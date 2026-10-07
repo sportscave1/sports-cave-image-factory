@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.deploy import DeployError, Git, deploy, normalize
+from scripts.deploy import DeployError, Git, deploy, normalize, local_only_path
 
 
 class DeploymentTests(unittest.TestCase):
@@ -54,6 +54,50 @@ class DeploymentTests(unittest.TestCase):
 
     def change(self, value="VALUE = 2\n"):
         (self.root / "source.py").write_bytes(value.encode())
+
+    def test_git_add_all_skips_local_workspaces_but_keeps_shopify_runtime(self):
+        repository = Path(__file__).resolve().parents[1]
+        shutil.copyfile(repository / '.gitignore', self.root / '.gitignore')
+        local = ['.tmp-cw/capture.html', '.tmp-cwv/working/templates/product.json',
+                 'shopify_theme_reviews/source/assets/main.js', '.tmp-deploy-review/run.log',
+                 'test-results/screen.png', 'docs/evidence/local-export.json']
+        production = ['shopify_client.py', 'shopify_theme/assets/sports-cave-image-protection.js',
+                      'tests/fixtures/sport_taxonomy.json']
+        for name in local + production:
+            file = self.root / name
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('fixture\n', encoding='utf-8')
+        self.cmd('add', '-A')
+        indexed = self.cmd('ls-files').splitlines()
+        for name in local:
+            self.assertNotIn(name, indexed)
+            self.assertTrue((self.root / name).is_file())
+        for name in production:
+            self.assertIn(name, indexed)
+            self.assertFalse(local_only_path(name))
+
+    def test_forced_local_file_staging_fails_before_commit(self):
+        folder = self.root / 'shopify_theme_reviews'
+        folder.mkdir()
+        (folder / 'theme.json').write_text('{}\n')
+        self.cmd('add', '-f', 'shopify_theme_reviews/theme.json')
+        with self.assertRaisesRegex(DeployError, 'Local-only files'):
+            self.run_deploy()
+        self.assertEqual(self.before, self.cmd('rev-parse', 'HEAD'))
+        self.assertTrue((folder / 'theme.json').is_file())
+
+    def test_removing_committed_evidence_from_index_preserves_disk_and_can_deploy(self):
+        folder = self.root / 'test-results'
+        folder.mkdir()
+        file = folder / 'result.txt'
+        file.write_text('historic evidence\n')
+        self.cmd('add', 'test-results/result.txt')
+        self.cmd('commit', '-m', 'Historic fixture evidence')
+        self.cmd('rm', '--cached', 'test-results/result.txt')
+        result, _ = self.run_deploy()
+        self.assertEqual(result, 'PUSHED')
+        self.assertTrue(file.is_file())
+        self.assertNotIn('test-results/result.txt', self.cmd('ls-files').splitlines())
 
     def test_clean_tree_success_no_commit_no_push(self):
         with patch.object(Git, "run", autospec=True, wraps=None) as observed:

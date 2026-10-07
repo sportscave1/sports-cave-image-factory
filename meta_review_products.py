@@ -1,4 +1,5 @@
 """Deterministic canonical catalogue resolution; no Meta or image API calls."""
+from sports_categories import normalize_sport_category, infer_sport_category
 import json
 import re
 from copy import deepcopy
@@ -29,20 +30,20 @@ def canonical(row):
     url=next((str(row[k]) for k in ('online_store_url','product_url','product_page_url') if product_url_handle(row.get(k))==handle.lower()),'')
     url=url or ads_page.canonical_shopify_product_url_from_row({**row,'product_handle':handle})
     category=''
-    aliases={'basketball':'NBA','nba':'NBA','motorsport':'Motorsport','motorsport art':'Motorsport','football':'Football',
-             'soccer':'Football','football/soccer':'Football','combat sports':'Combat','ufc/mma':'Combat','hockey':'Ice Hockey'}
     def category_value(value):
-        value=str(value or '').strip()
-        return value if value in ads_page.CATEGORY_OPTIONS and value!='Select category' else aliases.get(value.casefold(),'')
-    for field in ('category','sport','product_sport','product_type'):
+        return normalize_sport_category(value)
+    for field in ('category','sport','sport_category','product_sport','product_type'):
         category=category_value(row.get(field))
         if category: break
     if not category:
         collections=row.get('collections') or []
         if isinstance(collections,str): collections=re.split(r'[,;|]',collections)
-        matches={category_value(c.get('title') if isinstance(c,dict) else c) for c in collections}
-        matches.discard('')
-        if len(matches)==1: category=matches.pop()
+        category=infer_sport_category(c.get('title') if isinstance(c,dict) else c for c in collections)
+    if not category:
+        tags = row.get('tags') or []
+        if isinstance(tags, str):
+            tags = re.split(r'[,;|]', tags)
+        category = infer_sport_category(tags)
     return {'product_id':str(row.get('shopify_product_id') or row.get('product_id') or ''),
             'product_title':title,'product_handle':handle,'product_url':url,'category':category,'sport':category,
             'canonical_row':{**row,'product_handle':handle,'product_title':title,'online_store_url':url}}
@@ -77,6 +78,22 @@ def resolve(package,catalogue,mappings=(),postings=()):
             if not hits or any(not matched(m) for m in sources):
                 return {'product':None,'confidence':'AMBIGUOUS','method':'Unresolved existing '+key+' mapping','candidates':hits}
             return result(hits,'existing '+key+' mapping')
+    carousel = bool(package.get('carousel_cards') or package.get('carousel') or
+                    package.get('creative_format') in ('CAROUSEL', 'DYNAMIC_CAROUSEL'))
+    if carousel:
+        # Authored card destinations outrank historic Posting/name suggestions.
+        cards = package.get('carousel_cards') or package.get('cards') or []
+        handles = [product_url_handle(c.get('destination_url') or c.get('link')) for c in cards]
+        known = set(handles) - {''}
+        if known:
+            hits = [p for p in products if p['product_handle'].lower() in known]
+            if len(known) == 1 and all(handles) and len(hits) == 1:
+                return result(hits, 'common carousel product destination')
+            return {'product': None, 'confidence': 'AMBIGUOUS',
+                    'method': 'incomplete/multiple carousel product destinations', 'candidates': hits}
+        verified = {k: package.get(k) for k in ('product_id', 'product_handle')}
+        if any(verified.values()):
+            return result(matched(verified), 'verified product record')
     for key in ('ad_id','creative_id','campaign_id','adset_id'):
         sources=[m for m in postings if package.get(key) and str(m.get(key) or m.get('meta_'+key) or '')==str(package[key])]
         hits=[p for m in sources for p in matched(m)]
@@ -92,6 +109,9 @@ def resolve(package,catalogue,mappings=(),postings=()):
         if len(handles)>1 or len({p['product_handle'].lower() for p in hits})!=len(handles):
             return {'product':None,'confidence':'AMBIGUOUS','method':'multiple/unresolved product destinations','candidates':hits}
         return result(hits,'exact product destination')
+    if carousel:
+        return {'product': None, 'confidence': 'NO MATCH',
+                'method': 'Confirm carousel product manually', 'candidates': []}
     evidence=' '.join(str(package.get(k) or '') for k in ('campaign_name','ad_name','creative_name'))
     for key in ('primary_text','headline'):
         evidence+=' '+str((package.get('components',{}).get(key) or {}).get('value') or '')

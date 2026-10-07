@@ -49,20 +49,7 @@ class OptionOrderingTests(unittest.TestCase):
         self.assertEqual(ads_page.CATEGORY_OPTIONS[-1], "Other")
         self.assertEqual(
             ads_page.CATEGORY_OPTIONS[1:-1],
-            [
-                "Baseball",
-                "Combat",
-                "Cricket",
-                "Football",
-                "Golf",
-                "Horse Racing",
-                "Ice Hockey",
-                "Motorsport",
-                "NBA",
-                "NFL",
-                "Rugby Union",
-                "Tennis",
-            ],
+            list(__import__("sports_categories").CANONICAL_SPORT_CATEGORIES),
         )
 
         repository = Path(__file__).resolve().parents[1]

@@ -1,4 +1,5 @@
 """Google Demand Gen Beta contracts. No Google or Meta publishing calls live here."""
+from sports_categories import normalize_sport_category
 
 import csv
 import hashlib
@@ -219,6 +220,7 @@ def parse_csv(data):
             raise GoogleCampaignError(f"{field} cannot be blank.")
     if not ads.is_valid_product_page_url(row["product_url"]):
         raise GoogleCampaignError(ads.PRODUCT_URL_ERROR)
+    row["category"] = normalize_sport_category(row["category"], row["category"])
     if row["category"] not in ads.CATEGORY_OPTIONS[1:] or row["country"] not in ads.COUNTRY_OPTIONS[1:]:
         raise GoogleCampaignError("Select a supported category and country from New Ads.")
     for kind, limit in (("headline", 40), ("description", 90)):

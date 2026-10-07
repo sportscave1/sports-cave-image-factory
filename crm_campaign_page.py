@@ -1,4 +1,5 @@
 """Compact Campaigns V1 workspace. Explicit buttons are the only external-I/O triggers."""
+from sports_categories import sport_category_options, normalize_sport_state
 from copy import deepcopy
 import json
 import uuid
@@ -10,7 +11,7 @@ from crm_campaign_content import (TYPES,MARKETS,OBJECTIVES,FIELDS,new_document,s
 from crm_campaign_store import CampaignStore
 from crm_campaign_library import COMPOSER_TARGET
 from crm_audience import count_page
-from crm_logic import rule,SPORTS
+from crm_logic import rule
 from crm_store import StoreUnavailable
 from crm_email_blocks import PURPOSES, STARTERS, KINDS, block, starter, duplicate_block, legacy_blocks
 from crm_campaign_content import html_budget
@@ -379,7 +380,8 @@ def audience_editor(shop,store,doc,key,compact=False):
     if mode.startswith('All'):
         cols=[st.container() for _ in range(4)] if compact else st.columns(4)
         country=cols[0].selectbox('Country',('Any','AU','US','GB'),key=key+'country')
-        sport=cols[1].selectbox('Interest / sport',('Any',*SPORTS),key=key+'sport')
+        normalize_sport_state(st.session_state, key+'sport', 'Any')
+        sport=cols[1].selectbox('Interest / sport',sport_category_options(controls=('Any',)),key=key+'sport')
         orders=cols[2].number_input('Minimum orders',0,10000,key=key+'orders')
         days=cols[3].selectbox('Last purchase',('Any','Last 30 days','Last 180 days','Over 180 days'),key=key+'days')
         if st.button('Use these filters'):

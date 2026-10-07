@@ -1,3 +1,4 @@
+from sports_categories import normalize_sport_state
 import hashlib
 import html
 import io
@@ -662,6 +663,7 @@ def _render_creator_form(products):
             ),
             key=FIELD_KEYS["market"],
         )
+        normalize_sport_state(st.session_state, FIELD_KEYS["sport"], "Other")
         sport_options = alphabetize_options(social_media_creator.SPORT_OPTIONS)
         sport = row[1].selectbox(
             "Sport",

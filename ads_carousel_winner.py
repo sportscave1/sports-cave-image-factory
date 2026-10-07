@@ -3,6 +3,7 @@
 No storage, API calls or independent product/edition lookup. Creative Refresh
 continues using its existing contracts in ads_page.
 """
+from sports_categories import sport_family
 import hashlib
 import json
 import random
@@ -83,7 +84,10 @@ def resolve_room_set(*, product_name, sport, market, variation_token="", metadat
         "artwork_mood", "era", "artwork_palette", "palette", "artwork_brightness", "frame_colour", "collections")}
     seed = (product_name, sport, market, variation_token or "standard", visual_context, campaign_context)
     rng = _rng(*seed)
-    hints = list(SPORT_ROOMS.get(sport, ()))
+    room_sport = sport_family(sport).casefold()
+    if room_sport == "afl":
+        room_sport = "australian rules"
+    hints = list(SPORT_ROOMS.get(room_sport, ()))
     specialist = rng.choice(hints) if hints else None
     selected = {4: "sports_cave"}
     specialist_slot = rng.choice((2, 3, 5)) if specialist else None

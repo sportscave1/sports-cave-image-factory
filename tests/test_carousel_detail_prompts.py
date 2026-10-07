@@ -59,9 +59,18 @@ class CarouselDetailPromptTests(unittest.TestCase):
         for unknown in (None, "", "unmapped sport", "Select category"):
             self.assertEqual(resolve(unknown), resolve("Other"))
             self.assertIn("muted gallery taupe", resolve(unknown))
+        # Existing bespoke treatments stay distinct; newly supported disciplines
+        # without a treatment deliberately use the safe collector-gallery fallback.
+        for category in ("AFL", "Baseball", "Combat", "Cricket", "Football", "Golf",
+                         "Horse Racing", "Ice Hockey", "Motorsport", "NBA", "NFL",
+                         "Rugby League", "Rugby Union", "Tennis"):
+            self.assertNotEqual(resolve(category), resolve("Other"))
         for category in ads_page.CATEGORY_OPTIONS[1:]:
-            if category != "Other":
-                self.assertNotEqual(resolve(category), resolve("Other"))
+            family = ads_page.sport_family(category).casefold()
+            family = "australian rules" if family == "afl" else family
+            if family not in ads_page.CAROUSEL_NOSTALGIC_WALL_TONES:
+                self.assertEqual(resolve(category), resolve("Other"))
+            self.assertIn("Required nostalgic wall tone:", resolve(category))
 
     def test_resolved_tone_reaches_final_card_and_survives_missing_mockups_foundation(self):
         for category in ("Cricket", "Basketball", "Unmapped sport"):
@@ -121,7 +130,11 @@ class CarouselDetailPromptTests(unittest.TestCase):
                     prompt = ads_page.build_ads_prompt(**kwargs, campaign_type=kind)
                 if kind.startswith("refresh_"):
                     self.assertIn("WINNER LED REFRESH V3", prompt)
-                    self.assertIn("CANONICAL_PRODUCT", prompt)
+                    if kind == 'refresh_Carousel':
+                        self.assertNotIn('CANONICAL_PRODUCT', prompt)
+                        self.assertIn('COLLECTIVE WINNER CAROUSEL V1', prompt)
+                    else:
+                        self.assertIn('CANONICAL_PRODUCT', prompt)
                 else:
                     self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(), row["sha256"])
 

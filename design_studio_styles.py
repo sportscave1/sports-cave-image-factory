@@ -1,3 +1,4 @@
+from sports_categories import sport_family
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -1016,6 +1017,12 @@ SPORT_ADAPTERS = MappingProxyType(
 
 
 def select_sport_adapter(sport="", task_text="", style_slug=""):
+    family = sport_family(sport)
+    if family and style_slug != "motorsport_driver_car":
+        return {"Motorsport": "motorsport", "NBA": "basketball", "Football": "football",
+                "Cricket": "cricket", "Combat": "combat", "NFL": "american_sports",
+                "Baseball": "american_sports", "Ice Hockey": "american_sports",
+                "Golf": "golf_tennis", "Tennis": "golf_tennis"}.get(family, "generic")
     text = f"{sport} {task_text}".casefold()
     if style_slug == "motorsport_driver_car" or re.search(r"\b(f1|formula 1|nascar|supercars?|motorsport|driver|car|bathurst|racing|motogp)\b", text):
         return "motorsport"

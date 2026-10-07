@@ -74,7 +74,7 @@ class ActiveCpcTests(unittest.TestCase):
                     f'p.render_campaign_details(CONFIG,{campaign!r},date(2026,9,1),date(2026,9,14))').run()
                 self.assertFalse(app.exception)
                 summary=app.dataframe[0].value
-                self.assertEqual(list(summary),['Spend','Sales','ROAS','CPA','CPC','Last Sale','Action'])
+                self.assertEqual(list(summary),['Spend','Sales','ROAS','CPA','CPC','Last Sale'])
                 self.assertEqual(summary.iloc[0][['Spend','Sales','ROAS','CPA']].tolist(),[100,4,2,25])
                 styled=captured[0]; column=list(styled.data).index('CPC')
                 self.assertEqual(styled._display_funcs[(0,column)](styled.data.iloc[0,column]),expected)

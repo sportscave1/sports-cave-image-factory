@@ -319,17 +319,18 @@ class LivePageTests(unittest.TestCase):
         self.at.session_state['meta-review-creative-table-900']={'selection':{'rows':[0],'columns':[]}}
         self.at.run()
         self.assertFalse(self.at.exception)
-        self.assertTrue(any('View details' in e.label for e in self.at.expander))
+        self.assertFalse(any(s.label=='Winner to use' for s in self.at.selectbox))
+        self.assertTrue(any(b.label=='APPLY TO CREATIVE REFRESH' for b in self.at.button))
         self.assertTrue(any('Exact primary' in t.value for t in self.at.text))
         self.assertTrue(any(t.value=='SHOP_NOW' for t in self.at.text))
 
     def test_live_winner_handoff_uses_existing_queue(self):
         self.details()
-        with patch.object(handoff,'queue') as queue:
-            next(b for b in self.at.button if b.label=='Refresh Winning Ad').click().run()
+        with patch.object(handoff,'queue_link',return_value='?page=creative-refresh&handoff_id=fixture') as queue:
+            next(b for b in self.at.button if b.label=='APPLY TO CREATIVE REFRESH').click().run()
         self.assertFalse(self.at.exception)
         self.assertEqual(queue.call_args.args[0]['mode'],'complete_ad')
-        self.assertEqual(self.at.session_state['current_page'],'Creative Refresh')
+        self.assertTrue(any('handoff_id=fixture' in x.proto.url for x in self.at.get('link_button')))
 
 
 if __name__=='__main__': unittest.main()

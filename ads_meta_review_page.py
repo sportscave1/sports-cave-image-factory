@@ -162,28 +162,30 @@ def resolve_selected(ad, config=None):
     if entry.get('data') is not None and not entry.get('stale'):
         resolved = entry['data']
         apply_resolved(ad, resolved)
-        for warning in resolved.get('warnings', []):
-            st.caption(warning)
     return ad
 
 
-def render_creative_diagnostic(ad):
+def render_creative_diagnostic(ad, advanced=None):
     import os_accounts
     if not os_accounts.is_admin(st.session_state.get('sports_cave_current_user')):
         return
     resolved = ad.get('winning_creative') or {}
-    with st.expander('Advanced Meta diagnostic', expanded=False):
+    with st.expander('Diagnostics', expanded=False):
         st.json(creative.diagnostic(resolved, campaign_id=ad.get('campaign_id', ''), ad_id=ad['ad_id'],
             displayed_count=len(resolved.get('cards') or []),
             handoff_count=st.session_state.get('meta-review-handoff-count-'+creative.fingerprint([ad['ad_id'], resolved]), 0)))
-        st.caption('Displayed count is the complete navigable source. Handoff count is zero until APPLY succeeds in this session.')
+        st.caption('Displayed count is the complete source. Handoff count is zero until APPLY succeeds in this session.')
+        for warning in resolved.get('warnings', []):
+            st.caption(warning)
+        if advanced and st.checkbox('Show advanced winner tools',key='meta-advanced-winner-'+str(ad['ad_id'])):
+            advanced()
 
 
-def ad_card(ad):
-    ad = resolve_selected(ad)
+def ad_card(ad, *, resolved=False):
+    if not resolved:
+        ad = resolve_selected(ad)
     with st.container(border=True):
-        st.subheader(ad.get('ad_name') or ad['ad_id'])
-        st.caption(f"{ad.get('adset_name') or 'Ad set unavailable'} · {ad.get('effective_status') or ad.get('status') or 'Unknown'} · Ad {ad['ad_id']} · Creative {ad['assets']['creative_id']}")
+        st.markdown('**'+escape(str(ad.get('ad_name') or 'Selected creative'))+'**')
         if ad.get('winning_creative', {}).get('creative_format') in creative.CAROUSEL_FORMATS:
             creative.render_cards(st, ad['winning_creative'])
             creative.render_shared_primary_text(st, ad['winning_creative'])
@@ -205,8 +207,6 @@ def ad_card(ad):
                     if not ad['assets'][kind]: st.caption('Unavailable')
                 if ad['assets']['dynamic'] or ad['assets']['carousel']:
                     st.caption('Multiple original assets/cards. Ad-level results do not prove which served combination won.')
-            st.caption(f"Ad {ad['ad_id']} · Creative {ad['assets'].get('creative_id') or 'Unavailable'} · Ad set {ad.get('adset_name') or ad.get('adset_id') or 'Unavailable'}")
-        render_creative_diagnostic(ad)
         with st.expander('Advanced metrics',expanded=False):
             st.dataframe(tables.advanced_rows(ad.get('benchmark_metrics',ad['metrics'])),hide_index=True)
 
@@ -297,8 +297,7 @@ def winner_board(ads, history, context, compact=False):
             except Exception as error: st.error(sync_service.safe_error(error))
 
 
-def simple_winner(ads,history,context):
-    st.markdown('**SPORTS CAVE WINNER**')
+def simple_winner(ads,history,context,selected=None):
     winner=analysis.choose_winner(ads)
     scope=hashlib.sha256(json.dumps(context,sort_keys=True,default=str).encode()).hexdigest()[:12]
     key='va-winner-'+str(context['campaign_id'])
@@ -306,19 +305,16 @@ def simple_winner(ads,history,context):
     saved=next((r['context'].get('overall','Automatic') for r in history['selections'] if r['action_type']=='meta_review_selection' and r['context'].get('scope')==scope),'Automatic')
     options=['Automatic']+ids
     if st.session_state.get(key) not in options: st.session_state[key]=saved if saved in options else 'Automatic'
-    chosen=st.selectbox('Winner to use',options,key=key,format_func=lambda value:
-        ('Automatic Best Ad — '+str(winner.get('ad_name') or winner['ad_id']) if winner else 'Automatic Best Ad — Insufficient data') if value=='Automatic' else str(by_id[value].get('ad_name') or value))
-    selected=winner if chosen=='Automatic' else by_id[chosen]
+    if selected is not None:
+        chosen = selected['ad_id']
+    else:
+        chosen=st.selectbox('Winner to use',options,key=key,format_func=lambda value:
+            ('Automatic Best Ad — '+str(winner.get('ad_name') or winner['ad_id']) if winner else 'Automatic Best Ad — Insufficient data') if value=='Automatic' else str(by_id[value].get('ad_name') or value))
+        selected=winner if chosen=='Automatic' else by_id[chosen]
     complete={}
     if selected:
         resolve_selected(selected)
         resolved = selected.get('winning_creative') or {}
-        st.caption(creative.label(resolved))
-        if resolved.get('creative_format') in creative.CAROUSEL_FORMATS:
-            with st.expander('Original winning carousel', expanded=True):
-                creative.render_cards(st, resolved, key_prefix='winner')
-                creative.render_shared_primary_text(st, resolved)
-        st.caption('Selected Winner: '+str(selected.get('ad_name') or selected['ad_id']))
         for kind in ('image','primary_text','headline'):
             candidates=[c for c in analysis.component_candidates(ads,kind,history['assets']) if str(c['ad_id'])==str(selected['ad_id'])]
             # The carrier image is for the existing archive contract only. Every
@@ -335,7 +331,8 @@ def simple_winner(ads,history,context):
     resolved = (selected or {}).get('winning_creative', {})
     unsupported = resolved.get('creative_format') in ('DYNAMIC', 'VIDEO') or resolved.get('carousel_resolution_incomplete', False)
     if unsupported: st.caption('This format has no supported fixed-card refresh mapping.')
-    if st.button('APPLY TO CREATIVE REFRESH',type='primary',disabled=not selected or len(complete)!=3 or unsupported,key='va-apply-'+scope):
+    actions = st.columns(2, gap='small')
+    if actions[0].button('APPLY TO CREATIVE REFRESH',type='primary',disabled=not selected or len(complete)!=3 or unsupported,key='va-apply-'+scope):
         try:
             b=selected.get('benchmark') or {}
             mapping=next((m for m in history['mapping'] if str(m['ad_id'])==str(selected['ad_id'])),{})
@@ -349,12 +346,10 @@ def simple_winner(ads,history,context):
         except Exception as error: st.error(sync_service.safe_error(error))
     url=st.session_state.get('va-handoff-link-'+reference_key)
     if url:
-        st.link_button('OPEN CREATIVE REFRESH',url,type='primary')
-        st.caption('Opens a new tab with the saved winner. Meta Review stays open.')
+        actions[1].link_button('OPEN CREATIVE REFRESH',url)
     if selected:
-        render_creative_diagnostic(selected)
-    with st.expander('Advanced winner options',expanded=False):
-        winner_board(ads,history,context,compact=False)
+        ad_card(selected, resolved=True)
+        render_creative_diagnostic(selected, advanced=lambda: winner_board(ads,history,context,compact=False))
 
 
 def live_status(entry, label):
@@ -384,7 +379,8 @@ def render_campaign_details(config, campaign, since, until):
     with st.spinner('Reading selected campaign…'):
         entry=live.cached_read(cache,(live.scope(config),'campaign',cid,since,until),
             lambda:live.load_campaign(config,cid,since,until))
-    live_status(entry,'Ads / available Meta history')
+    if entry.get('error'):
+        st.error('Meta campaign data unavailable. Please retry Refresh From Meta.')
     if entry['data'] is None: return
     history=entry['data']
     history['currency']=(campaign.get('benchmark') or {}).get('currency','UNKNOWN')
@@ -413,7 +409,7 @@ def render_campaign_details(config, campaign, since, until):
         lambda:recency.load(config,cid,'ad',campaign.get('account_timezone','Australia/Sydney')))
     for ad in ads: ad['recency']=recency.signal({**ad,'metrics':ad.get('benchmark_metrics',ad['metrics'])},sale_entry['data'])
     summary=tables.va_campaign_rows([campaign])[0]
-    summary={k:summary[k] for k in ('Spend','Sales','ROAS','CPA','CPC','Last Sale','Action')}
+    summary={k:summary[k] for k in ('Spend','Sales','ROAS','CPA','CPC','Last Sale')}
     st.dataframe(tables.va_styled([summary],[campaign]),hide_index=True,placeholder='—',width='stretch',height=72,row_height=30,
         column_config={**{k:st.column_config.Column(width='small',help=tables.HELP.get(k)) for k in ('Spend','Sales','ROAS','CPA','CPC')},
             'Last Sale':st.column_config.Column(width='medium'),'Action':st.column_config.Column(width='medium')})
@@ -424,10 +420,19 @@ def render_campaign_details(config, campaign, since, until):
                 if item['campaign_id']==cid:
                     item['benchmark']=campaign['benchmark']
                     item['creative_format']=campaign['creative_format']
-    st.caption('Select a creative row to view its full image, copy and reporting details.')
+    render_creative_selection(ads,history,{'account_id':aid,'campaign_id':cid,'campaign_name':campaign.get('campaign_name'),
+        'market':'All','date_range':f'{since or "available"} — {until}'})
+
+
+@st.fragment
+def render_creative_selection(ads,history,context):
+    """Selection reruns only the ad UI, not campaign loading/aggregation."""
+    cid=context['campaign_id']
+    st.caption('Select an ad to use as your creative reference.')
     event=st.dataframe(tables.va_styled(tables.va_ad_rows(ads),ads),hide_index=True,width='stretch',placeholder='—',
-        height=min(390,40+64*len(ads)),row_height=64,on_select='rerun',selection_mode=['single-row','single-cell'],
+        height=min(285,36+48*len(ads)),row_height=48,on_select='rerun',selection_mode='single-row',
         key='meta-review-creative-table-'+cid,
+        column_order=['Creative','Ad','Format','Sales','ROAS','CPA','CTR','ATC','Checkout','Last Sale','Action'],
         column_config={**{k:st.column_config.Column(help=v) for k,v in tables.HELP.items()},'Creative':st.column_config.ImageColumn(width=76,pinned=True),
             'Ad':st.column_config.TextColumn(width=180,pinned=True),
             'Primary Text':st.column_config.TextColumn(width=210),
@@ -439,11 +444,8 @@ def render_campaign_details(config, campaign, since, until):
         if st.session_state.get(selection_key)!=selected['ad_id']:
             st.session_state['va-winner-'+cid]=selected['ad_id']
             st.session_state[selection_key]=selected['ad_id']
-        with st.expander('View details · '+str(selected.get('ad_name') or selected['ad_id']),expanded=True):
-            ad_card(selected)
     with st.container(key='meta-review-winner-controls'):
-        winner_board(ads,history,{'account_id':aid,'campaign_id':cid,'campaign_name':campaign.get('campaign_name'),
-            'market':'All','date_range':f'{since or "available"} — {until}'},compact=True)
+        simple_winner(ads,history,context,selected=selected)
     saved=[r for r in history['selections'] if r['action_type']=='meta_review_handoff' and str(r['context'].get('campaign_id'))==str(cid)]
     if saved:
         with st.expander('Saved winner handoffs'):
@@ -467,13 +469,18 @@ def render_page():
     .st-key-meta-review-toolbar [data-testid="stHorizontalBlock"] { gap:.65rem; align-items:end; }
     .st-key-meta-review-toolbar button, .st-key-meta-review-toolbar input { min-height:38px; }
     .st-key-meta-review-toolbar button[kind="primary"] { background:#b99448; border-color:#b99448; color:#171510; white-space:nowrap; }
+    .st-key-meta-review-winner-controls button[kind="primary"] { background:#b99448; border-color:#b99448; color:#171510; }
     @media (max-width:1100px) {
       .st-key-meta-review-toolbar [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
       .st-key-meta-review-toolbar [data-testid="stColumn"] { min-width:220px; flex:1 1 40%; }
     }
     div[role="dialog"]:has(.meta-review-modal-marker) {
-        width:min(96vw,1680px); max-width:96vw; max-height:92vh; overflow-y:auto;
+        width:min(96vw,1380px); max-width:96vw; max-height:92vh; overflow-y:auto;
     }
+    div[role="dialog"]:has(.meta-review-modal-marker) [data-testid="stVerticalBlock"] { gap:.45rem; }
+    div[role="dialog"]:has(.meta-review-modal-marker) h3 { font-size:1.2rem;padding:.15rem 0; }
+    div[role="dialog"]:has(.meta-review-modal-marker) [data-testid="stVerticalBlockBorderWrapper"] { padding:.45rem; }
+    div[role="dialog"]:has(.meta-review-modal-marker) [data-testid="stCaptionContainer"] p { margin-bottom:.15rem; }
     </style>""",unsafe_allow_html=True)
     config=meta.get_meta_config()
     account_scope=live.scope(config)

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sports_categories import normalize_sport_category, normalize_sport_state
 
 import csv
 import hashlib
@@ -1903,7 +1904,7 @@ def validate_creative_refresh_inputs(inputs, *, winning_creative=None, csv_selec
     errors = {"product_campaign": [], "winning_ad": [], "performance": []}
     if not _clean_text(inputs.get("product_name")):
         errors["product_campaign"].append("Select or enter a product name.")
-    if inputs.get("category") not in ads_page.CATEGORY_OPTIONS[1:]:
+    if normalize_sport_category(inputs.get("category")) not in ads_page.CATEGORY_OPTIONS[1:]:
         errors["product_campaign"].append("Select a category.")
     if inputs.get("country") not in ads_page.COUNTRY_OPTIONS[1:]:
         errors["product_campaign"].append("Select a country.")
@@ -2197,6 +2198,7 @@ def _render_product_campaign_section():
 
         category_col, country_col, campaign_col = st.columns(3)
         with category_col:
+            normalize_sport_state(st.session_state, f"{STATE_PREFIX}category", "Select category")
             category = st.selectbox(
                 "Category",
                 ads_page.CATEGORY_OPTIONS,

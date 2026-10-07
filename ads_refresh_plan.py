@@ -1,4 +1,5 @@
 """Local, deterministic refresh planning. No image inference or network calls."""
+from sports_categories import sport_family
 from copy import deepcopy
 import hashlib
 import json
@@ -12,6 +13,13 @@ VERSION = 'WINNER LED REFRESH V3'
 AUTHORITY = ('The canonical black-framed product image supplies the exact artwork and black frame only. '
              'Its external background is not a creative reference. Analyse the separately supplied winning '
              'advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.')
+CAROUSEL_CONTRACT = 'COLLECTIVE WINNER CAROUSEL V1'
+CAROUSEL_AUTHORITY = ('The supplied winning Carousel cards collectively supply the immutable product authority. '
+    'Inspect ALL supplied full-resolution winning cards together to establish exact artwork, printed internal background, '
+    'text, faces, logos, plaque, aspect ratio and frame colour/thickness/depth/bevel. Preserve these exactly; '
+    'never invent hidden or illegible details. Each individual card supplies its own creative role and broad room family. '
+    'Only the external environment and execution may change. If product details conflict or cannot be established, '
+    'stop and request complete original winning cards. Do not redraw or reconstruct the product.')
 # Architecture, palette and materials are selection metadata, not inferred winner observations.
 _STYLES = (
  ('Heritage billiards room', 'games', 'burgundy', 'panelling', 'traditional timber', 'heritage enclosed room', 'warm practical light', 'pool table'),
@@ -57,7 +65,7 @@ def select_styles(seed, *, product='', category='', history=(), eligible_ids=Non
     """Seeded without replacement; least recently used candidates first if restricted."""
     allowed = set(eligible_ids) if eligible_ids is not None else {s['id'] for s in STYLES}
     pool = [s for s in STYLES if s['id'] in allowed
-            and (s['context'] != 'motorsport' or re.search('motorsport|racing|formula|f1', category + ' ' + product, re.I))]
+            and (s['context'] != 'motorsport' or re.search('motorsport|racing|formula|f1', sport_family(category) + ' ' + category + ' ' + product, re.I))]
     recent = [str(i) for entry in history[-30:] for i in entry.get('style_ids', [])]
     rng = random.Random(str(seed))
     rng.shuffle(pool)
@@ -80,9 +88,9 @@ def reference_map(campaign_type, source=None):
         if cards or source.get('creative_format') in ('CAROUSEL','DYNAMIC_CAROUSEL') or source.get('carousel'):
             expected = source.get('source_card_count')
             if source.get('carousel_resolution_incomplete') or (expected is not None and len(cards) != expected - source.get('excluded_end_card_count', 0)):
-                raise ValueError('Complete source carousel images are required. Reload the winner from Meta Review.')
+                raise ValueError('Complete winning Carousel required. Reload the winner from Meta Review.')
             if len(cards)<2 or any(not isinstance(c,dict) or c.get('position')!=i or not (c.get('image_url') or c.get('image_sha256')) or c.get('image_unavailable') for i,c in enumerate(cards,1)):
-                raise ValueError('Complete source carousel images are required. Reload the winner from Meta Review.')
+                raise ValueError('Complete winning Carousel required. Reload the winner from Meta Review.')
         count = len(cards) if cards else 5  # Existing manual New Ads default only.
         by_position = {}
         for index, card in enumerate(cards, 1):
@@ -113,7 +121,7 @@ def reference_map(campaign_type, source=None):
                  'image_sha256': source.get('image_sha256', ''),
                  'image_url': ((source.get('components') or {}).get('image') or {}).get('value', ''),
                  'evidence': 'metadata only; inspect attachment in ChatGPT'}]
-    return refs + [{'label': 'CANONICAL_PRODUCT', 'authority': 'exact artwork and black frame only'}]
+    return refs if campaign_type == 'Carousel' else refs + [{'label': 'CANONICAL_PRODUCT', 'authority': 'exact artwork and black frame only'}]
 
 
 def identity_hash(context, campaign_type, product, category):
@@ -127,6 +135,7 @@ def build_plan(context, campaign_type, product, category, seed, history=()):
     identity = identity_hash(context, campaign_type, product, category)
     return {'version': VERSION, 'run_id': hashlib.sha256((identity+str(seed)).encode()).hexdigest()[:24],
             'identity_hash': identity, 'product': product, 'category': category, 'campaign_type': campaign_type,
+            **({'carousel_contract': CAROUSEL_CONTRACT} if campaign_type == 'Carousel' else {}),
             'seed': str(seed), 'references': reference_map(campaign_type, source),
             'styles': select_styles(seed, product=product, category=category, history=history) if campaign_type != 'Carousel' else [],
             'recent_styles': deepcopy(list(history)[-30:]),
@@ -139,7 +148,7 @@ def current_plan(context, campaign_type, product, category, seed, history=()):
     expected = len(reference_map(campaign_type, (context or {}).get('source_winner'))) if campaign_type == 'Carousel' else 2
     structural = (isinstance(refs, list) and len(refs) == expected
                   and all(isinstance(r, dict) for r in refs)
-                  and refs[-1].get('label') == 'CANONICAL_PRODUCT'
+                  and (saved.get('carousel_contract') == CAROUSEL_CONTRACT and refs == reference_map(campaign_type, (context or {}).get('source_winner')) if campaign_type == 'Carousel' else refs[-1].get('label') == 'CANONICAL_PRODUCT')
                   and (campaign_type == 'Carousel' or len(saved.get('styles') or []) == 3))
     if structural and saved.get('version') == VERSION and saved.get('identity_hash') == identity_hash(context, campaign_type, product, category):
         return saved
@@ -164,10 +173,14 @@ def session_plan(state, identity, context, campaign_type, product, category, see
                 plans[key] = plans.pop(key)
                 continue
             del plans[oldest]
+    if campaign_type == 'Carousel':
+        plans[key] = current_plan({**context, 'refresh_plan': plans[key]}, campaign_type, product, category, plans[key]['seed'], history)
     return plans[key]
 
 
-def standalone_brief(product, reference, *, scene='', role='', style=None, detail=False, dimensions='1080 x 1080'):
+def standalone_brief(product, reference, *, scene='', role='', style=None, detail=False, dimensions='1080 x 1080', references=()):
+    if reference.startswith('WINNER_CARD_'):
+        return carousel_standalone_brief(product, reference, scene=scene, role=role, detail=detail, dimensions=dimensions, references=references)
     style = style or {}
     return f'''PRODUCT: {product}
 REFERENCE: {reference}; inspect this exact attachment. CANONICAL_PRODUCT is the independent immutable product authority.
@@ -202,6 +215,13 @@ def copy_issues(rows, product='', winner=None, fixed_facts=()):
             old = normal((winner or {}).get('winning_'+field))
             if a and old and SequenceMatcher(None, a, old).ratio() >= .9:
                 issues.append(f'Refresh {field}: essentially unchanged winner wording.')
+            source = (winner or {}).get('source_winner') or {}
+            cards = source.get('carousel_cards') or source.get('cards') or []
+            originals = source.get('shared_primary_texts') or [] if field == 'primary_text' else [c.get(field) for c in cards]
+            for original in originals:
+                old = normal(original)
+                if a and old and (SequenceMatcher(None, a, old).ratio() >= .85 or sorted(a.split()) == sorted(old.split())):
+                    issues.append(f'Refresh {field}: essentially unchanged source Carousel wording.')
     return list(dict.fromkeys(issues))
 
 
@@ -223,7 +243,7 @@ def asset_issues(slots, source_hashes=()):
 
 def execution_issues(executions, refresh_plan, product, campaign_type):
     """Validate declared plans only. This does not certify rendered image fidelity."""
-    count = len(refresh_plan.get('references') or []) - 1 if campaign_type == 'Carousel' else 3
+    count = len([r for r in refresh_plan.get('references', []) if r.get('label', '').startswith('WINNER_CARD_')]) if campaign_type == 'Carousel' else 3
     if not isinstance(executions, list) or len(executions) != count:
         return [f'Paste {count} final execution records in refresh notes before marking ready.']
     issues = []
@@ -239,8 +259,9 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
         if execution.get('position') != i or execution.get('winner_reference') != expected:
             issues.append(f'Execution {i}: wrong winner reference or order.')
         observations = execution.get('observations') or {}
-        if execution.get('reference_inspected') is not True or execution.get('canonical_inspected') is not True:
-            issues.append(f'Execution {i}: external winner and canonical attachment inspection is not declared complete.')
+        inspection_key = 'collective_product_inspected' if campaign_type == 'Carousel' else 'canonical_inspected'
+        if execution.get('reference_inspected') is not True or execution.get(inspection_key) is not True:
+            issues.append(f'Execution {i}: required winner/product attachment inspection is not declared complete.')
         observation_fields = ('scene_category', 'ad_role', 'defining_objects', 'composition', 'product_attention',
                               'strengths', 'clutter', 'mood_contrast', 'copy_hook', 'tone', 'structure', 'emotional_appeal')
         if not isinstance(observations, dict) or not all(str(observations.get(k) or '').strip() for k in observation_fields):
@@ -255,7 +276,14 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
         if not isinstance(dimensions, dict):
             dimensions = {}
         def resolved(value):
-            return bool(str(value or '').strip()) and str(value).casefold().strip() not in {'unknown', 'tbd', 'n/a', 'pending', 'not supplied'}
+            placeholders = {'unknown', 'tbd', 'n/a', 'pending', 'not supplied'}
+            if campaign_type == 'Carousel':
+                placeholders.update({'make it better',
+                'more premium', 'different room', 'same room, slightly different',
+                'change angle', 'change colour', 'use warmer lighting', 'move frame'})
+            return bool(str(value or '').strip()) and str(value).casefold().strip() not in placeholders
+        if campaign_type == 'Carousel' and not all(resolved(execution.get(k)) for k in ('scene', 'role', 'keep', 'change', 'improvement')):
+            issues.append(f'Execution {i}: replace generic refresh claims with concrete source principle and upgrade.')
         if not all(resolved(dimensions.get(k)) for k in required) or (not is_detail and sum(resolved(dimensions.get(k)) for k in extras) < 2):
             issues.append(f'Execution {i}: specify new architecture/layout, wall palette/material, camera and two further scene changes.')
         signature = tuple(str(dimensions.get(k) or '').casefold().strip() for k in required)
@@ -263,16 +291,31 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
             issues.append(f'Execution {i}: near-identical planned environment; change more than paint/camera.')
         scene_signatures.append(signature)
         winner_dimensions = observations.get('execution') if isinstance(observations, dict) else None
+        if campaign_type == 'Carousel' and (not isinstance(winner_dimensions, dict) or not all(resolved(winner_dimensions.get(k)) for k in required)):
+            issues.append(f'Execution {i}: record observed source dimensions before declaring a new execution.')
         if isinstance(winner_dimensions, dict) and not is_detail:
             same = [k for k in required if resolved(winner_dimensions.get(k))
                     and str(winner_dimensions[k]).casefold().strip() == str(dimensions.get(k) or '').casefold().strip()]
             if len(same) >= 4:
                 issues.append(f'Execution {i}: declared scene barely changes the winner; redesign architecture and layout.')
         prompt = str(execution.get('image_prompt') or '')
-        if full_rules not in prompt or AUTHORITY not in prompt or product.casefold() not in prompt.casefold() or expected not in prompt:
+        if full_rules not in prompt or (CAROUSEL_AUTHORITY if campaign_type == 'Carousel' else AUTHORITY) not in prompt or product.casefold() not in prompt.casefold() or expected not in prompt:
             issues.append(f'Execution {i}: missing full shared rules, product authority or exact reference.')
         if campaign_type == 'Carousel':
             anchor = refresh_plan['references'][i-1]
+            if any(r['label'] not in prompt for r in refresh_plan['references']):
+                issues.append(f'Execution {i}: list every winning product-authority reference in the standalone prompt.')
+            if isinstance(observations, dict):
+                for field, observed in (('scene', 'scene_category'), ('role', 'ad_role')):
+                    if not anchor.get(field) and str(execution.get(field) or '').casefold().strip() != str(observations.get(observed) or '').casefold().strip():
+                        issues.append(f'Execution {i}: preserve the observed source {field}; describe novelty in execution dimensions.')
+            if not is_detail and (not resolved(dimensions.get('lighting')) or not any(resolved(dimensions.get(k)) for k in ('furniture', 'background'))):
+                issues.append(f'Execution {i}: specify new lighting and furniture/environment.')
+            if not is_detail and isinstance(winner_dimensions, dict) and all(
+                str(dimensions.get(k) or '').casefold().strip() == str(winner_dimensions.get(k) or '').casefold().strip()
+                for k in ('architecture', 'layout', 'wall_material')
+            ):
+                issues.append(f'Execution {i}: recolour/angle-only change; redesign the physical environment.')
             if anchor.get('scene') and str(anchor['scene']).casefold() != str(execution.get('scene')).casefold():
                 issues.append(f'Execution {i}: original carousel scene anchor changed.')
             if anchor.get('role') and str(anchor['role']).casefold() != str(execution.get('role')).casefold():
@@ -281,7 +324,7 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
             style = by_style.get(str(execution.get('style_id')))
             if not style:
                 issues.append(f'Execution {i}: select a curated style ID after attachment inspection.')
-            elif style['context'] == 'motorsport' and not re.search('motorsport|racing|formula|f1', product+' '+refresh_plan.get('category', ''), re.I):
+            elif style['context'] == 'motorsport' and not re.search('motorsport|racing|formula|f1', product+' '+sport_family(refresh_plan.get('category', ''))+' '+refresh_plan.get('category', ''), re.I):
                 issues.append(f'Execution {i}: style is incompatible with verified product context.')
             elif any(style['id'] == old['id'] or (style['family'], style['wall_hue']) == (old['family'], old['wall_hue']) for old in styles):
                 issues.append(f'Execution {i}: repeated style/family and palette.')
@@ -292,3 +335,19 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
                 issues.append(f'Execution {i}: repeated environment declaration.')
             seen_scenes.append(scene)
     return issues
+
+
+def carousel_standalone_brief(product, reference, *, scene='', role='', detail=False, dimensions='1080 x 1080', references=()):
+    return f"""PRODUCT: {product}
+REFERENCE: {reference}; inspect this exact attachment AND all other winning cards for collective product fidelity.
+{CAROUSEL_AUTHORITY}
+Collective reference attachments: {', '.join(references) or 'Explicitly list every supplied WINNER_CARD label in the final prompt'}.
+Concept anchor: {scene or 'Determine the broad room family from this exact winning card'}.
+Advertising role: {role or 'Determine this card role from the actual attachment'}.
+Keep / Change / Improvement: record this card's observed role, winning visual/copy principle and what to retain, then specify a substantially NEW execution and concrete upgrade. A winning carousel does not prove individual card causality.
+Same family, new execution: bedroom -> new bedroom; man cave -> new man cave; office -> new office; lounge -> new lounge; detail-role -> new detail execution. Never swap a bedroom for a bar. Preserve defining functional objects, not the old furniture or literal composition.
+Redesign architecture and layout, wall palette/material, camera composition plus at least two of furniture, lighting, flooring, background or product placement. No recolour, camera-angle-only sibling or copied room. For a verified detail role, specify a genuinely new detail composition, light and product placement instead of inventing a room.
+Output: square {dimensions}; preserve production safe areas and deterministic Sports Cave overlays separately from the PRINTED artwork. Product remains the mobile-readable hero. {'Intentional detail crop is permitted only for this verified detail-card role; never redraw hidden details.' if detail else 'Show the full outer frame, matching the winning product exactly.'}
+Use source-preserving compositing where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Resolve conflicting or unreadable product detail before generation; never guess.
+PREMIUM PHYSICAL PRODUCT: preserve frame thickness, bevel and mounting depth, realistic bevel lighting, transparent glass with subtle room-based reflections, wall separation, soft contact shadow and ambient occlusion. Preserve verified unglazed/unframed construction. Never add glare over faces or print; no flat poster, pasted mockup, floating frame or CGI showroom.
+{build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=detail)}"""

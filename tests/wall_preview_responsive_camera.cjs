@@ -17,7 +17,7 @@ const sizes=[[320,568],[360,640],[375,667],[375,812],[390,844],[393,852],[412,91
   await page.locator('[data-sc-wall-camera-cancel]').click();assert(await page.locator('video').evaluate(e=>e.srcObject===null));
   await page.keyboard.press('Escape');assert(await page.locator('[data-sc-wall-overlay]').isHidden());
   await page.locator('[data-sc-wall-open]').click();await page.waitForFunction(()=>document.querySelector('video').readyState>=2);
-  await page.locator('[data-sc-wall-camera-capture]').click();await page.locator('[data-sc-wall-art]').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('video').srcObject===null);
+  await page.locator('[data-sc-wall-camera-capture]').click();await page.locator('[data-sc-wall-quick-preview]').click();await page.locator('[data-sc-wall-art]').waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('video').srcObject===null);
   assert.deepEqual(errors,[]);count++;console.log('PASS camera '+width+'x'+height);await page.close();
  }
  // Denial must use a clear upload fallback without repeated permission attempts.

@@ -1,3 +1,4 @@
+from sports_categories import sport_category_options, normalize_sport_category, normalize_sport_state
 from contextlib import suppress
 import base64
 import calendar
@@ -424,20 +425,7 @@ MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY = "mockups_lifestyle_upload_lifecycle"
 MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_MAX_ITEMS = 64
 MOCKUPS_LIFESTYLE_UPLOAD_PROCESSING_STALE_SECONDS = 120
 MOCKUPS_DROPBOX_RETRY_ATTEMPTS = 3
-SPORT_OPTIONS = [
-    "AFL",
-    "Baseball",
-    "Basketball",
-    "Cricket",
-    "Hockey",
-    "Motorsport",
-    "NFL",
-    "NRL",
-    "Rugby Union",
-    "Soccer",
-    "Tennis",
-    "Custom",
-]
+SPORT_OPTIONS = list(sport_category_options(include_other=False, controls=('Custom',)))
 PROMPT_LABELS = {
     "01-man-cave-prompt.txt": "01 - Man Cave (Product Page)",
     "02-office-prompt.txt": "02 - Office (Product Page)",
@@ -13007,6 +12995,7 @@ def _apply_dashboard_design_idea_best_mix():
 
 def render_todays_design_ideas(local_now, events):
     del local_now, events
+    normalize_sport_state(st.session_state, DASHBOARD_DESIGN_IDEA_SPORT_KEY, "Other")
     _initialise_dashboard_design_idea_controls()
     with st.expander("Generate New Design Ideas", expanded=False):
         setup_columns = st.columns([1.7, 0.8], gap="medium")
@@ -14108,9 +14097,10 @@ def render_task_group(group, tasks):
             key=f"dashboard-task-style-filter::{group_key}",
         )
         sport_options = alphabetize_options(
-            ["", *{row.get("sport") for row in authoritative_rows if row.get("sport")}],
+            ["", *{normalize_sport_category(row.get("sport"), row.get("sport")) for row in authoritative_rows if row.get("sport")}],
             label=lambda value: value or "All sports",
         )
+        normalize_sport_state(st.session_state, f"dashboard-task-sport-filter::{group_key}", preserve_custom=True)
         sport = filter_columns[2].selectbox(
             "Sport",
             sport_options,

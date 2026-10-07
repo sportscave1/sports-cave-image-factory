@@ -8,7 +8,7 @@ for(const mode of ['denied','unavailable','late-permission','artwork-failure','s
  if(mode==='script-failure'){await page.locator('#normal-cart').click();assert.equal(await page.locator('#normal-cart').innerText(),'Available');}
  else{await page.locator('[data-sc-wall-open]').click();
  if(mode==='late-permission'){await page.locator('[data-sc-wall-camera-cancel]').click();await page.evaluate(()=>resolveCamera());await page.waitForFunction(()=>stopped===1);assert(await page.locator('[data-sc-wall-live-camera]').isHidden());}
- else if(mode==='artwork-failure'){await page.locator('[data-sc-wall-upload-input]').setInputFiles('output/image-protection-test-room.jpg');await page.waitForTimeout(500);assert(await page.locator('[data-sc-wall-art]').isHidden());assert(await page.locator('[data-sc-wall-save]').isDisabled());assert(await page.locator('[data-sc-wall-art-error]').isVisible());}
+ else if(mode==='artwork-failure'){await page.locator('[data-sc-wall-upload-input]').setInputFiles('output/image-protection-test-room.jpg');await page.locator('[data-sc-wall-quick-preview]').click();await page.waitForTimeout(500);assert(await page.locator('[data-sc-wall-art]').isHidden());assert(await page.locator('[data-sc-wall-save]').isDisabled());assert(await page.locator('[data-sc-wall-art-error]').isVisible());}
  else{await page.locator('[data-sc-wall-upload]').waitFor({state:'visible'});if(mode==='denied')assert.equal(await page.evaluate(()=>calls),1);}
  await page.keyboard.press('Escape');assert(await page.locator('[data-sc-wall-overlay]').isHidden());
  }

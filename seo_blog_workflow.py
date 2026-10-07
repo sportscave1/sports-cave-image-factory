@@ -1,6 +1,7 @@
 """Persisted two-prompt SEO Blog research and article workflow."""
 
 from __future__ import annotations
+from sports_categories import sport_category_options, normalize_sport_category
 
 from collections import Counter
 import csv
@@ -100,47 +101,7 @@ STATUSES = (
     "Idea", "Brief ready", "Generating", "Needs review", "Approved",
     "Shopify draft", "Scheduled", "Published", "Error",
 )
-SPORT_OPTIONS = (
-    "All Sports / General Sports",
-    "Australian Rules Football / AFL",
-    "Rugby League / NRL",
-    "Rugby Union",
-    "Soccer / Football",
-    "American Football / NFL",
-    "College Football / NCAA",
-    "Basketball / NBA",
-    "College Basketball / NCAA",
-    "WNBA",
-    "Baseball / MLB",
-    "Cricket",
-    "Tennis",
-    "Golf",
-    "Formula 1",
-    "Supercars",
-    "Motorsport - General",
-    "NASCAR",
-    "IndyCar",
-    "MotoGP / Motorcycle Racing",
-    "Rally / WRC",
-    "Le Mans / Endurance Racing",
-    "Boxing",
-    "MMA / UFC",
-    "Professional Wrestling / WWE",
-    "Ice Hockey / NHL",
-    "Horse Racing",
-    "Athletics / Track and Field",
-    "Olympics",
-    "Swimming",
-    "Surfing",
-    "Cycling",
-    "Netball",
-    "Darts",
-    "Snooker / Pool",
-    "Field Hockey",
-    "Lacrosse",
-    "Sailing",
-    "Other",
-)
+SPORT_OPTIONS = sport_category_options(controls=('All Sports / General Sports',))
 SEARCH_INTENT_OPTIONS = (
     "Informational - Fan Education",
     "Informational - Athlete / Player Profile",
@@ -363,18 +324,13 @@ def normalize_brief(brief):
         brief.get("gsc_seed_query") or brief.get("selected_opportunity") or ""
     ).strip()
     brief["subject"] = str(brief.get("subject") or brief.get("topic_entity") or "").strip()
-    brief["sport"] = {
-        "AFL": "Australian Rules Football / AFL",
-        "NRL": "Rugby League / NRL",
-        "Football": "Soccer / Football",
-        "Soccer": "Soccer / Football",
-        "NFL": "American Football / NFL",
-        "NBA": "Basketball / NBA",
-        "MLB": "Baseball / MLB",
-        "Formula 1 / Motorsport": "Motorsport - General",
-        "UFC / Boxing": "MMA / UFC",
-        "NHL": "Ice Hockey / NHL",
-    }.get(str(brief.get("sport") or "").strip(), str(brief.get("sport") or "").strip())
+    saved_sport = str(brief.get("sport") or "").strip()
+    if saved_sport == "All Sports / General Sports":
+        brief["sport"] = saved_sport
+    else:
+        brief["sport"] = normalize_sport_category(saved_sport, "Other" if saved_sport else "")
+        if brief["sport"] == "Other" and saved_sport and saved_sport != "Other":
+            brief["sport_custom"] = brief.get("sport_custom") or saved_sport
     brief["search_intent"] = str(
         brief.get("search_intent") or brief.get("search_intent_article_type") or ""
     ).strip()
@@ -731,7 +687,8 @@ def parse_blog_brief_csv(data, *, filename="", current_brief=None):
         target_markets = normalize_target_markets(
             _semicolon_list(row["target_markets"]), reject_mixed=True
         )
-        sport, sport_custom = _taxonomy_value(row["sport"], SPORT_OPTIONS, "Other")
+        sport_value = normalize_sport_category(row["sport"], row["sport"])
+        sport, sport_custom = _taxonomy_value(sport_value, SPORT_OPTIONS, "Other")
         search_intent, search_intent_custom = _taxonomy_value(
             row["search_intent_article_type"], SEARCH_INTENT_OPTIONS, "Other / Custom"
         )

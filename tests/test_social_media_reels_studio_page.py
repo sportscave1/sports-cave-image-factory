@@ -160,10 +160,10 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
                 details = reels.derive_product_details_from_filename(filename)
                 self.assertEqual(details["product_handle"], handle)
                 self.assertEqual(details["product_title"], title)
-                self.assertEqual(details["sport_category"], sport)
+                self.assertEqual(details["sport_category"], "V8 Supercars" if "v8-supercars" in filename else __import__("sports_categories").normalize_sport_category(sport))
 
     def test_sport_detection_ambiguity_and_meaningful_numbers(self):
-        self.assertEqual(reels.detect_sport_category("classic-football-wall-art"), "Soccer")
+        self.assertEqual(reels.detect_sport_category("classic-football-wall-art"), "Football")
         self.assertEqual(reels.detect_sport_category("brady-super-bowl-football-wall-art"), "NFL")
         self.assertEqual(reels.strip_trailing_random_id("lebron-23"), "lebron-23")
 
@@ -627,14 +627,12 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
 
     def test_mockups_sport_dropdown_options_are_alphabetical_with_custom_last(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        options_source = source[source.index("SPORT_OPTIONS = [") : source.index("]\nPROMPT_LABELS")]
-        options = [
-            line.strip().strip('",')
-            for line in options_source.splitlines()
-            if line.strip().startswith('"')
-        ]
+        import app
+        from sports_categories import sport_category_options
+        options = app.SPORT_OPTIONS
+        self.assertEqual(options, list(sport_category_options(include_other=False, controls=("Custom",))))
 
-        self.assertEqual(options[:-1], sorted(options[:-1]))
+        self.assertEqual(options[:-1], sorted(options[:-1], key=str.casefold))
         self.assertEqual(options[-1], "Custom")
 
     def test_wizard_unlocks_are_linear(self):

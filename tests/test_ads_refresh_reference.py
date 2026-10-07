@@ -24,8 +24,8 @@ class ReferenceCleanupTests(unittest.TestCase):
             handoff.hydrate(state)
             self.assertEqual(state['ads_campaign_type'],expected)
             self.assertTrue(state[handoff.ACTIVE]['campaign_type_resolution']['confirmed'])
-            value=ads.build_ads_result_record('Reference product','Football','Australia',state['ads_campaign_type'],
-                product_url='https://sportscave.com.au/products/reference',creative_refresh_context={
+            value=ads.build_ads_result_record(source['product_mapping']['product_title'],'Football','Australia',state['ads_campaign_type'],
+                product_url=source['product_mapping']['product_url'],creative_refresh_context={
                     'winning_primary_text':source['components']['primary_text']['value'],
                     'winning_headline':source['components']['headline']['value'], 'source_winner':state[handoff.ACTIVE]})
             self.assertEqual(value['campaign_type'],expected)
@@ -95,8 +95,8 @@ class ReferenceCleanupTests(unittest.TestCase):
         st.link_button.assert_called_once_with('Find product image','/files-window?relative_path=04_OUTPUT/product-images',icon=':material/folder_open:')
         self.assertEqual(st.session_state,before)
         source=(ROOT/'ads_page.py').read_text(encoding='utf-8')
-        self.assertIn('if is_creative_refresh:\n        from ads_refresh_reference import render_product_image_link',source)
-        self.assertIn('elif not is_google:\n        render_product_artwork_reference(product_selection, product_url)',source)
+        self.assertIn("if is_creative_refresh and campaign_type != 'Carousel':\n        from ads_refresh_reference import render_product_image_link",source)
+        self.assertIn('elif not is_creative_refresh and not is_google:\n        render_product_artwork_reference(product_selection, product_url)',source)
         self.assertNotIn('shopify',Path(reference.__file__).read_text(encoding='utf-8').lower())
 
     def test_format_and_provenance_survive_existing_save_and_posting(self):

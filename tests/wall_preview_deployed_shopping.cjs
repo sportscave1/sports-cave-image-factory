@@ -19,7 +19,7 @@ for(const path of ['/','/collections/all','/products/legends-never-die-kobe-brya
 const baselineErrors=new Set(errors.map(e=>e.split('\n')[0]));
 const cookies=page.getByRole('button',{name:/reject all|decline/i});if(await cookies.count())await cookies.first().click();
 const bar=page.frameLocator('#PBarNextFrame').getByRole('button',{name:/hide/i});try{await bar.first().waitFor({state:'visible',timeout:8000});await bar.first().click();}catch(e){}
-await page.locator('[data-sc-wall-open]').click();await page.locator('[data-sc-wall-upload-input]').setInputFiles('output/image-protection-test-room.jpg');await page.locator('[data-sc-wall-art]').waitFor({state:'visible'});
+await page.locator('[data-sc-wall-open]').click();await page.locator('[data-sc-wall-upload-input]').setInputFiles('output/image-protection-test-room.jpg');await page.locator('[data-sc-wall-quick-preview]').click();await page.locator('[data-sc-wall-art]').waitFor({state:'visible'});
 const box=await page.locator('[data-sc-wall-art]').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+20,box.y+box.height/2+10);await page.mouse.up();await page.locator('[data-sc-wall-confirm]').click();
 await page.waitForFunction(()=>document.querySelector('[data-sc-wall-confirm-label]').textContent.includes('Your wall preview is ready'));await page.locator('[data-sc-wall-save]').click();await page.locator('[data-sc-wall-download-email]').waitFor({state:'visible'});await page.keyboard.press('Escape');
 await page.locator('[data-sc-wall-sticky-secure]').click();await page.waitForFunction(()=>document.querySelector('cart-drawer')?.getAttribute('aria-hidden')==='false');

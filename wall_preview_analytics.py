@@ -10,6 +10,12 @@ EVENTS = tuple('WallPreview'+name for name in (
     'Started','CameraOpened','GalleryOpened','PhotoCaptured','PhotoUploaded','PhotoReady',
     'ArtworkDragged','FrameChanged','SizeChanged','ScaleStarted','ScaleCompleted',
     'QuickPreviewUsed','Confirmed','Downloaded','Shared','AddedToCart','CheckoutStarted','Purchased','Closed'))
+CANONICAL_EVENTS = dict(zip((
+    'wall_preview_cta_click','wall_preview_open','wall_preview_camera_open','wall_preview_photo_loaded',
+    'wall_preview_placement_confirmed','wall_preview_add_to_cart','wall_preview_close','wall_preview_active_time'),
+    ('WallPreviewCTAClick','WallPreviewStarted','WallPreviewCameraOpened','WallPreviewPhotoReady',
+     'WallPreviewConfirmed','WallPreviewAddedToCart','WallPreviewClosed','WallPreviewActiveTime')))
+EVENTS += ('WallPreviewCTAClick','WallPreviewActiveTime')
 TEXT_FIELDS = {'product_id':80,'variant_id':80,'product_handle':255,'product_title':500,
     'frame':120,'size':160,'unit':2,'device_type':16,'capture_source':16,
     'utm_source':160,'utm_medium':160,'utm_campaign':160,'utm_content':160,'utm_term':160,'furthest_stage':40}
@@ -19,7 +25,8 @@ STAGES = [('Opened','Started'),('Photo Ready','PhotoReady'),('Interacted / Dragg
 
 def clean(payload):
     if not isinstance(payload,dict):raise ValueError('Invalid event')
-    name=payload.get('event') or payload.get('event_name')
+    event_type=payload.get('event') or payload.get('event_name')
+    name=CANONICAL_EVENTS.get(event_type,event_type)
     if name not in EVENTS or name=='WallPreviewPurchased':raise ValueError('Unsupported client event')
     result={'event_name':name,'event_key':'analytics:'+identifier(payload.get('event_id')),
             'session_id':identifier(payload.get('session_id')),'client_preview_id':identifier(payload.get('client_preview_id'))}
@@ -41,6 +48,13 @@ def clean(payload):
     for key in ('product_id','variant_id'):
         result[key]=result[key].rsplit('/',1)[-1]
     result['elapsed_ms']=elapsed
+    if event_type in CANONICAL_EVENTS:
+        result['event_type']=event_type
+        result['wall_preview_session_id']=identifier(payload.get('wall_preview_session_id'))
+        result['visitor_id']=identifier(payload.get('visitor_id'))
+        active=payload.get('active_seconds',0)
+        if type(active) not in (int,float) or not 0<=active<=86400:raise ValueError('Invalid active duration')
+        result['active_seconds']=active
     result['source']='storefront'
     return result
 
@@ -64,6 +78,11 @@ def ingest(payload):
         cur.execute('SELECT session_id FROM public.wall_preview_events WHERE client_preview_id=%s LIMIT 1',(data['client_preview_id'],))
         previous=cur.fetchone()
         if previous and previous['session_id'] and str(previous['session_id'])!=data['session_id']:raise PermissionError('Journey mismatch')
+        if data.get('wall_preview_session_id'):
+            cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',('wall-visit:'+data['wall_preview_session_id'],))
+            cur.execute('SELECT session_id,visitor_id FROM public.wall_preview_events WHERE wall_preview_session_id=%s LIMIT 1',(data['wall_preview_session_id'],))
+            previous=cur.fetchone()
+            if previous and (str(previous['session_id'])!=data['session_id'] or str(previous['visitor_id'])!=data['visitor_id']):raise PermissionError('Visit mismatch')
         return insert(cur,data)
 
 
@@ -91,13 +110,13 @@ def purchase(cur,payload,line,row=None):
         revenue=max(Decimal(0),money(line['price'])*quantity-sum((money(d['amount']) for d in line.get('discount_allocations') or []),Decimal(0)))
         total=money(payload['total_price'])
     except (ValueError,InvalidOperation,KeyError,TypeError):revenue=total=None
-    cur.execute("SELECT device_type,capture_source FROM public.wall_preview_events WHERE client_preview_id=%s AND source='storefront' ORDER BY occurred_at DESC LIMIT 1",(client,))
+    cur.execute("SELECT device_type,capture_source,wall_preview_session_id,visitor_id FROM public.wall_preview_events WHERE client_preview_id=%s AND source='storefront' ORDER BY occurred_at DESC LIMIT 1",(client,))
     dimensions=dict(cur.fetchone() or {})
     at=payload.get('processed_at') or payload.get('created_at') or datetime.now(timezone.utc)
     data={'event_name':'WallPreviewPurchased','event_key':f"purchase:{payload['id']}:{line['id']}",
           'source':'shopify','occurred_at':at,'client_preview_id':client,
           'preview_id':str(row['id']) if 'archive_sha256' in row else row.get('preview_id'),
-          'session_id':row.get('session_id'),'product_id':product,'variant_id':variant,
+          'session_id':row.get('session_id'),'wall_preview_session_id':dimensions.get('wall_preview_session_id'),'visitor_id':dimensions.get('visitor_id'),'product_id':product,'variant_id':variant,
           'product_title':str(row.get('product_title') or line.get('title') or '')[:500],
           'product_handle':str(row.get('product_handle') or '')[:255],
           'frame':row.get('frame_label',row.get('frame','')),'size':row.get('size_label',row.get('size','')),
@@ -124,14 +143,14 @@ def filters(params):
 
 # Prefer true browser observations over old server confirmation proxies, preserving old history.
 BASE="""WITH resolved AS (SELECT e.*,
- COALESCE(e.client_preview_id,p.client_preview_id) AS journey,
+ COALESCE(e.wall_preview_session_id,e.client_preview_id,p.client_preview_id) AS journey,
  COALESCE(NULLIF(e.product_id,''),p.product_id,'') AS resolved_product,
  COALESCE(NULLIF(e.product_title,''),p.product_title,'') AS resolved_title,
- COALESCE(NULLIF(e.capture_source,''),d.capture_source,'') AS resolved_capture,
+ CASE WHEN e.wall_preview_session_id IS NOT NULL THEN COALESCE(d.capture_source,NULLIF(e.capture_source,''),'') ELSE COALESCE(NULLIF(e.capture_source,''),d.capture_source,'') END AS resolved_capture,
  COALESCE(NULLIF(e.device_type,''),d.device_type,'') AS resolved_device
  FROM public.wall_preview_events e LEFT JOIN public.wall_previews p ON p.id=e.preview_id
  LEFT JOIN LATERAL (SELECT capture_source,device_type FROM public.wall_preview_events x
- WHERE x.client_preview_id=COALESCE(e.client_preview_id,p.client_preview_id) AND x.capture_source<>''
+ WHERE ((e.wall_preview_session_id IS NOT NULL AND x.wall_preview_session_id=e.wall_preview_session_id) OR (e.wall_preview_session_id IS NULL AND x.client_preview_id=COALESCE(e.client_preview_id,p.client_preview_id))) AND x.capture_source<>''
  ORDER BY x.occurred_at DESC LIMIT 1) d ON TRUE),
  normalized AS (SELECT r.* FROM resolved r WHERE NOT (source='legacy' AND event_name='WallPreviewStarted')
  AND NOT (source='legacy' AND EXISTS (SELECT 1 FROM resolved n WHERE n.journey=r.journey AND n.event_name=r.event_name AND n.source<>'legacy'))),
@@ -145,6 +164,25 @@ def report(params=None):
     base=BASE.format(where=where)
     def rows(cur,sql):cur.execute(base+sql,tuple(args));return [dict(r) for r in cur.fetchall()]
     with transaction() as cur:
+        engagement=rows(cur,""", visits AS (
+          SELECT wall_preview_session_id,visitor_id,resolved_product,
+           min(occurred_at) FILTER(WHERE event_type='wall_preview_cta_click') clicked,
+           min(occurred_at) FILTER(WHERE event_type='wall_preview_open') opened,
+           min(occurred_at) FILTER(WHERE event_type='wall_preview_photo_loaded') photo,
+           min(occurred_at) FILTER(WHERE event_type='wall_preview_placement_confirmed') placed,
+           min(occurred_at) FILTER(WHERE event_type='wall_preview_add_to_cart') cart,
+           max(active_seconds) FILTER(WHERE event_type IN ('wall_preview_active_time','wall_preview_close')) active
+          FROM filtered WHERE wall_preview_session_id IS NOT NULL GROUP BY wall_preview_session_id,visitor_id,resolved_product)
+          SELECT count(*) FILTER(WHERE clicked IS NOT NULL) cta_clicks,
+           count(DISTINCT visitor_id) FILTER(WHERE clicked IS NOT NULL) unique_clickers,
+           count(*) FILTER(WHERE opened IS NOT NULL) opens,
+           count(*) FILTER(WHERE opened>=clicked) click_opens,
+           count(*) FILTER(WHERE photo>=opened) photo_ready,
+           count(*) FILTER(WHERE placed>=opened) confirmed,
+           count(*) FILTER(WHERE cart>=opened) atc,
+           avg(active) FILTER(WHERE opened IS NOT NULL) avg_active_seconds,
+           percentile_cont(0.5) WITHIN GROUP(ORDER BY active) FILTER(WHERE opened IS NOT NULL) median_active_seconds
+          FROM visits""")[0]
         counts=rows(cur,"SELECT event_name,count(*) AS events,count(DISTINCT COALESCE(journey::text,preview_id::text)) AS journeys FROM filtered GROUP BY event_name")
         sessions=rows(cur,'SELECT count(DISTINCT session_id) AS n FROM filtered')[0]['n']
         revenue=rows(cur,"SELECT currency,sum(line_revenue) AS revenue FROM filtered WHERE source='shopify' AND event_name='WallPreviewPurchased' AND line_revenue IS NOT NULL AND currency<>'' GROUP BY currency")
@@ -186,7 +224,7 @@ def report(params=None):
         p['revenue']=[r for r in product_revenue if r['product_id']==p['product_id']]
         p['purchase_percent']=ratio(int(p.pop('converted')),int(p['opens']))
         p.pop('sort_revenue',None)
-    return {'summary':{'opens':count('Started'),'sessions':int(sessions),'photo_ready':count('PhotoReady'),
+    return {'engagement':{**engagement,'click_open_percent':ratio(engagement['click_opens'],engagement['cta_clicks']),'placement_percent':ratio(engagement['confirmed'],engagement['opens']),'cart_percent':ratio(engagement['atc'],engagement['opens'])},'summary':{'opens':count('Started'),'sessions':int(sessions),'photo_ready':count('PhotoReady'),
             'confirmed':count('Confirmed'),'atc':count('AddedToCart'),'purchased':count('Purchased'),
             'atc_percent':ratio(next((int(r['n']) for r in transitions if r['event_name']=='WallPreviewStarted' and r['next_event']=='WallPreviewAddedToCart'),0),count('Started')),'purchase_percent':ratio(next((int(r['n']) for r in transitions if r['event_name']=='WallPreviewStarted' and r['next_event']=='WallPreviewPurchased'),0),count('Started')),'revenue':revenue},
             'funnel':funnel,'products':products,'insights':insight}
@@ -199,5 +237,5 @@ def events(params=None):
         where=where.replace('preview_id=%s',"(preview_id=%s OR client_preview_id=(SELECT client_preview_id FROM public.wall_previews WHERE id=%s))")
         args.append(str(params['preview_id']))
     with transaction() as cur:
-        cur.execute('SELECT event_name,occurred_at,product_title,frame,size,furthest_stage,source FROM public.wall_preview_events WHERE '+where+' ORDER BY occurred_at,id LIMIT %s OFFSET %s',tuple(args+[limit,offset]))
+        cur.execute('SELECT event_name,event_type,wall_preview_session_id,active_seconds,occurred_at,product_title,frame,size,furthest_stage,source FROM public.wall_preview_events WHERE '+where+' ORDER BY occurred_at,id LIMIT %s OFFSET %s',tuple(args+[limit,offset]))
         return [dict(r) for r in cur.fetchall()]

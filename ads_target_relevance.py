@@ -1,13 +1,9 @@
 """Deterministic presentation ranking; never resolves or changes Meta IDs."""
+from sports_categories import sport_aliases
 import re
 import unicodedata
 
 STOPWORDS = frozenset("the a an and of for wall art print framed frame limited edition sports sport cave collection product products poster official premium exclusive australia aus uk usa".split())
-SPORT_ALIASES = {
-    "basketball": "nba", "american football": "nfl", "ice hockey": "nhl",
-    "baseball": "mlb", "rugby league": "nrl", "australian football": "afl",
-    "formula one": "f1", "formula 1": "f1", "mixed martial arts": "ufc",
-}
 
 
 def tokens(text):
@@ -18,10 +14,9 @@ def tokens(text):
 
 
 def extract_relevance_terms(product_title="", sport=""):
-    sport_text = " ".join(tokens(sport))
     sport_terms = {word for word in tokens(sport) if word not in STOPWORDS and word != "other"}
-    if sport_text in SPORT_ALIASES:
-        sport_terms.add(SPORT_ALIASES[sport_text])
+    for alias in sport_aliases(sport):
+        sport_terms.update(word for word in tokens(alias) if word not in STOPWORDS and word != "other")
     title_terms = tuple(dict.fromkeys(word for word in tokens(product_title) if word not in STOPWORDS and len(word) > 1))
     return sport_terms, title_terms
 
@@ -38,7 +33,7 @@ def rank_relevant_meta_options(options, *, product_title="", sport="", selected=
         matches = terms & set(name_tokens)
         name = " " + " ".join(name_tokens) + " "
         exact_sport = bool(sport_terms and sport_phrase and (
-            f" {sport_phrase} " in name or SPORT_ALIASES.get(sport_phrase) in name_tokens
+            f" {sport_phrase} " in name or any(f" {' '.join(tokens(alias))} " in name for alias in sport_aliases(sport))
         ))
         phrase = bool(len(athlete_phrase.split()) > 1 and f" {athlete_phrase} " in name)
         score = (exact_sport, phrase, len(matches))

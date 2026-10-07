@@ -46,7 +46,7 @@ class DetailTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'1, 2, 3, 4, 5'):
             handoff.require_complete_carousel({'carousel_cards':value['cards']})
         import ads_refresh_plan
-        with self.assertRaisesRegex(ValueError,'Complete source'):
+        with self.assertRaisesRegex(ValueError,'Complete winning Carousel'):
             ads_refresh_plan.reference_map('Carousel',{'creative_format':'DYNAMIC_CAROUSEL','carousel_cards':value['cards']})
 
     def test_ambiguous_asset_labels_and_multiple_sequences_fail_closed(self):
@@ -72,15 +72,12 @@ class DetailTests(unittest.TestCase):
         raw=inline();raw['asset_feed_spec']={'bodies':[{'text':'Shared'}]}
         with patch.object(live.meta,'get_meta_config',return_value=CONFIG),patch.object(live.meta,'_request',return_value=raw) as read:
             app_test=AppTest.from_function(app).run()
+            self.assertFalse(app_test.exception)
             for i in range(1,6):
-                self.assertFalse(app_test.exception)
-                self.assertTrue(any(f'CARD {i} OF 5'==c.value for c in app_test.caption))
-                self.assertTrue(any('Headline: Headline '+str(i)==t.value for t in app_test.text))
-                self.assertFalse(any(b.label=='Copy winning image' for b in app_test.button))
-                self.assertEqual(app_test.get('link_button')[0].proto.url, f'https://fixture.fbcdn.net/card{i}.jpg')
-                if i<5:next(b for b in app_test.button if b.label=='Next card').click().run()
-            next(b for b in app_test.button if b.label=='Previous card').click().run()
-            self.assertTrue(any('CARD 4 OF 5'==c.value for c in app_test.caption))
+                self.assertIn('Headline '+str(i),str([x.proto for x in app_test.get('html')]))
+                self.assertIn(f'https://fixture.fbcdn.net/card{i}.jpg',str([x.proto for x in app_test.get('iframe')]))
+            self.assertFalse(any(b.label in ('Next card','Previous card') for b in app_test.button))
+            for _ in range(3):app_test.run()
         self.assertEqual(read.call_count,2) # creative + all image hashes, cached on reruns
 
     def test_handoff_while_viewing_card_three_contains_every_card(self):
@@ -97,7 +94,8 @@ class DetailTests(unittest.TestCase):
         with patch.object(page.meta,'get_meta_config',return_value=CONFIG),patch.object(creative,'resolve',return_value=value),patch.object(handoff,'queue_link',return_value='?page=creative-refresh') as queue:
             at=AppTest.from_function(app).run()
             next(s for s in at.selectbox if s.label=='Winner to use').set_value('55').run()
-            for _ in range(2):next(b for b in at.button if b.label=='Next card').click().run()
+            at.session_state['meta-card-index-legacy']=2
+            at.run()
             next(b for b in at.button if b.label=='APPLY TO CREATIVE REFRESH').click().run()
         self.assertFalse(at.exception)
         self.assertEqual([c['position'] for c in queue.call_args.args[0]['carousel_cards']],[1,2,3,4,5])

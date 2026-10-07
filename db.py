@@ -1,3 +1,4 @@
+from sports_categories import sport_category_options, normalize_sport_category, sport_aliases
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,22 +24,7 @@ PRODUCT_STATUSES = (
     "Archived",
 )
 
-SPORT_CATEGORIES = (
-    "NBA",
-    "Soccer",
-    "Motorsport",
-    "Cricket",
-    "AFL",
-    "NFL",
-    "Baseball",
-    "Hockey",
-    "Horse Racing",
-    "Tennis",
-    "Boxing",
-    "MMA",
-    "Golf",
-    "Other",
-)
+SPORT_CATEGORIES = sport_category_options()
 
 COUNTRY_FOCUS_OPTIONS = (
     "Australia",
@@ -2122,8 +2108,7 @@ def clean_product_payload(payload):
     cleaned["product_name"] = cleaned["product_name"] or "Untitled Product"
     if cleaned["status"] not in PRODUCT_STATUSES:
         cleaned["status"] = "Idea"
-    if cleaned["sport_category"] not in SPORT_CATEGORIES:
-        cleaned["sport_category"] = "Other"
+    cleaned["sport_category"] = normalize_sport_category(cleaned["sport_category"], "Other")
     if cleaned["country_focus"] not in COUNTRY_FOCUS_OPTIONS:
         cleaned["country_focus"] = "Global"
     if not cleaned["final_jpg_url"] and cleaned["jpg_file_url"]:
@@ -2245,8 +2230,9 @@ def list_products(
         search_value = f"%{search.strip().lower()}%"
         values.extend((search_value, search_value))
     if sport_category != "All":
-        clauses.append("p.sport_category = ?")
-        values.append(sport_category)
+        aliases = sport_aliases(sport_category) or (sport_category,)
+        clauses.append("LOWER(TRIM(p.sport_category)) IN (" + ",".join("?" for _ in aliases) + ")")
+        values.extend(alias.casefold() for alias in aliases)
     if country_focus != "All":
         clauses.append("p.country_focus = ?")
         values.append(country_focus)
@@ -2429,6 +2415,8 @@ def get_shopify_link_status(product):
 
 
 def enrich_product(product, asset_records=None, shopify_match=None):
+    product = dict(product)
+    product["sport_category"] = normalize_sport_category(product.get("sport_category"), "Other")
     if not product.get("final_jpg_url") and product.get("jpg_file_url"):
         product["final_jpg_url"] = product["jpg_file_url"]
     if not product.get("jpg_file_url") and product.get("final_jpg_url"):

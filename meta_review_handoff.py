@@ -1,4 +1,5 @@
 """Persistent, certificate-independent creative reference handoff; no Meta mutations."""
+from sports_categories import normalize_sport_category
 from copy import deepcopy
 from io import BytesIO
 import time
@@ -216,15 +217,16 @@ def hydrate(state):
     mapping=package.get('product_mapping') or {}
     hydrate_product(state,mapping)
     # Unmapped references must not inherit an unrelated previous product/market.
-    state['ads_category']=mapping.get('sport') if mapping.get('sport') in ads_page.CATEGORY_OPTIONS else 'Select category' if 'Select category' in ads_page.CATEGORY_OPTIONS else ads_page.CATEGORY_OPTIONS[0]
     state['ads_country']='Select country'
-    if mapping.get('sport') in ads_page.CATEGORY_OPTIONS:
-        state['ads_category']=mapping['sport']
     market={'AU':'Australia','US':'USA','GB':'UK','CA':'Canada','NZ':'New Zealand'}.get(package.get('market'),package.get('market'))
     if market in ads_page.COUNTRY_OPTIONS:
         state['ads_country']=market
     resolution = resolve_campaign_type(package)
     state['ads_campaign_type'] = resolution['campaign_type']
+    previous = {k: v for k, v in (state.get(ACTIVE) or {}).items() if k != 'campaign_type_resolution'}
+    if resolution['campaign_type'] == 'Carousel' and package != previous:
+        state.pop(ads_page.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY, None)
+        state.pop(ads_page.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY, None)
     state[ACTIVE] = {**deepcopy(package), 'campaign_type_resolution': resolution}
     state.pop(PENDING,None)
     for key in ('ads-refresh-previous-campaign','ads-refresh-winning-candidate','ads-refresh-applied-winner'):
@@ -246,7 +248,8 @@ def hydrate_product(state,mapping):
     state[ads_page.ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY]=url
     state[ads_page.ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]=False
     state[ads_page.ADS_PRODUCT_URL_INITIALIZED_KEY]=bool(title)
-    state['ads_category']=mapping.get('category') or mapping.get('sport') or 'Select category'
+    category = normalize_sport_category(mapping.get('category') or mapping.get('sport'))
+    state['ads_category']=category if category in ads_page.CATEGORY_OPTIONS else 'Select category'
 
 
 def product_selector_rows(rows,state):
@@ -313,7 +316,7 @@ def render_source(st):
     if not source:
         return False
     with st.container(border=True):
-        st.subheader('Winner from Meta Review')
+        st.markdown('**WINNER FROM META REVIEW**')
         if st.session_state.get('meta-review-product-error'): st.warning(st.session_state['meta-review-product-error'])
         if source.get('mode')=='best_components':
             st.warning('Mixed components are an untested combination. Their combined performance is not proven.')
@@ -323,8 +326,9 @@ def render_source(st):
         if source.get('creative_format') in ('DYNAMIC', 'VIDEO'):
             st.warning('This source format has no deterministic fixed-card refresh mapping.')
         if resolution['campaign_type'] == 'Carousel':
-            from meta_review_creative import render_cards
+            from meta_review_creative import render_cards, render_shared_primary_text
             render_cards(st, source, archived=True)
+            render_shared_primary_text(st, source)
             return True
         try:
             data,mime=store.load_media(source['image_sha256'])

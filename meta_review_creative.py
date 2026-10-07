@@ -297,12 +297,8 @@ def log_resolution(value, ad_id='', handoff_count=0):
 
 
 def render_shared_primary_text(st, value):
-    texts = value.get('shared_primary_texts') or ([value['shared_primary_text']] if value.get('shared_primary_text') else [])
-    if texts:
-        with st.expander('Shared Primary Text', expanded=False):
-            for index, text in enumerate(texts, 1):
-                st.caption(f'Primary Text {index}')
-                st.text(text)
+    from meta_carousel_view import render_primary
+    render_primary(st, value)
 
 
 def label(value):
@@ -331,41 +327,6 @@ import streamlit as _streamlit
 
 @_streamlit.fragment
 def render_cards(st, value, *, archived=False, key_prefix="source"):
-    """Fragment-owned viewer: arrow navigation never re-reads Meta or the parent."""
-    cards = value.get('cards') or value.get('carousel_cards') or []
-    st.caption(label({**value, 'cards': cards}))
-    if not cards:
-        st.warning('Source cards were not retained in this legacy handoff. Reload the winner from Meta Review.')
-        return
-    missing=sum(c.get('image_unavailable',False) or not (c.get('image_url') or c.get('image_sha256')) for c in cards)
-    if missing: st.warning(f'{missing} of {len(cards)} source cards could not be retrieved.')
-    if value.get('multi_share_optimized'): st.caption('Meta may optimize carousel delivery order; the authored source order is shown here.')
-    identity=key_prefix+'-'+fingerprint([value.get('creative_id'),[(c.get('identity'),c.get('position')) for c in cards]])[:12]
-    key='meta-card-index-'+identity
-    index=min(max(int(st.session_state.get(key,0)),0),len(cards)-1)
-    with st.container(key='meta-source-cards-'+identity):
-        st.html('<style>[class*="st-key-meta-source-cards-"]{max-width:560px;margin-left:auto;margin-right:auto} [class*="st-key-meta-source-cards-"] [data-testid="stImage"] img{max-height:320px;max-width:100%;width:auto!important;object-fit:contain} [class*="st-key-meta-source-cards-"] [data-testid="stImage"]{margin:auto;max-width:100%} [class*="st-key-meta-source-cards-"] button{min-height:40px;min-width:40px;color:#9b7727} [class*="st-key-meta-source-cards-"] button p{font-size:0} [class*="st-key-meta-source-cards-"] [data-testid="stColumn"]:nth-child(2){text-align:center}</style>')
-        left,counter,right=st.columns([1,3,1],vertical_alignment='center')
-        if left.button('Previous card',icon=':material/chevron_left:',disabled=index==0,key=key+'-previous'): index-=1
-        if right.button('Next card',icon=':material/chevron_right:',disabled=index==len(cards)-1,key=key+'-next'): index+=1
-        st.session_state[key]=index
-        counter.caption(f'{index+1} / {len(cards)}')
-        card=cards[index]
-        st.caption(f"CARD {index+1} OF {len(cards)}")
-        data,mime=None,None
-        if archived and card.get('image_sha256'):
-            try:
-                import meta_review_store
-                data,mime=meta_review_store.load_media(card['image_sha256'])
-            except Exception: pass
-        if data:
-            st.image(data,width=320)
-            from ads_refresh_reference import render_winning_image_copy
-            render_winning_image_copy(data,mime)
-        elif card.get('image_url'):
-            st.image(card['image_url'],width=320)
-        else: st.caption(f"Card {card['position']} — image unavailable from Meta")
-        if card.get('image_url'):
-            st.link_button('Open full-resolution image',card.get('high_resolution_image_url') or card['image_url'])
-        for field,title in (('headline','Headline'),('description','Description'),('cta','CTA'),('destination_url','Destination')):
-            if card.get(field): st.text(title+': '+card[field])
+    """Shared client-side strip; consumes resolved cards without another read."""
+    from meta_carousel_view import render
+    render(st, value, archived=archived, key_prefix=key_prefix)

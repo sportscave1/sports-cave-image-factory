@@ -191,11 +191,14 @@ class SourceUITests(unittest.TestCase):
             with patch.object(live.meta, '_request', side_effect=AssertionError('network')), patch.object(handoff.requests, 'get', side_effect=AssertionError('download')):
                 at = AppTest.from_function(app, args=(n,)).run()
             self.assertFalse(at.exception)
-            self.assertEqual(len([c for c in at.caption if c.value.startswith('CARD ')]), 1)
-            self.assertEqual(len([b for b in at.button if b.label == 'Copy winning image']), 0)
-            for _ in range(n-1):next(b for b in at.button if b.label=='Next card').click().run()
-            self.assertTrue(any(t.value == f'Headline: Headline {n}' for t in at.text))
-            self.assertTrue(any(t.value == f'Description: Description {n}' for t in at.text))
+            self.assertEqual(len(at.get('iframe')),1)
+            self.assertFalse(any(b.label in ('Previous card','Next card') for b in at.button))
+            html=str([x.proto for x in at.get('html')])
+            images=str([x.proto for x in at.get('iframe')])
+            for i in range(1,n+1):
+                self.assertIn(f'Headline {i}',html)
+                self.assertIn(f'Description {i}',html)
+                self.assertIn(f'card{i}.jpg',images)
 
     def test_missing_card_warning_keeps_all_positions(self):
         from streamlit.testing.v1 import AppTest
@@ -209,8 +212,11 @@ class SourceUITests(unittest.TestCase):
         at = AppTest.from_function(app).run()
         self.assertFalse(at.exception)
         self.assertIn('1 of 5', at.warning[0].value)
-        for _ in range(2):next(b for b in at.button if b.label=='Next card').click().run()
-        self.assertTrue(any('Card 3 — image unavailable from Meta' == c.value for c in at.caption))
+        from meta_carousel_view import card_views
+        raw=inline();del raw['object_story_spec']['link_data']['child_attachments'][2]['picture']
+        views=card_views(creative.normalize(raw))
+        self.assertEqual(len(views),5)
+        self.assertEqual(views[2],{'number':3,'preview':'','full':''})
 
     def test_selected_resolution_and_rerender_reuse_cache(self):
         from streamlit.testing.v1 import AppTest
@@ -307,16 +313,17 @@ class HandoffTests(unittest.TestCase):
 class DynamicRefreshTests(unittest.TestCase):
     def result(self, n):
         return ads.build_ads_result_record('Verified Product Wall Art', 'Golf', 'New Zealand', 'Carousel',
-            product_url='https://example.com/products/art', variation_token='test',
+            product_url='https://www.sportscaveshop.com/products/art', variation_token='test',
             creative_refresh_context={'winning_primary_text': 'Shared collector message', 'winning_headline': 'Shared headline',
-                                      'source_winner': package(inline(n))})
+                                      'source_winner': {**package(inline(n)), 'product_mapping': {'product_title': 'Verified Product Wall Art', 'product_handle': 'art'}}})
 
     def test_attachment_and_output_counts_and_shared_rules(self):
         for n in (4, 5, 6):
             value = self.result(n)
             prompt = value['master_prompt']
             self.assertIn(f'ONE refreshed {n}-CARD', prompt)
-            self.assertIn(f'ATTACHMENT {n+1} — CANONICAL_PRODUCT', prompt)
+            self.assertNotIn('CANONICAL_PRODUCT', prompt)
+            self.assertIn(f'Image {n} = Card {n} = WINNER_CARD_{n}', prompt)
             self.assertNotIn(f'WINNER_CARD_{n+1}', prompt)
             self.assertEqual(prompt.count('PRODUCT: Verified Product Wall Art'), n)
             self.assertGreaterEqual(prompt.count(build_sports_cave_image_realism_rules(include_product_lock=True)), n)

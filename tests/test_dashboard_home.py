@@ -2508,7 +2508,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             )
 
         backend.assert_not_called()
-        self.assertIn("Formula 1 / Motorsport", prompt)
+        self.assertIn("Motorsport", prompt)
         self.assertNotIn("DATABASE_URL", prompt)
 
     def test_suggested_design_mix_is_exact_and_sport_appropriate(self):

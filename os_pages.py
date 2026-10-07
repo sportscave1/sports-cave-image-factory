@@ -1,3 +1,4 @@
+from sports_categories import normalize_sport_category, normalize_sport_state
 import csv
 import gc
 import html
@@ -2360,6 +2361,7 @@ def render_shopify_sync_page():
 
 def product_form_fields(prefix, product=None):
     product = product or {}
+    normalize_sport_state(st.session_state, f"{prefix}-sport", "Other")
     sport_options = alphabetize_options(db.SPORT_CATEGORIES)
     country_options = alphabetize_options(db.COUNTRY_FOCUS_OPTIONS)
     left, right = st.columns(2)
@@ -2369,7 +2371,7 @@ def product_form_fields(prefix, product=None):
         sport_category = st.selectbox(
             "Sport category",
             sport_options,
-            index=selected_option_index(sport_options, product.get("sport_category", "Other"), default=len(sport_options) - 1),
+            index=selected_option_index(sport_options, normalize_sport_category(product.get("sport_category"), "Other"), default=len(sport_options) - 1),
             key=f"{prefix}-sport",
         )
         country_focus = st.selectbox(
@@ -2739,7 +2741,7 @@ def render_product_overview(product):
             sport_category = left.selectbox(
                 "Sport category",
                 sport_options,
-                index=selected_option_index(sport_options, product.get("sport_category"), default=len(sport_options) - 1),
+                index=selected_option_index(sport_options, normalize_sport_category(product.get("sport_category"), "Other"), default=len(sport_options) - 1),
             )
             country_focus = left.selectbox(
                 "Country focus",

@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tokenize
+from fnmatch import fnmatchcase
 from collections.abc import Callable
 
 REPOSITORY = "sportscave1/sports-cave-image-factory"
@@ -24,6 +25,31 @@ ORIGINS = {
     f"ssh://git@github.com/{REPOSITORY}.git",
 }
 
+# Deliberately specific: shopify_theme/assets is a served OS runtime, not an audit.
+LOCAL_ONLY_PATTERNS = (
+    '.tmp-*', 'shopify_theme_reviews/*', 'test-results/*',
+    'artifacts/email-sent-verification/*', 'tmp/pdfs/certificate-layout-check/*',
+    'docs/evidence/*', 'et', '.env', '.env.*', '.streamlit/secrets.toml',
+    'client_secret.json', 'token.json', 'credentials.json', 'service-account.json',
+    '.shopify/*', '.render/*',
+)
+
+
+def local_only_path(name: str) -> bool:
+    name = name.replace('\\', '/').casefold()
+    if name in {'.env.example', '.env.sample'}:
+        return False
+    return any(fnmatchcase(name, pattern) for pattern in LOCAL_ONLY_PATTERNS)
+
+
+def validate_deploy_paths(git: 'Git') -> None:
+    # Deletions used to untrack old evidence are permitted; inspect the final index.
+    blocked = sorted(name for name in git.names('ls-files', '-z') if local_only_path(name))
+    if blocked:
+        sample = ', '.join(blocked[:5])
+        raise DeployError(f'Local-only files remain in the Git index ({len(blocked)}): {sample}. '
+                          'Remove from the index with git rm --cached; keep local files.')
+
 
 class DeployError(RuntimeError):
     pass
@@ -33,8 +59,8 @@ class Git:
     def __init__(self, root: Path):
         self.root = root
 
-    def run(self, *args: str, allowed: tuple[int, ...] = (0,)) -> bytes:
-        result = subprocess.run(["git", *args], cwd=self.root, capture_output=True)
+    def run(self, *args: str, allowed: tuple[int, ...] = (0,), input: bytes | None = None) -> bytes:
+        result = subprocess.run(["git", *args], cwd=self.root, capture_output=True, input=input)
         command = next(arg for arg in args if not arg.startswith("-"))
         if result.returncode not in allowed:
             # Never echo remote URLs/credentials. Local check diagnostics are safe.
@@ -139,6 +165,7 @@ def deploy(
             raise DeployError("Finish or cancel the current Git operation before deploying.")
     if git.run("ls-files", "--unmerged", "-z"):
         raise DeployError("Unresolved Git conflicts; deployment stopped.")
+    validate_deploy_paths(git)
     print("Repository verified. Branch: main. Fetching origin/main...", flush=True)
     git.run("fetch", "origin", "refs/heads/main:refs/remotes/origin/main")
     local = git.text("rev-parse", "HEAD")
@@ -175,14 +202,20 @@ def deploy(
         intended = staged or (unstaged | untracked)
     if staged & unstaged & intended:
         raise DeployError("Partially staged files detected. Finish staging or unstage those files first; selection preserved.")
+    # git rm --cached deliberately leaves local evidence on disk. Do not re-add it.
+    index_removals = git.names('diff', '--cached', '--name-only', '--diff-filter=D', '-z')
+    to_stage = intended - index_removals
     print(f"Changes: {len(staged)} staged, {len(unstaged)} unstaged, {len(untracked)} untracked.")
     for name in sorted(intended):
         print(f"  {name}")
-        if normalize(root / name):
+        if name in to_stage and normalize(root / name):
             print(f"  Repaired harmless whitespace: {name}")
-    if intended:
+    if to_stage:
         # Literal pathspecs prevent wildcard/metacharacter filenames staging others.
-        git.run("--literal-pathspecs", "add", "-A", "--", *sorted(intended))
+        # NUL-delimited stdin avoids Windows command-length limits and shell quoting.
+        git.run("--literal-pathspecs", "add", "-A", "--pathspec-from-file=-", "--pathspec-file-nul",
+                input=b'\0'.join(os.fsencode(name) for name in sorted(to_stage)) + b'\0')
+    validate_deploy_paths(git)
     staged = git.names("diff", "--cached", "--name-only", "-z", "--no-renames")
     git.run("diff", "--cached", "--check")
     if not staged and not push_existing:

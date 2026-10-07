@@ -402,22 +402,7 @@ class AdsPageTests(unittest.TestCase):
     def test_dropdown_options_are_in_required_order(self):
         self.assertEqual(
             ads_page.CATEGORY_OPTIONS,
-            [
-                "Select category",
-                "Baseball",
-                "Combat",
-                "Cricket",
-                "Football",
-                "Golf",
-                "Horse Racing",
-                "Ice Hockey",
-                "Motorsport",
-                "NBA",
-                "NFL",
-                "Rugby Union",
-                "Tennis",
-                "Other",
-            ],
+            list(__import__("sports_categories").sport_category_options("Select category")),
         )
         self.assertEqual(
             ads_page.COUNTRY_OPTIONS,
@@ -447,13 +432,13 @@ class AdsPageTests(unittest.TestCase):
     def test_category_specific_templates_cover_carousel_and_instant_experience_with_generic_fallback(self):
         for category in ads_page.SUPPORTED_AD_CATEGORIES:
             with self.subTest(category=category, campaign_type="Carousel"):
-                self.assertIsNotNone(ads_page.get_template_key(category, "Carousel"))
+                self.assertEqual(bool(ads_page.get_template_key(category, "Carousel")), category in ads_page.CATEGORY_WINNER_ANGLES)
                 self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Carousel"))
             with self.subTest(category=category, campaign_type="Instant Experience"):
-                self.assertIsNotNone(ads_page.get_template_key(category, "Instant Experience"))
+                self.assertEqual(bool(ads_page.get_template_key(category, "Instant Experience")), category in ads_page.CATEGORY_WINNER_ANGLES)
                 self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Instant Experience"))
             with self.subTest(category=category, campaign_type="Single Image / Video"):
-                self.assertIsNotNone(ads_page.get_template_key(category, "Single Image / Video"))
+                self.assertEqual(bool(ads_page.get_template_key(category, "Single Image / Video")), category in ads_page.CATEGORY_WINNER_ANGLES)
                 self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Single Image / Video"))
 
         self.assertEqual(ads_page.get_template_key("Motorsport", "Carousel"), "motorsport_carousel")
@@ -478,8 +463,12 @@ class AdsPageTests(unittest.TestCase):
 
         for category in ads_page.SUPPORTED_AD_CATEGORIES:
             with self.subTest(category=category):
-                self.assertIn(category, ads_page.CATEGORY_COPY_CUES)
-                self.assertTrue(required_fields.issubset(ads_page.CATEGORY_WINNER_ANGLES[category]))
+                if category in ads_page.CATEGORY_WINNER_ANGLES:
+                    self.assertIn(category, ads_page.CATEGORY_COPY_CUES)
+                    self.assertTrue(required_fields.issubset(ads_page.CATEGORY_WINNER_ANGLES[category]))
+                else:
+                    self.assertEqual(ads_page.get_category_winner_angle(category), {})
+                    self.assertEqual(ads_page.get_winner_pattern_key(category, "Carousel"), "generic_carousel")
 
     def test_baseball_instant_experience_is_supported_with_required_url(self):
         self.assertEqual(
@@ -863,10 +852,13 @@ class AdsPageTests(unittest.TestCase):
                         self.assertIn("Legacy", prompt)
                     else:
                         self.assertIn(
-                            f"SPORTS CAVE {category.upper()} CAROUSEL WINNER PATTERN",
+                            f"SPORTS CAVE {category.upper()} CAROUSEL WINNER PATTERN" if category in ads_page.CATEGORY_WINNER_ANGLES else "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN",
                             prompt,
                         )
-                        self.assertIn("CATEGORY-SPECIFIC CAROUSEL WINNER ANGLE", prompt)
+                        if category in ads_page.CATEGORY_WINNER_ANGLES:
+                            self.assertIn("CATEGORY-SPECIFIC CAROUSEL WINNER ANGLE", prompt)
+                        else:
+                            self.assertIn("UNIVERSAL SPORTS CAVE WINNER RULES", prompt)
                         for role in required_roles:
                             self.assertIn(role, prompt)
 

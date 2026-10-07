@@ -43,8 +43,9 @@ def executions(value):
         scene = reference.get('scene') if carousel else style['name']
         role = reference.get('role') if carousel else 'collector identity'
         prompt = plan.standalone_brief(TITLE, reference['label'], scene=scene, role=role, style=style, detail=carousel and 'detail' in role,
-                                      dimensions='1080 x 1080' if carousel else '1024 x 1024')
-        result.append(dict(position=i, winner_reference=reference['label'], reference_inspected=True, canonical_inspected=True,
+                                      dimensions='1080 x 1080' if carousel else '1024 x 1024',
+                                      references=[r['label'] for r in selected['references']] if carousel else ())
+        result.append(dict(position=i, winner_reference=reference['label'], reference_inspected=True, canonical_inspected=True, collective_product_inspected=True,
                            observations={k:'Synthetic fixture observation: '+str(scene) for k in ('scene_category','ad_role','defining_objects','composition','product_attention','strengths','clutter','mood_contrast','copy_hook','tone','structure','emotional_appeal')}, scene=scene, role=role,
                            keep=f'Preserve {scene} concept and {role}',
                            change='New architecture/layout, wall materials, camera, furniture and lighting',
@@ -54,17 +55,19 @@ def executions(value):
                                           wall_palette=f'Synthetic palette {i}', wall_material=f'Synthetic material {i}',
                                           camera=f'New composition {i}', furniture=f'New furnishings {i}',
                                           lighting='One coherent side light and restrained glazing', product_placement='Source preserving prominent detail' if carousel and 'detail' in role else 'Dominant mounted artwork')))
+    for row in result:
+        row['observations']['execution'] = {k: 'Observed original ' + str(v) for k, v in row['execution'].items()}
     return result
 
 
 class RefreshPlanTests(unittest.TestCase):
-    def test_active_carousel_maps_five_refs_and_canonical_sixth(self):
+    def test_active_carousel_maps_five_refs_and_no_extra_product_reference(self):
         value = fixture()
         refs = value['creative_refresh_context']['refresh_plan']['references']
-        self.assertEqual([r['label'] for r in refs], [f'WINNER_CARD_{i}' for i in range(1, 6)] + ['CANONICAL_PRODUCT'])
+        self.assertEqual([r['label'] for r in refs], [f'WINNER_CARD_{i}' for i in range(1, 6)])
         self.assertEqual([r['scene'] for r in refs[:5]], list(SCENES))
         prompt = value['master_prompt']
-        self.assertIn('ATTACHMENT 6 — CANONICAL_PRODUCT', prompt)
+        self.assertNotIn('CANONICAL_PRODUCT', prompt)
         self.assertNotIn('ATTACHMENT 2 — CANONICAL', prompt)
         self.assertIn('ONE refreshed 5-CARD', prompt)
 
@@ -78,16 +81,16 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertIn('OS has not analysed winner pixels', prompt)
 
     def test_partial_reference_keeps_its_original_position(self):
-        with self.assertRaisesRegex(ValueError,'Complete source carousel'):
+        with self.assertRaisesRegex(ValueError,'Complete winning Carousel'):
             plan.reference_map('Carousel',{'carousel_cards':[{'position':3,'image_sha256':'actual-card-three'}]})
 
     def test_canonical_authority_exact_in_every_standalone(self):
         value = fixture()
         for row in executions(value):
-            self.assertIn(plan.AUTHORITY, row['image_prompt'])
+            self.assertIn(plan.CAROUSEL_AUTHORITY, row['image_prompt'])
             self.assertIn('PRINTED', value['master_prompt'])
-            self.assertIn('not a creative reference', row['image_prompt'])
-            self.assertIn('Never reconstruct artwork from a winner', value['master_prompt'])
+            self.assertIn('collectively supply the immutable product authority', row['image_prompt'])
+            self.assertIn('Do not redraw or reconstruct the product', value['master_prompt'])
 
     def test_full_shared_block_in_all_active_carousel_and_ie_briefs(self):
         block = build_sports_cave_image_realism_rules(include_product_lock=True)
@@ -261,9 +264,11 @@ class RefreshPlanTests(unittest.TestCase):
         workflow['ad_notes']['refresh_executions'] = executions(value)
         carousel = ads._carousel_copy_notes_from_workflow(value,workflow)
         carousel['primary_texts'] = ['Your rivalry deserves a place.', 'Remember the match that mattered.', 'Make room for a defining memory.', 'Bring the passion into your home.', 'Build a collection around football.']
-        carousel['headlines'] = ['Own the rivalry','Remember football','For your collection','A place for passion','Frame a memory']
-        carousel['descriptions'] = ['Two football legends','Your sporting story','A collector focus','Built for your wall','The rivalry lives on']
-        for card in carousel['cards']:
+        carousel['headlines'] = ['Own the rivalry','Remember football','Collector pride','Room for passion','Frame a memory']
+        carousel['descriptions'] = ['Football legends','Your fan story','Collector focus','Wall centrepiece','Rivalry lives on']
+        for i, card in enumerate(carousel['cards']):
+            card['headline'] = carousel['headlines'][i]
+            card['description'] = carousel['descriptions'][i]
             card['destination_url'] = value['product_url']
         ads._store_carousel_copy_notes(workflow,carousel)
         with patch.object(ads.st,'session_state',{}):

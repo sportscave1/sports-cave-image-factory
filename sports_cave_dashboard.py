@@ -1,3 +1,4 @@
+from sports_categories import sport_category_options, normalize_sport_category, sport_family
 from datetime import date, datetime, time, timedelta, timezone
 from collections import Counter
 import csv
@@ -63,22 +64,7 @@ TASK_IMPORT_CSV_COLUMNS = (
     *DESIGN_TASK_CSV_COLUMNS,
     *TASK_IMPORT_LEGACY_DETAIL_COLUMNS,
 )
-DESIGN_IDEA_SPORTS = (
-    "NFL",
-    "NBA",
-    "Football / Soccer",
-    "AFL",
-    "NRL",
-    "Cricket",
-    "Formula 1 / Motorsport",
-    "UFC / Boxing",
-    "MLB / Baseball",
-    "NHL / Ice Hockey",
-    "Tennis",
-    "Golf",
-    "Horse Racing",
-    "Other",
-)
+DESIGN_IDEA_SPORTS = sport_category_options()
 DESIGN_IDEA_STYLE_FIELDS = (
     ("ultimate_moment", "Ultimate Moment"),
     ("rivalry_faceoff", "Rivalry Face-Off"),
@@ -92,7 +78,7 @@ DESIGN_IDEA_STYLE_FIELDS = (
 DESIGN_IDEA_STYLE_SLUGS = tuple(slug for slug, _label in DESIGN_IDEA_STYLE_FIELDS)
 DESIGN_IDEA_DEFAULT_TOTAL = 10
 DESIGN_IDEA_STYLE_WEIGHTS = {
-    "Formula 1 / Motorsport": (
+    "Motorsport": (
         ("motorsport_driver_car", 5),
         ("ultimate_moment", 3),
         ("nostalgic_tribute", 2),
@@ -465,11 +451,7 @@ def normalize_task_import_section(section):
 
 
 def normalize_design_idea_sport(value):
-    clean = " ".join(str(value or "").strip().casefold().split())
-    for sport in DESIGN_IDEA_SPORTS:
-        if clean == sport.casefold():
-            return sport
-    return ""
+    return normalize_sport_category(value)
 
 
 def normalize_design_idea_style_mix(style_mix=None):
@@ -501,7 +483,7 @@ def suggest_design_idea_style_mix(sport, total):
         raise ValueError("Number of design ideas must be between 1 and 30.")
 
     weighted_styles = DESIGN_IDEA_STYLE_WEIGHTS.get(
-        selected_sport,
+        sport_family(selected_sport),
         DESIGN_IDEA_GENERIC_STYLE_WEIGHTS,
     )
     total_weight = sum(weight for _slug, weight in weighted_styles)
@@ -800,7 +782,7 @@ def filter_task_table_rows(rows, *, search="", design_style="", sport="", priori
     for row in rows or []:
         if design_style and row.get("design_style") != design_style:
             continue
-        if sport and row.get("sport") != sport:
+        if sport and normalize_sport_category(row.get("sport"), row.get("sport")) != normalize_sport_category(sport, sport):
             continue
         if priority and row.get("priority") != priority:
             continue
@@ -4384,7 +4366,7 @@ def _event_matches_region(event, region):
 
 
 def _event_matches_sport(event, sport):
-    return not sport or sport == "All" or event.get("sport") == sport
+    return not sport or sport == "All" or normalize_sport_category(event.get("sport"), event.get("sport")) == normalize_sport_category(sport, sport)
 
 
 def filter_calendar_events(

@@ -1,4 +1,4 @@
-﻿import argparse
+import argparse
 import hashlib
 import os
 from pathlib import Path
@@ -64,8 +64,9 @@ CRM_MIGRATIONS = (
 )
 EMAIL_MIGRATIONS = ('20260927020406_customer_support_workflow.sql', '20260927025319_customer_support_email_settings.sql', '20260930055619_support_email_inbox_snapshot.sql', '20261006063028_support_email_durable_delivery.sql')
 REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
-WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql')
+WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql', '20261006084655_wall_preview_engagement.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20261006084655_wall_preview_engagement.sql': 'dd1975f28b31ef3c201221713c875b471fb1e264f46ee04cd12e2112d162761b',
     '20261006063028_support_email_durable_delivery.sql': '70496c310de3ad912289df430a8d17fbe7c3091e1302ed642892acde2226ccb9',
     '20261006030857_wall_preview_funnel_analytics.sql': '00228bf736dcd61f213ab180d55fb592f3b4c4e01040a0ce620d8073d0b6350f',
     '20261006033000_crm_single_delay.sql': '6b27bb0b887f0e9a9e4f0c0da93fa94df4dc2f805f26c828002c5e3ee7292903',

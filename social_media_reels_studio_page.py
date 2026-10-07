@@ -1,4 +1,6 @@
 from __future__ import annotations
+from sports_categories import detect_sport_in_text
+from sports_categories import sport_category_options, normalize_sport_category, normalize_sport_state
 
 import base64
 import html
@@ -41,20 +43,7 @@ GENERIC_SPORT_PLACEHOLDER = "[SPORT]"
 GENERIC_PRODUCT_ANGLE_PLACEHOLDER = "[PRODUCT ANGLE]"
 FILENAME_HANDLE_PLACEHOLDER = "athlete-name-product-handle"
 STATUS_OPTIONS = ["draft", "final", "posted", "ad-test", "winner", "archive"]
-SPORT_CATEGORY_OPTIONS = [
-    "",
-    "Soccer",
-    "Basketball",
-    "Cricket",
-    "Motorsport",
-    "Tennis",
-    "Combat Sports",
-    "Golf",
-    "Horse Racing",
-    "AFL",
-    "Baseball",
-    "NFL",
-]
+SPORT_CATEGORY_OPTIONS = list(sport_category_options(''))
 WIZARD_FLAG_DEFAULTS = {
     "reels_step_1_complete": False,
     "reels_step_2_complete": False,
@@ -1010,11 +999,17 @@ def title_from_handle(product_handle: str) -> str:
 
 def detect_sport_category(value: str) -> str:
     handle = sanitize_handle(value)
+    # Preserve the existing unambiguous American-football athlete/league hints.
+    if any(f"-{sanitize_handle(keyword)}-" in f"-{handle}-" for keyword in SPORT_KEYWORDS[0][1]):
+        return normalize_sport_category(SPORT_KEYWORDS[0][0])
+    detected = detect_sport_in_text(handle)
+    if detected:
+        return detected
     padded = f"-{handle}-"
     for sport, keywords in SPORT_KEYWORDS:
         for keyword in keywords:
             if f"-{sanitize_handle(keyword)}-" in padded:
-                return sport
+                return normalize_sport_category(sport)
     return ""
 
 
@@ -2871,6 +2866,8 @@ def _summary_card(title: str, product_handle: str, sport_category: str) -> None:
 
 
 def _sport_selectbox(current_value: str) -> str:
+    current_value = normalize_sport_category(current_value, current_value)
+    normalize_sport_state(st.session_state, "smrs_sport_category_edit", preserve_custom=True)
     options = list(SPORT_CATEGORY_OPTIONS)
     if current_value and current_value not in options:
         options.append(current_value)

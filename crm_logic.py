@@ -1,4 +1,5 @@
 """Pure CRM eligibility, live rule evaluation and safe identity helpers."""
+from sports_categories import sport_category_options, normalize_sport_category, detect_sport_in_text
 import hashlib
 import re
 import time
@@ -6,7 +7,8 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
-SPORTS = ('Motorsport','NBA','NFL','MLB','NRL','Cricket','Horse Racing')
+LEGACY_INTEREST_SEGMENTS = ('Motorsport','NBA','NFL','MLB','NRL','Cricket','Horse Racing')
+SPORTS = sport_category_options()
 FIELDS = {'country','consent','orders','spend','last_order_days','subscribed_days','created_days',
           'product','collection','interest','edition','abandoned'}
 
@@ -83,7 +85,7 @@ def segment_seeds():
       ('new_subscribers','New Subscribers — 30 Days',{'all':[rule('consent','SUBSCRIBED'),rule('subscribed_days',30,'lte')]}),
       ('au','Australia',rule('country','AU')),('us','United States',rule('country','US')),('uk','United Kingdom',rule('country','GB')),
       ('repeat','Repeat Buyers',rule('orders',2,'gte')),('vip','VIP Collectors',rule('spend',1000,'gte'))]
-    entries += [(s.lower().replace(' ','_'),s+' Collectors',rule('interest',s,'contains')) for s in SPORTS]
+    entries += [(s.lower().replace(' ','_'),s+' Collectors',rule('interest',s,'contains')) for s in LEGACY_INTEREST_SEGMENTS]
     entries += [('recent','Recent Buyers — 30 Days',rule('last_order_days',30,'lte')),
       ('lapsed','No Purchase — 180 Days',{'all':[rule('orders',1,'gte'),rule('last_order_days',180,'gte')]}),
       ('abandoned','Abandoned Checkout Eligible',{'all':[rule('consent','SUBSCRIBED'),rule('abandoned',True)]})]
@@ -134,7 +136,9 @@ class LiveFacts:
                     cursor=page['pageInfo']['endCursor']
                     if cursor in seen:raise ValueError('Shopify pagination did not advance.')
                     seen.add(cursor);page=self.shop.collections(product['id'],cursor,self.fresh)
-        interests={sport for sport in SPORTS if any(re.search(r'\b'+re.escape(sport.casefold())+r'\b',x) for x in labels)}
+        interests={sport for sport in LEGACY_INTEREST_SEGMENTS if any(re.search(r'\b'+re.escape(sport.casefold())+r'\b',x) for x in labels)}
+        interests.update(detect_sport_in_text(label) for label in labels)
+        interests.discard('')
         self.memo['purchases']={'product':products,'collection':collections,'interest':interests}
         if not self.fresh:self.shop.cache.put(key,self.memo['purchases'],45)
         return self.memo['purchases']
@@ -170,7 +174,11 @@ def matches(rules,facts,at=None):
     if 'any' in rules:return any(matches(r,facts,at) for r in rules['any'])
     value=facts.value(rules['field'],at);expected=rules['value'];op=rules['op']
     if value is None:return False
-    if op=='contains':return str(expected).casefold() in {str(v).casefold() for v in value}
+    if op=='contains':
+        if rules['field']=='interest':
+            expected=normalize_sport_category(expected, str(expected))
+            value={normalize_sport_category(v, str(v)) for v in value}
+        return str(expected).casefold() in {str(v).casefold() for v in value}
     if op in ('gte','lte'):
         a,b=Decimal(str(value)),Decimal(str(expected));return a>=b if op=='gte' else a<=b
     return str(value).casefold()==str(expected).casefold()

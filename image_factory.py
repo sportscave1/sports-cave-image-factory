@@ -1,3 +1,4 @@
+from sports_categories import sport_family
 from pathlib import Path
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
 from contextlib import suppress
@@ -2804,7 +2805,7 @@ ROOM_STYLE_GUIDANCE_PROMPT_FILENAMES = {
 def build_room_style_guidance(product_name, sport_category):
     product_value = str(product_name or "").strip() or PRODUCT_TITLE_PLACEHOLDER
     sport_value = str(sport_category or "").strip() or SPORT_PLACEHOLDER
-    sport_text = sport_value.lower()
+    sport_text = (sport_family(sport_value) or sport_value).lower()
     product_text = product_value.lower()
 
     sport_profiles = [

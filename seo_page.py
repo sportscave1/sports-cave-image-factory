@@ -4661,6 +4661,12 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
                 on_change=_normalize_blog_market_widget_state,
                 args=(selected_id,),
             )
+            saved_sport = st.session_state.get(f"{key_root}-sport", "")
+            normalized_sport = seo_blog_workflow.normalize_brief({"sport": saved_sport})
+            if saved_sport and normalized_sport["sport"] != saved_sport:
+                st.session_state[f"{key_root}-sport"] = normalized_sport["sport"]
+                if normalized_sport.get("sport_custom"):
+                    st.session_state[f"{key_root}-sport-custom"] = normalized_sport["sport_custom"]
             ready_brief["sport"] = review_top[1].selectbox(
                 "Sport",
                 seo_blog_workflow.SPORT_OPTIONS,

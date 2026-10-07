@@ -4,6 +4,7 @@ The app exports instructions; the connected executor does Shopify writes. The
 preview accepts caller-supplied verified facts and a catalogue, never fetches or
 writes Shopify, and never treats a cached preview as upload authority.
 """
+from sports_categories import normalize_sport_category, sport_collection_handles
 import json
 import re
 
@@ -69,19 +70,6 @@ END NEW PRODUCT MULTI-COLLECTION POLICY'''
 
 # Canonical handles verified in the store catalogue on 2026-09-16. IDs are always
 # taken from the supplied catalogue; absent handles are simply not selected.
-SPORT_HANDLES = {
-    'f1': {'formula-one-wall-art', 'motor-racing-wall-art'},
-    'supercars': {'motor-racing-wall-art'},
-    'motorsport': {'motor-racing-wall-art'},
-    'nba': {'nba'}, 'nfl': {'nfl-wall-art'},
-    'football': {'soccer'}, 'cricket': {'cricket'},
-    'baseball': {'baseball-wall-art'}, 'ice hockey': {'ice-hockey-wall-art'},
-    'rugby league': {'rugby-league-collection'}, 'afl': {'afl-wall-art'},
-    'tennis': {'tennis-wall-art'}, 'horse racing': {'horse-racing-wall-art'},
-}
-ALIASES = {'formula one': 'f1', 'formula 1': 'f1', 'v8': 'supercars',
-           'v8 supercars': 'supercars', 'australian motorsport': 'motorsport',
-           'motor racing': 'motorsport', 'soccer': 'football'}
 SUBJECTS = {
     'michael jordan': ('nba', 'michael-jordan-wall-art'),
     'lebron james': ('nba', 'lebron-james-wall-art'),
@@ -99,14 +87,13 @@ def preview_collections(facts, catalogue):
     the real catalogue cannot silently turn a preview into exhaustive approval.
     """
     identity = facts.get('league') or facts.get('sub_sport') or facts.get('sport', '')
-    sport = str(identity).strip().casefold()
-    sport = ALIASES.get(sport, sport)
-    handles = {h: 'Verified sport hierarchy' for h in SPORT_HANDLES.get(sport, ())}
-    if facts.get('collector_eligible') is True and sport in SPORT_HANDLES:
+    sport = normalize_sport_category(identity)
+    handles = {h: 'Verified sport hierarchy' for h in sport_collection_handles(sport)}
+    if facts.get('collector_eligible') is True and bool(sport) and sport != 'Other':
         handles['collector-series-art'] = 'Verified collector wall art'
     for subject in facts.get('athletes', []):
         match = SUBJECTS.get(str(subject).strip().casefold())
-        if match and match[0] == sport:
+        if match and normalize_sport_category(match[0]) == sport:
             handles[match[1]] = 'Exact verified athlete and sport'
     rows, seen = [], set()
     for collection in catalogue:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sports_categories import normalize_sport_category
 
 import csv
 import io
@@ -426,6 +427,7 @@ def _validate_shared_fields(row, row_index, *, allowed_countries, allowed_sports
         )
     row["country"] = canonical_posting_country(row["country"])
     _allowed(row["country"], allowed_countries, label="Country")
+    row["sport_category"] = normalize_sport_category(row["sport_category"], row["sport_category"])
     _allowed(row["sport_category"], allowed_sports, label="Sport/category")
     _allowed(row["campaign_type"], allowed_campaign_types, label="Campaign type")
 

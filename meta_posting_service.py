@@ -1,4 +1,5 @@
 from __future__ import annotations
+from sports_categories import sport_category_options, normalize_sport_category
 
 from copy import deepcopy
 from dataclasses import dataclass
@@ -54,10 +55,7 @@ AD_TYPES = (AD_TYPE, CAROUSEL_AD_TYPE)
 CAROUSEL_CARD_COUNT = 5
 CAROUSEL_PRIMARY_TEXT_COUNT = 5
 COUNTRY_META_CODES = {"AUS": "AU", "USA": "US", "UK": "GB", "CAN": "CA", "NZ": "NZ"}
-SPORT_OPTIONS = (
-    "NBA", "Motorsport", "Football", "Cricket", "Golf", "Horse Racing", "Baseball",
-    "Combat", "Ice Hockey", "NFL", "Rugby Union", "Tennis", "Other",
-)
+SPORT_OPTIONS = sport_category_options()
 POSTING_STATUSES = (
     "VALIDATING", "CAMPAIGN_CREATED", "ADSET_CREATED", "IMAGE_UPLOADED",
     "PAGE_PHOTO_CREATED", "INSTANT_EXPERIENCE_CREATED", "CREATIVE_CREATED",
@@ -1140,7 +1138,7 @@ def validate_carousel_posting_request(request):
     country = str(request.country or "").strip().upper()
     if country not in COUNTRY_META_CODES:
         raise PostingValidationError("Select a supported country.")
-    sport = str(request.sport or "").strip()
+    sport = normalize_sport_category(request.sport)
     if sport not in SPORT_OPTIONS:
         raise PostingValidationError("Select a sport/category.")
     (
@@ -1215,7 +1213,7 @@ def validate_posting_request(request):
     country = str(request.country or "").strip().upper()
     if country not in COUNTRY_META_CODES:
         raise PostingValidationError("Select a supported country.")
-    sport = str(request.sport or "").strip()
+    sport = normalize_sport_category(request.sport)
     if sport not in SPORT_OPTIONS:
         raise PostingValidationError("Select a sport/category.")
     catalog_id = str(request.catalog_id or "").strip()

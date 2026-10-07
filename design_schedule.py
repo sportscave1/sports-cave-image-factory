@@ -1,3 +1,4 @@
+from sports_categories import normalize_sport_category, normalize_sport_state
 from datetime import datetime, timezone
 import hashlib
 import html
@@ -378,6 +379,7 @@ def _style_mix_key(style_slug):
 def _initialise_idea_controls():
     sport_key = "design-schedule-idea-sport"
     total_key = "design-schedule-idea-total"
+    normalize_sport_state(st.session_state, sport_key, "Other")
     st.session_state.setdefault(sport_key, sports_cave_dashboard.DESIGN_IDEA_SPORTS[0])
     st.session_state.setdefault(total_key, sports_cave_dashboard.DESIGN_IDEA_DEFAULT_TOTAL)
     mix = sports_cave_dashboard.suggest_design_idea_style_mix(
@@ -822,9 +824,10 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
             key=f"design-schedule-style::{group_key}",
         )
         sports = alphabetize_options(
-            ["", *{row.get("sport") for row in authoritative_rows if row.get("sport")}],
+            ["", *{normalize_sport_category(row.get("sport"), row.get("sport")) for row in authoritative_rows if row.get("sport")}],
             label=lambda value: value or "All sports",
         )
+        normalize_sport_state(st.session_state, f"design-schedule-sport::{group_key}", preserve_custom=True)
         sport = filters[2].selectbox(
             "Sport",
             sports,

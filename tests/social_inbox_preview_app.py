@@ -26,6 +26,6 @@ inbox._image=lambda row:blob
 inbox.wall_preview_store.get_preview=lambda pid,**kw: next((r for r in rows if r['id']==pid and pid not in st.session_state['fixture-deleted']),{})
 inbox.wall_preview_store.delete_preview=lambda pid,**kw:st.session_state['fixture-deleted'].append(pid)
 inbox.wall_preview_crm_store.timeline=lambda pid:[]
-analytics.snapshot=lambda *a:dict(summary=dict(opens=16,sessions=5,photo_ready=15,confirmed=12,atc=3,purchased=1,atc_percent=18.75,purchase_percent=6.25,revenue=[]),funnel=[],products=[],insights=[])
+analytics.snapshot=lambda *a:dict(engagement=dict(cta_clicks=20,unique_clickers=14,opens=16,click_open_percent=80,avg_active_seconds=34.5,median_active_seconds=28,photo_ready=15,confirmed=12,placement_percent=75,atc=3,cart_percent=18.75),summary=dict(opens=16,sessions=5,photo_ready=15,confirmed=12,atc=3,purchased=1,atc_percent=18.75,purchase_percent=6.25,revenue=[]),funnel=[],products=[],insights=[])
 analytics.snapshot.clear=lambda:None
 inbox.render(user)

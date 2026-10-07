@@ -1,4 +1,6 @@
 from __future__ import annotations
+from sports_categories import detect_sport_in_text
+from sports_categories import normalize_sport_category, normalize_sport_state, infer_sport_category
 
 import hashlib
 import html
@@ -731,7 +733,7 @@ def consume_saved_posting_package(product_records, *, state=None):
     batch = package["batch"]
     if batch.get("country") not in COUNTRY_META_CODES:
         raise posting_handoff.SavedPackageError("The saved package country is not supported by Posting.")
-    if batch.get("sport_category") not in SPORT_OPTIONS:
+    if normalize_sport_category(batch.get("sport_category")) not in SPORT_OPTIONS:
         raise posting_handoff.SavedPackageError("The saved package sport is not supported by Posting.")
 
     staging = dict(state)
@@ -1258,23 +1260,14 @@ def _render_connection_details(overview):
 
 def _infer_sport(selection):
     row = dict(selection.get("row") or {})
-    candidates = [
-        str(row.get("product_type") or ""),
-        *[str(value or "") for value in row.get("collections") or ()],
-        str(selection.get("selected_label") or ""),
-    ]
-    joined = " | ".join(candidates).casefold()
-    aliases = {
-        "nba": "NBA", "basketball": "NBA", "motorsport": "Motorsport", "formula 1": "Motorsport",
-        "football": "Football", "soccer": "Football", "cricket": "Cricket", "golf": "Golf",
-        "horse racing": "Horse Racing", "baseball": "Baseball", "boxing": "Combat", "ufc": "Combat",
-        "combat": "Combat", "ice hockey": "Ice Hockey", "nhl": "Ice Hockey", "nfl": "NFL",
-        "rugby union": "Rugby Union", "tennis": "Tennis",
-    }
-    for needle, sport in aliases.items():
-        if needle in joined:
-            return sport
-    return "Other"
+    direct = infer_sport_category(row.get(key) for key in ('category', 'sport', 'sport_category', 'product_type'))
+    if direct:
+        return direct
+    collections = row.get('collections') or ()
+    if isinstance(collections, str):
+        collections = re.split(r'[,;|]', collections)
+    direct = infer_sport_category(c.get('title') if isinstance(c, dict) else c for c in collections)
+    return direct or detect_sport_in_text(selection.get('selected_label'), 'Other')
 
 
 def _audience_options(references):
@@ -1929,6 +1922,7 @@ def render_page():
 
     targeting_cols = st.columns(2)
     country = targeting_cols[0].selectbox("Country", tuple(COUNTRY_META_CODES), key=COUNTRY_KEY)
+    normalize_sport_state(st.session_state, SPORT_KEY, "Other")
     sport = targeting_cols[1].selectbox("Sport / category", SPORT_OPTIONS, key=SPORT_KEY)
     # An untouched default sport is not product context on an empty Posting form.
     relevance_sport = sport if product_title else ""

@@ -1,3 +1,4 @@
+from sports_categories import sport_category_options, normalize_sport_category
 import hashlib
 import json
 import re
@@ -26,21 +27,7 @@ MARKET_OPTIONS = (
     "United States",
     "Canada",
 )
-SPORT_OPTIONS = (
-    "NBA",
-    "Motorsport",
-    "Football",
-    "Cricket",
-    "Golf",
-    "Horse Racing",
-    "Baseball",
-    "Combat",
-    "Ice Hockey",
-    "NFL",
-    "Rugby Union",
-    "Tennis",
-    "Other",
-)
+SPORT_OPTIONS = sport_category_options()
 FORMAT_OPTIONS = (
     "Reel",
     "Story sequence",
@@ -682,7 +669,7 @@ def normalise_creator_input(payload):
         "product_image_url": _validate_url(payload.get("product_image_url")),
         "event": _single_line(payload.get("event"), 240),
         "market": _single_line(payload.get("market"), 60),
-        "sport": _single_line(payload.get("sport"), 80),
+        "sport": normalize_sport_category(_single_line(payload.get("sport"), 80)),
         "format": content_format,
         "series": _single_line(payload.get("series"), 80),
         "platforms": platforms,

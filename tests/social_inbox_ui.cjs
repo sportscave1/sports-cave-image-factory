@@ -4,6 +4,7 @@ const assert=require('node:assert/strict');
  const started=Date.now();const browser=await chromium.launch({channel:process.env.TEST_BROWSER||'msedge',headless:true});const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  await page.goto('http://127.0.0.1:8876');await page.getByText('Wall Preview Inbox',{exact:true}).waitFor();
  const grid=page.frameLocator('iframe[title="wall_preview_inbox.wall_preview_gallery"]');await grid.locator('.card').first().waitFor();
+ for(const label of ['CTA Clicks','Unique Clickers','Click → Open %','Avg Active Time','Median Active Time','Placement Rate','Preview → Cart %'])await page.locator('.sc-social-kpi').filter({hasText:label}).waitFor();
  console.log('Cold fixture startup to first gallery: '+(Date.now()-started)+'ms (includes browser startup)');
  const sizes=[[320,568],[360,640],[375,667],[390,844],[430,932],[768,1024],[820,1180],[1024,1366],[1280,720],[1366,768],[1440,900],[1920,1080],[2560,1440],[844,390]];
  for(const [width,height] of sizes){await page.setViewportSize({width,height});await page.waitForTimeout(100);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${width} page overflow`);assert.equal(await grid.locator('body').evaluate(b=>b.scrollWidth>innerWidth),false,`${width} grid overflow`);const columns=await grid.locator('.grid').evaluate(g=>getComputedStyle(g).gridTemplateColumns.split(' ').length);assert.ok(columns>=2,`${width} columns ${columns}`);console.log(`${width}x${height}: ${columns} columns, no overflow`)}

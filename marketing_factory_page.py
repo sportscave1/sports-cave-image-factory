@@ -1,3 +1,4 @@
+from sports_categories import normalize_sport_category, infer_sport_category, detect_sport_in_text
 import csv
 import html
 import io
@@ -464,8 +465,14 @@ def _edition_stage_rules(stage):
 def _infer_sport(row, manual_value=""):
     manual = _plain_text(manual_value)
     if manual:
-        return manual
+        return normalize_sport_category(manual, manual)
+    direct = infer_sport_category(row.get(key) for key in ("sport_category", "sport", "category"))
+    if direct:
+        return direct
     text = f"{_product_title(row)} {_product_handle(row)}".lower()
+    detected = detect_sport_in_text(text)
+    if detected:
+        return detected
     sports = (
         ("Basketball", ("kobe", "jordan", "lebron", "nba", "basketball")),
         ("Motorsport", ("f1", "formula", "senna", "schumacher", "motorsport", "racing")),
@@ -478,7 +485,7 @@ def _infer_sport(row, manual_value=""):
     )
     for sport, keywords in sports:
         if any(word in text for word in keywords):
-            return sport
+            return normalize_sport_category(sport, "Other")
     return "Sport not specified"
 
 

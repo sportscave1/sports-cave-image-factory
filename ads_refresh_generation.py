@@ -1,4 +1,5 @@
 """Creative Refresh generation context; production schemas remain owned by ads_page."""
+from sports_categories import sport_family
 from copy import deepcopy
 import json
 import ads_refresh_plan as plan
@@ -124,6 +125,9 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
                  *, campaign_moment=None, product_metadata=None):
     winner = ads.normalize_creative_refresh_context(context)
     source = winner.get("source_winner") or {}
+    if campaign_type == 'Carousel':
+        return build_carousel_refresh_prompt(ads, product, category, country, url, winner,
+            campaign_moment=campaign_moment, product_metadata=product_metadata)
     identity = {"product_name": product, "category": category, "country": country,
                 "campaign_type": campaign_type, "product_url": url}
     carousel = campaign_type == "Carousel"
@@ -218,7 +222,7 @@ REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
 {json.dumps(refresh_plan, ensure_ascii=False)}
 For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and same family+palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
 Curated eligible style library (IE/single-image only; never override carousel concepts):
-{json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
+{json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (sport_family(category) + ' ' + category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
 
 STANDALONE EXECUTION CONTRACTS — complete each after actual attachment analysis
 {chr(10).join(briefs)}
@@ -232,3 +236,98 @@ Check exact role map, {n} carousel or 3 IE outputs, order, all copy fields, expl
 EXACT CSV TEMPLATE
 {template.decode('utf-8-sig')}
 """.strip()
+
+
+def carousel_identity_issue(product, url, source):
+    """No network: validate the verified mapping already carried by the handoff."""
+    from meta_review_products import product_url_handle
+    mapping = source.get('product_mapping') or {}
+    if not source:
+        return ''  # Legacy manual references are explicitly supplied by the operator.
+    if not mapping.get('product_title') or not mapping.get('product_handle'):
+        return 'Confirm the Carousel product from the product selector before generating.'
+    labels = {mapping['product_title'].strip().casefold(),
+              f"{mapping['product_title']} ({mapping['product_handle']})".strip().casefold()}
+    if (str(product).strip().casefold() not in labels
+            or product_url_handle(url) != mapping['product_handle'].casefold()):
+        return 'Product and URL do not match the confirmed Carousel product. Confirm the correct product before generating.'
+    return ''
+
+
+def build_carousel_refresh_prompt(ads, product, category, country, url, winner,
+                                  *, campaign_moment=None, product_metadata=None):
+    source = winner.get('source_winner') or {}
+    issue = carousel_identity_issue(product, url, source)
+    if issue:
+        raise ValueError(issue)
+    selected = plan.current_plan(winner, 'Carousel', product, category, 'direct-prompt')
+    refs = selected['references']
+    n = len(refs)
+    identity = dict(product_name=product, category=category, country=country,
+                    campaign_type='Carousel', product_url=url, creative_refresh_context=winner)
+    template = ads.build_carousel_copy_csv(identity, template=True).decode('utf-8-sig')
+    shared = source.get('shared_primary_texts') or [winner['winning_primary_text']]
+    mappings = '\n'.join(f'Image {i} = Card {i} = WINNER_CARD_{i}' for i in range(1, n + 1))
+    briefs = '\n\n'.join(plan.carousel_standalone_brief(product, r['label'],
+        scene=r.get('scene', ''), role=r.get('role', ''), detail='detail' in r.get('role', '').casefold(),
+        references=[ref['label'] for ref in refs]) for r in refs)
+    return f'''SPORTS CAVE — TRUE WINNER CAROUSEL REFRESH
+{plan.VERSION} / {plan.CAROUSEL_CONTRACT}
+Product: {product}
+Category: {category}
+Market: {country}
+Campaign format: Carousel
+Product page URL: {url}
+Verified product facts: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
+
+ATTACH EXACTLY {n} ORIGINAL WINNING CARD IMAGES, IN SOURCE ORDER
+{mappings}
+These are {n} winning Carousel cards, collectively the product authority and individually the creative authority. No additional product image is required.
+CSV template is a separate non-image attachment. For a legacy manual winner, attach every labelled card and supply its matching headline/description and shared primary texts before proceeding.
+Missing references: list every missing labelled image and stop. One winning image cannot stand in for {n} cards. Complete winning Carousel required. Reload the winner from Meta Review.
+OS has not analysed winner pixels. Inspect the actual full-resolution attachments, never infer visual details from metadata.
+
+PRODUCT AUTHORITY — SHARED ACROSS ALL CARDS
+{plan.CAROUSEL_AUTHORITY}
+Explicitly list all {n} product-authority references in every standalone prompt. Lock the same product across the whole batch. Printed internal background is immutable; external room, wall, furniture and lighting must be newly executed.
+If one card is angled or partly obscured, cross-reference clearer product views in the other winning cards. Never borrow another card's external room or create different interpretations of the artwork.
+
+SOURCE CARDS — CARD N MUST REMAIN CARD N
+{json.dumps(refs, ensure_ascii=False)}
+Keep each image, headline, description, destination, CTA and source identity paired. Do not assign shared primary variation N to card N.
+SHARED WINNING PRIMARY TEXT VARIATIONS
+{json.dumps(shared, ensure_ascii=False)}
+Fallback winning headline: {winner['winning_headline']}
+Winning CTA: {source.get('cta') or 'Not supplied'}
+
+INDIVIDUAL WINNER ANALYSIS — REQUIRED FOR EVERY CARD
+For each Image 1 through Image {n}, identify observed scene family, advertising role, defining functional objects, composition, product attention, strengths, clutter, mood/contrast, copy hook, tone, structure and emotional appeal. Record what to keep, what to change and why the new execution is better. Treat effectiveness as a hypothesis, not independently proven card performance.
+Preserve the winning strategic principle, broad room family, card role and source sequence. Create a substantially different physical scene for every card: bedroom -> new bedroom; man cave -> new man cave; office -> new office; lounge -> new lounge; detail-role -> new detail execution.
+Redesign room architecture/layout, wall colour/material, furniture/environment, product position, camera composition and lighting arrangement. Preserve concept-defining objects (e.g. billiards table) but not their literal styling. Never only recolour, recrop, change camera angle or make an unrelated concept. Detail cards retain detail function with a fresh photographic execution rather than a forced interior.
+
+ONE refreshed {n}-CARD carousel — EXACTLY {n} COMPLETE STANDALONE IMAGE PROMPTS
+Each final prompt must name {product}, its exact WINNER_CARD_N, all collective product-authority references, source role, preserved principle, concrete new scene, architecture/wall, furniture/environment, camera, lighting, product position and specific upgrade. Include the COMPLETE shared product-lock and photographic realism block from its contract below, not a cross-reference. Supported detail crops retain the applicable detail version.
+Product physics comes first: faithful frame thickness/depth/bevel, realistic transparent glass/reflections consistent with actual lights, bevel lighting, wall separation, soft contact shadow, ambient occlusion, mobile-readable product prominence and genuine interior photography. No invented construction, flat matte poster treatment of glazed products, distorted frame, CGI sheen or pasted rectangle. Reject unclear artwork details rather than regenerate them from imagination.
+
+REFRESH THE WINNING COPY
+Return exactly five shared Primary Text variations AND {n} matching card headline/description pairs. Analyse each supplied source primary text separately; retain its useful emotional/collector appeal but create a new hook, argument and expression. Refresh each card's OWN original headline and description in its original role. Do not reuse winner copy, shuffle the source phrases, make synonym-only edits, repeat sibling openings or duplicate descriptions. Fixed verified facts, product names and mandatory CTAs may repeat; do not invent scarcity, stock, offers, demand or endorsements.
+{ads.build_country_language_guidance(country)}
+{ads.build_carousel_card_copy_rules().replace('For all five carousel cards:', f'For all {n} carousel cards:')}
+Keep the EXACT existing CSV headers, row identities, five shared-copy slots, {n} ordered card fields, upload slots and Posting contract. No execution metadata in CSV columns. Use {url} for every card destination. Return completed downloadable UTF-8 CSV with correctly quoted commas/newlines. Generate images only when requested.
+{ads.build_campaign_moment_copy_relevance_block(campaign_moment, selected_country=country, campaign_type='Carousel')}
+VISUAL CAMPAIGN MOMENT RULE
+{ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country) or 'Do not inject events, seasonal props or promotions into the visuals.'}
+Campaign Moment must not overwrite the winning creative strategy.
+
+STANDALONE EXECUTION CONTRACTS — COMPLETE AFTER INSPECTING THE ACTUAL ATTACHMENTS
+{briefs}
+
+EXECUTION NOTES — {n} JSON records alongside CSV, in source order
+Each record: position, winner_reference, reference_inspected=true and collective_product_inspected=true only after inspecting all winning images; observations object with scene_category, ad_role, defining_objects, composition, product_attention, strengths, clutter, mood_contrast, copy_hook, tone, structure, emotional_appeal and execution (observed architecture, layout, wall_palette, wall_material, camera, furniture, lighting, flooring, background, product_placement). Record unknowns honestly; resolve required unknowns before finalising. Then scene (preserved broad family), role, keep (winning principle), change (concrete new execution), improvement (upgrade rationale), execution (NEW architecture/layout/wall_palette/wall_material/camera plus at least two of furniture/lighting/flooring/background/product_placement), image_prompt (complete standalone final brief). For verified detail roles use camera, lighting and product_placement as required source/new dimensions instead of forcing room architecture.
+Compare the declared new dimensions against the observed source and all siblings. Reject unchanged architecture/layout with mere colour or angle swaps, missing analysis, generic placeholders, missing product-lock/realism, near-duplicate rooms or copied copy. These deterministic declarations do not certify pixel fidelity; inspect generated images before use. Never claim a visual similarity score.
+
+FINAL BATCH CHECK
+Exactly {n} source cards, {n} independent analyses, {n} new same-family executions, {n} standalone image prompts, five shared Primary Text variations and {n} new card headline/description pairs; same order, same product, no copied room or copy. Complete all required fields before marking ready.
+
+EXACT CSV TEMPLATE
+{template}'''.strip()

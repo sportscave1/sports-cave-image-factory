@@ -89,7 +89,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(package['source_campaign_type'], 'Carousel')
         self.assertEqual(package['shared_primary_texts'], value['shared_primary_texts'])
         self.assertEqual([r['label'] for r in plan.reference_map('Carousel', package)],
-                         [f'WINNER_CARD_{i}' for i in range(1, 6)] + ['CANONICAL_PRODUCT'])
+                         [f'WINNER_CARD_{i}' for i in range(1, 6)])
 
     def test_inline_precedes_both_story_and_feed(self):
         raw = authored()
@@ -169,7 +169,7 @@ class ContractTests(unittest.TestCase):
         package = package_for(raw, value)
         package['carousel_cards'].pop()
         with self.assertRaisesRegex(ValueError, 'count changed'): handoff.require_complete_carousel(package)
-        with self.assertRaisesRegex(ValueError, 'Complete source'): plan.reference_map('Carousel', package)
+        with self.assertRaisesRegex(ValueError, 'Complete winning Carousel required'): plan.reference_map('Carousel', package)
 
     def test_archive_and_hydration_keep_every_card_and_shared_text(self):
         raw = authored()
@@ -246,12 +246,13 @@ class ActiveScreenTests(unittest.TestCase):
             at = AppTest.from_function(app).run()
             self.assertFalse(at.exception)
             for i in range(1, 6):
-                self.assertTrue(any(t.value == f'Shared text {i}' for t in at.text))
-            for _ in range(4): next(b for b in at.button if b.label == 'Next card').click().run()
-            self.assertTrue(any(t.value == 'Headline: Headline 5' for t in at.text))
-            for _ in range(4): next(b for b in at.button if b.label == 'Previous card').click().run()
-            for _ in range(2): next(b for b in at.button if b.label == 'Next card').click().run()
-            self.assertTrue(any(t.value == 'Headline: Headline 3' for t in at.text))
+                self.assertIn(f'Shared text {i}', str([x.proto for x in at.get('html')]))
+            html = str([x.proto for x in at.get('iframe')])
+            for i in range(1, 6):
+                self.assertIn(f'card{i}.jpg', html)
+                self.assertIn(f'Headline {i}', str([x.proto for x in at.get('html')]))
+            self.assertFalse(any(b.label in ('Next card', 'Previous card') for b in at.button))
+            for _ in range(3): at.run()
             next(b for b in at.button if b.label == 'APPLY TO CREATIVE REFRESH').click().run()
             self.assertFalse(at.exception)
             self.assertEqual(graph.call_count, 2)
@@ -273,7 +274,7 @@ class ActiveScreenTests(unittest.TestCase):
                 'diagnostic': {'access_token': 'SECRET'}, 'cards': []}})
         admin = AppTest.from_function(app, args=('admin',)).run()
         self.assertFalse(admin.exception)
-        self.assertTrue(any(e.label == 'Advanced Meta diagnostic' for e in admin.expander))
+        self.assertTrue(any(e.label == 'Diagnostics' for e in admin.expander))
         self.assertNotIn('SECRET', str([j.value for j in admin.json]))
         worker = AppTest.from_function(app, args=('worker',)).run()
         self.assertEqual(len(worker.json), 0)

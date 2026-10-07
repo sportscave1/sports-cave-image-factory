@@ -1,3 +1,4 @@
+from sports_categories import sport_category_options, normalize_sport_state, sport_family
 import ads_ie_legacy_description as ie_legacy_description
 import ads_ie_copy as ie_copy
 import csv
@@ -65,22 +66,7 @@ ads_image_workflow = _LazyModuleProxy("ads_image_workflow")
 image_factory = _LazyModuleProxy("image_factory")
 
 
-CATEGORY_OPTIONS = list(alphabetize_options([
-    "Select category",
-    "NBA",
-    "Motorsport",
-    "Football",
-    "Cricket",
-    "Golf",
-    "Horse Racing",
-    "Baseball",
-    "Combat",
-    "Ice Hockey",
-    "NFL",
-    "Rugby Union",
-    "Tennis",
-    "Other",
-]))
+CATEGORY_OPTIONS = list(sport_category_options('Select category'))
 
 COUNTRY_OPTIONS = list(alphabetize_options([
     "Select country",
@@ -2531,7 +2517,7 @@ def _template_slug(value):
 
 
 def get_category_specific_template_key(category, campaign_type):
-    if category in SUPPORTED_AD_CATEGORIES and campaign_type in CATEGORY_SPECIFIC_CAMPAIGN_TYPES:
+    if category in CATEGORY_WINNER_ANGLES and campaign_type in CATEGORY_SPECIFIC_CAMPAIGN_TYPES:
         return f"{_template_slug(category)}_{_template_slug(campaign_type)}"
     return None
 
@@ -2803,23 +2789,12 @@ CAROUSEL_NOSTALGIC_WALL_TONES = {
     "horse racing": ("muted warm clubhouse cream", "historic racecourse pavilions and grandstands"),
     "other": ("muted gallery taupe", "restrained collector galleries and warm painted walls"),
 }
-CAROUSEL_WALL_SPORT_ALIASES = {
-    "basketball": "nba", "nba basketball": "nba", "basketball nba": "nba",
-    "soccer": "football", "association football": "football", "football soccer": "football",
-    "american football": "nfl", "american football nfl": "nfl",
-    "afl": "australian rules", "aussie rules": "australian rules", "australian rules football": "australian rules",
-    "australian rules afl": "australian rules",
-    "rugby": "rugby union", "nrl": "rugby league",
-    "nhl": "ice hockey", "ice hockey nhl": "ice hockey",
-    "boxing": "combat", "mma": "combat", "combat sports": "combat",
-    "combat sports boxing mma": "combat",
-    "motor racing": "motorsport", "motor sports": "motorsport", "motorsports": "motorsport",
-}
 
 
 def carousel_nostalgic_wall_treatment(category):
-    sport = _normalise_option_label(re.sub(r"[\W_]+", " ", str(category or "").casefold()))
-    sport = CAROUSEL_WALL_SPORT_ALIASES.get(sport, sport)
+    sport = sport_family(category).casefold()
+    if sport == "afl":
+        sport = "australian rules"
     tone, heritage = CAROUSEL_NOSTALGIC_WALL_TONES.get(sport, CAROUSEL_NOSTALGIC_WALL_TONES["other"])
     return (
         f"Required nostalgic wall tone: {tone}. Its restrained sporting association is {heritage}. "
@@ -3169,8 +3144,9 @@ Card-specific visual purpose: {required_purposes[index]}
 
 def resolve_carousel_visual_scenes(product_name, category, country, *, variation_token="", product_metadata=None, campaign_moment=None):
     metadata = dict(product_metadata or {})
-    sport = _normalise_option_label(re.sub(r"[\W_]+", " ", str(metadata.get("product_sport") or category or "").casefold()))
-    sport = CAROUSEL_WALL_SPORT_ALIASES.get(sport, sport)
+    sport = sport_family(metadata.get("product_sport") or category).casefold()
+    if sport == "afl":
+        sport = "australian rules"
     return carousel_winner.resolve_room_set(
         product_name=_clean_product_name(product_name), sport=sport, market=country,
         variation_token=variation_token, metadata=metadata,
@@ -9483,6 +9459,8 @@ def ads_prompt_contract_version_for_campaign(
         version = f"{version}; {CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}; REFRESH WORKFLOW V3"
         if campaign_type == "Instant Experience":
             version += f"; WINNER LED THREE ENVIRONMENTS V3"
+        elif campaign_type == 'Carousel':
+            version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT
     return version
 
 
@@ -12172,6 +12150,25 @@ def _render_ads_setup_notes(result, workflow):
         return
     if result.get("campaign_type") == "Carousel":
         _render_carousel_setup_notes(result, workflow)
+        if ((result.get('creative_refresh_context') or {}).get('refresh_plan') or {}).get('carousel_contract') == ads_refresh_generation.plan.CAROUSEL_CONTRACT:
+            with st.expander('Winner refresh execution review', expanded=False):
+                st.caption('Paste the execution-notes JSON returned with the CSV. These checks validate declarations; inspect the final images before use.')
+                notes = workflow.setdefault('ad_notes', {})
+                text = st.text_area('Card execution notes (JSON)',
+                    value=json.dumps(notes.get('refresh_executions') or [], ensure_ascii=False, indent=2),
+                    key=f"carousel-refresh-executions::{result['context_key']}", height=160)
+                try:
+                    candidate = json.loads(text)
+                    issues = ads_refresh_generation.plan.execution_issues(candidate,
+                        result['creative_refresh_context']['refresh_plan'], result['product_name'], 'Carousel')
+                    notes['refresh_executions'] = candidate
+                    for issue in issues:
+                        st.warning(issue)
+                    if not issues:
+                        st.success('Execution declarations complete. Visual approval remains your responsibility.')
+                except (ValueError, TypeError):
+                    notes['refresh_executions'] = []
+                    st.warning('Paste a valid JSON array containing every card execution.')
         return
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -14212,7 +14209,17 @@ def creative_refresh_quality_issues(result, workflow):
         if not all(str(v or '').strip() for field in ("primary_texts", "headlines", "descriptions") for v in carousel[field]) or not all(
             str(card.get(field) or '').strip() for card in carousel["cards"] for field in ("headline", "description", "destination_url")):
             return ["Complete all production carousel copy fields before saving."]
-    issues = []  # Execution notes are optional audit data, never a Save/Posting gate.
+    issues = []  # Older/non-Carousel packages retain their optional-notes contract.
+    if result.get('campaign_type') == 'Carousel' and plan.get('carousel_contract') == ads_refresh_generation.plan.CAROUSEL_CONTRACT:
+        issues += ads_refresh_generation.plan.execution_issues(
+            (workflow.get('ad_notes') or {}).get('refresh_executions'), plan, result['product_name'], 'Carousel')
+        rows = [dict(primary_text=v) for v in carousel['primary_texts']]
+        rows += [dict(headline=c.get('headline'), description=c.get('description')) for c in carousel['cards']]
+        metadata = result.get('product_metadata') or {}
+        limit = _positive_int_or_none(metadata.get('edition_limit'))
+        fixed_facts = ([f'limited to {limit}', f'{limit} editions worldwide', f'only {limit} editions']
+                       if limit and metadata.get('edition_limit_source') else [])
+        issues += ads_refresh_generation.plan.copy_issues(rows, result['product_name'], context, fixed_facts)
     source_hashes = [r.get("image_sha256") for r in plan["references"] if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:
@@ -14536,6 +14543,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
     )
     category_col, country_col, campaign_col = st.columns(3)
     with category_col:
+        normalize_sport_state(st.session_state, "ads_category", "Select category")
         category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
     with country_col:
         country = st.selectbox("Country", COUNTRY_OPTIONS, key="ads_country")
@@ -14563,10 +14571,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.caption(product_url_state["message"])
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
-    if is_creative_refresh:
+    if is_creative_refresh and campaign_type != 'Carousel':
         from ads_refresh_reference import render_product_image_link
         render_product_image_link(st)
-    elif not is_google:
+    elif not is_creative_refresh and not is_google:
         render_product_artwork_reference(product_selection, product_url)
     campaign_moment = render_campaign_moment_section()
     creative_refresh_context = None
@@ -14602,9 +14610,13 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             k:v for k,v in saved_context.items() if k != 'refresh_plan'
         } == creative_refresh_context:
             st.session_state.setdefault('ads-refresh-plans', {})[hashlib.sha256(plan_identity.encode()).hexdigest()] = saved_context['refresh_plan']
-        creative_refresh_context["refresh_plan"] = ads_refresh_generation.plan.session_plan(
-            st.session_state, plan_identity, creative_refresh_context, campaign_type, product_name,
-            category, build_visual_variation_token, new=deliberate_new)
+        try:
+            creative_refresh_context["refresh_plan"] = ads_refresh_generation.plan.session_plan(
+                st.session_state, plan_identity, creative_refresh_context, campaign_type, product_name,
+                category, build_visual_variation_token, new=deliberate_new)
+        except ValueError as error:
+            st.error(str(error))
+            return
     submitted = st.button(
         "Submit",
         type="primary",
@@ -14658,6 +14670,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             if is_creative_refresh
             else ""
         )
+        if is_creative_refresh and campaign_type == 'Carousel':
+            creative_refresh_message = ads_refresh_generation.carousel_identity_issue(
+                product_name, product_url, (creative_refresh_context or {}).get('source_winner') or {}
+            ) or creative_refresh_message
         if campaign_moment_message:
             st.warning(campaign_moment_message)
         elif validation_message:
@@ -14767,7 +14783,11 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             )
 
     result = st.session_state.get(result_state_key)
-    refreshed_result = ensure_current_ads_result_prompt(result)
+    try:
+        refreshed_result = ensure_current_ads_result_prompt(result)
+    except ValueError as error:
+        st.error(str(error))
+        return
     if refreshed_result is not result:
         result = refreshed_result
         st.session_state[result_state_key] = result
