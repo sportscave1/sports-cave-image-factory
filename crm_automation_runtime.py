@@ -143,7 +143,9 @@ def reconcile(engine,a):
         ok,reason=eligibility(c,engine.store.suppressed((c or {}).get('id'),recipient_hash((c or {}).get('email'))))
         if not ok:
             from crm_checkout_identity import block_label
-            engine.store.set_state(evaluation_key,{'result':block_label(reason),'reason':reason,'at':at.isoformat()});continue
+            engine.store.set_state(evaluation_key,{'result':block_label(reason),'reason':reason,'at':at.isoformat()})
+            LOG.info('checkout_ineligible automation_id=%s reason=%s',a['id'],reason)
+            continue
         threshold=0  # Admin has identified abandonment; one delay starts at verified activity.
         activity=date(state_row['activity_at'])
         if created and activity>=cutoff and activity<=at-timedelta(seconds=threshold) and not checkout.get('completedAt'):
@@ -153,6 +155,7 @@ def reconcile(engine,a):
             engine.store.set_state(evaluation_key,{'result':'Added to flow' if entered else 'Not eligible: rules, re-entry or changed state','at':at.isoformat()})
             LOG.info('checkout_evaluated checkout_key=%s automation_id=%s enrolled=%s',key,a['id'],bool(entered))
     engine.store.set_state(state_key,{'next_at':(at+timedelta(seconds=30)).isoformat()})
+    LOG.info('checkout_reconcile_complete automation_id=%s scanned=%s',a['id'],len(candidates))
 
 
 def advance(engine,enrollment):

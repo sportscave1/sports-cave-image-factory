@@ -1,8 +1,10 @@
 """Nonblocking UI acknowledgement; only the durable worker enrolls checkouts."""
 from concurrent.futures import ThreadPoolExecutor
 from threading import BoundedSemaphore
+from time import monotonic
 import streamlit as st
 from crm_checkout_enrollment_requests import request, read_requests, ACTIVE
+from crm_checkout_enrollment_requests import reconciled_result
 
 POOL=ThreadPoolExecutor(max_workers=2,thread_name_prefix='checkout-request-save')
 CAPACITY=BoundedSemaphore(4)
@@ -25,6 +27,7 @@ def begin(store,user,identity,keys,slot):
     try:
         future=submit(store,user,identity,keys)
         state['writes'].append((tuple(keys),future))
+        state.setdefault('started',{})[id(future)]=monotonic()
         for k in keys:state['results'][k]={'state':'SAVING','result':'Adding…'}
     except Exception:
         for k in keys:state['results'][k]={'state':'FAILED','result':'Failed — request unavailable'}
@@ -39,9 +42,29 @@ def progress(store,row,records,slot):
         value=c.get('enrollment_request')
         if value and value.get('state') in (*ACTIVE,'FAILED') and c['checkout_key'] not in results:
             results[c['checkout_key']]=value
+        if c['checkout_key'] in results:
+            value=results[c['checkout_key']]
+            # Let the targeted receipt read finish an active request normally.
+            # Only reconcile cached membership here after expiry/failure; doing
+            # it early can replace a fresh "Added to flow" receipt with stale UI.
+            expired=reconciled_result({},value)
+            if value.get('state') not in ACTIVE or expired.get('state')=='FAILED':
+                results[c['checkout_key']]=reconciled_result(c,expired)
     for keys,future in list(state['writes']):
-        if not future.done():continue
+        started=state.setdefault('started',{}).setdefault(id(future),monotonic())
+        if not future.done():
+            if monotonic()-started<30:continue
+            # The write may have committed before its response was lost. Read
+            # the durable request/membership; never retry the enrollment here.
+            for k in keys:
+                if results.get(k,{}).get('state')=='SAVING':
+                    results[k]={'state':'FAILED','result':'Request confirmation timed out — refresh or retry safely','_refresh':True}
+            future.cancel()
+            state['writes'].remove((keys,future))
+            state['started'].pop(id(future),None)
+            continue
         state['writes'].remove((keys,future))
+        state['started'].pop(id(future),None)
         try:
             for value in future.result():results[value['checkout_key']]=dict(value,_refresh=True)
         except Exception:
@@ -54,7 +77,7 @@ def progress(store,row,records,slot):
             by_key={c['checkout_key']:c for c in records}
             changed=[]
             for update in data:
-                key=update['checkout_key'];value=update['request']
+                key=update['checkout_key'];value=reconciled_result(update,update['request'])
                 # Cached progress predating an explicit retry cannot overwrite
                 # its fresh acknowledgement or prematurely stop polling.
                 if results.get(key,{}).get('requested_at','')>value.get('requested_at',''):continue
@@ -65,6 +88,10 @@ def progress(store,row,records,slot):
                     c['enrollment_request']=value
                     changed.append(c)
             if changed:patch_checkouts(store,row['id'],changed)
+            if phase=='READY':
+                found={u['checkout_key'] for u in data}
+                for k in watching:
+                    if k not in found and results[k].get('state')=='FAILED':results[k].pop('_refresh',None)
         if phase=='ERROR':
             st.caption('Progress temporarily unavailable; saved requests continue in the worker.')
     busy={k for k,v in results.items() if v.get('state') in (*ACTIVE,'SAVING')}

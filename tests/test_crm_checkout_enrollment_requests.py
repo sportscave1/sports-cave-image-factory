@@ -74,7 +74,7 @@ class RequestTests(unittest.TestCase):
         self.shop.checkout.assert_not_called()
         rows=self.finish(a,keys)
         self.assertEqual(rows[0]['request']['result'],'Added to flow')
-        self.assertIn('remaining',time_to_send(rows[0]))
+        self.assertEqual(time_to_send(rows[0]),'Due now')
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_marketing_sends',one=True)['n'],before)
         self.provider.send.assert_not_called()
 
@@ -177,8 +177,8 @@ class RequestTests(unittest.TestCase):
         with patch.object(self.store,'q',side_effect=crash),self.assertRaises(StoreUnavailable):process(self.store,self.shop,item)
         original("UPDATE crm_runtime_state SET value=value || %s::jsonb WHERE key=%s",
                  ('{"lease_until":"2000-01-01T00:00:00Z"}',item['key']))
-        restarted=AutomationStore(connect);retry=claim(restarted,1,'restarted')[0]
-        process(restarted,self.shop,retry)
+        restarted=AutomationStore(connect)
+        self.assertEqual(claim(restarted,1,'restarted'),[])  # Reconcile actual membership without repeating work.
         self.assertEqual(restarted.state(item['key'])['result'],'Already in flow')
         self.assertEqual(restarted.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],1)
 
@@ -189,8 +189,8 @@ class RequestTests(unittest.TestCase):
         def counted(conn,sql,args=()):calls.append(sql);return original(conn,sql,args)
         with patch.object(Connection,'execute',counted):request(self.store,ADMIN,a['id'],keys)
         statements=[s for s in calls if s not in ('BEGIN','COMMIT')]
-        self.assertEqual(len(statements),4)
-        self.assertEqual(calls.count('COMMIT'),1)
+        self.assertEqual(len(statements),5)
+        self.assertEqual(calls.count('COMMIT'),2)
         self.shop.checkout.assert_not_called();self.shop.customer.assert_not_called()
         self.finish(a,keys)
 

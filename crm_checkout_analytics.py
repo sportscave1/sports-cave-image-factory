@@ -1,6 +1,7 @@
 """Private checkout-ledger projections. No Shopify calls in list/report reads."""
 from datetime import timedelta
 import json
+import logging
 from crm_logic import now, date
 
 RECONCILE_QUERY='''query AutomationCheckoutReconciliation($after:String,$query:String) {
@@ -76,10 +77,17 @@ def sync_cache(shop,store,at=None):
     at=at or now();slot='checkout-cache-v2';state=store.state(slot)
     if date(state.get('next_at')) and date(state['next_at'])>at:return
     page=shop.query(RECONCILE_QUERY,{'after':state.get('cursor'),'query':None},'checkout identity sync',0,True)['abandonedCheckouts']
-    for checkout in page['nodes']:details(store,checkout)
+    counts={'Updated':0,'Unchanged':0,'Failed':0}
+    for checkout in page['nodes']:
+        try:counts[details(store,checkout)]+=1
+        except ValueError:
+            # One malformed Shopify identity must not pin the pagination cursor.
+            counts['Failed']+=1
+            logging.getLogger(__name__).warning('checkout_sync_invalid_identity')
     info=page['pageInfo'];cursor=info.get('endCursor') if info.get('hasNextPage') else None
     if info.get('hasNextPage') and (not cursor or cursor==state.get('cursor')):raise ValueError('Checkout sync pagination did not advance')
-    store.set_state(slot,{'cursor':cursor,'next_at':(at+timedelta(seconds=2 if cursor else 300)).isoformat()})
+    store.set_state(slot,{'cursor':cursor,'next_at':(at+timedelta(seconds=2 if cursor else 300)).isoformat(),'counts':counts,'last_synced_at':at.isoformat()})
+    logging.getLogger(__name__).info('checkout_sync_page updated=%s unchanged=%s invalid=%s more=%s',counts['Updated'],counts['Unchanged'],counts['Failed'],bool(cursor))
 
 
 LIST_SQL="""WITH selected AS MATERIALIZED (
@@ -105,6 +113,7 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  FROM messages s LEFT JOIN events e ON e.send_id=s.id GROUP BY s.checkout_key
 )
 SELECT c.*,v.value AS evaluation,request.value-'history' AS enrollment_request,a.status AS automation_status,a.config->>'archived_at' AS archived_at,
+ GREATEST(a.activated_at,(SELECT (value->>'started_at')::timestamptz FROM crm_runtime_state WHERE key='checkout-auto-start-v2')) AS auto_start_at,
  a.config->'published'->>'abandonment_seconds' AS abandonment_seconds,
  j.id AS enrollment_id,j.status AS flow_status,j.stop_reason,j.current_step,j.steps,j.next_due_at,
  GREATEST(c.activity_at,j.updated_at,r.last_event) AS last_activity_at,

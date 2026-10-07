@@ -5,19 +5,67 @@ queue. Fresh validation and the locked enrollment transaction remain unchanged.
 """
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
+from datetime import timedelta
 import json
 import logging
 from threading import Lock
 from time import perf_counter
 import uuid
 
-from crm_logic import now, recipient_hash
+from crm_logic import now, date, recipient_hash
 from crm_navigation import require
 
 LOG = logging.getLogger(__name__)
 PREFIX = 'checkout-enroll:'
 ACTIVE = ('QUEUED', 'CHECKING')
 CONCURRENCY = 4
+REQUEST_MAX_AGE = timedelta(minutes=15)
+MAX_ATTEMPTS = 3
+
+
+def reconciled_result(row, value, at=None):
+    """Persisted membership wins over a lost acknowledgement; never enroll here."""
+    from crm_checkout_identity import recovered
+    if recovered(row) or row.get('status') == 'RECOVERED':
+        return dict(value, state='DONE', result='Recovered')
+    if row.get('enrollment_id'):
+        return value if value.get('state') == 'DONE' else dict(value, state='DONE', result='Already in flow')
+    requested = date(value.get('requested_at'))
+    if value.get('state') in ACTIVE and (not requested or (at or now())-requested >= REQUEST_MAX_AGE):
+        return dict(value, state='FAILED', result='Request expired — retry to recheck', error_code='request_expired')
+    return value
+
+
+def reconcile_requests(store):
+    """Bound stale manual intent without releasing historical checkouts to send.
+
+    A healthy in-flight lease is left alone. Existing membership/recovery is
+    acknowledged; old unprocessed intent expires and requires an explicit retry.
+    This changes request receipts only, never enrollments or send history.
+    """
+    rows = store.q('''WITH candidates AS (
+      SELECT r.key,r.value,c.status AS checkout_status,j.id AS enrollment_id
+      FROM crm_runtime_state r
+      LEFT JOIN crm_shopify_checkouts c ON c.checkout_key=r.value->>'checkout_key'
+      LEFT JOIN LATERAL (SELECT id FROM crm_automation_enrollments
+        WHERE automation_id::text=r.value->>'automation_id' AND checkout_key=c.checkout_key LIMIT 1) j ON true
+      WHERE starts_with(r.key,%s) AND r.value->>'state' IN ('QUEUED','CHECKING')
+        AND (r.value->>'state'='QUEUED' OR COALESCE((r.value->>'lease_until')::timestamptz,'-infinity')<=now())
+        AND (j.id IS NOT NULL OR c.status='RECOVERED'
+          OR COALESCE((r.value->>'requested_at')::timestamptz,'-infinity')<=now()-%s::interval
+          OR COALESCE((r.value->>'attempts')::int,0)>=%s)
+      ORDER BY r.updated_at LIMIT 100 FOR UPDATE OF r SKIP LOCKED
+    ) UPDATE crm_runtime_state r SET value=r.value || jsonb_build_object(
+      'state',CASE WHEN c.enrollment_id IS NOT NULL OR c.checkout_status='RECOVERED' THEN 'DONE' ELSE 'FAILED' END,
+      'result',CASE WHEN c.checkout_status='RECOVERED' THEN 'Recovered'
+        WHEN c.enrollment_id IS NOT NULL THEN 'Already in flow' ELSE 'Request expired — retry to recheck' END,
+      'error_code',CASE WHEN c.enrollment_id IS NOT NULL OR c.checkout_status='RECOVERED' THEN NULL ELSE 'request_expired' END,
+      'completed_at',now()),updated_at=now()
+      FROM candidates c WHERE r.key=c.key RETURNING r.value->>'state' AS state''',
+      (PREFIX,REQUEST_MAX_AGE,MAX_ATTEMPTS))
+    if rows:LOG.info('checkout_requests_reconciled completed=%s expired=%s',
+                    sum(r['state']=='DONE' for r in rows),sum(r['state']=='FAILED' for r in rows))
+    return len(rows)
 
 
 def request_key(identity, checkout_key):
@@ -25,12 +73,13 @@ def request_key(identity, checkout_key):
 
 
 def request(store, user, identity, selected):
-    """Four batched SQL statements, one commit, zero Shopify/provider calls."""
+    """Batched SQL plus stale-intent reconciliation; zero Shopify/provider calls."""
     require(user, 'crm_automations_manage')
     identity = str(uuid.UUID(str(identity)))
     if not selected or len(selected)>500 or any(not isinstance(k,str) or len(k)>256 for k in selected):
         raise ValueError('Select between 1 and 500 checkouts.')
     keys = sorted(set(selected))
+    reconcile_requests(store)
     from crm_automation_definition import native
     from crm_checkout_analytics import disabled_reason
     started = perf_counter()
@@ -70,7 +119,7 @@ def request(store, user, identity, selected):
               COALESCE(existing.value->'history','[]'::jsonb) || jsonb_build_array(existing.value-'history')) END,
             updated_at=CASE WHEN existing.value->>'state' IN ('QUEUED','CHECKING') THEN existing.updated_at ELSE now() END
           RETURNING key,value''', (json.dumps(pending),)).fetchall()
-    LOG.info('checkout_enrollment_requested automation_id=%s rows=%s sql_statements=4 duration_ms=%.1f',
+    LOG.info('checkout_enrollment_requested automation_id=%s rows=%s duration_ms=%.1f',
              identity,len(keys),(perf_counter()-started)*1000)
     return [r['value'] for r in result]
 
@@ -90,15 +139,18 @@ def read_requests(store, identity, keys):
 
 def claim(store, limit, owner):
     """Atomic row leases recover unfinished work after a worker restart."""
+    reconcile_requests(store)
     return store.q('''WITH candidates AS (
-        SELECT key FROM crm_runtime_state WHERE key>=%s AND key<%s
+        SELECT key FROM crm_runtime_state WHERE starts_with(key,%s)
+        AND COALESCE((value->>'requested_at')::timestamptz,'-infinity')>now()-%s::interval
+        AND COALESCE((value->>'attempts')::int,0)<%s
         AND (value->>'state'='QUEUED' OR (value->>'state'='CHECKING' AND
-          (value->>'lease_until')::timestamptz<now()))
+          COALESCE((value->>'lease_until')::timestamptz,'-infinity')<now()))
         ORDER BY updated_at,key LIMIT %s FOR UPDATE SKIP LOCKED)
       UPDATE crm_runtime_state r SET value=r.value || jsonb_build_object(
         'state','CHECKING','result','Checking eligibility…','owner',%s::text,
         'lease_until',now()+interval '10 minutes','attempts',COALESCE((r.value->>'attempts')::int,0)+1),updated_at=now()
-      FROM candidates c WHERE r.key=c.key RETURNING r.key,r.value''', (PREFIX,'checkout-enroll;',limit,owner))
+      FROM candidates c WHERE r.key=c.key RETURNING r.key,r.value''', (PREFIX,REQUEST_MAX_AGE,MAX_ATTEMPTS,limit,owner))
 
 
 def safe_failure(exc):

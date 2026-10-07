@@ -14,10 +14,18 @@ def time_to_send(row, at=None):
     if flow == 'STOPPED':
         return block_label(reason)
     if not row.get('enrollment_id'):
+        if any(s.get('status') == 'ACCEPTED' and s.get('provider_id') for s in row.get('sends', [])):
+            return 'Sent'
         result = evaluation.get('result')
-        if result in ('Suppressed', 'Unsubscribed', 'Missing email', 'Invalid email', 'Not eligible'):
+        if evaluation.get('reason'):
+            return block_label(evaluation['reason'])
+        if result:
             return result
-        return 'Sent' if any(s.get('status') == 'ACCEPTED' and s.get('provider_id') for s in row.get('sends', [])) else '—'
+        cutoff=date(row.get('auto_start_at'))
+        created=date(row.get('created_at'))
+        if cutoff and created and created<cutoff:
+            return 'Historical — not auto-enrolled'
+        return 'Awaiting eligibility check'
     if row.get('archived_at'):
         return 'Archived'
     if row.get('automation_status') == 'PAUSED':

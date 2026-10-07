@@ -142,6 +142,8 @@ def _checkout_panel(shop,store,user,row,bounds,period):
         st.session_state.pop(slot+'-timing',None)
         try:
             counts,more=reconcile(shop,store,period)
+            from crm_checkout_enrollment_requests import reconcile_requests
+            reconcile_requests(store)
             st.session_state[slot+'-results']=[{'Result':k,'Rows':v} for k,v in counts.items()]
             if more:st.session_state[slot+'-results'].append({'Result':'More rows remain; refresh resumes from the saved cursor','Rows':0})
             state().get('campaign_home_cache',{}).pop((store.connect,key),None)
@@ -152,13 +154,10 @@ def _checkout_panel(shop,store,user,row,bounds,period):
         st.rerun(scope='fragment')
     if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True)
     if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
-    timing_signature=repr([(c['checkout_key'],c.get('next_due_at'),c.get('current_step'),c.get('sends')) for c in records])
-    timing=st.session_state.get(slot+'-timing')
-    if not timing or timing[0]!=timing_signature:
-        timing=(timing_signature,now());st.session_state[slot+'-timing']=timing
+    timing_now=now()  # The deadline is persisted; the display clock must keep advancing.
     listing=[{'key':c['checkout_key'],'reference':reference(c),'created':str(c['created_at'])[:16]+' UTC',
       'customer':display_name(c),'region':(c.get('analytics') or {}).get('region') or (c.get('analytics') or {}).get('country') or '—',
-      'status':recovery_status(c),'time_to_send':time_to_send(c,at=timing[1]),
+      'status':recovery_status(c),'time_to_send':time_to_send(c,at=timing_now),
       'enrollment_progress':{k:enrollment_results.get(c['checkout_key'],{}).get(k) for k in ('state','result')}} for c in visible]
     component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
     event=render_component(component,rows=listing,selected=selected,key=slot+'-table',default=None)

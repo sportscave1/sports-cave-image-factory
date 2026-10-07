@@ -46,7 +46,7 @@ def reference(row):
 
 def block_label(reason):
     return {'local_suppression':'Suppressed','provider_suppression':'Suppressed',
-            'consent_unsubscribed':'Unsubscribed','consent_invalid':'Invalid email',
+            'consent_not_subscribed':'Marketing consent required','consent_unsubscribed':'Unsubscribed','consent_invalid':'Invalid email',
             'missing_email':'Missing email','recovered':'Recovered',
             'already_enrolled':'Already in flow'}.get(reason,'Not eligible')
 

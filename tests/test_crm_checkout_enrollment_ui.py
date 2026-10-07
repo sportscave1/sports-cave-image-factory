@@ -58,5 +58,22 @@ class ProgressTests(unittest.TestCase):
             states,busy=ui.progress(store,{'id':'fixture'},[deepcopy(record)],'slot')
             self.assertEqual(busy,{'chosen'});self.assertEqual(states['chosen'],value)
 
+    def test_lost_write_response_has_bounded_busy_state_and_reconciles_membership(self):
+        session={};saved=Future();store=Mock();store.connect='fixture'
+        with patch.object(st,'session_state',session),patch.object(ui,'submit',return_value=saved),patch.object(ui,'monotonic',return_value=0):
+            ui.begin(store,{},'fixture',['chosen'],'slot')
+        found={'checkout_key':'chosen','enrollment_id':'existing','request':{'state':'QUEUED','requested_at':now().isoformat()}}
+        with patch.object(st,'session_state',session),patch.object(ui,'monotonic',return_value=31),patch.object(analytics,'read',return_value=([found],'READY')):
+            states,busy=ui.progress(store,{'id':'fixture'},[{'checkout_key':'chosen'}],'slot')
+        self.assertFalse(busy);self.assertEqual(states['chosen']['result'],'Already in flow')
+        self.assertEqual(session['slot-enrollment']['writes'],[])
+
+    def test_old_pending_request_does_not_poll_forever(self):
+        session={};store=Mock();store.connect='fixture'
+        record={'checkout_key':'chosen','enrollment_request':{'state':'QUEUED','requested_at':(now()-timedelta(hours=1)).isoformat()}}
+        with patch.object(st,'session_state',session),patch.object(analytics,'read') as read:
+            states,busy=ui.progress(store,{'id':'fixture'},[record],'slot')
+        self.assertFalse(busy);self.assertEqual(states['chosen']['state'],'FAILED');read.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()

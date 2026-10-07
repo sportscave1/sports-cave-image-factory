@@ -25,7 +25,7 @@ class TimingLabels(unittest.TestCase):
                 self.assertEqual(self.label(next_due_at=self.at+timedelta(seconds=seconds)),expected)
 
     def test_not_enrolled_and_blocked(self):
-        self.assertEqual(self.label(enrollment_id=None),'—')
+        self.assertEqual(self.label(enrollment_id=None),'Awaiting eligibility check')
         for result in ('Suppressed','Unsubscribed','Missing email','Invalid email','Not eligible'):
             self.assertEqual(self.label(enrollment_id=None,evaluation={'result':result}),result)
         self.assertEqual(self.label(flow_status='STOPPED',stop_reason='consent_unsubscribed'),'Unsubscribed')
@@ -35,6 +35,13 @@ class TimingLabels(unittest.TestCase):
         self.assertEqual(self.label(archived_at=self.at),'Archived')
         self.assertEqual(self.label(order_id='shopify-order'),'Recovered')
         self.assertEqual(self.label(),'Awaiting schedule')
+
+    def test_historical_consent_and_elapsed_display_are_explicit(self):
+        self.assertEqual(self.label(enrollment_id=None,created_at=self.at-timedelta(days=1),auto_start_at=self.at),'Historical — not auto-enrolled')
+        self.assertEqual(self.label(enrollment_id=None,evaluation={'result':'Not eligible','reason':'consent_not_subscribed'}),'Marketing consent required')
+        row=dict(self.row,next_due_at=self.at+timedelta(minutes=2))
+        self.assertEqual(time_to_send(row,self.at),'2m remaining')
+        self.assertEqual(time_to_send(row,self.at+timedelta(minutes=2)),'Due now')
 
     def test_provider_states_are_not_sent(self):
         for status, expected in [('PENDING','Awaiting schedule'),('CLAIMED','Processing'),('SUBMITTING','Processing'),

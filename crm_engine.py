@@ -178,7 +178,7 @@ class Engine:
                 # No automatic replay after potentially accepted submission, including process crashes.
                 from email_service import EmailDeliveryError
                 known_rejection=isinstance(exc,EmailDeliveryError) and exc.status_code in (400,401,403,404,405,422,429)
-                if known_rejection and exc.status_code==429 and enrollment and enrollment.get('checkout_key'):
+                if known_rejection and exc.status_code==429 and enrollment and enrollment.get('checkout_key') and row['attempts']<5:
                     self.store.q("UPDATE crm_marketing_sends SET status='PENDING',error_code='provider_rate_limited',due_at=now()+interval '5 minutes',lease_until=NULL WHERE id=%s AND lease_token=%s AND status='SUBMITTING'",(row['id'],row['lease_token']))
                 else:self.store.finish_send(row,'FAILED' if known_rejection else 'UNCERTAIN','provider_rejected' if known_rejection else 'submission_uncertain')
                 if enrollment and enrollment.get('checkout_key'):
@@ -309,6 +309,7 @@ class Engine:
         self.store.set_state(key,{'cursor':page['pageInfo'].get('endCursor') if more else None,'after_time':(self.clock()+timedelta(seconds=2 if more else 300)).isoformat()})
     def advance_due(self):
         due=self.store.q("SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND (e.retry_after IS NULL OR e.retry_after<=now()) ORDER BY e.next_due_at LIMIT 20")
+        logging.getLogger(__name__).info('crm_due_batch count=%s',len(due))
         for e in due:
             self.hold_lease()
             try:self.advance(e)
@@ -319,6 +320,9 @@ class Engine:
     def tick(self,owner):
         if not self.store.lease(owner):return {'leader':False}
         self.owner=owner
+        from time import perf_counter
+        started=perf_counter();completed=False
+        logging.getLogger(__name__).info('crm_worker_run_start')
         try:
             from crm_automation_capabilities import verify as verify_automation,refresh_due
             if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
@@ -399,6 +403,8 @@ class Engine:
                         self.store.q('UPDATE crm_suppressions SET provider_synced=true,email_for_provider=NULL WHERE recipient_hash=%s',(row['recipient_hash'],))
                     except Exception:break
             self.store.set_state('worker_health',{'checked_at':self.clock().isoformat(),'status':'ok','marketing_enabled':self.config.enabled,'provider_configured':bool(self.config.api_key),'sender_configured':bool(self.config.sender and self.config.reply_to)})
+            completed=True
             return {'leader':True}
         finally:
+            logging.getLogger(__name__).info('crm_worker_run_end completed=%s duration_ms=%.1f',completed,(perf_counter()-started)*1000)
             self.store.release(owner);self.owner=None
