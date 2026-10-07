@@ -400,7 +400,7 @@
     localDraft=null;mobileReading=true;emit('compose',{mode,message_key:model.active_message});
   }
   function send(){
-    if(!model.draft||busy||locked(model)||!model.smtp_configured||model.send_result?.status==='rejected')return;
+    if(!model.draft||busy||locked(model)||!model.smtp_configured)return;
     const id=model.draft.operation_id;if(submitted.has(id))return;
     submitted.add(id);emit('send',{operation_id:id});
   }

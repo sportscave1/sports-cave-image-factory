@@ -56,6 +56,12 @@ fs.mkdirSync(output,{recursive:true});
         assert.ok(box.height>height-250,'Mailbox should fill the window below compact status');
       }
       assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'1');
+      if(scenario==='rejected'){
+        await mail.locator('[data-action="send"]:enabled').click();
+        await mail.locator('#send-status').filter({hasText:'Sending email'}).waitFor();
+        await mail.locator('#send-status').filter({hasText:'Email not sent'}).waitFor();
+        assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'2');
+      }
       assert.deepEqual(errors,[]);
       await page.screenshot({path:path.join(output,`${scenario}-${width}.png`),fullPage:true});
       results.push({scenario,width,height,result:'passed'});
