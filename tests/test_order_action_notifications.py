@@ -484,6 +484,11 @@ class NewOrderEventTests(unittest.TestCase):
 
 
 class OrderStatusUiContractTests(unittest.TestCase):
+    def setUp(self):
+        self.cache=mock.patch.dict(top_bar_api._ORDER_SUMMARY_DISPLAY_CACHE,{"expires_at":0,"value":None})
+        self.cache.start()
+        self.addCleanup(self.cache.stop)
+
     def test_backend_selector_uses_shared_rules_and_has_no_latest_fifty_limit(self):
         summary_source = inspect.getsource(supabase_backend.get_order_action_summary)
         query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
@@ -598,7 +603,8 @@ class OrderStatusUiContractTests(unittest.TestCase):
         self.assertIn("sc-orders-action-badge", source)
         self.assertIn("right: 12px", source)
         self.assertIn("refreshOrderStatus", source)
-        self.assertIn("later(refreshOrderStatus, 30000)", source)
+        self.assertIn("const EMAIL_HEARTBEAT_MS = 30000", source)
+        self.assertIn("state.config.emailEnabled || state.config.wallInboxEnabled", source)
         self.assertIn("TEMPORARY_TOAST_MS = 3000", source)
         self.assertIn("SportsCaveTemporaryToastRuntime", source)
         self.assertIn("current.identity === cleanIdentity", source)

@@ -21,7 +21,7 @@ class InboxDatabaseTests(unittest.TestCase):
     tearDown=fixtures.DatabaseTests.tearDown
     create=fixtures.DatabaseTests.create
 
-    def test_delete_one_retains_events_and_other_preview_and_is_idempotent(self):
+    def test_delete_one_scrubs_events_preserves_other_preview_and_is_idempotent(self):
         row=self.create();pid=str(row['id'])
         other=crm.confirm(payload(),Mock(return_value=dict(self.upload.return_value,path='/other.jpg',file_id='id:other')))[0]
         before=crm.timeline(pid)
@@ -31,7 +31,8 @@ class InboxDatabaseTests(unittest.TestCase):
             self.assertFalse(ledger.delete_preview(pid,user=ADMIN,remove_asset=remove))
             remove.assert_called_once();audit.assert_called_once()
         self.assertEqual(ledger.get_preview(pid,include_private=True),{})
-        self.assertEqual(crm.timeline(pid),before)
+        self.assertTrue(before)
+        self.assertEqual(crm.timeline(pid),[])
         self.assertEqual([str(r['id']) for r in ledger.list_previews(status='all',include_private=True)],[str(other['id'])])
         with self.assertRaises(ValueError):crm.confirm(self.data,self.upload)
 
@@ -42,10 +43,11 @@ class InboxDatabaseTests(unittest.TestCase):
         with patch('activity_log.record_activity_log'):
             self.assertTrue(ledger.delete_preview(pid,user=ADMIN,remove_asset=Mock()))
 
-    def test_shared_asset_fails_closed_and_nonadmin_cannot_delete(self):
+    def test_shared_asset_is_preserved_and_nonadmin_cannot_delete(self):
         row=self.create();crm.confirm(payload(),self.upload)
         remove=Mock()
-        with self.assertRaises(ledger.WallPreviewStoreError):ledger.delete_preview(str(row['id']),user=ADMIN,remove_asset=remove)
+        with patch('activity_log.record_activity_log'):
+            self.assertTrue(ledger.delete_preview(str(row['id']),user=ADMIN,remove_asset=remove))
         with self.assertRaises(PermissionError):ledger.delete_preview(str(row['id']),user={'role':'worker','is_active':True},remove_asset=remove)
         remove.assert_not_called()
 
@@ -68,7 +70,7 @@ class InboxDatabaseTests(unittest.TestCase):
         remove.assert_called_once()
         with self.Adapter() as cur:
             cur.execute('SELECT state,image,reason FROM wall_preview_archive_jobs WHERE preview_id=%s',(pid,))
-            self.assertEqual(cur.fetchone(),{'state':'failed','image':None,'reason':'admin_deleted'})
+            self.assertIsNone(cur.fetchone())
 
     def test_device_source_filters_use_latest_known_dimensions(self):
         row=self.create();pid=str(row['id'])

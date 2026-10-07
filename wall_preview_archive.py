@@ -70,6 +70,10 @@ def tick(preview_id=None):
             ORDER BY j.due_at FOR UPDATE OF p SKIP LOCKED LIMIT 1''',(preview_id,preview_id))
         row=dict(cur.fetchone() or {})
         if not row:return False
+        from wall_preview_deletion import blocked
+        if blocked(row):
+            cur.execute("UPDATE public.wall_preview_archive_jobs SET state='failed',image=NULL,reason='admin_deleted',finished_at=now() WHERE preview_id=%s", (str(row['id']),))
+            return True
         cur.execute("SELECT version,encode(image,'hex') AS image,attempts FROM public.wall_preview_archive_jobs WHERE preview_id=%s FOR UPDATE",(str(row['id']),))
         job=dict(cur.fetchone())
         if job['version']!=row['version'] or not job['image']:

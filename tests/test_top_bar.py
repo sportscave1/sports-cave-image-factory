@@ -469,7 +469,8 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn('[data-testid="stSidebarHeader"]', SIDEBAR_CSS)
         self.assertIn("height:40px", SIDEBAR_CSS)
         self.assertIn("height:37px", SIDEBAR_CSS)
-        self.assertIn("resetInitialSidebarScroll", COMPONENT_PATH.read_text(encoding="utf-8"))
+        # The shell preserves native sidebar scroll across rerenders.
+        self.assertNotIn("scrollTop = 0", COMPONENT_PATH.read_text(encoding="utf-8"))
 
     def test_component_bridge_has_zero_layout_height(self):
         user = {

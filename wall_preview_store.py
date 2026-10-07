@@ -62,7 +62,8 @@ def find_preview(digest, *, customer_email=''):
     with _backend().connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='4000ms'")
-            cur.execute("SELECT * FROM public.wall_previews WHERE customer_email=%s AND image_sha256=%s AND client_preview_id IS NULL", (customer_email, digest))
+            from wall_preview_deletion import retired_email
+            cur.execute("SELECT * FROM public.wall_previews WHERE customer_email IN (%s,%s) AND image_sha256=%s AND client_preview_id IS NULL", (customer_email, retired_email(customer_email), digest))
             row = cur.fetchone()
             return dict(row) if row else None
 
@@ -156,6 +157,9 @@ def record_preview(payload):
                     ),
                 )
                 row = dict(cur.fetchone() or {})
+                if not row.get('duplicate'):
+                    from wall_preview_notifications import record
+                    record(cur, row['id'])
             conn.commit()
             return row
         except Exception:
@@ -283,42 +287,7 @@ def get_preview(preview_id, *, include_private=False):
             return dict(cur.fetchone() or {})
 
 
-def delete_preview(preview_id, *, user, remove_asset):
-    """Remove one image, retaining its analytics tombstone and exact-request identity.
-
-    Shares the archive worker's parent-row lock. Provider failure leaves the inbox
-    intact; a retry after a DB failure tolerates an already removed provider file.
-    """
-    import os_accounts
-    import wall_preview_crm_store as crm
-    import activity_log
-    if not os_accounts.is_admin(user):
-        raise PermissionError('Only an administrator can delete a preview.')
-    with crm.transaction() as cur:
-        cur.execute('SELECT * FROM public.wall_previews WHERE id=%s FOR UPDATE', (preview_id,))
-        row = dict(cur.fetchone() or {})
-        if not row or (row.get('attribution') or {}).get('inbox_deleted_at'):
-            return False
-        cur.execute("SELECT id FROM public.wall_preview_email_jobs WHERE preview_id=%s AND state='processing' LIMIT 1",(preview_id,))
-        if cur.fetchone():
-            raise WallPreviewStoreError('An image delivery is in progress. Retry deletion shortly.')
-        if row.get('dropbox_path'):
-            cur.execute("""SELECT id FROM public.wall_previews WHERE id<>%s
-                AND ((dropbox_file_id<>'' AND dropbox_file_id=%s) OR dropbox_path=%s) LIMIT 1""",
-                (preview_id,row['dropbox_file_id'],row['dropbox_path']))
-            if cur.fetchone():
-                raise WallPreviewStoreError('This asset is shared by another preview; deletion was stopped.')
-            remove_asset(row)
-        cur.execute("""UPDATE public.wall_previews SET
-            attribution=COALESCE(attribution,'{}'::jsonb) || jsonb_build_object(
-                'inbox_deleted_at',now(),'inbox_deleted_by',%s::text),
-            share_revoked_at=now(),status='archived',dropbox_file_id='',dropbox_path='',updated_at=now()
-            WHERE id=%s""", (str(user['id']),preview_id))
-        cur.execute("""UPDATE public.wall_preview_archive_jobs SET state='failed',image=NULL,
-            reason='admin_deleted',finished_at=now() WHERE preview_id=%s""", (preview_id,))
-        cur.execute("""UPDATE public.wall_preview_email_jobs SET state='suppressed',reason='preview_deleted'
-            WHERE preview_id=%s AND state='queued'""", (preview_id,))
-    activity_log.record_activity_log('wall_preview_deleted','Social Media','Wall preview image deleted',
-        entity_type='wall_preview',entity_id=str(preview_id),actor=str(user['id']),
-        event_key='wall-preview-deleted:'+str(preview_id))
-    return True
+def delete_preview(preview_id, *, user, remove_asset=None):
+    """Individual and bulk actions share the same durable deletion service."""
+    from wall_preview_deletion import delete_one
+    return delete_one(preview_id, user=user, remove_asset=remove_asset)['status'] == 'deleted'

@@ -93,8 +93,12 @@ def tick():
         cur.execute("UPDATE public.wall_preview_customer_jobs SET state='processing',claimed_at=now(),attempts=attempts+1 WHERE id=%s",(str(job['id']),))
     try:
         with store.transaction() as cur:
-            cur.execute('SELECT * FROM public.wall_previews WHERE id=%s',(str(job['preview_id']),))
-            row = dict(cur.fetchone())
+            cur.execute('SELECT * FROM public.wall_previews WHERE id=%s FOR UPDATE',(str(job['preview_id']),))
+            row = dict(cur.fetchone() or {})
+            from wall_preview_deletion import blocked
+            if not row or blocked(row):
+                cur.execute("UPDATE public.wall_preview_customer_jobs SET state='failed',reason='preview_deleted',finished_at=now() WHERE id=%s", (str(job['id']),))
+                return True
             # Serialize all previews for this email across processes; never trust posted customer IDs.
             cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',('wall-preview-customer:'+row['customer_email'],))
             customer_id,state = synchronize(row)

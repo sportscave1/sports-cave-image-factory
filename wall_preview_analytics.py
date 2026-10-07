@@ -70,8 +70,10 @@ def ingest(payload):
     with transaction() as cur:
         # The existing session is also a private write capability, never a public analytics ID.
         cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))',('wall-preview:'+data['client_preview_id'],))
-        cur.execute('SELECT id,session_id,client_preview_id FROM public.wall_previews WHERE client_preview_id=%s',(data['client_preview_id'],))
+        cur.execute('SELECT id,session_id,client_preview_id,attribution FROM public.wall_previews WHERE client_preview_id=%s FOR UPDATE',(data['client_preview_id'],))
         row=cur.fetchone()
+        from wall_preview_deletion import blocked
+        if blocked(row):raise PermissionError('Preview removed')
         if row and str(row['session_id'])!=data['session_id']:raise PermissionError('Journey mismatch')
         if data['preview_id'] and (not row or str(row['id'])!=data['preview_id']):raise PermissionError('Preview mismatch')
         if row:data['preview_id']=str(row['id'])

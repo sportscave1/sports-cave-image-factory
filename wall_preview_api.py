@@ -244,6 +244,9 @@ def _save_preview_locked(request, data, content_type, cors):
         digest = hashlib.sha256(data).hexdigest()
         existing = wall_preview_store.find_preview(digest, customer_email=identity['customer_email'])
         if existing:
+            from wall_preview_deletion import blocked
+            if blocked(existing):
+                raise ValueError('This preview was removed.')
             return JSONResponse({"ok": True, "preview_id": str(existing['id']),
                                  "duplicate": True,
                                  "marketing_permission": bool(existing['marketing_permission'])},

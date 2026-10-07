@@ -16,6 +16,7 @@ import social_media
 import wall_preview_store
 import wall_preview_identity
 import wall_preview_crm_store
+import wall_preview_deletion
 
 
 _TEMP_LINK_CACHE = {}
@@ -190,23 +191,6 @@ def _page(**filters):
     return wall_preview_store.list_previews(**filters)
 
 
-def _remove_asset(row):
-    token=_dropbox_connection()
-    path=row['dropbox_path']
-    if not dropbox_integration.path_is_within_root(path,WALL_PREVIEW_DROPBOX_PATH):
-        raise ValueError('Unexpected preview location.')
-    metadata=dropbox_integration.get_metadata_if_exists(token,path)
-    if metadata:
-        if row.get('dropbox_file_id'):
-            if metadata.get('id')!=row['dropbox_file_id']:
-                raise ValueError('Preview storage identity changed.')
-        elif Path(path).stem not in {str(row['id']),str(row.get('client_preview_id'))}:
-            # A worker may have uploaded before its database commit failed. Only
-            # the exact capture-owned filename may be removed in that situation.
-            raise ValueError('Unconfirmed preview storage identity.')
-        dropbox_integration.delete_path_recoverable(token,path,root_path=WALL_PREVIEW_DROPBOX_PATH)
-
-
 def _image(row):
     if row.get('dropbox_file_id'):
         _,content=dropbox_integration.get_file_bytes(_dropbox_connection(),row['dropbox_path'])
@@ -224,6 +208,52 @@ def _reset():
     st.session_state.pop('wp-analytics-custom',None)
 
 
+def _delete_confirm(user, preview_ids):
+    """Both dialogs use an immutable ID snapshot, never the current grid indices."""
+    if not os_accounts.is_admin(user):
+        st.error('Only administrators can delete previews.');return
+    ids=wall_preview_deletion.validate_ids(preview_ids)
+    count=len(ids)
+    st.markdown(f'**Delete {count} Wall Preview{"s" if count != 1 else ""}?**')
+    st.warning('This will permanently remove the selected previews and their associated files from Sports Cave OS and Dropbox. Shared files needed by other previews are kept. This action cannot be undone in Sports Cave OS.')
+    running=bool(st.session_state.get('wall-preview-deleting'))
+    error_message=st.session_state.pop('wall-preview-delete-error',None)
+    if error_message:st.error(error_message)
+    controls=st.empty()
+    with controls.container():
+        left,right=st.columns(2)
+        cancel=left.button('Cancel',key='wp-delete-cancel',disabled=running)
+        confirm=right.button(f'Delete {count} Preview{"s" if count != 1 else ""}',type='primary',key='wp-delete-confirm',disabled=running)
+    if cancel:
+        st.session_state.pop('wall-preview-delete',None);st.rerun()
+    if confirm:
+        st.session_state['wall-preview-deleting']=True
+        controls.empty()
+        progress=st.progress(0,text=f'Deleting 0 of {count} previews…')
+        try:
+            results=wall_preview_deletion.bulk_delete(ids,user=user,
+                progress=lambda done,total:progress.progress(done/total,text=f'Processed {done} of {total} previews'))
+            st.session_state['wall-preview-delete-results']=results
+            st.session_state['wall-preview-selection-revision']=str(time.time_ns())
+            _page.clear();_thumbnails.clear();_TEMP_LINK_CACHE.clear()
+            from wall_preview_analytics_ui import snapshot
+            snapshot.clear()
+            st.session_state['wall-preview-cursors']=[None]
+            st.session_state.pop('wall-preview-delete',None)
+            st.session_state.pop('wall-preview-details',None)
+        except Exception as error:
+            st.session_state['wall-preview-delete-error']=str(error) if isinstance(error,wall_preview_store.WallPreviewStoreError) else 'Deletion could not finish. Please retry.'
+            st.rerun(scope='fragment')
+        finally:
+            st.session_state['wall-preview-deleting']=False
+        st.rerun()
+
+
+@st.dialog('Delete Wall Previews',dismissible=False)
+def _bulk_delete_dialog(user, preview_ids):
+    _delete_confirm(user, tuple(preview_ids))
+
+
 @st.dialog('Wall Preview',width='large')
 def _viewer(user,preview_id,action='view'):
     st.html("""<style>
@@ -237,18 +267,7 @@ def _viewer(user,preview_id,action='view'):
     st.markdown('**'+str(row.get('product_title') or 'Wall preview')+'**')
     st.caption(_format_received(row.get('received_at'))+' · '+str(row.get('customer_name') or row.get('customer_email') or 'Anonymous visitor')+' · '+str(row.get('status') or 'new'))
     if action=='delete' or st.session_state.get('wall-preview-delete')==preview_id:
-        st.warning('Delete wall preview? This removes this image from the Inbox and Dropbox. Analytics history is retained.')
-        left,right=st.columns(2)
-        if left.button('Cancel',key='wp-delete-cancel'):
-            st.session_state.pop('wall-preview-delete',None);st.rerun()
-        if right.button('Delete',type='primary',key='wp-delete-confirm'):
-            try:
-                wall_preview_store.delete_preview(preview_id,user=user,remove_asset=_remove_asset)
-                _page.clear();_thumbnails.clear();st.session_state.pop('wall-preview-delete',None)
-                st.session_state.pop('wall-preview-details',None);st.rerun()
-            except Exception as error:
-                logging.getLogger(__name__).warning('wall_preview_delete_failed preview_id=%s error_type=%s',preview_id,type(error).__name__)
-                st.error('Could not delete this preview. Nothing else was selected. Please retry.')
+        _delete_confirm(user, (preview_id,))
         return
     try:
         content=_image(row)
@@ -257,7 +276,18 @@ def _viewer(user,preview_id,action='view'):
         image=''
     extension='.png' if row.get('content_type')=='image/png' else '.jpg'
     filename='sports-cave-wall-preview-'+re.sub(r'[^a-z0-9-]+','-',str(row.get('product_handle') or 'artwork').lower())+'-'+str(row.get('received_at') or '')[:10]+extension
-    viewer_event=_gallery(mode='viewer',id=preview_id,image=image,title=row.get('product_title'),filename=filename,key='wp-full-viewer',default=None)
+    viewer_event=_gallery(mode='viewer',id=preview_id,image=image,title=row.get('product_title'),filename=filename,
+        seenId=preview_id if st.session_state.get('wall-preview-seen-ack')==preview_id else '',key='wp-full-viewer',default=None)
+    if (image and viewer_event and viewer_event.get('action')=='viewed' and viewer_event.get('id')==preview_id
+            and viewer_event.get('nonce')!=st.session_state.get('wall-preview-viewed-event')):
+        try:
+            from wall_preview_notifications import mark_seen
+            mark_seen(preview_id,user)
+            st.session_state['wall-preview-viewed-event']=viewer_event['nonce']
+            st.session_state['wall-preview-seen-ack']=preview_id
+            st.rerun(scope='fragment')
+        except Exception:
+            st.warning('Image opened, but its unread status could not be saved. Reopen it to retry.')
     if viewer_event and viewer_event.get('action')=='close' and viewer_event.get('nonce')!=st.session_state.get('wall-preview-viewer-event'):
         st.session_state['wall-preview-viewer-event']=viewer_event['nonce'];st.rerun()
     if os_accounts.is_admin(user) and st.button('Delete image',key='wp-delete-open'):
@@ -272,6 +302,27 @@ def render(user):
     from wall_preview_analytics_ui import render as analytics_render, snapshot
     inject_styles()
     st.markdown('<div class="sc-social-header"><h1>Wall Preview Inbox</h1><p>Customer wall previews from See It On Your Wall.</p></div>',unsafe_allow_html=True)
+    target=st.query_params.get('wall_preview_id')
+    if target:
+        del st.query_params['wall_preview_id']
+        try:
+            import uuid
+            target=str(uuid.UUID(target))
+        except (ValueError,TypeError):
+            st.warning('This Wall Inbox image link is invalid.')
+        else:
+            _viewer(user,target)
+    results=st.session_state.get('wall-preview-delete-results') or []
+    if results:
+        failed=[r for r in results if r['status']=='failed']
+        succeeded=len(results)-len(failed)
+        if not failed:st.success(f'{succeeded} previews deleted or already removed.')
+        elif succeeded:st.warning(f'{succeeded} removed; {len(failed)} could not be deleted. Select failed previews to retry.')
+        else:st.error('No previews were fully deleted. Review the errors and retry.')
+        for result in failed:st.caption(result['id']+' · '+result['error'])
+        if any(r.get('shared_files_preserved') for r in results):st.caption('Shared files still needed by other previews were preserved.')
+        if st.button('Dismiss deletion results',key='wp-dismiss-deletion'):
+            st.session_state.pop('wall-preview-delete-results',None);st.rerun()
     controls=st.columns([3,1,1])
     if controls[0].button('Open Wall Preview Folder',icon=':material/folder_open:',disabled=not os_accounts.can_access_page(user,'Files')):_open_wall_preview_folder()
     if controls[1].button('Refresh',icon=':material/refresh:'):
@@ -302,8 +353,11 @@ def render(user):
         thumbs={};st.caption('Thumbnails temporarily unavailable. Open a preview to retry.')
     items=[dict(id=str(r['id']),title=r.get('product_title') or r.get('product_id') or 'Wall preview',
         identity=(r.get('customer_email') if os_accounts.is_admin(user) else '') or r.get('customer_name') or 'Anonymous visitor',
-        date=_format_received(r.get('received_at')),status=STATUS_LABELS.get(r.get('status'),'New'),thumbnail=thumbs.get(str(r['id']),'')) for r in visible]
-    event=_gallery(items=items,canDelete=os_accounts.is_admin(user),key='wp-gallery',default=None)
+        date=_format_received(r.get('received_at')),status='Deletion pending · retry' if (r.get('attribution') or {}).get('inbox_deletion') else STATUS_LABELS.get(r.get('status'),'New'),thumbnail=thumbs.get(str(r['id']),'')) for r in visible]
+    scope=signature+repr(cursors[-1])
+    event=_gallery(items=items,canDelete=os_accounts.is_admin(user),scope=scope,
+        selectedIds=[r['id'] for r in results if r['status']=='failed'],
+        selectionRevision=st.session_state.get('wall-preview-selection-revision'),key='wp-gallery',default=None)
     nav=st.columns([1,2,1])
     if nav[0].button('Previous',disabled=len(cursors)==1):
         cursors.pop();st.rerun()
@@ -314,6 +368,11 @@ def render(user):
     analytics_details(filters)
     if event and event.get('nonce')!=st.session_state.get('wall-preview-event'):
         st.session_state['wall-preview-event']=event.get('nonce')
+        if event.get('action')=='bulk_delete':
+            ids=event.get('ids')
+            if os_accounts.is_admin(user) and event.get('scope')==scope and isinstance(ids,list) and ids and len(ids)<=24 and set(ids)<={str(r['id']) for r in visible}:
+                _bulk_delete_dialog(user,tuple(dict.fromkeys(ids)))
+            return
         if event.get('id') in {str(r['id']) for r in visible}:
             if event.get('action')=='delete':st.session_state['wall-preview-delete']=event['id']
             _viewer(user,event['id'],event.get('action','view'))

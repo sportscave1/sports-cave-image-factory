@@ -264,6 +264,11 @@ class WallPreviewDatabaseTests(unittest.TestCase):
         from tests.crm_db_fixture import connect
         with connect() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS public.os_users(id uuid PRIMARY KEY)')
+            operational=Path('migrations/20260625_stage1_supabase_operational_ledger.sql').read_text()
+            for table in ('app_sync_state','audit_logs'):
+                statement=operational.split('CREATE TABLE IF NOT EXISTS '+table+' (',1)[1].split(';',1)[0]
+                conn.execute('CREATE TABLE IF NOT EXISTS '+table+' ('+statement)
+
             for name in run_migrations.WALL_PREVIEW_MIGRATIONS:
                 sql=Path('migrations', name).read_text().replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;', '')
                 for statement in sql.split(';'):

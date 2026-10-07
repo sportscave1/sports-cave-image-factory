@@ -865,10 +865,17 @@ async def top_bar_notifications(request: Request):
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
     activity_rows, alerts = await run_in_threadpool(load_notification_sources, claims)
+    from wall_preview_notifications import status as wall_status
+    try:
+        wall = await run_in_threadpool(wall_status, claims)
+    except Exception:
+        wall = {"unread_count": None, "notifications": []}
+
     return _json(
         {
             "ok": True,
-            "notifications": build_notifications(
+            "wall_unread_count": wall["unread_count"],
+            "notifications": wall["notifications"] + build_notifications(
                 claims,
                 activity_rows=activity_rows,
                 alerts=alerts,

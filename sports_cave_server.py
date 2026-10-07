@@ -18,6 +18,7 @@ from support_email_idle import IdleLifecycle
 from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
 from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
 from wall_preview_analytics_api import ROUTES as WALL_PREVIEW_ANALYTICS_ROUTES
+from wall_preview_inbox_api import ROUTES as WALL_PREVIEW_INBOX_ROUTES
 from storefront_protection_api import ROUTES as STOREFRONT_PROTECTION_ROUTES
 from auth_cookie_cleanup import ROUTES as AUTH_COOKIE_CLEANUP_ROUTES
 
@@ -32,6 +33,7 @@ routes = [
         *GOOGLE_SEO_ROUTE_HANDLERS,
         *WALL_PREVIEW_ROUTES,
         *WALL_PREVIEW_ANALYTICS_ROUTES,
+        *WALL_PREVIEW_INBOX_ROUTES,
         *WALL_PREVIEW_CRM_ROUTES,
         *STOREFRONT_PROTECTION_ROUTES,
         *AUTH_COOKIE_CLEANUP_ROUTES,

@@ -84,7 +84,7 @@ def authorize(cur, preview_id, token):
     cur.execute('SELECT * FROM public.wall_previews WHERE id=%s FOR UPDATE', (str(uuid.UUID(str(preview_id))),))
     row = dict(cur.fetchone() or {})
     # A canonical preview ID or claimed Shopify ID alone never authorizes a mutation.
-    if not row or not token or not row.get('session_id') or not hmac.compare_digest(str(row['session_id']), str(token)):
+    if not row or (row.get('attribution') or {}).get('inbox_deletion') or (row.get('attribution') or {}).get('inbox_deleted_at') or not token or not row.get('session_id') or not hmac.compare_digest(str(row['session_id']), str(token)):
         raise PermissionError('Preview authorization required.')
     return row
 
@@ -96,7 +96,8 @@ def confirm(payload, upload):
         cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', ('wall-preview:'+client_id,))
         cur.execute('SELECT * FROM public.wall_previews WHERE client_preview_id=%s FOR UPDATE', (client_id,))
         previous = dict(cur.fetchone() or {})
-        if (previous.get('attribution') or {}).get('inbox_deleted_at'):
+        from wall_preview_deletion import blocked
+        if blocked(previous):
             raise ValueError('This preview was removed.')
         if previous and not hmac.compare_digest(str(previous['session_id']), session):
             raise PermissionError('Preview authorization required.')
@@ -145,6 +146,9 @@ def confirm(payload, upload):
         # continue to describe the real session independently of capture count.
         if not previous and payload.get('attribution', {}).get('capture_mode') != 'save_event':
             event(cur,row,'WallPreviewStarted','started')
+        if not previous:
+            from wall_preview_notifications import record
+            record(cur, row['id'])
         event(cur,row,'WallPreviewConfirmed','confirmed:'+str(version),{'version':version})
         return row, False
 
@@ -295,6 +299,9 @@ def correlate_order(payload):
             column = 'id' if props.get('_wall_preview_id') else 'client_preview_id'
             cur.execute(f'SELECT * FROM public.wall_previews WHERE {column}=%s FOR UPDATE',(value,))
             row = dict(cur.fetchone() or {})
+            from wall_preview_deletion import blocked
+            if blocked(row):
+                continue
             from wall_preview_analytics import purchase
             if not row:
                 purchase(cur,payload,line)

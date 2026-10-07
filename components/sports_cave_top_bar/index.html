@@ -1588,7 +1588,7 @@
         badge?.remove();
         button.removeAttribute("data-action-required-count");
         if (route === "orders") button.setAttribute("aria-label", "Orders");
-        else button.setAttribute("aria-label", "Email");
+        else button.setAttribute("aria-label", route === "social_media_wall_previews" ? "Wall Preview Inbox" : "Email");
         return;
       }
       if (!badge) {
@@ -1599,7 +1599,7 @@
       }
       badge.textContent = label || (numericCount > 99 ? "99+" : String(numericCount));
       button.dataset.actionRequiredCount = String(numericCount);
-      button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `Email, ${numericCount} unread`);
+      button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `${route === "social_media_wall_previews" ? "Wall Preview Inbox" : "Email"}, ${numericCount} unread`);
     };
     const updateOrdersBadge = (count, label) => updateSidebarBadge("orders", count, label);
     const applyEmailStatus = (payload) => {
@@ -1880,15 +1880,16 @@
     const refreshOrderStatus = async () => {
       // Share the existing global schedule; Email never blocks the Orders response.
       void refreshEmailStatus();
+      void refreshWallNotifications();
       if (!state.config.ordersEnabled || !state.config.orderStatusUrl) {
         updateOrdersBadge(0, "");
-        if (state.config.emailEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
+        if (state.config.emailEnabled || state.config.wallInboxEnabled) later(refreshOrderStatus, EMAIL_HEARTBEAT_MS);
         return;
       }
       // One timer, with Orders retaining its existing 60-second request cadence.
       const remaining = statusRefreshDelay("orders", ORDER_STATUS_REFRESH_MS);
       if (remaining > 0) {
-        later(refreshOrderStatus, Math.min(remaining, state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
+        later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
         return;
       }
       writeStatusCache("orders");
@@ -1903,7 +1904,7 @@
       } catch (_error) {
         // Keep the last visible local state when the lightweight status read is unavailable.
       } finally {
-        later(refreshOrderStatus, state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
+        later(refreshOrderStatus, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
       }
     };
     const compactTimerLabel = (seconds) => {
@@ -2569,6 +2570,12 @@
       notificationsPanel.querySelectorAll(".sc-os-notification-item").forEach((button) => {
         button.addEventListener("click", () => {
           const item = items[Number(button.dataset.index)];
+          if (item.wall_preview_id && item.route_key === "social_media_wall_previews") {
+            const url = new URL(routeUrl(item.route_key, "", false));
+            url.searchParams.set("wall_preview_id", item.wall_preview_id);
+            navigateDocument(url.toString(), true);
+            return;
+          }
           if (item.route_key === "email" && item.email_target) {
             const url = new URL(routeUrl("email", "", false));
             for (const key of ["uid", "uidvalidity", "message_id"]) {
@@ -2581,16 +2588,36 @@
         });
       });
     };
+    let notificationReadVersion = 0;
     const loadNotifications = async () => {
       if (!state.notifications) {
+        const version = ++notificationReadVersion;
         try {
           const payload = await requestJson(state.config.notificationsUrl);
-          state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+          if (version === notificationReadVersion) {
+            state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
+            if (Number.isInteger(payload.wall_unread_count)) updateSidebarBadge("social_media_wall_previews", payload.wall_unread_count, "");
+          }
         } catch (_error) {
-          state.notifications = [];
+          if (version === notificationReadVersion) state.notifications = [];
         }
       }
-      return state.notifications;
+      return state.notifications || [];
+    };
+    let wallNotificationsPending = false;
+    let wallNotificationsDirty = false;
+    const refreshWallNotifications = async () => {
+      if (!state.config.wallInboxEnabled) return;
+      if (wallNotificationsPending) { wallNotificationsDirty = true; return; }
+      wallNotificationsPending = true;
+      try {
+        state.notifications = null;
+        const items = await loadNotifications();
+        if (state.activePanel === "notifications") renderNotifications(items);
+      } finally {
+        wallNotificationsPending = false;
+        if (wallNotificationsDirty) { wallNotificationsDirty = false; void refreshWallNotifications(); }
+      }
     };
     const currentTheme = () => {
       const key = `stActiveTheme-${parentWindow.location.pathname}-v2`;
@@ -2855,6 +2882,12 @@
     parentWindow.addEventListener("pageshow", reconcileDocumentRoute, listenerOptions);
     parentWindow.addEventListener("message", (event) => {
       if (event.origin !== parentWindow.location.origin) return;
+      if (event.data?.type === "sc:wall-inbox-seen") {
+        const trusted = [...doc.querySelectorAll('iframe[title="wall_preview_inbox.wall_preview_gallery"]')]
+          .some(frame => frame.contentWindow === event.source);
+        if (trusted) void refreshWallNotifications();
+        return;
+      }
       if (event.data?.type === "sports-cave-planner-timer-state") {
         receivePlannerTimerState(event.data);
         return;
@@ -2968,6 +3001,7 @@
         }, 250);
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
+          void refreshWallNotifications();
           const cachedOrders = readStatusCache("orders");
           if (cachedOrders.payload) {
             updateOrdersBadge(
@@ -2975,7 +3009,7 @@
               cachedOrders.payload.badge_label,
             );
           }
-          const orderDelay = Math.min(state.config.emailEnabled ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS,
+          const orderDelay = Math.min((state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS,
             statusRefreshDelay(state.config.ordersEnabled ? "orders" : "email", state.config.ordersEnabled ? ORDER_STATUS_REFRESH_MS : EMAIL_HEARTBEAT_MS));
           const cachedEmail = readStatusCache("email").payload;
           if (cachedEmail) applyEmailStatus(cachedEmail);
