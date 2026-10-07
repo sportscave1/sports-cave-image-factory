@@ -21,9 +21,12 @@ class Engine:
         c=self.shop.customer(customer_id,fresh=True)
         ok,reason=eligibility(c,self.store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))
         context={'first_name':(c or {}).get('firstName') or 'there','store_url':'https://www.sportscaveshop.com'}
-        if not ok:return c,context,reason
+        automation=self.store.get('automations',enrollment['automation_id']) if enrollment else None
+        checkout_flow=bool(automation and automation['trigger_type']=='abandoned')
+        if checkout_flow and not (c or {}).get('email'):return c,context,'missing_email'
+        if not ok and not checkout_flow:return c,context,reason
         if enrollment:
-            a=self.store.get('automations',enrollment['automation_id'])
+            a=automation
             if not a:return c,context,'automation_unavailable'
             kind=a['trigger_type'];trigger=enrollment['trigger_shopify_id']
             if a['status']!='ACTIVE':return c,context,'automation_paused'
@@ -66,6 +69,9 @@ class Engine:
                     if date(latest.get('createdAt')) and date(latest['createdAt'])>=date(checkout['createdAt']):return c,context,'recovered'
                     recent=self.shop.orders(c['id'],fresh=True)['nodes']
                     if any(not o.get('cancelledAt') and date(o['createdAt'])>=date(checkout['createdAt']) for o in recent):return c,context,'recovered'
+                from crm_checkout_eligibility import recovery_eligibility,policy
+                ok,reason=recovery_eligibility(checkout,c,policy(self.store),suppressed=self.store.suppressed(c['id'],recipient_hash(c.get('email'))))
+                if not ok:return c,context,reason
                 context['checkout_url']=checkout['abandonedCheckoutUrl']
                 context['_checkout']=checkout;context['_checkout_id']=trigger
                 context['products']=[{'title':p['title'],'quantity':p['quantity'],'price':p.get('originalUnitPriceSet',{}).get('shopMoney',{}).get('amount','')} for p in checkout['lineItems']['nodes']]
@@ -104,7 +110,7 @@ class Engine:
                 self.store.finish_send(row,'BLOCKED',reason);return True
             if not row['test_send']:
                 from crm_native_unsubscribe import native_unsubscribe_url
-                unsubscribe=native_unsubscribe_url(c)
+                unsubscribe=native_unsubscribe_url(c,recovery=bool(context.get('_checkout')))
                 if not unsubscribe:
                     self.store.finish_send(row,'BLOCKED','missing_shopify_marketing_unsubscribe_url');return True
             if self.delivery().suppressed(address):
@@ -261,7 +267,7 @@ class Engine:
         if topic=='customers_email_marketing_consent/update':
             c=self.shop.customer(customer_id,fresh=True)
             if consent(c)!='SUBSCRIBED':
-                self.store.q("UPDATE crm_automation_enrollments SET status='STOPPED',stop_reason='consent_changed',updated_at=now() WHERE shopify_customer_id=%s AND status='ACTIVE'",(customer_id,));return
+                self.store.q("UPDATE crm_automation_enrollments SET status='STOPPED',stop_reason='consent_changed',updated_at=now() WHERE shopify_customer_id=%s AND status='ACTIVE' AND (steps->0->>'trigger' IS DISTINCT FROM 'abandoned') AND automation_id NOT IN (SELECT id FROM crm_automations WHERE trigger_type='abandoned')",(customer_id,));return
             changed=date(c['emailMarketingConsent'].get('consentUpdatedAt'))
             if not changed or abs((changed-at).total_seconds())>300:return
             for a in automations:

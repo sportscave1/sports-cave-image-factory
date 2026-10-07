@@ -48,6 +48,7 @@ class RequestTests(unittest.TestCase):
             c={'id':'gid://shopify/AbandonedCheckout/'+identity,'createdAt':(now()-timedelta(minutes=90)).isoformat(),
                'updatedAt':(now()-timedelta(minutes=90)).isoformat(),'completedAt':None,'customer':customer,
                'abandonedCheckoutUrl':'https://fixture.myshopify.com/checkouts/'+identity+'/recover'}
+            c['lineItems']={'nodes':[{'title':'Fixture artwork','quantity':1}]}
             details(self.store,c);checkouts[c['id']]=c;profiles[customer['id']]=customer
         self.shop.checkout.side_effect=lambda key,**kw:deepcopy(checkouts[key])
         self.shop.customer.side_effect=lambda key,**kw:deepcopy(profiles[key])
@@ -101,7 +102,7 @@ class RequestTests(unittest.TestCase):
         self.assertIn('Suppressed',[r['result'] for r in response]);self.assertIn('Recovered',[r['result'] for r in response])
         rows=self.finish(a,keys);labels=[r['request']['result'] for r in rows]
         self.assertEqual(labels.count('Added to flow'),8)
-        for label in ('Unsubscribed','Suppressed','Recovered','Failed — Shopify unavailable'):self.assertIn(label,labels)
+        for label in ('Opted out','Suppressed','Recovered','Failed — Shopify unavailable'):self.assertIn(label,labels)
         self.assertEqual(self.shop.checkout.call_count,10) # local blocks did not fetch Shopify
         self.provider.send.assert_not_called()
 

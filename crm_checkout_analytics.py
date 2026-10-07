@@ -113,6 +113,7 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  FROM messages s LEFT JOIN events e ON e.send_id=s.id GROUP BY s.checkout_key
 )
 SELECT c.*,v.value AS evaluation,request.value-'history' AS enrollment_request,a.status AS automation_status,a.config->>'archived_at' AS archived_at,
+ (SELECT value FROM crm_runtime_state WHERE key='abandoned-checkout-policy') AS recovery_policy,
  GREATEST(a.activated_at,(SELECT (value->>'started_at')::timestamptz FROM crm_runtime_state WHERE key='checkout-auto-start-v2')) AS auto_start_at,
  a.config->'published'->>'abandonment_seconds' AS abandonment_seconds,
  j.id AS enrollment_id,j.status AS flow_status,j.stop_reason,j.current_step,j.steps,j.next_due_at,
@@ -126,7 +127,21 @@ ORDER BY c.created_at DESC,c.checkout_key"""
 
 def checkouts(store,identity,bounds,key=None):
     start,end=bounds
-    return store.q(LIST_SQL,(start,start,end,key,key,identity,identity))
+    rows=store.q(LIST_SQL,(start,start,end,key,key,identity,identity))
+    from crm_checkout_identity import block_label
+    for row in rows:
+        regions=(row.pop('recovery_policy',None) or {}).get('regions') or {}
+        evaluation=row.get('evaluation') or {}
+        if evaluation.get('reason'):
+            row['evaluation']={**evaluation,'result':block_label(evaluation['reason'])}
+            if evaluation['reason']=='consent_not_subscribed' and not row.get('enrollment_id'):
+                rule=regions.get((row.get('analytics') or {}).get('country'),regions.get('*',{}))
+                cutoff=date(rule.get('effective_at'))
+                if rule.get('mode')=='explicit_or_valid_inferred' and cutoff:
+                    old=date(row.get('created_at'))
+                    reason='historical_not_enrolled' if old and old<cutoff else 'recovery_recheck_required'
+                    row['evaluation']={**evaluation,'reason':reason,'result':block_label(reason)}
+    return rows
 
 def report(store,identity,bounds):
     """One message/event aggregate shared by KPI and chart; no event fanout totals.

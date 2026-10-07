@@ -73,7 +73,7 @@ COUNT = 'query CrmCount($query:String) { customerSegmentMembers(query:$query,fir
 CAMPAIGN_MEMBER_IDS = MEMBERS.replace('CrmMembers','CrmCampaignMemberIds').replace('first:50','first:250')
 MEMBERSHIPS = 'query CrmMemberships($id:ID!,$segments:[ID!]!) { customerSegmentMembership(customerId:$id,segmentIds:$segments) { memberships { segmentId isMember } } }'
 TOTAL = 'query CrmTotal { customersCount { count precision } }'
-CHECKOUT_LINES_FIELDS = '''id title quantity variant { id product { id } } image { url }
+CHECKOUT_LINES_FIELDS = '''id title quantity variant { id availableForSale product { id status onlineStoreUrl } } image { url }
  originalUnitPriceSet { shopMoney { amount currencyCode } }'''
 CHECKOUT_LINES_FIELDS += ''' variantTitle discountedTotalPriceWithCodeDiscount { shopMoney { amount currencyCode } presentmentMoney { amount currencyCode } }'''
 CHECKOUT_IDENTITY = '''name customer { id firstName lastName email } shippingAddress { name firstName lastName country countryCodeV2 } billingAddress { name firstName lastName country countryCodeV2 }'''
@@ -304,7 +304,11 @@ class Shopify:
     def checkouts(self, after=None, query=None, fresh=False):
         return self.query(CHECKOUTS, {'after':after, 'query':query}, 'abandoned checkouts', 20, fresh)['abandonedCheckouts']
     def checkout(self, checkout_id, fresh=False):
-        return self.query(CHECKOUT, {'id':gid(checkout_id, 'AbandonedCheckout')}, 'abandoned checkouts', 20, fresh).get('node')
+        checkout=self.query(CHECKOUT, {'id':gid(checkout_id, 'AbandonedCheckout')}, 'abandoned checkouts', 20, fresh).get('node')
+        if checkout:
+            from crm_abandoned_checkout import complete
+            checkout=complete(self,checkout)
+        return checkout
     def checkout_lines(self,checkout_id,after,fresh=False):
         node=self.query(CHECKOUT_LINES,{'id':gid(checkout_id,'AbandonedCheckout'),'after':after},'abandoned checkouts',20,fresh).get('node')
         return (node or {}).get('lineItems')

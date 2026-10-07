@@ -162,7 +162,7 @@ def safe_failure(exc):
     if isinstance(exc,ValueError):
         message = str(exc)
         if 'identity' in message.lower():return 'FAILED','Failed — identity changed','identity_unverified'
-        for label in ('Already in flow','Recovered','Missing email','Invalid email','Suppressed','Unsubscribed','Not eligible'):
+        for label in ('Already in flow','Recovered','Missing email','Invalid email','Suppressed','Unsubscribed','Opted out','Region requires consent','Historical — not auto-enrolled','Not recoverable','Recovery policy needs configuration','Recovery permission not verified','Platform recovery eligibility unavailable','Not eligible'):
             if message.startswith(label):return 'DONE',label,'eligibility_block'
         if 'Shopify' in message:return 'FAILED','Failed — Shopify unavailable','shopify_unavailable'
         return 'DONE','Not eligible','eligibility_block'

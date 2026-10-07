@@ -162,10 +162,11 @@ def _authorized_add_to_flow(shop,store,identity,checkout_id,expected_key=None):
     from crm_logic import eligibility,recipient_hash
     c=recipient(shop,store,checkout,ledger)
     if not (c or {}).get('email'):raise ValueError('Missing email')
-    eligible,reason=eligibility(c,store.suppressed(c['id'],recipient_hash(c.get('email'))))
+    from crm_checkout_eligibility import recovery_eligibility,policy
+    eligible,reason=recovery_eligibility(checkout,c,policy(store),suppressed=store.suppressed(c['id'],recipient_hash(c.get('email'))))
     if not eligible:raise ValueError(block_label(reason))
     from crm_native_unsubscribe import native_unsubscribe_url
-    if not native_unsubscribe_url(c):raise ValueError('Not eligible: unsubscribe link unavailable')
+    if not native_unsubscribe_url(c,recovery=True):raise ValueError('Not eligible: unsubscribe link unavailable')
     customer=c['id']
     at=now();threshold=row['config']['published'].get('abandonment_seconds',3600)
     created=date(checkout.get('createdAt'));activated=date(row.get('activated_at'))
@@ -178,7 +179,7 @@ def _authorized_add_to_flow(shop,store,identity,checkout_id,expected_key=None):
     if not updated:raise ValueError('Verified checkout activity date is required.')
     if max(date(ledger['activity_at']),updated)+timedelta(seconds=threshold)>at:raise ValueError('Checkout is not yet abandoned. Wait for the configured inactivity period.')
     result=enter(Engine(store,shop),row,customer,checkout_id,'checkout:'+key,at,checkout_key=key,
-                 source_event_id=ledger['source_event_id'],event_facts=checkout_facts(checkout),manual_checkout=True,recipient=c)
+                 source_event_id=ledger['source_event_id'],event_facts=checkout_facts(checkout),manual_checkout=True,recipient=c,checkout_source=checkout)
     if not result:
         if store.q('SELECT id FROM crm_automation_enrollments WHERE automation_id=%s AND checkout_key=%s',(identity,key),True):raise ValueError('Already in flow')
         raise ValueError('Not eligible: flow rules, re-entry policy or checkout state changed')

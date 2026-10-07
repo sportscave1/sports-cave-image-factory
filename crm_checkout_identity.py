@@ -46,7 +46,14 @@ def reference(row):
 
 def block_label(reason):
     return {'local_suppression':'Suppressed','provider_suppression':'Suppressed',
-            'consent_not_subscribed':'Marketing consent required','consent_unsubscribed':'Unsubscribed','consent_invalid':'Invalid email',
+            'consent_not_subscribed':'Region requires consent','consent_unsubscribed':'Opted out',
+            'region_requires_consent':'Region requires consent','recovery_opted_out':'Opted out',
+            'historical_not_enrolled':'Historical — not auto-enrolled','not_recoverable':'Not recoverable',
+            'products_unavailable':'Not recoverable — products unavailable',
+            'recovery_policy_invalid':'Recovery policy needs configuration',
+            'recovery_evidence_required':'Recovery permission not verified',
+            'platform_eligibility_unavailable':'Platform recovery eligibility unavailable','consent_invalid':'Invalid email',
+            'recovery_recheck_required':'Awaiting recovery eligibility check',
             'missing_email':'Missing email','recovered':'Recovered',
             'already_enrolled':'Already in flow'}.get(reason,'Not eligible')
 

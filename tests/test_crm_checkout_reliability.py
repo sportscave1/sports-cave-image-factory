@@ -110,7 +110,7 @@ class Reliability(TestCase):
 
     def test_suppression_and_unsubscribe_are_explicit(self):
         a,c=self.prepared();self.customer['emailMarketingConsent']['marketingState']='UNSUBSCRIBED'
-        with self.assertRaisesRegex(ValueError,'Unsubscribed'):self.add(a,c)
+        with self.assertRaisesRegex(ValueError,'Opted out'):self.add(a,c)
         self.customer['emailMarketingConsent']['marketingState']='SUBSCRIBED'
         self.store.suppress(recipient_hash(self.customer['email']),self.customer['id'],'manual','admin')
         with self.assertRaisesRegex(ValueError,'Suppressed'):self.add(a,c)

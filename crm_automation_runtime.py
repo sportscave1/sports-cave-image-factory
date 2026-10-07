@@ -10,12 +10,16 @@ from crm_automation_definition import native, qualifies
 LOG=logging.getLogger(__name__)
 
 
-def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False,recipient=None):
+def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False,recipient=None,checkout_source=None):
     """Serialize re-entry with publication/pause and freeze the complete flow."""
     started=perf_counter();store=engine.store;at=date(occurred_at)
     if not at: return None
     c=recipient if recipient is not None else engine.shop.customer(customer_id,fresh=True)
-    if not eligibility(c,store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
+    if automation['trigger_type']=='abandoned':
+        from crm_checkout_eligibility import recovery_eligibility,policy
+        checkout_source=checkout_source or engine.shop.checkout(trigger_id,fresh=True)
+        if not recovery_eligibility(checkout_source,c,policy(store),suppressed=store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
+    elif not eligibility(c,store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
     with store.db() as conn:
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(automation['id'],)).fetchone()
         if not row or not native(row) or row['status']!='ACTIVE' or not row['activated_at'] or at<date(row['activated_at']):return None
@@ -140,7 +144,8 @@ def reconcile(engine,a):
         try:c=recipient(engine.shop,engine.store,checkout,state_row)
         except ValueError:
             engine.store.set_state(evaluation_key,{'result':'Missing email' if not state_row.get('analytics',{}).get('email') else 'Not eligible: verified identity unavailable','at':at.isoformat()});continue
-        ok,reason=eligibility(c,engine.store.suppressed((c or {}).get('id'),recipient_hash((c or {}).get('email'))))
+        from crm_checkout_eligibility import recovery_eligibility,policy
+        ok,reason=recovery_eligibility(checkout,c,policy(engine.store),suppressed=engine.store.suppressed((c or {}).get('id'),recipient_hash((c or {}).get('email'))))
         if not ok:
             from crm_checkout_identity import block_label
             engine.store.set_state(evaluation_key,{'result':block_label(reason),'reason':reason,'at':at.isoformat()})
@@ -151,7 +156,7 @@ def reconcile(engine,a):
         if created and activity>=cutoff and activity<=at-timedelta(seconds=threshold) and not checkout.get('completedAt'):
             engine.store.q("UPDATE crm_shopify_checkouts SET admin_checkout_id=%s,status=CASE WHEN status='OPEN' THEN 'ABANDONED' ELSE status END WHERE checkout_key=%s AND status<>'RECOVERED'",(checkout['id'],key))
             from crm_automation_rule_facts import checkout_facts
-            entered=enter(engine,a,c['id'],checkout['id'],'checkout:'+key,activity+timedelta(seconds=threshold),checkout_key=key,source_event_id=state_row['source_event_id'],event_facts=checkout_facts(checkout),recipient=c)
+            entered=enter(engine,a,c['id'],checkout['id'],'checkout:'+key,activity+timedelta(seconds=threshold),checkout_key=key,source_event_id=state_row['source_event_id'],event_facts=checkout_facts(checkout),recipient=c,checkout_source=checkout)
             engine.store.set_state(evaluation_key,{'result':'Added to flow' if entered else 'Not eligible: rules, re-entry or changed state','at':at.isoformat()})
             LOG.info('checkout_evaluated checkout_key=%s automation_id=%s enrolled=%s',key,a['id'],bool(entered))
     engine.store.set_state(state_key,{'next_at':(at+timedelta(seconds=30)).isoformat()})

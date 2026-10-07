@@ -93,6 +93,7 @@ class AnalyticsTests(unittest.TestCase):
            'completedAt':None,'customer':deepcopy(self.customer),'abandonedCheckoutUrl':'https://fixture.myshopify.com/checkouts/'+self.token+'/recover',
            'totalPriceSet':{'shopMoney':{'amount':'199.50','currencyCode':'AUD'}},'shippingAddress':{'countryCodeV2':'AU'}}
         self.shop.checkout.return_value=c
+        c['lineItems']={'nodes':[{'title':'Fixture artwork','quantity':1}], 'pageInfo':{'hasNextPage':False}}
         return a,c
 
     def add(self,a,c):
