@@ -22,7 +22,8 @@ class Engine:
         ok,reason=eligibility(c,self.store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))
         context={'first_name':(c or {}).get('firstName') or 'there','store_url':'https://www.sportscaveshop.com'}
         automation=self.store.get('automations',enrollment['automation_id']) if enrollment else None
-        checkout_flow=bool(automation and automation['trigger_type']=='abandoned')
+        snapshot=(enrollment.get('steps') or [{}])[0] if enrollment else {}
+        checkout_flow=bool(automation and snapshot.get('trigger',automation['trigger_type'])=='abandoned')
         if checkout_flow and not (c or {}).get('email'):return c,context,'missing_email'
         if not ok and not checkout_flow:return c,context,reason
         if enrollment:
@@ -33,13 +34,18 @@ class Engine:
             frozen=enrollment['steps'][0] if enrollment.get('steps') else {}
             if frozen.get('automation_version'):
                 current=enrollment['steps'][enrollment['current_step']] if enrollment['current_step']<len(enrollment['steps']) else None
-                if not current or not any(s.get('step_id')==current['step_id'] for s in a['steps']):return c,context,'automation_step_removed'
+                # Existing journeys own immutable sequences, including steps
+                # removed or disabled in a later publication.
+                if not current:return c,context,'automation_sequence_complete'
                 from crm_automation_definition import qualifies
                 kind=frozen['trigger']
                 from crm_automation_capabilities import require as require_trigger
                 require_trigger(self.store,kind)
                 identity_rules=[r for r in frozen['rules'] if r['field'] in ('market','customer_country')]
                 if not qualifies({'rules':identity_rules},c):return c,context,'automation_rules_changed'
+                if frozen.get('exit_on_purchase') and kind not in ('abandoned','win_back'):
+                    last=date((c.get('lastOrder') or {}).get('createdAt'))
+                    if last and last>date(enrollment['trigger_at']):return c,context,'recent_purchase'
             if kind=='abandoned':
                 if enrollment.get('checkout_key'):
                     state=self.store.q('SELECT status FROM crm_shopify_checkouts WHERE checkout_key=%s',(enrollment['checkout_key'],),True)
@@ -88,7 +94,7 @@ class Engine:
                     if not qualifies({'rules':frozen['rules']},c,order_facts(self.shop,order,frozen['rules'])):return c,context,'automation_rules_changed'
             elif kind=='win_back':
                 last=date((c.get('lastOrder') or {}).get('createdAt'))
-                if not last or int(c['numberOfOrders'])<1 or last>self.clock()-timedelta(days=int(a['config'].get('days',180))):return c,context,'recent_purchase'
+                if not last or int(c['numberOfOrders'])<1 or last>self.clock()-timedelta(days=int(frozen.get('inactive_days',a['config'].get('days',180)))):return c,context,'recent_purchase'
         return c,context,''
     def send_one(self,send_id=None):
         if not (self.config.enabled or self.config.tests_enabled):return False
@@ -167,6 +173,11 @@ class Engine:
                 records=WorkspaceRecords(self.store.connect)
                 hours=content['document']['smart_hours'] if content.get('format') in ('campaign_delivery_v1','automation_delivery_v1') else records.setting('sending')['value']['smart_hours']
                 if records.frequency_blocked(recipient_hash(address),hours):
+                    if content.get('format')=='automation_delivery_v1':
+                        # Keep short configured sequences alive while honoring
+                        # the shared frequency policy across flows/campaigns.
+                        self.store.q("UPDATE crm_marketing_sends SET status='PENDING',due_at=now()+interval '1 hour',lease_until=NULL,error_code='smart_sending_deferred' WHERE id=%s AND lease_token=%s",(row['id'],row['lease_token']))
+                        return True
                     self.store.finish_send(row,'BLOCKED','smart_sending');return True
             self.hold_lease()
             if not self.store.begin_send(row,digest,recipient_hash(address)):
@@ -184,14 +195,15 @@ class Engine:
                 self.store.set_state('checkout-send-error:'+str(row['id']),{'message':str(exc)})
         except Exception as exc:
             from email_service import EmailDeliveryError
-            if enrollment and enrollment.get('checkout_key'):
+            if enrollment:
                 message=exc.safe_message if isinstance(exc,EmailDeliveryError) else ('Verification failed: '+type(exc).__name__)
-                self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None)})
+                try:self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None)})
+                except Exception:logging.getLogger(__name__).warning('automation_error_detail_deferred send_id=%s',row['id'])
             if submitting:
                 # No automatic replay after potentially accepted submission, including process crashes.
                 from email_service import EmailDeliveryError
                 known_rejection=isinstance(exc,EmailDeliveryError) and exc.status_code in (400,401,403,404,405,422,429)
-                if known_rejection and exc.status_code==429 and enrollment and enrollment.get('checkout_key') and row['attempts']<5:
+                if known_rejection and exc.status_code==429 and enrollment and row['attempts']<5:
                     self.store.q("UPDATE crm_marketing_sends SET status='PENDING',error_code='provider_rate_limited',due_at=now()+interval '5 minutes',lease_until=NULL WHERE id=%s AND lease_token=%s AND status='SUBMITTING'",(row['id'],row['lease_token']))
                 else:self.store.finish_send(row,'FAILED' if known_rejection else 'UNCERTAIN','provider_rejected' if known_rejection else 'submission_uncertain')
                 if enrollment and enrollment.get('checkout_key'):

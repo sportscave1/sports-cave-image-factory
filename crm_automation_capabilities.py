@@ -8,7 +8,7 @@ from crm_logic import date, now
 EXPECTED_SCOPES = ('read_customers','read_orders','write_pixels','read_customer_events','write_marketing_events')
 TOPICS = {'welcome':('CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE',),
           'abandoned':('CHECKOUTS_CREATE','CHECKOUTS_UPDATE','ORDERS_CREATE','ORDERS_PAID'),
-          'post_purchase':('ORDERS_PAID',), 'fulfilled':('ORDERS_FULFILLED',)}
+          'post_purchase':('ORDERS_PAID',), 'fulfilled':('ORDERS_FULFILLED',), 'win_back':('ORDERS_PAID',)}
 CONNECTION = '''query AutomationCapabilities { shop { id primaryDomain { url } } currentAppInstallation { app { apiKey } accessScopes { handle } } }'''
 PIXEL = 'query AutomationPixel { webPixel { id settings } }'
 CREATE_PIXEL = '''mutation AutomationPixelCreate($pixel:WebPixelInput!) {

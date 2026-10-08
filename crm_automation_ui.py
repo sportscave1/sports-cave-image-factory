@@ -25,6 +25,7 @@ def changed():
 
 
 def open_flow(identity):
+    st.session_state['automation_composing']=False
     st.session_state['automation_selected']=str(identity)
     st.session_state.pop('automation_editor',None);st.query_params['automation']=str(identity)
     st.rerun()
@@ -33,6 +34,7 @@ def open_flow(identity):
 @st.dialog('Create automation',width='small')
 def chooser(store,user):
     st.caption('Choose a trigger. Publishing listens for future events only.')
+    st.caption('Win Back uses a scheduled customer inactivity scan. Identifiable abandoned-cart events are not available; checkout recovery uses verified Shopify checkouts.')
     for kind,(name,label,_) in TRIGGERS.items():
         if st.button(name+' · '+label,key='auto_create_'+kind,use_container_width=True):
             row=store.create(user,kind);changed();open_flow(row['id'])
@@ -139,6 +141,13 @@ def detail(shop,store,actions,identity):
     from crm_campaign_recovery import flush_current
     from crm_html_workspace import html_document,composer_styles
     user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
+    if not st.session_state.get('automation_composing'):
+        from crm_flow_builder import builder
+        builder(store,user,row)
+        return
+    if st.button('← Flow Builder',key='back_to_sequence'):
+        if flush_current(force=True):
+            st.session_state['automation_composing']=False;st.session_state.pop('automation_editor',None);st.rerun(scope='fragment')
     publication=row['config'].get('publication') or {}
     if publication.get('state')=='FAILED':st.error(publication.get('error') or 'Publication failed. Review the saved draft and retry.')
     if publication.get('state')=='PUBLISHING':st.caption('Publishing saved revision '+str(publication['revision'])+' · you can continue editing the next draft.')
@@ -146,7 +155,8 @@ def detail(shop,store,actions,identity):
         if flush_current():
             st.session_state.pop('_automation_preview_open',None)
             st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
-    title,action=st.columns([3,1]);title.subheader(row['name']);title.caption(status(row)+' · Published version '+str(row['config']['published_version']))
+    from crm_flow_builder import display_name
+    title,action=st.columns([3,1]);title.subheader(display_name(row['name']));title.caption(status(row)+' · Published version '+str(row['config']['published_version']))
     if row['status']=='ACTIVE' and not readonly:
         if action.button('Pause'):store.lifecycle(user,identity,'pause');changed();st.rerun()
     elif row['status']=='PAUSED' and not readonly:
@@ -199,7 +209,8 @@ def detail(shop,store,actions,identity):
         if st.button('Save draft',key=key+'save'):
             if flush_current(force=True):changed();st.toast('Draft saved')
         test_control(store,user,editor,key,cfg=cfg)
-        publish_requested=st.button('Publish now',type='primary',disabled=publication.get('state')=='PUBLISHING',key=key+'publish')
+        confirmed=row['status']!='ACTIVE' or st.checkbox('Publish for new enrollments; preserve existing sequences',key=key+'confirm_live')
+        publish_requested=st.button('Publish now',type='primary',disabled=publication.get('state')=='PUBLISHING' or not confirmed,key=key+'publish')
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     from pathlib import Path
     publish_js=Path(__file__).with_name('components').joinpath('crm_sections','automation_publish.js').read_text(encoding='utf-8')
@@ -251,9 +262,19 @@ def workspace(shop,base,actions,navigate=lambda _:None):
                 if existing['status']=='ACTIVE' and st.button('Pause legacy flow'):
                     store.lifecycle(actions.user,identity,'pause');changed();st.rerun()
             else:
-                with st.container(key='crm-automation-editor'):
-                    detail(shop,store,actions,identity)
+                home(store,actions.user,shop=shop)
+                editor_dialog(shop,store,actions,identity)
         else:
             st.session_state.pop('_automation_preview_open',None)
             home(store,actions.user,shop=shop)
     except (StoreUnavailable,ValueError,PermissionError) as exc:st.warning(str(exc))
+
+
+@st.dialog('Automation editor',width='large',dismissible=False)
+def editor_dialog(shop,store,actions,identity):
+    # Replacing one placeholder clears the previous composer/tabs atomically
+    # when the dialog fragment changes modes.
+    content=st.empty()
+    with content.container():
+        with st.container(key='crm-automation-editor'):
+            detail(shop,store,actions,identity)

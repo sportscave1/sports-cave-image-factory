@@ -16,7 +16,7 @@ def with_email_defaults(doc,cfg):
         from crm_email_blocks import render_blocks,legacy_blocks
         body=render_blocks(result.get('blocks') or legacy_blocks(result['content']),market=result['market'])[0]
         result.update(content_mode='HTML',custom_html='<table role="presentation" width="100%">'+body+'</table>')
-    result['html_sections']=deepcopy(cfg['email_defaults'])
+    result.setdefault('html_sections',deepcopy(cfg['email_defaults']))
     return result
 
 

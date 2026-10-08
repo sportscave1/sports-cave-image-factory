@@ -255,6 +255,7 @@ def read(store,key,load):
 
 
 def activity_html(events,profiles=None):
+    from crm_flow_builder import display_name
     profiles=profiles or {}
     cards=[]
     for event in events:
@@ -262,7 +263,7 @@ def activity_html(events,profiles=None):
         age='Just now' if elapsed is not None and elapsed<60 else str(elapsed//60)+' min ago' if elapsed is not None and elapsed<3600 else stamp.strftime('%d %b · %H:%M UTC') if stamp else '—'
         customer=profiles.get(event.get('customer_id')) or 'Customer '+str(event.get('customer_id') or 'unavailable').rsplit('/',1)[-1]
         initials=''.join(p[0] for p in customer.split()[:2])
-        cards.append('<div class="sc-auto-event"><div class="sc-auto-person"><span class="sc-auto-avatar">'+escape(initials)+'</span><strong>'+escape(customer)+'</strong></div><small>'+escape(event['name'])+'</small><span>'+escape(event['event'])+'</span><small>'+escape(age)+'</small></div>')
+        cards.append('<div class="sc-auto-event"><div class="sc-auto-person"><span class="sc-auto-avatar">'+escape(initials)+'</span><strong>'+escape(customer)+'</strong></div><small>'+escape(display_name(event['name']))+'</small><span>'+escape(event['event'])+'</span><small>'+escape(age)+'</small></div>')
     return '<div class="sc-auto-activity">'+''.join(cards)+'</div>'
 
 
@@ -336,7 +337,8 @@ def table(shop,store,user,script=None):
                     category='Active' if publication.get('state')=='LIVE' else row['category'].rstrip('s')
                     target='?'+urlencode({'page':'CRM Automations','automation':str(row['id'])})
                     glyph,colour={'welcome':(7,'blue'),'post_purchase':(8,'gold'),'fulfilled':(8,'green'),'winback':(4,'rose')}.get(row['trigger_type'],(0,'gold'))
-                    name='<div class="sc-auto-name">'+icon(glyph,colour)+'<div><a href="'+escape(target,quote=True)+'" target="_self">'+escape(row['name'])+'</a><small>'+escape(label)+'</small></div></div>'
+                    from crm_flow_builder import display_name
+                    name='<div class="sc-auto-name">'+icon(glyph,colour)+'<div><a href="'+escape(target,quote=True)+'" target="_self">'+escape(display_name(row['name']))+'</a><small>'+escape(label)+(' · '+str(row['email_count'])+' emails' if row.get('email_count') is not None else '')+'</small></div></div>'
                     values=[name,escape(label),*metric_texts(row),
                       '<span data-auto-status="'+str(row['id'])+'">'+status_html(category,publication)+'</span>']
                     st.html('<div class="sc-auto-row">'+''.join('<div>'+('<span data-auto-metric="'+str(row['id'])+':'+str(i)+'">'+value+'</span>' if 2<=i<=8 else value)+'</div>' for i,value in enumerate(values))+'</div>')

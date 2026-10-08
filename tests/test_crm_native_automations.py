@@ -37,6 +37,97 @@ class DefinitionTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class NativeAutomationTests(unittest.TestCase):
+    def test_claimed_send_rechecks_rescheduled_deadline_before_submission(self):
+        a=self.published();j=self.enroll(a);advance(self.engine,self.due(j))
+        receipt=self.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],),True)
+        claimed=self.store.claim_send(send_id=receipt['id'])
+        self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()+interval '1 hour' WHERE id=%s",(j['id'],))
+        self.assertIsNone(self.store.begin_send(claimed,'fixture',claimed['recipient_hash']))
+        self.provider.send.assert_not_called()
+
+    def test_two_workers_cannot_claim_or_send_the_same_due_step(self):
+        from concurrent.futures import ThreadPoolExecutor
+        a=self.published();j=self.enroll(a);advance(self.engine,self.due(j))
+        receipt=self.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],),True)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claims=list(pool.map(lambda _:AutomationStore(connect).claim_send(send_id=receipt['id']),range(2)))
+        self.assertEqual(sum(c is not None for c in claims),1)
+        self.store.q("UPDATE crm_marketing_sends SET lease_until=now()-interval '1 second' WHERE id=%s",(receipt['id'],))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda _:self.engine.send_one(send_id=receipt['id']),range(2)))
+        self.provider.send.assert_called_once()
+
+    def test_flow_retry_known_rejection_reuses_receipt_and_never_replays_uncertain(self):
+        from email_service import EmailDeliveryError
+        a=self.published();j=self.enroll(a);advance(self.engine,self.due(j))
+        self.provider.send.side_effect=EmailDeliveryError('Rejected fixture',status_code=422)
+        self.engine.send_one()
+        receipt=self.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],),True)
+        self.assertEqual(receipt['status'],'FAILED')
+        self.store.retry_delivery(ADMIN,a['id'],receipt['id'])
+        self.provider.send.side_effect=lambda *a,**k:str(uuid.uuid4())
+        self.engine.send_one()
+        accepted=self.store.q('SELECT * FROM crm_marketing_sends WHERE id=%s',(receipt['id'],),True)
+        self.assertEqual(accepted['status'],'ACCEPTED');self.assertEqual(accepted['idempotency_key'],receipt['idempotency_key'])
+        with self.assertRaises(ValueError):self.store.retry_delivery(ADMIN,a['id'],receipt['id'])
+        self.store.q("UPDATE crm_marketing_sends SET status='UNCERTAIN',provider_email_id=NULL WHERE id=%s",(receipt['id'],))
+        with self.assertRaises(ValueError):self.store.retry_delivery(ADMIN,a['id'],receipt['id'])
+
+    def test_short_wait_respects_smart_sending_without_stopping_sequence(self):
+        a=self.published();j=self.enroll(a);advance(self.engine,self.due(j))
+        with patch('crm_workspace_store.WorkspaceRecords.frequency_blocked',return_value=True):self.engine.send_one()
+        receipt=self.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],),True)
+        self.assertEqual(receipt['status'],'PENDING');self.assertEqual(receipt['error_code'],'smart_sending_deferred')
+        self.assertGreater(date(receipt['due_at']),now());self.provider.send.assert_not_called()
+
+    def test_resume_spreads_overdue_enrollments_and_preserves_32_sent_receipts(self):
+        a=self.published();template=a['steps'][0]
+        self.store.q('''INSERT INTO crm_automation_enrollments(automation_id,shopify_customer_id,trigger_shopify_id,trigger_key,trigger_at,steps,next_due_at)
+          SELECT %s,'fixture-history-'||i,'fixture-history-'||i,'fixture-history-'||i,now(),%s::jsonb,now()-interval '1 day' FROM generate_series(1,32) i''',
+          (a['id'],__import__('json').dumps(a['steps'])))
+        self.store.q('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,enrollment_id,step_index,status,provider_email_id)
+          SELECT 'history:'||id,shopify_customer_id,'fixture',%s,%s,id,0,'ACCEPTED','fixture-'||id FROM crm_automation_enrollments WHERE automation_id=%s''',
+          (template['template_id'],template['template_version'],a['id']))
+        before=self.store.q('SELECT id,steps FROM crm_automation_enrollments WHERE automation_id=%s ORDER BY id',(a['id'],))
+        self.store.lifecycle(ADMIN,a['id'],'pause');self.store.lifecycle(ADMIN,a['id'],'resume')
+        self.assertEqual(self.store.q('SELECT id,steps FROM crm_automation_enrollments WHERE automation_id=%s ORDER BY id',(a['id'],)),before)
+        self.assertEqual(step_metrics(self.store,a['id'])[0]['sent'],32)
+        self.assertEqual(self.store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s AND next_due_at<=now()',(a['id'],),True)['n'],5)
+
+    def test_flow_builder_disabled_removed_steps_keep_existing_publication_history(self):
+        a=self.published(delays=(0,86400));j=self.enroll(a);old=deepcopy(j['steps'])
+        flow=deepcopy(a['config']['draft']);flow['emails'].pop(0)
+        flow['emails'].append(email_step(document(),3600));flow['emails'][-1]['enabled']=False
+        a=self.store.save_flow(ADMIN,a['id'],a['name'],flow,a['config']['revision'])
+        a=self.store.publish(ADMIN,a['id'],a['config']['revision'],env=LIVE)
+        self.assertEqual(len(a['steps']),1)
+        advance(self.engine,self.due(j));self.engine.send_one()
+        self.provider.send.assert_called_once()
+        self.assertEqual(self.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)['steps'],old)
+        self.assertEqual(step_metrics(self.store,a['id'])[0]['sent'],1)
+
+    def test_new_checkout_defaults_do_not_change_existing_flow_or_send_history(self):
+        a=self.store.create(ADMIN,'abandoned');self.created.append(str(a['id']))
+        self.assertEqual([s['delay_seconds'] for s in a['config']['draft']['emails']],[7200,86400,172800])
+        self.assertEqual(len({s['step_id'] for s in a['config']['draft']['emails']}),3)
+        self.assertEqual(a['status'],'DRAFT')
+        self.assertEqual(self.store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],0)
+
+    def test_native_winback_polling_dedup_and_purchase_exit(self):
+        self.store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{'win_back':'AVAILABLE'}})
+        a=self.published('win_back');self.customer['numberOfOrders']=1
+        self.customer['lastOrder']={'id':'gid://shopify/Order/100','createdAt':(now()-timedelta(days=181)).isoformat()}
+        self.shop.customers.return_value={'nodes':[deepcopy(self.customer)],'pageInfo':{'hasNextPage':False}}
+        self.clock=now()+timedelta(seconds=1)
+        from crm_automation_runtime import reconcile
+        reconcile(self.engine,a)
+        self.store.set_state('reconcile:inactive:'+str(a['id']),{})
+        reconcile(self.engine,a)
+        journeys=self.store.q('SELECT * FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],))
+        self.assertEqual(len(journeys),1)
+        self.customer['lastOrder']['createdAt']=now().isoformat()
+        advance(self.engine,self.due(journeys[0]));self.provider.send.assert_not_called()
+
     def test_legacy_checkout_send_test_fallback_preserves_draft_and_blocks_publish(self):
         from tests.test_crm_checkout_preview_fallback import PreviewFallbackTests
         from crm_campaign_send import send_test

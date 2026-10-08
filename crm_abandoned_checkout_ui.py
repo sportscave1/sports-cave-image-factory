@@ -70,21 +70,7 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
         elif pending and not loading:st.rerun(scope='app')
 
 
-def template_control(editor,key):
-    import streamlit as st
-    context_pair=st.session_state.get('automation_editor_context')
-    if not context_pair:return
-    store,_=context_pair
-    if store.flow(editor['id'])['config']['draft']['trigger']!='abandoned':return
-    st.markdown('**'+TEMPLATE+'**')
-    use,edit=st.columns(2)
-    if use.button('Use',key=key+'checkout_template'):
-        from crm_checkout_template import use as apply_saved
-        apply_saved(store,editor['document']);st.rerun()
-    if edit.button('Edit',key=key+'checkout_template_edit'):edit_master(store,context_pair[1],key)
-
-
-@st.dialog('Abandoned Checkout — Collector Reminder',width='large')
+@st.dialog('Default Abandoned Checkout',width='large')
 def edit_master(store,user,key):
     from crm_checkout_template import load,save
     from crm_checkout_styles import default_html
@@ -101,8 +87,12 @@ def edit_master(store,user,key):
         try:validate(source);apply_template(doc,source)
         except ValueError as exc:
             st.caption(str(exc));apply_template(doc,row['html'])
-        automation_canvas(doc,store.render_settings(),key+'master_preview_',store,current_document=False)
-    st.caption('Keep one protected checkout marker. Use copies this design into the current email; existing drafts are independent.')
+        if getattr(store,'email_mode',None)=='automation':
+            automation_canvas(doc,store.render_settings(),key+'master_preview_',store,current_document=False)
+        else:
+            from crm_checkout_preview import document,sample
+            from crm_campaign_content import render_campaign
+            components.html(render_campaign(document(doc,sample(doc))[0],store.render_settings())['html'],height=440,scrolling=True)
     def reset_html():
         st.session_state[key+'master_html']=default_html()
         row['html']=default_html()

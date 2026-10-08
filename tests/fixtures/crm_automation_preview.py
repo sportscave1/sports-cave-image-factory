@@ -18,7 +18,7 @@ requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionE
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
 
 @st.cache_resource
-def setup(legacy_preview=False):
+def setup(legacy_preview=False,test_run=''):
     store=AutomationStore(connect)
     from crm_logic import now
     store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
@@ -39,7 +39,7 @@ def setup(legacy_preview=False):
         identities.append(str(row['id']))
     return identities
 
-identities=setup(bool(st.query_params.get('fixture_legacy')))
+identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')))
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
 from tests.test_crm_abandoned_checkout import checkout

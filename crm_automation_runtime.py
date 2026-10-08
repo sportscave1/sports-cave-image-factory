@@ -97,6 +97,8 @@ def process_event(engine,event,automations):
 
 
 def reconcile(engine,a):
+    if a['trigger_type']=='win_back':
+        return reconcile_inactive(engine,a)
     if a['trigger_type']!='abandoned':return
     state_key='reconcile:native:'+str(a['id'])+':'+str(a['config']['published_version'])+':'+str(a['activated_at'])
     state=engine.store.state(state_key);at=engine.clock()
@@ -163,6 +165,22 @@ def reconcile(engine,a):
             LOG.info('checkout_evaluated checkout_key=%s automation_id=%s enrolled=%s',key,a['id'],bool(entered))
     engine.store.set_state(state_key,{'next_at':(at+timedelta(seconds=30)).isoformat()})
     LOG.info('checkout_reconcile_complete automation_id=%s scanned=%s',a['id'],len(candidates))
+
+
+def reconcile_inactive(engine,a):
+    """Bounded existing Shopify customer scan; stable customer/order identity."""
+    from crm_automation_capabilities import require as require_trigger
+    require_trigger(engine.store,'win_back')
+    key='reconcile:inactive:'+str(a['id']);state=engine.store.state(key);at=engine.clock()
+    if date(state.get('next_at')) and date(state['next_at'])>at:return
+    page=engine.shop.customers(state.get('cursor'),fresh=True)
+    days=a['config']['published'].get('inactive_days',180)
+    for c in page['nodes']:
+        last=c.get('lastOrder') or {};occurred=date(last.get('createdAt'))
+        if consent(c)=='SUBSCRIBED' and occurred and last.get('id') and occurred<=at-timedelta(days=days):
+            enter(engine,a,c['id'],last['id'],c['id']+':'+last['id'],at,recipient=c)
+    more=page['pageInfo'].get('hasNextPage')
+    engine.store.set_state(key,{'cursor':page['pageInfo'].get('endCursor') if more else None,'next_at':(at+timedelta(seconds=2 if more else 300)).isoformat()})
 
 
 def advance(engine,enrollment):

@@ -33,3 +33,8 @@ def brand_templates_settings(store,user,cfg=None,target=None):
                     row=store.email_default(kind,store.render_settings() if cfg is None else cfg)
                 edit_default(store,user,kind,row,target)
             except (ValueError,StoreUnavailable):st.error('Template could not be loaded.')
+    label,action=st.columns([3,1],vertical_alignment='center')
+    label.write('Default Abandoned Checkout')
+    if action.button('Edit',key='edit_email_default_checkout',disabled=not os_accounts.can_access_page(user,'crm_automations_manage')):
+        from crm_abandoned_checkout_ui import edit_master
+        edit_master(store,user,'email_default_checkout_')

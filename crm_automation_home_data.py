@@ -11,7 +11,7 @@ def counts(store):
 
 def identities(store,*,search='',trigger='All',oldest=False,offset=0):
     """Critical first paint: bounded identities/status only, no event/order joins."""
-    return store.q("SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,a.config->>'revision' AS requested_revision,a.config->>'published_version' AS active_version,a.config->'publication' AS publication,"+CATEGORY+" AS category FROM crm_automations a WHERE "+VISIBLE+" AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s) ORDER BY a.updated_at "+('ASC' if oldest else 'DESC')+",a.id LIMIT %s OFFSET %s",(search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
+    return store.q("SELECT a.id,a.name,a.trigger_type,a.updated_at,jsonb_array_length(COALESCE(a.config->'draft'->'emails','[]'::jsonb)) AS email_count,a.config->>'format' AS format,a.config->>'revision' AS requested_revision,a.config->>'published_version' AS active_version,a.config->'publication' AS publication,"+CATEGORY+" AS category FROM crm_automations a WHERE "+VISIBLE+" AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s) ORDER BY a.updated_at "+('ASC' if oldest else 'DESC')+",a.id LIMIT %s OFFSET %s",(search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
 
 
 def delivery_summary(store,window):
@@ -38,7 +38,7 @@ def orders_summary(store,window):
 
 def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offset=0):
     return store.q("""WITH page AS (
-      SELECT a.id,a.name,a.trigger_type,a.updated_at,a.config->>'format' AS format,a.config->'publication' AS publication,"""+CATEGORY+""" AS category FROM crm_automations a
+      SELECT a.id,a.name,a.trigger_type,a.updated_at,jsonb_array_length(COALESCE(a.config->'draft'->'emails','[]'::jsonb)) AS email_count,a.config->>'format' AS format,a.config->'publication' AS publication,"""+CATEGORY+""" AS category FROM crm_automations a
       WHERE """+VISIBLE+" AND (%s='All automations' OR ("+CATEGORY+""" )=%s)
         AND position(lower(%s) in lower(a.name))>0 AND (%s='All' OR a.trigger_type=%s)
       ORDER BY a.updated_at """+('ASC' if oldest else 'DESC')+""",a.id LIMIT %s OFFSET %s
@@ -74,6 +74,9 @@ def step_metrics(store,identity):
       JOIN crm_automation_enrollments j ON j.id=s.enrollment_id JOIN crm_template_versions v
       ON v.template_id=s.template_id AND v.version=s.template_version WHERE j.automation_id=%s AND NOT s.test_send)
       SELECT s.step_id,count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED') AS sent,
+      count(DISTINCT s.id) FILTER(WHERE s.status IN ('PENDING','CLAIMED','SUBMITTING')) AS queued,
+      count(DISTINCT s.id) FILTER(WHERE s.status IN ('FAILED','UNCERTAIN')) AS failed,
+      count(DISTINCT s.id) FILTER(WHERE s.status='BLOCKED') AS skipped,
       count(DISTINCT s.id) FILTER(WHERE e.event_type='email.delivered') AS delivered,
       count(DISTINCT s.id) FILTER(WHERE e.event_type='email.opened') AS opened,
       count(DISTINCT s.id) FILTER(WHERE e.event_type='email.clicked') AS clicked,

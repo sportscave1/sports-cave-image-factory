@@ -145,7 +145,7 @@ def new_compose(smart_hours=16,cfg=None,sections=None):
     """Empty composer; first meaningful edit creates a durable checkpoint."""
     from crm_campaign_sections import section_defaults
     doc=new_document();doc.update(content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=deepcopy(sections) if sections is not None else section_defaults(cfg or settings()))
-    if cfg and 'email_defaults' in cfg:doc.pop('html_sections',None)
+    if cfg and 'email_defaults' in cfg:doc['html_sections']=deepcopy(cfg['email_defaults'])
     open_editor({'id':None,'version':None,'name':'Untitled campaign','status':'DRAFT',
                  'archived_at':None,'last_tested_at':None,'document':doc})
 
@@ -166,6 +166,7 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
     from crm_recovery_ui import recovery_bridge
     if available and mode=='campaign':recovery_bridge(drafts,actions.user,editor,key)
     doc=editor['document'];c=doc['content']
+    if 'email_defaults' in cfg:doc.setdefault('html_sections',deepcopy(cfg['email_defaults']))
     before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
         with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
@@ -195,9 +196,6 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     brand_templates_settings(drafts,actions.user,cfg,target=COMPOSER_TARGET)
                     st.divider()
                     from crm_campaign_library import library
-                    if mode=='automation':
-                        from crm_abandoned_checkout_ui import template_control
-                        template_control(editor,key)
                     library(drafts,actions.user,doc,target=COMPOSER_TARGET)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False

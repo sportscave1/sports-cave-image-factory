@@ -25,6 +25,9 @@ def validate_middle(sections):
         ids.add(s['id'])
         if type(s.get('visible')) is not bool: raise ValueError('Invalid section visibility.')
         common = {'id', 'type', 'visible'}
+        if 'name' in s:
+            if not isinstance(s['name'],str) or not s['name'].strip() or len(s['name'])>80:raise ValueError('Use a section name of 1–80 characters.')
+            common.add('name')
         if s.get('type') == 'html':
             if set(s) != common | {'html_number', 'html'} or type(s['html_number']) is not int or not 1 <= s['html_number'] <= 10000 or s['html_number'] in numbers or not isinstance(s['html'], str):
                 raise ValueError('Invalid HTML section.')
@@ -94,6 +97,11 @@ def apply_event(doc, event):
             raise ValueError('Section cannot be restored here.')
         sections.insert(min(position,len(sections)),restored)
     elif selected is None: raise ValueError('Section not found.')
+    elif kind == 'rename': selected['name'] = event.get('name','').strip()
+    elif kind == 'duplicate':
+        copied=deepcopy(selected);copied['id']=uuid.uuid4().hex
+        if copied['type']=='html':copied['html_number']=max(s.get('html_number',0) for s in sections)+1
+        sections.insert(sections.index(selected)+1,copied)
     elif kind == 'visible': selected['visible'] = event.get('visible')
     elif kind == 'html' and selected['type'] in ('html', 'image'): selected['html'] = event.get('html')
     elif kind == 'settings' and selected['type'] == 'catalogue': selected['settings'] = deepcopy(event.get('settings'))
@@ -118,6 +126,7 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
     for s in middle_sections(doc):
         if not s['visible']: continue
         if s['type']=='abandoned_checkout_products':raise ValueError('Resolve checkout data before rendering this automation.')
+        if 'SC_ABANDONED_CHECKOUT' in s.get('html',''):raise ValueError('Abandoned Checkout requires a checkout recovery automation. Campaign recipients have no checkout context.')
         source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,

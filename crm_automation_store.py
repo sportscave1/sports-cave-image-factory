@@ -33,6 +33,15 @@ class AutomationStore(CampaignStore):
         doc['html_sections']=self.default_sections(rendering)
         commit_middle(doc,middle_sections(doc))
         cfg['draft']['emails'][0]['document']=doc
+        if trigger=='abandoned':
+            from crm_automation_definition import email_step
+            from crm_abandoned_checkout import apply_template
+            apply_template(doc)
+            cfg['draft']['emails']=[email_step(doc,delay) for delay in (7200,86400,172800)]
+            for index,step in enumerate(cfg['draft']['emails']):
+                step.update(name=('First Reminder','Second Reminder','Final Reminder')[index],enabled=True)
+                step['document']['content']['subject']=('Your Sports Cave checkout','A reminder about your Sports Cave checkout','Your Sports Cave checkout link')[index]
+            cfg['draft']['exit_on_purchase']=True
         return self.q("""INSERT INTO crm_automations(id,automation_key,name,trigger_type,config)
           VALUES(%s,%s,%s,%s,%s::jsonb) RETURNING *""",(identity,'native:'+identity,name or TRIGGERS[trigger][0],trigger,json.dumps(cfg)),True)
 
@@ -53,6 +62,24 @@ class AutomationStore(CampaignStore):
     def request_publish(self,user,identity,revision):
         from crm_automation_publication import request
         return request(self,user,identity,revision)
+
+    def retry_delivery(self,user,identity,send_id):
+        """Explicit retry of a known rejection, using the same immutable receipt."""
+        require(user,'crm_automations_manage')
+        with self.db() as conn:
+            flow=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+            if not flow or not native(flow) or status(flow)!='ACTIVE':raise ValueError('Resume the flow before retrying.')
+            item=conn.execute('SELECT enrollment_id FROM crm_marketing_sends WHERE id=%s AND NOT test_send',(send_id,)).fetchone()
+            if not item:raise ValueError('Send unavailable.')
+            journey=conn.execute('SELECT * FROM crm_automation_enrollments WHERE id=%s AND automation_id=%s FOR UPDATE',(item['enrollment_id'],identity)).fetchone()
+            send=conn.execute('SELECT * FROM crm_marketing_sends WHERE id=%s FOR UPDATE',(send_id,)).fetchone()
+            retryable=('provider_rejected','revalidation_unavailable')
+            if not journey or send['status']!='FAILED' or send.get('provider_email_id') or send.get('error_code') not in retryable or send['step_index']!=journey['current_step']:
+                raise ValueError('This send cannot be retried safely. Accepted or uncertain sends are never replayed.')
+            if journey['status']!='ACTIVE' and not (journey['status']=='STOPPED' and journey['stop_reason'] in retryable):raise ValueError('Recipient has exited the flow.')
+            conn.execute("UPDATE crm_automation_enrollments SET status='ACTIVE',retry_after=NULL,next_due_at=now(),stop_reason='' WHERE id=%s",(journey['id'],))
+            conn.execute("UPDATE crm_marketing_sends SET status='PENDING',due_at=now(),lease_until=NULL WHERE id=%s",(send_id,))
+        return True
 
     def publish(self,user,identity,revision,*,env=None):
         """Authoritative synchronous executor retained for internal/local callers.
@@ -88,6 +115,14 @@ class AutomationStore(CampaignStore):
         interval=str(shift.total_seconds())+' seconds'
         conn.execute("UPDATE crm_automation_enrollments SET next_due_at=next_due_at+%s::interval,updated_at=now() WHERE automation_id=%s AND status='ACTIVE'",(interval,identity))
         conn.execute("UPDATE crm_marketing_sends s SET due_at=s.due_at+%s::interval FROM crm_automation_enrollments e WHERE s.enrollment_id=e.id AND e.automation_id=%s AND s.status IN ('PENDING','CLAIMED')",(interval,identity))
+        # Spread already-overdue work across normal worker cycles. Future
+        # schedules retain their remaining wait instead of being reset.
+        conn.execute("""WITH overdue AS (
+          SELECT id,row_number() OVER(ORDER BY next_due_at,id)-1 AS position
+          FROM crm_automation_enrollments WHERE automation_id=%s AND status='ACTIVE' AND next_due_at<%s)
+          UPDATE crm_automation_enrollments e SET next_due_at=%s::timestamptz+(o.position/5)*interval '30 seconds'
+          FROM overdue o WHERE e.id=o.id""",(identity,at,at))
+        conn.execute("UPDATE crm_marketing_sends s SET due_at=GREATEST(s.due_at,e.next_due_at) FROM crm_automation_enrollments e WHERE s.enrollment_id=e.id AND e.automation_id=%s AND s.status IN ('PENDING','CLAIMED')",(identity,))
 
     def duplicate(self,user,identity):
         require(user,'crm_automations_manage')

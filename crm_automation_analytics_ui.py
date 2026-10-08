@@ -217,6 +217,10 @@ def content(shop,store,user,identity,period,bounds):
     if not row or row['config'].get('deleted_at'):st.warning('Automation unavailable.');return
     if row['trigger_type']=='abandoned':
         checkout_panel(shop,store,user,row,window('All time'),'All time')
+        with st.expander('Per-email performance and scheduling',on_change='rerun',key='checkout-flow-performance-'+str(identity)) as step_panel:
+            from crm_flow_builder import activity as flow_activity
+            from crm_automation_definition import native
+            if step_panel.open and native(row):flow_activity(store,row,user)
         with poll:arm('auto-analytics-definition-poll',2 if st.session_state.get('checkout-enrollment-pending') else 1 if st.session_state.get('automation-analytics-pending') else 30)
         return
     st.subheader('Automation analytics')

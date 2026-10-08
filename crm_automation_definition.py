@@ -10,6 +10,7 @@ TRIGGERS = {
     'post_purchase': ('Post-purchase', 'Order paid', 'orders/paid'),
     'abandoned': ('Abandoned checkout', 'Checkout abandoned', 'checkouts/create + checkouts/update'),
     'fulfilled': ('Fulfilment follow-up', 'Order fulfilled', 'orders/fulfilled'),
+    'win_back': ('Win Back', 'Customer inactive', 'Shopify customer / last order polling'),
 }
 MARKETS = ('Any', 'AU', 'NZ', 'US', 'UK', 'CA')
 RULE_FIELDS={'market':'Market','customer_country':'Customer country','checkout_country':'Checkout country','product_purchased':'Product purchased','order_value':'Order value'}
@@ -26,7 +27,7 @@ def new_flow(trigger='welcome'):
 
 
 def validate(flow):
-    if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request','timing_version'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
+    if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request','timing_version','inactive_days','exit_on_purchase'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
         raise ValueError('Invalid automation definition.')
     if flow.get('timing_version',1) not in (1,2) or (flow.get('timing_version')==2 and 'abandonment_seconds' in flow):
         raise ValueError('Use the single Delay setting for this flow.')
@@ -39,6 +40,9 @@ def validate(flow):
     if type(flow.get('abandonment_seconds',3600)) is not int or not 60<=flow.get('abandonment_seconds',3600)<=7*86400:
         raise ValueError('Abandonment qualification must be between one minute and seven days.')
     if flow['trigger'] not in TRIGGERS: raise ValueError('Choose a supported trigger.')
+    if type(flow.get('inactive_days',180)) is not int or not 1<=flow.get('inactive_days',180)<=3650:raise ValueError('Inactivity must be 1–3650 days.')
+    if type(flow.get('exit_on_purchase',True)) is not bool:raise ValueError('Invalid purchase exit.')
+    if flow['trigger'] in ('abandoned','win_back') and not flow.get('exit_on_purchase',True):raise ValueError('Recovery flows must exit on purchase.')
     if type(flow['reentry_days']) is not int or flow['reentry_days'] not in (0,7,30,90):
         raise ValueError('Choose once ever or a 7, 30 or 90 day re-entry cooldown.')
     if not isinstance(flow['rules'], list) or len(flow['rules']) > 12:
@@ -59,7 +63,9 @@ def validate(flow):
     if not isinstance(flow['emails'],list) or not flow['emails']: raise ValueError('Add an email.')
     seen=set()
     for step in flow['emails']:
-        if not isinstance(step,dict) or set(step) != {'step_id','delay_seconds','document'}: raise ValueError('Invalid email step.')
+        if not isinstance(step,dict) or set(step)-{'step_id','delay_seconds','document','name','enabled'} or not {'step_id','delay_seconds','document'}.issubset(step): raise ValueError('Invalid email step.')
+        if type(step.get('enabled',True)) is not bool:raise ValueError('Invalid email enabled state.')
+        if not isinstance(step.get('name',''),str) or len(step.get('name',''))>150:raise ValueError('Email names must be at most 150 characters.')
         try:identity=str(uuid.UUID(step['step_id']))
         except (ValueError,TypeError,AttributeError):raise ValueError('Invalid email step identity.') from None
         if identity in seen: raise ValueError('Duplicate email step identity.')

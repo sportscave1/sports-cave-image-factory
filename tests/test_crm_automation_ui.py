@@ -132,7 +132,7 @@ class AutomationUiTests(unittest.TestCase):
         self.assertEqual(list(dict.fromkeys(k[1][0] for k in app.session_state['requests'] if k[0]=='table')),['','Reminder'])
 
     def test_same_composer_preview_templates_and_test_send_are_called(self):
-        source=Path('crm_automation_ui.py').read_text()
+        source=Path('crm_automation_ui.py').read_text(encoding='utf-8')
         for name in ('composer_form(','test_control(','mode=\'automation\'','composer_canvas('):self.assertIn(name,source)
         self.assertIn('automation_size_meter(cache)',Path('crm_abandoned_checkout_ui.py').read_text(encoding='utf8'))
         self.assertNotIn('text_area(',source)

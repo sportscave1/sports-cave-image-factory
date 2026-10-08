@@ -142,10 +142,10 @@ class Store:
          FROM due WHERE s.id=due.id RETURNING s.*''',(allow_test,allow_customer,send_id,send_id),one=True)
     def begin_send(self,row,request_hash,hashed):
         sql="""UPDATE crm_marketing_sends SET status='SUBMITTING',request_hash=%s,recipient_hash=%s,first_submitted_at=now(),updated_at=now()
-         WHERE id=%s AND status='CLAIMED' AND lease_token=%s AND lease_until>now()
+         WHERE id=%s AND status='CLAIMED' AND lease_token=%s AND lease_until>now() AND due_at<=now()
          AND (campaign_id IS NULL OR EXISTS(SELECT 1 FROM crm_campaigns c WHERE c.id=campaign_id AND c.status='SENDING'))
          AND (enrollment_id IS NULL OR EXISTS(SELECT 1 FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id
-              WHERE e.id=enrollment_id AND e.status='ACTIVE' AND a.status='ACTIVE')) RETURNING *"""
+              WHERE e.id=enrollment_id AND e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND e.current_step=step_index)) RETURNING *"""
         args=(request_hash,hashed,row['id'],row['lease_token'])
         if not row.get('enrollment_id'):return self.q(sql,args,True)
         with self.db() as conn:

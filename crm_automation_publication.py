@@ -29,7 +29,9 @@ def preflight(row,revision):
     if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
     from crm_automation_timing import single_delay
     flow=validate(single_delay(row['config']['draft']))
+    if not any(s.get('enabled',True) for s in flow['emails']):raise ValueError('Enable at least one email before publishing.')
     for step in flow['emails']:
+        if not step.get('enabled',True):continue
         subject=step['document']['content']['subject'].strip()
         if not subject:raise ValueError('Add a subject before publishing.')
         if re.match(r'\s*(re|fwd?)\s*:',subject,re.I):raise ValueError('Use a truthful subject without RE: or FWD:.')
@@ -68,6 +70,7 @@ def prepare(store,identity,flow,version,name,env=None):
     flow=validate(migrate_flow(flow));cfg=store.render_settings(env)
     require_trigger(store,flow['trigger']);bundles=[];steps=[]
     for index,step in enumerate(flow['emails']):
+        if not step.get('enabled',True):continue
         doc=with_email_defaults(production_document(step['document']),cfg)
         validation_doc=publication_document(doc,flow['trigger'])
         failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True).items() if not v]
@@ -84,7 +87,8 @@ def prepare(store,identity,flow,version,name,env=None):
         bundles.append((template_id,name+' · Email '+str(index+1),content))
         steps.append({'type':'send','step_id':step['step_id'],'delay_seconds':step['delay_seconds'],
                       'template_id':template_id,'template_version':version,'automation_version':version,
-                      'trigger':flow['trigger'],'rules':flow['rules']})
+                      'trigger':flow['trigger'],'rules':flow['rules'],'name':step.get('name') or 'Email '+str(index+1),
+                      'inactive_days':flow.get('inactive_days',180),'exit_on_purchase':flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back'))})
     return flow,bundles,steps
 
 
@@ -98,6 +102,7 @@ def commit(store,conn,row,flow,bundles,steps,version,publication=None):
         conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(template_id,version,json.dumps(content)))
     config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
     config['published']['timing_version']=flow.get('timing_version',1)
+    config['published'].update(inactive_days=flow.get('inactive_days',180),exit_on_purchase=flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back')))
     if flow.get('timing_version')!=2:config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
     if config.get('paused_at'):store._resume_due(conn,identity,config['paused_at'],now())
     config.pop('paused_at',None)
