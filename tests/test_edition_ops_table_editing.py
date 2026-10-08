@@ -48,8 +48,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             edition_ops._render_table()
         kwargs = fake_st.data_editor.call_args.kwargs
         self.assertEqual(kwargs["column_order"], (
-            "product_title", "handle", "edition_enabled", "edition_total", "edition_next_number",
-            "edition_sold_count", "edition_remaining", "sync_status", "admin_url", "online_store_url",
+            "product_title", "edition_next_number", "edition_total", "sync_status", "admin_url", "online_store_url",
         ))
         for field in ("edition_total", "edition_next_number", "edition_enabled"):
             self.assertNotIn(field, kwargs["disabled"])
@@ -102,6 +101,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         def override(handle, **kw):
             next(row for row in stored if row['handle']==handle)['edition_next_number']=kw['next_number']
             return {'id':kw['request_id']}
+        self.stack.enter_context(patch.object(edition_cursor_overrides,'require_schema'))
         cursor_save=self.stack.enter_context(patch.object(edition_cursor_overrides,'save',side_effect=override))
         self.stack.enter_context(patch('edition_version_ui.sync_status'))
 
@@ -149,7 +149,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         self.assertEqual(stored[1], {**_product(2),"edition_run_id":"test-run"})
         backend.update_edition_products_batch.assert_not_called()
         self.assertEqual(cursor_save.call_args.kwargs['expected_next'],1)
-        self.assertFalse(cursor_save.call_args.kwargs['acknowledged'])
+        self.assertNotIn('acknowledged',cursor_save.call_args.kwargs)
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_sold_count"], 0)
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_remaining"], 100)
         self.assertIn("0 unsaved changes", " ".join(item.value for item in app.caption))

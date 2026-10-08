@@ -46,11 +46,10 @@ def save(rows,**kw):
 backend=types.SimpleNamespace(update_edition_products_batch=save)
 def cursor_save(handle,**kw):
     target=next(r for r in data['rows'] if r['handle']==handle)
-    if kw['next_number']<=9 and not kw['acknowledged']:
-        raise ValueError('DUPLICATE_ACK_REQUIRED')
     data['saves']+=1;target['edition_next_number']=kw['next_number']
     return {'id':kw['request_id']}
 edition_cursor_overrides.save=cursor_save
+edition_cursor_overrides.require_schema=lambda:None
 edition_version_ui.sync_status=lambda:st.caption('Fixture Shopify confirmation pending; no network calls')
 ops._configured_supabase_backend=lambda:backend
 ops._load_snapshot=snapshot

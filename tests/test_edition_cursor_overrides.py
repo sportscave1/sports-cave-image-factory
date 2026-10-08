@@ -6,6 +6,42 @@ import supabase_backend as backend
 
 
 class CursorOverrideTests(EditionVersionTests):
+    def test_reported_products_numbers_and_limit_changes_keep_history(self):
+        self.allocate(quantity=5)
+        self.q('UPDATE edition_products SET sold_count=94,remaining_count=6,next_edition_number=95,last_assigned_edition=94 WHERE id=%s',(self.product,))
+        self.q('UPDATE edition_runs SET next_edition_number=95 WHERE id=%s',(self.old,))
+        history=self.q('SELECT * FROM edition_orders WHERE edition_run_id=%s ORDER BY id',(self.old,))
+        for title in ('Sam Kerr','Cade Cunningham','Chase Elliott','Dale Earnhardt Sr.','Dale Jarrett & Ned Jarrett','Darrell Waltrip','Devin Booker','Dick Johnson & John Bowe'):
+            self.q('UPDATE edition_products SET product_title=%s WHERE id=%s',(title,self.product))
+            for number in (1,5,50,95,100):
+                self.override(number)
+                p=self.q('SELECT next_edition_number,sold_count,remaining_count FROM edition_products WHERE id=%s',(self.product,))[0]
+                self.assertEqual(p,dict(next_edition_number=number,sold_count=94,remaining_count=6))
+        overrides.save(self.handle,run_id=self.old,expected_next=100,next_number=5,expected_limit=100,edition_limit=90,
+            request_id=str(uuid.uuid4()),actor_id=self.actor)
+        self.assertEqual(self.q('SELECT sold_count,edition_total,next_edition_number FROM edition_products WHERE id=%s',(self.product,))[0],dict(sold_count=94,edition_total=90,next_edition_number=5))
+        self.assertEqual(history,self.q('SELECT * FROM edition_orders WHERE edition_run_id=%s ORDER BY id',(self.old,)))
+        with self.assertRaisesRegex(RuntimeError,'limit|sold out|not active|disabled'):self.allocate()
+
+    def test_inconsistent_legacy_counters_do_not_gate_manual_save(self):
+        self.q('UPDATE edition_products SET sold_count=94,remaining_count=96 WHERE id=%s',(self.product,))
+        self.override(5)
+        self.assertEqual(self.q('SELECT sold_count,remaining_count,next_edition_number FROM edition_products WHERE id=%s',(self.product,))[0],dict(sold_count=94,remaining_count=96,next_edition_number=5))
+
+    def test_order_and_admin_race_is_serialized_without_duplicate_order(self):
+        from concurrent.futures import ThreadPoolExecutor
+        def edit():
+            try:return self.override(5,expected=1)
+            except RuntimeError as exc:return str(exc)
+        order='777'+str(self.product)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            editing=pool.submit(edit);allocating=pool.submit(self.allocate,order)
+            result=editing.result();allocated=allocating.result()[0]['allocation']
+        p=self.q('SELECT next_edition_number,sold_count FROM edition_products WHERE id=%s',(self.product,))[0]
+        self.assertEqual(p['sold_count'],1)
+        self.assertEqual(p['next_edition_number'],6 if isinstance(result,dict) else 2)
+        self.assertEqual(self.allocate(order)[0]['allocation']['id'],allocated['id'])
+
     def test_competing_edits_only_one_expected_cursor_wins(self):
         from concurrent.futures import ThreadPoolExecutor
         def attempt(n):
@@ -27,8 +63,7 @@ class CursorOverrideTests(EditionVersionTests):
         self.q('UPDATE edition_products SET sold_count=94,remaining_count=6,last_assigned_edition=94,next_edition_number=95 WHERE id=%s',(self.product,))
         self.q('UPDATE edition_runs SET next_edition_number=95,allocation_baseline_sold_count=89 WHERE id=%s',(self.old,))
         before=self.q('SELECT * FROM edition_orders WHERE edition_run_id=%s ORDER BY id',(self.old,))
-        with self.assertRaisesRegex(RuntimeError,'DUPLICATE_ACK_REQUIRED'):self.override(5)
-        result=self.override(5,ack=True)
+        result=self.override(5)
         p=self.q('SELECT * FROM edition_products WHERE id=%s',(self.product,))[0]
         self.assertEqual((p['next_edition_number'],p['sold_count'],p['remaining_count']),(5,94,6))
         projection=backend.list_edition_products_read_only(handles=[self.handle],limit=1)[0]
@@ -67,7 +102,7 @@ class CursorOverrideTests(EditionVersionTests):
         self.override(5)
         row=dict(next_edition_number=5,edition_total=100,sold_count=94,remaining_count=6,last_assigned_edition=94,manual_override_id='authorised')
         self.assertFalse(backend.calculate_product_edition_metafield_values(row)['allocation_blocked'])
-        self.assertTrue(backend.calculate_product_edition_metafield_values({**row,'remaining_count':96})['allocation_blocked'])
+        self.assertFalse(backend.calculate_product_edition_metafield_values({**row,'remaining_count':96})['allocation_blocked'])
         self.assertTrue(backend.calculate_product_edition_metafield_values({**row,'manual_override_id':None})['allocation_blocked'])
 
     def test_enable_toggle_after_reuse_keeps_cursor_and_sales(self):

@@ -10382,7 +10382,13 @@ def calculate_product_edition_metafield_values(row):
         or _safe_int(row.get("stored_product_next"), next_number) != next_number
         or _safe_int(row.get("run_next_edition_number"), next_number) != next_number
     )
-    is_sold_out = allocation_blocked or next_number > edition_total or remaining_count <= 0
+    if row.get("manual_override_id"):
+        # Manual publication controls the cursor independently of legacy sales
+        # diagnostics. The allocator still enforces capacity and order identity.
+        allocation_blocked = bool(next_number < 1 or next_number > edition_total + 1
+            or _safe_int(row.get("stored_product_next"), next_number) != next_number
+            or _safe_int(row.get("run_next_edition_number"), next_number) != next_number)
+    is_sold_out = allocation_blocked or next_number > edition_total or remaining_count <= 0 or sold_count >= edition_total
     archived = bool(row.get("is_archived")) or row.get("active") is False or str(row.get("run_status") or "").lower() in {"archived", "expired", "closed"}
     if archived:
         edition_status = "archived"

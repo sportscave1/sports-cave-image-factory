@@ -10,6 +10,7 @@ import crm_schema
 import support_email_schema
 import reviews_schema
 import wall_preview_store
+import edition_cursor_overrides
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,7 +66,13 @@ CRM_MIGRATIONS = (
 EMAIL_MIGRATIONS = ('20260927020406_customer_support_workflow.sql', '20260927025319_customer_support_email_settings.sql', '20260930055619_support_email_inbox_snapshot.sql', '20261006063028_support_email_durable_delivery.sql')
 REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
 WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql', '20261006084655_wall_preview_engagement.sql')
+EDITION_MIGRATIONS = ('20261008041452_edition_version_transitions.sql', '20261008045733_edition_version_guard_hardening.sql', '20261008065000_explicit_edition_cursor_override.sql', '20261008090000_edition_admin_cursor_repair.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20261008041452_edition_version_transitions.sql': 'b35a3418b5f469e9a9ff00ae510c60c96fffcb854b292dfc4fd3cc8dbf502930',
+    '20261008045733_edition_version_guard_hardening.sql': '37d46b43946f677711549690f4eae652e2aa51480573a5300966936b7fdd7aa8',
+    '20261008065000_explicit_edition_cursor_override.sql': 'af6e4e02daddc5d10d12a221521e74ebea26d37fa9b98f4a5c8831098ba92fc1',
+    '20261008090000_edition_admin_cursor_repair.sql': 'a156582896a7e4e0657a8f472bf4c231847036f062087afcb40da20f327a4c1a',
+
     '20261006084655_wall_preview_engagement.sql': 'dd1975f28b31ef3c201221713c875b471fb1e264f46ee04cd12e2112d162761b',
     '20261006063028_support_email_durable_delivery.sql': '70496c310de3ad912289df430a8d17fbe7c3091e1302ed642892acde2226ccb9',
     '20261006030857_wall_preview_funnel_analytics.sql': '00228bf736dcd61f213ab180d55fb592f3b4c4e01040a0ce620d8073d0b6350f',
@@ -120,6 +127,7 @@ DEPLOYMENT_MIGRATIONS = (
     *EMAIL_MIGRATIONS,
     *REVIEWS_MIGRATIONS,
     *WALL_PREVIEW_MIGRATIONS,
+    *EDITION_MIGRATIONS,
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
@@ -434,7 +442,7 @@ def run_deployment_migrations(*, check=False):
                     cur.execute(_migration_body(sql))
                 cur.execute('INSERT INTO schema_migrations(filename) VALUES (%s)', (path.name,))
                 applied.append((path.name, 'recorded verified existing schema' if already_present else 'applied'))
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur) + wall_preview_store.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur) + wall_preview_store.schema_issues(cur) + edition_cursor_overrides.schema_issues(cur)
             if issues:
                 raise RuntimeError('Deployment schema incompatible: ' + '; '.join(issues))
         conn.commit()
@@ -442,7 +450,7 @@ def run_deployment_migrations(*, check=False):
     with psycopg.connect(database_url, row_factory=dict_row, connect_timeout=15,
                           options='-c default_transaction_read_only=on', prepare_threshold=None) as conn:
         with conn.cursor() as cur:
-            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur) + wall_preview_store.schema_issues(cur)
+            issues = manual_certificate_schema.schema_issues(cur) + crm_schema.schema_issues(cur) + support_email_schema.schema_issues(cur) + reviews_schema.schema_issues(cur) + wall_preview_store.schema_issues(cur) + edition_cursor_overrides.schema_issues(cur)
             if issues:
                 raise RuntimeError('Post-commit deployment verification failed: ' + '; '.join(issues))
             cur.execute('SELECT count(*) AS count FROM manual_order_line_editions')
@@ -541,6 +549,47 @@ def run_email_migrations(*, check=False, verify=False):
         print('READY Email schema and migration ledger verified; source=' + source)
 
 
+def run_edition_migrations(*, check=False, verify=False, expected_project=None):
+    """Targeted edition chain; no DDL on page render or Save. Release operator only."""
+    selected=[(MIGRATIONS_DIR/name,(MIGRATIONS_DIR/name).read_text(encoding='utf-8')) for name in EDITION_MIGRATIONS]
+    for path,sql in selected:
+        if not reviewed_migration_sql(path,sql):raise RuntimeError('Edition migration is not SHA-reviewed: '+path.name)
+    if check:
+        print('READY edition migration manifest: '+', '.join(EDITION_MIGRATIONS));return
+    url,source=get_database_url()
+    from urllib.parse import urlsplit,unquote
+    parts=urlsplit(url or '')
+    if parts.hostname not in ('127.0.0.1','localhost'):
+        project_host=(parts.hostname or '').split('.')
+        project_user=unquote(parts.username or '').rsplit('.',1)
+        matches=bool(expected_project and (
+            project_host==['db',expected_project,'supabase','co'] or
+            (len(project_user)==2 and project_user[1]==expected_project)))
+        if not matches:
+            raise RuntimeError('Explicit matching --expected-project is required for remote edition migration or verification')
+    from psycopg.rows import dict_row
+    with psycopg.connect(url,row_factory=dict_row,prepare_threshold=None,
+                         options='-c default_transaction_read_only=on' if verify else '') as conn:
+        with conn.cursor() as cur:
+            if not verify:
+                cur.execute("SET LOCAL lock_timeout='60s'")
+                cur.execute("SET LOCAL statement_timeout='120s'")
+                cur.execute('SELECT pg_advisory_xact_lock(731948321)')
+                cur.execute('CREATE TABLE IF NOT EXISTS schema_migrations(filename text PRIMARY KEY,applied_at timestamptz DEFAULT now())')
+                for path,sql in selected:
+                    cur.execute('SELECT 1 FROM schema_migrations WHERE filename=%s',(path.name,))
+                    if cur.fetchone():continue
+                    cur.execute(_migration_body(sql))
+                    cur.execute('INSERT INTO schema_migrations(filename) VALUES(%s)',(path.name,))
+            issues=edition_cursor_overrides.schema_issues(cur)
+            cur.execute('SELECT filename FROM schema_migrations WHERE filename=ANY(%s)',(list(EDITION_MIGRATIONS),))
+            recorded={r['filename'] for r in cur.fetchall()}
+            issues.extend('Missing edition migration record: '+n for n in EDITION_MIGRATIONS if n not in recorded)
+            if issues:raise RuntimeError('; '.join(issues))
+    if not verify:run_edition_migrations(verify=True,expected_project=expected_project)
+    else:print('READY committed edition override schema and migration ledger; source='+source)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Apply reviewed Sports Cave database migrations.")
     parser.add_argument("--only", help="Apply one migration filename from the migrations directory.")
@@ -559,9 +608,15 @@ if __name__ == "__main__":
         help="Read-only verification of optional marketplace diagnostic columns and indexes.",
     )
     parser.add_argument('--email', action='store_true', help='Apply only SHA-reviewed private Email migrations.')
+    parser.add_argument('--edition',action='store_true',help='Apply the reviewed edition dependency chain.')
+    parser.add_argument('--verify-edition-schema',action='store_true',help='Read-only edition schema and migration ledger verification.')
+    parser.add_argument('--expected-project',help='Required matching Supabase project reference for remote edition operations.')
     parser.add_argument('--verify-email-schema', action='store_true', help='Read-only private Email schema/ledger verification.')
     args = parser.parse_args()
-    if args.email or args.verify_email_schema:
+    if args.edition or args.verify_edition_schema:
+        if args.only or args.deploy or args.crm or args.email or args.verify_crm_schema or args.verify_email_schema or args.verify_required_schema or args.verify_marketplace_schema or (args.edition and args.verify_edition_schema) or (args.check and args.verify_edition_schema):parser.error('choose one migration selection or verification mode')
+        run_edition_migrations(check=args.check,verify=args.verify_edition_schema,expected_project=args.expected_project)
+    elif args.email or args.verify_email_schema:
         if args.only or args.deploy or args.crm or args.verify_crm_schema or args.verify_required_schema or args.verify_marketplace_schema or (args.email and args.verify_email_schema) or (args.verify_email_schema and args.check):
             parser.error('choose one migration selection or verification mode')
         run_email_migrations(check=args.check, verify=args.verify_email_schema)

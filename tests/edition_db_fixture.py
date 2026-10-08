@@ -36,4 +36,39 @@ class Connection:
     def close(self):pass
 
 
-def connect():return Connection()
+def connect():
+    import os
+    url=os.getenv('EDITION_REAL_POSTGRES_URL','')
+    if url:
+        from urllib.parse import urlsplit
+        if urlsplit(url).hostname not in ('localhost','127.0.0.1'):raise ValueError('Only disposable loopback PostgreSQL is allowed')
+        import psycopg
+        from psycopg.rows import dict_row
+        return RealConnection(psycopg.connect(url,row_factory=dict_row))
+    return Connection()
+
+
+class RealCursor:
+    def __init__(self,cursor):self.cursor=cursor
+    def __enter__(self):return self
+    def __exit__(self,*args):self.cursor.close()
+    def execute(self,sql,args=()):
+        import psycopg
+        try:self.cursor.execute(sql,args);return self
+        except psycopg.Error as exc:raise RuntimeError(str(exc)) from exc
+    def fetchone(self):
+        if self.cursor.description is None:return None
+        row=self.cursor.fetchone()
+        return json.loads(json.dumps(row,default=str)) if row else None
+    def fetchall(self):return json.loads(json.dumps(self.cursor.fetchall(),default=str)) if self.cursor.description else []
+    @property
+    def rowcount(self):return self.cursor.rowcount
+
+class RealConnection:
+    def __init__(self,conn):self.conn=conn
+    def __enter__(self):self.conn.__enter__();return self
+    def __exit__(self,*args):return self.conn.__exit__(*args)
+    def cursor(self):return RealCursor(self.conn.cursor())
+    def rollback(self):self.conn.rollback()
+    def commit(self):self.conn.commit()
+    def close(self):self.conn.close()

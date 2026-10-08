@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import http from 'node:http';
 const db=new PGlite();
 await db.exec(readFileSync('tests/fixtures/edition_base.sql','utf8'));
-for(const f of ['create_edition_runs_phase2.sql','20260825_atomic_edition_allocation_ledger.sql','20260912045939_independent_edition_cursor.sql','20261008041452_edition_version_transitions.sql','20261008045733_edition_version_guard_hardening.sql','20261008065000_explicit_edition_cursor_override.sql'])
+for(const f of ['create_edition_runs_phase2.sql','20260825_atomic_edition_allocation_ledger.sql','20260912045939_independent_edition_cursor.sql','20261008041452_edition_version_transitions.sql','20261008045733_edition_version_guard_hardening.sql','20261008065000_explicit_edition_cursor_override.sql','20261008090000_edition_admin_cursor_repair.sql'])
  await db.exec(readFileSync('migrations/'+f,'utf8').replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;',''));
 let queue=Promise.resolve();
 http.createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;

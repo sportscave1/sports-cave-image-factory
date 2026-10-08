@@ -2,6 +2,7 @@
 from copy import deepcopy
 import uuid
 import time
+import logging
 import streamlit as st
 import edition_ops as ops
 import edition_versions as versions
@@ -22,63 +23,71 @@ def actor():
     return st.session_state.get('sports_cave_current_user') or {}
 
 
+def sync_error_message(error):
+    """Keep transport/SQL internals in logs, with actionable compact UI errors."""
+    text=str(error or '').lower()
+    if 'mismatch' in text or 'verification' in text:
+        return 'Shopify readback did not match the saved value. Retry sync.'
+    if '429' in text or 'throttl' in text or 'rate limit' in text:
+        return 'Shopify rate limit reached; automatic retry is pending.'
+    if 'timeout' in text or 'connection' in text:
+        return 'Connection interrupted; the saved value is retained for retry.'
+    return 'Sync needs attention. Retry sync; technical details are in the server log.'
+
+
 def save_cursor_changes(acknowledged=False, submissions=None):
-    """Cursor writes use a dedicated audited transaction, not ledger reconciliation."""
+    """Persist only explicit changed rows; missing schema stops the entire batch."""
     import edition_cursor_overrides
+    import logging
     originals={ops._stable_row_key(r):r for r in st.session_state[ops.ORIGINAL_ROWS_KEY]}
-    rows=st.session_state[ops.ROWS_KEY]
     if submissions is None:
         submissions=[]
-        for row in rows:
-            old=originals.get(ops._stable_row_key(row),row)
-            selected=st.session_state.get(ops.EDITOR_PRODUCT_SELECTION_KEY)
-            if row['edition_next_number']!=old['edition_next_number'] or (
-                ops._stable_row_key(row)==selected and row.get('sync_status')=='needs_reconciliation'):
-                fingerprint=(row.get('edition_run_id'),old['edition_next_number'],row['edition_next_number'])
-                requests=st.session_state.setdefault('edition-cursor-requests',{})
-                saved=requests.get(row['handle'])
-                if not saved or saved[0]!=fingerprint:
-                    saved=(fingerprint,str(uuid.uuid4()));requests[row['handle']]=saved
-                submissions.append((deepcopy(row),deepcopy(old),saved[1]))
+        for row in st.session_state[ops.ROWS_KEY]:
+            old=originals.get(ops._stable_row_key(row))
+            if old is None or not any(row.get(k)!=old.get(k) for k in ('edition_next_number','edition_total')):continue
+            fingerprint=(row.get('edition_run_id'),old['edition_next_number'],row['edition_next_number'],old['edition_total'],row['edition_total'])
+            requests=st.session_state.setdefault('edition-cursor-requests',{})
+            saved=requests.get(row['handle'])
+            if not saved or saved[0]!=fingerprint:
+                saved=(fingerprint,str(uuid.uuid4()));requests[row['handle']]=saved
+            submissions.append((deepcopy(row),deepcopy(old),saved[1]))
+    st.session_state['edition-save-errors']=[]
     if not submissions:
-        ops._save_changed_rows(background_sync=True)
+        st.session_state[ops.NOTICE_KEY]='No edited editions to save.'
         return
-    pending=[]
+    try:edition_cursor_overrides.require_schema()
+    except Exception as exc:
+        logging.getLogger(__name__).exception('Edition override schema preflight failed')
+        st.session_state[ops.NOTICE_KEY]=(str(exc) if isinstance(exc,edition_cursor_overrides.SchemaUnavailable)
+            else 'Edition database unavailable. No changes saved; your edits are retained. Retry when connectivity is restored.')
+        return
+    saved_count=0
+    st.session_state['edition-sync-verified']=set()
     for row,old,request in submissions:
         try:
-            if row['edition_total']!=old['edition_total'] or row['edition_enabled']!=old['edition_enabled']:
-                raise ValueError('Save number changes separately from edition limit or enable/disable changes.')
             edition_cursor_overrides.save(row['handle'],run_id=row['edition_run_id'],
                 expected_next=old['edition_next_number'],next_number=row['edition_next_number'],
-                request_id=request,actor_id=actor().get('id'),acknowledged=acknowledged)
-            # Keep the native grid/key and its scroll position. Only this row's baseline changes.
+                expected_limit=old['edition_total'],edition_limit=row['edition_total'],
+                request_id=request,actor_id=actor().get('id'))
             key=ops._stable_row_key(row)
             for collection in (ops.ROWS_KEY,ops.ORIGINAL_ROWS_KEY,ops.EDITOR_ROWS_KEY):
                 st.session_state[collection]=[
-                    {**r,'edition_next_number':row['edition_next_number'],'sync_status':'Pending','sync_error':''}
+                    {**r,'edition_next_number':row['edition_next_number'],'edition_total':row['edition_total'],
+                     'sync_status':'Pending','sync_error':''}
                     if ops._stable_row_key(r)==key else r for r in st.session_state.get(collection,[])]
-            ops._cached_supabase_products_snapshot.clear()
+            saved_count+=1
             st.session_state.setdefault('edition-sync-watching',set()).add(row['handle'])
             st.session_state.pop('edition-sync-watch-until',None)
-            st.session_state[ops.NOTICE_KEY]='Number saved. Shopify confirmation pending.'
         except Exception as exc:
-            if 'DUPLICATE_ACK_REQUIRED' in str(exc):pending.append((row,old,request))
-            else:
-                st.session_state[ops.NOTICE_KEY]=row['product_title']+' — '+str(exc)
-                st.error(st.session_state[ops.NOTICE_KEY])
-    if pending:confirm_cursor_override(pending)
-
-
-@st.dialog('Confirm Override',width='small')
-def confirm_cursor_override(submissions):
-    st.write('This number may already have been allocated. Continue with manual override?')
-    for row,old,_ in submissions:
-        st.caption(f"{row['product_title']} · {old['edition_next_number']:03d} → {row['edition_next_number']:03d}")
-    a,b=st.columns(2)
-    if a.button('Cancel',key='cancel-cursor-override'):st.rerun()
-    if b.button('Confirm Override',type='primary',key='confirm-cursor-override'):
-        save_cursor_changes(True,submissions)
-        st.rerun()
+            logging.getLogger(__name__).exception('Edition override save failed handle=%s',row['handle'])
+            message='Could not save. Your edited values are retained; retry or ask an administrator to check the server log.'
+            if 'Edition changed' in str(exc):message='Changed by another edit or order. Refresh this product before retrying.'
+            elif 'administrator required' in str(exc):message='An active administrator account is required.'
+            elif 'Number must be within' in str(exc):message='Enter a positive number within the limit, or the terminal sold-out number.'
+            st.session_state['edition-save-errors'].append((row['product_title'],message))
+    if saved_count:ops._cached_supabase_products_snapshot.clear()
+    failed=len(st.session_state['edition-save-errors'])
+    st.session_state[ops.NOTICE_KEY]=f'{saved_count} edition changes saved. Shopify verification is shown below. {failed} saves require attention.'
 
 
 def refresh_handle(handle, *, discard_edits=False):
@@ -145,7 +154,7 @@ def release_controls():
             if st.button('Retry Shopify sync'):
                 versions.kick(row['handle']);st.session_state.setdefault('edition-sync-watching',set()).add(row['handle'])
                 st.session_state.pop('edition-sync-watch-until',None)
-    if row.get('sync_error'):st.caption(row['sync_error'])
+    if row.get('sync_error'):st.caption(sync_error_message(row['sync_error']))
     if st.session_state.get('edition-review-run')==row.get('edition_run_id') and row.get('edition_run_id'):
         try:
             data=versions.details(row['edition_run_id'])
@@ -212,7 +221,10 @@ def archive():
 @st.fragment(run_every=3)
 def sync_status():
     handles=list(st.session_state.get('edition-sync-watching',set()))[:50]
-    if not handles:return
+    if not handles:
+        verified=st.session_state.get('edition-sync-verified',set())
+        if verified:st.caption(f'{len(verified)} editions verified in Shopify · 0 pending')
+        return
     deadline=st.session_state.setdefault('edition-sync-watch-until',time.monotonic()+90)
     if time.monotonic()>deadline:
         st.caption('Sync continues in the background. Refresh the product to check its latest status.')
@@ -223,15 +235,24 @@ def sync_status():
               r.status,to_jsonb(r)->>'sync_error' AS version_error FROM edition_products p
               JOIN edition_runs r ON r.id=p.active_edition_run_id WHERE p.shopify_handle=ANY(%s)""",(handles,))
             rows=cur.fetchall()
+        failed=[]
+        verified=st.session_state.setdefault('edition-sync-verified',set())
         for r in rows:
             error=r.get('version_error') or r.get('last_metafield_error')
-            status='PENDING SYNC' if r['status']=='pending_sync' else r['metafields_sync_status']
-            st.caption(r['product_title']+' · '+str(status)+((' · '+error) if error else ''))
             if str(r['metafields_sync_status']).lower()=='synced' and r['status']!='pending_sync':
                 refresh_handle(r['shopify_handle'])
                 st.session_state['edition-sync-watching'].discard(r['shopify_handle'])
-                st.toast(r['product_title']+' · Shopify sync confirmed')
-    except Exception as exc:st.caption('Sync status unavailable: '+str(exc))
+                verified.add(r['shopify_handle'])
+            elif error:
+                failed.append((r['product_title'],sync_error_message(error)))
+        pending=max(0,len(st.session_state['edition-sync-watching'])-len(failed))
+        st.caption(f'{len(verified)} editions verified in Shopify · {pending} pending · {len(failed)} require attention')
+        if failed:
+            with st.expander('Shopify sync details'):
+                for title,error in failed:st.caption(title+' — '+error)
+    except Exception:
+        logging.getLogger(__name__).exception('Edition sync status unavailable')
+        st.caption('Sync status unavailable. Saved values are retained; retry when connectivity is restored.')
 
 
 def workspace():

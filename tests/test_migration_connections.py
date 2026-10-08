@@ -9,13 +9,27 @@ import run_migrations
 
 
 class MigrationConnections(unittest.TestCase):
+    def test_edition_chain_is_reviewed_and_registered_in_dependency_order(self):
+        positions=[run_migrations.DEPLOYMENT_MIGRATIONS.index(n) for n in run_migrations.EDITION_MIGRATIONS]
+        self.assertEqual(positions,sorted(positions))
+        with patch.object(run_migrations.psycopg,'connect') as connect,redirect_stdout(io.StringIO()):
+            run_migrations.run_edition_migrations(check=True)
+        connect.assert_not_called()
+
+    def test_edition_wrong_project_fails_before_connecting(self):
+        for expected in (None,'other-project','correct'):
+            with self.subTest(expected=expected),patch.object(run_migrations,'get_database_url',return_value=('postgresql://postgres.correct-project@pool.supabase.com/postgres','fixture')),patch.object(run_migrations.psycopg,'connect') as connect:
+                with self.assertRaisesRegex(RuntimeError,'matching --expected-project'):
+                    run_migrations.run_edition_migrations(expected_project=expected)
+                connect.assert_not_called()
+
     def test_every_migration_connection_disables_preparation(self):
         tree = ast.parse(Path(run_migrations.__file__).read_text(encoding='utf-8'))
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Attribute)
                  and isinstance(node.func.value, ast.Name)
                  and node.func.value.id == 'psycopg' and node.func.attr == 'connect']
-        self.assertEqual(len(calls), 6)
+        self.assertEqual(len(calls), 7)
         for call in calls:
             with self.subTest(line=call.lineno):
                 keywords = {keyword.arg: keyword.value for keyword in call.keywords}
@@ -33,6 +47,7 @@ class MigrationConnections(unittest.TestCase):
             stack.enter_context(patch.object(run_migrations, 'get_database_url', return_value=('fixture', 'DATABASE_URL')))
             connect = stack.enter_context(patch.object(run_migrations.psycopg, 'connect', side_effect=connections))
             stack.enter_context(patch.object(run_migrations.manual_certificate_schema, 'schema_issues', return_value=[]))
+            stack.enter_context(patch.object(run_migrations.edition_cursor_overrides, 'schema_issues', return_value=[]))
             stack.enter_context(patch.object(run_migrations.crm_schema, 'schema_issues', return_value=[]))
             stack.enter_context(patch.object(run_migrations.reviews_schema, 'schema_issues', return_value=[]))
             stack.enter_context(patch.object(run_migrations.wall_preview_store, 'schema_issues', return_value=[]))

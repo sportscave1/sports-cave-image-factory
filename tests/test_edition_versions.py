@@ -24,6 +24,10 @@ class EditionVersionTests(unittest.TestCase):
         self.product=self.q("INSERT INTO edition_products(shopify_product_gid,shopify_product_id,shopify_handle,product_title,active_edition_run_id,edition_name) VALUES(%s,%s,%s,'Revised artwork',%s,'Original') RETURNING id",(self.gid,self.gid,self.handle,self.old))[0]['id']
         self.q("INSERT INTO edition_runs(id,edition_product_id,shopify_product_id,shopify_handle,edition_name,edition_total,next_edition_number,status) VALUES(%s,%s,%s,%s,'Original',100,1,'active')",(self.old,self.product,self.gid,self.handle))
 
+    def tearDown(self):
+        # Isolated fixture jobs must not fill the next test's bounded worker queue.
+        self.q("UPDATE edition_runs SET sync_retry_at=NULL WHERE edition_product_id=%s AND status<>'expired'",(self.product,))
+
     def create(self,**changes):
         args=dict(expected_run=self.old,request_id=self.request,name='Updated design',start=5,total=100,reason='Artwork revised',actor_id=self.actor)
         args.update(changes)

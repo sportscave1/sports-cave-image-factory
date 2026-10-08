@@ -53,16 +53,7 @@ EDITABLE_FIELDS = (
 )
 
 VISIBLE_COLUMNS = (
-    "product_title",
-    "handle",
-    "edition_enabled",
-    "edition_total",
-    "edition_next_number",
-    "edition_sold_count",
-    "edition_remaining",
-    "sync_status",
-    "admin_url",
-    "online_store_url",
+    "product_title", "edition_next_number", "edition_total", "sync_status", "admin_url", "online_store_url",
 )
 
 CSV_COLUMNS = (
@@ -2436,6 +2427,9 @@ def _render_table():
         save_cursor_changes()
         rows=st.session_state[ROWS_KEY]
     if st.session_state.get(NOTICE_KEY):st.caption(st.session_state[NOTICE_KEY])
+    if st.session_state.get('edition-save-errors'):
+        with st.expander('Save details'):
+            for title,message in st.session_state['edition-save-errors']:st.caption(title+' — '+message)
     if st.session_state.get(LOAD_ERROR_KEY):
         st.error(st.session_state[LOAD_ERROR_KEY])
         if not rows:return rows
@@ -2457,7 +2451,9 @@ def _render_table():
         disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url'])
     if selected!=ALL_PRODUCTS_SELECTION:
         for row in visible:
-            if row.get('sync_error'):st.caption(row['product_title']+' — '+row['sync_error'])
+            if row.get('sync_error'):
+                from edition_version_ui import sync_error_message
+                st.caption(row['product_title']+' — '+sync_error_message(row['sync_error']))
     if not rows:st.caption('No products loaded. Use Advanced to reconcile the catalogue.')
     return rows
 
