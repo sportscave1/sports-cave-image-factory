@@ -151,6 +151,7 @@ def row_html(row):
         value=row.get(field)
         return ('—' if value is None else format(value,','))+('<small>'+str(row[rate_field])+'%</small>' if rate_field and row.get(rate_field) is not None else '')
     status='Archived' if row.get('archived_at') else {'DRAFT':'Draft','NEEDS_REVIEW':'Draft','TEST_READY':'Draft','BUILDING':'Active'}.get(row['status'],row['status'].title())
+    if not row.get('archived_at') and row['status']=='SENT' and row.get('submitted')==0:status='Needs attention'
     destination='?'+urlencode({'page':'CRM Campaigns','campaign':str(row['id'])})
     submission=('<small>'+format(row['submitted'],',')+' / '+format(row['planned'],',')+' submitted</small>') if row['status']=='SENDING' and row.get('submitted') is not None and row.get('planned') is not None else ''
     progress=row.get('progress')
@@ -158,6 +159,7 @@ def row_html(row):
         detail=' · '.join(str(progress[f])+' '+f for f in ('submitted','skipped','failed','held'))
         if progress.get('stalled'):status='Stalled'
         elif progress['held']:status='Needs attention'
+        elif progress['complete'] and not progress['submitted']:status='Needs attention'
         elif progress['complete'] and progress['failed']:status='Sent with issues'
         elif row['status']=='SENDING' and not progress.get('worker_started_at') and not progress['processed']:status='Queued'
         if row['status'] in ('SENDING','QUEUED','BUILDING'):

@@ -135,6 +135,29 @@ class PostingJobTests(unittest.TestCase):
             {'index': 3, 'meta_ad_id': 'three'},
         ]}), (1, 3))
 
+    def test_live_operation_and_elapsed_time_are_observations_not_retry_triggers(self):
+        from unittest.mock import patch
+        entered, release = Event(), Event()
+        def factory(**kw):
+            def run(request):
+                kw['progress_callback']('Uploading images to Meta')
+                entered.set()
+                release.wait(5)
+            return Mock(create_paused_campaign=run)
+        with patch('meta_posting_jobs.monotonic', return_value=100):
+            jobs, _, _ = self.make_jobs(factory=factory)
+            identity = jobs.submit(request_for())
+            self.assertTrue(entered.wait(2))
+        try:
+            with patch('meta_posting_jobs.monotonic', return_value=205):
+                row = jobs.snapshot(identity)
+            self.assertEqual(row['operation'], 'Uploading images to Meta')
+            self.assertEqual(row['elapsed_seconds'], 105)
+            self.assertEqual(row['operation_seconds'], 105)
+            self.assertFalse(row['can_retry'])
+        finally:
+            release.set()
+
 
 if __name__ == '__main__':
     unittest.main()

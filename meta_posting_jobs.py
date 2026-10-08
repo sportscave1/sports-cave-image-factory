@@ -6,6 +6,7 @@ idempotency. A lost process with a nonterminal ledger requires review, not repla
 from concurrent.futures import Future, ThreadPoolExecutor
 from copy import deepcopy
 from threading import RLock
+from time import monotonic
 from meta_posting_service import (
     MetaPostingService, SupabasePostingStore, PostingError, PostingBusyError,
     posting_ad_results, carousel_ad_result, CAROUSEL_AD_TYPE,
@@ -39,7 +40,9 @@ class PostingJobs:
             store = self.store_factory()
             if not store.reserve(request, retry=retry):
                 return identity
-            job = {'request': deepcopy(request), 'message': 'Validating campaign and creatives…'}
+            now = monotonic()
+            job = {'request': deepcopy(request), 'message': 'Validating campaign and creatives…',
+                   'started_at': now, 'operation_at': now}
             self.jobs[identity] = job
             try:
                 job['future'] = self.pool.submit(self._run, identity, job['request'])
@@ -56,7 +59,10 @@ class PostingJobs:
         store = self.store_factory()
         def progress(message):
             with self.lock:
-                self.jobs[identity]['message'] = message
+                job = self.jobs[identity]
+                if message != job['message']:
+                    job['operation_at'] = monotonic()
+                    job['message'] = message
         try:
             self.service_factory(store=store, progress_callback=progress).create_paused_campaign(request)
         except PostingBusyError:
@@ -85,6 +91,9 @@ class PostingJobs:
             return {
                 **row, 'running_here': running,
                 'operation': job['message'] if running else '',
+                'last_operation': job['message'] if job else '',
+                'elapsed_seconds': int(monotonic() - job['started_at']) if running else None,
+                'operation_seconds': int(monotonic() - job['operation_at']) if running else None,
                 'can_retry': bool(job and not running and row.get('status') == 'FAILED'),
             }
 

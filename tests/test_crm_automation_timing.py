@@ -22,9 +22,9 @@ class TimingContract(unittest.TestCase):
         self.assertEqual(delay_controls(1800),(30,'Minutes'))
         self.assertEqual(delay_controls(7200),(2,'Hours'))
         self.assertEqual(delay_controls(172800),(2,'Days'))
-    def test_analytics_has_no_live_timer(self):
+    def test_analytics_countdown_does_not_use_server_timer(self):
         source=Path('crm_automation_analytics_ui.py').read_text(encoding='utf-8')
-        self.assertIn('time_to_send(c,at=timing_now)',source)
+        self.assertIn('rows=listing(visible,schema,timezone_for_user(user),timing_now)',source)
         self.assertNotIn('run_every=',source)
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable database required')
@@ -33,6 +33,17 @@ class PersistedTiming(unittest.TestCase):
     published=native.NativeAutomationTests.published
     enroll=native.NativeAutomationTests.enroll
     due=native.NativeAutomationTests.due
+    def test_published_ten_minutes_does_not_gain_an_unrelated_abandonment_hour(self):
+        a=self.published('abandoned',delays=(600,7200));j=self.enroll(a)
+        self.assertEqual(date(j['next_due_at']),date(j['trigger_at'])+timedelta(minutes=10))
+        self.clock=date(j['next_due_at'])-timedelta(seconds=1)
+        advance(self.engine,j)
+        self.assertFalse(self.store.q('SELECT id FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],)))
+        self.clock=date(j['next_due_at'])
+        advance(self.engine,j)
+        send=self.store.q('SELECT due_at FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],),True)
+        self.assertEqual(date(send['due_at']),date(j['next_due_at']))
+        self.provider.send.assert_not_called()
     def test_before_due_no_queue_then_due_survives_new_store(self):
         a=self.published(delays=(1800,));j=self.enroll(a)
         self.assertEqual(date(j['next_due_at']),date(j['trigger_at'])+timedelta(minutes=30))
@@ -41,10 +52,11 @@ class PersistedTiming(unittest.TestCase):
         from crm_automation_store import AutomationStore
         from tests.crm_db_fixture import connect
         self.engine.store=AutomationStore(connect)
-        advance(self.engine,self.due(j));advance(self.engine,self.due(j))
+        due=self.due(j)
+        advance(self.engine,due);advance(self.engine,due)
         jobs=self.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],))
         self.assertEqual(len(jobs),1)
-        self.assertEqual(date(jobs[0]['due_at']),date(self.store.q('SELECT next_due_at FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)['next_due_at']).replace(microsecond=date(jobs[0]['due_at']).microsecond))
+        self.assertEqual(date(jobs[0]['due_at']),date(due['next_due_at']))
     def test_missing_schedule_backfill_preserves_existing_deadline(self):
         a=self.published(delays=(1800,));j=self.enroll(a);original=date(j['next_due_at'])
         sql=Path('migrations/20261006033000_crm_single_delay.sql').read_text()

@@ -12,8 +12,34 @@ class Engine:
     def __init__(self,store,shop,provider=None,config=None,clock=now):
         self.store,self.shop,self.config,self.clock=store,shop,config or Config(),clock
         self.provider=provider;self.owner=None
+        self._schedule_checkpoint=None;self._delivery_checkpoint=None
     def hold_lease(self):
         if self.owner and not self.store.lease(self.owner):raise RuntimeError('CRM worker lease changed.')
+        if self.owner:
+            at=self.clock()
+            if self._schedule_checkpoint is None or at-self._schedule_checkpoint>=timedelta(seconds=60):
+                from crm_campaign_schedule import schedule_gate
+                # Evidence of actual leased work, not an independent heartbeat
+                # that could conceal a stuck worker. Real >5 minute gaps still
+                # fail closed, including a gap inside a blocking API request.
+                schedule_gate(self.store,self.config.enabled,at)
+                self._schedule_checkpoint=at
+    def delivery_checkpoint(self,*,force=False):
+        """Cooperative delivery between maintenance transactions; one worker."""
+        if not self.owner:return
+        at=self.clock()
+        if not force and self._delivery_checkpoint is not None and at-self._delivery_checkpoint<timedelta(seconds=30):return
+        self.hold_lease()
+        self._delivery_checkpoint=at
+        if self.config.enabled:
+            self.store.q("UPDATE crm_campaigns SET status='SENDING',sending_started_at=now(),updated_at=now() WHERE status='SCHEDULED' AND audience_snapshot_id IS NOT NULL AND scheduled_at<=now()")
+            self.advance_due()
+        for _ in range(5):
+            self.hold_lease()
+            if not self.send_one():break
+        from crm_campaign_dispatch import dispatch
+        dispatch(self)
+        self._delivery_checkpoint=self.clock()
     def delivery(self):
         if self.provider is None:self.provider=Resend(self.config)
         return self.provider
@@ -345,13 +371,15 @@ class Engine:
     def tick(self,owner):
         if not self.store.lease(owner):return {'leader':False}
         self.owner=owner
+        self._schedule_checkpoint=None;self._delivery_checkpoint=None
         from time import perf_counter
         started=perf_counter();completed=False
         logging.getLogger(__name__).info('crm_worker_run_start')
         try:
+            self.hold_lease()
             from crm_automation_capabilities import verify as verify_automation,refresh_due
             if refresh_due(self.store.state('shopify_automation_capabilities'),self.clock()):
-                try:verify_automation(self.shop,self.store)
+                try:verify_automation(self.shop,self.store,include_pixel=False)
                 except Exception:logging.getLogger(__name__).warning('automation_capability_check_unavailable')
             # One durable publication per leased cycle, independent of mail gates.
             try:
@@ -360,11 +388,9 @@ class Engine:
                 publication_tick(AutomationStore(self.store.connect),owner)
             except Exception as exc:
                 logging.getLogger(__name__).warning('automation_publication_cycle_failed error_class=%s',type(exc).__name__)
-            from crm_campaign_schedule import schedule_gate
-            schedule_gate(self.store,self.config.enabled,self.clock())
             events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' AND provider<>'resend' ORDER BY received_at LIMIT 10")
             for event in events:
-                if not self.store.lease(owner):return {'leader':False}
+                self.hold_lease()
                 try:
                     self.process_event(event)
                     self.store.q("UPDATE crm_webhook_events SET status='DONE',processed_at=now() WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
@@ -372,34 +398,26 @@ class Engine:
                     self.store.q("UPDATE crm_webhook_events SET attempts=attempts+1,status=CASE WHEN attempts>=4 THEN 'FAILED' ELSE 'PENDING' END,error_code='source_unavailable' WHERE provider=%s AND event_id=%s",(event['provider'],event['event_id']))
             # Due work runs before catalogue refreshes or source reconciliation.
             # The queue and claims remain shared with the existing worker.
-            if self.config.enabled:
-                self.advance_due()
-            for _ in range(5):
-                if not self.store.lease(owner) or not self.send_one():break
+            self.delivery_checkpoint(force=True)
             try:
                 from crm_checkout_analytics import sync_cache
-                sync_cache(self.shop,self.store,self.clock())
+                sync_cache(self.shop,self.store,self.clock(),checkpoint=self.delivery_checkpoint)
             except Exception as exc:logging.getLogger(__name__).warning('checkout_cache_sync_failed type=%s',type(exc).__name__)
             if self.config.enabled:
                 active=getattr(type(self.store),'active_automations',None)
                 for a in (active(self.store) if active else self.store.list('automations')):
                     if a['status']=='ACTIVE':
                         self.hold_lease()
-                        from crm_automation_definition import native
-                        if native(a):
-                            try:self.reconcile(a)
-                            except Exception as exc:
-                                # An unavailable trigger source holds this flow;
-                                # it must not prevent unrelated Campaign dispatch.
-                                logging.getLogger(__name__).warning('automation_source_held automation_id=%s exception_type=%s',a['id'],type(exc).__name__)
-                        else:self.reconcile(a)
-                self.store.q("UPDATE crm_campaigns SET status='SENDING',sending_started_at=now(),updated_at=now() WHERE status='SCHEDULED' AND audience_snapshot_id IS NOT NULL AND scheduled_at<=now()")
+                        try:self.reconcile(a)
+                        except Exception as exc:
+                            # Isolate source failures for legacy and native flows.
+                            # Neither can stop another flow or campaign's queue.
+                            logging.getLogger(__name__).warning('automation_source_held automation_id=%s exception_type=%s',a['id'],type(exc).__name__)
                 campaigns=self.store.q("SELECT * FROM crm_campaigns WHERE audience_snapshot_id IS NULL AND (status='BUILDING' OR (status='SCHEDULED' AND scheduled_at<=now())) ORDER BY created_at LIMIT 1")
                 for campaign in campaigns:self.hold_lease();self.campaign_page(campaign)
             # Native reviewed campaigns consume the frozen delivery snapshot in
             # batches. Automation/legacy template tests retain their own path.
-            from crm_campaign_dispatch import dispatch
-            dispatch(self)
+            self.delivery_checkpoint(force=True)
             self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
               final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
               WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
@@ -427,7 +445,8 @@ class Engine:
                         self.delivery().suppress(address)
                         self.store.q('UPDATE crm_suppressions SET provider_synced=true,email_for_provider=NULL WHERE recipient_hash=%s',(row['recipient_hash'],))
                     except Exception:break
-            self.store.set_state('worker_health',{'checked_at':self.clock().isoformat(),'status':'ok','marketing_enabled':self.config.enabled,'provider_configured':bool(self.config.api_key),'sender_configured':bool(self.config.sender and self.config.reply_to)})
+            self.hold_lease()
+            self.store.set_state('worker_health',{'checked_at':self.clock().isoformat(),'status':'ok','duration_ms':round((perf_counter()-started)*1000),'marketing_enabled':self.config.enabled,'provider_configured':bool(self.config.api_key),'sender_configured':bool(self.config.sender and self.config.reply_to)})
             completed=True
             return {'leader':True}
         finally:

@@ -53,13 +53,19 @@ def status_content(store, identity):
             if row.get('stalled'): st.caption('Send appears stalled · background status retained. Do not resend.')
             if row['held']: st.caption('⚠ Submission uncertain · needs attention. Do not resend.')
             elif row['failed']: st.caption('⚠ Some submissions failed. Review delivery history before retrying.')
+            elif row['complete'] and not row['submitted']: st.caption('No emails accepted by Resend. Review the blocked or failed reasons before taking action.')
             elif row['complete']: st.caption('✓ Processing complete · submitted does not mean delivered.')
             elif row['status']=='SCHEDULED': st.caption('Queued securely · delivery starts at the scheduled time.')
             elif row['status'] in ('PAUSED','CANCELLED'): st.caption('Delivery '+row['status'].lower()+'.')
             elif row['processed']==row['total'] and row['total']: st.caption('Awaiting worker completion.')
             # Only system-owned reason labels are displayed, never database or
             # provider exception text (which may contain private payloads).
-            reasons={'provider_rejected':'Provider rejected submission',
+            reasons={'schedule_missed':'Schedule missed — reschedule requires a new review; overdue messages will not be released automatically',
+                     'marketing_off_schedule':'Marketing was disabled at the scheduled time',
+                     'local_suppression':'Recipient suppressed locally',
+                     'provider_suppression':'Recipient suppressed by Resend',
+                     'smart_sending':'Recipient excluded by the sending frequency policy',
+                     'provider_rejected':'Provider rejected submission',
                      'batch_retry_exhausted':'Submission retry window exhausted',
                      'batch_stop_state_changed':'Consent or suppression changed during uncertain submission',
                      'revalidation_unavailable':'Recipient verification unavailable',
@@ -92,5 +98,20 @@ def operational_view(store,user,delivery):
 @st.fragment
 def operational_status(store,identity):
     row=status_content(store,identity)
+    with st.expander('Delivery diagnostics'):
+        # An explicit history view; no extra reads on the composer/progress tray.
+        try:
+            from crm_email_diagnostics import campaign_status,worker_label,utc
+            report=campaign_status(store,identity)
+            if report:
+                st.caption(worker_label(report.get('worker') or {}))
+                timing=report.get('timing') or {}
+                st.caption('Schedule · '+(str(timing.get('date'))+' '+str(timing.get('time'))+' recipient local time' if timing.get('mode')=='schedule' else 'Send now'))
+                for zone in report.get('zones') or []:
+                    st.caption(str(zone['timezone'] or 'Unknown timezone')+' · '+str(zone['recipients'])+' recipients · '+utc(zone['due_at']))
+                st.caption(str(report['accepted'])+' accepted by Resend · '+str(report['delivered'])+' delivered receipts · '+str(report['delivery_problems'])+' recipients with delivery problems')
+                st.caption('Acceptance is not delivery. Missing receipts do not confirm delivery or failure.')
+                st.caption('Schedule guard last checked · '+utc((report.get('schedule_health') or {}).get('checked_at')))
+        except StoreUnavailable:st.caption('Delivery diagnostics temporarily unavailable.')
     if row and row['complete'] and st.button('View analytics',key='operational_analytics'):
         _analytics(identity)

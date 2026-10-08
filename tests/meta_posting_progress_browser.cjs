@@ -24,12 +24,13 @@ const assert = require('node:assert/strict');
     // Full refresh also enables the fixture's formerly failing mocked request.
     await page.reload();
     await page.getByRole('button', {name: 'Retry incomplete steps', exact: true}).click();
-    await page.getByText('3 Meta ads created successfully', {exact: false}).first().waitFor({timeout: 20000});
+    const success = process.env.POST_AD_COMPACT_PROGRESS ? 'Ads created successfully in Meta' : '3 Meta ads created successfully';
+    await page.getByText(success, {exact: false}).first().waitFor({timeout: 20000});
     await page.getByRole('link', {name: 'Open in Ads Manager', exact: true}).waitFor();
     assert.equal(new URL(page.url()).searchParams.get('meta_posting_job'), identity);
     await page.screenshot({path: 'tmp/meta-posting-complete.png', fullPage: true});
     await page.reload();
-    await page.getByText('3 Meta ads created successfully', {exact: false}).first().waitFor();
+    await page.getByText(success, {exact: false}).first().waitFor();
     assert.equal(await page.locator('[data-testid="stException"]').count(), 0);
     assert.equal(await page.getByRole('progressbar').count(), 1);
     await page.setViewportSize({width: 390, height: 844});

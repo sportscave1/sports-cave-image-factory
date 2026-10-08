@@ -31,8 +31,8 @@ def summarize(row):
     return {**row, 'total': total, 'submitted': submitted, 'skipped': skipped,
             'failed': failed, 'held': held, 'pending': pending, 'processed': processed,
             'percent': min(1., processed / total) if total else 0.,
-            'complete': complete, 'stalled': stalled, 'attention': bool(held or failed or stalled),
-            'title': ('Campaign complete · needs attention' if held or failed else 'Campaign sent')
+            'complete': complete, 'stalled': stalled, 'attention': bool(held or failed or stalled or (complete and not submitted)),
+            'title': ('Campaign complete · needs attention' if held or failed or not submitted else 'Campaign sent')
                      if complete else 'Send appears stalled · view details' if stalled else 'Campaign needs attention' if held else
                      'Campaign scheduled' if row['status'] == 'SCHEDULED' else
                      'Campaign paused' if row['status'] == 'PAUSED' else
@@ -55,7 +55,7 @@ def read_progress(store, identities):
           min(t.worker_started_at) AS worker_started_at,max(t.last_progress_at) AS last_progress_at,
           min(t.next_due_at) AS next_due_at FROM (
           SELECT s.status,count(*) AS n,min(s.first_submitted_at) AS worker_started_at,
-            array_agg(DISTINCT s.error_code) FILTER (WHERE s.status IN ('FAILED','UNCERTAIN')) AS failures,
+            array_agg(DISTINCT s.error_code) FILTER (WHERE s.status IN ('FAILED','UNCERTAIN','BLOCKED')) AS failures,
             max(s.updated_at) AS last_progress_at,
             min(s.due_at) FILTER (WHERE s.status IN ('PENDING','CLAIMED','SUBMITTING')) AS next_due_at FROM crm_marketing_sends s
           WHERE s.campaign_id=c.id AND NOT s.test_send GROUP BY s.status

@@ -121,6 +121,7 @@ def reconcile(engine,a):
       ORDER BY c.activity_at,c.checkout_key LIMIT 20""",(str(a['id']),cutoff,cutoff,at,a['id'],at-timedelta(minutes=5)))
     for candidate in candidates:
         engine.hold_lease()
+        engine.delivery_checkpoint()
         # One fresh detail only for a bounded, not-yet-enrolled candidate.
         evaluation_key='checkout-evaluation:'+candidate['checkout_key']+':'+str(a['id'])
         try:checkout=engine.shop.checkout(candidate['admin_checkout_id'],fresh=True)

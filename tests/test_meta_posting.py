@@ -536,21 +536,16 @@ class PostingNavigationTests(unittest.TestCase):
 
     def test_posting_v3_ui_keeps_shared_setup_and_three_compact_creatives(self):
         source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
-        self.assertIn('"Meta connected · ready"', source)
-        self.assertIn('"Create 3 Paused Meta Ads"', source)
+        self.assertNotIn('"Meta connected · ready"', source)
+        self.assertIn('"Create Ad"', source)
         self.assertIn('st.subheader("Creatives")', source)
         self.assertIn("for index in range(1, 4)", source)
         self.assertIn("one paused campaign, one paused ad set and three paused", source)
         self.assertIn('button("New campaign"', source)
         self.assertIn('button("Start fresh campaign"', source)
         self.assertIn("_start_new_posting_run()", source)
-        self.assertIn(
-            'st.expander("Advanced Meta Diagnostics", expanded=False)', source
-        )
-        self.assertLess(
-            source.index('"Create 3 Paused Meta Ads"'),
-            source.index('st.expander("Advanced Meta Diagnostics", expanded=False)'),
-        )
+        self.assertNotIn('st.expander("Advanced Meta Diagnostics"', source)
+        self.assertIn('def run_collection_validation_from_posting_state(', source)
 
     def test_posting_mode_ui_defaults_new_and_keeps_existing_controls_conditional(self):
         source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
@@ -560,7 +555,7 @@ class PostingNavigationTests(unittest.TestCase):
         self.assertIn('if posting_mode == POSTING_MODE_EXISTING:', source)
         self.assertIn('"Existing Campaign"', source)
         self.assertIn('"Existing Ad Set"', source)
-        self.assertIn('"Add 3 Paused Ads to Existing Ad Set"', source)
+        self.assertIn('"Create Ad"', source)
         self.assertIn('"Audience and targeting will not be changed."', source)
         self.assertIn('"Existing campaign budget will not be changed."', source)
 

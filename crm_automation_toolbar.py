@@ -72,6 +72,13 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             elif st.button('Test Flow',key='toolbar-test'):
                 name='flow-top-'+str(identity)+'simulation'
                 st.session_state[name]=not st.session_state.get(name,False);st.rerun(scope='app')
+            import os_accounts
+            if os_accounts.is_admin(user):
+                with st.popover('Diagnostics',on_change='rerun',key='flow-diagnostics') as diagnostics:
+                    if diagnostics.open:
+                        from crm_automation_diagnostic_ui import control
+                        from crm_shopify import Shopify
+                        control(Shopify(),store,user,row['trigger_type'],key+'flow_',automation=row)
             if busy:st.html('<span class="automation-current automation-publishing" role="status">Publishing changes…</span>')
             elif not pending:st.html('<span class="automation-current" role="status"'+(' style="color:#327147"' if publication.get('state')=='LIVE' else '')+'>'+('Published · Up to date' if publication.get('state')=='LIVE' else 'Up to date')+'</span>')
             elif st.button('Retry Publish' if publication.get('state')=='FAILED' else 'Publish changes' if version else 'Publish now',type='primary',disabled=archived,key='toolbar-publish',help='Publish for new enrollments; existing recipients keep their sequence.'):

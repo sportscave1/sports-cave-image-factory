@@ -556,12 +556,12 @@ class PostingTemplateCopyIntegrationTests(unittest.TestCase):
 
     def test_ui_is_posting_only_and_normal_three_ad_button_is_unchanged(self):
         posting_source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
-        self.assertEqual(posting_source.count('"Create 1 Paused Template Copy"'), 1)
+        self.assertEqual(posting_source.count('"Create 1 Paused Template Copy"'), 0)
         self.assertIn(
-            '"Create 3 Paused Meta Ads", type="primary", use_container_width=True,',
+            '"Create Ad", type="primary"',
             posting_source,
         )
-        self.assertIn("COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY", posting_source)
+        self.assertIn("def run_collection_template_copy_from_posting_state(", posting_source)
         for path in (ROOT / "ads_page.py", ROOT / "ads_creative_refresh.py"):
             self.assertNotIn(
                 "Create 1 Paused Template Copy", path.read_text(encoding="utf-8")

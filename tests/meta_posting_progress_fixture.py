@@ -46,4 +46,4 @@ with patch.object(progress, 'JOBS', jobs), \
      patch('ads_posting_page.MetaPostingClient', return_value=Mock(ad_account_id='act_123')), \
      patch('ads_posting_page._load_recent_posts', return_value=store.recent()), \
      patch('requests.sessions.Session.request', side_effect=AssertionError('No external network allowed')):
-    progress.render_current()
+    progress.render_current(compact=os.environ.get('POST_AD_COMPACT_PROGRESS') == '1')

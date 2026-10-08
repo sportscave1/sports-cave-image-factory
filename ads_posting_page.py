@@ -4,11 +4,11 @@ from sports_categories import normalize_sport_category, normalize_sport_state, i
 
 import hashlib
 import html
+import importlib
 from copy import deepcopy
 
 import streamlit as st
 
-import ads_page
 import ads_posting_handoff as posting_handoff
 from ads_image_workflow import (
     AdsImageValidationError,
@@ -85,6 +85,15 @@ from posting_import_csv import (
     PostingImportCSVError,
     parse_posting_import_csv,
 )
+
+
+class _LazyProductHelpers:
+    """Keep the large New Ads module off the heading and job-monitor paths."""
+    def __getattr__(self, name):
+        return getattr(importlib.import_module("ads_page"), name)
+
+
+ads_page = _LazyProductHelpers()
 
 
 STATE_PREFIX = "ads_posting_v2_"
@@ -393,6 +402,7 @@ def _product_selector_state(product_rows, *, state=None):
     if (
         isinstance(cached, dict)
         and cached.get("runtime_version") == PRODUCT_SELECTOR_RUNTIME_VERSION
+        and cached.get("source_rows") == product_rows
     ):
         return tuple(cached.get("records") or ()), dict(
             cached.get("record_by_identity") or {}
@@ -404,10 +414,20 @@ def _product_selector_state(product_rows, *, state=None):
     }
     state[PRODUCT_SELECTOR_STATE_KEY] = {
         "runtime_version": PRODUCT_SELECTOR_RUNTIME_VERSION,
+        "source_rows": product_rows,
         "records": records,
         "record_by_identity": record_by_identity,
     }
     return records, record_by_identity
+
+
+def _resolve_selected_product(value, rows, records, by_identity):
+    """Use the already built identity index; keep legacy/manual resolution intact."""
+    record = by_identity.get(str(value or "").strip())
+    if record is not None:
+        return {"selected_label": record["label"], "selector_identity": record["identity"],
+                **{key: record[key] for key in ("row", "record_key", "product_id", "product_url")}}
+    return ads_page.resolve_ads_product_selector_value(value, rows=rows, records=records)
 
 
 def _uploaded_file_identity(uploaded_file):
@@ -1456,26 +1476,48 @@ def _render_object_result(result, *, title, show_technical_details=True):
             st.caption("Reasons: " + " · ".join(str(value) for value in reason_details))
 
 
-def _render_success(result):
+def _review_rows(rows):
+    st.markdown('<div class="posting-review-grid">' + ''.join(
+        f'<div><strong>{html.escape(str(label))}</strong><br>{html.escape(str(value))}</div>'
+        for label, value in rows
+    ) + '</div>', unsafe_allow_html=True)
+
+
+def _render_success(result, *, compact=False):
     is_existing_mode = (
         str(result.get("posting_mode") or POSTING_MODE_NEW).upper()
         == POSTING_MODE_EXISTING
     )
     carousel_mode = str(result.get("ad_type") or AD_TYPE) == CAROUSEL_AD_TYPE
-    st.success(
-        "1 Meta carousel ad added successfully — PAUSED"
-        if carousel_mode and is_existing_mode
-        else "1 Meta carousel ad created successfully — PAUSED"
-        if carousel_mode
-        else "3 Meta ads added successfully — PAUSED"
-        if is_existing_mode
-        else SUCCESS_MESSAGE
-    )
-    _render_object_result(
-        result,
-        title="Created Meta objects",
-        show_technical_details=False,
-    )
+    if compact:
+        from meta_posting_jobs import confirmed_ads
+        done, total = confirmed_ads(result)
+        if result.get("status") != "COMPLETE" or done != total:
+            st.warning("Creation is not fully verified. Review the saved Meta objects before retrying.")
+            _render_object_result(result, title="Saved posting result")
+            return
+        st.success("Ads created successfully in Meta")
+        _review_rows((
+            ("Campaign", result.get("campaign_name") or result.get("campaign_id") or "Unresolved"),
+            ("Ad set", result.get("adset_name") or result.get("adset_id") or "Unresolved"),
+            ("Ads created", str(done)),
+            ("Ad status", "PAUSED — Ready for Review"),
+        ))
+    else:
+        st.success(
+            "1 Meta carousel ad added successfully — PAUSED"
+            if carousel_mode and is_existing_mode
+            else "1 Meta carousel ad created successfully — PAUSED"
+            if carousel_mode
+            else "3 Meta ads added successfully — PAUSED"
+            if is_existing_mode
+            else SUCCESS_MESSAGE
+        )
+        _render_object_result(
+            result,
+            title="Created Meta objects",
+            show_technical_details=False,
+        )
     first_ad = (
         carousel_ad_result(result.get("ad_results"))
         if carousel_mode
@@ -1486,7 +1528,7 @@ def _render_success(result):
         campaign_id=result.get("campaign_id"), adset_id=result.get("adset_id"),
         ad_id=first_ad.get("meta_ad_id") or result.get("meta_ad_id"),
     )
-    actions = st.columns([1, 1, 4])
+    actions = st.columns([2, 2, 3] if compact else [1, 1, 4])
     actions[0].link_button("Open in Ads Manager", link, use_container_width=True)
     if actions[1].button("New campaign", use_container_width=True):
         _reset_posting_state()
@@ -1655,9 +1697,28 @@ def _render_recent_posts():
 
 
 def render_page():
-    st.title("Post Ad")
+    from ads_posting_style import CSS
+    st.markdown(CSS, unsafe_allow_html=True)
+    # Detach editable values from widget cleanup while the progress view is shown.
+    form_keys = (
+        PRODUCT_KEY, COUNTRY_KEY, SPORT_KEY, PRODUCT_SET_KEY, AUDIENCE_KEY,
+        CUSTOMER_LIFECYCLE_KEY, AD_TYPE_KEY, POSTING_MODE_KEY,
+        EXISTING_CAMPAIGN_KEY, EXISTING_ADSET_KEY, CREATE_COMPATIBLE_ADSET_KEY,
+        *PRIMARY_TEXT_KEYS, *HEADLINE_KEYS, *DESCRIPTION_KEYS,
+        *CAROUSEL_HEADLINE_KEYS, *CAROUSEL_DESCRIPTION_KEYS, *CAROUSEL_PRIMARY_TEXT_KEYS,
+    )
+    for key in form_keys:
+        if key in st.session_state:
+            st.session_state[key] = st.session_state[key]
+    with st.container(key="post-ad-workspace"):
+        _render_post_ad()
+
+
+def _render_post_ad():
+    title_col, refresh_col = st.columns([5, 1])
+    title_col.title("Post Ad")
     from ads_posting_progress import render_current
-    if render_current():
+    if render_current(compact=True):
         return
     if st.session_state.get(posting_handoff.PENDING_KEY):
         try:
@@ -1704,26 +1765,29 @@ def render_page():
     st.session_state.setdefault(COLLECTION_DIAGNOSTIC_PROCESSING_KEY, False)
     st.session_state.setdefault(COLLECTION_TEMPLATE_COPY_PROCESSING_KEY, False)
 
-    st.caption("**POSTING MODE**")
-    st.segmented_control(
-        "Posting mode",
-        tuple(POSTING_MODE_LABELS.values()),
-        default=POSTING_MODE_LABELS[POSTING_MODE_NEW],
-        key=POSTING_MODE_KEY,
-        label_visibility="collapsed",
-        disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
-    )
+    mode_cols = st.columns(2)
+    with mode_cols[0]:
+        st.caption("**POSTING MODE**")
+        st.segmented_control(
+            "Posting mode",
+            tuple(POSTING_MODE_LABELS.values()),
+            default=POSTING_MODE_LABELS[POSTING_MODE_NEW],
+            key=POSTING_MODE_KEY,
+            label_visibility="collapsed",
+            disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
+        )
     posting_mode = _posting_mode(st.session_state)
 
-    st.caption("**AD TYPE**")
-    st.segmented_control(
-        "Ad type",
-        AD_TYPES,
-        default=AD_TYPE,
-        key=AD_TYPE_KEY,
-        label_visibility="collapsed",
-        disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
-    )
+    with mode_cols[1]:
+        st.caption("**AD TYPE**")
+        st.segmented_control(
+            "Ad type",
+            AD_TYPES,
+            default=AD_TYPE,
+            key=AD_TYPE_KEY,
+            label_visibility="collapsed",
+            disabled=_current_run_state(st.session_state) != RUN_STATE_DRAFT,
+        )
     ad_type = str(st.session_state.get(AD_TYPE_KEY) or AD_TYPE)
     st.caption(
         "Create three route-specific Collection + Instant Experience ads safely in Meta."
@@ -1733,8 +1797,7 @@ def render_page():
 
     result = dict(st.session_state.get(RESULT_KEY) or {})
     if str(result.get("status") or "") == "COMPLETE":
-        _render_success(result)
-        _render_recent_posts()
+        _render_success(result, compact=True)
         return
     if str(result.get("status") or "") == "ABANDONED_EXTERNALLY":
         st.error(
@@ -1748,7 +1811,6 @@ def render_page():
         if st.button("Start fresh campaign", type="primary"):
             _start_new_posting_run()
             st.rerun()
-        _render_recent_posts()
         return
     if str(result.get("status") or "") in {"FAILED", "AMBIGUOUS"}:
         st.warning(
@@ -1759,7 +1821,7 @@ def render_page():
             _start_new_posting_run()
             st.rerun()
 
-    status_col, refresh_col = st.columns([5, 1])
+    status_col = st.container()
     refresh_meta = refresh_col.button(
         "Refresh Meta",
         use_container_width=True,
@@ -1799,11 +1861,9 @@ def render_page():
         _connection_status(status_col, f"Meta unavailable — {overview_error}", tone="warning")
     elif not overview.get("posting_ready"):
         _connection_status(status_col, str(overview.get("summary") or "Meta unavailable"), tone="warning")
-        _render_connection_details(overview)
-    elif references_ready:
-        _connection_status(status_col, "Meta connected · ready", tone="success")
-    else:
-        _connection_status(status_col, "Meta connected · setup needs attention", tone="warning")
+        status_col.caption("Check Meta credentials and permissions, then select Refresh Meta.")
+    elif not references_ready:
+        status_col.warning("Meta setup is incomplete. Refresh Meta to resolve missing settings.")
     warnings = tuple(str(value) for value in references.get("warnings") or () if str(value).strip())
     if warnings:
         st.caption("⚠ " + " · ".join(warnings[:3]))
@@ -1904,14 +1964,15 @@ def render_page():
         )
     elif import_status.get("message"):
         st.error(str(import_status.get("message")))
-    selector_value = st.selectbox(
+    product_cols = st.columns(2)
+    selector_value = product_cols[0].selectbox(
         "Product",
         options=tuple(record_by_identity), index=None, placeholder="Search Edition Ops products",
         filter_mode="fuzzy",
         format_func=lambda value: record_by_identity[value]["label"], key=PRODUCT_KEY,
     )
-    selection = ads_page.resolve_ads_product_selector_value(
-        selector_value, rows=product_rows, records=product_records
+    selection = _resolve_selected_product(
+        selector_value, product_rows, product_records, record_by_identity
     )
     selected_row = dict(selection.get("row") or {})
     selected_identity = str(selection.get("selector_identity") or "")
@@ -1934,7 +1995,7 @@ def render_page():
         or selected_row.get("handle")
         or ""
     )
-    st.text_input("Product URL", value=product_url, disabled=True)
+    product_cols[1].text_input("Product URL", value=product_url, disabled=True)
     if product_title and not product_url:
         st.error("This product has no usable Shopify product URL or valid handle. Posting is blocked.")
 
@@ -1945,6 +2006,7 @@ def render_page():
     # An untouched default sport is not product context on an empty Posting form.
     relevance_sport = sport if product_title else ""
 
+    meta_cols = st.columns(2)
     catalog_id = ""
     catalog_label = "Not used"
     product_set_id = ""
@@ -1956,7 +2018,7 @@ def render_page():
             else ""
         )
         catalog_label = str(catalog_resolution.get("name") or EXPECTED_CATALOG_NAME)
-        st.text_input(
+        meta_cols[0].text_input(
             "Catalog", value=catalog_label if catalog_id else "Not resolved", disabled=True
         )
         if not catalog_id:
@@ -1982,7 +2044,7 @@ def render_page():
             tuple(product_set_by_id.values()), product_title=product_title, sport=relevance_sport, key=PRODUCT_SET_KEY,
         )
         product_set_id = (
-            st.selectbox(
+            meta_cols[1].selectbox(
                 "Product set",
                 visible_product_sets,
                 index=None,
@@ -2004,8 +2066,9 @@ def render_page():
             "URL and does not use or modify a Catalog or Product Set."
         )
 
+    audience_cols = st.columns(2)
     if posting_mode == POSTING_MODE_EXISTING:
-        st.text_input(
+        audience_cols[0].text_input(
             "Audience",
             value="Inherited from the selected Ad Set",
             disabled=True,
@@ -2029,7 +2092,7 @@ def render_page():
         inherited_lifecycle_label = str(inherited_lifecycle.get("label") or "")
         if inherited_lifecycle.get("strategy") == CUSTOMER_LIFECYCLE_UNKNOWN:
             inherited_lifecycle_label = ""
-        st.text_input(
+        audience_cols[1].text_input(
             "Customer Lifecycle Strategy",
             value=(
                 f"Inherited: {inherited_lifecycle_label}"
@@ -2049,7 +2112,7 @@ def render_page():
         )
         if AUDIENCE_KEY not in st.session_state:
             st.session_state[AUDIENCE_KEY] = "broad"
-        audience_key = st.selectbox(
+        audience_key = audience_cols[0].selectbox(
             "Audience", visible_audiences,
             format_func=lambda value: (
                 "Broad — Sports Cave Default" if value == "broad"
@@ -2058,7 +2121,7 @@ def render_page():
             key=AUDIENCE_KEY,
         )
         audience = audience_by_key[audience_key]
-        customer_lifecycle_strategy = st.selectbox(
+        customer_lifecycle_strategy = audience_cols[1].selectbox(
             "Customer Lifecycle Strategy",
             (
                 CUSTOMER_LIFECYCLE_ALL_AUDIENCES,
@@ -2091,32 +2154,35 @@ def render_page():
         for index in range(1, 4):
             with st.container(border=True):
                 st.markdown(f"**Ad {index}**")
-                uploaded = st.file_uploader(
-                    f"Image {index}", type=("jpg", "jpeg", "png", "webp"),
-                    accept_multiple_files=False, key=IMAGE_KEYS[index - 1],
-                )
-                image = _sync_posting_image_upload(index, uploaded)
-                image_error = str(image.get("error") or "")
-                if image.get("valid"):
-                    st.caption(
-                        f":green[✓ **Image {index} ready**] · "
-                        f"{_posting_image_size_label(image.get('source_size'))} "
-                        f"{image.get('source_format') or ''} · "
-                        f"{image.get('source_width')} × {image.get('source_height')} · "
-                        "Instant Experience cover · Generate backgrounds off"
+                asset_col, copy_col = st.columns([1, 2])
+                with asset_col:
+                    uploaded = st.file_uploader(
+                        f"Image {index}", type=("jpg", "jpeg", "png", "webp"),
+                        accept_multiple_files=False, key=IMAGE_KEYS[index - 1],
                     )
-                elif image_error:
-                    st.error(image_error)
-                primary_text = st.text_area(
-                    f"Primary Text {index}", key=PRIMARY_TEXT_KEYS[index - 1], height=100
-                )
-                copy_cols = st.columns(2)
-                headline = copy_cols[0].text_input(
-                    f"Headline {index}", key=HEADLINE_KEYS[index - 1]
-                )
-                description = copy_cols[1].text_input(
-                    f"Description {index} (optional)", key=DESCRIPTION_KEYS[index - 1]
-                )
+                    image = _sync_posting_image_upload(index, uploaded)
+                    image_error = str(image.get("error") or "")
+                    if image.get("valid"):
+                        st.caption(
+                            f":green[✓ **Image {index} ready**] · "
+                            f"{_posting_image_size_label(image.get('source_size'))} "
+                            f"{image.get('source_format') or ''} · "
+                            f"{image.get('source_width')} × {image.get('source_height')} · "
+                            "Instant Experience cover · Generate backgrounds off"
+                        )
+                    elif image_error:
+                        st.error(image_error)
+                with copy_col:
+                    primary_text = st.text_area(
+                        f"Primary Text {index}", key=PRIMARY_TEXT_KEYS[index - 1], height=100
+                    )
+                    copy_cols = st.columns(2)
+                    headline = copy_cols[0].text_input(
+                        f"Headline {index}", key=HEADLINE_KEYS[index - 1]
+                    )
+                    description = copy_cols[1].text_input(
+                        f"Description {index} (optional)", key=DESCRIPTION_KEYS[index - 1]
+                    )
                 creative_inputs.append(
                     {
                         "image": image,
@@ -2130,38 +2196,41 @@ def render_page():
         for index in range(1, 6):
             with st.container(border=True):
                 st.markdown(f"**CAROUSEL CARD {index}**")
-                uploaded = st.file_uploader(
-                    f"Image {index}",
-                    type=("jpg", "jpeg", "png", "webp"),
-                    accept_multiple_files=False,
-                    key=CAROUSEL_IMAGE_KEYS[index - 1],
-                )
-                image = _sync_carousel_image_upload(index, uploaded)
-                image_error = str(image.get("error") or "")
-                if image.get("valid"):
-                    st.caption(
-                        f":green[✓ **Card image {index} ready**] · "
-                        f"{_posting_image_size_label(image.get('source_size'))} "
-                        f"{image.get('source_format') or ''} · "
-                        f"{image.get('source_width')} × {image.get('source_height')}"
+                asset_col, copy_col = st.columns([1, 2])
+                with asset_col:
+                    uploaded = st.file_uploader(
+                        f"Image {index}",
+                        type=("jpg", "jpeg", "png", "webp"),
+                        accept_multiple_files=False,
+                        key=CAROUSEL_IMAGE_KEYS[index - 1],
                     )
-                elif image_error:
-                    st.error(image_error)
-                expected_name = str(
-                    st.session_state.get(CAROUSEL_EXPECTED_IMAGE_NAME_KEYS[index - 1])
-                    or ""
-                )
-                if expected_name:
-                    st.caption(f"CSV image slot: {expected_name}")
-                copy_cols = st.columns(2)
-                headline = copy_cols[0].text_input(
-                    f"Card Headline {index}", key=CAROUSEL_HEADLINE_KEYS[index - 1]
-                )
-                description = copy_cols[1].text_input(
-                    f"Card Description {index}",
-                    key=CAROUSEL_DESCRIPTION_KEYS[index - 1],
-                )
-                st.caption(f"Destination: {product_url or 'selected product URL'} · CTA: SHOP_NOW")
+                    image = _sync_carousel_image_upload(index, uploaded)
+                    image_error = str(image.get("error") or "")
+                    if image.get("valid"):
+                        st.caption(
+                            f":green[✓ **Card image {index} ready**] · "
+                            f"{_posting_image_size_label(image.get('source_size'))} "
+                            f"{image.get('source_format') or ''} · "
+                            f"{image.get('source_width')} × {image.get('source_height')}"
+                        )
+                    elif image_error:
+                        st.error(image_error)
+                    expected_name = str(
+                        st.session_state.get(CAROUSEL_EXPECTED_IMAGE_NAME_KEYS[index - 1])
+                        or ""
+                    )
+                    if expected_name:
+                        st.caption(f"CSV image slot: {expected_name}")
+                with copy_col:
+                    copy_cols = st.columns(2)
+                    headline = copy_cols[0].text_input(
+                        f"Card Headline {index}", key=CAROUSEL_HEADLINE_KEYS[index - 1]
+                    )
+                    description = copy_cols[1].text_input(
+                        f"Card Description {index}",
+                        key=CAROUSEL_DESCRIPTION_KEYS[index - 1],
+                    )
+                    st.caption(f"Destination: {product_url or 'selected product URL'} · CTA: SHOP_NOW")
                 carousel_cards.append(
                     {
                         "image": image,
@@ -2331,11 +2400,11 @@ def render_page():
     st.subheader("Review")
     with st.container(border=True):
         if posting_mode == POSTING_MODE_EXISTING:
-            st.markdown(
-                f"Campaign: **{html.escape(generated_campaign_name or 'Select a Campaign')}**  \n"
-                f"Ad set: **{html.escape(generated_adset_name or 'Select an Ad Set')}**  \n"
-                f"Structure: **{_existing_review_structure(ad_type, create_compatible_adset=create_compatible_adset)}**"
-            )
+            _review_rows((
+                ("Campaign", generated_campaign_name or "Select a Campaign"),
+                ("Ad set", generated_adset_name or "Select an Ad Set"),
+                ("Structure", _existing_review_structure(ad_type, create_compatible_adset=create_compatible_adset)),
+            ))
             if create_compatible_adset:
                 st.markdown(
                     "**Existing Campaign:** Its status and settings will not be changed. "
@@ -2360,15 +2429,12 @@ def render_page():
                 )
             )
         else:
-            st.markdown(
-                f"Campaign: **{html.escape(generated_campaign_name or 'Waiting for product')}**  \n"
-                f"Ad set: **{html.escape(generated_adset_name)}**  \n"
-                + (
-                    "Structure: **1 New Campaign → 1 New Ad Set → 1 New Carousel Ad**"
-                    if ad_type == CAROUSEL_AD_TYPE
-                    else "Structure: **1 New Campaign → 1 New Ad Set → 3 New Ads**"
-                )
-            )
+            _review_rows((
+                ("Campaign", generated_campaign_name or "Waiting for product"),
+                ("Ad set", generated_adset_name),
+                ("Structure", "1 New Campaign → 1 New Ad Set → 1 New Carousel Ad"
+                 if ad_type == CAROUSEL_AD_TYPE else "1 New Campaign → 1 New Ad Set → 3 New Ads"),
+            ))
             st.markdown(
                 "**Sales setup:** "
                 f"Purchase optimization · Advantage+ placements · Advantage+ audience · {country} only · "
@@ -2400,7 +2466,7 @@ def render_page():
                 f"**Carousel Ad — {html.escape(generated_carousel_ad_name or 'Waiting for product')}**"
             )
             for index, card in enumerate(carousel_cards, start=1):
-                preview, summary = st.columns([1, 2])
+                preview, summary = st.columns([1, 5])
                 with preview:
                     if card["image"].get("preview_data"):
                         st.image(
@@ -2424,7 +2490,7 @@ def render_page():
             zip(creative_inputs, generated_ad_names), start=1
         ):
             with st.container(border=True):
-                preview, summary = st.columns([1, 2])
+                preview, summary = st.columns([1, 5])
                 with preview:
                     if creative["image"].get("preview_data"):
                         st.image(
@@ -2515,34 +2581,14 @@ def render_page():
             "Instant Experience ads in Meta for review."
         )
 
-    if posting_mode == POSTING_MODE_EXISTING:
-        create_clicked = st.button(
-            "Create Compatible Ad Set + 3 Paused Ads"
-            if create_compatible_adset
-            else "Add 1 Paused Carousel Ad to Existing Ad Set"
-            if ad_type == CAROUSEL_AD_TYPE
-            else "Add 3 Paused Ads to Existing Ad Set",
-            type="primary",
-            use_container_width=True,
-            disabled=not ready or st.session_state[PROCESSING_KEY],
-            key=f"{STATE_PREFIX}create",
-        )
-    else:
-        if ad_type == CAROUSEL_AD_TYPE:
-            create_clicked = st.button(
-                "Create 1 Paused Meta Carousel Ad",
-                type="primary",
-                use_container_width=True,
-                disabled=not ready or st.session_state[PROCESSING_KEY],
-                key=f"{STATE_PREFIX}create",
-            )
-        else:
-            create_clicked = st.button(
-                "Create 3 Paused Meta Ads", type="primary", use_container_width=True,
-                disabled=not ready or st.session_state[PROCESSING_KEY], key=f"{STATE_PREFIX}create",
-            )
+    create_clicked = st.button(
+        "Create Ad", type="primary",
+        disabled=not ready or st.session_state[PROCESSING_KEY],
+        key=f"{STATE_PREFIX}create",
+    )
 
     if create_clicked:
+        st.progress(0, text="Validating campaign settings…")
         st.session_state[PROCESSING_KEY] = True
         st.session_state[RUN_STATE_KEY] = RUN_STATE_ACTIVE
         request = _build_posting_request(
@@ -2589,166 +2635,3 @@ def render_page():
         else:
             _load_recent_posts.clear()
             st.rerun()
-
-    if ad_type == CAROUSEL_AD_TYPE:
-        with st.expander("Advanced Meta Diagnostics", expanded=False):
-            st.caption(
-                "Carousel creation is guarded by the Graph-confirmed manual reference "
-                "contract and Meta validate_only checks. Both must pass before any "
-                "persistent Carousel Meta write is attempted."
-            )
-        _render_recent_posts()
-        return
-
-    diagnostics_panel = st.expander("Advanced Meta Diagnostics", expanded=False)
-    diagnostics_panel.markdown("#### Collection diagnostic")
-    diagnostics_panel.caption("Uses Meta validate_only. Creates no campaign, ad set, creative or ad.")
-    diagnostic_signature = _collection_validation_signature(
-        submission_id=st.session_state[SUBMISSION_ID_KEY],
-        product_title=product_title,
-        product_set_id=product_set_id,
-        product_url=product_url,
-        primary_text=creative_inputs[0]["primary_text"],
-        headline=creative_inputs[0]["headline"],
-    )
-    diagnostic_ready = bool(
-        product_title
-        and product_url
-        and product_set_id
-        and str(creative_inputs[0]["primary_text"] or "").strip()
-        and str(creative_inputs[0]["headline"] or "").strip()
-        and overview.get("posting_ready")
-    )
-    if diagnostics_panel.button(
-        "Run Collection Validation — No Ads Created",
-        type="secondary",
-        use_container_width=True,
-        disabled=(
-            not diagnostic_ready
-            or st.session_state[PROCESSING_KEY]
-            or st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY]
-        ),
-        key=f"{STATE_PREFIX}collection_diagnostic",
-    ):
-        st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY] = True
-        try:
-            with st.spinner("Running Meta validate-only Collection tests…"):
-                diagnostic = run_collection_validation_from_posting_state(
-                    submission_id=st.session_state[SUBMISSION_ID_KEY],
-                    product_title=product_title,
-                    product_set_id=product_set_id,
-                    product_url=product_url,
-                    primary_text=creative_inputs[0]["primary_text"],
-                    headline=creative_inputs[0]["headline"],
-                )
-        except (PostingValidationError, MetaCollectionDiagnosticSafetyError) as error:
-            diagnostic = {
-                "persistent_meta_writes": "NONE",
-                "error": str(error),
-            }
-        except Exception:
-            diagnostic = {
-                "persistent_meta_writes": "NONE",
-                "error": (
-                    "Meta Collection validation could not run safely. No Meta objects "
-                    "were created and the Posting ledger was not changed."
-                ),
-            }
-        finally:
-            st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY] = False
-        st.session_state[COLLECTION_DIAGNOSTIC_RESULT_KEY] = {
-            "signature": diagnostic_signature,
-            "result": diagnostic,
-        }
-
-    saved_diagnostic = dict(
-        st.session_state.get(COLLECTION_DIAGNOSTIC_RESULT_KEY) or {}
-    )
-    if saved_diagnostic.get("signature") == diagnostic_signature:
-        with diagnostics_panel:
-            _render_collection_validation(saved_diagnostic.get("result"))
-
-    diagnostics_panel.markdown("#### Real-write Collection diagnostic")
-    diagnostics_panel.warning(
-        "Creates exactly one real PAUSED ad by copying the configured Collection "
-        "template into the existing failed-job Ad Set. It does not create a campaign, "
-        "ad set, Instant Experience, Page photo, or additional route ads."
-    )
-    template_copy_attempted = bool(
-        st.session_state.get(COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY)
-    )
-    if diagnostics_panel.button(
-        "Create 1 Paused Template Copy",
-        type="secondary",
-        use_container_width=True,
-        disabled=(
-            not diagnostic_ready
-            or st.session_state[PROCESSING_KEY]
-            or st.session_state[COLLECTION_DIAGNOSTIC_PROCESSING_KEY]
-            or st.session_state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY]
-            or template_copy_attempted
-        ),
-        key=f"{STATE_PREFIX}collection_template_copy",
-    ):
-        # Lock the control before the network call. A Meta failure or ambiguous
-        # response must never cause an automatic or accidental second copy.
-        st.session_state[COLLECTION_TEMPLATE_COPY_ATTEMPTED_KEY] = {
-            "signature": diagnostic_signature,
-            "source_ad_id": configured_collection_template_ad_id(),
-        }
-        st.session_state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY] = True
-        try:
-            with st.spinner("Creating and verifying one paused Meta template copy…"):
-                template_copy_result = run_collection_template_copy_from_posting_state(
-                    submission_id=st.session_state[SUBMISSION_ID_KEY],
-                    product_title=product_title,
-                    product_set_id=product_set_id,
-                    product_url=product_url,
-                    primary_text=creative_inputs[0]["primary_text"],
-                    headline=creative_inputs[0]["headline"],
-                )
-        except MetaCollectionTemplateCopyVerificationError as error:
-            template_copy_result = dict(error.result or {})
-            template_copy_result["status"] = "FAIL"
-            template_copy_result["error"] = str(error)
-        except MetaAdsApiError as error:
-            template_copy_result = {
-                "status": "FAIL",
-                "persistent_meta_writes": "NONE CONFIRMED — REVIEW REQUIRED",
-                **sanitized_template_copy_error(error),
-            }
-        except (PostingValidationError, MetaCollectionTemplateCopySafetyError) as error:
-            template_copy_result = {
-                "status": "FAIL",
-                "persistent_meta_writes": "NONE",
-                "error": str(error),
-            }
-        except Exception:
-            template_copy_result = {
-                "status": "FAIL",
-                "persistent_meta_writes": "NONE CONFIRMED — REVIEW REQUIRED",
-                "error": (
-                    "The template-copy diagnostic could not confirm a safe result. "
-                    "Do not retry until the source ad copies are reviewed in Meta."
-                ),
-            }
-        finally:
-            st.session_state[COLLECTION_TEMPLATE_COPY_PROCESSING_KEY] = False
-        st.session_state[COLLECTION_TEMPLATE_COPY_RESULT_KEY] = {
-            "signature": diagnostic_signature,
-            "result": template_copy_result,
-        }
-
-    saved_template_copy = dict(
-        st.session_state.get(COLLECTION_TEMPLATE_COPY_RESULT_KEY) or {}
-    )
-    if saved_template_copy.get("signature") == diagnostic_signature:
-        with diagnostics_panel:
-            _render_collection_template_copy(saved_template_copy.get("result"))
-    elif template_copy_attempted:
-        diagnostics_panel.caption(
-            "A template-copy attempt has already been made in this Posting session. "
-            "Further copies are blocked."
-        )
-
-    _render_recent_posts()

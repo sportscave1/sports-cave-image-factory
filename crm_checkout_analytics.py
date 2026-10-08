@@ -38,7 +38,7 @@ def details(store,checkout):
         if prior and prior['customer_id'] and customer and prior['customer_id']!=customer:raise ValueError('Checkout customer identity changed')
         if prior and date((prior.get('analytics') or {}).get('completed_at')):data['completed_at']=prior['analytics']['completed_at']
         if conn.execute("SELECT 1 FROM crm_suppressions WHERE shopify_customer_id=%s AND reason='redacted'",(customer or (prior or {}).get('customer_id',''),)).fetchone():return 'Unchanged'
-        conn.execute("""INSERT INTO crm_shopify_checkouts(checkout_key,shop,customer_id,source_event_id,created_at,activity_at,status,admin_checkout_id,analytics)
+        if not prior:conn.execute("""INSERT INTO crm_shopify_checkouts(checkout_key,shop,customer_id,source_event_id,created_at,activity_at,status,admin_checkout_id,analytics)
           VALUES(%s,%s,%s,%s,%s,%s,'ABANDONED',%s,'{}') ON CONFLICT DO NOTHING""",
           (key,os.getenv('SHOPIFY_STORE_DOMAIN',''),customer,'admin:'+checkout['id'],created,activity,checkout['id']))
         # Preserve signed completion/order evidence. Cached status alone is not evidence.
@@ -72,13 +72,15 @@ def reconcile(shop,store,period):
     return counts,True
 
 
-def sync_cache(shop,store,at=None):
+def sync_cache(shop,store,at=None,*,checkpoint=None):
     """One persistent page per worker cycle, even with sending disabled."""
     at=at or now();slot='checkout-cache-v2';state=store.state(slot)
     if date(state.get('next_at')) and date(state['next_at'])>at:return
     page=shop.query(RECONCILE_QUERY,{'after':state.get('cursor'),'query':None},'checkout identity sync',0,True)['abandonedCheckouts']
     counts={'Updated':0,'Unchanged':0,'Failed':0}
     for checkout in page['nodes']:
+        # Outside details' transaction: never submit while holding ledger locks.
+        if checkpoint:checkpoint()
         try:counts[details(store,checkout)]+=1
         except ValueError:
             # One malformed Shopify identity must not pin the pagination cursor.
@@ -86,7 +88,10 @@ def sync_cache(shop,store,at=None):
             logging.getLogger(__name__).warning('checkout_sync_invalid_identity')
     info=page['pageInfo'];cursor=info.get('endCursor') if info.get('hasNextPage') else None
     if info.get('hasNextPage') and (not cursor or cursor==state.get('cursor')):raise ValueError('Checkout sync pagination did not advance')
-    store.set_state(slot,{'cursor':cursor,'next_at':(at+timedelta(seconds=2 if cursor else 300)).isoformat(),'counts':counts,'last_synced_at':at.isoformat()})
+    finished=now()
+    # Preserve the original scan cadence; reporting completion must not add
+    # another page's processing time to checkout discovery latency.
+    store.set_state(slot,{'cursor':cursor,'next_at':(at+timedelta(seconds=2 if cursor else 300)).isoformat(),'counts':counts,'started_at':at.isoformat(),'last_synced_at':finished.isoformat()})
     logging.getLogger(__name__).info('checkout_sync_page updated=%s unchanged=%s invalid=%s more=%s',counts['Updated'],counts['Unchanged'],counts['Failed'],bool(cursor))
 
 
@@ -99,20 +104,29 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  SELECT DISTINCT ON(j.checkout_key) j.* FROM crm_automation_enrollments j JOIN selected c USING(checkout_key)
  WHERE j.automation_id=%s ORDER BY j.checkout_key,j.trigger_at DESC
 ), messages AS MATERIALIZED (
- SELECT s.id,s.enrollment_id,j.checkout_key,s.step_index,s.status,s.first_submitted_at,s.updated_at,s.provider_email_id,s.error_code
+ SELECT s.id,s.enrollment_id,j.checkout_key,s.step_index,j.steps->s.step_index->>'step_id' AS step_id,
+ s.due_at,s.status,s.first_submitted_at,s.updated_at,s.provider_email_id,s.error_code
  FROM crm_marketing_sends s JOIN crm_automation_enrollments j ON j.id=s.enrollment_id
  JOIN selected c ON c.checkout_key=j.checkout_key JOIN crm_automations a ON a.id=j.automation_id
  WHERE NOT s.test_send AND a.trigger_type='abandoned'
 ), events AS (
  SELECT e.send_id,count(*) FILTER(WHERE event_type='email.opened') AS opened,
- count(*) FILTER(WHERE event_type='email.clicked') AS clicked,max(occurred_at) AS last_event
+ count(*) FILTER(WHERE event_type='email.clicked') AS clicked,max(occurred_at) AS last_event,
+ max(occurred_at) FILTER(WHERE event_type='email.delivered') AS delivered_at
  FROM crm_delivery_events e JOIN messages s ON s.id=e.send_id GROUP BY e.send_id
 ), receipts AS (
- SELECT s.checkout_key,jsonb_agg(jsonb_build_object('id',s.id,'enrollment_id',s.enrollment_id,'step',step_index,'status',status,'submitted_at',first_submitted_at,'updated_at',updated_at,'provider_id',provider_email_id,'error',error_code) ORDER BY step_index) AS sends,
+ SELECT s.checkout_key,jsonb_agg(jsonb_build_object('id',s.id,'enrollment_id',s.enrollment_id,'step',step_index,'step_id',step_id,'due_at',due_at,'status',status,'submitted_at',first_submitted_at,'updated_at',updated_at,'provider_id',provider_email_id,'error',error_code,'delivered_at',e.delivered_at) ORDER BY step_index) AS sends,
  sum(COALESCE(e.opened,0)) AS opened,sum(COALESCE(e.clicked,0)) AS clicked,max(e.last_event) AS last_event
  FROM messages s LEFT JOIN events e ON e.send_id=s.id GROUP BY s.checkout_key
 )
 SELECT c.*,v.value AS evaluation,request.value-'history' AS enrollment_request,a.status AS automation_status,a.config->>'archived_at' AS archived_at,
+ statement_timestamp() AS read_at,
+ (SELECT COALESCE(jsonb_agg(jsonb_build_object('step_id',step->>'step_id','name',step->>'name',
+   'enabled',COALESCE((step->>'enabled')::boolean,true)) ORDER BY ordinal),'[]')
+  FROM jsonb_array_elements(COALESCE(a.config->'published_flow'->'emails',
+    (SELECT snapshot->'flow'->'emails' FROM crm_automation_publish_jobs
+      WHERE automation_id=a.id AND publication_version=(a.config->>'published_version')::int AND state='SUCCEEDED'),
+    a.steps)) WITH ORDINALITY AS published(step,ordinal)) AS published_steps,
  (SELECT value FROM crm_runtime_state WHERE key='abandoned-checkout-policy') AS recovery_policy,
  GREATEST(a.activated_at,(SELECT (value->>'started_at')::timestamptz FROM crm_runtime_state WHERE key='checkout-auto-start-v2')) AS auto_start_at,
  a.config->'published'->>'abandonment_seconds' AS abandonment_seconds,

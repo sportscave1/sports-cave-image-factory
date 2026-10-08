@@ -58,6 +58,18 @@ class DiagnosticTests(TestCase):
         self.assertEqual(result['pixel'],'UNVERIFIED');self.assertEqual(result['triggers']['abandoned'],'AVAILABLE')
         store=Mock();store.state.return_value=result;require(store,'abandoned')
 
+    def test_worker_skips_optional_pixel_but_explicit_diagnostic_checks_it(self):
+        from crm_automation_capabilities import PIXEL
+        shop=trigger_tests.CapabilitiesTests().shop();store=Mock()
+        store.state.return_value={'pixel':'NOT VERIFIED','pixel_checked_at':'2026-10-01T00:00:00Z'}
+        with patch('crm_tracking_health.subscriptions',return_value=self.hooks()):
+            result=verify(shop,store,ENV,include_pixel=False)
+            self.assertFalse(any(call.args[0]==PIXEL for call in shop.query.call_args_list))
+            self.assertEqual(result['triggers']['abandoned'],'AVAILABLE')
+            self.assertEqual(result['pixel_checked_at'],'2026-10-01T00:00:00Z')
+            verify(shop,store,ENV)
+            self.assertTrue(any(call.args[0]==PIXEL for call in shop.query.call_args_list))
+
     def test_missing_stale_and_failed_reports_block_but_valid_report_passes(self):
         for result,text in [({},'Diagnostic missing'),({'checked_at':(now()-timedelta(minutes=11)).isoformat(),'triggers':{'abandoned':'AVAILABLE'}},'Diagnostic expired'),(self.report(scopes=['read_customers']),'read_orders: MISSING')]:
             store=Mock();store.state.return_value=result
@@ -78,7 +90,9 @@ class DiagnosticTests(TestCase):
         config=Mock(enabled=False,api_key='');engine=Engine(store,Mock(),config=config,clock=lambda:clock)
         engine.send_one=Mock(return_value=False)
         stamps=[]
-        def verified(*a):state['checked_at']=clock.isoformat();stamps.append(clock)
+        def verified(*a,**kwargs):
+            self.assertFalse(kwargs['include_pixel'])
+            state['checked_at']=clock.isoformat();stamps.append(clock)
         with patch('crm_automation_capabilities.verify',side_effect=verified),patch('crm_campaign_schedule.schedule_gate'),patch('crm_campaign_dispatch.dispatch'),patch('crm_campaign_attribution.reconcile'),patch('crm_consent_sync.reconcile_pending'):
             for minute in range(21):
                 if minute:clock+=timedelta(minutes=1)

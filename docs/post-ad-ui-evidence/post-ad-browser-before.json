@@ -1,0 +1,30 @@
+[
+  {
+    "width": 1440,
+    "loadMs": 1585,
+    "height": 3148,
+    "overflow": false,
+    "headingTop": 96
+  },
+  {
+    "width": 1280,
+    "loadMs": 273,
+    "height": 3173,
+    "overflow": false,
+    "headingTop": 96
+  },
+  {
+    "width": 768,
+    "loadMs": 234,
+    "height": 3218,
+    "overflow": false,
+    "headingTop": 96
+  },
+  {
+    "width": 390,
+    "loadMs": 247,
+    "height": 3884,
+    "overflow": false,
+    "headingTop": 96
+  }
+]

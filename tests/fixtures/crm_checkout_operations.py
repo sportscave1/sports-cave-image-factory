@@ -14,7 +14,8 @@ import crm_automation_analytics_ui as ui
 import crm_checkout_enrollment_ui as enrollment_ui
 
 st.set_page_config(layout='wide')
-row={'id':'fixture','status':'ACTIVE','steps':[{}],'config':{'published':{'abandonment_seconds':1800}},'trigger_type':'abandoned'}
+steps=[{'step_id':str(i),'name':'Email '+str(i+1),'enabled':True} for i in range(5)]
+row={'id':'fixture','status':'ACTIVE','steps':steps,'config':{'published_flow':{'emails':steps}},'trigger_type':'abandoned'}
 
 class Fixture:
     def __init__(self):
@@ -24,8 +25,11 @@ class Fixture:
             'created_at':now()-timedelta(days=4),'activity_at':now()-timedelta(days=4),'status':'ABANDONED',
             'customer_id':'gid://shopify/Customer/'+str(i),'analytics':{'name':name,'email':f'fixture{i}@example.test','region':region,'reference':'#'+str(100+i)},
             'sends':[{'step':0,'status':'ACCEPTED','provider_id':'fixture','error':''}] if i==1 else [],
-            'order_id':'gid://shopify/Order/99' if i==2 else None,'enrollment_id':None}
+            'order_id':'gid://shopify/Order/99' if i==2 else None,'enrollment_id':None,'automation_status':'ACTIVE'}
             for i,(name,region) in enumerate(names)]
+        for c in self.records:c['analytics']['shopify_abandoned']=True
+        self.records[1].update(enrollment_id='fixture-1',steps=steps,flow_status='ACTIVE',current_step=1,next_due_at=now()+timedelta(hours=12),
+            sends=[{'step':0,'enrollment_id':'fixture-1','status':'ACCEPTED','provider_id':'fixture','error':''}])
     def request(self,keys):
         sleep(.15)
         with self.lock:
@@ -45,10 +49,10 @@ class Fixture:
             reason={'5':'Unsubscribed','6':'Suppressed'}.get(k)
             if k=='4' and self.attempts[k]==1:reason='Failed — Shopify unavailable'
             self.results[k].update(state='FAILED' if reason and reason.startswith('Failed') else 'DONE',result=reason or 'Sent',delivery='failed' if reason and reason.startswith('Failed') else 'skipped' if reason else 'sent',enrolled=not bool(reason))
-            if not reason:self.records[int(k)].update(enrollment_id='fixture-'+k,flow_status='ACTIVE',next_due_at=now()+timedelta(days=1),current_step=1,steps=[{},{}],sends=[{'step':0,'status':'ACCEPTED','provider_id':'fixture-'+k,'enrollment_id':'fixture-'+k,'error':''}])
+            if not reason:self.records[int(k)].update(enrollment_id='fixture-'+k,flow_status='ACTIVE',next_due_at=now()+timedelta(days=1),current_step=1,steps=steps,sends=[{'step':0,'status':'ACCEPTED','provider_id':'fixture-'+k,'enrollment_id':'fixture-'+k,'error':''}])
     def read(self,store,key,fn,ttl=180):
         with self.lock:
-            if key[0]=='checkout-list':return deepcopy(self.records),'READY'
+            if key[0]=='checkout-list':return [dict(deepcopy(c),published_steps=steps,read_at=now()) for c in self.records],'READY'
             return [dict(deepcopy(self.records[int(k)]),request=deepcopy(self.results[k])) for k in key[2] if k in self.results],'READY'
 
 if 'fixture_backend' not in st.session_state:st.session_state['fixture_backend']=Fixture()

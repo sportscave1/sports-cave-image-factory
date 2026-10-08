@@ -241,10 +241,12 @@ class ProductionSqlTests(unittest.TestCase):
         # This shared disposable database contains queues from other tests;
         # isolate the worker lifecycle being asserted here.
         self.store.q("UPDATE crm_campaigns SET status='PAUSED' WHERE id<>%s AND status='SENDING'",(self.editor['id'],))
+        target=self.store.q('SELECT id FROM crm_marketing_sends WHERE campaign_id=%s ORDER BY id LIMIT 1',(self.editor['id'],),True)['id']
+        original_claim=self.store.claim_send
         def claim(**kwargs):
-            return self.store.q("""UPDATE crm_marketing_sends SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes'
-              WHERE id=(SELECT s.id FROM crm_marketing_sends s JOIN crm_campaigns c ON c.id=s.campaign_id
-                WHERE s.campaign_id=%s AND s.status='PENDING' AND c.status='SENDING' AND s.due_at<=now() ORDER BY s.id LIMIT 1) RETURNING *""",(self.editor['id'],),True)
+            # Exercise the production claim predicate, including exclusion of
+            # frozen batch recipients from the individual-message transport.
+            return original_claim(**kwargs,send_id=target)
         with patch.dict(os.environ,LIVE),patch.object(self.store,'claim_send',side_effect=claim),patch.object(self.store,'list',return_value=[]),patch.object(engine,'campaign_page'),patch('crm_campaign_attribution.reconcile'),patch('crm_consent_sync.reconcile_pending'):
             engine.tick('fixture-'+uuid.uuid4().hex);engine.tick('fixture-'+uuid.uuid4().hex)
         provider.send.assert_not_called()

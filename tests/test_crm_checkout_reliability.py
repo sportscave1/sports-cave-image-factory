@@ -26,7 +26,8 @@ class Presentation(TestCase):
 
     def test_not_sent_red(self):
         self.assertEqual(recovery_status({}),'Not sent')
-        self.assertIn("'Not sent':'red'",Path('components/crm_checkout_table/index.html').read_text())
+        from crm_checkout_progress import pending
+        self.assertEqual(pending({'automation_status':'ACTIVE','evaluation':{'reason':'not_recoverable'}},now())['tone'],'red')
 
     def test_sent_not_recovered_orange(self):
         self.assertEqual(recovery_status({'sends':[{'status':'ACCEPTED','provider_id':'receipt'}]}),'Not recovered')
@@ -52,13 +53,15 @@ class Presentation(TestCase):
 
     def test_operational_page_has_no_secondary_analytics(self):
         import inspect
-        from crm_automation_analytics_ui import checkout_panel,_checkout_panel,content
+        from crm_automation_analytics_ui import checkout_panel,_checkout_panel
+        from crm_flow_page import checkouts
         panel=inspect.getsource(checkout_panel)+inspect.getsource(_checkout_panel)
         self.assertNotIn('secondary(',panel)
         self.assertNotIn('countdown_html',panel)
         self.assertIn("disabled=not available",panel)
         self.assertLess(panel.index("'Refresh checkout details'"),panel.index("'Add to flow'"))
-        branch=inspect.getsource(content).split("if row['trigger_type']=='abandoned':",1)[1].split('return',1)[0]
+        branch=inspect.getsource(checkouts)
+        self.assertIn('checkout_panel(',branch)
         self.assertNotIn('secondary(',branch)
 
 

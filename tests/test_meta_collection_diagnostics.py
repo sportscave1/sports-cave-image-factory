@@ -241,18 +241,9 @@ class PostingCollectionDiagnosticIntegrationTests(unittest.TestCase):
 
     def test_ui_control_is_posting_only_and_normal_create_control_is_unchanged(self):
         posting_source = (ROOT / "ads_posting_page.py").read_text(encoding="utf-8")
-        self.assertEqual(
-            posting_source.count('"Run Collection Validation — No Ads Created"'),
-            1,
-        )
-        self.assertIn(
-            '"Uses Meta validate_only. Creates no campaign, ad set, creative or ad."',
-            posting_source,
-        )
-        self.assertIn(
-            '"Create 3 Paused Meta Ads", type="primary", use_container_width=True,',
-            posting_source,
-        )
+        self.assertNotIn('"Run Collection Validation — No Ads Created"', posting_source)
+        self.assertIn('def run_collection_validation_from_posting_state(', posting_source)
+        self.assertIn('"Create Ad", type="primary"', posting_source)
         for path in (ROOT / "ads_page.py", ROOT / "ads_creative_refresh.py"):
             self.assertNotIn(
                 "Run Collection Validation — No Ads Created",

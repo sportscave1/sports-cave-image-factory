@@ -109,6 +109,8 @@ def checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     .st-key-checkout-compact [data-baseweb="input"]{height:32px;min-height:32px}
     .st-key-checkout-compact [data-testid="stButton"] button{min-height:32px;padding:.2rem .65rem}
     .st-key-checkout-compact [data-testid="stButton"] button p{font-size:13px}
+    .st-key-checkout-compact [data-testid="stCustomComponentV1"]{min-width:0;max-width:100%}
+    .st-key-checkout-compact iframe{width:100%!important;max-width:100%;min-width:0}
     </style>''')
     with st.container(key='checkout-compact'):
         _checkout_panel(shop,store,user,row,bounds,period,paginated=paginated)
@@ -118,8 +120,9 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     from pathlib import Path
     import streamlit.components.v1 as components
     from crm_component_json import render_component
-    from crm_checkout_identity import display_name,reference,recovery_status
-    from crm_checkout_timing_ui import time_to_send
+    from crm_checkout_identity import display_name,reference
+    from crm_checkout_progress import columns,listing
+    from os_accounts import timezone_for_user
     slot='auto-checkouts-'+str(row['id']);key=('checkout-list',str(row['id']),period)
     heading,status=st.columns([4,1]);heading.subheader('Abandoned checkouts')
     status.selectbox('Checkout status',['Incomplete'],label_visibility='collapsed',key=slot+'-status')
@@ -131,9 +134,9 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
             st.session_state[slot+'-criteria']=criteria;st.session_state[slot+'-cursors']=[None]
         cursors=st.session_state.setdefault(slot+'-cursors',[None]);cursor=cursors[-1]
         key+=('page',search.strip(),cursor)
-        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period),page_size=51,after=cursor,search=search),60)
+        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period),page_size=51,after=cursor,search=search),12)
     else:
-        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),60)
+        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),12)
     if records is None:
         st.caption('Loading abandoned checkouts…' if phase!='ERROR' else 'Checkout records temporarily unavailable.');return
     more=bool(paginated and len(records)>50)
@@ -149,7 +152,7 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
         st.caption('Selections on other pages are retained. Add to flow applies to this page’s selected checkouts.')
     with actions.container(horizontal=True):
         refresh=st.button('Refresh checkout details',key=slot+'-reconcile',help='Repair Shopify details only; never enrol or send')
-        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='secondary' if paginated else 'primary')
+        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='secondary')
     if refresh:
         st.session_state.pop(slot+'-timing',None)
         try:
@@ -172,13 +175,17 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     for checkout in visible:
         if checkout['checkout_key'] in enrollment_results:
             checkout['enrollment_request']=enrollment_results[checkout['checkout_key']]
-    timing_now=now()  # The deadline is persisted; the display clock must keep advancing.
-    listing=[{'key':c['checkout_key'],'reference':reference(c),'created':str(c['created_at'])[:16]+' UTC',
-      'customer':display_name(c),'region':(c.get('analytics') or {}).get('region') or (c.get('analytics') or {}).get('country') or '—',
-      'status':recovery_status(c),'time_to_send':time_to_send(c,at=timing_now),
-      'enrollment_progress':{k:enrollment_results.get(c['checkout_key'],{}).get(k) for k in ('state','result')}} for c in visible]
+    timing_now=now()
+    # Published metadata arrives in the same bounded read as the journeys.
+    # Never derive columns from the editable draft or match across versions by index.
+    published=records[0].get('published_steps') if records else None
+    if published is None:published=(row.get('config',{}).get('published_flow') or {}).get('emails',row.get('steps',[]))
+    schema=columns(published)
+    rows=listing(visible,schema,timezone_for_user(user),timing_now)
     component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
-    event=render_component(component,rows=listing,selected=selected,key=slot+'-table',default=None)
+    event=render_component(component,rows=rows,columns=schema,selected=selected,
+      server_now=timing_now,read_at=records[0].get('read_at') if records else timing_now,
+      refresh_seconds=15,phase=phase,key=slot+'-table',default=None)
     if event and event.get('sequence')!=st.session_state.get(slot+'-event'):
         st.session_state[slot+'-event']=event['sequence']
         elsewhere=[k for k in st.session_state.get(slot+'-selected',[]) if k not in keys] if paginated else []
@@ -187,7 +194,7 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
         retry=event.get('retry')
         if retry in keys and retry not in busy and enrollment_results.get(retry,{}).get('state')=='FAILED':
             begin(store,user,str(row['id']),[retry],slot)
-        st.rerun(scope='fragment')
+        if not event.get('refresh'):st.rerun(scope='fragment')
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-detail')),None)
     if chosen:checkout_details(store,user,row,chosen)
     if paginated:

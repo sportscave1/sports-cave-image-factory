@@ -15,7 +15,7 @@ CREATE_PIXEL = '''mutation AutomationPixelCreate($pixel:WebPixelInput!) {
  webPixelCreate(webPixel:$pixel) { webPixel { id settings } userErrors { field message } } }'''
 
 
-def verify(shop, store, env=None,*,persist=True):
+def verify(shop, store, env=None,*,persist=True,include_pixel=True):
     import os
     from crm_tracking_health import callbacks, subscriptions
     remote_receiver = env is None and bool(os.getenv('RENDER') or os.getenv('RENDER_SERVICE_NAME'))
@@ -83,12 +83,17 @@ def verify(shop, store, env=None,*,persist=True):
         failures=[name+': '+checks[name] for name in required if checks[name] not in ('VERIFIED','CONFIGURED')]
         result['reasons'][kind]=failures
         result['triggers'][kind]='AVAILABLE' if not failures else 'UNVERIFIED' if not scopes_read or rows is None else 'UNAVAILABLE'
-    if identity and {'write_pixels','read_customer_events'}.issubset(scopes):
+    if not include_pixel:
+        previous=store.state('shopify_automation_capabilities') or {}
+        for key in ('pixel','pixel_id','pixel_checked_at'):
+            if key in previous:result[key]=previous[key]
+    elif identity and {'write_pixels','read_customer_events'}.issubset(scopes):
         try:
             pixel=shop.query(PIXEL,{},'automation app pixel',0,True).get('webPixel')
             if pixel:result.update(pixel='INSTALLED — CUSTOMER EVENTS VERIFICATION REQUIRED',pixel_id=pixel['id'])
             else:result['pixel']='NOT INSTALLED'
         except Exception:result['pixel']='NOT VERIFIED'
+        result['pixel_checked_at']=now().isoformat()
     result['scope_checks']={s:'VERIFIED' if s in result['scopes'] else 'MISSING / UNVERIFIED' for s in EXPECTED_SCOPES}
     result['checked_at']=now().isoformat()
     if persist:store.set_state('shopify_automation_capabilities',result)
