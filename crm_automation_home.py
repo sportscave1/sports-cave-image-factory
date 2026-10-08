@@ -194,7 +194,7 @@ def icon(index,colour='green'):
     if index==7:paths='<circle cx="12" cy="7" r="4"/><path d="M4 21v-3a8 8 0 0 1 16 0v3"/>'
     if index==8:paths='<path d="m3 7 9-5 9 5v10l-9 5-9-5V7Zm0 0 9 5 9-5M12 12v10M7 4l10 6"/>'
     svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="'+{'green':'#218148','blue':'#2665d8','purple':'#8058ad','gold':'#947021','rose':'#af5268'}[colour]+'" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+paths+'</svg>'
-    return '<span class="sc-home-icon '+colour+'" aria-hidden="true"><img alt="" src="data:image/svg+xml;base64,'+b64encode(svg.encode()).decode()+'"></span>'
+    return '<span class="sc-home-icon '+colour+'" aria-hidden="true"><img width="21" height="21" alt="" src="data:image/svg+xml;base64,'+b64encode(svg.encode()).decode()+'"></span>'
 
 
 def kpi_html(data):
@@ -475,9 +475,10 @@ def recent(store,overview):
 
 
 
-def home(shop,store,user):
+def home(shop,store,user,*,styles=True):
     from crm_automation_ui import home_state,chooser
-    state=home_state();st.html(STYLE+STYLE_AUTO)
+    state=home_state()
+    if styles:st.html(STYLE+STYLE_AUTO)
     st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
     with st.container(key='crm-campaign-home'):
         title,create=st.columns([4,1],vertical_alignment='center')

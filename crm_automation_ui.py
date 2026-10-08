@@ -55,9 +55,9 @@ def delete_dialog(store,user,row):
 
 
 @st.fragment
-def home(store,user,shop=None):
+def home(store,user,shop=None,*,styles=True):
     from crm_automation_home import home as render_home
-    render_home(shop,store,user)
+    render_home(shop,store,user,styles=styles)
 
 
 def flow_email_control(flow,identity,selected):
@@ -134,21 +134,21 @@ def settings_control(editor,key):
     add_email_controls(store,user,editor,key)
 
 
-def detail(shop,store,actions,identity):
+def detail(shop,store,actions,identity,*,row=None):
     store.preview_shop=shop
     template_view=st.session_state.get('automation_template_view')
     if template_view:
         fn,args,kwargs=template_view
         fn(*args,**kwargs)
         return
-    from crm_campaign_page import composer_form
-    from crm_campaign_recovery import flush_current
-    from crm_html_workspace import html_document,composer_styles
-    user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
+    user=actions.user;row=store.flow(identity,row=row);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
     if not st.session_state.get('automation_composing'):
         from crm_flow_builder import builder
         builder(store,user,row)
         return
+    from crm_campaign_page import composer_form
+    from crm_campaign_recovery import flush_current
+    from crm_html_workspace import html_document,composer_styles
     selected=st.session_state.get('automation_step')
     if selected not in [s['step_id'] for s in flow['emails']]:selected=flow['emails'][0]['step_id']
     step=next(s for s in flow['emails'] if s['step_id']==selected)
@@ -158,7 +158,7 @@ def detail(shop,store,actions,identity):
         if not flush_current():return
         editor=None;row=store.flow(identity);flow=row['config']['draft']
     if editor is None:
-        editor=store.draft(identity);editor['document']=html_document(editor['document'])
+        editor=store.draft(identity,row=row);editor['document']=html_document(editor['document'])
         st.session_state['automation_editor']=editor;st.session_state['automation_saved']=deepcopy(editor)
     st.session_state['automation_step']=step['step_id'];st.session_state['automation_editor_context']=(store,user)
     store.preview_trigger=flow['trigger']
@@ -195,6 +195,10 @@ def detail(shop,store,actions,identity):
             with st.container(width=360):flow_email_control(flow,identity,selected)
             with st.container(width='stretch'):composer_canvas(editor['document'],cfg,key,store)
         return
+    # The toolbar just rendered this exact snapshot. Only a subsequent edit
+    # needs its independent refresh; mounting the composer is not an edit.
+    import json
+    st.session_state['_automation_toolbar_value']=json.dumps([editor['name'],editor['document'],editor.get('version')],sort_keys=True)
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     st.session_state[key+'editor_emitted']=True
     if st.toggle('Show email step analytics',key='auto_step_stats'):
@@ -208,6 +212,19 @@ def workspace(shop,base,actions,navigate=lambda _:None):
         st.session_state.pop('_automation_preview_open',None)
     st.session_state['email_editor_mode']='automation'
     store=AutomationStore(base.connect);identity=st.session_state.get('automation_selected') or st.query_params.get('automation')
+    # Keep critical overview styles at a stable delta position while its old
+    # subtree is removed. A route placeholder replaces that subtree before any
+    # blocking editor read; it must never be reconciled with editor columns.
+    from crm_automation_home import STYLE,STYLE_AUTO
+    st.html(STYLE+STYLE_AUTO+'''<style>
+    [role="dialog"]:has(.st-key-crm-automation-editor)>div:first-child:has(>[class]>[data-testid="stMarkdownContainer"]){display:none!important}
+    /* This editor is a route, not an animated alert. Remove BaseWeb's 400ms
+       nested opacity/transform transitions; leave its visibility state intact. */
+    [data-testid="stDialog"]:has(.st-key-crm-automation-editor) [role="dialog"],
+    [data-testid="stDialog"]:has(.st-key-crm-automation-editor) div:has(>[role="dialog"]){transition:none!important}
+    .sc-auto-editor-loading{min-height:38px;display:flex;align-items:center;color:#73747c;font-size:13px}
+    </style>''')
+    route=st.empty()
     notice=st.session_state.pop('automation_notice',None)
     if notice:st.toast(notice,icon=':material/check_circle:')
     try:
@@ -220,22 +237,11 @@ def workspace(shop,base,actions,navigate=lambda _:None):
                 st.session_state.pop('automation_requested_route',None);navigate(target);st.rerun()
             if stay.button('Keep editing'):st.session_state.pop('automation_requested_route',None);st.rerun()
         if identity:
-            from crm_automation_definition import native
-            existing=store.get('automations',str(uuid.UUID(str(identity))))
-            if existing and not native(existing):
-                st.subheader(existing['name']);st.caption('Legacy '+existing['status'].lower()+' flow · runtime and audit history retained')
-                if st.button('← Automations',key='legacy_auto_back'):
-                    st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
-                if existing['status']=='DRAFT' and existing['trigger_type'] in TRIGGERS and st.button('Convert draft to shared editor'):
-                    store.adopt(actions.user,identity);changed();st.rerun()
-                if existing['status']=='ACTIVE' and st.button('Pause legacy flow'):
-                    store.lifecycle(actions.user,identity,'pause');changed();st.rerun()
-            else:
-                home(store,actions.user,shop=shop)
-                editor_dialog(shop,store,actions,identity)
+            route.empty()
+            editor_dialog(shop,store,actions,identity)
         else:
             st.session_state.pop('_automation_preview_open',None)
-            home(store,actions.user,shop=shop)
+            with route.container():home(store,actions.user,shop=shop,styles=False)
     except (StoreUnavailable,ValueError,PermissionError) as exc:st.warning(str(exc))
 
 
@@ -243,7 +249,26 @@ def workspace(shop,base,actions,navigate=lambda _:None):
 def editor_dialog(shop,store,actions,identity):
     # Replacing one placeholder clears the previous composer/tabs atomically
     # when the dialog fragment changes modes.
-    content=st.empty()
-    with content.container():
-        with st.container(key='crm-automation-editor'):
-            detail(shop,store,actions,identity)
+    with st.container(key='crm-automation-editor'):
+        content=st.empty()
+        content.html('<div class="sc-auto-editor-loading" role="status">Opening automation…</div>')
+        try:
+            existing=store.get('automations',str(uuid.UUID(str(identity))))
+            with content.container():
+                from crm_automation_definition import native
+                if existing and not native(existing):
+                    st.subheader(existing['name']);st.caption('Legacy '+existing['status'].lower()+' flow · runtime and audit history retained')
+                    if st.button('← Automations',key='legacy_auto_back'):
+                        st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')
+                    if existing['status']=='DRAFT' and existing['trigger_type'] in TRIGGERS and st.button('Convert draft to shared editor'):
+                        store.adopt(actions.user,identity);changed();st.rerun(scope='app')
+                    if existing['status']=='ACTIVE' and st.button('Pause legacy flow'):
+                        store.lifecycle(actions.user,identity,'pause');changed();st.rerun(scope='app')
+                else:
+                    detail(shop,store,actions,identity,row=existing)
+        except (StoreUnavailable,ValueError,PermissionError) as exc:
+            with content.container():
+                st.error(str(exc))
+                if st.button('Retry opening editor'):st.rerun(scope='fragment')
+                if st.button('← Automations',key='editor-error-back'):
+                    st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')

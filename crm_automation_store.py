@@ -13,8 +13,10 @@ class AutomationStore(CampaignStore):
     email_mode='automation'
     step_id=None
 
-    def flow(self, identity):
-        row=self.get('automations',str(uuid.UUID(str(identity))))
+    def flow(self, identity,*,row=None):
+        identity=str(uuid.UUID(str(identity)))
+        row=self.get('automations',identity) if row is None else row
+        if row and str(row['id'])!=identity:raise ValueError('Automation is unavailable.')
         if not row or not native(row) or row['config'].get('deleted_at'): raise ValueError('Automation is unavailable.')
         from crm_automation_timing import single_delay
         row=deepcopy(row)
@@ -165,8 +167,8 @@ class AutomationStore(CampaignStore):
             cfg={'format':FORMAT,'revision':1,'published_version':0,'draft':flow,'legacy_config':row['config']}
             return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps='[]'::jsonb,updated_at=now() WHERE id=%s RETURNING *",(json.dumps(cfg),identity)).fetchone()
 
-    def draft(self,identity):
-        row=self.flow(identity)
+    def draft(self,identity,*,row=None):
+        row=self.flow(identity) if row is None else row
         step=next((s for s in row['config']['draft']['emails'] if s['step_id']==self.step_id),None)
         if not step: raise ValueError('Email step changed. Reopen it.')
         from crm_checkout_migration import migrate

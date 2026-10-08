@@ -6,7 +6,7 @@ const page=await context.newPage();await page.setViewportSize({width:1440,height
 await page.goto('http://127.0.0.1:8540/?fixture_checkout=1&fixture_run='+Date.now());
 const dialog=page.getByRole('dialog');await dialog.getByRole('tab',{name:'Flow Builder',exact:true}).waitFor();
 async function settings(index){const card=dialog.locator('[class*="st-key-flow-card-"]').nth(index);if(await card.locator('details').getAttribute('open')===null)await card.getByText('Step settings',{exact:true}).click();return card;}
-assert.equal(await page.locator('.sc-auto-kpi').count(),6);
+assert.equal(await page.locator('.sc-auto-kpi').count(),0); // Overview unmounts while editing; its cache survives Back.
 await dialog.getByRole('button',{name:'+ Add Email',exact:true}).click();
 await dialog.getByRole('button',{name:'Edit email',exact:true}).nth(2).waitFor();
 let menu=await settings(2);

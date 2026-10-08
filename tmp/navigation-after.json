@@ -1,0 +1,26 @@
+[
+  {
+    "scenario": "cold",
+    "toolbarMs": 335,
+    "overlapFrames": 0,
+    "giantFrames": 0,
+    "fadedFrames": 0,
+    "errors": []
+  },
+  {
+    "scenario": "warm",
+    "toolbarMs": 351,
+    "overlapFrames": 0,
+    "giantFrames": 0,
+    "fadedFrames": 0,
+    "errors": []
+  },
+  {
+    "scenario": "slow",
+    "toolbarMs": 478,
+    "overlapFrames": 0,
+    "giantFrames": 0,
+    "fadedFrames": 0,
+    "errors": []
+  }
+]

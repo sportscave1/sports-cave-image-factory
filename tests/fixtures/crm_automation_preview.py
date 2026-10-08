@@ -66,6 +66,23 @@ elif st.query_params.get('fixture_delay'):
         return {'nodes':[checkout(items=2)],'pageInfo':{'hasNextPage':False}}
     shop.abandoned_preview.side_effect=delayed
 from crm_automation_ui import workspace
+if st.query_params.get('fixture_navigation_delay') or st.query_params.get('fixture_navigation_failure'):
+    # One failing/slow essential read, then a real retry. No provider requests.
+    from unittest.mock import patch
+    original_get=AutomationStore.get
+    def navigation_get(self,table,identity):
+        if table=='automations' and not st.session_state.get('fixture_navigation_read'):
+            st.session_state['fixture_navigation_read']=True
+            if st.query_params.get('fixture_navigation_delay'):
+                from time import sleep
+                sleep(2)
+            if st.query_params.get('fixture_navigation_failure'):
+                from crm_store import StoreUnavailable
+                raise StoreUnavailable('Synthetic editor read unavailable')
+        return original_get(self,table,identity)
+    # Restore after this script run; patching globally across sessions would
+    # mix their failure state. Registered context below owns its lifetime.
+else:navigation_get=None
 if st.query_params.get('fixture_rerun'):
     import crm_checkout_preview as preview_module
     if not hasattr(preview_module,'_fixture_document'):
@@ -140,7 +157,9 @@ if st.query_params.get('fixture_home_delay'):
             stack.enter_context(patch.object(home_module,name,slow(getattr(home_module,name))))
         workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
 else:
-    workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+    from contextlib import nullcontext
+    with patch.object(AutomationStore,'get',navigation_get) if navigation_get else nullcontext():
+        workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
 
 if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: '+str(shop.abandoned_preview.call_count))
 if st.query_params.get('fixture_rerun'):st.caption('Fixture hydrations: '+str(st.session_state.get('fixture_hydrations',0)))
