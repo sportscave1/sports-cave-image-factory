@@ -131,6 +131,7 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
         if not s['visible']: continue
         if s['type']=='abandoned_checkout_products':raise ValueError('Resolve checkout data before rendering this automation.')
         if 'SC_ABANDONED_CHECKOUT' in s.get('html',''):raise ValueError('Abandoned Checkout requires a checkout recovery automation. Campaign recipients have no checkout context.')
+        if 'SC_WALL_PREVIEW_URL' in s.get('html',''):raise ValueError('Resolve the wall preview product link before rendering this email.')
         source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,

@@ -16,10 +16,16 @@ COMPOSER_TARGET='crm_campaign_composer' if 'key' in inspect.signature(st.fragmen
 
 def library_rows(store):
     # Flow and legacy delivery templates are not editable campaign-library items.
-    return cached(store, ('metadata',), lambda: sorted(store.html_library(metadata=True),key=lambda r:(r['name'].casefold(),str(r['id']))))
+    rows=cached(store, ('metadata',), lambda: sorted(store.html_library(metadata=True),key=lambda r:(r['name'].casefold(),str(r['id']))))
+    if getattr(store,'email_mode',None)=='automation':
+        from crm_wall_preview_template import library_row
+        rows.append(library_row())
+    return rows
 
 
 def template_html(store,row):
+    from crm_wall_preview_template import IDENTITY,source
+    if row['id']==IDENTITY and row.get('builtin'):return source()
     return cached(store, ('body',str(row['id']),row['version']), lambda:_template_html(store,row))
 
 
@@ -51,7 +57,8 @@ def insert_template(doc,html,row):
         sections[0].update(html=html,visible=True)
     else:
         sections.append({'id':uuid.uuid4().hex,'type':'html','visible':True,
-            'html_number':max(s.get('html_number',0) for s in sections)+1,'html':html})
+            'html_number':max((s.get('html_number',0) for s in sections),default=0)+1,'html':html})
+    if row.get('builtin'):sections[-1]['name']=row['name']
     commit_middle(proposed,sections)
     proposed['template_ref']={'id':str(row['id']),'version':row['version'],'name':row['name']}
     proposed['copy_reviewed']=False;validate_document(proposed)
@@ -143,6 +150,6 @@ def library(store,user,doc,target=None):
             label.text(row['name'])
             with controls.container(horizontal=True,gap='small'):
                 st.button('Use',key='use_'+str(row['id']),on_click=use,args=(row,))
-                if manage:
+                if manage and not row.get('builtin'):
                     if st.button('Edit',key='edit_'+str(row['id'])):edit_template(store,user,row,target)
                     if st.button('',icon=':material/delete:',help='Delete template',key='delete_'+str(row['id'])):delete_template(store,user,row,target)

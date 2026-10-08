@@ -133,4 +133,16 @@
     if (root.scWallOpen) root.scWallOpen();
     else loadingDialog(trigger, root);
   });
+
+  function openEmailPreview() {
+    const url = new URL(location.href);
+    if (url.searchParams.get('sc_wall_preview') !== '1') return;
+    const trigger = document.querySelector('.section-main-product [data-sc-wall-preview-trigger]') || document.querySelector('[data-sc-wall-preview-trigger]');
+    if (!trigger || trigger.disabled || trigger.getAttribute('aria-disabled') === 'true') return;
+    url.searchParams.delete('sc_wall_preview');
+    history.replaceState(history.state, '', url);
+    trigger.click();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openEmailPreview, { once: true });
+  else openEmailPreview();
 }());

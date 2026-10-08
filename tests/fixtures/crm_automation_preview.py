@@ -48,6 +48,10 @@ from tests.test_crm_abandoned_checkout import checkout
 shop=st.session_state.get('fixture_shop')
 if shop is None:shop=Mock();st.session_state['fixture_shop']=shop
 fixture_checkout=checkout(identity=2 if st.session_state.get('fixture_new_customer') else 1,items=2)
+if st.query_params.get('fixture_wall_preview'):
+    fixture_checkout['lineItems']['nodes'][0]['variant']={'id':'gid://shopify/ProductVariant/123',
+        'product':{'id':'gid://shopify/Product/456','status':'ACTIVE',
+                   'onlineStoreUrl':'https://www.sportscaveshop.com/products/shohei-ohtani-wall-art'}}
 if st.session_state.get('fixture_new_customer'):
     fixture_checkout['customer']['firstName']='New'
     fixture_checkout['lineItems']['nodes'][0]['title']='New collector product'

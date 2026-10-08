@@ -167,6 +167,7 @@ class CheckoutTests(unittest.TestCase):
     def test_automation_only_ui_and_no_saved_preview_customer(self):
         source=Path('crm_automation_ui.py').read_text(encoding='utf-8')
         self.assertNotIn('live_control',source)
+        source=Path('crm_automation_toolbar.py').read_text(encoding='utf-8')
         self.assertLess(source.index("st.button('Save draft'"),source.index('test_control(store'))
         source=Path('crm_campaign_page.py').read_text(encoding='utf-8')
         self.assertIn("if mode!='automation'",source)

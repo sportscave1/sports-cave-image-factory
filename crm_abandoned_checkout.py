@@ -11,11 +11,12 @@ TEMPLATE='Abandoned Checkout — Collector Reminder'
 
 def dynamic(doc):
     from crm_checkout_styles import count
-    return bool(count(doc))
+    from crm_wall_preview_template import present
+    return bool(count(doc)) or present(doc)
 
 
 def reject_unresolved(value):
-    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT',str(value)):
+    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_WALL_PREVIEW_URL',str(value)):
         raise ValueError('Unresolved checkout template syntax. Use the Abandoned Checkout template instead of Liquid.')
 
 
@@ -49,7 +50,9 @@ def context(checkout,*,edition_reader=None):
             if not image:raise ValueError('Checkout image needs a public HTTPS destination.')
         product=(item.get('variant') or {}).get('product') or item.get('product') or {}
         items.append({'title':title,'variant':variant,'quantity':quantity,'image':image,'amount':str(amount),'currency':currency,
-                      'product_id':product.get('id'),'edition':None})
+                      'product_id':product.get('id'),'edition':None,
+                      'product_url':product.get('onlineStoreUrl') if product.get('status','ACTIVE')=='ACTIVE' else '',
+                      'variant_id':(item.get('variant') or {}).get('id')})
     # Read existing ledger facts once per context, never during HTML rendering.
     # This projection has next/limit facts, but no checkout reservation authority.
     from crm_catalogue import product_id,edition_for
@@ -190,7 +193,8 @@ def block_html(data,*,test=False):
 
 def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None):
     from crm_checkout_styles import MARKER,compile_document
-    result=deepcopy(doc)
+    from crm_wall_preview_template import resolve
+    result=resolve(doc,data)
     for section in result.get('middle_sections',[]):
         if section['type']==BLOCK:
             if section['visible'] and not data:raise ValueError('No recent abandoned checkout available for preview.')
@@ -229,9 +233,11 @@ def publication_document(doc,trigger):
     """Validate authored HTML offline; enrollment data is resolved at dispatch."""
     from crm_checkout_styles import MARKER,count,compile_document
     total=count(doc)
+    from crm_wall_preview_template import present,resolve
+    if present(doc) and trigger!='abandoned':raise ValueError('Dynamic wall preview links require Checkout abandoned trigger or a manually configured product URL.')
     if total and trigger!='abandoned':raise ValueError('Abandoned Checkout template requires Checkout abandoned trigger.')
     if total>1:raise ValueError('Use exactly one abandoned checkout products block.')
-    result=deepcopy(doc)
+    result=resolve(doc,None)
     # Keep the migrated template's surrounding table nesting intact even for
     # offline checks, where recipient-owned checkout data is not available.
     from crm_checkout_migration import join_fragments
