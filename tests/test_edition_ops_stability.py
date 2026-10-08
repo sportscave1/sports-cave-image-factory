@@ -330,7 +330,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
         ):
             edition_ops._render_table()
         self.assertEqual(len(fake_st.editor_payloads), 1)
-        self.assertEqual(len(fake_st.editor_payloads[0]), 50)
+        self.assertEqual(len(fake_st.editor_payloads[0]), 120)
         self.assertEqual(
             set(fake_st.editor_payloads[0][0]),
             {"edition_product_id", "shopify_product_gid", *edition_ops.VISIBLE_COLUMNS},

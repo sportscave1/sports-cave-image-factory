@@ -49,19 +49,19 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         kwargs = fake_st.data_editor.call_args.kwargs
         self.assertEqual(kwargs["column_order"], (
             "product_title", "handle", "edition_enabled", "edition_total", "edition_next_number",
-            "edition_sold_count", "edition_remaining", "admin_url", "online_store_url",
+            "edition_sold_count", "edition_remaining", "sync_status", "admin_url", "online_store_url",
         ))
         for field in ("edition_total", "edition_next_number", "edition_enabled"):
             self.assertNotIn(field, kwargs["disabled"])
             self.assertIn(field, edition_ops.EDITABLE_FIELDS)
         for field in ("handle", "edition_sold_count", "edition_remaining", "admin_url"):
             self.assertIn(field, kwargs["disabled"])
-        for field in ("edition_status", "sync_status"):
+        for field in ("edition_status",):
             self.assertNotIn(field, fake_st.editor_payloads[0][0])
             self.assertIn(field, fake_st.session_state[edition_ops.ROWS_KEY][0])
             self.assertIn(field, edition_ops.CSV_COLUMNS)
         self.assertIn("Existing import warning", fake_st.captions)
-        self.assertTrue(any('Allocation requires review' in text for text in fake_st.captions))
+        self.assertEqual(fake_st.editor_payloads[0][0]['sync_status'], 'needs_reconciliation')
         self.assertIn("edition_status", edition_ops.SHOPIFY_MIRROR_METAFIELD_KEYS)
 
     def test_numeric_config_allows_sold_out_sentinel(self):
@@ -97,6 +97,13 @@ class EditionOpsTableEditingTests(unittest.TestCase):
     def test_actual_streamlit_edit_save_reload_and_navigation(self):
         stored = [_product(1), _product(2)]
         backend = Mock()
+        for row in stored:row['edition_run_id']='test-run'
+        import edition_cursor_overrides
+        def override(handle, **kw):
+            next(row for row in stored if row['handle']==handle)['edition_next_number']=kw['next_number']
+            return {'id':kw['request_id']}
+        cursor_save=self.stack.enter_context(patch.object(edition_cursor_overrides,'save',side_effect=override))
+        self.stack.enter_context(patch('edition_version_ui.sync_status'))
 
         def save(batch, **kwargs):
             for item in batch:
@@ -131,21 +138,18 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             self.assertFalse(app.exception)
 
         edit_next(17)
-        self.assertEqual(stored[0]["edition_next_number"], 17)
-        self.assertIn("0 unsaved changes", " ".join(item.value for item in app.caption))
+        self.assertEqual(stored[0]["edition_next_number"], 1)
+        self.assertIn("1 unsaved change", " ".join(item.value for item in app.caption))
         app.selectbox(key="test_page").select("Home").run()
         app.selectbox(key="test_page").select("Edition Ops").run()
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 17)
         app.button(key="edition-ops-save-changes").click().run()
         self.assertFalse(app.exception)
         self.assertEqual(stored[0]["edition_next_number"], 17)
-        self.assertEqual(stored[1], _product(2))
-        batch = backend.update_edition_products_batch.call_args.args[0]
-        self.assertEqual(len(batch), 1)
-        self.assertTrue(batch[0]["manual_next_number_override"])
-        self.assertEqual(batch[0]["expected_next_edition_number"], 1)
-        self.assertIsNone(batch[0]["active"])
-        self.assertIsNone(batch[0]["edition_total"])
+        self.assertEqual(stored[1], {**_product(2),"edition_run_id":"test-run"})
+        backend.update_edition_products_batch.assert_not_called()
+        self.assertEqual(cursor_save.call_args.kwargs['expected_next'],1)
+        self.assertFalse(cursor_save.call_args.kwargs['acknowledged'])
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_sold_count"], 0)
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_remaining"], 100)
         self.assertIn("0 unsaved changes", " ".join(item.value for item in app.caption))

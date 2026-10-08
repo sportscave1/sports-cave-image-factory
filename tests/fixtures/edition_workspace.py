@@ -15,6 +15,8 @@ if os.environ.get('EDITION_BASELINE')=='1' and 'edition_ops' not in sys.modules:
 import edition_ops as ops
 import edition_versions as versions
 import design_tracking_page
+import edition_cursor_overrides
+import edition_version_ui
 
 
 @st.cache_resource
@@ -42,6 +44,14 @@ def save(rows,**kw):
             target['edition_next_number']=n;result.append({'ok':True,'key':row['row_key'],'handle':row['handle']})
     return result
 backend=types.SimpleNamespace(update_edition_products_batch=save)
+def cursor_save(handle,**kw):
+    target=next(r for r in data['rows'] if r['handle']==handle)
+    if kw['next_number']<=9 and not kw['acknowledged']:
+        raise ValueError('DUPLICATE_ACK_REQUIRED')
+    data['saves']+=1;target['edition_next_number']=kw['next_number']
+    return {'id':kw['request_id']}
+edition_cursor_overrides.save=cursor_save
+edition_version_ui.sync_status=lambda:st.caption('Fixture Shopify confirmation pending; no network calls')
 ops._configured_supabase_backend=lambda:backend
 ops._load_snapshot=snapshot
 ops._write_snapshot=lambda *a,**k:None
@@ -66,5 +76,5 @@ else:st.write('Home')
 def counters():
     st.button('Profile snapshot')
     st.session_state['edition-profile-tick']=st.session_state.get('edition-profile-tick',0)+1
-    st.html('<pre id="edition-profile" style="white-space:pre-wrap;overflow-wrap:anywhere">'+json.dumps({**{k:v for k,v in data.items() if k!='rows'},'full_runs':st.session_state['fixture_full_runs'],'tick':st.session_state['edition-profile-tick']})+'</pre>')
+    st.html('<pre id="edition-profile" style="white-space:pre-wrap;overflow-wrap:anywhere">'+json.dumps({**{k:v for k,v in data.items() if k!='rows'},'first_next':data['rows'][0]['edition_next_number'],'full_runs':st.session_state['fixture_full_runs'],'tick':st.session_state['edition-profile-tick']})+'</pre>')
 counters()

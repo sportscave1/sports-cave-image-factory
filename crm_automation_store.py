@@ -186,6 +186,10 @@ class AutomationStore(CampaignStore):
         from crm_checkout_preview import needs_checkout,document,sample
         self.preview_warning=''
         if not needs_checkout(doc):return doc,''
+        from crm_frame_banner_template import present,resolve
+        from crm_abandoned_checkout import dynamic
+        from crm_checkout_preview import legacy
+        if present(doc) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':return resolve(doc),''
         import streamlit as st
         data,note=preview_context(st.session_state,self.preview_shop,auto_refresh=False,slot='_automation_checkout_pin')
         if not data:data=sample(doc)
@@ -211,6 +215,10 @@ class AutomationStore(CampaignStore):
         from crm_abandoned_checkout import latest
         from crm_checkout_preview import needs_checkout,document,sample
         if not needs_checkout(doc):return doc
+        from crm_frame_banner_template import present,resolve
+        from crm_abandoned_checkout import dynamic
+        from crm_checkout_preview import legacy
+        if present(doc) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':return resolve(doc)
         if self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':raise ValueError('Checkout abandoned trigger required.')
         if getattr(self,'_checkout_test_operation',None)!=operation_id:
             from crm_shopify import Shopify

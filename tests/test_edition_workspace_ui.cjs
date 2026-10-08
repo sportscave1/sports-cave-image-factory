@@ -5,6 +5,16 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  if(process.env.EDITION_SLOW==='1'){const cdp=await context.newCDPSession(page);await cdp.send('Emulation.setCPUThrottlingRate',{rate:4});await cdp.send('Network.enable');await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:100,downloadThroughput:200000,uploadThroughput:100000});}
  const baseline=process.env.EDITION_BASELINE==='1',url=process.env.EDITION_URL||'http://127.0.0.1:8895';
  const start=Date.now();await page.goto(url);await page.getByTestId('stDataFrame').waitFor();const results={initialMs:Date.now()-start};
+ if(!baseline){
+  assert.equal(await page.getByRole('button',{name:'Next products',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Previous products',exact:true}).count(),0);
+  await page.getByRole('button',{name:'Save & Sync Shopify',exact:true}).waitFor();
+  const grid=page.locator('.dvn-scroller').first();
+  assert.ok(await grid.evaluate(e=>e.scrollHeight>15000),'All 500 rows accessible in one virtualized grid');
+  await grid.evaluate(e=>{e.scrollTop=e.scrollHeight});
+  await page.waitForFunction(()=>document.querySelector('.dvn-scroller').scrollTop>14000);
+  await grid.evaluate(e=>{e.scrollTop=0});
+ }
  async function read(){const prior=await page.locator('#edition-profile').textContent();await page.getByRole('button',{name:'Profile snapshot',exact:true}).click();await page.waitForFunction(p=>document.querySelector('#edition-profile')?.textContent!==p,prior);return JSON.parse(await page.locator('#edition-profile').textContent());}
  const before=await read();let t=Date.now();
  await page.evaluate(()=>{window.editionFrames=[];window.editionSampling=true;function frame(){if(!window.editionSampling)return;window.editionFrames.push({tables:document.querySelectorAll('[data-testid="stDataFrame"]').length,largestIcon:Math.max(0,...[...document.querySelectorAll('[data-testid="stMain"] svg')].map(e=>e.getBoundingClientRect().height))});requestAnimationFrame(frame)}requestAnimationFrame(frame)});
@@ -23,7 +33,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  const route=page.getByTestId('stSidebar').getByRole('combobox');await route.click();await page.getByRole('option',{name:'Home',exact:true}).click();await page.getByTestId('stMain').getByText('Home',{exact:true}).waitFor();
  t=Date.now();await route.click();await page.getByRole('option',{name:'Edition Ops',exact:true}).click();await page.getByTestId('stDataFrame').waitFor();results.warmReturnMs=Date.now()-t;
  if(!baseline){for(const width of [1000,750,390]){await page.setViewportSize({width,height:1000});await page.waitForFunction(()=>{const e=document.querySelector('[data-testid="stMain"]');return e.scrollWidth<=e.clientWidth+2});}}
- await page.setViewportSize({width:1440,height:1000});await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));await page.screenshot({path:'.tmp-edition-evidence/edition-'+(baseline?'before':'after')+'.png',fullPage:true});
+ await page.setViewportSize({width:1440,height:1000});await page.waitForFunction(()=>document.querySelector('[data-testid="stDataFrame"]').getBoundingClientRect().width>800);await page.screenshot({path:'.tmp-edition-evidence/edition-'+(baseline?'before':'after')+'.png',fullPage:true});
  assert.equal(await page.getByTestId('stException').count(),0);assert.deepEqual(errors,[]);
  fs.writeFileSync('.tmp-edition-evidence/edition-'+(baseline?'before':'after')+'.json',JSON.stringify(results,null,2));console.log(JSON.stringify(results));
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

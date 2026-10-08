@@ -93,7 +93,7 @@ def sync_locked(handle, version, *, config=None, request_post=None):
                        edition_label=version['edition_name']+' · Release '+str(version['id']))
         # Preserve the allocator's total-minus-sold ledger invariant, while the
         # storefront reports numbers actually available from this cursor.
-        available=min(payload['remaining_count'],max(0,payload['edition_total']-payload['next_edition_number']+1))
+        available=payload['remaining_count'] if payload.get('manual_override_id') else min(payload['remaining_count'],max(0,payload['edition_total']-payload['next_edition_number']+1))
         payload.update(remaining_count=available,edition_remaining=available)
         if not payload['is_archived'] and not payload['is_sold_out']:
             payload['edition_status']='final_editions' if available<=5 else 'selling_quickly' if available<=12 else 'limited_release'
@@ -123,7 +123,7 @@ def sync_locked(handle, version, *, config=None, request_post=None):
 
 def pending(limit=10):
     with backend.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT shopify_handle FROM edition_runs WHERE status='pending_sync' AND sync_retry_at<=now() ORDER BY sync_retry_at LIMIT %s",(min(50,max(1,limit)),))
+        cur.execute("SELECT shopify_handle FROM edition_runs WHERE (status='pending_sync' OR (status IN ('active','sold_out','inactive') AND to_jsonb(edition_runs)->>'manual_override_id' IS NOT NULL)) AND sync_retry_at<=now() ORDER BY sync_retry_at LIMIT %s",(min(50,max(1,limit)),))
         return [r['shopify_handle'] for r in cur.fetchall()]
 
 
@@ -195,6 +195,8 @@ def reconcile(handle,expected_run,actor_id,reason):
                 AND COALESCE(status,'') NOT IN ('voided','refunded','cancelled','superseded')) AS atomic_count
               FROM edition_orders WHERE edition_run_id=%s OR (edition_run_id IS NULL AND shopify_product_gid=%s)""",
               (run['id'],product.get('shopify_product_gid') or product['shopify_product_id']))
+            if run.get('manual_override_id'):
+                raise ValueError('Administrator cursor preserved; use Save & Sync Shopify to change it.')
             ledger=cur.fetchone();sold=int(product['sold_count']);total=int(product['edition_total'])
             if ledger['records']!=ledger['numbers'] or sold<ledger['atomic_count'] or not 0<=sold<=total:
                 raise ValueError('Conflicting allocations or sales need an audited historical repair; no counters changed')

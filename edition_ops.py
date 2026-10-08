@@ -60,6 +60,7 @@ VISIBLE_COLUMNS = (
     "edition_next_number",
     "edition_sold_count",
     "edition_remaining",
+    "sync_status",
     "admin_url",
     "online_store_url",
 )
@@ -539,7 +540,9 @@ def _row_from_supabase_product(product):
     mirror_status = str(product.get("metafields_sync_status") or "").strip()
     sync_status = "Loaded from Supabase"
     sync_error = ""
-    if mirror_status.casefold() == "failed":
+    if mirror_status.casefold() == "synced":
+        sync_status = "Synced to Shopify"
+    elif mirror_status.casefold() == "failed":
         sync_status = "needs_shopify_sync"
         sync_error = str(product.get("last_metafield_error") or "")
     elif mirror_status.casefold() in {
@@ -1822,7 +1825,7 @@ def _capture_editor_changes(source_rows):
     rows = _mark_current_changes(rows, st.session_state.get(ORIGINAL_ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
     st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
-    st.session_state['edition-autosave-pending']=True
+    # Editing is local; only Save & Sync Shopify persists an administrator decision.
 
 
 def _merge_visible_rows(edited_rows, source_rows):
@@ -2035,12 +2038,12 @@ def _column_config():
         "edition_enabled": st.column_config.CheckboxColumn("Enabled",width="small"),
         "edition_total": st.column_config.NumberColumn("Limit", min_value=1, max_value=100, step=1,width="small"),
         "edition_next_number": st.column_config.NumberColumn(
-            "Next number", min_value=1, max_value=100000, step=1, required=True,width="small"
+            "Next Edition #", min_value=1, max_value=101, step=1, required=True,width="small",format="%03d"
         ),
         "edition_sold_count": st.column_config.NumberColumn("Sold",width="small"),
         "edition_remaining": st.column_config.NumberColumn("Remaining",width="small"),
         "edition_status": st.column_config.TextColumn("Status"),
-        "sync_status": st.column_config.TextColumn("Sync status"),
+        "sync_status": st.column_config.TextColumn("Shopify Sync",width="small"),
         "admin_url": st.column_config.LinkColumn("Open Admin", display_text="Open"),
         "online_store_url": st.column_config.LinkColumn("Open live product", display_text="Open"),
     }
@@ -2410,8 +2413,6 @@ def _render_table():
     """Existing native grid, with local interactions and bounded visible rows."""
     _ensure_state()
     _hydrate_from_snapshot_once()
-    if st.session_state.pop('edition-autosave-pending',False):
-        _save_changed_rows(background_sync=True)
     backend=_configured_supabase_backend()
     rows=_mark_current_changes(st.session_state.get(ROWS_KEY,[]),st.session_state.get(ORIGINAL_ROWS_KEY,[]))
     st.session_state[ROWS_KEY]=rows
@@ -2427,11 +2428,12 @@ def _render_table():
                 if match:refresh_handle(match['handle'])
             else:_reload_products_from_supabase()
             st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
-        save_clicked=st.button('Save Changes',type='secondary',disabled=not backend or not rows,key='edition-ops-save-changes')
+        save_clicked=st.button('Save & Sync Shopify',type='secondary',disabled=not backend or not rows,key='edition-ops-save-changes')
         from edition_version_ui import advanced
         advanced()
     if save_clicked:
-        _save_changed_rows(background_sync=True)
+        from edition_version_ui import save_cursor_changes
+        save_cursor_changes()
         rows=st.session_state[ROWS_KEY]
     if st.session_state.get(NOTICE_KEY):st.caption(st.session_state[NOTICE_KEY])
     if st.session_state.get(LOAD_ERROR_KEY):
@@ -2449,21 +2451,13 @@ def _render_table():
     criteria=(selected,status)
     if st.session_state.get('edition-grid-criteria')!=criteria:
         st.session_state['edition-grid-criteria']=criteria;st.session_state['edition-grid-page']=0;st.session_state.pop(EDITOR_KEY,None)
-    page=st.session_state.get('edition-grid-page',0)
-    visible_page=visible[page*50:(page+1)*50]
-    st.data_editor([_editor_payload(r) for r in visible_page],hide_index=True,width='stretch',num_rows='fixed',
-        key=EDITOR_KEY,column_order=VISIBLE_COLUMNS,on_change=_capture_editor_changes,args=(deepcopy(visible_page),),
+    st.data_editor([_editor_payload(r) for r in visible],hide_index=True,width='stretch',height=600,num_rows='fixed',
+        key=EDITOR_KEY,column_order=VISIBLE_COLUMNS,on_change=_capture_editor_changes,args=(deepcopy(visible),),
         column_config=_column_config(),row_height=32,
         disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url'])
-    if len(visible)>50:
-        with st.container(horizontal=True):
-            if st.button('Previous products',disabled=page==0):
-                st.session_state['edition-grid-page']=page-1;st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
-            st.caption(f'Page {page+1} · {len(visible)} products')
-            if st.button('Next products',disabled=(page+1)*50>=len(visible)):
-                st.session_state['edition-grid-page']=page+1;st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
-    for row in visible_page:
-        if row.get('sync_error'):st.caption(row['product_title']+' — Edition number conflict: '+row['sync_error'])
+    if selected!=ALL_PRODUCTS_SELECTION:
+        for row in visible:
+            if row.get('sync_error'):st.caption(row['product_title']+' — '+row['sync_error'])
     if not rows:st.caption('No products loaded. Use Advanced to reconcile the catalogue.')
     return rows
 

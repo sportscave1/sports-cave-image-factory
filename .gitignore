@@ -38,6 +38,7 @@ node_modules/
 
 # Generated local test evidence/captures; keep test source and fixtures tracked.
 /artifacts/email-sent-verification/
+/artifacts/frame-banner/
 /test-results/
 /tmp/pdfs/certificate-layout-check/
 /docs/evidence/

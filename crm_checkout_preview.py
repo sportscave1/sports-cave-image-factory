@@ -15,7 +15,9 @@ def sources(doc):
     return [s.get('html','') for s in doc.get('middle_sections',[])]+[doc.get('custom_html','')]
 
 
-def needs_checkout(doc):return dynamic(doc) or legacy(doc)
+def needs_checkout(doc):
+    from crm_frame_banner_template import present
+    return dynamic(doc) or legacy(doc) or present(doc)
 
 
 def sample(doc):

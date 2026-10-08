@@ -7,6 +7,7 @@ import edition_ops as ops
 import edition_versions as versions
 
 STYLE='''<style>
+[data-testid="stMainBlockContainer"]:has(.st-key-edition-workspace){padding-top:calc(var(--sc-topbar-height, 64px) + 0.65rem)!important}
 .st-key-edition-workspace [data-testid="stVerticalBlock"]{gap:6px}
 .st-key-edition-workspace h3{font-size:19px;padding:2px 0}
 .st-key-edition-workspace button[kind="secondary"],.st-key-edition-workspace [data-testid="stPopoverButton"]{background:#fff!important;border:1px solid #d7d7d0!important;color:#262926!important;min-height:32px;height:32px;border-radius:4px!important;padding:3px 10px!important;box-shadow:none!important}
@@ -19,6 +20,65 @@ STYLE='''<style>
 
 def actor():
     return st.session_state.get('sports_cave_current_user') or {}
+
+
+def save_cursor_changes(acknowledged=False, submissions=None):
+    """Cursor writes use a dedicated audited transaction, not ledger reconciliation."""
+    import edition_cursor_overrides
+    originals={ops._stable_row_key(r):r for r in st.session_state[ops.ORIGINAL_ROWS_KEY]}
+    rows=st.session_state[ops.ROWS_KEY]
+    if submissions is None:
+        submissions=[]
+        for row in rows:
+            old=originals.get(ops._stable_row_key(row),row)
+            selected=st.session_state.get(ops.EDITOR_PRODUCT_SELECTION_KEY)
+            if row['edition_next_number']!=old['edition_next_number'] or (
+                ops._stable_row_key(row)==selected and row.get('sync_status')=='needs_reconciliation'):
+                fingerprint=(row.get('edition_run_id'),old['edition_next_number'],row['edition_next_number'])
+                requests=st.session_state.setdefault('edition-cursor-requests',{})
+                saved=requests.get(row['handle'])
+                if not saved or saved[0]!=fingerprint:
+                    saved=(fingerprint,str(uuid.uuid4()));requests[row['handle']]=saved
+                submissions.append((deepcopy(row),deepcopy(old),saved[1]))
+    if not submissions:
+        ops._save_changed_rows(background_sync=True)
+        return
+    pending=[]
+    for row,old,request in submissions:
+        try:
+            if row['edition_total']!=old['edition_total'] or row['edition_enabled']!=old['edition_enabled']:
+                raise ValueError('Save number changes separately from edition limit or enable/disable changes.')
+            edition_cursor_overrides.save(row['handle'],run_id=row['edition_run_id'],
+                expected_next=old['edition_next_number'],next_number=row['edition_next_number'],
+                request_id=request,actor_id=actor().get('id'),acknowledged=acknowledged)
+            # Keep the native grid/key and its scroll position. Only this row's baseline changes.
+            key=ops._stable_row_key(row)
+            for collection in (ops.ROWS_KEY,ops.ORIGINAL_ROWS_KEY,ops.EDITOR_ROWS_KEY):
+                st.session_state[collection]=[
+                    {**r,'edition_next_number':row['edition_next_number'],'sync_status':'Pending','sync_error':''}
+                    if ops._stable_row_key(r)==key else r for r in st.session_state.get(collection,[])]
+            ops._cached_supabase_products_snapshot.clear()
+            st.session_state.setdefault('edition-sync-watching',set()).add(row['handle'])
+            st.session_state.pop('edition-sync-watch-until',None)
+            st.session_state[ops.NOTICE_KEY]='Number saved. Shopify confirmation pending.'
+        except Exception as exc:
+            if 'DUPLICATE_ACK_REQUIRED' in str(exc):pending.append((row,old,request))
+            else:
+                st.session_state[ops.NOTICE_KEY]=row['product_title']+' — '+str(exc)
+                st.error(st.session_state[ops.NOTICE_KEY])
+    if pending:confirm_cursor_override(pending)
+
+
+@st.dialog('Confirm Override',width='small')
+def confirm_cursor_override(submissions):
+    st.write('This number may already have been allocated. Continue with manual override?')
+    for row,old,_ in submissions:
+        st.caption(f"{row['product_title']} · {old['edition_next_number']:03d} → {row['edition_next_number']:03d}")
+    a,b=st.columns(2)
+    if a.button('Cancel',key='cancel-cursor-override'):st.rerun()
+    if b.button('Confirm Override',type='primary',key='confirm-cursor-override'):
+        save_cursor_changes(True,submissions)
+        st.rerun()
 
 
 def refresh_handle(handle, *, discard_edits=False):
@@ -105,7 +165,7 @@ def release_controls():
 def table():
     ops._render_table()
     release_controls()
-    restored={r['handle'] for r in st.session_state.get(ops.ROWS_KEY,[]) if r.get('run_status')=='pending_sync'}
+    restored={r['handle'] for r in st.session_state.get(ops.ROWS_KEY,[]) if r.get('run_status')=='pending_sync' or r.get('sync_status')=='Pending'}
     st.session_state.setdefault('edition-sync-watching',set()).update(restored)
     if st.session_state.get('edition-sync-watching'):sync_status()
 

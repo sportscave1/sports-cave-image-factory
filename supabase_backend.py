@@ -9149,11 +9149,11 @@ def edition_allocation_integrity_from_read_row(row):
     issues = []
     if historical_invalid or active_invalid:
         issues.append("An allocation has an invalid edition number of zero or less.")
-    if live_duplicates:
+    if live_duplicates and not values.get("manual_override_id"):
         issues.append(
             "Two live allocations use the same edition number for this product identity."
         )
-    if active_duplicates:
+    if active_duplicates and not values.get("manual_override_id"):
         issues.append(
             "The current atomic allocation suffix contains a duplicate edition number."
         )
@@ -9177,7 +9177,7 @@ def edition_allocation_integrity_from_read_row(row):
         issues.append(
             "The active run and product disagree on the current next edition number."
         )
-    if next_occupied:
+    if next_occupied and not values.get("manual_override_id"):
         issues.append(
             f"The current next edition number #{product_next:03d} is already occupied."
         )
@@ -9187,7 +9187,7 @@ def edition_allocation_integrity_from_read_row(row):
         active_max + 1,
         1,
     )
-    if product_next < minimum_safe_next or run_next < minimum_safe_next:
+    if not values.get("manual_override_id") and (product_next < minimum_safe_next or run_next < minimum_safe_next):
         issues.append(
             "The current next edition number points behind the authoritative allocation boundary."
         )
@@ -9536,6 +9536,7 @@ def list_edition_products_read_only(search="", limit=500, offset=0, *, product_i
                    ep.edition_name,
                    ep.allow_counter_history_override,
                    ep.active_edition_run_id,
+               to_jsonb(ep)->>'manual_override_id' AS manual_override_id,
                    ep.metafields_sync_status,
                    ep.last_metafield_error,
                    ep.featured_image_url
@@ -9653,6 +9654,7 @@ def list_edition_products_read_only(search="", limit=500, offset=0, *, product_i
                ep.edition_name,
                ep.allow_counter_history_override,
                ep.active_edition_run_id,
+               to_jsonb(ep)->>'manual_override_id' AS manual_override_id,
                ep.metafields_sync_status,
                ep.last_metafield_error,
                shp.status AS shopify_status,
@@ -9920,7 +9922,7 @@ def _update_edition_product_with_cursor(
     allocation_count = _int_value(ledger_state.get("allocation_count"), 0)
     min_assigned = _int_value(ledger_state.get("min_assigned"), 0)
     max_assigned = _int_value(ledger_state.get("max_assigned"), 0)
-    if manual_next_number_override or run.get('revision_reason'):
+    if manual_next_number_override or run.get('revision_reason') or run.get('manual_override_id'):
         # Edition Ops explicitly edited this pointer. Do not rebuild allocation
         # history/counters or copy stale Enabled/total values from its table.
         proposed_next = _int_value(next_edition_number, 0)
@@ -9934,7 +9936,9 @@ def _update_edition_product_with_cursor(
         safe_boundary=max(max_assigned+1, _int_value(product.get("last_assigned_edition"),0)+1,
                           _int_value(run.get("starting_number"),1),
                           1 if run.get('revision_reason') else _int_value(product.get('sold_count'),0)+1)
-        if proposed_next < safe_boundary:
+        if run.get('manual_override_id') and proposed_next != old_next:
+            raise ValueError('Use the explicit administrator Save & Sync Shopify action to change this cursor.')
+        if proposed_next < safe_boundary and not run.get('manual_override_id'):
             raise ValueError(f"Edition number conflict: this release requires #{safe_boundary:03d} or later. Review Allocations, or Start New Edition Version only for genuinely revised artwork.")
         run_fields = {"next_edition_number": proposed_next}
         product_fields = {"next_edition_number": proposed_next}
@@ -9948,7 +9952,9 @@ def _update_edition_product_with_cursor(
             product_fields.update(edition_total=new_total, remaining_count=new_total - stored_sold)
         if active is not None and bool(active) != old_enabled:
             requested_status = (
-                SOLD_OUT_RUN_STATUS if max_assigned >= new_total
+                SOLD_OUT_RUN_STATUS if (
+                    (_int_value(product.get('sold_count'),0)>=new_total or proposed_next>new_total)
+                    if run.get('manual_override_id') else max_assigned>=new_total)
                 else ACTIVE_RUN_STATUS if active else INACTIVE_RUN_STATUS
             )
             run_fields["status"] = requested_status
@@ -10370,7 +10376,7 @@ def calculate_product_edition_metafield_values(row):
         row.get("allocation_blocked") or next_number < 1
         or sold_count < 0 or sold_count > edition_total
         or remaining_count != edition_total - sold_count
-        or allocation_count > sold_count or last_assigned >= next_number
+        or allocation_count > sold_count or (last_assigned >= next_number and not row.get("manual_override_id"))
         or (allocation_count > 0 and "first_assigned_edition" in row
             and _safe_int(row.get("first_assigned_edition"), 0) < 1)
         or _safe_int(row.get("stored_product_next"), next_number) != next_number
@@ -14365,6 +14371,7 @@ def import_limited_edition_rows(
                             updated_at = now()
                         WHERE ep.shopify_handle = %s
                           AND COALESCE(ep.allow_counter_history_override, FALSE) = FALSE
+                          AND to_jsonb(ep)->>'manual_override_id' IS NULL
                         """,
                         (handle,),
                     )
@@ -23688,6 +23695,8 @@ def _recalculate_next_edition_number_with_cursor(cur, product, run=None, *, reas
         raise ValueError("Edition product handle is missing.")
     if run is None:
         _, run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
+    if (run or {}).get('manual_override_id'):
+        raise ValueError('Explicit administrator cursor preserved; use Save & Sync Shopify to change it.')
     if (run or {}).get('revision_reason') or (run or {}).get('status') in ('expired','pending_sync'):
         raise ValueError('Use Edition Ops → Review Allocations → Reconcile existing release for versioned artwork; historical counters must not be applied to another release.')
     edition_total = max(
@@ -26205,6 +26214,7 @@ def run_integrity_check():
                 GROUP BY ep.shopify_handle, ep.product_title, ep.next_edition_number, ep.allow_counter_history_override
                 HAVING COALESCE(ep.next_edition_number, 1) < COALESCE(MAX(eo.edition_number), 0) + 1
                    AND COALESCE(ep.allow_counter_history_override, FALSE) = FALSE
+                          AND to_jsonb(ep)->>'manual_override_id' IS NULL
                 ORDER BY ep.shopify_handle
                 """
             )

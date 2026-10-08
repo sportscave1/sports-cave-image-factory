@@ -16,7 +16,7 @@ def dynamic(doc):
 
 
 def reject_unresolved(value):
-    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_WALL_PREVIEW_URL',str(value)):
+    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_WALL_PREVIEW_URL|SC_FRAME_BANNER_',str(value)):
         raise ValueError('Unresolved checkout template syntax. Use the Abandoned Checkout template instead of Liquid.')
 
 
@@ -195,6 +195,8 @@ def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None):
     from crm_checkout_styles import MARKER,compile_document
     from crm_wall_preview_template import resolve
     result=resolve(doc,data)
+    from crm_frame_banner_template import resolve as resolve_banner
+    result=resolve_banner(result,data)
     for section in result.get('middle_sections',[]):
         if section['type']==BLOCK:
             if section['visible'] and not data:raise ValueError('No recent abandoned checkout available for preview.')
@@ -238,6 +240,8 @@ def publication_document(doc,trigger):
     if total and trigger!='abandoned':raise ValueError('Abandoned Checkout template requires Checkout abandoned trigger.')
     if total>1:raise ValueError('Use exactly one abandoned checkout products block.')
     result=resolve(doc,None)
+    from crm_frame_banner_template import resolve as resolve_banner
+    result=resolve_banner(result)
     # Keep the migrated template's surrounding table nesting intact even for
     # offline checks, where recipient-owned checkout data is not available.
     from crm_checkout_migration import join_fragments

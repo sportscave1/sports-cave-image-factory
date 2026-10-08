@@ -7,6 +7,18 @@ import shopify_sync
 
 
 class EditionVersionMirrorTests(unittest.TestCase):
+    def test_override_writes_canonical_and_legacy_cursor_without_reconstructing_sales(self):
+        payload=dict(shopify_product_gid='gid://shopify/Product/42',edition_total=100,
+                     next_edition_number=5,edition_next_number=5,last_assigned_edition=94,
+                     sold_count=94,edition_sold_count=94,remaining_count=6,edition_remaining=6,
+                     edition_enabled=True,is_sold_out=False)
+        inputs=shopify_sync.complete_product_edition_metafield_inputs(payload)
+        by_key={(r['namespace'],r['key']):r['value'] for r in inputs}
+        self.assertEqual(by_key['sports_cave','edition_next_number'],'5')
+        self.assertEqual(by_key['sports_cave','edition_sold_count'],'94')
+        self.assertEqual(by_key['sports_cave','edition_remaining'],'6')
+        self.assertTrue(all(r['ownerId']=='gid://shopify/Product/42' for r in inputs))
+
     def test_sync_recovery_failure_does_not_stop_order_reconciliation(self):
         import supabase_backend
         import shopify_order_reconciliation_worker as worker
