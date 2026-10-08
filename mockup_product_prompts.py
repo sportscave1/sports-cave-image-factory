@@ -29,7 +29,7 @@ ANGLE_GUIDANCE = {
 }
 MARKER = 'SPORTS CAVE PRODUCT PAGE SCENE V1'
 END = 'END PRODUCT PAGE SCENE'
-SCENE = re.compile(re.escape(MARKER)+r'.*?'+re.escape(END), re.S)
+SCENE = re.compile(re.escape(MARKER) + r'.*?' + re.escape(END), re.S)
 TEMPLATE = '''Create a 1024 x 1024 photorealistic ecommerce lifestyle mockup using the supplied framed Sports Cave artwork as the exact reference.
 Preserve the supplied artwork and frame exactly: colours, text, badge, layout, complete outer frame and landscape proportions. Do not redesign, crop, blur, stretch, warp or distort the artwork.
 Place the frame realistically on a wall at eye level with believable scale, physical mounting, natural contact shadows and restrained glass reflections that do not obscure the artwork.
@@ -41,14 +41,21 @@ The final scene must look like real professional interior photography, not an AI
 
 
 def build(filename, base=None):
-    room=random.choice(ROOMS[filename])
-    angle=random.choice(ANGLES)
-    body=SCENE.sub('',base or TEMPLATE).strip()
-    return f'{body}\n\n{MARKER}\nSelected room: {room}\nSelected camera angle: {angle}\n{ANGLE_GUIDANCE[angle]}\nUse only this selected room and angle; they replace any earlier room or camera direction. Keep the artwork unchanged and the room premium, minimal and product-page friendly.\n{END}'
+    room = random.choice(ROOMS[filename])
+    angle = random.choice(ANGLES)
+    body = SCENE.sub('', base or TEMPLATE).strip()
+    return (
+        f'{body}\n\n{MARKER}\nSelected room: {room}\n'
+        f'Selected camera angle: {angle}\n{ANGLE_GUIDANCE[angle]}\n'
+        'Use only this selected room and angle; they replace any earlier room or '
+        'camera direction. Keep the artwork unchanged and the room premium, '
+        f'minimal and product-page friendly.\n{END}'
+    )
 
 
 def preserve_selection(override, generated):
     """A stored prompt edit must not erase the run's resolved room/angle choice."""
-    scene=SCENE.search(generated)
-    if not scene or override==generated:return override
-    return SCENE.sub('',override).strip()+'\n\n'+scene.group(0)
+    scene = SCENE.search(generated)
+    if not scene or override == generated:
+        return override
+    return SCENE.sub('', override).strip() + '\n\n' + scene.group(0)

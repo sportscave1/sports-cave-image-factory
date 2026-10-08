@@ -71,7 +71,7 @@ class MockupReelsTests(unittest.TestCase):
             "20-collector-display-room-reel-prompt.txt": "20-collector-display-room-reel",
         }
 
-        self.assertEqual(len(image_factory.LIFESTYLE_PROMPT_SPECS), 17)
+        self.assertEqual(len(image_factory.LIFESTYLE_PROMPT_SPECS), 3)
         for filename, safe_name in legacy_expected.items():
             self.assertNotIn(filename, specs_by_filename)
             self.assertIn(filename, legacy_specs_by_filename)
@@ -93,7 +93,7 @@ class MockupReelsTests(unittest.TestCase):
             )
 
             prompt_names = {path.name for path in prompt_paths}
-            self.assertEqual(len(prompt_paths), 17)
+            self.assertEqual(len(prompt_paths), 3)
             self.assertNotIn("16-man-cave-reel-prompt.txt", prompt_names)
             self.assertNotIn("20-collector-display-room-reel-prompt.txt", prompt_names)
 

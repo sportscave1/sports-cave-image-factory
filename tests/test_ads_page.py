@@ -2858,14 +2858,11 @@ PRIMARY TEXT VARIATIONS
             "Motorsport",
             local_only=True,
         )
-        close_up_item = next(
-            item
-            for item in prompt_items
-            if item["filename"] == image_factory.CLOSE_UP_WALL_PROMPT_FILENAME
+        # Ads keeps its existing foundation independently of the retired Mockups card.
+        self.assertNotIn(
+            image_factory.CLOSE_UP_WALL_PROMPT_FILENAME,
+            [item["filename"] for item in prompt_items],
         )
-
-        self.assertIn("Close-Up Premium Wall Shot", close_up_item["label"])
-        self.assertIn(foundation, close_up_item["prompt"])
         self.assertIn("create a 1024 x 1024 ultra-realistic close-up lifestyle mockup", foundation)
         self.assertIn("Use only the framed artwork on a premium textured wall.", foundation)
 

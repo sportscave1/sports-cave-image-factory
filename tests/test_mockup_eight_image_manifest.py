@@ -83,8 +83,8 @@ class MockupEightImageManifestTests(unittest.TestCase):
 
     def test_all_upload_slots_remain_available(self):
         filenames = [row[0] for row in image_factory.LIFESTYLE_PROMPT_SPECS]
-        self.assertEqual(17, len(filenames))
-        self.assertEqual(17, len(set(filenames)))
+        self.assertEqual(3, len(filenames))
+        self.assertEqual(3, len(set(filenames)))
         for filename in image_factory.PRODUCT_PAGE_PROMPT_FILENAMES:
             self.assertIn(filename, filenames)
 

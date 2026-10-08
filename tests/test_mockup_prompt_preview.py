@@ -25,20 +25,7 @@ EXPECTED_MOCKUP_PROMPT_FILENAMES = [
     "01-man-cave-prompt.txt",
     "02-office-prompt.txt",
     "03-living-room-prompt.txt",
-    "04-close-up-wall-prompt.txt",
-    "05-limited-edition-detail-prompt.txt",
-    "06-instant-experience-cover-prompt.txt",
-    "07-home-sports-bar-prompt.txt",
-    "08-collector-display-room-prompt.txt",
-    "09-luxury-entry-wall-prompt.txt",
-    "10-private-club-lounge-prompt.txt",
-    "11-wall-upgrade-moment-prompt.txt",
-    "12-fireplace-feature-wall-prompt.txt",
-    "13-premium-bedroom-prompt.txt",
-    "14-man-cave-pool-table-prompt.txt",
-    "15-premium-tool-shed-workshop-prompt.txt",
-    "16-man-cave-with-pool-table-prompt.txt",
-    "17-architectural-loft-prompt.txt",
+
 ]
 
 
@@ -176,7 +163,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             [item["filename"] for item in prompt_items],
             expected_filenames,
         )
-        self.assertEqual(len(prompt_items), 17)
+        self.assertEqual(len(prompt_items), 3)
         self.assertTrue(all(item["key"] and item["label"] and item["prompt"] for item in prompt_items))
         self.assertEqual(
             [item["key"] for item in prompt_items],
@@ -194,7 +181,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             artwork_reference_available=False,
         )
 
-        self.assertEqual(len(prompt_items), 17)
+        self.assertEqual(len(prompt_items), 3)
         first_prompt = prompt_items[0]["prompt"]
         self.assertIn("Product name: [PRODUCT TITLE]", first_prompt)
         self.assertIn("Sport category: AFL", first_prompt)
@@ -242,7 +229,8 @@ class MockupPromptPreviewTests(unittest.TestCase):
             local_only=True,
         )
 
-        self.assertEqual(first_items, second_items)
+        from mockup_product_prompts import SCENE
+        self.assertEqual([SCENE.sub("", i["prompt"]) for i in first_items], [SCENE.sub("", i["prompt"]) for i in second_items])
         for prompt_item in second_items:
             prompt_text = prompt_item["prompt"]
             self.assertEqual(prompt_text.count(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK), 1)
@@ -259,13 +247,9 @@ class MockupPromptPreviewTests(unittest.TestCase):
         labels = [item["label"] for item in prompt_items]
         filenames = [item["filename"] for item in prompt_items]
 
-        self.assertEqual(len(prompt_items), 17)
+        self.assertEqual(len(prompt_items), 3)
         self.assertEqual(filenames, EXPECTED_MOCKUP_PROMPT_FILENAMES)
-        self.assertIn("Private Club Lounge / Collector Retreat", labels[9])
-        self.assertEqual(labels[13], "Premium Man Cave With Pool Table")
-        self.assertEqual(labels[14], "Premium Tool Shed / Workshop")
-        self.assertEqual(labels[15], "Man Cave With Pool Table")
-        self.assertEqual(labels[16], "Architectural Loft / Statement Wall")
+        self.assertEqual(labels, ["Man Cave", "Office", "Living Room"])
         self.assertFalse(any("Reel" in label for label in labels))
         self.assertNotIn("10-premium-unboxing-prompt.txt", filenames)
         self.assertNotIn("15-premium-gift-reveal-prompt.txt", filenames)
@@ -278,66 +262,17 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("Premium Gift Reveal Scene", joined_labels)
         self.assertNotIn("Retired Social Prompt", joined_labels)
 
-    def test_replacement_prompts_include_real_room_sport_and_product_guidance(self):
-        prompt_items = {
-            item["filename"]: item["prompt"]
-            for item in image_factory.build_lifestyle_prompt_items(
-                "Senna Monaco Legacy",
-                "Motorsport",
-                local_only=True,
-            )
-        }
-
-        prompt_10 = prompt_items["10-private-club-lounge-prompt.txt"]
-        prompt_15 = prompt_items["17-architectural-loft-prompt.txt"]
-        for prompt_text in (prompt_10, prompt_15):
-            self.assertIn("30-50-year-old male sports", prompt_text)
-            self.assertIn("selected sport category and product title", prompt_text)
-            self.assertIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_text)
-            self.assertIn("real premium lived-in interior", prompt_text)
-            self.assertIn("colour, materiality, mood", prompt_text)
-            self.assertIn("Do not add sports balls", prompt_text)
-            self.assertIn("Do not add jerseys", prompt_text)
-            self.assertNotIn("premium ribbon", prompt_text)
-            self.assertNotIn("shipping box", prompt_text)
-            self.assertNotIn("gift box", prompt_text)
-
-    def test_new_man_cave_workshop_and_pool_table_prompts_have_required_style_and_shared_locks(self):
-        prompt_items = {
-            item["filename"]: item["prompt"]
-            for item in image_factory.build_lifestyle_prompt_items(
-                "Bathurst Pride",
-                "Motorsport",
-                local_only=True,
-            )
-        }
-        new_prompt_names = [
-            "14-man-cave-pool-table-prompt.txt",
-            "15-premium-tool-shed-workshop-prompt.txt",
-            "16-man-cave-with-pool-table-prompt.txt",
-        ]
-
-        for filename in new_prompt_names:
-            with self.subTest(filename=filename):
-                prompt_text = prompt_items[filename]
-                self.assertIn("Create a 1024 x 1024 ultra-realistic Meta ad", prompt_text)
-                self.assertIn("The artwork and frame must remain exactly the same", prompt_text)
-                self.assertIn("Do not redesign the artwork", prompt_text)
-                self.assertEqual(prompt_text.count(image_factory.ROOM_STYLE_GUIDANCE_MARKER), 1)
-                self.assertEqual(prompt_text.count(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK), 1)
-                self.assertEqual(prompt_text.count("FRAME REALISM:"), 1)
-                self.assertEqual(prompt_text.count("ROOM REALISM:"), 1)
-
-        new_man_cave_prompt = prompt_items["14-man-cave-pool-table-prompt.txt"]
-        workshop_prompt = prompt_items["15-premium-tool-shed-workshop-prompt.txt"]
-        pool_table_prompt = prompt_items["16-man-cave-with-pool-table-prompt.txt"]
-
-        self.assertIn("premium man cave with a pool table", new_man_cave_prompt)
-        self.assertIn("I need that artwork in my man cave.", new_man_cave_prompt)
-        self.assertIn("not dirty, cluttered, unsafe, cheap, or gimmicky", workshop_prompt)
-        self.assertIn("Do not add dirty floors.", workshop_prompt)
-        self.assertIn("physically believable proportions", pool_table_prompt)
-        self.assertIn("Keep the pool table physically accurate", pool_table_prompt)
+    def test_product_prompts_include_selected_scene_and_shared_locks(self):
+        from mockup_product_prompts import ROOMS, ANGLES, MARKER
+        items=image_factory.build_lifestyle_prompt_items("Bathurst Pride", "Motorsport", local_only=True)
+        for item in items:
+            text=item["prompt"]
+            self.assertEqual(text.count(MARKER),1)
+            self.assertTrue(any("Selected room: "+room in text for room in ROOMS[item["filename"]]))
+            self.assertTrue(any("Selected camera angle: "+angle in text for angle in ANGLES))
+            self.assertEqual(text.count(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK),1)
+            self.assertIn("Do not redesign the artwork",text)
+            self.assertIn("1024 x 1024",text)
 
     def test_room_guidance_changes_with_sport_and_product_title(self):
         motorsport_prompt = image_factory.build_lifestyle_prompt_items(
@@ -367,8 +302,8 @@ class MockupPromptPreviewTests(unittest.TestCase):
             )
         }
 
-        self.assertNotIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_items["04-close-up-wall-prompt.txt"])
-        self.assertNotIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_items["05-limited-edition-detail-prompt.txt"])
+        self.assertNotIn("04-close-up-wall-prompt.txt", prompt_items)
+        self.assertNotIn("05-limited-edition-detail-prompt.txt", prompt_items)
         self.assertIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_items["03-living-room-prompt.txt"])
 
     def test_prompt_pack_writes_the_exact_supplied_prompt_collection(self):
@@ -698,10 +633,11 @@ class MockupPromptPreviewTests(unittest.TestCase):
             )
             self.assertNotIn("14-retired-social-prompt.txt", prompt_names)
             self.assertNotIn("Retired Social Prompt", rendered_text)
-            self.assertIn("14 - Premium Man Cave With Pool Table (Social)", rendered_text)
-            self.assertIn("15 - Premium Tool Shed / Workshop (Social)", rendered_text)
-            self.assertIn("16 - Man Cave With Pool Table (Social)", rendered_text)
-            self.assertIn("17 - Architectural Loft / Statement Wall (Social)", rendered_text)
+            self.assertNotIn("14 - Premium Man Cave With Pool Table (Social)", rendered_text)
+            self.assertNotIn("15 - Premium Tool Shed / Workshop (Social)", rendered_text)
+            self.assertNotIn("16 - Man Cave With Pool Table (Social)", rendered_text)
+            self.assertNotIn("Social Lifestyle Mockups", rendered_text)
+            self.assertNotIn("17 - Architectural Loft / Statement Wall (Social)", rendered_text)
 
     def test_image_factory_import_is_reloaded_when_prompt_specs_change(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -731,26 +667,26 @@ class MockupPromptPreviewTests(unittest.TestCase):
             app_test.run(timeout=20)
 
             self.assertEqual(len(app_test.exception), 0)
-            self.assertEqual(len(app_test.file_uploader), 18)
+            self.assertEqual(len(app_test.file_uploader), 4)
             self.assertNotIn("Add To ZIP", [button.label for button in app_test.button])
 
             app_test.file_uploader[-1].set_value(
-                [("architectural-loft.png", tiny_png_bytes((20, 40, 80)), "image/png")]
+                [("living-room.png", tiny_png_bytes((20, 40, 80)), "image/png")]
             )
             app_test.run(timeout=30)
 
             result = app_test.session_state["last_generation_result"]
-            prompt_name = "15-premium-tool-shed-workshop-prompt.txt"
+            prompt_name = "03-living-room-prompt.txt"
             self.assertIn(prompt_name, result["lifestyle_mockup_paths"])
-            social_assets = [
+            product_assets = [
                 asset
                 for asset in result["assets"]
                 if asset.get("prompt_filename") == prompt_name
-                and asset.get("zip_group") == image_factory.ASSET_CATEGORY_SOCIAL
+                and asset.get("zip_group") == image_factory.ASSET_CATEGORY_PRODUCT
             ]
-            self.assertEqual(len(social_assets), 1)
-            self.assertIsNone(social_assets[0]["webp_path"])
-            self.assertTrue(Path(social_assets[0]["jpg_path"]).exists())
+            self.assertEqual(len(product_assets), 1)
+            self.assertTrue(Path(product_assets[0]["webp_path"]).exists())
+            self.assertTrue(Path(product_assets[0]["jpg_path"]).exists())
 
             core_checkbox = next(
                 checkbox
@@ -766,7 +702,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
                 for caption in captions
                 if "files selected for ZIP" in caption
             ]
-            self.assertIn("1 files selected for ZIP", selected_count_captions)
+            self.assertIn("2 files selected for ZIP", selected_count_captions)
 
             zip_paths = sorted((run_dir / "zip").glob("apptest-product-selected-*.zip"), key=lambda path: path.stat().st_mtime)
             self.assertTrue(zip_paths)
@@ -776,11 +712,12 @@ class MockupPromptPreviewTests(unittest.TestCase):
             self.assertEqual(
                 names,
                 {
-                    "jpg/apptest-product-black-framed-afl-premium-tool-shed-workshop-lifestyle.jpg",
+                    "jpg/apptest-product-black-framed-afl-living-room-lifestyle.jpg",
+                    "WEBP/apptest-product-black-framed-afl-living-room-lifestyle.webp",
                 },
             )
             self.assertNotIn("WEBP/apptest-product-black-framed-afl-wall-art.webp", names)
-            self.assertEqual(len(names), 1)
+            self.assertEqual(len(names), 2)
 
     def test_prompt_card_uploads_do_not_force_full_page_reruns(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -812,7 +749,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             app_test.run(timeout=20)
 
             uploader_count = len(app_test.file_uploader)
-            self.assertEqual(uploader_count, 18)
+            self.assertEqual(uploader_count, 4)
             app_test.file_uploader[1].set_value(
                 [("first-lifestyle.png", tiny_png_bytes((20, 40, 80)), "image/png")]
             )

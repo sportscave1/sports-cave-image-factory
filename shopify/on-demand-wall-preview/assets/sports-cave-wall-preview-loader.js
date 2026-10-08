@@ -121,28 +121,59 @@
     attempt();
   }
 
+  let stopEmailWatch = function () {};
+
+  function openPreview(trigger) {
+    if (!trigger || trigger.disabled || trigger.getAttribute('aria-disabled') === 'true') return false;
+    const root = document.querySelector('.section-main-product [data-sc-wall-root]') || document.querySelector('[data-sc-wall-root]');
+    if (!root) return false;
+    stopEmailWatch();
+    if (active) { active.dialog.querySelector('button:not([hidden])')?.focus(); return true; }
+    trigger.focus({ preventScroll: true });
+    if (root.scWallOpen) root.scWallOpen();
+    else loadingDialog(trigger, root);
+    return true;
+  }
+
   document.addEventListener('click', function (event) {
     const target = event.target instanceof Element ? event.target : event.target.parentElement;
     const trigger = target?.closest('[data-sc-wall-preview-trigger]');
     if (!trigger || trigger.disabled || trigger.getAttribute('aria-disabled') === 'true') return;
     event.preventDefault();
-    if (active) { active.dialog.querySelector('button:not([hidden])')?.focus(); return; }
-    const root = document.querySelector('.section-main-product [data-sc-wall-root]') || document.querySelector('[data-sc-wall-root]');
-    if (!root) return;
-    trigger.focus({ preventScroll: true });
-    if (root.scWallOpen) root.scWallOpen();
-    else loadingDialog(trigger, root);
+    openPreview(trigger);
   });
 
-  function openEmailPreview() {
-    const url = new URL(location.href);
-    if (url.searchParams.get('sc_wall_preview') !== '1') return;
-    const trigger = document.querySelector('.section-main-product [data-sc-wall-preview-trigger]') || document.querySelector('[data-sc-wall-preview-trigger]');
-    if (!trigger || trigger.disabled || trigger.getAttribute('aria-disabled') === 'true') return;
-    url.searchParams.delete('sc_wall_preview');
-    history.replaceState(history.state, '', url);
-    trigger.click();
+  function watchEmailPreview() {
+    if (new URL(location.href).searchParams.get('sc_wall_preview') !== '1') return;
+    let finished = false;
+    const observer = new MutationObserver(tryOpen);
+    const deadline = setTimeout(stop, 20000);
+    function stop() {
+      finished = true;
+      observer.disconnect();
+      clearTimeout(deadline);
+      document.removeEventListener('shopify:section:load', tryOpen);
+    }
+    function tryOpen() {
+      if (finished) return;
+      const trigger = document.querySelector('.section-main-product [data-sc-wall-preview-trigger]') || document.querySelector('[data-sc-wall-preview-trigger]');
+      try {
+        if (!openPreview(trigger)) return;
+        const url = new URL(location.href);
+        url.searchParams.delete('sc_wall_preview');
+        history.replaceState(history.state, '', url);
+      } catch (error) {
+        stop();
+      }
+    }
+    stopEmailWatch = stop;
+    observer.observe(document.documentElement, {
+      childList: true, subtree: true, attributes: true,
+      attributeFilter: ['disabled', 'aria-disabled', 'data-sc-wall-root', 'data-sc-wall-preview-trigger']
+    });
+    document.addEventListener('shopify:section:load', tryOpen);
+    tryOpen();
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', openEmailPreview, { once: true });
-  else openEmailPreview();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchEmailPreview, { once: true });
+  else watchEmailPreview();
 }());

@@ -430,20 +430,6 @@ PROMPT_LABELS = {
     "01-man-cave-prompt.txt": "01 - Man Cave (Product Page)",
     "02-office-prompt.txt": "02 - Office (Product Page)",
     "03-living-room-prompt.txt": "03 - Living Room (Product Page)",
-    "04-close-up-wall-prompt.txt": "04 - Close-Up Premium Wall Shot (Social)",
-    "05-limited-edition-detail-prompt.txt": "05 - Limited Edition Detail Shot (Social)",
-    "06-instant-experience-cover-prompt.txt": "06 - Instant Experience Cover Banner (Social)",
-    "07-home-sports-bar-prompt.txt": "07 - Premium Home Sports Bar (Social)",
-    "08-collector-display-room-prompt.txt": "08 - Collector Display Room (Social)",
-    "09-luxury-entry-wall-prompt.txt": "09 - Luxury Entry Statement Wall (Social)",
-    "10-private-club-lounge-prompt.txt": "10 - Private Club Lounge / Collector Retreat (Social)",
-    "11-wall-upgrade-moment-prompt.txt": "11 - The Wall Upgrade Moment (Social)",
-    "12-fireplace-feature-wall-prompt.txt": "12 - Luxury Fireplace Feature Wall (Social)",
-    "13-premium-bedroom-prompt.txt": "13 - Premium Bedroom / Private Retreat (Social)",
-    "14-man-cave-pool-table-prompt.txt": "14 - Premium Man Cave With Pool Table (Social)",
-    "15-premium-tool-shed-workshop-prompt.txt": "15 - Premium Tool Shed / Workshop (Social)",
-    "16-man-cave-with-pool-table-prompt.txt": "16 - Man Cave With Pool Table (Social)",
-    "17-architectural-loft-prompt.txt": "17 - Architectural Loft / Statement Wall (Social)",
 }
 PRODUCT_PAGE_PROMPT_NAMES = {
     "01-man-cave-prompt.txt",
@@ -6620,9 +6606,9 @@ def current_lifestyle_prompt_text(prompt_filename, default_text):
     prompt_id = prompt_edit_id("lifestyle", prompt_key)
     legacy_prompt_id = prompt_edit_id("lifestyle", Path(prompt_filename).name)
     prompt_text = prompt_store.get_prompt(prompt_id, "")
-    if prompt_text.strip():
-        return prompt_text
-    return prompt_store.get_prompt(legacy_prompt_id, default_text)
+    from mockup_product_prompts import preserve_selection
+    override = prompt_text if prompt_text.strip() else prompt_store.get_prompt(legacy_prompt_id, default_text)
+    return preserve_selection(override, default_text)
 
 
 def render_prompt_edit_button(prompt_id, *, label="✎"):
@@ -7169,7 +7155,8 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
 
 def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
     default_prompt_text = prompt_text
-    prompt_text = current_prompt_text(prompt_id, default_prompt_text).strip()
+    from mockup_product_prompts import preserve_selection
+    prompt_text = preserve_selection(current_prompt_text(prompt_id, default_prompt_text).strip(), default_prompt_text)
     notice = st.session_state.pop("mockup_prompt_notice", "")
     if notice:
         st.success(notice)
@@ -7435,7 +7422,10 @@ def prompt_paths_match_current_mockup_collection(prompt_paths):
 def prompt_items_match_current_mockup_collection(prompt_items):
     current_filenames = current_mockup_prompt_filenames()
     item_names = [str((item or {}).get("filename", "")) for item in prompt_items or []]
-    return item_names == current_filenames
+    from mockup_product_prompts import MARKER
+    return item_names == current_filenames and all(
+        MARKER in str((item or {}).get("prompt", "")) for item in prompt_items or []
+    )
 
 
 def build_current_mockup_prompt_items_for_result(result):
@@ -8950,17 +8940,11 @@ def render_generation_result(result):
             "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
         )
         product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
-        social_prompts = [
-            path
-            for path in prompt_paths
-            if not is_product_page_prompt(path) and not is_reels_prompt(path)
-        ]
 
         render_prompt_cards(
             result,
             (
                 (product_page_prompts, "Product Page Lifestyle Mockups", None),
-                (social_prompts, "Social Lifestyle Mockups", None),
             ),
         )
     else:
