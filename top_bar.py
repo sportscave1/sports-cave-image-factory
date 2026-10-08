@@ -167,10 +167,13 @@ def render_planner_data_refresh_bridge(st_module, *, current_route):
 
     if str(current_route or "").strip().casefold() not in PLANNER_DATA_REFRESH_ROUTES:
         return False
-    st_module.button(
+    refreshed = st_module.button(
         "Refresh planner data",
         key=PLANNER_DATA_REFRESH_BRIDGE_KEY,
     )
+    if refreshed:
+        from workspace_display_cache import invalidate_home
+        invalidate_home(st_module.session_state)
     return True
 
 

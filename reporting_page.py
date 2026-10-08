@@ -681,6 +681,7 @@ def _archive_label(row):
     )
 
 
+@st.fragment
 def _render_sent_reports(user, storage_ready):
     st.subheader("Sent Reports")
     if not storage_ready:

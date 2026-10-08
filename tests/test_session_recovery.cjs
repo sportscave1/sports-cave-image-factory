@@ -1,24 +1,40 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 async function shell(){
- const handlers={},timers=new Map();let seq=0,hidden=false,disconnected=false,fetches=0,reloads=0,observer;
+ const handlers={},timers=new Map(),frames=new Map();let seq=0,hidden=false,disconnected=false,fetches=0,reloads=0,observer,scans=0,installs=0;
  const storage=new Map(),button={disabled:true};
  const dialog={querySelector:()=>({textContent:'Connection error'})};
  const document={body:{},get hidden(){return hidden;},addEventListener:(k,f)=>handlers[k]=f,
-  querySelectorAll:s=>s==='[role="dialog"]'?(disconnected?[dialog]:[]):[button]};
+  querySelectorAll:s=>{scans++;return s==='[role="dialog"]'?(disconnected?[dialog]:[]):[button]}};
  const window={addEventListener:(k,f)=>handlers[k]=f,dispatchEvent(){}};
  const context={document,window,AbortController,URL,Event,Date,location:{href:'https://example.test/',reload(){reloads++;}},
   fetch:async()=>{fetches++;return {ok:true};},sessionStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},
   setTimeout:(f,delay)=>{timers.set(++seq,{f,delay});return seq;},clearTimeout:id=>timers.delete(id),
-  MutationObserver:class{constructor(f){observer=f;}observe(){}disconnect(){}}};
+  requestAnimationFrame:f=>{frames.set(++seq,f);return seq;},cancelAnimationFrame:id=>frames.delete(id),
+  MutationObserver:class{constructor(f){observer=f;installs++;}observe(){}disconnect(){}}};
+ const paint=()=>{const pending=[...frames.values()];frames.clear();pending.forEach(f=>f())};
  vm.runInNewContext(fs.readFileSync('components/session_recovery.js','utf8'),context);
- handlers.focus();handlers.pageshow();observer();assert.equal(fetches,0);assert.equal(timers.size,0);
- disconnected=true;observer();assert.equal(timers.size,1);
+ handlers.focus();handlers.pageshow();observer();paint();assert.equal(fetches,0);assert.equal(timers.size,0);
+ const before=scans;for(let i=0;i<100;i++)observer();assert.equal(frames.size,1);paint();assert.equal(scans-before,1);
+ vm.runInNewContext(fs.readFileSync('components/session_recovery.js','utf8'),context);assert.equal(installs,1);
+ disconnected=true;observer();paint();assert.equal(timers.size,1);
  hidden=true;handlers.visibilitychange();assert.equal(timers.size,0);
  hidden=false;handlers.visibilitychange();const pending=[...timers.values()][0];timers.clear();await pending.f();
  assert.equal(fetches,1);assert.equal(reloads,1);
  assert.equal(button.disabled,true); // Never fake recovery by unlocking Streamlit.
- disconnected=false;observer();assert.equal(timers.size,0);
- window.SportsCaveSessionRecovery.destroy();assert.equal(timers.size,0);
+ disconnected=false;observer();paint();assert.equal(timers.size,0);
+ observer();window.SportsCaveSessionRecovery.destroy();assert.equal(timers.size,0);assert.equal(frames.size,0);
+ // An aborted health request may still settle. It must neither reload nor restart
+ // a controller that has been destroyed or hidden while the request was pending.
+ for(const cancelPending of ['destroy','hidden']){
+  hidden=false;disconnected=true;storage.clear();
+  let finish;context.fetch=()=>new Promise(resolve=>{finish=resolve;});
+  vm.runInNewContext(fs.readFileSync('components/session_recovery.js','utf8'),context);
+  const scheduled=[...timers.values()][0];timers.clear();const settling=scheduled.f();
+  if(cancelPending==='destroy')window.SportsCaveSessionRecovery.destroy();
+  else {hidden=true;handlers.visibilitychange();}
+  finish({ok:true});await settling;assert.equal(reloads,1);assert.equal(timers.size,0);
+  window.SportsCaveSessionRecovery?.destroy();
+ }
  console.log('Shell: healthy focus has zero I/O; hidden cancels; disconnected resume probes/reloads once; disabled state not bypassed.');
 }
 function checkpoint(){

@@ -14,6 +14,7 @@ import analytics_reporting
 import google_seo
 import navigation_runtime
 import seo_live_analytics
+from workspace_display_cache import read_display, session_cache, user_scope
 
 
 STATE_PREFIX = "analytics-v2-"
@@ -23,6 +24,38 @@ TREND_CHOICES = {
     "Views": ("trend_views", "screenPageViews"),
     "Key events": ("trend_key_events", "keyEvents"),
 }
+
+
+class _ReportDisplayStore:
+    """Cache only saved report reads; explicit refresh requests remain authoritative."""
+    def __init__(self, store, cache):
+        self.store, self.cache = store, cache
+
+    def report_for_period(self, property_id, contract_key, start, end):
+        return read_display(self.cache, ("period", property_id, contract_key, str(start), str(end)),
+                            lambda: self.store.report_for_period(property_id, contract_key, start, end))
+
+    def latest_report(self, property_id, contract_key):
+        return read_display(self.cache, ("latest", property_id, contract_key),
+                            lambda: self.store.latest_report(property_id, contract_key),
+                            ttl=10 if contract_key == "realtime" else 30)
+
+    def queue_report(self, *args, **kwargs):
+        result = self.store.queue_report(*args, **kwargs)
+        self.cache.invalidate()
+        return result
+
+
+def _session_report_store(user):
+    scope = user_scope(user)
+    key = f"{STATE_PREFIX}report-store"
+    saved = st.session_state.get(key)
+    if not saved or saved[0] != scope:
+        # Reuse the store so its successful schema check is not repeated per rerun.
+        cache = session_cache(st.session_state, f"{STATE_PREFIX}display-cache", user)
+        saved = (scope, _ReportDisplayStore(analytics_reporting.PostgresAnalyticsStore(), cache))
+        st.session_state[key] = saved
+    return saved[1]
 
 
 def _decimal(value):
@@ -310,34 +343,34 @@ def _overview(store, property_id, period, connection, *, operational_reader=None
         for insight in insights:
             st.caption(insight)
 
-    tabs = st.tabs(("Top pages", "Channels", "Countries", "Devices"))
-    with tabs[0]:
-        _table(
-            _exact_report(store, property_id, "pages_screens", period),
-            (("pageTitle", "Page title"), ("pagePathPlusQueryString", "Path")),
-            (("screenPageViews", "Views"), ("activeUsers", "Active users"), ("keyEvents", "Key events")),
-        )
-    with tabs[1]:
-        _table(
-            _exact_report(store, property_id, "traffic_acquisition", period),
-            (("sessionDefaultChannelGroup", "Channel"),),
-            (("sessions", "Sessions"), ("engagementRate", "Engagement rate"), ("keyEvents", "Key events")),
-        )
-    with tabs[2]:
-        _table(
-            _exact_report(store, property_id, "countries", period),
-            (("country", "Country"), ("countryId", "Code")),
-            (("activeUsers", "Active users"), ("sessions", "Sessions")),
-        )
-    with tabs[3]:
-        _table(
-            _exact_report(store, property_id, "devices", period),
-            (("deviceCategory", "Device"),),
-            (("activeUsers", "Active users"), ("sessions", "Sessions")),
-        )
-
+    _overview_breakdowns(store, property_id, period)
     _shopify_operational_panel(period, reader=operational_reader)
     _render_connection_settings(connection)
+
+
+@st.fragment
+def _overview_breakdowns(store, property_id, period):
+    # Own every layout element inside the fragment; no external placeholder writes.
+    tabs = st.tabs(("Top pages", "Channels", "Countries", "Devices"),
+                   key=f"{STATE_PREFIX}breakdown", on_change="rerun")
+    reports = (
+        ("pages_screens", (("pageTitle", "Page title"), ("pagePathPlusQueryString", "Path")),
+         (("screenPageViews", "Views"), ("activeUsers", "Active users"), ("keyEvents", "Key events"))),
+        ("traffic_acquisition", (("sessionDefaultChannelGroup", "Channel"),),
+         (("sessions", "Sessions"), ("engagementRate", "Engagement rate"), ("keyEvents", "Key events"))),
+        ("countries", (("country", "Country"), ("countryId", "Code")),
+         (("activeUsers", "Active users"), ("sessions", "Sessions"))),
+        ("devices", (("deviceCategory", "Device"),),
+         (("activeUsers", "Active users"), ("sessions", "Sessions"))),
+    )
+    for tab, (key, dimensions, metrics) in zip(tabs, reports):
+        if tab.open:
+            with tab:
+                try:
+                    _table(_exact_report(store, property_id, key, period), dimensions, metrics)
+                except (analytics_reporting.AnalyticsReportingError, ValueError) as error:
+                    st.error(str(getattr(error, "public_message", error)))
+                    st.caption("Select this tab again to retry. Other saved reports are unchanged.")
 
 
 def _traffic(store, property_id, period):
@@ -487,7 +520,7 @@ def render_page(
     }
     _header(title, subtitles[route])
     connection_store = connection_store or google_seo.default_store()
-    store = store or analytics_reporting.PostgresAnalyticsStore()
+    store = store or _session_report_store(user)
     try:
         connection = connection_store.get_connection()
     except Exception:

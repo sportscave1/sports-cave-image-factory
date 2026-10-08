@@ -922,9 +922,10 @@
       : null;
     const timers = new Set();
     const later = (callback, delay) => {
+      if (state.destroyed) return null;
       const timer = parentWindow.setTimeout(() => {
         timers.delete(timer);
-        callback();
+        if (!state.destroyed) callback();
       }, delay);
       timers.add(timer);
       return timer;
@@ -1514,19 +1515,44 @@
       }
       return true;
     };
-    const requestJson = async (url, options = {}) => {
+    const pendingReads = new Map();
+    const cancelPendingReads = () => {
+      pendingReads.forEach(entry => entry.controller.abort());
+      pendingReads.clear();
+    };
+    const requestJson = (url, options = {}) => {
+      if (state.destroyed) {
+        const error = new Error("Request superseded"); error.name = "AbortError";
+        return Promise.reject(error);
+      }
       const method = String(options.method || "GET").toUpperCase();
+      const revision = state.config.revision;
+      const key = `${revision || ""}:${url}`;
+      if (method === "GET" && pendingReads.has(key)) return pendingReads.get(key).promise;
+      const controller = new AbortController();
+      const entry = {controller};
       const headers = {Authorization: `Bearer ${state.config.authToken || ""}`};
       if (options.body !== undefined) headers["Content-Type"] = "application/json";
+      entry.promise = (async () => {
       const response = await parentWindow.fetch(url, {
         credentials: "same-origin",
         method,
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: method === "GET" ? controller.signal : undefined,
       });
       const payload = await response.json().catch(() => ({}));
+      // Navigation/identity changes invalidate reads even if a transport ignored abort.
+      if (state.destroyed || revision !== state.config.revision || controller.signal.aborted) {
+        const error = new Error("Request superseded"); error.name = "AbortError"; throw error;
+      }
       if (!response.ok) throw new Error(payload.error || "Request failed");
       return payload;
+      })().finally(() => {
+        if (pendingReads.get(key) === entry) pendingReads.delete(key);
+      });
+      if (method === "GET") pendingReads.set(key, entry);
+      return entry.promise;
     };
     const topBarGreetingForDate = (date = new Date()) => {
       const hour = Number(date.getHours());
@@ -1671,11 +1697,11 @@
         applyEmailStatus(payload);
         state.notifications = null;
         if (state.activePanel === "notifications") renderNotifications(await loadNotifications());
-      } catch (_error) { applyEmailStatus({unread_count:null}); }
+      } catch (_error) { if (!state.destroyed && _error.name !== "AbortError") applyEmailStatus({unread_count:null}); }
       finally {
         emailStatusPending = false;
         // Reuse the established notification heartbeat, including failed checks.
-        doc.querySelectorAll('iframe[title^="support_email_page."]').forEach(frame =>
+        if (!state.destroyed) doc.querySelectorAll('iframe[title^="support_email_page."]').forEach(frame =>
           frame.contentWindow?.postMessage({type:"sc:email-tick"}, parentWindow.location.origin));
       }
     };
@@ -2088,7 +2114,7 @@
           showPlannerToast("Time’s up — did you complete this task?", {eventKey:`pending:${timer.id}:${timer.deadline_at || ""}`});
         }
       } catch (_error) {
-        if (immediate) updatePlannerMirror();
+        if (immediate && !state.destroyed && _error.name !== "AbortError") updatePlannerMirror();
       } finally {
         state.plannerStatusPending = false;
         schedulePlannerStatus(PLANNER_STATUS_REFRESH_MS);
@@ -2338,6 +2364,7 @@
       }).join("");
     };
     const renderRepairPanel = () => {
+      if (state.destroyed) return;
       const sections = Array.isArray(state.config.repairSections) && state.config.repairSections.length
         ? state.config.repairSections
         : ["Other"];
@@ -2449,6 +2476,7 @@
         state.repairIsAdmin = Boolean(payload.is_admin);
         return true;
       } catch (error) {
+        if (state.destroyed || error.name === "AbortError") return false;
         state.repairItems = [];
         state.repairMessage = {kind: "error", text: error.message || "Repairs are temporarily unavailable."};
         return false;
@@ -2541,7 +2569,7 @@
       repairsPanel.querySelector(".sc-os-repair-close")?.addEventListener("click", () => closePanels(true));
       state.repairMessage = {};
       await loadRepairItems();
-      if (state.activePanel === "repairs") {
+      if (!state.destroyed && state.activePanel === "repairs") {
         renderRepairPanel();
         repairsPanel.querySelector("#sc-os-repair-section")?.focus({preventScroll: true});
       }
@@ -2553,6 +2581,7 @@
       renderSearchResults();
     };
     const renderNotifications = (items) => {
+      if (state.destroyed) return;
       notificationsPanel.innerHTML = '<div class="sc-os-topbar-panel-title">Notifications</div>';
       if (!items.length) {
         notificationsPanel.innerHTML += '<div class="sc-os-topbar-state">No new notifications</div>';
@@ -2599,7 +2628,7 @@
             if (Number.isInteger(payload.wall_unread_count)) updateSidebarBadge("social_media_wall_previews", payload.wall_unread_count, "");
           }
         } catch (_error) {
-          if (version === notificationReadVersion) state.notifications = [];
+          if (!state.destroyed && _error.name !== "AbortError" && version === notificationReadVersion) state.notifications = [];
         }
       }
       return state.notifications || [];
@@ -2951,7 +2980,7 @@
         scheduleTopBarGreeting();
         filesButton.hidden = !state.config.filesEnabled;
         if (revisionChanged) {
-
+          cancelPendingReads();
           state.notifications = null;
           state.shownPlannerEvents.clear();
           state.terminalPlannerTimerIds.clear();
@@ -3079,6 +3108,7 @@
       },
       destroy({preserveDom = false} = {}) {
         state.destroyed = true;
+        cancelPendingReads();
         emailEventsController?.abort();
         state.plannerDataRefreshPending = false;
         listenerController.abort();

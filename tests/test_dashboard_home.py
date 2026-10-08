@@ -756,7 +756,11 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         )
         self.assertIn("Tennis & Finals", combined_values)
         self.assertIn("<script>alert(2)</script>", combined_values)
-        self.assertFalse(any("<script>" in str(item.proto.body) for item in app_test.get("html")))
+        # The shell intentionally installs its own recovery/navigation scripts.
+        # Verify that untrusted task content cannot become executable HTML.
+        rendered_html = "\n".join(str(item.proto.body) for item in app_test.get("html"))
+        self.assertNotIn("<script>alert(1)</script>", rendered_html)
+        self.assertNotIn("<script>alert(2)</script>", rendered_html)
         app_test.session_state["design-schedule-view"] = "Collections"
         with patch.object(
             sports_cave_dashboard,

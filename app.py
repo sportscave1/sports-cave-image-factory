@@ -12824,7 +12824,10 @@ def render_home_weekly_work(user, local_now):
     render_html_section_title("This Week's Work")
     started = time.perf_counter()
     try:
-        snapshot = sports_cave_dashboard.build_home_weekly_work_snapshot(user, local_now)
+        from workspace_display_cache import home_weekly_snapshot
+        snapshot = home_weekly_snapshot(
+            st.session_state, user, local_now, sports_cave_dashboard.build_home_weekly_work_snapshot
+        )
     except sports_cave_dashboard.DashboardStorageError:
         st.markdown(
             '<div class="sc-empty-note">Weekly work analytics are unavailable right now.</div>',
@@ -12911,7 +12914,7 @@ def render_home_weekly_work(user, local_now):
             st.rerun()
     safe_startup_print(
         "PERF Dashboard weekly "
-        f"total={(time.perf_counter() - started):.3f}s queries={snapshot.get('query_count') or 1}"
+        f"total={(time.perf_counter() - started):.3f}s snapshot_source_queries={snapshot.get('query_count') or 1}"
     )
 
 

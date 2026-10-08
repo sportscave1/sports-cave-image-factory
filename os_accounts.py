@@ -830,7 +830,9 @@ class PostgresAccountStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT * FROM os_users
+                    SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+                        WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
+                    FROM os_users u
                     WHERE role='admin'
                       AND is_active IS TRUE
                       AND account_status <> 'removed'
@@ -839,18 +841,22 @@ class PostgresAccountStore:
                     """
                 )
                 row = cur.fetchone()
-                return _clean_user(row, self._permissions(cur, row["id"]) if row else ())
+                return self._clean_read_user(row)
 
     def get_user(self, user_id, *, include_removed=False):
         self.ensure_schema()
         with self._connect() as conn:
             with conn.cursor() as cur:
                 if include_removed:
-                    cur.execute("SELECT * FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                    cur.execute("""SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+                        WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
+                        FROM os_users u WHERE id=%s LIMIT 1""", (str(user_id),))
                 else:
                     cur.execute(
                         """
-                        SELECT * FROM os_users
+                        SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+                            WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
+                        FROM os_users u
                         WHERE id=%s
                           AND account_status <> 'removed'
                         LIMIT 1
@@ -858,7 +864,7 @@ class PostgresAccountStore:
                         (str(user_id),),
                     )
                 row = cur.fetchone()
-                return _clean_user(row, self._permissions(cur, row["id"]) if row else ())
+                return self._clean_read_user(row)
 
     def find_user_by_login(self, login):
         self.ensure_schema()
@@ -867,7 +873,9 @@ class PostgresAccountStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT * FROM os_users
+                    SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+                        WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
+                    FROM os_users u
                     WHERE (lower(username)=%s OR lower(COALESCE(email, ''))=%s)
                       AND account_status <> 'removed'
                     ORDER BY created_at
@@ -876,7 +884,15 @@ class PostgresAccountStore:
                     (clean_login, clean_login),
                 )
                 row = cur.fetchone()
-                return _clean_user(row, self._permissions(cur, row["id"]) if row else ())
+                return self._clean_read_user(row)
+
+    @staticmethod
+    def _clean_read_user(row):
+        """Identity and permissions from one current database snapshot; never cached."""
+        if not row:
+            return _clean_user(row, ())
+        row = dict(row)
+        return _clean_user(row, row.pop("_page_permissions", ()))
 
     def list_users(self):
         self.ensure_schema()
@@ -886,16 +902,15 @@ class PostgresAccountStore:
                     """
                     SELECT id, username, email, display_name, role, country, timezone, is_active,
                            session_version, account_status, removed_at, removed_by,
-                           created_at, updated_at, last_login_at
-                    FROM os_users
+                           created_at, updated_at, last_login_at,
+                           ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+                               WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
+                    FROM os_users u
                     WHERE account_status <> 'removed'
                     ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, display_name, username
                     """
                 )
-                rows = []
-                for row in cur.fetchall():
-                    rows.append(_clean_user(row, self._permissions(cur, row["id"])))
-                return rows
+                return [self._clean_read_user(row) for row in cur.fetchall()]
 
     @staticmethod
     def _replace_permissions(cur, user_id, page_keys, *, allow_credential_permissions=False):
