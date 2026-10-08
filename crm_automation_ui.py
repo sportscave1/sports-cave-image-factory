@@ -142,7 +142,6 @@ def detail(shop,store,actions,identity):
         fn(*args,**kwargs)
         return
     from crm_campaign_page import composer_form
-    from crm_campaign_send_ui import test_control,safe_error
     from crm_campaign_recovery import flush_current
     from crm_html_workspace import html_document,composer_styles
     user=actions.user;row=store.flow(identity);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
@@ -150,22 +149,6 @@ def detail(shop,store,actions,identity):
         from crm_flow_builder import builder
         builder(store,user,row)
         return
-    if st.button('← Flow Builder',key='back_to_sequence'):
-        if flush_current(force=True):
-            st.session_state['automation_composing']=False;st.session_state.pop('automation_editor',None);st.rerun(scope='fragment')
-    publication=row['config'].get('publication') or {}
-    if publication.get('state')=='FAILED':st.error(publication.get('error') or 'Publication failed. Review the saved draft and retry.')
-    if publication.get('state')=='PUBLISHING':st.caption('Publishing saved revision '+str(publication['revision'])+' · you can continue editing the next draft.')
-    if st.button('← Automations',key='auto_back'):
-        if flush_current():
-            st.session_state.pop('_automation_preview_open',None)
-            st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
-    from crm_flow_builder import display_name
-    title,action=st.columns([3,1]);title.subheader(display_name(row['name']));title.caption(status(row)+' · Published version '+str(row['config']['published_version']))
-    if row['status']=='ACTIVE' and not readonly:
-        if action.button('Pause'):store.lifecycle(user,identity,'pause');changed();st.rerun()
-    elif row['status']=='PAUSED' and not readonly:
-        if action.button('Resume'):store.lifecycle(user,identity,'resume');changed();st.rerun()
     selected=st.session_state.get('automation_step')
     if selected not in [s['step_id'] for s in flow['emails']]:selected=flow['emails'][0]['step_id']
     step=next(s for s in flow['emails'] if s['step_id']==selected)
@@ -204,34 +187,15 @@ def detail(shop,store,actions,identity):
     .st-key-crm-automation-editor .st-key-crm-composer-preview{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
     }
     </style>''')
+    from crm_automation_toolbar import toolbar
+    toolbar(store,user,identity,editor=editor,key=key,cfg=cfg)
     if readonly:
         from crm_html_workspace import composer_canvas
         with st.container(horizontal=True,gap='small'):
             with st.container(width=360):flow_email_control(flow,identity,selected)
             with st.container(width='stretch'):composer_canvas(editor['document'],cfg,key,store)
         return
-    with st.container(horizontal=True,vertical_alignment='center'):
-        if st.button('Save draft',key=key+'save'):
-            if flush_current(force=True):changed();st.toast('Draft saved')
-        test_control(store,user,editor,key,cfg=cfg)
-        confirmed=row['status']!='ACTIVE' or st.checkbox('Publish for new enrollments; preserve existing sequences',key=key+'confirm_live')
-        publish_requested=st.button('Publish now',type='primary',disabled=publication.get('state')=='PUBLISHING' or not confirmed,key=key+'publish')
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
-    from pathlib import Path
-    publish_js=Path(__file__).with_name('components').joinpath('crm_sections','automation_publish.js').read_text(encoding='utf-8')
-    st.html('<script>'+publish_js+'</script>',unsafe_allow_javascript=True)
-    if publish_requested:
-        try:
-            if not flush_current(force=True):return
-            job=store.request_publish(user,identity,editor['version'])
-            # Prime last-good table rows so the accepted state is visible before
-            # the bounded table refresh completes. KPI values stay untouched.
-            from crm_automation_home import accepted_publication
-            accepted_publication(job);changed()
-            st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None)
-            st.session_state['automation_notice']='Publication accepted · validation continues in the background';st.rerun()
-        except (ValueError,StoreUnavailable,PermissionError) as exc:
-            st.error('Automation storage is temporarily unavailable. Your draft is retained; retry publishing.' if isinstance(exc,StoreUnavailable) else safe_error(exc))
     st.session_state[key+'editor_emitted']=True
     if st.toggle('Show email step analytics',key='auto_step_stats'):
         from crm_automation_home_data import step_metrics

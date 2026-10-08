@@ -16,7 +16,7 @@ await page.waitForFunction(()=>[...document.querySelectorAll('input[aria-label="
 await menu.getByRole('button',{name:'Save step',exact:true}).click();
 await dialog.getByText('Final follow-up',{exact:true}).waitFor({timeout:10000}).catch(async error=>{console.log(await dialog.innerText());await page.screenshot({path:'tmp/flow-settings-failure.png',fullPage:true});throw error;});
 menu=await settings(2);await menu.getByRole('button',{name:'Move up',exact:true}).click();
-await page.waitForFunction(()=>Array.from(document.querySelectorAll('[role="dialog"] strong')).map(e=>e.textContent).indexOf('Final follow-up')===1);
+await page.waitForFunction(()=>Array.from(document.querySelectorAll('[class*="st-key-flow-card-"] strong')).map(e=>e.textContent).indexOf('Final follow-up')===1);
 menu=await settings(1);await menu.getByRole('button',{name:'Duplicate',exact:true}).click();
 await dialog.getByText('Final follow-up copy',{exact:true}).waitFor();
 menu=await settings(2);
@@ -27,21 +27,22 @@ await dialog.getByText('Final follow-up copy',{exact:true}).waitFor({state:'hidd
 await dialog.getByRole('tab',{name:'Triggers & Timing',exact:true}).click();
 await dialog.getByRole('textbox',{name:'Flow name',exact:true}).fill('Recovery builder fixture');
 await dialog.getByRole('button',{name:'Save timing and rules',exact:true}).click();
-await dialog.getByRole('heading',{name:'Recovery builder fixture',exact:true}).waitFor();
+await dialog.locator('.automation-title strong').filter({hasText:'Recovery builder fixture'}).waitFor();
 await dialog.getByRole('tab',{name:'Flow Builder',exact:true}).click();
 await dialog.getByRole('button',{name:'Test Flow',exact:true}).click();
 await dialog.getByText('Simulation only.',{exact:false}).waitFor();
 await dialog.getByRole('button',{name:'Test Flow',exact:true}).click();
+await dialog.getByText('Simulation only.',{exact:false}).waitFor({state:'hidden'});
 await dialog.getByRole('button',{name:'Edit email',exact:true}).first().click();
-await dialog.getByRole('button',{name:'← Flow Builder',exact:true}).waitFor();
-await dialog.getByRole('button',{name:'← Flow Builder',exact:true}).click();
+await dialog.getByRole('button',{name:'Flow Builder',exact:true}).waitFor();
+await dialog.getByRole('button',{name:'Flow Builder',exact:true}).click();
 await dialog.getByRole('tab',{name:'Flow Builder',exact:true}).last().waitFor();
 await dialog.getByRole('tab',{name:'Activity',exact:true}).last().click();
 await dialog.getByText('Scheduler ·',{exact:false}).waitFor();
 await dialog.getByRole('tab',{name:'Flow Builder',exact:true}).last().click();
 await dialog.getByRole('button',{name:'+ Add Email',exact:true}).waitFor();
 for(const width of [1440,750,390,320]){await page.setViewportSize({width,height:1000});await page.screenshot({path:`tmp/flow-builder-${width}.png`,fullPage:true});assert.equal(await page.getByTestId('stException').count(),0);}
-await dialog.getByRole('button',{name:'Close',exact:true}).click();await dialog.waitFor({state:'hidden'});
+await dialog.getByRole('button',{name:'← Automations',exact:true}).click();await dialog.waitFor({state:'hidden'});
 assert.equal(await page.locator('.sc-auto-kpi').count(),6);
 console.log('PASS: existing overview preserved; modal sequence, add, timing, shared composer, simulation, activity, close, four viewport sizes');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

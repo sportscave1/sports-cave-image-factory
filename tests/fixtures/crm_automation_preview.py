@@ -40,6 +40,8 @@ def setup(legacy_preview=False,test_run=''):
     return identities
 
 identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')))
+if st.query_params.get('fixture_toolbar_live') and not st.session_state.get('fixture_selected'):
+    st.session_state['automation_selected']=identities[0];st.session_state['fixture_selected']=True
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
 from tests.test_crm_abandoned_checkout import checkout

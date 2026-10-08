@@ -19,7 +19,8 @@ from tests.test_crm_simple_editor import document
 class PublicationUiTests(unittest.TestCase):
     def test_automation_checkbox_removed_and_request_navigation(self):
         from crm_automation_ui import settings_control,detail
-        settings=inspect.getsource(settings_control);editor=inspect.getsource(detail)
+        from crm_automation_toolbar import toolbar
+        settings=inspect.getsource(settings_control);editor=inspect.getsource(toolbar)
         self.assertNotIn('This email copy is reviewed',settings)
         self.assertNotIn("['copy_reviewed']",settings)
         self.assertIn('flush_current(force=True)',editor)
@@ -32,8 +33,8 @@ class PublicationUiTests(unittest.TestCase):
         barrier=Path('components/crm_sections/automation_publish.js').read_text()
         self.assertIn('scCampaignFlushSections',barrier)
         self.assertIn("document.activeElement?.blur()",barrier)
-        self.assertIn(".st-key-crm-automation-editor button",barrier)
-        self.assertIn('return !!current',barrier)
+        self.assertIn(".st-key-automation-toolbar button",barrier)
+        self.assertIn('Publish changes',barrier)
         # Campaign explicit review continues to own its copy confirmation.
         from crm_campaign_send import review
         self.assertIn("doc['copy_reviewed']=True",inspect.getsource(review))
@@ -52,6 +53,48 @@ class PublicationUiTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class PublicationTests(unittest.TestCase):
+    def test_effective_content_noop_and_paused_publication(self):
+        from crm_automation_publish_state import has_changes
+        row=self.draft();self.job(row);self.run_job();row=self.state(row)
+        self.assertFalse(has_changes(self.store,row))
+        with patch.object(self.store,'render_settings',side_effect=AssertionError('Live master defaults must not change comparison')):
+            self.assertFalse(has_changes(self.store,row))
+        version=row['config']['published_version']
+        self.assertTrue(self.job(row)['unchanged'])
+        same=self.store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
+        self.assertEqual(same['config']['published_version'],version)
+        self.store.lifecycle(ADMIN,row['id'],'pause');row=self.state(row)
+        pause=row['config']['paused_at'];flow=deepcopy(row['config']['draft'])
+        flow['emails'][0]['document']['content']['subject']='Changed subject'
+        row=self.store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+        self.assertTrue(has_changes(self.store,row));self.job(row);self.run_job();row=self.state(row)
+        self.assertEqual(row['status'],'PAUSED');self.assertEqual(row['config']['paused_at'],pause)
+        self.assertEqual(row['config']['published_version'],version+1)
+        self.assertFalse(has_changes(self.store,row))
+
+    def test_legacy_snapshot_and_opening_checkout_do_not_flag_changes(self):
+        from crm_automation_publish_state import has_changes
+        from crm_checkout_section import editable
+        row=self.draft('abandoned');self.job(row);self.run_job();row=self.state(row)
+        self.store.q("UPDATE crm_automations SET config=config-'published_flow' WHERE id=%s",(row['id'],))
+        row=self.state(row);self.assertFalse(has_changes(self.store,row))
+        flow=deepcopy(row['config']['draft']);flow['emails'][0]['document']=editable(flow['emails'][0]['document'])
+        flow['emails'][0]['document']['copy_reviewed']=True
+        self.assertFalse(has_changes(self.store,row,flow))
+        self.store.q('DELETE FROM crm_automation_publish_jobs WHERE automation_id=%s',(row['id'],))
+        self.assertFalse(has_changes(self.store,self.state(row),flow))
+
+    def test_meaningful_settings_changes_detected_independently_of_revision(self):
+        from crm_automation_publish_state import has_changes
+        row=self.draft();self.job(row);self.run_job();row=self.state(row)
+        for field,value in [('trigger','post_purchase'),('reentry_days',7),('exit_on_purchase',True),('inactive_days',90)]:
+            flow=deepcopy(row['config']['draft']);flow[field]=value
+            self.assertTrue(has_changes(self.store,row,flow),field)
+        for field,value in [('enabled',False),('delay_seconds',700)]:
+            flow=deepcopy(row['config']['draft']);flow['emails'][0][field]=value
+            self.assertTrue(has_changes(self.store,row,flow),field)
+        flow=deepcopy(row['config']['draft']);flow['emails'][0]['document']['custom_html']+='<p>Changed</p>'
+        self.assertTrue(has_changes(self.store,row,flow))
     def setUp(self):
         self.store=AutomationStore(connect);self.ids=[]
         self.guard=patch('requests.sessions.Session.request',side_effect=AssertionError('External network forbidden'))

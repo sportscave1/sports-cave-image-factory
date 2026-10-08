@@ -12,6 +12,7 @@ from crm_logic import now
 from crm_navigation import require
 from crm_automation_definition import validate, native, status, production_document
 from crm_store import StoreUnavailable
+from crm_automation_publish_state import has_changes
 
 LOG=logging.getLogger(__name__)
 MAX_ATTEMPTS=3
@@ -48,6 +49,8 @@ def request(store,user,identity,revision):
             if active['revision']!=revision:raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
             return active
         previous=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND revision=%s AND state='SUCCEEDED' ORDER BY requested_at DESC LIMIT 1",(identity,revision)).fetchone()
+        if not has_changes(store,row,flow,conn):
+            return {**(previous or {'id':None,'automation_id':row['id'],'revision':revision,'publication_version':row['config']['published_version'],'state':'SUCCEEDED'}),'unchanged':True}
         if previous:return previous
         config=deepcopy(row['config']);job_id=str(uuid.uuid4());version=config['published_version']+1
         snapshot={'flow':approved(flow),'name':row['name'],'base_status':row['status'],
@@ -103,22 +106,27 @@ def commit(store,conn,row,flow,bundles,steps,version,publication=None):
     config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
     config['published']['timing_version']=flow.get('timing_version',1)
     config['published'].update(inactive_days=flow.get('inactive_days',180),exit_on_purchase=flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back')))
+    config['published_flow']=deepcopy(flow)
+    documents={content['step_id']:content['document'] for _,_,content in bundles}
+    for step in config['published_flow']['emails']:
+        if step['step_id'] in documents:step['document']=deepcopy(documents[step['step_id']])
     if flow.get('timing_version')!=2:config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
-    if config.get('paused_at'):store._resume_due(conn,identity,config['paused_at'],now())
-    config.pop('paused_at',None)
+    target='PAUSED' if row['status']=='PAUSED' else 'ACTIVE'
     if publication:config['publication']={**publication,'state':'LIVE','completed_at':now().isoformat()}
     # Preserve the current editable draft, including edits made after acceptance.
-    return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps=%s::jsonb,trigger_type=%s,status='ACTIVE',activated_at=now(),updated_at=now() WHERE id=%s RETURNING *",
-                        (json.dumps(config),json.dumps(steps),flow['trigger'],identity)).fetchone()
+    return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps=%s::jsonb,trigger_type=%s,status=%s,activated_at=COALESCE(activated_at,now()),updated_at=now() WHERE id=%s RETURNING *",
+                        (json.dumps(config),json.dumps(steps),flow['trigger'],target,identity)).fetchone()
 
 
 def publish_direct(store,user,identity,revision,env=None):
     require(user,'crm_automations_manage');row=store.flow(identity)
     flow=approved(preflight(row,revision));version=row['config']['published_version']+1
+    if not has_changes(store,row,flow):return row
     prepared=prepare(store,identity,flow,version,row['name'],env)
     with store.db() as conn:
         fresh=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
         preflight(fresh,revision)
+        if not has_changes(store,fresh,flow,conn):return fresh
         if fresh['config'].get('publication',{}).get('state')=='PUBLISHING':raise ValueError('A publication is already in progress.')
         if fresh['config']['published_version']!=version-1:raise ValueError('A newer publication exists.')
         return commit(store,conn,fresh,*prepared,version)

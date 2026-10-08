@@ -31,7 +31,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  await page.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.srcdoc.includes('Editable browser draft')));
  await page.screenshot({path:'tmp/checkout-editable-desktop.png',fullPage:true});
  await page.getByRole('button',{name:'Save draft',exact:true}).click();
- await page.getByRole('button',{name:'← Flow Builder',exact:true}).click();
+ await page.getByRole('button',{name:'Flow Builder',exact:true}).click();
  await page.getByRole('button',{name:'Edit email',exact:true}).first().click();
  await page.getByRole('tab',{name:'Editor',exact:true}).click();
  const reopened=frame.getByRole('button',{name:'Edit Abandoned Checkout',exact:true}).last();await reopened.click();

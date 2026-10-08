@@ -435,6 +435,10 @@ class NativeAutomationTests(unittest.TestCase):
         self.store.q('UPDATE crm_automations SET config=%s::jsonb WHERE id=%s',(__import__('json').dumps(row['config']),a['id']))
         self.store.publish(ADMIN,a['id'],row['config']['revision'],env=LIVE)
         current=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)
+        self.assertEqual(self.store.flow(a['id'])['status'],'PAUSED')
+        self.assertEqual(date(current['next_due_at']),before)
+        self.store.lifecycle(ADMIN,a['id'],'resume')
+        current=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)
         self.assertGreaterEqual(date(current['next_due_at']),before+timedelta(hours=2))
         self.assertEqual(current['steps'],old)
 

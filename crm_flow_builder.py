@@ -211,37 +211,9 @@ def builder(store,user,row):
       @media(max-width:760px){.st-key-flow-builder-actions [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:6px!important}
       .st-key-flow-builder-actions [data-testid="stColumn"]{flex:1 1 100px!important;width:auto!important;min-width:0!important}}
       .st-key-crm-automation-editor h3{font-size:20px;padding:0}</style>''')
-    st.subheader(display_name(row['name']))
-    st.caption({'ACTIVE':'Live','DRAFT':'Draft','PAUSED':'Paused','ARCHIVED':'Archived'}[status(row)]+' · Published version '+str(row['config']['published_version']))
-    with st.container(key='flow-builder-actions'):controls=st.columns(5)
-    if controls[0].button('Close',key=key+'close'):
-        from crm_campaign_recovery import flush_current
-        if flush_current(force=True):
-            st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun()
+    from crm_automation_toolbar import toolbar
+    toolbar(store,user,identity)
     archived=status(row)=='ARCHIVED'
-    if controls[1].button('Save Draft',disabled=archived,key=key+'save'):
-        st.session_state['flow-save-requested']=True
-    if controls[2].button('Test Flow',key=key+'test'):st.session_state[key+'simulation']=not st.session_state.get(key+'simulation',False)
-    if controls[3].button('Publish',type='primary',disabled=archived,key=key+'publish'):st.session_state[key+'publish-review']=True
-    if row['status'] in ('ACTIVE','PAUSED') and not archived:
-        action='pause' if row['status']=='ACTIVE' else 'resume'
-        if controls[4].button(action.title(),key=key+action):store.lifecycle(user,identity,action);changed();st.rerun()
-    if st.session_state.get(key+'publish-review'):
-        st.info('Publish this saved draft for new enrollments. Existing recipients retain their original sequence; historical checkouts are not backfilled.')
-        confirm,cancel=st.columns(2)
-        if cancel.button('Cancel publication',key=key+'cancel'):st.session_state[key+'publish-review']=False;st.rerun()
-        if confirm.button('Confirm publish',key=key+'confirm'):
-            try:
-                job=store.request_publish(user,identity,row['config']['revision'])
-                from crm_automation_home import accepted_publication
-                accepted_publication(job);changed();st.session_state[key+'publish-review']=False;st.rerun()
-            except (ValueError,PermissionError) as exc:st.error(str(exc))
-    publication=row['config'].get('publication',{})
-    if publication.get('state')=='PUBLISHING':
-        st.info('Publication queued for background validation.')
-        from crm_automation_analytics_ui import arm
-        arm(key+'publication',2)
-    if publication.get('state')=='FAILED':st.error(publication.get('error') or 'Publication failed')
     if st.session_state.get(key+'simulation'):test_flow(row)
     # Streamlit renders only the open tab, so activity SQL is not part of editing.
     tabs=st.tabs(['Flow Builder','Triggers & Timing','Activity'],on_change='rerun',key=key+'tabs')
@@ -251,5 +223,3 @@ def builder(store,user,row):
                 if archived and index!=2:
                     st.caption('Archived flow: history is retained.')
                 else:render(store,user,row)
-    if st.session_state.pop('flow-save-requested',False):
-        st.toast('Sequence changes are saved. Publish when ready for new enrollments.')

@@ -171,6 +171,11 @@ class AutomationStore(CampaignStore):
         if not step: raise ValueError('Email step changed. Reopen it.')
         from crm_checkout_migration import migrate
         doc=migrate(step['document']) if row['config']['draft']['trigger']=='abandoned' else deepcopy(step['document'])
+        if row['config'].get('published_version') and 'html_sections' not in doc:
+            from crm_automation_publish_state import published
+            snapshot=published(self,row)
+            previous=next((s['document'] for s in snapshot['emails'] if s['step_id']==self.step_id),{})
+            if 'html_sections' in previous:doc['html_sections']=deepcopy(previous['html_sections'])
         return {'id':str(row['id']),'version':row['config']['revision'],'name':row['name'],
                 'document':doc,'archived_at':row['config'].get('archived_at')}
 

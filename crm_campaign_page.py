@@ -200,6 +200,13 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
     if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
     flush_current()
+    if mode=='automation':
+        toolbar_value=json.dumps([editor['name'],doc,editor.get('version')],sort_keys=True)
+        if st.session_state.get('_automation_toolbar_value')!=toolbar_value:
+            st.session_state['_automation_toolbar_value']=toolbar_value
+            # Wake only the toolbar after the composer has finished rendering.
+            # A synchronous fragment rerun here interrupts initial preview mounting.
+            st.html('<script>setTimeout(()=>document.querySelector(".st-key-toolbar-refresh button")?.click(),250);</script>',unsafe_allow_javascript=True)
     from html import escape
     st.html('<p id="sc-campaign-save-status" role="status" style="font-size:13px;color:#777">'+escape(st.session_state.get('campaign_save_status','Saved'))+'</p>')
     if st.session_state.get('campaign_save_error'):

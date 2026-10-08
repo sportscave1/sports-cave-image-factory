@@ -1,0 +1,31 @@
+const {chromium}=require('playwright');const {execFileSync}=require('node:child_process');const assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+ const context=await browser.newContext();await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ const page=await context.newPage();await page.setViewportSize({width:1440,height:1000});
+ await page.goto('http://127.0.0.1:8540/?fixture_toolbar_live=1&fixture_run=toolbar'+Date.now());
+ await page.getByRole('button',{name:'Edit email',exact:true}).first().click();
+ const toolbar=page.locator('.st-key-automation-toolbar');
+ await toolbar.getByText('Live · v1',{exact:true}).waitFor();await toolbar.getByText('Up to date',{exact:true}).waitFor();
+ assert.equal(await toolbar.getByRole('button',{name:'Publish now',exact:true}).count(),0);
+ assert.equal(await toolbar.getByRole('button',{name:'Save draft',exact:true}).isDisabled(),true);
+ await page.locator('.st-key-crm-composer-preview iframe').waitFor();
+ const boxes=await toolbar.locator('button').evaluateAll(items=>items.filter(x=>x.getClientRects().length).map(x=>x.getBoundingClientRect().top));assert.ok(Math.max(...boxes)-Math.min(...boxes)<4,JSON.stringify(boxes));
+ await page.screenshot({path:'tmp/automation-toolbar-desktop.png',fullPage:true});
+ await page.getByRole('tab',{name:'Editor',exact:true}).click();
+ const source=page.frameLocator('iframe[title="crm_section_ui.crm_middle_sections_v2"]').getByRole('textbox').first();await source.fill((await source.inputValue())+'<p>Toolbar version two</p>');await source.press('Tab');
+ await toolbar.getByRole('button',{name:'Publish changes',exact:true}).waitFor();
+ await page.reload();await page.getByRole('button',{name:'Edit email',exact:true}).first().click();
+ await toolbar.getByRole('button',{name:'Publish changes',exact:true}).waitFor();
+ await toolbar.getByRole('button',{name:'Pause',exact:true}).click();await toolbar.getByRole('button',{name:'Resume',exact:true}).waitFor();
+ await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Latest unsaved subject');
+ await toolbar.getByRole('button',{name:'Publish changes',exact:true}).click();await toolbar.getByText('Publishing…',{exact:true}).waitFor().catch(async e=>{console.log(await page.getByRole('dialog').innerText());await page.screenshot({path:'tmp/toolbar-publish-error.png',fullPage:true});throw e;});
+ execFileSync('.venv/Scripts/python.exe',['-c',"from unittest.mock import patch; from copy import deepcopy; from crm_automation_publication import tick; from crm_automation_store import AutomationStore; from tests.crm_db_fixture import connect; from tests.test_crm_send_flow import CFG,LIVE; AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG); tick(AutomationStore(connect),'toolbar-browser',env=LIVE)"],{env:{...process.env,CRM_FIXTURE_SQL_PORT:'8881'},stdio:'pipe'});
+ await toolbar.getByText('Paused · v2',{exact:true}).waitFor({timeout:15000});await toolbar.getByText('Up to date',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('textbox',{name:'Subject',exact:true}).inputValue(),'Latest unsaved subject');
+ await toolbar.getByRole('button',{name:'Resume',exact:true}).click();await toolbar.getByText('Live · v2',{exact:true}).waitFor();
+ await toolbar.getByRole('button',{name:'Send test',exact:false}).click();await page.getByRole('textbox',{name:'Send test email',exact:true}).waitFor();await page.keyboard.press('Escape');
+ for(const width of [1000,750,390,320]){await page.setViewportSize({width,height:1000});await page.screenshot({path:`tmp/automation-toolbar-${width}.png`,fullPage:true});const overflow=await toolbar.evaluate(e=>e.scrollWidth>e.clientWidth+2);assert.equal(overflow,false,`toolbar overflow ${width}`);}
+ assert.equal(await page.getByTestId('stException').count(),0);
+ await toolbar.getByRole('button',{name:'← Automations',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});
+ console.log('PASS compact desktop toolbar, responsive controls, live/up-to-date, edit/refresh, paused publication v2, resume, send-test control and back navigation');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
