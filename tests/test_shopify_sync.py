@@ -5037,7 +5037,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         self.assertIn("duplicate_diagnostics", signature.parameters)
         self.assertEqual(signature.parameters["duplicate_diagnostics"].default, None)
-        self.assertIn("Orders sync automatically after payment.", inspect.getsource(orders_page.render_page))
+        self.assertNotIn("Orders sync automatically after payment.", inspect.getsource(orders_page.render_page))
         self.assertNotIn("Check New Paid Orders", actions_source)
 
     def test_orders_duplicate_warning_disappears_when_raw_diagnostics_are_clean(self):
@@ -5568,7 +5568,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertNotIn("allocation_key", warning_source)
         self.assertNotIn("Backfill latest paid orders", actions_source)
         self.assertNotIn("Check New Paid Orders", actions_source)
-        self.assertIn("Orders sync automatically after payment.", inspect.getsource(orders_page.render_page))
+        self.assertNotIn("Orders sync automatically after payment.", inspect.getsource(orders_page.render_page))
 
     def test_developer_page_has_orders_cache_recheck_diagnostics_only(self):
         import app

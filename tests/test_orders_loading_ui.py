@@ -1896,7 +1896,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("Open Shopify Admin", top_actions)
         self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
-        self.assertIn("Orders sync automatically after payment.", render_page)
+        self.assertNotIn("Orders sync automatically after payment.", render_page)
         self.assertIn("Assign edition number before certificate generation.", top_actions)
         self.assertNotIn("Source: Shopify mirror + Supabase edition ledger", render_page)
         self.assertNotIn("Edition source: Supabase", render_page)
@@ -2500,7 +2500,7 @@ class EditionOpsUiTests(unittest.TestCase):
             def caption(self, *args, **kwargs):
                 return None
 
-        class FakeStreamlit:
+        class FakeStreamlit(FakeColumn):
             def __init__(self):
                 self.session_state = {}
                 self.column_config = SimpleNamespace(
@@ -2626,7 +2626,7 @@ class EditionOpsUiTests(unittest.TestCase):
             def checkbox(self, *args, **kwargs):
                 return False
 
-        class FakeStreamlit:
+        class FakeStreamlit(FakeColumn):
             def __init__(self):
                 self.session_state = {}
                 self.column_config = SimpleNamespace(
@@ -2833,7 +2833,7 @@ class EditionOpsUiTests(unittest.TestCase):
             def caption(self, *args, **kwargs):
                 return None
 
-        class FakeStreamlit:
+        class FakeStreamlit(FakeColumn):
             def __init__(self):
                 self.session_state = {}
                 self.column_config = SimpleNamespace(

@@ -1,6 +1,7 @@
 """Orders UI with synthetic units and no production backend or action writes."""
 import ast
 from pathlib import Path
+from html import escape
 from types import SimpleNamespace
 from unittest.mock import patch
 import streamlit as st
@@ -28,3 +29,4 @@ def action(selected):
 backend=SimpleNamespace(orders_visibility_marker=lambda **kw:{'marker':'fixture-v1'})
 with patch.object(orders,'_configured_supabase_backend',return_value=backend), patch.object(orders,'_read_orders_snapshot',side_effect=read), patch.object(orders,'_generate_selected_certificates',side_effect=action), patch.object(orders,'_generate_upload_selected_certificates',side_effect=action), patch.object(orders,'_open_prodigi_for_row',side_effect=lambda row:action([row])):
     orders.render_page()
+st.html(f'<span id="orders-fixture-state" style="display:none" data-count="{len(st.session_state.get(orders.ROWS_KEY,[]))}" data-query="{escape(st.session_state.get(orders.LOADED_QUERY_KEY,""),quote=True)}"></span>')

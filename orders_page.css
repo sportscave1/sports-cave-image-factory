@@ -1,0 +1,51 @@
+<style>
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) {
+  padding-top: calc(var(--sc-topbar-height, 64px) + 8px) !important;
+  padding-bottom: 12px;
+}
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) > [data-testid="stVerticalBlock"] {
+  gap: 8px;
+}
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) h1 {
+  font-size: 22px; line-height: 28px; padding: 0; margin: 0;
+}
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) [data-testid="stMarkdownContainer"] {
+  margin-bottom: 0;
+}
+/* Global style injection elements have no visible content; do not give them gaps. */
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) [data-testid="stElementContainer"]:has([data-testid="stMarkdownContainer"] > style:only-child) {
+  display: none;
+}
+[data-testid="stForm"]:has(.st-key-orders_search_text) { border: 0; padding: 0; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stVerticalBlock"],
+.st-key-orders-table > [data-testid="stVerticalBlock"] { gap: 4px; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stHorizontalBlock"] { gap: 8px; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stTextInputRootElement"] { min-height: 36px; height: 36px; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) input { padding: 6px 10px; }
+.st-key-orders-actions button, .st-key-orders-actions a[kind],
+[data-testid="stForm"]:has(.st-key-orders_search_text) button {
+  min-height: 36px; padding: 5px 10px; border-radius: 5px;
+  background: #fff !important; color: #242424 !important;
+  border: 1px solid #d8d6d0 !important; box-shadow: none;
+}
+.st-key-orders-actions button p, .st-key-orders-actions a p,
+[data-testid="stForm"]:has(.st-key-orders_search_text) button p { font-size: 13px; line-height: 20px; }
+.st-key-orders-actions button:disabled { color: #858585 !important; background: #f5f5f3 !important; }
+.st-key-orders-actions button:hover:enabled, [data-testid="stForm"]:has(.st-key-orders_search_text) button:hover { background: #f5f4f0 !important; }
+.st-key-orders-actions [data-testid="stCaptionContainer"] p,
+[data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stCaptionContainer"] p { margin: 0; white-space: nowrap; }
+[data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stCaptionContainer"] { margin: 0; min-height: 22px; }
+.st-key-orders-actions { gap: 6px; }
+.st-key-orders-table [data-testid="stDataFrame"] { height: auto !important; }
+.st-key-orders-table [data-testid="stDataFrameResizable"] {
+  height: clamp(280px, calc(100dvh - var(--sc-topbar-height, 64px) - 180px), 760px) !important;
+}
+@media (max-width: 640px) {
+  [data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) { padding-top: calc(var(--sc-topbar-height, 64px) + 14px) !important; }
+  [data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stHorizontalBlock"] { flex-wrap: wrap; flex-direction: row !important; }
+  [data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stColumn"] { min-width: 0 !important; }
+  [data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stColumn"]:first-child { flex: 1 1 100% !important; }
+  [data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stColumn"]:not(:first-child) { flex: 1 1 40% !important; width: auto !important; }
+  .st-key-orders-table [data-testid="stDataFrameResizable"] { height: clamp(280px, calc(100dvh - 440px), 600px) !important; }
+}
+</style>

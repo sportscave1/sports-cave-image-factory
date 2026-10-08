@@ -1605,11 +1605,11 @@ def _selected_indices_from_state():
 
 
 def _selected_rows_from_state(rows):
-    normalised_rows = [_normalise_row(row) for row in rows or []]
+    rows = rows or []
     selected = []
     for index in _selected_indices_from_state():
-        if 0 <= index < len(normalised_rows):
-            selected.append(normalised_rows[index])
+        if 0 <= index < len(rows):
+            selected.append(_normalise_row(rows[index]))
     return selected
 
 
@@ -2005,9 +2005,9 @@ def _render_ledger_diagnostics():
                 st.caption(f"Duplicate allocation diagnostics unavailable: {error}")
 
 
-def _display_rows(rows):
+def _display_rows(rows, *, normalised=False):
     output = []
-    for row in [_normalise_row(item) for item in rows or []]:
+    for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         if display_row.get("order"):
             display_row["order"] = f"{COPY_ORDER_ICON} {display_row['order']}"
@@ -2214,8 +2214,8 @@ def _fulfilment_cell_style(value):
     return ""
 
 
-def _display_table_payload(rows):
-    display_rows = _display_rows(rows)
+def _display_table_payload(rows, *, normalised=False):
+    display_rows = _display_rows(rows, normalised=normalised)
     if getattr(st, "__name__", "") != "streamlit":
         return display_rows
     pandas_module = _pandas_module()
@@ -2313,41 +2313,41 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
     st.session_state[ORDER_SYNC_BACKFILL_KEY] = False
-    action_cols = st.columns([1.35, 1.15, 1.4, 1.15, 1.35, 1.2])
-    if action_cols[1].button(
-        "Preview Certificate",
-        use_container_width=True,
-        disabled=not can_generate,
-    ):
-        with st.spinner("Generating selected certificates..."):
-            _generate_selected_certificates(selected_rows)
-        st.rerun()
-    if action_cols[2].button(
-        upload_label,
-        use_container_width=True,
-        disabled=not can_upload,
-    ):
-        with st.spinner("Generating and uploading selected certificates..."):
-            certificate_action_ok = _generate_upload_selected_certificates(selected_rows)
-        if certificate_action_ok:
+    with st.container(key="orders-actions", horizontal=True, vertical_alignment="center", gap="small"):
+        if st.button(
+            "Preview Certificate",
+            use_container_width=False,
+            disabled=not can_generate,
+        ):
+            with st.spinner("Generating selected certificates..."):
+                _generate_selected_certificates(selected_rows)
             st.rerun()
-    if open_url:
-        action_cols[3].link_button("Open Certificate", open_url, use_container_width=True)
-    else:
-        action_cols[3].button("Open Certificate", use_container_width=True, disabled=True)
-    if action_cols[4].button(
-        "Start Fulfilment QA",
-        use_container_width=True,
-        disabled=not can_dispatch,
-    ):
-        _open_prodigi_for_row(selected_rows[0])
-        st.rerun()
-    action_cols[5].caption(f"{selected_count} selected")
+        if st.button(
+            upload_label,
+            use_container_width=False,
+            disabled=not can_upload,
+        ):
+            with st.spinner("Generating and uploading selected certificates..."):
+                certificate_action_ok = _generate_upload_selected_certificates(selected_rows)
+            if certificate_action_ok:
+                st.rerun()
+        if open_url:
+            st.link_button("Open Certificate", open_url, use_container_width=False)
+        else:
+            st.button("Open Certificate", use_container_width=False, disabled=True)
+        if st.button(
+            "Start Fulfilment QA",
+            use_container_width=False,
+            disabled=not can_dispatch,
+        ):
+            _open_prodigi_for_row(selected_rows[0])
+            st.rerun()
+        _render_manual_edition_entry(selected_rows, backend)
+        st.caption(f"{selected_count} selected")
     if not backend:
         st.caption("Orders are temporarily unavailable.")
     if selected_rows and not can_generate:
         st.caption("Assign edition number before certificate generation.")
-    _render_manual_edition_entry(selected_rows, backend)
 
 
 def _render_sync_diagnostics(result):
@@ -2679,9 +2679,9 @@ def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
     _render_inline_prodigi_actions(rows)
-    with st.container(border=True):
+    with st.container(border=False, key="orders-table"):
         st.dataframe(
-            _display_table_payload(rows),
+            _display_table_payload(rows, normalised=True),
             hide_index=True,
             use_container_width=True,
             height=min(760, max(420, 28 * (len(rows) + 1))),
@@ -2700,15 +2700,17 @@ def _render_orders_table(rows):
 
 def _render_orders_search_form():
     if hasattr(st, "form") and hasattr(st, "form_submit_button"):
-        with st.form("orders-search-form", clear_on_submit=False):
-            search_cols = st.columns([3.2, 1])
+        with st.form("orders-search-form", clear_on_submit=False, border=False):
+            search_cols = st.columns([6, 1, 1], vertical_alignment="center")
             query = search_cols[0].text_input(
                 "Search orders",
                 key=SEARCH_KEY,
+                label_visibility="collapsed",
                 placeholder="Order, customer, product, variant, edition",
             )
             search_cols[1].caption("Latest 50")
-            submitted = st.form_submit_button("Search", use_container_width=False)
+            with search_cols[2]:
+                submitted = st.form_submit_button("Search", use_container_width=True)
         return str(query or "").strip(), bool(submitted)
 
     search_cols = st.columns([3.2, 1])
@@ -2774,11 +2776,6 @@ def _render_orders_data_area():
 
     _render_top_actions(visible_rows, None)
 
-    if st.session_state.get(LOADED_QUERY_KEY):
-        st.caption(f"{len(visible_rows)} matching fulfilment row(s) shown from Supabase.")
-    else:
-        st.caption(f"{len(visible_rows)} fulfilment row(s) shown from the latest 50 orders.")
-
     _render_orders_table(visible_rows)
 
 
@@ -2797,12 +2794,19 @@ def _render_orders_loading_fragment():
     _orders_loading_fragment()
 
 
+def _render_orders_styles():
+    # The existing form key scopes every rule to Orders, including outer padding.
+    # Style-only HTML uses Streamlit's event container, reserving no layout slot.
+    if getattr(st, "__name__", "") == "streamlit":
+        st.html((Path(__file__).parent / "orders_page.css").read_text(encoding="utf-8"))
+
+
 def render_page():
     page_started = time.perf_counter()
     _ensure_state()
     print("PERF Orders page entry", flush=True)
+    _render_orders_styles()
     st.title("Orders")
-    st.caption("Orders sync automatically after payment.")
     search_text, search_submitted = _render_orders_search_form()
     if _async_orders_load_supported():
         if search_submitted:
