@@ -113,6 +113,12 @@ class NativeAutomationTests(unittest.TestCase):
           'defaultAddress':{'countryCodeV2':'AU'},'numberOfOrders':0,'lastOrder':None,
           'unsubscribeUrl':'https://example.test/unsubscribe/fixture'}
         self.shop=Mock();self.shop.customer.side_effect=lambda *a,**k:deepcopy(self.customer)
+        self.shop.orders.return_value={'nodes':[]}
+        self.shop.checkout.return_value={'id':'gid://shopify/AbandonedCheckout/123','customer':deepcopy(self.customer),
+            'createdAt':self.clock.isoformat(),'updatedAt':self.clock.isoformat(),'completedAt':None,
+            'abandonedCheckoutUrl':'https://fixture.myshopify.com/checkouts/fixture-token/recover',
+            'lineItems':{'nodes':[{'title':'Fixture artwork','quantity':1}]}}
+
         self.provider=Mock();self.provider.suppressed.return_value=False;self.provider.send.side_effect=lambda *a,**k:str(uuid.uuid4())
         from crm_resend import Config
         self.engine=Engine(self.store,self.shop,self.provider,Config(LIVE),clock=lambda:self.clock)
@@ -247,6 +253,7 @@ class NativeAutomationTests(unittest.TestCase):
         self.store.set_state('checkout-auto-start-v2',{'started_at':str(a['activated_at'])})
         from crm_checkout_analytics import details
         self.shop.checkout.return_value=self.shop.checkouts.return_value['nodes'][0]
+        self.shop.checkout.return_value['lineItems']={'nodes':[{'title':'Fixture artwork','quantity':1}]}
         with patch.dict(os.environ,{'SHOPIFY_STORE_DOMAIN':'fixture.myshopify.com'}):
             details(self.store,self.shop.checkout.return_value)
             reconcile(self.engine,a)

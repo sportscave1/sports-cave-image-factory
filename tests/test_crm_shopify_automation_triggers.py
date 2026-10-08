@@ -95,6 +95,7 @@ class TriggerTests(unittest.TestCase):
         native_fixture.NativeAutomationTests.setUp(self)
         self.shop_env=patch.dict(os.environ,{'SHOPIFY_STORE_DOMAIN':SHOP});self.shop_env.start();self.addCleanup(self.shop_env.stop)
         self.token=uuid.uuid4().hex;self.key=checkout_key(self.token,SHOP)
+        self.shop.checkout.return_value['abandonedCheckoutUrl']='https://fixture.myshopify.com/checkouts/'+self.token+'/recover'
     def event(self,topic,payload,at=None):
         identity=uuid.uuid4().hex
         receive_shopify(self.store,topic,identity,payload,at or self.clock)

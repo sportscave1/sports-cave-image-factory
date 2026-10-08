@@ -33,7 +33,7 @@ class Fixture:
                 if self.results.get(k,{}).get('state') in ('QUEUED','CHECKING'):continue
                 c=self.records[int(k)]
                 reason='Recovered' if c['order_id'] else 'Already in flow' if c['enrollment_id'] else None
-                self.results[k]={'checkout_key':k,'requested_at':now().isoformat(),'state':'DONE' if reason else 'QUEUED','result':reason or 'Adding…'}
+                self.results[k]={'checkout_key':k,'requested_at':now().isoformat(),'state':'DONE' if reason else 'QUEUED','result':reason or 'Queued','manual_dispatch':True,'delivery':'skipped' if reason else 'queued'}
                 if not reason:self.pool.submit(self.validate,k)
             return deepcopy([self.results[k] for k in keys])
     def validate(self,k):
@@ -44,8 +44,8 @@ class Fixture:
             self.attempts[k]=self.attempts.get(k,0)+1
             reason={'5':'Unsubscribed','6':'Suppressed'}.get(k)
             if k=='4' and self.attempts[k]==1:reason='Failed — Shopify unavailable'
-            self.results[k].update(state='FAILED' if reason and reason.startswith('Failed') else 'DONE',result=reason or 'Added to flow')
-            if not reason:self.records[int(k)].update(enrollment_id='fixture-'+k,flow_status='ACTIVE',next_due_at=now()+timedelta(minutes=78),current_step=0,steps=[{}])
+            self.results[k].update(state='FAILED' if reason and reason.startswith('Failed') else 'DONE',result=reason or 'Sent',delivery='failed' if reason and reason.startswith('Failed') else 'skipped' if reason else 'sent',enrolled=not bool(reason))
+            if not reason:self.records[int(k)].update(enrollment_id='fixture-'+k,flow_status='ACTIVE',next_due_at=now()+timedelta(days=1),current_step=1,steps=[{},{}],sends=[{'step':0,'status':'ACCEPTED','provider_id':'fixture-'+k,'enrollment_id':'fixture-'+k,'error':''}])
     def read(self,store,key,fn,ttl=180):
         with self.lock:
             if key[0]=='checkout-list':return deepcopy(self.records),'READY'

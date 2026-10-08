@@ -13,6 +13,17 @@ from crm_checkout_timing_ui import time_to_send
 
 
 class ProgressTests(unittest.TestCase):
+    def test_cached_sent_receipt_does_not_finish_pending_retry_write(self):
+        session={};saved=Future();store=Mock();store.connect='fixture'
+        record={'checkout_key':'chosen','enrollment_id':'existing',
+                'sends':[{'status':'ACCEPTED','provider_message_id':'accepted','step_index':0}]}
+        with patch.object(st,'session_state',session),patch.object(ui,'submit',return_value=saved),patch.object(analytics,'read') as read:
+            ui.begin(store,{},'fixture',['chosen'],'slot')
+            states,busy=ui.progress(store,{'id':'fixture'},[record],'slot')
+        self.assertEqual(states['chosen']['state'],'SAVING')
+        self.assertEqual(busy,{'chosen'});read.assert_not_called()
+        self.assertEqual(len(session['slot-enrollment']['writes']),1)
+
     def test_ack_poll_patch_schedule_then_stop_without_full_reload(self):
         session={};store=Mock();store.connect='safe-fixture';row={'id':'fixture'}
         records=[{'checkout_key':'chosen','sends':[]},{'checkout_key':'unselected','sends':[]}]
@@ -26,7 +37,7 @@ class ProgressTests(unittest.TestCase):
         with patch.object(st,'session_state',session),patch.object(ui,'submit',return_value=saved),patch.object(ui,'read_requests',side_effect=fetch):
             ui.begin(store,{},'fixture',['chosen'],'slot')
             states,busy=ui.progress(store,row,records,'slot')
-            self.assertEqual(states['chosen']['result'],'Adding…');self.assertEqual(busy,{'chosen'})
+            self.assertEqual(states['chosen']['result'],'Queued');self.assertEqual(busy,{'chosen'})
             self.assertEqual(calls,[])
             saved.set_result([result])
             for _ in range(20):

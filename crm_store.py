@@ -126,7 +126,7 @@ class Store:
         return self.q('''INSERT INTO crm_marketing_sends(idempotency_key,shopify_customer_id,recipient_hash,template_id,template_version,campaign_id,enrollment_id,step_index,test_send,test_recipient,due_at)
          VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,COALESCE((SELECT next_due_at FROM crm_automation_enrollments WHERE id=%s),now())) ON CONFLICT DO NOTHING RETURNING *''',
          (key,customer_id,hashed,template['id'],template['version'],campaign_id,enrollment_id,step_index,bool(test_recipient),test_recipient,enrollment_id),True)
-    def claim_send(self,allow_customer=True,allow_test=True):
+    def claim_send(self,allow_customer=True,allow_test=True,send_id=None):
         # A crash after submission is never automatically replayed outside provider protection.
         self.q("UPDATE crm_marketing_sends s SET status='UNCERTAIN',error_code='interrupted_submission',updated_at=now() WHERE status='SUBMITTING' AND lease_until<now() AND NOT EXISTS(SELECT 1 FROM crm_template_versions v WHERE v.template_id=s.template_id AND v.version=s.template_version AND v.content->'dispatch'->>'version'='1')")
         return self.q('''WITH due AS (SELECT s.id FROM crm_marketing_sends s
@@ -134,11 +134,12 @@ class Store:
          LEFT JOIN crm_automations a ON a.id=e.automation_id
          WHERE (s.status='PENDING' OR (s.status='CLAIMED' AND s.lease_until<now())) AND s.due_at<=now()
          AND ((s.test_send AND %s) OR (NOT s.test_send AND %s))
+         AND (%s::uuid IS NULL OR s.id=%s::uuid)
          AND (s.campaign_id IS NULL OR c.status='SENDING') AND (s.enrollment_id IS NULL OR (e.status='ACTIVE' AND a.status='ACTIVE' AND e.next_due_at<=now() AND s.step_index=e.current_step))
          AND NOT EXISTS(SELECT 1 FROM crm_template_versions v WHERE v.template_id=s.template_id AND v.version=s.template_version AND v.content->'dispatch'->>'version'='1')
          ORDER BY s.due_at FOR UPDATE OF s SKIP LOCKED LIMIT 1)
          UPDATE crm_marketing_sends s SET status='CLAIMED',lease_token=gen_random_uuid(),lease_until=now()+interval '5 minutes',attempts=attempts+1
-         FROM due WHERE s.id=due.id RETURNING s.*''',(allow_test,allow_customer),one=True)
+         FROM due WHERE s.id=due.id RETURNING s.*''',(allow_test,allow_customer,send_id,send_id),one=True)
     def begin_send(self,row,request_hash,hashed):
         sql="""UPDATE crm_marketing_sends SET status='SUBMITTING',request_hash=%s,recipient_hash=%s,first_submitted_at=now(),updated_at=now()
          WHERE id=%s AND status='CLAIMED' AND lease_token=%s AND lease_until>now()
@@ -158,6 +159,14 @@ class Store:
             if key:
                 checkout=conn.execute('SELECT status FROM crm_shopify_checkouts WHERE checkout_key=%s FOR UPDATE',(key,)).fetchone()
                 if not checkout or checkout['status']=='RECOVERED':return None
+                duplicate=conn.execute('''SELECT 1 FROM crm_marketing_sends s
+                  JOIN crm_automation_enrollments other ON other.id=s.enrollment_id
+                  WHERE other.checkout_key=%s AND other.id<>%s AND NOT s.test_send
+                  AND (s.status IN ('ACCEPTED','SUBMITTING','UNCERTAIN') OR s.provider_email_id IS NOT NULL) LIMIT 1''',
+                  (key,row['enrollment_id'])).fetchone()
+                if duplicate:
+                    conn.execute("UPDATE crm_marketing_sends SET status='BLOCKED',error_code='checkout_recovery_already_sent',lease_until=NULL WHERE id=%s AND status='CLAIMED' AND lease_token=%s",(row['id'],row['lease_token']))
+                    return None
             return conn.execute(sql,args).fetchone()
     def finish_send(self,row,status,code='',provider_id=None):
         result=self.q('''UPDATE crm_marketing_sends SET status=%s,error_code=%s,provider_email_id=%s,updated_at=now(),lease_until=NULL

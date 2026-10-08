@@ -102,7 +102,9 @@ class AnalyticsTests(unittest.TestCase):
 
     def test_manual_enrollment_idempotent_immutable_no_inline_send(self):
         a,c=self.prepared();j=self.add(a,c)
-        self.assertEqual(j['checkout_key'],self.key);self.assertEqual(j['steps'],a['steps'])
+        self.assertEqual(j['checkout_key'],self.key)
+        expected=deepcopy(a['steps']);expected[0].update(manual_checkout=True,delay_seconds=0)
+        self.assertEqual(j['steps'],expected)
         self.assertEqual(date(j['next_due_at']),self.clock)
         with self.assertRaises(ValueError):self.add(a,c)
         self.assertEqual(self.store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],1)
@@ -111,7 +113,7 @@ class AnalyticsTests(unittest.TestCase):
     def test_manual_guards_consent_recovery_identity_unsigned_historical_and_delay(self):
         a,c=self.prepared()
         original=deepcopy(c)
-        for mutation in ({'completedAt':now().isoformat()},{'id':'wrong'},{'updatedAt':self.clock.isoformat()}):
+        for mutation in ({'completedAt':now().isoformat()},{'id':'wrong'},{'updatedAt':(self.clock+timedelta(minutes=1)).isoformat()}):
             self.shop.checkout.return_value={**original,**mutation}
             with self.assertRaises(ValueError):self.add(a,c)
         self.shop.checkout.return_value=original
@@ -119,7 +121,7 @@ class AnalyticsTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.add(a,c)
         self.customer['emailMarketingConsent']['marketingState']='SUBSCRIBED'
         with self.assertRaises(PermissionError):add_to_flow(self.shop,self.store,WORKER,a['id'],c['id'])
-        self.store.q('UPDATE crm_shopify_checkouts SET activity_at=%s WHERE checkout_key=%s',(self.clock,self.key))
+        self.store.q('UPDATE crm_shopify_checkouts SET activity_at=%s WHERE checkout_key=%s',(self.clock+timedelta(minutes=1),self.key))
         with self.assertRaises(ValueError):self.add(a,c)
         self.store.q("UPDATE crm_shopify_checkouts SET status='RECOVERED' WHERE checkout_key=%s",(self.key,))
         with self.assertRaises(ValueError):self.add(a,c)
@@ -137,7 +139,7 @@ class AnalyticsTests(unittest.TestCase):
     def test_concurrent_checkout_update_rechecked_under_enrollment_lock(self):
         from crm_automation_runtime import enter
         a,c=self.prepared()
-        self.store.q('UPDATE crm_shopify_checkouts SET activity_at=%s WHERE checkout_key=%s',(self.clock,self.key))
+        self.store.q('UPDATE crm_shopify_checkouts SET activity_at=%s WHERE checkout_key=%s',(self.clock+timedelta(minutes=1),self.key))
         self.assertIsNone(enter(self.engine,a,self.customer['id'],c['id'],'checkout:'+self.key,self.clock,checkout_key=self.key,manual_checkout=True))
         self.provider.send.assert_not_called()
 

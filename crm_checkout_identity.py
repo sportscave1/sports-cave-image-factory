@@ -33,7 +33,13 @@ def recovered(row):
 
 def recovery_status(row):
     if recovered(row):return 'Recovered'
-    if any(s.get('status')=='ACCEPTED' and s.get('provider_id') for s in row.get('sends',[])):return 'Not recovered'
+    manual=(row.get('enrollment_request') or {}).get('manual_dispatch')
+    if any(s.get('status')=='ACCEPTED' and s.get('provider_id') for s in row.get('sends',[])):return 'Sent' if manual else 'Not recovered'
+    if manual:
+        request=row['enrollment_request']
+        if request.get('state') in ('SAVING','QUEUED','CHECKING') or request.get('delivery')=='queued':return 'Queued'
+        if request.get('state')=='FAILED':return 'Send failed'
+
     return 'Not sent'
 
 

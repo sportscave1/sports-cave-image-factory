@@ -127,11 +127,13 @@ class Reliability(TestCase):
         from crm_automation_runtime import reconcile as automatic
         a,c=self.prepared();self.store.set_state('checkout-auto-start-v2',{'started_at':(date(c['createdAt'])-timedelta(seconds=1)).isoformat()})
         self.shop.checkouts.return_value={'nodes':[c],'pageInfo':{'hasNextPage':True,'endCursor':'page-two'}}
+        details(self.store,c)
         automatic(self.engine,a)
         journey=self.store.q('SELECT * FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)
         self.assertIsNotNone(journey)
         key='reconcile:native:'+str(a['id'])+':'+str(a['config']['published_version'])+':'+str(a['activated_at'])
-        self.assertEqual(self.store.state(key)['cursor'],'page-two')
+        self.assertIn('next_at',self.store.state(key))
+        self.shop.checkouts.assert_not_called()
         self.assertNotIn('cursor',self.store.state(self.key))
 
     def test_restart_preserves_enrollment_and_queue(self):
@@ -178,6 +180,8 @@ class Reliability(TestCase):
         j=self.add(a,c)
         send=self.store.enqueue('automation:'+str(j['id'])+':0',self.customer['id'],recipient_hash(self.customer['email']),
           {'id':a['steps'][0]['template_id'],'version':a['steps'][0]['template_version']},enrollment_id=j['id'],step_index=0)
+        self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()-interval '1 second' WHERE id=%s",(j['id'],))
+        self.store.q("UPDATE crm_marketing_sends SET due_at=now()-interval '1 second' WHERE id=%s",(send['id'],))
         return a,c,j,send
 
     def test_provider_rejection_persisted_and_explicitly_retryable(self):
@@ -223,8 +227,10 @@ class Reliability(TestCase):
         a,c=self.prepared();c['lineItems']={'nodes':[{'title':'Fixture item','quantity':1}]}
         self.store.set_state('checkout-auto-start-v2',{'started_at':(date(c['createdAt'])-timedelta(seconds=1)).isoformat()})
         self.shop.checkouts.return_value={'nodes':[c],'pageInfo':{'hasNextPage':False}}
+        details(self.store,c)
         automatic(self.engine,a)
         j=self.store.q('SELECT * FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)
+        self.store.q("UPDATE crm_automation_enrollments SET next_due_at=now()-interval '1 second' WHERE id=%s",(j['id'],))
         advance(self.engine,j)
         self.assertEqual(recovery_status(checkouts(self.store,a['id'],window('All time',self.clock),self.key)[0]),'Not sent')
         self.engine.send_one();self.provider.send.assert_called_once()

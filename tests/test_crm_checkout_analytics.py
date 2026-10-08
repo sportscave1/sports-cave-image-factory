@@ -82,7 +82,8 @@ class LedgerTests(unittest.TestCase):
         self.shop.checkout.return_value=c;self.shop.checkouts.return_value={'nodes':[c],'pageInfo':{'hasNextPage':False}}
         automatic(self.engine,a)
         self.assertFalse(self.store.q('SELECT id FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],)))
-        j=self.add(a,c);self.assertEqual(j['steps'],a['steps'])
+        j=self.add(a,c);expected=deepcopy(a['steps']);expected[0].update(manual_checkout=True,delay_seconds=0)
+        self.assertEqual(j['steps'],expected)
         with self.assertRaises(ValueError):self.add(a,c)
         self.provider.send.assert_not_called()
 

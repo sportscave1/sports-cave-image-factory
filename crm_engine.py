@@ -64,13 +64,13 @@ class Engine:
                 if not safe_url(checkout.get('abandonedCheckoutUrl')) or not checkout['lineItems']['nodes']:return c,context,'invalid_checkout'
                 # Any newer order stops reminders, including payment-pending orders.
                 # Customer.lastOrder is authoritative and avoids scanning order history.
-                if not enrollment.get('checkout_key'):
+                if not enrollment.get('checkout_key') or frozen.get('manual_checkout'):
                     latest=c.get('lastOrder') or {}
                     if date(latest.get('createdAt')) and date(latest['createdAt'])>=date(checkout['createdAt']):return c,context,'recovered'
                     recent=self.shop.orders(c['id'],fresh=True)['nodes']
                     if any(not o.get('cancelledAt') and date(o['createdAt'])>=date(checkout['createdAt']) for o in recent):return c,context,'recovered'
                 from crm_checkout_eligibility import recovery_eligibility,policy
-                ok,reason=recovery_eligibility(checkout,c,policy(self.store),suppressed=self.store.suppressed(c['id'],recipient_hash(c.get('email'))))
+                ok,reason=recovery_eligibility(checkout,c,policy(self.store),suppressed=self.store.suppressed(c['id'],recipient_hash(c.get('email'))),manual=bool(frozen.get('manual_checkout')))
                 if not ok:return c,context,reason
                 context['checkout_url']=checkout['abandonedCheckoutUrl']
                 context['_checkout']=checkout;context['_checkout_id']=trigger
@@ -90,11 +90,12 @@ class Engine:
                 last=date((c.get('lastOrder') or {}).get('createdAt'))
                 if not last or int(c['numberOfOrders'])<1 or last>self.clock()-timedelta(days=int(a['config'].get('days',180))):return c,context,'recent_purchase'
         return c,context,''
-    def send_one(self):
+    def send_one(self,send_id=None):
         if not (self.config.enabled or self.config.tests_enabled):return False
-        row=self.store.claim_send(allow_customer=self.config.enabled,allow_test=self.config.tests_enabled)
+        row=self.store.claim_send(allow_customer=self.config.enabled,allow_test=self.config.tests_enabled,**({"send_id":send_id} if send_id else {}))
         if not row:return False
         submitting=False
+        enrollment=None
         try:
             self.config.require_send(row['test_send'])
             enrollment=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],),True) if row['enrollment_id'] else None
@@ -177,9 +178,15 @@ class Engine:
             if enrollment and enrollment.get('checkout_key'):
                 try:self.store.set_state('checkout-send-attempt:'+str(row['id'])+':'+str(row['attempts']),{'status':'ACCEPTED','at':self.clock().isoformat(),'enrollment_id':str(enrollment['id'])})
                 except Exception:logging.getLogger(__name__).warning('checkout_send_audit_deferred send_id=%s',row['id'])
-        except MarketingDisabled:
+        except MarketingDisabled as exc:
             self.store.defer_send(row)
+            if enrollment and enrollment.get('checkout_key'):
+                self.store.set_state('checkout-send-error:'+str(row['id']),{'message':str(exc)})
         except Exception as exc:
+            from email_service import EmailDeliveryError
+            if enrollment and enrollment.get('checkout_key'):
+                message=exc.safe_message if isinstance(exc,EmailDeliveryError) else ('Verification failed: '+type(exc).__name__)
+                self.store.set_state('checkout-send-error:'+str(row['id']),{'message':message,'http_status':getattr(exc,'status_code',None)})
             if submitting:
                 # No automatic replay after potentially accepted submission, including process crashes.
                 from email_service import EmailDeliveryError

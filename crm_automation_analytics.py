@@ -162,13 +162,15 @@ def _authorized_add_to_flow(shop,store,identity,checkout_id,expected_key=None):
     from crm_logic import eligibility,recipient_hash
     c=recipient(shop,store,checkout,ledger)
     if not (c or {}).get('email'):raise ValueError('Missing email')
+    purchased=date((c.get('lastOrder') or {}).get('createdAt'))
+    if purchased and date(checkout.get('createdAt')) and purchased>=date(checkout['createdAt']):raise ValueError('Recovered')
     from crm_checkout_eligibility import recovery_eligibility,policy
-    eligible,reason=recovery_eligibility(checkout,c,policy(store),suppressed=store.suppressed(c['id'],recipient_hash(c.get('email'))))
+    eligible,reason=recovery_eligibility(checkout,c,policy(store),suppressed=store.suppressed(c['id'],recipient_hash(c.get('email'))),manual=True)
     if not eligible:raise ValueError(block_label(reason))
     from crm_native_unsubscribe import native_unsubscribe_url
     if not native_unsubscribe_url(c,recovery=True):raise ValueError('Not eligible: unsubscribe link unavailable')
     customer=c['id']
-    at=now();threshold=row['config']['published'].get('abandonment_seconds',3600)
+    at=now();threshold=0  # Explicit manual action bypasses the initial automation wait.
     created=date(checkout.get('createdAt'));activated=date(row.get('activated_at'))
     if not created or not activated:raise ValueError('Verified checkout and activation dates are required.')
     # Manual selection is intentional historical enrollment, not automatic backfill.

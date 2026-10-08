@@ -24,7 +24,7 @@ class TimingContract(unittest.TestCase):
         self.assertEqual(delay_controls(172800),(2,'Days'))
     def test_analytics_has_no_live_timer(self):
         source=Path('crm_automation_analytics_ui.py').read_text(encoding='utf-8')
-        self.assertIn('time_to_send(c,at=timing[1])',source)
+        self.assertIn('time_to_send(c,at=timing_now)',source)
         self.assertNotIn('run_every=',source)
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable database required')

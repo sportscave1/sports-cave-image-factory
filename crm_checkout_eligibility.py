@@ -37,7 +37,7 @@ def configure_regions(store, user, regions):
 
 
 def recovery_eligibility(checkout, customer, rules=None, *, suppressed=False,
-                         provider_suppressed=False):
+                         provider_suppressed=False, manual=False):
     """Return (allowed, reason); scheduling/idempotency stay in the queue owner.
 
     Region overrides use ISO codes. A relaxed rule needs an effective_at cutoff
@@ -95,7 +95,10 @@ def recovery_eligibility(checkout, customer, rules=None, *, suppressed=False,
     created = date(checkout.get('createdAt'))
     if not effective:
         return False, 'recovery_policy_invalid'
-    if not created or created < effective:
+    # The effective date is the automatic-backfill boundary, not evidence of
+    # opt-in. Explicit manual intent still needs the configured region/basis
+    # and matching verified contact below, and cannot override an opt-out.
+    if not created or (created < effective and not manual):
         return False, 'historical_not_enrolled'
     if region.get('inferred_basis') != 'checkout_contact':
         return False, 'recovery_evidence_required'

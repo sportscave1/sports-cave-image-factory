@@ -18,7 +18,7 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
     if automation['trigger_type']=='abandoned':
         from crm_checkout_eligibility import recovery_eligibility,policy
         checkout_source=checkout_source or engine.shop.checkout(trigger_id,fresh=True)
-        if not recovery_eligibility(checkout_source,c,policy(store),suppressed=store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
+        if not recovery_eligibility(checkout_source,c,policy(store),suppressed=store.suppressed(customer_id,recipient_hash((c or {}).get('email'))),manual=manual_checkout)[0]:return None
     elif not eligibility(c,store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
     with store.db() as conn:
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(automation['id'],)).fetchone()
@@ -49,7 +49,9 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
         steps=enrollment_steps(row)
         if not steps:return None
         due_base=at
-        if manual_checkout:due_base=min(at,date(checkout['activity_at']))
+        if manual_checkout:
+            steps[0]['manual_checkout']=True
+            steps[0]['delay_seconds']=0
         result=conn.execute('''INSERT INTO crm_automation_enrollments(automation_id,shopify_customer_id,trigger_shopify_id,trigger_key,trigger_at,steps,next_due_at,checkout_key,source_event_id)
           VALUES(%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING *''',
           (row['id'],customer_id,trigger_id,event_id,due_base,json.dumps(steps),scheduled_at(due_base,steps[0]['delay_seconds']),checkout_key,source_event_id)).fetchone()
@@ -178,8 +180,8 @@ def advance(engine,enrollment):
         store.enqueue(key,c['id'],recipient_hash(c['email']),{'id':step['template_id'],'version':step['template_version']},enrollment_id=enrollment['id'],step_index=index)
         return
     if receipt['status'] in ('PENDING','CLAIMED','SUBMITTING'):return
-    if enrollment.get('checkout_key') and receipt['status']=='FAILED' and receipt.get('error_code')=='provider_rejected':
-        store.q("UPDATE crm_automation_enrollments SET retry_after=now()+interval '5 minutes',stop_reason='provider_rejected' WHERE id=%s",(enrollment['id'],));return
+    if enrollment.get('checkout_key') and receipt['status']=='FAILED' and receipt.get('error_code') in ('provider_rejected','revalidation_unavailable'):
+        store.q("UPDATE crm_automation_enrollments SET retry_after=now()+interval '5 minutes',stop_reason=%s WHERE id=%s",(receipt['error_code'],enrollment['id']));return
     if receipt['status']!='ACCEPTED':engine.stop(enrollment,receipt['error_code'] or 'send_held');return
     if enrollment.get('checkout_key'):
         store.q("UPDATE crm_shopify_checkouts SET status='RECOVERY_EMAIL_SENT',updated_at=now() WHERE checkout_key=%s AND status<>'RECOVERED'",(enrollment['checkout_key'],))

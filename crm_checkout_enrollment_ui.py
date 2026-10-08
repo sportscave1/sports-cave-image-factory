@@ -27,8 +27,9 @@ def begin(store,user,identity,keys,slot):
     try:
         future=submit(store,user,identity,keys)
         state['writes'].append((tuple(keys),future))
+        state['batch']=tuple(keys)
         state.setdefault('started',{})[id(future)]=monotonic()
-        for k in keys:state['results'][k]={'state':'SAVING','result':'Adding…'}
+        for k in keys:state['results'][k]={'state':'SAVING','result':'Queued','manual_dispatch':True,'delivery':'queued'}
     except Exception:
         for k in keys:state['results'][k]={'state':'FAILED','result':'Failed — request unavailable'}
 
@@ -40,10 +41,13 @@ def progress(store,row,records,slot):
     # Restores active requests when the dialog/browser is reopened.
     for c in records:
         value=c.get('enrollment_request')
-        if value and value.get('state') in (*ACTIVE,'FAILED') and c['checkout_key'] not in results:
+        if value and (value.get('state') in (*ACTIVE,'FAILED') or value.get('manual_dispatch')) and c['checkout_key'] not in results:
             results[c['checkout_key']]=value
         if c['checkout_key'] in results:
             value=results[c['checkout_key']]
+            # A prior accepted receipt cannot finish a new request before its
+            # durable acknowledgement arrives; keep polling the write future.
+            if value.get('state')=='SAVING':continue
             # Let the targeted receipt read finish an active request normally.
             # Only reconcile cached membership here after expiry/failure; doing
             # it early can replace a fresh "Added to flow" receipt with stale UI.
@@ -69,7 +73,7 @@ def progress(store,row,records,slot):
             for value in future.result():results[value['checkout_key']]=dict(value,_refresh=True)
         except Exception:
             for k in keys:results[k]={'state':'FAILED','result':'Failed — persistence error'}
-    watching=tuple(sorted(k for k,v in results.items() if v.get('state') in ACTIVE or v.get('_refresh')))
+    watching=tuple(sorted(k for k,v in results.items() if v.get('state') in ACTIVE or (v.get('delivery')=='queued' and v.get('state')!='SAVING') or v.get('_refresh')))
     if watching:
         data,phase=read(store,('checkout-enrollment-progress',str(row['id']),watching),
                         lambda:read_requests(store,row['id'],watching),2)
@@ -96,4 +100,12 @@ def progress(store,row,records,slot):
             st.caption('Progress temporarily unavailable; saved requests continue in the worker.')
     busy={k for k,v in results.items() if v.get('state') in (*ACTIVE,'SAVING')}
     if busy or watching:st.session_state['checkout-enrollment-pending']=True
+    batch=[results[k] for k in state.get('batch',()) if k in results]
+    if batch and not any(v.get('state') in (*ACTIVE,'SAVING') for v in batch):
+        counts={name:sum(v.get('delivery')==name for v in batch) for name in ('sent','queued','skipped','failed')}
+        message=f"{sum(bool(v.get('enrolled')) for v in batch)} enrolled; {counts['sent']} sent; {counts['queued']} queued; {counts['skipped']} skipped; {counts['failed']} failed."
+        (st.warning if counts['failed'] else st.success)(message)
+        from collections import Counter
+        reasons=Counter(v.get('result') or 'Not eligible' for v in batch if v.get('delivery') in ('failed','skipped'))
+        for reason,count in reasons.items():st.caption(f'{count}: {reason}')
     return results,busy

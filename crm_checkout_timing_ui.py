@@ -8,6 +8,10 @@ def time_to_send(row, at=None):
     at = at or now()
     if recovered(row):
         return 'Recovered'
+    request=row.get('enrollment_request') or {}
+    if request.get('manual_dispatch'):
+        if request.get('state') in ('SAVING','QUEUED','CHECKING') or request.get('delivery')=='queued':return 'Queued'
+        if request.get('state')=='FAILED':return request.get('result') or 'Send failed'
     flow = row.get('flow_status')
     reason = row.get('stop_reason')
     evaluation = row.get('evaluation') or {}

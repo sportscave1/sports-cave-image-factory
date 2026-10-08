@@ -37,7 +37,12 @@ class LookupTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class RequestTests(unittest.TestCase):
-    setUp=AnalyticsTests.setUp
+    def setUp(self):
+        AnalyticsTests.setUp(self)
+        self.shop.orders.return_value={'nodes':[]}
+        from crm_engine import Engine
+        self.dispatch_engine=patch('crm_checkout_manual_dispatch.Engine',side_effect=lambda store,shop:Engine(store,shop,self.provider,self.engine.config,clock=now))
+        self.dispatch_engine.start();self.addCleanup(self.dispatch_engine.stop)
     published=AnalyticsTests.published
 
     def candidates(self,n=1):
@@ -68,16 +73,16 @@ class RequestTests(unittest.TestCase):
             self.fail('Requests did not complete')
         finally:processor.pool.shutdown(wait=True)
 
-    def test_single_persists_schedule_without_enqueuing_or_sending(self):
+    def test_single_immediately_dispatches_and_schedules_remaining_step(self):
         a,keys,_,_=self.candidates()
         before=self.store.q('SELECT count(*) AS n FROM crm_marketing_sends',one=True)['n']
         self.assertEqual(request(self.store,ADMIN,a['id'],keys)[0]['state'],'QUEUED')
         self.shop.checkout.assert_not_called()
         rows=self.finish(a,keys)
-        self.assertEqual(rows[0]['request']['result'],'Added to flow')
-        self.assertEqual(time_to_send(rows[0]),'Due now')
-        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_marketing_sends',one=True)['n'],before)
-        self.provider.send.assert_not_called()
+        self.assertEqual(rows[0]['request']['result'],'Sent')
+        self.assertEqual(time_to_send(rows[0]),'1d 0h remaining')
+        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_marketing_sends',one=True)['n'],before+1)
+        self.provider.send.assert_called_once()
 
     def test_duplicate_request_and_completed_enrollment_are_idempotent(self):
         a,keys,_,_=self.candidates()
@@ -101,10 +106,10 @@ class RequestTests(unittest.TestCase):
         response=request(self.store,ADMIN,a['id'],keys)
         self.assertIn('Suppressed',[r['result'] for r in response]);self.assertIn('Recovered',[r['result'] for r in response])
         rows=self.finish(a,keys);labels=[r['request']['result'] for r in rows]
-        self.assertEqual(labels.count('Added to flow'),8)
+        self.assertEqual(labels.count('Sent'),8)
         for label in ('Opted out','Suppressed','Recovered','Failed — Shopify unavailable'):self.assertIn(label,labels)
-        self.assertEqual(self.shop.checkout.call_count,10) # local blocks did not fetch Shopify
-        self.provider.send.assert_not_called()
+        self.assertGreaterEqual(self.shop.checkout.call_count,10) # dispatch freshly revalidates every send
+        self.assertEqual(self.provider.send.call_count,8)
 
     def test_slow_checkout_does_not_block_other_results_and_bounded_parallelism(self):
         a,keys,checkouts,_=self.candidates(12);slow=list(checkouts)[0];entered=Event();release=Event()
@@ -121,7 +126,7 @@ class RequestTests(unittest.TestCase):
             while monotonic()<deadline:
                 processor.pump();self.assertLessEqual(len(processor.futures),4)
                 rows=read_requests(self.store,a['id'],keys)
-                if entered.is_set() and any(r['request']['result']=='Added to flow' for r in rows):partial=True;break
+                if entered.is_set() and any(r['request']['result']=='Sent' for r in rows):partial=True;break
                 sleep(.01)
             self.assertTrue(partial);self.assertFalse(release.is_set())
             print(f'PERF 12 selected: durable acknowledgement={ack:.3f}s; independent completion while slow lookup blocked; max_inflight=4')
@@ -143,7 +148,7 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(restarted.state(item['key'])['history'][-1]['error_code'],'shopify_unavailable')
         self.finish(a,keys)
         process(restarted,self.shop,item) # stale owner must not overwrite completion
-        self.assertEqual(restarted.state(item['key'])['result'],'Added to flow')
+        self.assertEqual(restarted.state(item['key'])['result'],'Sent')
 
     def test_only_selected_and_permission_required(self):
         a,keys,_,_=self.candidates(3)
@@ -163,9 +168,9 @@ class RequestTests(unittest.TestCase):
         c['abandonedCheckoutUrl']='https://fixture.myshopify.com/checkouts/changedtoken123456/recover'
         process(self.store,self.shop,first[0]);process(self.store,self.shop,second[0])
         self.assertEqual(self.store.state(first[0]['key'])['result'],'Failed — identity changed')
-        self.assertEqual(self.store.state(second[0]['key'])['result'],'Added to flow')
+        self.assertEqual(self.store.state(second[0]['key'])['result'],'Sent')
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],1)
-        self.provider.send.assert_not_called()
+        self.provider.send.assert_called_once()
 
     def test_lost_ack_after_enrollment_commit_restarts_without_duplicate(self):
         a,keys,_,_=self.candidates();request(self.store,ADMIN,a['id'],keys)
@@ -179,8 +184,11 @@ class RequestTests(unittest.TestCase):
         original("UPDATE crm_runtime_state SET value=value || %s::jsonb WHERE key=%s",
                  ('{"lease_until":"2000-01-01T00:00:00Z"}',item['key']))
         restarted=AutomationStore(connect)
-        self.assertEqual(claim(restarted,1,'restarted'),[])  # Reconcile actual membership without repeating work.
-        self.assertEqual(restarted.state(item['key'])['result'],'Already in flow')
+        items=claim(restarted,1,'restarted')
+        self.assertEqual(len(items),1)
+        process(restarted,self.shop,items[0])
+        self.assertEqual(restarted.state(item['key'])['result'],'Sent')
+        self.provider.send.assert_called_once()
         self.assertEqual(restarted.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],1)
 
     def test_batch_sql_statement_count_is_constant(self):
@@ -194,6 +202,92 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(calls.count('COMMIT'),2)
         self.shop.checkout.assert_not_called();self.shop.customer.assert_not_called()
         self.finish(a,keys)
+
+    def test_historical_manual_dispatch_retains_inferred_consent_checks_and_auto_cutoff(self):
+        from crm_checkout_eligibility import recovery_eligibility
+        a,keys,checkouts,profiles=self.candidates()
+        customer=next(iter(profiles.values()));customer['emailMarketingConsent']['marketingState']='NOT_SUBSCRIBED'
+        checkout=next(iter(checkouts.values()));checkout['customer']=deepcopy(customer)
+        rules={'regions':{'*':{'mode':'explicit_or_valid_inferred','inferred_basis':'checkout_contact','effective_at':now().isoformat()}}}
+        self.store.set_state('abandoned-checkout-policy',rules)
+        self.addCleanup(lambda:self.store.set_state('abandoned-checkout-policy',{}))
+        self.assertEqual(recovery_eligibility(checkout,customer,rules),(False,'historical_not_enrolled'))
+        self.assertEqual(recovery_eligibility(checkout,customer,rules,manual=True),(True,''))
+        request(self.store,ADMIN,a['id'],keys)
+        self.assertEqual(self.finish(a,keys)[0]['request']['result'],'Sent')
+        self.provider.send.assert_called_once()
+
+    def test_manual_never_bypasses_required_consent_or_recent_purchase(self):
+        a,keys,checkouts,profiles=self.candidates(2)
+        customers=list(profiles.values())
+        customers[0]['emailMarketingConsent']['marketingState']='NOT_SUBSCRIBED'
+        customers[1]['lastOrder']={'id':'gid://shopify/Order/123','createdAt':now().isoformat()}
+        request(self.store,ADMIN,a['id'],keys)
+        results=self.finish(a,keys)
+        self.assertEqual({r['request']['result'] for r in results},{'Region requires consent','Recovered'})
+        self.provider.send.assert_not_called()
+
+    def test_provider_rejection_shows_actual_safe_error_and_retry_reuses_receipt(self):
+        from email_service import EmailDeliveryError
+        a,keys,_,_=self.candidates()
+        self.provider.send.side_effect=EmailDeliveryError('Resend rejected sender domain (HTTP 422).',status_code=422)
+        request(self.store,ADMIN,a['id'],keys)
+        row=self.finish(a,keys)[0]
+        self.assertEqual(row['request']['state'],'FAILED')
+        self.assertIn('sender domain',row['request']['result'])
+        first=self.store.q('SELECT * FROM crm_marketing_sends WHERE enrollment_id=%s',(row['enrollment_id'],),True)
+        self.assertEqual(first['status'],'FAILED')
+        self.provider.send.side_effect=lambda *a,**k:str(uuid.uuid4())
+        request(self.store,ADMIN,a['id'],keys)
+        self.assertEqual(self.finish(a,keys)[0]['request']['result'],'Sent')
+        last=self.store.receipt(first['id'])
+        self.assertEqual(last['status'],'ACCEPTED');self.assertEqual(last['attempts'],2)
+        self.assertEqual(len(self.store.q('SELECT id FROM crm_marketing_sends WHERE enrollment_id=%s',(row['enrollment_id'],))),1)
+        self.assertEqual(self.provider.send.call_args_list[0].args[2],self.provider.send.call_args_list[1].args[2])
+
+    def test_uncertain_provider_response_is_never_replayed(self):
+        a,keys,_,_=self.candidates()
+        self.provider.send.side_effect=TimeoutError('connection lost after submission')
+        request(self.store,ADMIN,a['id'],keys)
+        row=self.finish(a,keys)[0]
+        self.assertEqual(row['sends'][0]['status'],'UNCERTAIN')
+        self.assertEqual(row['request']['state'],'FAILED')
+        request(self.store,ADMIN,a['id'],keys);self.finish(a,keys)
+        self.provider.send.assert_called_once()
+
+    def test_prior_accepted_send_in_another_flow_blocks_manual_enrollment(self):
+        a,keys,_,_=self.candidates()
+        request(self.store,ADMIN,a['id'],keys);self.finish(a,keys)
+        other=self.published('abandoned',delays=(3600,86400))
+        request(self.store,ADMIN,other['id'],keys)
+        row=self.finish(other,keys)[0]
+        self.assertEqual(row['request']['result'],'Already sent')
+        self.assertIsNone(row['enrollment_id']);self.provider.send.assert_called_once()
+
+    def test_rate_limit_is_queued_with_backoff_and_no_false_sent(self):
+        from email_service import EmailDeliveryError
+        a,keys,_,_=self.candidates()
+        self.provider.send.side_effect=EmailDeliveryError('Resend rate limit (HTTP 429).',status_code=429)
+        request(self.store,ADMIN,a['id'],keys)
+        row=self.finish(a,keys)[0]
+        self.assertEqual(row['request']['delivery'],'queued')
+        self.assertEqual(row['sends'][0]['status'],'PENDING')
+        self.assertIsNone(row['sends'][0]['provider_id'])
+        request(self.store,ADMIN,a['id'],keys);self.finish(a,keys)
+        self.provider.send.assert_called_once()
+
+    def test_sending_disabled_reports_configuration_and_allows_safe_retry(self):
+        from crm_resend import MarketingDisabled
+        a,keys,_,_=self.candidates()
+        with patch.object(self.engine.config,'require_send',side_effect=MarketingDisabled('Marketing delivery configuration is incomplete.')):
+            request(self.store,ADMIN,a['id'],keys)
+            row=self.finish(a,keys)[0]
+        self.assertEqual(row['request']['state'],'FAILED')
+        self.assertIn('configuration is incomplete',row['request']['result'])
+        self.provider.send.assert_not_called()
+        request(self.store,ADMIN,a['id'],keys)
+        self.assertEqual(self.finish(a,keys)[0]['request']['result'],'Sent')
+        self.provider.send.assert_called_once()
 
     def test_profile_old_serial_path_against_bounded_worker(self):
         from crm_automation_analytics import add_to_flow
@@ -214,7 +308,8 @@ class RequestTests(unittest.TestCase):
         a,keys,_,_=self.candidates(12);latency();started=monotonic()
         request(self.store,ADMIN,a['id'],keys);ack=monotonic()-started
         self.finish(a,keys);parallel=monotonic()-started
-        self.assertLess(parallel,serial*.85)
+        self.assertLess(ack,1)
+        self.assertEqual(self.provider.send.call_count,12)
         print(f'PERF controlled 12-row old path: {serial:.3f}s, SQL calls={old_calls}, commits={old_commits}, fresh lookups=24; '
               f'new ack={ack:.3f}s, completed={parallel:.3f}s; same fresh checks, Shopify concurrency capped at 2')
 

@@ -154,6 +154,9 @@ def _checkout_panel(shop,store,user,row,bounds,period):
         st.rerun(scope='fragment')
     if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True)
     if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
+    for checkout in visible:
+        if checkout['checkout_key'] in enrollment_results:
+            checkout['enrollment_request']=enrollment_results[checkout['checkout_key']]
     timing_now=now()  # The deadline is persisted; the display clock must keep advancing.
     listing=[{'key':c['checkout_key'],'reference':reference(c),'created':str(c['created_at'])[:16]+' UTC',
       'customer':display_name(c),'region':(c.get('analytics') or {}).get('region') or (c.get('analytics') or {}).get('country') or '—',
