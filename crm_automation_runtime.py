@@ -221,7 +221,8 @@ def render(content,row,unsubscribe,context=None):
     doc=production_document(content['document']);doc['campaign_key']='auto_'+str(row['id']).replace('-','')
     from crm_abandoned_checkout import dynamic,hydrate,context as checkout_context,reject_unresolved
     from crm_frame_banner_template import present as has_banner
-    if dynamic(doc) or (has_banner(doc) and content.get('trigger')=='abandoned'):
+    from crm_lifestyle_images import present as has_lifestyle
+    if dynamic(doc) or ((has_banner(doc) or has_lifestyle(doc)) and content.get('trigger')=='abandoned'):
         source=(context or {}).get('_checkout')
         if content.get('trigger')!='abandoned' or not source or source.get('id')!=(context or {}).get('_checkout_id') or (source.get('customer') or {}).get('id')!=row['shopify_customer_id']:
             raise ValueError('Checkout recipient context mismatch.')

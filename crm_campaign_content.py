@@ -130,6 +130,8 @@ def fingerprint(doc, cfg):
 
 
 def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False, test_tracking=False, campaign_id=None, send_id=None):
+    from crm_lifestyle_images import resolve as resolve_lifestyle
+    doc=resolve_lifestyle(doc)
     from crm_frame_banner_template import resolve as resolve_banner
     doc=resolve_banner(doc)
     cfg=settings() if cfg is None else cfg
@@ -215,6 +217,8 @@ def html_budget(html):
 def preflight(doc, env=None, cfg=None):
     from crm_frame_banner_template import resolve as resolve_banner
     doc=resolve_banner(doc)
+    from crm_lifestyle_images import resolve as resolve_lifestyle
+    doc=resolve_lifestyle(doc)
     cfg=settings(env) if cfg is None else cfg
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)

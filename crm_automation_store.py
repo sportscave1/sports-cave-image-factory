@@ -220,9 +220,12 @@ class AutomationStore(CampaignStore):
         self.preview_warning=''
         if not needs_checkout(doc):return doc,''
         from crm_frame_banner_template import present,resolve
+        from crm_lifestyle_images import present as has_lifestyle,resolve as resolve_lifestyle,NO_CONTEXT
         from crm_abandoned_checkout import dynamic
         from crm_checkout_preview import legacy
-        if present(doc) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':return resolve(doc),''
+        if (present(doc) or has_lifestyle(doc)) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':
+            if has_lifestyle(doc):self.preview_warning=NO_CONTEXT
+            return resolve_lifestyle(resolve(doc)),''
         import streamlit as st
         data,note=preview_context(st.session_state,self.preview_shop,auto_refresh=False,slot='_automation_checkout_pin')
         if not data:data=sample(doc)
@@ -232,7 +235,7 @@ class AutomationStore(CampaignStore):
         cached=entries.get(token)
         if cached is None:
             style_warnings=[]
-            rendered,detected=document(doc,data,preview_warnings=style_warnings)
+            rendered,detected=document(doc,data,preview_warnings=style_warnings,shop=getattr(self,'preview_shop',None))
             cached={'token':token,'document':rendered,'legacy':detected,'style_warnings':style_warnings}
             entries={**entries,token:cached}
             if len(entries)>4:entries.pop(next(iter(entries)))
@@ -241,6 +244,8 @@ class AutomationStore(CampaignStore):
         if detected:self.preview_warning='Legacy checkout block needs migration · replace it with the native checkout products block before publishing.'
         if cached.get('style_warnings'):
             self.preview_warning+=' '+ ' '.join(cached['style_warnings'])
+        if has_lifestyle(doc) and data.get('preview_only'):
+            self.preview_warning+=' '+NO_CONTEXT
         label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')
         return rendered,label
 
@@ -249,9 +254,10 @@ class AutomationStore(CampaignStore):
         from crm_checkout_preview import needs_checkout,document,sample
         if not needs_checkout(doc):return doc
         from crm_frame_banner_template import present,resolve
+        from crm_lifestyle_images import present as has_lifestyle,resolve as resolve_lifestyle
         from crm_abandoned_checkout import dynamic
         from crm_checkout_preview import legacy
-        if present(doc) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':return resolve(doc)
+        if (present(doc) or has_lifestyle(doc)) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':return resolve_lifestyle(resolve(doc))
         if self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':raise ValueError('Checkout abandoned trigger required.')
         if getattr(self,'_checkout_test_operation',None)!=operation_id:
             from crm_shopify import Shopify
@@ -259,7 +265,7 @@ class AutomationStore(CampaignStore):
             except Exception:data=None
             if not data:data=sample(doc)
             self._checkout_test_data=data;self._checkout_test_operation=operation_id
-        return document(doc,self._checkout_test_data,test=True)[0]
+        return document(doc,self._checkout_test_data,test=True,shop=getattr(self,'preview_shop',None))[0]
 
     def save(self,user,name,document,identity=None,version=None,**_):
         row=self.flow(identity);flow=deepcopy(row['config']['draft'])

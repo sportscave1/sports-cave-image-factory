@@ -123,6 +123,8 @@ def apply_event(doc, event):
 
 
 def render_middle(doc, *, images_off=False, campaign_key=''):
+    from crm_lifestyle_images import resolve as resolve_lifestyle
+    doc=resolve_lifestyle(doc)
     from crm_frame_banner_template import resolve as resolve_banner
     doc=resolve_banner(doc)
     from crm_campaign_html import import_html

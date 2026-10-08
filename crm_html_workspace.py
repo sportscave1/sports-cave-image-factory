@@ -183,7 +183,8 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
                 from crm_checkout_preview import needs_checkout,document,sample
                 if needs_checkout(doc):
                     preview_doc=document(doc,sample(doc),test=True)[0]
-                    st.caption('Sample checkout · sending requires a checkout recovery automation.')
+                    from crm_lifestyle_images import present as lifestyle_present,NO_CONTEXT
+                    st.caption(NO_CONTEXT if lifestyle_present(doc) else 'Sample checkout · sending requires a checkout recovery automation.')
             if getattr(store,'email_mode',None)=='automation':
                 preview_doc,note=store.preview_document(doc)
                 if note:st.caption(note)

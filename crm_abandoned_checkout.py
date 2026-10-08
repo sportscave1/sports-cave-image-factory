@@ -16,7 +16,7 @@ def dynamic(doc):
 
 
 def reject_unresolved(value):
-    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_WALL_PREVIEW_URL|SC_FRAME_BANNER_',str(value)):
+    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_WALL_PREVIEW_URL|SC_FRAME_BANNER_|SC_LIFESTYLE_IMAGE_',str(value)):
         raise ValueError('Unresolved checkout template syntax. Use the Abandoned Checkout template instead of Liquid.')
 
 
@@ -191,12 +191,14 @@ def block_html(data,*,test=False):
     return '<table class="sc-cart-block" role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;max-width:600px;table-layout:fixed">'+''.join(rows)+'<tr><td class="sc-cart-button-wrap" align="center">'+cta+'</td></tr></table>'
 
 
-def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None):
+def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None,shop=None):
     from crm_checkout_styles import MARKER,compile_document
     from crm_wall_preview_template import resolve
     result=resolve(doc,data)
     from crm_frame_banner_template import resolve as resolve_banner
     result=resolve_banner(result,data)
+    from crm_lifestyle_images import resolve as resolve_lifestyle
+    result=resolve_lifestyle(result,data,shop=shop)
     for section in result.get('middle_sections',[]):
         if section['type']==BLOCK:
             if section['visible'] and not data:raise ValueError('No recent abandoned checkout available for preview.')
@@ -242,6 +244,8 @@ def publication_document(doc,trigger):
     result=resolve(doc,None)
     from crm_frame_banner_template import resolve as resolve_banner
     result=resolve_banner(result)
+    from crm_lifestyle_images import resolve as resolve_lifestyle
+    result=resolve_lifestyle(result)
     # Keep the migrated template's surrounding table nesting intact even for
     # offline checks, where recipient-owned checkout data is not available.
     from crm_checkout_migration import join_fragments

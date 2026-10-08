@@ -91,6 +91,7 @@ class EmailHTML(HTMLParser):
                 self.checks['Images use durable public JPEG/PNG URLs'] &= bool(resolved)
                 if resolved and not self.images_off: safe.append((name,resolved))
         if tag=='img':
+            self.checks['HTML content present'] |= bool(email_image_url(attributes.get('src') or ''))
             self.checks['Image alt text complete'] &= bool((attributes.get('alt') or '').strip())
             self.checks['Images use durable public JPEG/PNG URLs'] &= bool(email_image_url(attributes.get('src') or ''))
             self.plain.append(attributes.get('alt') or '')

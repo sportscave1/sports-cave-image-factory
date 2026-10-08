@@ -58,6 +58,8 @@ if st.session_state.get('fixture_new_customer'):
 shop.abandoned_preview.return_value={'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}
 shop.query.return_value={'abandonedCheckouts':{'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}}
 shop.checkout.return_value=fixture_checkout
+if st.query_params.get('fixture_lifestyle'):
+    shop.campaign_images.return_value={'nodes':[{'url':f'https://cdn.shopify.com/s/files/lifestyle-{i}.jpg'} for i in range(1,5)],'pageInfo':{'hasNextPage':False}}
 shop.customer_batch.return_value=[fixture_checkout['customer']]
 if st.query_params.get('fixture_analytics'):
     from tests.fixtures.crm_checkout_analytics_data import configure

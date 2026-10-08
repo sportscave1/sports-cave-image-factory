@@ -17,7 +17,8 @@ def sources(doc):
 
 def needs_checkout(doc):
     from crm_frame_banner_template import present
-    return dynamic(doc) or legacy(doc) or present(doc)
+    from crm_lifestyle_images import present as lifestyle_present
+    return dynamic(doc) or legacy(doc) or present(doc) or lifestyle_present(doc)
 
 
 def sample(doc):
@@ -74,7 +75,7 @@ def legacy_html(source,markup):
     return source,True
 
 
-def document(doc,data,*,test=False,preview_warnings=None):
+def document(doc,data,*,test=False,preview_warnings=None,shop=None):
     """Render-copy substitution; authored sections/IDs and saved content stay intact."""
     from crm_checkout_migration import migrate
     result=migrate(doc);warning=False;markup=block_html(data,test=test)
@@ -87,4 +88,4 @@ def document(doc,data,*,test=False,preview_warnings=None):
         # Compatibility mirror must follow the substituted source, never render twice.
         result['custom_html']=next((s['html'] for s in result['middle_sections'] if s.get('html_number')==1),'')
     else:result['custom_html'],warning=legacy_html(result.get('custom_html',''),markup)
-    return hydrate(result,data,test=test,preview=True,preview_warnings=preview_warnings),warning
+    return hydrate(result,data,test=test,preview=True,preview_warnings=preview_warnings,shop=shop),warning
