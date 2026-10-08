@@ -32,7 +32,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  await page.waitForFunction(name=>document.querySelector('.sc-auto-row a')?.textContent!==name,first);
  await select('Trigger','Checkout abandoned');await page.waitForFunction(()=>document.querySelectorAll('.sc-auto-row').length===2);
  await select('Trigger','All triggers');await page.waitForFunction(()=>document.querySelectorAll('.sc-auto-row').length===3);
- await page.locator('[data-testid=stPopoverButton]:visible').first().click();await page.getByRole('button',{name:'Open editor',exact:true}).waitFor();await page.keyboard.press('Escape');
+ await page.locator('[data-testid=stPopoverButton]:visible').first().click();await page.getByRole('button',{name:'Flow',exact:true}).waitFor();await page.keyboard.press('Escape');
  await search.fill('');await search.press('Enter');
  const next=page.getByRole('button',{name:'Next',exact:true});await next.waitFor();await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Next'&&!b.disabled));assert.equal(await next.isEnabled(),true);await next.click();
  await page.waitForFunction(()=>[...document.querySelectorAll('p')].some(p=>p.textContent.startsWith('Showing 13')));

@@ -169,7 +169,7 @@ class EmailSizeTests(unittest.TestCase):
         self.assertNotIn('sc-email-loading',markup)
         self.assertFalse(app.metric)
         source=Path(__file__).resolve().parents[1].joinpath('crm_campaign_page.py').read_text(encoding='utf-8')
-        action=source[source.index("with buttons.container"):source.index('new_requested=False')]
+        action=source[source.index("with toolbar.container"):source.index('new_requested=False')]
         self.assertLess(action.index('size_meter('),action.index("st.button('Save draft'"))
 
     def test_fragment_updates_unsaved_content_locally(self):

@@ -16,7 +16,7 @@ from crm_campaign_page import campaign_workspace
 drafts=Mock();actions=Mock();actions.user={}
 st.session_state['campaign_view']='CAMPAIGN_EDITOR'
 events=[];started=perf_counter()
-def editor(*args):
+def editor(*args,**kwargs):
  events.append(('editor',perf_counter()-started))
  st.caption('Selected composer')
 def history(*args):
@@ -146,3 +146,4 @@ class FirstPaintTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+

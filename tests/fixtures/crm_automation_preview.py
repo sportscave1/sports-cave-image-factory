@@ -18,14 +18,14 @@ requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionE
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
 
 @st.cache_resource
-def setup(legacy_preview=False,test_run=''):
+def setup(legacy_preview=False,test_run='',steps=2):
     store=AutomationStore(connect)
     from crm_logic import now
     store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
     identities=[]
     for kind,name,state in (('welcome','Welcome series · local fixture','ACTIVE'),('abandoned','Abandoned checkout · local fixture','DRAFT'),('post_purchase','Collector follow-up · local fixture','PAUSED')):
         row=store.create(ADMIN,kind,name);flow=deepcopy(row['config']['draft'])
-        flow['emails']=[email_step(document(),0),email_step(document(),86400)]
+        flow['emails']=[email_step(document(),0 if i==0 else 86400) for i in range(steps)]
         if kind=='abandoned':
             from crm_abandoned_checkout import apply_template
             apply_template(flow['emails'][0]['document'])
@@ -39,7 +39,7 @@ def setup(legacy_preview=False,test_run=''):
         identities.append(str(row['id']))
     return identities
 
-identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')))
+identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)))
 if st.query_params.get('fixture_toolbar_live') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[0];st.session_state['fixture_selected']=True
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):

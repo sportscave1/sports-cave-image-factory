@@ -20,16 +20,19 @@ def size_meter(editor,key,cfg):
         doc=current['document']
         if st.session_state.get('email_editor_mode')=='automation':
             store,_=st.session_state['automation_editor_context'];doc,_=store.preview_document(doc)
-        token=hashlib.sha256(json.dumps([current['id'],doc,cfg],sort_keys=True,default=str).encode()).hexdigest()
+        from crm_preview_cache import presentation_document
+        token=hashlib.sha256(json.dumps([current['id'],presentation_document(doc),cfg],sort_keys=True,default=str).encode()).hexdigest()
         cache=st.session_state.get(key+'size_cache')
         if not cache or cache['token']!=token:
             message=render_production(doc,cfg,current.get('id'))
-            cache={'token':token,'message':message};st.session_state[key+'size_cache']=cache
+            cache={'token':token,'message':message,'local':analyze_rendered_email(message['html'],message['text'])};st.session_state[key+'size_cache']=cache
         message=cache['message']
-        local=analyze_rendered_email(message['html'],message['text'])
+        local=cache['local']
         from crm_email_asset_size import metadata
         assets=metadata(local['asset_urls'],start=bool(st.session_state.get(key+'editor_emitted')))
-        report=analyze_rendered_email(message['html'],message['text'],assets)
+        if cache.get('assets')!=assets or 'report' not in cache:
+            cache['report']=analyze_rendered_email(message['html'],message['text'],assets);cache['assets']=assets.copy()
+        report=cache['report']
         st.html(meter_html(report))
     except Exception:
         # Invalid/incomplete compose state must not interrupt the editor or leak

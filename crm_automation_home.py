@@ -267,10 +267,9 @@ def activity_html(events,profiles=None):
     return '<div class="sc-auto-activity">'+''.join(cards)+'</div>'
 
 
-@st.dialog('Automation analytics',width='large')
 def analytics(shop,store,user,identity,name=None):
-    from crm_automation_analytics_ui import render
-    render(shop,store,user,identity,name=name)
+    from crm_automation_ui import open_flow
+    open_flow(identity)
 
 
 @st.dialog('Archive automation?',width='small')
@@ -345,10 +344,9 @@ def table(shop,store,user,script=None):
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
                     with st.popover('⋮',help='Automation actions',key='auto_actions_'+str(row['id'])):
                         with st.container(key='auto-context-menu-'+str(row['id']),gap='small'):
-                            if st.button('Analytics',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):
+                            if st.button('Flow',icon=':material/bar_chart:',use_container_width=True,key='auto_analytics_'+str(row['id'])):
                                 st.session_state.pop('auto-checkouts-'+str(row['id'])+'-timing',None)
                                 analytics(shop,store,user,row['id'],name=row['name'])
-                            if st.button('Open editor',icon=':material/edit:',use_container_width=True,key='auto_open_'+str(row['id'])):open_flow(row['id'])
                             if st.button('Duplicate',icon=':material/content_copy:',use_container_width=True,key='auto_duplicate_'+str(row['id'])):
                                 duplicate=store.duplicate(user,row['id']);changed();open_flow(duplicate['id'])
                             if st.button('Archive',icon=':material/archive:',use_container_width=True,disabled=category=='Archived' or publication.get('state')=='PUBLISHING',key='auto_archive_'+str(row['id'])):archive_dialog(store,user,row)

@@ -1,4 +1,4 @@
-"""One dialog refresh owner; bounded cached reads never mutate UI state."""
+"""Shared analytics reads and checkout controls used by the unified Flow page."""
 from crm_automation_read_cache import isolated
 from html import escape
 from time import monotonic
@@ -175,77 +175,7 @@ def _checkout_panel(shop,store,user,row,bounds,period):
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-detail')),None)
     if chosen:checkout_details(store,user,row,chosen)
 
-@isolated
-def secondary(store,row,bounds,period,charts=False):
-    slot='auto-analytics-'+str(row['id'])
-    if row['trigger_type']=='abandoned' and not st.session_state.get('analytics-primary-ready-'+str(row['id'])):
-        if not charts:stats(None)
-        st.session_state['automation-analytics-pending']=True;return
-    data,phase=read(store,('analytics-report',str(row['id']),period),lambda:[report(store,row['id'],window(period))])
-    value=data[0] if data else None
-    if not charts:
-        stats(value)
-        if phase=='ERROR':st.caption('Performance refresh unavailable. Last verified values are retained.')
-        return
-    if value:
-        st.caption('Send/order metrics use event occurrence within the selected UTC period. Checkout rows use creation date.')
-        if value['history']:st.line_chart(value['history'],x='day',y=['sent','delivered','opened','clicked'],height=180)
-        else:st.caption('No accepted sends in this reporting period.')
-        from crm_automation_home import money
-        st.caption('Revenue · '+money(value['revenue']))
-    if phase=='ERROR':st.caption('Performance refresh unavailable. Last verified values are retained.')
-    events,event_phase=read(store,('analytics-activity',str(row['id']),period),lambda:activity(store,row['id'],12,bounds=window(period)))
-    st.subheader('Recent activity')
-    if events:
-        from crm_automation_home import activity_html
-        st.html(activity_html(events))
-    elif events is not None:st.caption('No recorded activity in this reporting period.')
-
-@isolated
-def content(shop,store,user,identity,period,bounds):
-    # Keep initial-load scheduling above the fold even on narrow dialogs. The
-    # dialog owns all controls; nested fragments caused duplicate widget IDs.
-    poll=st.container();st.session_state['automation-analytics-pending']=False
-    st.session_state['checkout-enrollment-pending']=False
-    rows,phase=read(store,('analytics-definition',str(identity)),lambda:[store.get('automations',identity)],60)
-    if not rows:
-        with poll:arm('auto-analytics-definition-poll',1 if phase!='ERROR' else 30)
-        st.dataframe({'Checkout':[],'Created':[],'Customer name':[],'Region':[],'Recovery status':[]},height=360,hide_index=True)
-        st.caption('Loading automation…' if phase!='ERROR' else 'Automation details temporarily unavailable.')
-        return
-    row=rows[0]
-    if not row or row['config'].get('deleted_at'):st.warning('Automation unavailable.');return
-    if row['trigger_type']=='abandoned':
-        checkout_panel(shop,store,user,row,window('All time'),'All time')
-        with st.expander('Per-email performance and scheduling',on_change='rerun',key='checkout-flow-performance-'+str(identity)) as step_panel:
-            from crm_flow_builder import activity as flow_activity
-            from crm_automation_definition import native
-            if step_panel.open and native(row):flow_activity(store,row,user)
-        with poll:arm('auto-analytics-definition-poll',2 if st.session_state.get('checkout-enrollment-pending') else 1 if st.session_state.get('automation-analytics-pending') else 30)
-        return
-    st.subheader('Automation analytics')
-    st.caption(row['name'])
-    period=st.selectbox('Date range',list(PERIODS),index=1,key='auto-analytics-period-'+str(identity))
-    bounds=window(period)
-    # Containers reserve KPI position while primary work is submitted first.
-    metrics=st.container();primary=st.container();chart=st.container()
-    with primary:
-        if row['trigger_type']=='abandoned':checkout_panel(shop,store,user,row,bounds,period)
-        else:
-            from crm_automation_home_data import step_metrics
-            steps,_=read(store,('analytics-steps',str(identity)),lambda:step_metrics(store,identity))
-            if steps is not None:st.dataframe(steps,hide_index=True,width='stretch')
-    with metrics:secondary(store,row,bounds,period)
-    with chart:secondary(store,row,bounds,period,charts=True)
-    with poll:arm('auto-analytics-definition-poll',1 if st.session_state.get('automation-analytics-pending') else 30)
-
 def render(shop,store,user,identity,name=None):
-    previous=state().get('owner')
-    if previous!=str(identity):
-        dispose(state());state()['owner']=str(identity)
-    # The operational checkout panel owns its title; other flow headings render below.
-    period=st.session_state.get('auto-analytics-period-'+str(identity),'Last 30 days')
-    slot='auto-analytics-window-'+str(identity)
-    current=st.session_state.get(slot)
-    if not current or current[0]!=period:current=(period,window(period));st.session_state[slot]=current
-    content(shop,store,user,identity,period,current[1])
+    """Compatibility navigation for callers of the old analytics destination."""
+    from crm_automation_ui import open_flow
+    open_flow(identity)

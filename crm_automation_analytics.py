@@ -65,7 +65,13 @@ def activity(store, identity=None, limit=24, *, bounds=None):
       UNION ALL (SELECT (o.evidence->>'automation_id')::uuid,a.name,o.customer_id,o.order_created_at,'Order placed',o.shopify_order_id
       FROM crm_order_attribution o JOIN crm_automations a ON a.id::text=o.evidence->>'automation_id'
       WHERE o.eligible AND (%s::uuid IS NULL OR a.id=%s::uuid) ORDER BY o.order_created_at DESC LIMIT %s)
-      ) events WHERE (%s::timestamptz IS NULL OR occurred_at>=%s) AND (%s::timestamptz IS NULL OR occurred_at<%s) ORDER BY occurred_at DESC LIMIT %s""",(*(identity,identity,limit)*5,*(bounds[:1]*2+bounds[1:]*2 if bounds else (None,)*4),limit))
+      UNION ALL (SELECT j.automation_id,a.name,j.shopify_customer_id,s.updated_at,
+      CASE WHEN s.status IN ('PENDING','CLAIMED','SUBMITTING') THEN 'Email queued'
+           WHEN s.status='BLOCKED' THEN 'Email skipped' ELSE 'Email failed' END,s.id::text
+      FROM crm_marketing_sends s JOIN crm_automation_enrollments j ON j.id=s.enrollment_id
+      JOIN crm_automations a ON a.id=j.automation_id WHERE NOT s.test_send AND s.status IN ('PENDING','CLAIMED','SUBMITTING','BLOCKED','FAILED','UNCERTAIN')
+      AND (%s::uuid IS NULL OR a.id=%s::uuid) ORDER BY s.updated_at DESC LIMIT %s)
+      ) events WHERE (%s::timestamptz IS NULL OR occurred_at>=%s) AND (%s::timestamptz IS NULL OR occurred_at<%s) ORDER BY occurred_at DESC LIMIT %s""",(*(identity,identity,limit)*6,*(bounds[:1]*2+bounds[1:]*2 if bounds else (None,)*4),limit))
 
 
 CHECKOUTS='''query AutomationCheckoutAnalytics($after:String) {

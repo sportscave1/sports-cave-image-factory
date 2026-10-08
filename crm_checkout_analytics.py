@@ -153,7 +153,7 @@ def report(store,identity,bounds):
     return store.q("""WITH messages AS (
       SELECT s.id,date_trunc('day',s.first_submitted_at AT TIME ZONE 'UTC') AS day,
       bool_or(e.event_type='email.delivered') AS delivered,bool_or(e.event_type='email.opened') AS opened,
-      bool_or(e.event_type='email.clicked') AS clicked FROM crm_marketing_sends s
+      bool_or(e.event_type='email.clicked') AS clicked,bool_or(e.event_type='email.bounced') AS bounced FROM crm_marketing_sends s
       JOIN crm_automation_enrollments j ON j.id=s.enrollment_id LEFT JOIN crm_delivery_events e ON e.send_id=s.id
       WHERE j.automation_id=%s AND s.status='ACCEPTED' AND NOT s.test_send
       AND (%s::timestamptz IS NULL OR s.first_submitted_at>=%s) AND s.first_submitted_at<%s GROUP BY s.id
@@ -162,12 +162,14 @@ def report(store,identity,bounds):
     orders AS (SELECT currency,sum(amount) AS amount,count(*) AS n FROM crm_order_attribution
       WHERE eligible AND evidence->>'automation_id'=%s AND (%s::timestamptz IS NULL OR order_created_at>=%s)
       AND order_created_at<%s GROUP BY currency)
-    SELECT COALESCE((SELECT jsonb_agg(d ORDER BY day) FROM daily d),'[]') AS history,
+      SELECT COALESCE((SELECT jsonb_agg(d ORDER BY day) FROM daily d),'[]') AS history,
+        (SELECT count(*) FROM crm_automation_enrollments WHERE automation_id=%s AND (%s::timestamptz IS NULL OR trigger_at>=%s) AND trigger_at<%s) AS entered,
+        (SELECT count(*) FROM messages WHERE bounced) AS bounced,
       (SELECT count(*) FROM messages) AS sent,(SELECT count(*) FROM messages WHERE delivered) AS delivered,
       (SELECT count(*) FROM messages WHERE opened) AS opened,(SELECT count(*) FROM messages WHERE clicked) AS clicked,
       COALESCE((SELECT sum(n) FROM orders),0)::bigint AS conversions,
       COALESCE((SELECT jsonb_object_agg(currency,amount) FROM orders),'{}') AS revenue""",
-      (identity,start,start,end,str(identity),start,start,end),True)
+      (identity,start,start,end,str(identity),start,start,end,identity,start,start,end),True)
 
 def disabled_reason(checkout,row,at=None):
     at=at or now()

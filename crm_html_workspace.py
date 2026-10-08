@@ -73,6 +73,21 @@ def composer_styles():
     polished_styles()
     # Campaign-only overrides: the shell, Inbox and Flow canvas keep their styles.
     st.html("""<style>
+    .st-key-crm-campaign-toolbar{gap:8px!important;flex-wrap:wrap!important;margin-bottom:8px}
+    .st-key-crm-campaign-toolbar button{min-height:36px;padding:4px 10px;white-space:nowrap}
+    .st-key-crm-campaign-toolbar button p{font-size:13px}
+    .st-key-crm-campaign-toolbar>[data-testid="stElementContainer"]{flex:0 0 auto;width:auto}
+    .st-key-crm-campaign-toolbar>[data-testid="stElementContainer"]:has(.sc-campaign-title){flex:1 1 200px;min-width:0}
+    .sc-campaign-title{display:flex;align-items:center;gap:8px;min-width:0}
+    .sc-campaign-title strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .sc-campaign-title span{font-size:11px;color:#68716a;white-space:nowrap}
+    .st-key-crm-campaign-actions{flex-wrap:wrap!important;gap:6px!important}
+    @media(max-width:760px){
+      .st-key-crm-selected-campaign .st-key-crm-composer-layout{flex-wrap:wrap!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-layout>div{width:100%!important;flex-basis:100%!important;min-width:0!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-controls{width:100%!important;min-width:0!important;height:auto!important;max-height:none!important;overflow:visible!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-preview{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
+    }
     [data-testid="stMainBlockContainer"]:has(.st-key-crm-composer-layout){max-width:none;padding:calc(var(--sc-topbar-height, 64px) + 8px) 18px 10px !important}
     [data-testid="stMainBlockContainer"]:has(.st-key-crm-composer-layout)>[data-testid="stVerticalBlock"]{gap:0 !important}
     .st-key-crm-workspace:has(.st-key-crm-composer-layout){gap:8px}
@@ -159,7 +174,10 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
                               on_click=_preview_device,args=(key,label))
         from crm_store import StoreUnavailable
         try:
-            if store:cfg={**cfg,'email_defaults':store.default_sections(cfg)}
+            # Existing emails own header/footer snapshots. Their preview must
+            # neither query nor follow the current master on every tab click.
+            if store and 'email_defaults' not in cfg and 'html_sections' not in doc:
+                cfg={**cfg,'email_defaults':store.default_sections(cfg)}
             preview_doc=doc
             if getattr(store,'email_mode',None)!='automation':
                 from crm_checkout_preview import needs_checkout,document,sample

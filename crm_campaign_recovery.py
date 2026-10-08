@@ -89,6 +89,8 @@ def flush_current(*,force=False):
     if not force and saved and checkpoint(editor)==checkpoint(saved):return True
     try:
         updated=save_checkpoint(store,user,editor)
+        from crm_campaign_home_data import invalidate_after_save
+        invalidate_after_save(st.session_state,saved,updated)
         editor.update(updated)
         st.query_params['campaign']=str(editor['id'])
         st.session_state['campaign_saved']=deepcopy(editor)

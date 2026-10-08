@@ -143,8 +143,8 @@ def detail(shop,store,actions,identity,*,row=None):
         return
     user=actions.user;row=store.flow(identity,row=row);flow=row['config']['draft'];readonly=status(row)=='ARCHIVED'
     if not st.session_state.get('automation_composing'):
-        from crm_flow_builder import builder
-        builder(store,user,row)
+        from crm_flow_page import flow_page
+        flow_page(shop,store,user,row)
         return
     from crm_campaign_page import composer_form
     from crm_campaign_recovery import flush_current
@@ -201,10 +201,6 @@ def detail(shop,store,actions,identity,*,row=None):
     st.session_state['_automation_toolbar_value']=json.dumps([editor['name'],editor['document'],editor.get('version')],sort_keys=True)
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     st.session_state[key+'editor_emitted']=True
-    if st.toggle('Show email step analytics',key='auto_step_stats'):
-        from crm_automation_home_data import step_metrics
-        names={s['step_id']:'Email '+str(i+1)+' · '+s['document']['content']['subject'] for i,s in enumerate(flow['emails'])}
-        st.dataframe([{'Email':names.get(r['step_id'],'Previous version email'),**{k.title():v for k,v in r.items() if k!='step_id'}} for r in step_metrics(store,identity)],hide_index=True,use_container_width=True)
 
 
 def workspace(shop,base,actions,navigate=lambda _:None):
@@ -217,14 +213,12 @@ def workspace(shop,base,actions,navigate=lambda _:None):
     # blocking editor read; it must never be reconciled with editor columns.
     from crm_automation_home import STYLE,STYLE_AUTO
     st.html(STYLE+STYLE_AUTO+'''<style>
-    [role="dialog"]:has(.st-key-crm-automation-editor)>div:first-child:has(>[class]>[data-testid="stMarkdownContainer"]){display:none!important}
-    /* This editor is a route, not an animated alert. Remove BaseWeb's 400ms
-       nested opacity/transform transitions; leave its visibility state intact. */
-    [data-testid="stDialog"]:has(.st-key-crm-automation-editor) [role="dialog"],
-    [data-testid="stDialog"]:has(.st-key-crm-automation-editor) div:has(>[role="dialog"]){transition:none!important}
     .sc-auto-editor-loading{min-height:38px;display:flex;align-items:center;color:#73747c;font-size:13px}
     </style>''')
-    route=st.empty()
+    # Distinct delta slots matter: empty()+container() in one slot is coalesced
+    # by Streamlit and retains the old block's children until script completion.
+    # Clear the inactive slot without replacing it during the same run.
+    overview_route=st.empty();flow_route=st.empty()
     notice=st.session_state.pop('automation_notice',None)
     if notice:st.toast(notice,icon=':material/check_circle:')
     try:
@@ -237,18 +231,19 @@ def workspace(shop,base,actions,navigate=lambda _:None):
                 st.session_state.pop('automation_requested_route',None);navigate(target);st.rerun()
             if stay.button('Keep editing'):st.session_state.pop('automation_requested_route',None);st.rerun()
         if identity:
-            route.empty()
-            editor_dialog(shop,store,actions,identity)
+            overview_route.empty()
+            with flow_route.container(key='automation-flow-route'):editor_dialog(shop,store,actions,identity)
         else:
             st.session_state.pop('_automation_preview_open',None)
-            with route.container():home(store,actions.user,shop=shop,styles=False)
+            flow_route.empty()
+            with overview_route.container(key='automation-overview-route'):home(store,actions.user,shop=shop,styles=False)
     except (StoreUnavailable,ValueError,PermissionError) as exc:st.warning(str(exc))
 
 
-@st.dialog('Automation editor',width='large',dismissible=False)
+@st.fragment
 def editor_dialog(shop,store,actions,identity):
-    # Replacing one placeholder clears the previous composer/tabs atomically
-    # when the dialog fragment changes modes.
+    # Compatibility name: this is a normal route fragment, never a dialog.
+    # One placeholder replaces Flow and the shared composer atomically.
     with st.container(key='crm-automation-editor'):
         content=st.empty()
         content.html('<div class="sc-auto-editor-loading" role="status">Opening automation…</div>')
@@ -264,6 +259,12 @@ def editor_dialog(shop,store,actions,identity):
                         store.adopt(actions.user,identity);changed();st.rerun(scope='app')
                     if existing['status']=='ACTIVE' and st.button('Pause legacy flow'):
                         store.lifecycle(actions.user,identity,'pause');changed();st.rerun(scope='app')
+                    # Legacy records keep their existing adoption restrictions,
+                    # but their analytics must remain accessible at this route.
+                    from crm_flow_page import summary,recent
+                    from crm_checkout_analytics import PERIODS
+                    period=st.selectbox('Date range',list(PERIODS),index=4,key='auto-analytics-period-'+str(identity))
+                    summary(store,identity,period);recent(store,existing,actions.user,period)
                 else:
                     detail(shop,store,actions,identity,row=existing)
         except (StoreUnavailable,ValueError,PermissionError) as exc:

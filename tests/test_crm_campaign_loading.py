@@ -57,7 +57,8 @@ class CampaignLoadingTests(unittest.TestCase):
         for obsolete in ('EMAIL · CAMPAIGNS', 'sc-email-loading', '+ New campaign',
                          'Find campaign', 'Refresh', '780px'):
             self.assertNotIn(obsolete, html)
-        self.assertFalse(app.get('empty'))
+        # One empty sibling is the inactive route; it renders no loading UI.
+        self.assertLessEqual(len(app.get('empty')),1)
         for label in ('Tracking health','Verify tracking setup'):
             self.assertNotIn(label,[button.label for button in app.button])
             self.assertNotIn(label,[popover.label for popover in app.get('popover')])
@@ -114,3 +115,4 @@ class CampaignLoadingTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+

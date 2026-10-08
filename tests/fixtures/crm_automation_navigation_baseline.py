@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess,sys,types
 if not getattr(sys,'_navigation_baseline_loaded',False):
-    for name in ('crm_automation_store','crm_automation_ui','crm_automation_home'):
+    for name in ('crm_automation_store','crm_automation_home_data','crm_checkout_analytics','crm_automation_analytics','crm_flow_builder','crm_automation_toolbar','crm_automation_analytics_ui','crm_automation_ui','crm_automation_home'):
         source=subprocess.check_output(['git','show','edbeb70:'+name+'.py'],text=True,encoding='utf-8')
         module=types.ModuleType(name);module.__file__=str(Path(name+'.py').resolve())
         sys.modules[name]=module

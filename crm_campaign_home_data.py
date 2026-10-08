@@ -7,11 +7,16 @@ TTL = 20
 PAGE_SIZE = 12
 
 
-def invalidate(state):
+def invalidate(state,*,groups=None):
     # Detach in-flight reads without discarding last-good display values. An old
     # future can finish, but only the newly registered future may be published.
-    state.pop('campaign_home_cache', None)
-    state.pop('campaign_home_window', None)
+    if groups is None:
+        detached=state.pop('campaign_home_cache', {})
+        state.pop('campaign_home_window', None)
+    else:
+        cache=state.get('campaign_home_cache',{})
+        detached={key:cache.pop(key) for key in list(cache) if key[1][0] in groups}
+    for _,future in detached.values():future.cancel()
     state.pop('campaign_home_reported_errors', None)
 
 
@@ -19,6 +24,11 @@ def reporting_window():
     """One UTC [start, end) window shared by every 30-day summary group."""
     end = datetime.now(timezone.utc)
     return end - timedelta(days=30), end
+
+
+def invalidate_after_save(state,previous,updated):
+    if str(updated.get('id'))!=str(previous.get('id')) or updated.get('version')!=previous.get('version'):
+        invalidate(state,groups=('counts','table'))
 
 
 def counts(store):

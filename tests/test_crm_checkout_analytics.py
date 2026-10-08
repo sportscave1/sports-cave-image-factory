@@ -22,7 +22,7 @@ class ContractTests(unittest.TestCase):
         self.assertNotIn('countdown_html',text)
         self.assertIn('crm_checkout_table',text)
         self.assertIn('patch_checkout',text)
-        self.assertNotIn('shop.query',inspect.getsource(ui.content))
+        self.assertNotIn('shop.query',inspect.getsource(ui.checkout_panel))
         self.assertNotIn('shop.query',inspect.getsource(checkouts))
         self.assertNotIn('LATERAL',LIST_SQL)
 

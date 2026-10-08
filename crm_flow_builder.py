@@ -49,7 +49,7 @@ def simulate(flow,at=None,*,subscribed=True,purchased=False,customer=None,event_
 def save(store,user,row,definition,name=None,*,rerun=True):
     from crm_campaign_recovery import flush_current
     from crm_automation_ui import changed
-    if not flush_current(force=True):return
+    if not flush_current(force=True):return False
     # Flush may save only the current email. Merge that document, while an
     # unrelated concurrent edit must still fail the optimistic revision check.
     expected=row['config']['revision'];editor=st.session_state.get('automation_editor')
@@ -60,54 +60,7 @@ def save(store,user,row,definition,name=None,*,rerun=True):
     store.save_flow(user,row['id'],row['name'] if name is None else name,definition,expected)
     st.session_state.pop('automation_editor',None);changed()
     if rerun:st.rerun(scope='fragment')
-
-
-def step_submit(store,user,row,sid,prefix,action):
-    """Form callbacks commit before the dialog re-reads its optimistic revision."""
-    from crm_store import StoreUnavailable
-    try:
-        definition=deepcopy(row['config']['draft'])
-        if action=='delete':
-            if not st.session_state.get(prefix+'confirm'):raise ValueError('Confirm deletion first. Published histories are retained.')
-            definition=edit_sequence(definition,sid,'delete')
-        else:
-            step=next(s for s in definition['emails'] if s['step_id']==sid)
-            step.update(name=st.session_state[prefix+'name'],enabled=st.session_state[prefix+'enabled'])
-        save(store,user,row,definition,rerun=False)
-    except (ValueError,PermissionError,StoreUnavailable) as exc:
-        st.session_state['flow_builder_error']=str(exc) if not isinstance(exc,StoreUnavailable) else 'Storage temporarily unavailable. Retry saving.'
-
-
-def sequence(store,user,row):
-    flow=row['config']['draft'];key='builder-'+str(row['id'])+'-'+str(row['config']['revision'])
-    st.caption('TRIGGER · '+TRIGGERS[flow['trigger']][1])
-    for i,s in enumerate(flow['emails']):
-        amount,unit=delay_controls(s['delay_seconds']);sid=s['step_id'];prefix=key+sid
-        st.caption('↓ Wait '+str(amount)+' '+(unit.lower().rstrip('s') if amount==1 else unit.lower())+(' after the previous enabled email' if i else ' after the trigger'))
-        with st.container(border=True,key='flow-card-'+sid):
-            title,enabled,edit=st.columns([5,1,1])
-            title.markdown('**'+(s.get('name') or 'Email '+str(i+1))+'**')
-            title.caption(s['document']['content']['subject'] or 'Add a subject in the email editor')
-            enabled.caption('Enabled' if s.get('enabled',True) else 'Disabled')
-            if edit.button('Edit email',key=prefix+'edit'):
-                from crm_campaign_recovery import flush_current
-                if flush_current(force=True):
-                    st.session_state['automation_step']=sid;st.session_state.pop('automation_editor',None)
-                    st.session_state['automation_composing']=True;st.rerun(scope='fragment')
-            with st.expander('Step settings'):
-                with st.form(prefix+'settings-form'):
-                    name=st.text_input('Email name',s.get('name') or 'Email '+str(i+1),max_chars=150,key=prefix+'name')
-                    on=st.checkbox('Enable this email',s.get('enabled',True),key=prefix+'enabled')
-                    st.form_submit_button('Save step',on_click=step_submit,args=(store,user,row,sid,prefix,'save'))
-                cols=st.columns(3)
-                for col,label,action,disabled in ((cols[0],'Move up','up',i==0),(cols[1],'Move down','down',i==len(flow['emails'])-1),(cols[2],'Duplicate','duplicate',False)):
-                    if col.button(label,key=prefix+action,disabled=disabled):save(store,user,row,edit_sequence(flow,sid,action))
-                with st.form(prefix+'delete-form'):
-                    confirmed=st.checkbox('Confirm delete email from this draft',key=prefix+'confirm')
-                    st.form_submit_button('Delete email',disabled=len(flow['emails'])==1,on_click=step_submit,args=(store,user,row,sid,prefix,'delete'))
-    if st.button('+ Add Email',key=key+'add'):
-        definition=deepcopy(flow);definition['emails'].append(email_step(delay_seconds=86400));save(store,user,row,definition)
-    st.caption('Existing enrollments retain their published sequence. Draft changes take effect for new enrollments after publishing.')
+    return True
 
 
 def timing(store,user,row):
@@ -116,17 +69,6 @@ def timing(store,user,row):
     name=st.text_input('Flow name',display_name(row['name']),max_chars=150,key=key+'name')
     flow['trigger']=st.selectbox('Entry trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda k:TRIGGERS[k][1],key=key+'trigger')
     st.caption('Start · '+TRIGGERS[flow['trigger']][1]+' · Enter flow')
-    st.caption('Step · Trigger / Delay · Action / Status · Edit')
-    for i,s in enumerate(flow['emails']):
-        columns=st.columns([2,2,1,2,1]);columns[0].write(s.get('name') or 'Email '+str(i+1))
-        amount,unit=delay_controls(s['delay_seconds'])
-        value=columns[1].number_input('Wait',0,525600,amount,key=key+s['step_id']+'delay')
-        units=columns[2].selectbox('Unit',['Minutes','Hours','Days'],index=['Minutes','Hours','Days'].index(unit),key=key+s['step_id']+'unit')
-        if (value,units)!=(amount,unit):s['delay_seconds']=int(value)*{'Minutes':60,'Hours':3600,'Days':86400}[units]
-        columns[3].caption('Send email · '+('Enabled' if s.get('enabled',True) else 'Disabled'))
-        if columns[4].button('Edit',key=key+s['step_id']+'edit'):
-            st.session_state['automation_step']=s['step_id'];st.session_state['automation_composing']=True
-            save(store,user,row,flow,name)
     flow['reentry_days']=st.selectbox('Re-entry cooldown',[0,7,30,90],index=[0,7,30,90].index(flow['reentry_days']),format_func=lambda d:'Once ever' if d==0 else str(d)+' days',key=key+'reentry')
     if flow['trigger']=='win_back':flow['inactive_days']=st.number_input('Days since last purchase',1,3650,flow.get('inactive_days',180),key=key+'days')
     mandatory=flow['trigger'] in ('abandoned','win_back')
@@ -138,7 +80,7 @@ def timing(store,user,row):
     use_rules=st.checkbox('Apply these entry rules (AND)',bool(flow['rules']),key=key+'use-rules')
     flow['rules']=rules if use_rules else []
     st.warning('Check that Shopify or another marketing platform is not sending the same recovery sequence. External sends are not visible to this send ledger.')
-    if st.button('Save timing and rules',type='primary',key=key+'save') or st.session_state.pop('flow-save-requested',False):
+    if st.button('Save flow settings',type='primary',key=key+'save'):
         try:validate(flow);save(store,user,row,flow,name)
         except ValueError as exc:st.error(str(exc))
 
@@ -162,20 +104,6 @@ def test_flow(row):
 
 
 def activity(store,row,user=None):
-    from crm_automation_home_data import step_metrics
-    metrics=step_metrics(store,row['id']);names={s['step_id']:s.get('name') or 'Email '+str(i+1) for i,s in enumerate(row['config']['draft']['emails'])}
-    recorded={r['step_id'] for r in metrics}
-    metrics+= [dict(step_id=sid,**{k:0 for k in ('sent','queued','failed','skipped','delivered','opened','clicked','bounced','orders')}) for sid in names if sid not in recorded]
-    schedule={s['step_id']:s['delay_seconds'] for s in row.get('steps',[])}
-    st.dataframe([{'Email':names.get(r['step_id'],'Previous version email'),**{k:v for k,v in r.items() if k!='step_id'},
-                  'Delivery %':round(100*r['delivered']/r['sent'],1) if r['sent'] else None,
-                  'Published delay (seconds)':schedule.get(r['step_id'])} for r in metrics],hide_index=True,width='stretch')
-    from crm_automation_analytics import revenue
-    from crm_automation_home import money
-    entered=store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s',(row['id'],),True)['n']
-    st.caption(str(entered)+' entered · '+str(sum(r['sent'] for r in metrics))+' sent · '+str(sum(r['queued'] for r in metrics))+' queued · '+str(sum(r['orders'] for r in metrics))+' conversions')
-    st.caption('Attributed revenue · '+money(revenue(store,(date(row.get('created_at')) or now()-timedelta(days=36500),now()),row['id'])['revenue'])+' · Per-email unsubscribes unavailable where the source does not attribute an opt-out to a send.')
-    st.caption('Sent means provider acceptance. Delivered, opens and clicks require recorded provider events. Removed steps retain their history.')
     health=store.state('worker_health');checked=date(health.get('checked_at'))
     st.caption('Scheduler · '+('Healthy · '+checked.isoformat() if checked and now()-checked<timedelta(minutes=5) else 'No recent worker heartbeat — check the existing CRM worker'))
     journeys=store.q('''SELECT j.id,j.shopify_customer_id AS customer,j.trigger_shopify_id AS reference,
@@ -199,27 +127,6 @@ def activity(store,row,user=None):
 
 
 def builder(store,user,row):
-    from crm_automation_ui import changed
-    from crm_automation_definition import status
-    identity=row['id'];key='flow-top-'+str(identity)
-    error=st.session_state.pop('flow_builder_error',None)
-    if error:st.warning(error)
-    st.html('''<style>.st-key-crm-automation-editor [data-testid="stVerticalBlock"]{gap:8px}
-      .st-key-crm-automation-editor button[kind="primary"]{background:#c8a346!important;border-color:#b99436!important;color:#141414!important}
-      .st-key-crm-automation-editor button[role="tab"][aria-selected="true"]{color:#947021!important}
-      .st-key-crm-automation-editor [data-baseweb="tab-highlight"]{background:#c8a346!important}
-      @media(max-width:760px){.st-key-flow-builder-actions [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important;gap:6px!important}
-      .st-key-flow-builder-actions [data-testid="stColumn"]{flex:1 1 100px!important;width:auto!important;min-width:0!important}}
-      .st-key-crm-automation-editor h3{font-size:20px;padding:0}</style>''')
-    from crm_automation_toolbar import toolbar
-    toolbar(store,user,identity)
-    archived=status(row)=='ARCHIVED'
-    if st.session_state.get(key+'simulation'):test_flow(row)
-    # Streamlit renders only the open tab, so activity SQL is not part of editing.
-    tabs=st.tabs(['Flow Builder','Triggers & Timing','Activity'],on_change='rerun',key=key+'tabs')
-    for index,(tab,render) in enumerate(zip(tabs,(sequence,timing,lambda store,user,row:activity(store,row,user)))):
-        if tab.open:
-            with tab:
-                if archived and index!=2:
-                    st.caption('Archived flow: history is retained.')
-                else:render(store,user,row)
+    """Compatibility entry point; there is only one flow management frontend."""
+    from crm_flow_page import flow_page
+    flow_page(getattr(store,'preview_shop',None),store,user,row)

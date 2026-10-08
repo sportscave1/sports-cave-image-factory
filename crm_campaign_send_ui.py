@@ -88,7 +88,7 @@ def test_control(store,user,editor,key,available=True,cfg=None):
 
 @st.fragment
 def send_control(shop,store,user,editor,key,cfg,available=True):
-    if st.button('Send now',key=key+'open_review',type='primary',disabled=not available or bool(editor.get('archived_at')) or bool(editor.get('recovery_readonly'))):
+    if st.button('Send now',key=key+'open_review',type='primary',help='Review recipients, delivery timing and required checks before explicitly confirming. Opening review sends nothing.',disabled=not available or bool(editor.get('archived_at')) or bool(editor.get('recovery_readonly'))):
         review_dialog(shop,store,user,editor,key,cfg)
 
 

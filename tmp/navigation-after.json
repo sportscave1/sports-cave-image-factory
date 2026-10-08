@@ -1,7 +1,8 @@
 [
   {
     "scenario": "cold",
-    "toolbarMs": 335,
+    "toolbarMs": 346,
+    "interactiveMs": 418,
     "overlapFrames": 0,
     "giantFrames": 0,
     "fadedFrames": 0,
@@ -9,7 +10,8 @@
   },
   {
     "scenario": "warm",
-    "toolbarMs": 351,
+    "toolbarMs": 352,
+    "interactiveMs": 428,
     "overlapFrames": 0,
     "giantFrames": 0,
     "fadedFrames": 0,
@@ -17,7 +19,8 @@
   },
   {
     "scenario": "slow",
-    "toolbarMs": 478,
+    "toolbarMs": 1175,
+    "interactiveMs": 1320,
     "overlapFrames": 0,
     "giantFrames": 0,
     "fadedFrames": 0,

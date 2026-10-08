@@ -1,0 +1,36 @@
+{
+  "cold": {
+    "editorMs": 1083,
+    "overlapFrames": 0,
+    "giantFrames": 0,
+    "openReads": 6,
+    "tabMs": [
+      249,
+      119,
+      131,
+      252
+    ],
+    "tabReads": 2,
+    "tabDefaultReads": 0,
+    "longTasks": [],
+    "backMs": 231,
+    "backReads": 2
+  },
+  "warm": {
+    "editorMs": 575,
+    "overlapFrames": 0,
+    "giantFrames": 0,
+    "openReads": 3,
+    "tabMs": [
+      252,
+      112,
+      132,
+      256
+    ],
+    "tabReads": 0,
+    "tabDefaultReads": 0,
+    "longTasks": [],
+    "backMs": 265,
+    "backReads": 2
+  }
+}

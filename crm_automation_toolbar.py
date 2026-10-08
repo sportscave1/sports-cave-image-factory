@@ -25,8 +25,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None):
     .st-key-automation-toolbar{gap:8px!important;align-items:center!important;flex-wrap:wrap!important;margin:0 0 8px!important}
     .st-key-automation-toolbar>[data-testid="stElementContainer"]{width:auto!important;flex:0 0 auto!important}
     .st-key-automation-toolbar>[data-testid="stLayoutWrapper"]{width:auto!important;flex:0 0 auto!important}
-    [role="dialog"]:has(.st-key-crm-automation-editor)>div:first-child:has(>[class]>[data-testid="stMarkdownContainer"]){display:none!important}
-    .st-key-automation-toolbar button{min-height:38px!important;height:38px;padding:4px 10px!important;white-space:nowrap}
+    .st-key-automation-toolbar button{min-height:36px!important;height:36px;padding:4px 10px!important;white-space:nowrap}
     .st-key-automation-toolbar button p{font-size:13px!important}
     .st-key-automation-toolbar [data-testid="stElementContainer"]:has(.automation-title){flex:1 1 180px!important;min-width:0!important}
     .automation-title{display:flex;align-items:center;gap:8px;min-width:0;height:38px}
@@ -45,7 +44,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None):
                     st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')
             title=display_name(editor['name'] if editor else row['name'])
             st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong><span class="automation-state">'+escape(label(row,pending))+'</span></div>')
-            if editor and st.button('Flow Builder',key='toolbar-sequence',help='Return to this flow’s sequence'):
+            if editor and st.button('Flow',key='toolbar-sequence',help='Return to this flow’s sequence'):
                 if flush_current(force=True):
                     st.session_state['automation_composing']=False;st.session_state.pop('automation_editor',None);st.rerun(scope='app')
             if st.button('Save draft',disabled=not dirty or archived,key='toolbar-save'):

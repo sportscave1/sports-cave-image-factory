@@ -69,18 +69,36 @@ def rows(store,*,tab='All automations',search='',trigger='All',oldest=False,offs
       (tab,tab,search[:150],trigger,trigger,PAGE_SIZE+1,max(0,int(offset))))
 
 
-def step_metrics(store,identity):
-    return store.q("""WITH executions AS (SELECT s.*,v.content->>'step_id' AS step_id FROM crm_marketing_sends s
-      JOIN crm_automation_enrollments j ON j.id=s.enrollment_id JOIN crm_template_versions v
-      ON v.template_id=s.template_id AND v.version=s.template_version WHERE j.automation_id=%s AND NOT s.test_send)
-      SELECT s.step_id,count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED') AS sent,
+def step_metrics(store,identity,bounds=None):
+    """Stable immutable step identity, distinct messages, and currency-safe attribution.
+
+    A reordered draft never changes ownership of an old send. Unknown legacy
+    identities remain separate instead of being assigned to the current Email 1.
+    """
+    start,end=bounds or (None,None)
+    return store.q("""WITH params AS (SELECT %s::uuid AS flow_id,%s::timestamptz AS start_at,%s::timestamptz AS end_at),
+      executions AS (SELECT s.*,COALESCE(v.content->>'step_id',j.steps->s.step_index->>'step_id') AS step_id
+      FROM crm_marketing_sends s JOIN crm_automation_enrollments j ON j.id=s.enrollment_id
+      CROSS JOIN params p LEFT JOIN crm_template_versions v ON v.template_id=s.template_id AND v.version=s.template_version
+      WHERE j.automation_id=p.flow_id AND NOT s.test_send
+      AND (p.start_at IS NULL OR COALESCE(s.first_submitted_at,s.created_at)>=p.start_at)
+      AND (p.end_at IS NULL OR COALESCE(s.first_submitted_at,s.created_at)<p.end_at)),
+      orders AS (SELECT o.evidence->>'step_id' AS step_id,o.currency,count(*) AS n,sum(o.amount) AS amount
+      FROM crm_order_attribution o CROSS JOIN params p WHERE o.eligible AND o.evidence->>'automation_id'=p.flow_id::text
+      AND (p.start_at IS NULL OR o.order_created_at>=p.start_at) AND (p.end_at IS NULL OR o.order_created_at<p.end_at)
+      GROUP BY o.evidence->>'step_id',o.currency),
+      commerce AS (SELECT step_id,sum(n)::bigint AS orders,jsonb_object_agg(currency,amount) AS revenue FROM orders GROUP BY step_id),
+      totals AS (SELECT s.step_id,count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED') AS sent,
       count(DISTINCT s.id) FILTER(WHERE s.status IN ('PENDING','CLAIMED','SUBMITTING')) AS queued,
       count(DISTINCT s.id) FILTER(WHERE s.status IN ('FAILED','UNCERTAIN')) AS failed,
       count(DISTINCT s.id) FILTER(WHERE s.status='BLOCKED') AS skipped,
-      count(DISTINCT s.id) FILTER(WHERE e.event_type='email.delivered') AS delivered,
-      count(DISTINCT s.id) FILTER(WHERE e.event_type='email.opened') AS opened,
-      count(DISTINCT s.id) FILTER(WHERE e.event_type='email.clicked') AS clicked,
-      count(DISTINCT s.id) FILTER(WHERE e.event_type='email.bounced') AS bounced,
-      (SELECT count(*) FROM crm_order_attribution o WHERE o.eligible AND o.evidence->>'automation_id'=%s
-        AND o.evidence->>'step_id'=s.step_id) AS orders
-      FROM executions s LEFT JOIN crm_delivery_events e ON e.send_id=s.id GROUP BY s.step_id""",(identity,str(identity)))
+      count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED' AND e.event_type='email.delivered') AS delivered,
+      count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED' AND e.event_type='email.opened') AS opened,
+      count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED' AND e.event_type='email.clicked') AS clicked,
+      count(DISTINCT s.id) FILTER(WHERE s.status='ACCEPTED' AND e.event_type='email.bounced') AS bounced
+      FROM executions s LEFT JOIN crm_delivery_events e ON e.send_id=s.id GROUP BY s.step_id)
+      SELECT COALESCE(t.step_id,c.step_id) AS step_id,COALESCE(t.sent,0) AS sent,COALESCE(t.queued,0) AS queued,
+      COALESCE(t.failed,0) AS failed,COALESCE(t.skipped,0) AS skipped,COALESCE(t.delivered,0) AS delivered,
+      COALESCE(t.opened,0) AS opened,COALESCE(t.clicked,0) AS clicked,COALESCE(t.bounced,0) AS bounced,
+      COALESCE(c.orders,0) AS orders,COALESCE(c.revenue,'{}'::jsonb) AS revenue
+      FROM totals t FULL JOIN commerce c ON c.step_id=t.step_id""",(identity,start,end))

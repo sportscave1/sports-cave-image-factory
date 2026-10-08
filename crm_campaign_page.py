@@ -23,8 +23,6 @@ from crm_campaign_recovery import autosaving, flush_current, activate, restore
 
 
 def open_editor(row):
-    from crm_campaign_home_data import invalidate
-    invalidate(st.session_state)
     st.session_state['campaign_view']='CAMPAIGN_EDITOR'
     st.session_state['campaign_show_drafts']=True
     st.session_state['campaign_list_generation']=st.session_state.get('campaign_list_generation',0)+1
@@ -223,7 +221,7 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
 
 
 
-def continue_campaign_leave(drafts,navigate):
+def continue_campaign_leave(drafts,navigate,*,rerun=True):
     target=st.session_state.pop('crm_requested_route',None)
     pending=st.session_state.pop('campaign_pending_open',None)
     if target:navigate(target)
@@ -236,7 +234,7 @@ def continue_campaign_leave(drafts,navigate):
         if st.session_state.pop('campaign_open_templates',False):
             st.session_state[st.session_state['campaign_edit_key']+'panel']='Templates'
     elif pending:open_editor(drafts.draft(pending))
-    st.rerun()
+    if rerun or target:st.rerun()
 
 
 @st.fragment
@@ -244,7 +242,10 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     st.session_state['email_editor_mode']='campaign'
     from email_loading import stage
     from crm_html_workspace import composer_styles
+    from crm_campaign_home import STYLE
+    st.html(STYLE)
     composer_styles()
+    overview_route=st.empty();editor_route=st.empty()
     drafts=CampaignStore(store.connect)
     editor=st.session_state.get('campaign_editor')
     explicit=st.query_params.get('campaign')
@@ -262,27 +263,35 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
         leave_dialog(actions.user,lambda:continue_campaign_leave(drafts,navigate))
         return
     if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
-        continue_campaign_leave(drafts,navigate)
-        return
+        # The route is known before any widgets mount: render it in this run.
+        # A second whole-app rerun adds a needless browser/server round trip.
+        continue_campaign_leave(drafts,navigate,rerun=False)
+        editor=st.session_state.get('campaign_editor')
+        explicit=st.query_params.get('campaign')
     view=st.session_state.setdefault('campaign_view','CAMPAIGNS_HOME')
     if explicit:
         view='CAMPAIGN_EDITOR'
         st.session_state['campaign_view']=view
     if view=='CAMPAIGNS_HOME':
         from crm_campaign_home import home
-        home(drafts,actions.user)
+        editor_route.empty()
+        with overview_route.container():home(drafts,actions.user)
         return
+    overview_route.empty()
     st.html('''<style>
       [data-testid="stMainBlockContainer"]:has(.st-key-crm-selected-campaign){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 8px) 18px 10px !important}
     </style>''')
     def back():st.session_state['campaign_pending_open']='home'
-    st.button('← Campaigns',key='campaign_back_home',type='tertiary',on_click=back)
-    with st.container(key='crm-selected-campaign'):
-        with stage('Campaigns','editor_render'):
-            _selected_campaign(shop,store,actions,navigate,drafts)
+    with editor_route.container():
+        toolbar=st.container(horizontal=True,vertical_alignment='center',key='crm-campaign-toolbar')
+        with toolbar:
+            st.button('← Campaigns',key='campaign_back_home',type='tertiary',on_click=back)
+        with st.container(key='crm-selected-campaign'):
+            with stage('Campaigns','editor_render'):
+                _selected_campaign(shop,store,actions,navigate,drafts,toolbar=toolbar)
 
 
-def _selected_campaign(shop,store,actions,navigate,drafts):
+def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
     from crm_html_workspace import composer_styles
     from email_loading import stage
     available=True
@@ -334,11 +343,12 @@ def _selected_campaign(shop,store,actions,navigate,drafts):
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))
-    title,buttons=st.columns([4,5],vertical_alignment='center')
-    title.markdown('### '+('New Campaign' if not editor.get('id') else html_escape_name(editor['name']))+' · '+editor['status'])
-    if not get_resend_marketing_config_status()['marketing_enabled']:
-        title.caption('● Marketing delivery OFF · Tests only')
-    with buttons.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-campaign-actions'):
+    from html import escape
+    if toolbar is None:toolbar=st.container(horizontal=True,vertical_alignment='center')
+    title='New Campaign' if not editor.get('id') else editor['name']
+    toolbar.html('<div class="sc-campaign-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong><span>'+escape(editor['status'].replace('_',' ').title())+'</span></div>')
+    if not get_resend_marketing_config_status()['marketing_enabled']:st.caption('● Marketing delivery OFF · Tests only')
+    with toolbar.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-campaign-actions'):
         from crm_email_size_ui import size_meter
         st.session_state[key+'review_preview_settings']=cfg
         st.session_state[key+'editor_emitted']=False

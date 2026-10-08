@@ -5,7 +5,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
   const context=await browser.newContext();await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
   const page=await context.newPage();await page.setViewportSize({width:1440,height:1000});
   await page.goto(mode==='campaign'?'http://127.0.0.1:8541/':'http://127.0.0.1:8540/?fixture_checkout=1&fixture_run=rename'+Date.now());
-  async function editor(){if(mode==='automation')await page.getByRole('button',{name:'Edit email',exact:true}).first().click();await page.getByRole('tab',{name:'Editor',exact:true}).click();}
+  async function editor(){if(mode==='automation')await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();await page.getByRole('tab',{name:'Editor',exact:true}).click();}
   await editor();
   const frame=page.frameLocator('iframe[title="crm_section_ui.crm_middle_sections_v2"]'),card=frame.locator('.section').first();
   await card.locator('.title').waitFor();const defaultLabel=await card.locator('.title').innerText();
@@ -20,7 +20,10 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
   assert.equal(await card.locator('.title').getAttribute('aria-expanded'),wasOpen);
   assert.equal(await card.locator('.visibility').getAttribute('aria-pressed'),'true');
   if(mode==='campaign'){await card.getByRole('textbox',{name:'Hero / Heading HTML',exact:true}).fill('<p>Unchanged customer content</p>');await card.getByRole('textbox',{name:'Hero / Heading HTML',exact:true}).press('Tab');}
-  await page.getByRole('button',{name:'Save draft',exact:true}).click();
+  const save=page.getByRole('button',{name:'Save draft',exact:true});
+  // Automation section edits persist through the existing autosave. A disabled
+  // Save means the server already saved it; the reload below verifies that.
+  if(await save.isEnabled())await save.click();
   await page.getByRole('tab',{name:'Settings',exact:true}).click();await page.getByRole('tab',{name:'Editor',exact:true}).click();
   await card.getByRole('button',{name:'Edit Hero / Heading',exact:true}).waitFor();
   await page.reload();await editor();await card.getByRole('button',{name:'Edit Hero / Heading',exact:true}).waitFor();

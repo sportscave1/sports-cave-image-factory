@@ -48,7 +48,7 @@ def job(state,store,key,load):
  if key[0] in ('counts','delivery','attribution'):f.set_result({'all_count':st.session_state.get('fixture_count',1),'drafts':1,'active':0,'sent':0,'archived':0,'sent_emails':0,'revenue':{},'orders':0,'click_rate':None,'bounce_rate':None})
  else:f.set_result([record()])
  return f
-def composer(*args):
+def composer(*args,**kwargs):
  if 'campaign_editor' not in st.session_state:st.session_state['campaign_editor']=deepcopy(draft)
  st.caption('Existing composer: '+st.session_state['campaign_editor']['name'])
  for label in ('Settings','Editor','Templates'):st.caption(label)

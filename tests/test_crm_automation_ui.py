@@ -81,7 +81,7 @@ class AutomationUiTests(unittest.TestCase):
         for value in ('Automations','Delivery rate','Open rate','Revenue from automations (30 days)','Real fixture automation','Customer subscribes to email'):self.assertIn(value,html)
         for value in ('EMAIL · AUTOMATIONS','sc-email-loading'):self.assertNotIn(value,html)
         self.assertEqual(html.count('class="sc-auto-kpi"'),6)
-        self.assertTrue(any(b.label=='Analytics' for b in app.button))
+        self.assertTrue(any(b.label=='Flow' for b in app.button))
         self.assertTrue(any(b.label=='+ Create automation' for b in app.button))
     def test_editor_context_does_not_overwrite_campaign(self):
         original={'id':'campaign','name':'Campaign','document':document()}

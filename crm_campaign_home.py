@@ -35,19 +35,17 @@ def arm_home_poll(*, key='crm-home-poll', seconds=None):
         'const tick=()=>{const b=document.querySelector(".st-key-"+key+" button");'+
         'if(!b||!b.isConnected)return;'+
         'if(document.hidden){window.scCampaignTimers[key]=setTimeout(tick,30000);return;}'+
-        'if(b.disabled||document.querySelector("[role=dialog]")){window.scCampaignTimers[key]=setTimeout(tick,delay);return;}b.click();};'+
+        'if(b.disabled||[...document.querySelectorAll("[role=dialog],[data-testid=stPopoverBody],[role=listbox]")].some(e=>e.getClientRects().length)){window.scCampaignTimers[key]=setTimeout(tick,Math.max(delay,1000));return;}b.click();};'+
         'window.scCampaignTimers[key]=setTimeout(tick,delay);})();</script>',unsafe_allow_javascript=True)
 
 
 def request_open(identity, *, templates=False):
-    invalidate(st.session_state)
     st.session_state['campaign_pending_open']=identity
     if templates: st.session_state['campaign_open_templates']=True
     st.rerun()
 
 
 def return_home():
-    invalidate(st.session_state)
     st.session_state['campaign_view']='CAMPAIGNS_HOME'
     st.session_state.pop('campaign_recovery_context',None)
     st.query_params.pop('campaign',None)

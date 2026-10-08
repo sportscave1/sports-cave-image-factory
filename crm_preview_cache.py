@@ -13,10 +13,18 @@ RENDER_FIELDS = ('renderer_version', 'content_mode', 'content', 'blocks', 'custo
                  'html_sections', 'middle_sections', 'campaign_key', 'market')
 
 
+def presentation_document(doc):
+    """Internal organisation is persisted, but cannot change preview pixels."""
+    result=dict(doc)
+    if 'middle_sections' in doc:
+        result['middle_sections']=[{k:v for k,v in s.items() if k!='name'} for s in doc['middle_sections']]
+    return result
+
+
 def preview_key(doc, cfg, images_off=False):
     # Validate even on a hit; the cache cannot make an invalid document valid.
     validate_document(doc)
-    content = {field: doc.get(field) for field in RENDER_FIELDS}
+    content = {field: value for field,value in presentation_document(doc).items() if field in RENDER_FIELDS}
     # HTML and catalogue snapshot markup carries its own prices/content; segment
     # selection alone cannot change those bytes. Legacy blocks remain market-aware.
     if doc.get('content_mode')=='HTML':content.pop('market',None)
