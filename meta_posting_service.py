@@ -1994,6 +1994,35 @@ class SupabasePostingStore:
         import supabase_backend
         return supabase_backend
 
+    def get(self, submission_id):
+        identity=str(uuid.UUID(str(submission_id)))
+        backend=self._backend()
+        backend.ensure_ads_schema()
+        with backend.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT * FROM meta_posting_submissions WHERE submission_id=%s::uuid',(identity,))
+                return dict(cur.fetchone() or {})
+
+    def reserve(self, request, *, retry=False):
+        """Persist the button's identity before background validation/Meta I/O."""
+        identity=str(uuid.UUID(str(request.submission_id)))
+        backend=self._backend();backend.ensure_ads_schema()
+        with backend.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO meta_posting_submissions
+                    (submission_id,request_fingerprint,status,ad_name,destination_url,image_checksum,product_title,ad_type)
+                    VALUES(%s::uuid,'pending','VALIDATING','',%s,'',%s,%s)
+                    ON CONFLICT DO NOTHING RETURNING submission_id""",
+                    (identity,request.destination_url,request.product_title,request.ad_type))
+                reserved=bool(cur.fetchone())
+                if retry and not reserved:
+                    cur.execute("""UPDATE meta_posting_submissions SET status='VALIDATING',safe_error=NULL,updated_at=now()
+                        WHERE submission_id=%s::uuid AND status='FAILED'
+                        AND lease_token IS NULL RETURNING submission_id""",(identity,))
+                    reserved=bool(cur.fetchone())
+            conn.commit()
+        return reserved
+
     def claim(self, request_data, *, lease_token):
         backend = self._backend()
         backend.ensure_ads_schema()
@@ -2029,6 +2058,14 @@ class SupabasePostingStore:
                     for column in columns
                 )
                 placeholders[-1] = "%s::jsonb"
+                # A queued run contains only its identity and display metadata.
+                # Hydrate it with the service's validated contract before claiming.
+                cur.execute(
+                    'UPDATE meta_posting_submissions SET '+', '.join(
+                        column+'='+placeholder for column,placeholder in zip(columns[1:],placeholders[1:])
+                    )+" WHERE submission_id=%s::uuid AND request_fingerprint='pending'",
+                    (*values[1:],target_submission_id),
+                )
                 cur.execute(
                     f"INSERT INTO meta_posting_submissions({', '.join(columns)}) "
                     f"VALUES ({', '.join(placeholders)}) ON CONFLICT (submission_id) DO NOTHING",

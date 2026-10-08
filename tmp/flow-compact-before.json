@@ -1,0 +1,55 @@
+{
+  "coldMs": 2563,
+  "settingsOpen": {
+    "ms": 782,
+    "queries": 3,
+    "flowRenders": 1,
+    "fullRuns": 0,
+    "thumbnailRetained": false
+  },
+  "settingsEdit": {
+    "ms": 403,
+    "queries": 3,
+    "flowRenders": 1,
+    "fullRuns": 0,
+    "thumbnailRetained": false
+  },
+  "checkoutsOpen": {
+    "ms": 374,
+    "queries": 4,
+    "flowRenders": 1,
+    "fullRuns": 0,
+    "thumbnailRetained": false
+  },
+  "checkoutSearch": {
+    "ms": 145,
+    "queries": 0,
+    "flowRenders": 0,
+    "fullRuns": 0,
+    "thumbnailRetained": true
+  },
+  "stepMenu": {
+    "ms": 215,
+    "queries": 0,
+    "flowRenders": 0,
+    "fullRuns": 0,
+    "thumbnailRetained": true
+  },
+  "editEmail": {
+    "ms": 369,
+    "queries": 5,
+    "flowRenders": 0,
+    "fullRuns": 1,
+    "thumbnailRetained": false
+  },
+  "warmReturnMs": 360,
+  "final": {
+    "queries": 115,
+    "reports": 1,
+    "activity": 0,
+    "checkouts": 1,
+    "flow_renders": 5,
+    "full_runs": 3,
+    "tick": 16
+  }
+}

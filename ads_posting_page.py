@@ -1190,6 +1190,9 @@ def _current_run_state(state):
 def _start_new_posting_run(*, state=None):
     """Open a blank Meta run while retaining the VA's reviewed staging inputs."""
 
+    if state is None:
+        from ads_posting_progress import clear
+        clear()
     state = st.session_state if state is None else state
     for key in (
         RESULT_KEY,
@@ -1637,10 +1640,25 @@ def _render_recent_posts():
             ],
             hide_index=True, use_container_width=True,
         )
+        selected = st.selectbox(
+            'Posting job details', records,
+            format_func=lambda row: (
+                str(row.get('product_title') or '') + ' · '
+                + str(row.get('status') or '') + ' · ' + str(row['submission_id'])[:8]
+            ),
+            key='posting_history_selection',
+        )
+        if st.button('View Posting Details', key='posting_history_open'):
+            from ads_posting_progress import track
+            track(selected['submission_id'])
+            st.rerun()
 
 
 def render_page():
     st.title("Post Ad")
+    from ads_posting_progress import render_current
+    if render_current():
+        return
     if st.session_state.get(posting_handoff.PENDING_KEY):
         try:
             records, _ = _product_selector_state(_product_rows_state())
@@ -2488,14 +2506,6 @@ def render_page():
             "Existing live ads and settings will not be changed."
         )
         st.caption("Existing campaign budget will not be changed.")
-        spinner_label = (
-            "Creating one compatible paused Ad Set and three paused ads in the selected existing Campaign…"
-            if create_compatible_adset
-            else
-            "Creating one paused carousel ad in the selected existing Ad Set…"
-            if ad_type == CAROUSEL_AD_TYPE
-            else "Creating three paused ads in the selected existing Ad Set…"
-        )
     else:
         st.caption(
             "Creates one paused campaign, one paused ad set and one paused "
@@ -2503,11 +2513,6 @@ def render_page():
             if ad_type == CAROUSEL_AD_TYPE
             else "Creates one paused campaign, one paused ad set and three paused "
             "Instant Experience ads in Meta for review."
-        )
-        spinner_label = (
-            "Creating one paused campaign, one ad set and one carousel ad…"
-            if ad_type == CAROUSEL_AD_TYPE
-            else "Creating one paused campaign, one ad set and three ads…"
         )
 
     if posting_mode == POSTING_MODE_EXISTING:
@@ -2561,53 +2566,29 @@ def render_page():
             carousel_cards=carousel_cards,
             carousel_primary_texts=carousel_primary_texts,
         )
-        progress_status = st.status(spinner_label, expanded=False)
-
-        def update_progress(message):
-            progress_status.update(label=str(message or spinner_label), state="running")
-
+        from meta_posting_jobs import JOBS
+        from ads_posting_progress import track
         try:
-            posted = MetaPostingService(
-                progress_callback=update_progress
-            ).create_paused_campaign(request)
-        except (
-            PostingValidationError,
-            PostingBusyError,
-            PostingAbandonedError,
-            PostingAmbiguousError,
-            PostingError,
-        ) as error:
-            progress_status.update(
-                label="Posting stopped — review the result below",
-                state="error",
-            )
-            st.error(str(error))
-            partial = dict(getattr(error, "result", {}) or {})
-            if partial:
-                st.session_state[RESULT_KEY] = partial
-                st.session_state[RUN_STATE_KEY] = str(
-                    partial.get("status") or RUN_STATE_FAILED
-                ).upper()
-                _render_object_result(partial, title="Partial result — all created ad objects remain paused")
-            elif isinstance(error, PostingValidationError):
+            JOBS.submit(request)
+            track(request.submission_id)
+        except Exception as error:
+            st.session_state[PROCESSING_KEY] = False
+            from meta_ads_client import sanitize_meta_error
+            st.error('Posting could not be started: ' + sanitize_meta_error(error))
+            # A reservation may have committed before the connection failed.
+            # Preserve its identity and recover status instead of resubmitting.
+            try:
+                reserved = JOBS.snapshot(request.submission_id)
+            except Exception:
+                reserved = None
+            if reserved and reserved.get('submission_id'):
+                track(request.submission_id)
+                st.rerun()
+            elif reserved is not None:
                 st.session_state[RUN_STATE_KEY] = RUN_STATE_DRAFT
-            else:
-                st.session_state[RUN_STATE_KEY] = RUN_STATE_FAILED
         else:
-            progress_status.update(
-                label=(
-                    "Done — 1 Meta carousel ad is PAUSED"
-                    if ad_type == CAROUSEL_AD_TYPE
-                    else "Done — 3 Meta ads are PAUSED"
-                ),
-                state="complete",
-            )
-            st.session_state[RESULT_KEY] = dict(posted)
-            st.session_state[RUN_STATE_KEY] = RUN_STATE_COMPLETE
             _load_recent_posts.clear()
             st.rerun()
-        finally:
-            st.session_state[PROCESSING_KEY] = False
 
     if ad_type == CAROUSEL_AD_TYPE:
         with st.expander("Advanced Meta Diagnostics", expanded=False):
