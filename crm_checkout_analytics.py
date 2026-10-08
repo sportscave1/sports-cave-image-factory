@@ -125,9 +125,22 @@ LEFT JOIN crm_runtime_state v ON v.key='checkout-evaluation:'||c.checkout_key||'
 LEFT JOIN crm_runtime_state request ON request.key='checkout-enroll:'||a.id::text||':'||c.checkout_key
 ORDER BY c.created_at DESC,c.checkout_key"""
 
-def checkouts(store,identity,bounds,key=None):
+def checkouts(store,identity,bounds,key=None,*,page_size=None,after=None,search=''):
     start,end=bounds
-    rows=store.q(LIST_SQL,(start,start,end,key,key,identity,identity))
+    sql=LIST_SQL;params=(start,start,end,key,key)
+    if page_size is not None:
+        # Page the base ledger before joining sends/events. A cursor is stable
+        # when newer checkouts arrive and avoids scanning previous result pages.
+        needle='%'+search.strip().replace('\\','\\\\').replace('%','\\%').replace('_','\\_')+'%'
+        clause='''AND (%s='' OR concat_ws(' ',checkout_key,admin_checkout_id,
+          analytics->>'name',analytics->>'email',analytics->>'reference') ILIKE %s)
+          AND (%s::timestamptz IS NULL OR (created_at,checkout_key)<(%s::timestamptz,%s))
+          ORDER BY created_at DESC,checkout_key DESC LIMIT %s'''
+        sql=sql.replace('), journeys AS MATERIALIZED (',clause+'\n), journeys AS MATERIALIZED (',1)
+        sql=sql.replace('ORDER BY c.created_at DESC,c.checkout_key','ORDER BY c.created_at DESC,c.checkout_key DESC')
+        stamp,identity_key=after or (None,None)
+        params+=(search.strip(),needle,stamp,stamp,identity_key,min(100,max(1,int(page_size))))
+    rows=store.q(sql,params+(identity,identity))
     from crm_checkout_identity import block_label
     for row in rows:
         regions=(row.pop('recovery_policy',None) or {}).get('regions') or {}
@@ -143,14 +156,14 @@ def checkouts(store,identity,bounds,key=None):
                     row['evaluation']={**evaluation,'reason':reason,'result':block_label(reason)}
     return rows
 
-def report(store,identity,bounds):
+def report(store,identity,bounds,*,include_history=True):
     """One message/event aggregate shared by KPI and chart; no event fanout totals.
 
     Sends/orders use their occurrence time. Checkout list/recovered count use
     checkout creation time, clearly labelled as a separate cohort in the UI.
     """
     start,end=bounds
-    return store.q("""WITH messages AS (
+    sql="""WITH messages AS (
       SELECT s.id,date_trunc('day',s.first_submitted_at AT TIME ZONE 'UTC') AS day,
       bool_or(e.event_type='email.delivered') AS delivered,bool_or(e.event_type='email.opened') AS opened,
       bool_or(e.event_type='email.clicked') AS clicked,bool_or(e.event_type='email.bounced') AS bounced FROM crm_marketing_sends s
@@ -168,8 +181,14 @@ def report(store,identity,bounds):
       (SELECT count(*) FROM messages) AS sent,(SELECT count(*) FROM messages WHERE delivered) AS delivered,
       (SELECT count(*) FROM messages WHERE opened) AS opened,(SELECT count(*) FROM messages WHERE clicked) AS clicked,
       COALESCE((SELECT sum(n) FROM orders),0)::bigint AS conversions,
-      COALESCE((SELECT jsonb_object_agg(currency,amount) FROM orders),'{}') AS revenue""",
-      (identity,start,start,end,str(identity),start,start,end,identity,start,start,end),True)
+      COALESCE((SELECT sum(n) FROM orders),0)::bigint AS orders,
+      COALESCE((SELECT jsonb_object_agg(currency,amount) FROM orders),'{}') AS revenue"""
+    if not include_history:
+        # Flow has no chart. Other reporting callers retain the original query.
+        begin=sql.index(', daily AS (');finish=sql.index('    orders AS (',begin)
+        sql=sql[:begin]+', '+sql[finish:]
+        sql=sql.replace("COALESCE((SELECT jsonb_agg(d ORDER BY day) FROM daily d),'[]') AS history","'[]'::jsonb AS history")
+    return store.q(sql,(identity,start,start,end,str(identity),start,start,end,identity,start,start,end),True)
 
 def disabled_reason(checkout,row,at=None):
     at=at or now()

@@ -3,6 +3,17 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import json
+import os
+import subprocess
+import types
+if os.environ.get('FLOW_PROFILE_BASELINE')=='1' and not getattr(sys,'_flow_baseline_loaded',False):
+    baseline_ref=os.environ.get('FLOW_PROFILE_BASELINE_REF','01bc526')
+    for name in ('crm_checkout_analytics','crm_automation_analytics_ui','crm_automation_toolbar','crm_flow_page'):
+        source=subprocess.check_output(['git','show',baseline_ref+':'+name+'.py'],text=True,encoding='utf-8')
+        module=types.ModuleType(name);module.__file__=str(Path(__file__).resolve().parents[2]/(name+'.py'))
+        sys.modules[name]=module
+        exec(compile(source,module.__file__,'exec'),module.__dict__)
+    sys._flow_baseline_loaded=True
 import runpy
 import threading
 import streamlit as st
@@ -41,5 +52,5 @@ def counters():
     st.button('Profile snapshot')
     tick = st.session_state.get('profile_tick', 0) + 1
     st.session_state['profile_tick'] = tick
-    st.html('<pre id="flow-profile">' + json.dumps({**metrics, 'full_runs': st.session_state['profile_full_runs'], 'tick': tick}) + '</pre>')
+    st.html('<pre id="flow-profile" style="white-space:pre-wrap;overflow-wrap:anywhere">' + json.dumps({**metrics, 'full_runs': st.session_state['profile_full_runs'], 'tick': tick}) + '</pre>')
 counters()

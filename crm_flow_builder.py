@@ -103,7 +103,7 @@ def test_flow(row):
     st.caption('For an internal email preview, select Edit email and use the existing verified Send test control.')
 
 
-def activity(store,row,user=None):
+def activity(store,row,user=None,*,rerun_scope='app'):
     health=store.state('worker_health');checked=date(health.get('checked_at'))
     st.caption('Scheduler · '+('Healthy · '+checked.isoformat() if checked and now()-checked<timedelta(minutes=5) else 'No recent worker heartbeat — check the existing CRM worker'))
     journeys=store.q('''SELECT j.id,j.shopify_customer_id AS customer,j.trigger_shopify_id AS reference,
@@ -122,7 +122,7 @@ def activity(store,row,user=None):
         retryable={s['id']:s for s in sends if s['status']=='FAILED' and s['error_code'] in ('provider_rejected','revalidation_unavailable') and not s['provider_email_id']}
         for send_id,send in retryable.items():
             if st.button('Retry rejected email '+str(send['email']),key='flow-retry-'+str(send_id),disabled=user is None):
-                try:store.retry_delivery(user,row['id'],send_id);st.success('Queued for fresh eligibility checks. The existing send identity is retained.');st.rerun()
+                try:store.retry_delivery(user,row['id'],send_id);st.success('Queued for fresh eligibility checks. The existing send identity is retained.');st.rerun(scope=rerun_scope)
                 except ValueError as exc:st.warning(str(exc))
 
 

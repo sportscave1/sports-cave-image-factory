@@ -8,15 +8,30 @@ from crm_checkout_analytics import PERIODS,window,report
 from crm_automation_home_data import step_metrics
 from crm_automation_definition import TRIGGERS,email_step,status
 from crm_automation_timing import delay_controls
-from crm_flow_builder import save,edit_sequence,timing,test_flow
+from crm_flow_builder import save,edit_sequence
 
 STYLE='''<style>
 .st-key-crm-automation-editor{gap:8px!important;min-width:0}
 .st-key-crm-automation-editor [data-testid="stVerticalBlock"]{gap:6px}
 .st-key-crm-automation-editor button[kind="primary"]{background:#c8a346!important;border-color:#b99436!important;color:#141414!important}
 .st-key-crm-automation-editor h3{font-size:17px;padding:4px 0}
-.sc-flow-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:0}
-.sc-flow-stats>div{padding:8px 10px;border:1px solid #e8e6df;border-radius:7px;background:#fffefa;min-width:0}
+.st-key-flow-workspace button[kind="secondary"],.st-key-flow-workspace [data-testid="stPopoverButton"]{background:#fff!important;color:#30332e!important;border:1px solid #dddcd5!important;border-radius:4px!important;min-height:32px!important;height:32px;padding:3px 9px!important;box-shadow:none!important}
+.st-key-flow-workspace button[kind="secondary"]:hover,.st-key-flow-workspace [data-testid="stPopoverButton"]:hover{background:#f2f2ee!important;border-color:#b9bab3!important}
+.st-key-flow-workspace button:disabled{opacity:.5}
+.st-key-flow-workspace{min-width:0!important;max-width:100%!important}
+.st-key-flow-workspace [data-testid="stElementContainer"]:has(iframe){max-width:100%!important;min-width:0!important}
+.st-key-flow-workspace iframe{max-width:100%!important}
+.st-key-flow-workspace button p{font-size:12px!important}
+.st-key-flow-workspace [data-baseweb="input"],.st-key-flow-workspace [data-baseweb="select"]>div{min-height:32px!important;border-radius:4px!important}
+.st-key-flow-workspace .st-key-automation-toolbar{gap:6px!important;margin-bottom:2px!important}
+.st-key-flow-workspace .st-key-automation-toolbar button{min-height:32px!important;height:32px!important;border-radius:4px!important}
+.st-key-flow-workspace .automation-title,.st-key-flow-workspace .automation-current{height:32px}
+.st-key-flow-step-metrics-refresh{display:none!important}
+.st-key-flow-settings{border-top:1px solid #e8e6df;padding-top:6px}
+.st-key-flow-workspace [data-testid="stExpander"] details{border-radius:4px!important}
+.st-key-flow-workspace [data-testid="stExpander"] summary{min-height:32px;padding:4px 8px;font-size:13px}
+.sc-flow-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:0;padding:0!important}
+.sc-flow-stats>div{padding:5px 8px;border:1px solid #e8e6df;border-radius:4px;background:#fffefa;min-width:0}
 .sc-flow-stats dt{font-size:11px;color:#73747c}.sc-flow-stats dd{font-size:19px;font-weight:600;margin:3px 0;overflow-wrap:anywhere}
 [class*='st-key-flow-row-']{border-bottom:1px solid #e8e6df;padding:8px 0;gap:12px!important;align-items:center!important;flex-wrap:nowrap!important}
 [class*='st-key-flow-row-'] button{min-height:32px;padding:3px 8px}
@@ -33,31 +48,53 @@ STYLE='''<style>
 def rate(n,total):return f'{100*n/total:.1f}%' if total else '—'
 
 def summary_cards(value):
-    from crm_automation_home import money
-    fields=[('Entered',value['entered']),('Sent',value['sent']),('Delivery',rate(value['delivered'],value['sent'])),('Opens',rate(value['opened'],value['sent'])),('Clicks',rate(value['clicked'],value['sent'])),('Conversions',value['conversions']),('Revenue',money(value['revenue'])),('Bounce',rate(value['bounced'],value['sent']))] if value else [(k,'—') for k in ('Entered','Sent','Delivery','Opens','Clicks','Conversions','Revenue','Bounce')]
+    fields=[('Entered',value['entered']),('Sent',value['sent']),('Delivery',rate(value['delivered'],value['sent'])),('Opens',rate(value['opened'],value['sent'])),('Clicks',rate(value['clicked'],value['sent'])),('Conversions',value['conversions']),('Orders',value.get('orders','—')),('Bounce',rate(value['bounced'],value['sent']))] if value else [(k,'—') for k in ('Entered','Sent','Delivery','Opens','Clicks','Conversions','Orders','Bounce')]
     st.html('<dl class="sc-flow-stats">'+''.join('<div><dt>'+k+'</dt><dd>'+escape(str(v))+'</dd></div>' for k,v in fields)+'</dl>')
 
-def refresh_reads(store,identity):
+def refresh_reads(store,identity,groups=None):
     cache=state()
     for token in list(cache.get('campaign_home_cache',{})):
-        if token[0]==store.connect and str(identity) in token[1]:
+        if token[0]==store.connect and str(identity) in token[1] and (groups is None or token[1][0] in groups):
             _,future=cache['campaign_home_cache'].pop(token)
             future.cancel()
             for name in ('automation_read_terminal','automation_read_started','campaign_home_reported_errors'):cache.get(name,{}).pop(token,None)
 
 @st.fragment
 def summary(store,identity,period):
-    data,phase=read(store,('analytics-report',str(identity),period),lambda:[report(store,identity,window(period))])
+    data,phase=read(store,('flow-summary',str(identity),period),lambda:[report(store,identity,window(period),include_history=False)])
     value=data[0] if data else None
     summary_cards(value)
     if phase in ('LOADING','REFRESHING'):arm('flow-summary',1)
     elif phase in ('ERROR','TIMED_OUT'):
         st.caption('Summary unavailable. Previously loaded metrics are retained.')
         if st.button('Retry summary'):refresh_reads(store,identity);st.rerun(scope='fragment')
-    with st.expander('Performance history',on_change='rerun',key='flow-history-'+str(identity)) as panel:
-        if panel.open and value:
-            if value['history']:st.line_chart(value['history'],x='day',y=['sent','delivered','opened','clicked'],height=160)
-            st.caption('Sent means provider acceptance. Rates use accepted emails; delivery, opens and clicks require recorded events. Enrolments are counted once, independently of the number of emails.')
+
+
+def refresh_control(key):
+    """Wake an existing sibling fragment once, using its native button.
+
+    Same scoped-control mechanism as thumbnails and the editor toolbar. Only
+    fixed application-owned keys are used; no timers, polling or user HTML.
+    """
+    import json,uuid
+    st.html('<script>/* '+uuid.uuid4().hex+' */document.querySelector('+json.dumps('.st-key-'+key+' button')+')?.click();</script>',unsafe_allow_javascript=True)
+
+
+def refresh_toolbar():
+    if st.session_state.pop('flow-toolbar-dirty',False):refresh_control('toolbar-refresh')
+
+
+@st.fragment
+def analytics_controls(store,identity):
+    key='auto-analytics-period-'+str(identity)
+    previous=st.session_state.get(key+'-applied','All time')
+    with st.container(horizontal=True,vertical_alignment='center'):
+        with st.container(width=200):period=st.selectbox('Date range',list(PERIODS),index=list(PERIODS).index(previous),key=key,label_visibility='collapsed')
+        refresh=st.button('Refresh analytics',key='flow-analytics-refresh')
+    if refresh:refresh_reads(store,identity,{'flow-summary','analytics-steps'})
+    summary(store,identity,period)
+    st.session_state[key+'-applied']=period
+    if refresh or previous!=period:refresh_control('flow-step-metrics-refresh')
 
 def open_email(sid):
     from crm_campaign_recovery import flush_current
@@ -70,7 +107,8 @@ def commit(store,user,row,draft):
     try:
         if save(store,user,row,draft,rerun=False) is False:return
     except (ValueError,PermissionError,StoreUnavailable) as exc:st.error(str(exc));return
-    st.toast('Draft saved');st.rerun(scope='app')
+    st.session_state['flow-toolbar-dirty']=True
+    st.toast('Draft saved');st.rerun(scope='fragment')
 
 def step_settings(store,user,row,s,index,prefix):
     flow=row['config']['draft'];amount,unit=delay_controls(s['delay_seconds'])
@@ -94,18 +132,39 @@ def snippet(doc):
     return re.sub(r'\s+',' ',unescape(re.sub('<[^>]+>',' ',source))).strip()[:240]
 
 @st.fragment
-def sequence(shop,store,user,identity,period):
-    row=store.flow(identity);flow=row['config']['draft']
+def step_performance(store,identity,slots,detail_slots):
+    """Replace read-only placeholders without remounting rows or thumbnails.
+
+    Streamlit permits fragment output into existing empty placeholders. Each
+    .html replaces its slot, so repeated updates cannot append duplicate data.
+    """
+    st.button('Refresh sequence metrics',key='flow-step-metrics-refresh')
+    period=st.session_state.get('auto-analytics-period-'+str(identity),'All time')
     values,phase=read(store,('analytics-steps',str(identity),period),lambda:step_metrics(store,identity,window(period)))
     metrics={r['step_id']:r for r in values or []}
-    from crm_automation_home import money
-    from crm_flow_thumbnail import thumbnail
-    st.html('<div class="sc-flow-trigger">Trigger: '+escape(TRIGGERS[flow['trigger']][1])+' · Exit: '+('Customer purchases · ' if flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back')) else '')+'Unsubscribe / suppression</div>')
-    for i,s in enumerate(flow['emails']):
-        sid=s['step_id'];prefix='flow-step-'+sid+'-'+str(row['config']['revision']);content=s['document']['content']
-        amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+(' after the previous enabled email' if i else ' after trigger')
+    for sid,slot in slots.items():
         m=metrics.get(sid,{k:0 for k in ('sent','opened','clicked','orders','delivered','queued','bounced','failed','skipped')})
-        metric=[('Sent',m['sent']),('Opens',rate(m['opened'],m['sent'])),('Clicks',rate(m['clicked'],m['sent'])),('Sales',m['orders']),('Revenue',money(m.get('revenue',{})))]
+        fields=[('Sent',m['sent']),('Opens',rate(m['opened'],m['sent'])),('Clicks',rate(m['clicked'],m['sent'])),('Sales',m['orders']),('Orders',m['orders'])]
+        slot.html('<div class="sc-flow-metrics" data-period="'+escape(period,quote=True)+'" data-phase="'+escape(phase,quote=True)+'">'+''.join('<span>'+label+' <b>'+escape(str(value) if values is not None else '—')+'</b></span>' for label,value in fields)+'</div>')
+        detail_slots[sid].html('<small>'+escape(' · '.join(label+' '+(str(m[key]) if values is not None else '—') for label,key in [('Delivered','delivered'),('Queued','queued'),('Failed','failed'),('Skipped','skipped'),('Bounced','bounced')]))+'</small>')
+    if phase in ('LOADING','REFRESHING'):arm('flow-steps',1)
+    elif phase in ('ERROR','TIMED_OUT'):
+        st.caption('Step analytics unavailable.')
+        if st.button('Retry step analytics'):
+            refresh_reads(store,identity,{'analytics-steps'});st.rerun(scope='fragment')
+    historical=[m for m in values or [] if m['step_id'] not in slots]
+    if historical:
+        with st.expander('Previous / removed email history'):st.dataframe([{k:v for k,v in m.items() if k!='revenue'} for m in historical],hide_index=True)
+
+
+@st.fragment
+def sequence(shop,store,user,identity,period):
+    row=store.flow(identity);flow=row['config']['draft']
+    slots={};detail_slots={}
+    from crm_flow_thumbnail import thumbnail
+    for i,s in enumerate(flow['emails']):
+        sid=s['step_id'];prefix='flow-step-'+sid+'-';content=s['document']['content']
+        amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+(' after the previous enabled email' if i else ' after trigger')
         with st.container(horizontal=True,key='flow-row-'+sid):
             with st.container(width=78):
                 thumbnail(store,s)
@@ -115,22 +174,17 @@ def sequence(shop,store,user,identity,period):
                 body=snippet(s['document'])
                 title='Email '+str(i+1)+((' · '+name) if name!='Email '+str(i+1) else '')
                 copy=''.join('<p title="'+escape(text,quote=True)+'"><small>'+escape(text)+'</small></p>' for text in (preheader,body) if text)
-                st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+' · '+('Enabled' if s.get('enabled',True) else 'Disabled')+'</small><div class="sc-flow-metrics">'+''.join('<span>'+label+' <b>'+escape(str(value) if values is not None else '—')+'</b></span>' for label,value in metric)+'</div></div>')
+                st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+' · '+('Enabled' if s.get('enabled',True) else 'Disabled')+'</small></div>')
+                slots[sid]=st.empty()
             with st.container(width=130):
                 if st.button('Edit Email',key=prefix+'edit'):open_email(sid)
                 with st.popover('⋮',help='Email step settings',key=prefix+'menu'):
                     if status(row)!='ARCHIVED':step_settings(store,user,row,s,i,prefix)
-                    st.caption(' · '.join(label+' '+(str(m[key]) if values is not None else '—') for label,key in [('Delivered','delivered'),('Queued','queued'),('Failed','failed'),('Skipped','skipped'),('Bounced','bounced')]))
+                    detail_slots[sid]=st.empty()
                     st.caption('Per-email unsubscribe attribution is unavailable in the current ledger.')
-    if phase in ('LOADING','REFRESHING'):arm('flow-steps',1)
-    elif phase in ('ERROR','TIMED_OUT'):
-        st.caption('Step analytics unavailable.')
-        if st.button('Retry step analytics'):refresh_reads(store,identity);st.rerun(scope='fragment')
     if status(row)!='ARCHIVED' and st.button('+ Add Email',key='flow-add-'+str(identity)):
         draft=deepcopy(flow);draft['emails'].append(email_step(delay_seconds=86400));commit(store,user,row,draft)
-    historical=[m for m in values or [] if m['step_id'] not in {s['step_id'] for s in flow['emails']}]
-    if historical:
-        with st.expander('Previous / removed email history'):st.dataframe(historical,hide_index=True)
+    step_performance(store,identity,slots,detail_slots)
     preview=next((s for s in flow['emails'] if s['step_id']==st.session_state.get('flow_preview_step')),None)
     if preview:
         st.caption('Saved email preview · neutral sample data')
@@ -140,6 +194,53 @@ def sequence(shop,store,user,identity,period):
         if needs_checkout(doc):doc,_=document(doc,sample(doc))
         flow_preview(doc,store.render_settings(),'flow-readonly-'+preview['step_id'])
         if st.button('Close preview'):st.session_state.pop('flow_preview_step',None);st.rerun(scope='fragment')
+    refresh_toolbar()
+
+
+@st.fragment
+def flow_settings(store,user,identity):
+    from crm_automation_definition import RULE_FIELDS,validate
+    row=store.flow(identity);flow=deepcopy(row['config']['draft'])
+    key='flow-settings-'+str(identity)
+    with st.container(key='flow-settings'):
+        st.subheader('Flow Settings')
+        if status(row)=='ARCHIVED':
+            st.caption('Archived · '+TRIGGERS[flow['trigger']][1]);return
+        # Forms batch harmless typing locally. Only explicit Save persists the
+        # draft and wakes the toolbar; analytics/checkouts/previews stay mounted.
+        with st.form(key,border=False):
+            name_col,trigger_col,cooldown_col=st.columns([2,2,1])
+            name=name_col.text_input('Flow name',row['name'],max_chars=150)
+            flow['trigger']=trigger_col.selectbox('Entry trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda k:TRIGGERS[k][1])
+            flow['reentry_days']=cooldown_col.selectbox('Re-entry cooldown',[0,7,30,90],index=[0,7,30,90].index(flow['reentry_days']),format_func=lambda d:'Once ever' if d==0 else str(d)+' days')
+            mandatory=flow['trigger'] in ('abandoned','win_back')
+            flow['exit_on_purchase']=st.checkbox('Exit after a new purchase',value=True if mandatory else flow.get('exit_on_purchase',False),disabled=mandatory)
+            st.caption('Unsubscribe, suppression and recipient eligibility are checked before every email.')
+            with st.popover('Entry rules and advanced settings'):
+                inactive_days=st.number_input('Days since last purchase (Win Back)',1,3650,flow.get('inactive_days',180))
+                if flow['trigger']=='win_back':flow['inactive_days']=inactive_days
+                rules=st.data_editor(flow['rules'] or [{'field':'market','condition':'is','value':'AU'}],num_rows='dynamic',
+                    column_config={'field':st.column_config.SelectboxColumn('Field',options=list(RULE_FIELDS)),'condition':st.column_config.SelectboxColumn('Condition',options=['is','at_least']),'value':st.column_config.TextColumn('Value')})
+                flow['rules']=rules if st.checkbox('Apply these entry rules (AND)',bool(flow['rules'])) else []
+                st.caption('Initial delay starts at the trigger. Subsequent delays start after the preceding enabled email is accepted by the provider.')
+                st.caption('Check that Shopify or another marketing platform is not sending the same recovery sequence. External sends are not visible here.')
+            if st.form_submit_button('Save flow settings'):
+                try:
+                    if flow['trigger'] in ('abandoned','win_back'):flow['exit_on_purchase']=True
+                    validate(flow)
+                    if save(store,user,row,flow,name,rerun=False):
+                        st.session_state['flow-toolbar-dirty']=True
+                        st.toast('Flow settings saved');st.rerun(scope='fragment')
+                except (ValueError,PermissionError) as exc:st.error(str(exc))
+        refresh_toolbar()
+
+
+@st.fragment
+def recipient_details(store,user,identity):
+    with st.popover('Recipient timelines and scheduled deliveries',on_change='rerun',key='flow-recipients-'+str(identity)) as panel:
+        if panel.open:
+            from crm_flow_builder import activity as recipient_activity
+            recipient_activity(store,store.flow(identity),user,rerun_scope='fragment')
 
 @st.fragment
 def recent(store,row,user,period):
@@ -162,29 +263,40 @@ def recent(store,row,user,period):
 
 @st.fragment
 def checkouts(shop,store,user,row):
+    slot='auto-checkouts-'+str(row['id'])
+    for suffix in ('-search','-status'):
+        key=slot+suffix
+        if key not in st.session_state and key+'-retained' in st.session_state:
+            st.session_state[key]=st.session_state[key+'-retained']
     st.session_state['automation-analytics-pending']=False
     st.session_state['checkout-enrollment-pending']=False
-    checkout_panel(shop,store,user,row,window('All time'),'All time')
+    with st.expander('Abandoned checkouts',on_change='rerun',key='flow-checkout-panel-'+str(row['id'])) as panel:
+        if panel.open:checkout_panel(shop,store,user,row,window('All time'),'All time',paginated=True)
+        for suffix in ('-search','-status'):
+            key=slot+suffix
+            if key in st.session_state:st.session_state[key+'-retained']=st.session_state[key]
+    enrollment=st.session_state.get(slot+'-enrollment',{})
+    batch=[(k,enrollment.get('results',{}).get(k,{})) for k in enrollment.get('batch',())]
+    signature=tuple((k,v.get('state'),v.get('delivery'),v.get('enrolled')) for k,v in batch)
+    if (batch and all(v.get('state') in ('DONE','FAILED') for _,v in batch)
+            and any(v.get('enrolled') or v.get('delivery')=='sent' for _,v in batch)
+            and st.session_state.get(slot+'-metrics-receipt')!=signature):
+        st.session_state[slot+'-metrics-receipt']=signature
+        refresh_control('flow-analytics-refresh')
     if st.session_state.get('automation-analytics-pending') or st.session_state.get('checkout-enrollment-pending'):arm('flow-checkouts',1)
 
 def flow_page(shop,store,user,row):
     st.html(STYLE)
     from crm_automation_toolbar import toolbar
-    toolbar(store,user,row['id'])
-    if st.session_state.get('flow-top-'+str(row['id'])+'simulation'):test_flow(row)
-    error=st.session_state.pop('flow_builder_error',None)
-    if error:st.warning(error)
-    with st.container(horizontal=True,vertical_alignment='center'):
-        with st.container(width=240):period=st.selectbox('Date range',list(PERIODS),index=4,key='auto-analytics-period-'+str(row['id']),label_visibility='collapsed')
-        if st.button('Refresh analytics'):refresh_reads(store,row['id']);st.rerun(scope='app')
-    summary(store,row['id'],period)
-    with st.expander('Trigger and flow settings',on_change='rerun',key='flow-rules-'+str(row['id'])) as rules:
-        if rules.open and status(row)!='ARCHIVED':timing(store,user,row)
-    sequence(shop,store,user,row['id'],period)
-    if row['trigger_type']=='abandoned':
-        with st.expander('Abandoned checkouts',on_change='rerun',key='flow-checkout-panel-'+str(row['id'])) as panel:
-            if panel.open:checkouts(shop,store,user,row)
-    recent(store,row,user,period)
+    with st.container(key='flow-workspace'):
+        toolbar(store,user,row['id'],flow_view=True)
+        error=st.session_state.pop('flow_builder_error',None)
+        if error:st.warning(error)
+        analytics_controls(store,row['id'])
+        sequence(shop,store,user,row['id'],'All time')
+        flow_settings(store,user,row['id'])
+        recipient_details(store,user,row['id'])
+        if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
     from crm_flow_thumbnail import SCRIPT
     st.html('<span hidden data-flow-script="true"></span>'+SCRIPT,unsafe_allow_javascript=True)
     anchor=st.session_state.pop('flow_return_step',None)

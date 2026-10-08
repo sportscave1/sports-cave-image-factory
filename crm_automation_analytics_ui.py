@@ -14,8 +14,8 @@ def state():return st.session_state.setdefault('automation_analytics_reads',{})
 def read(store,key,fn,ttl=180):
     def verified():
         value=fn()
-        if key[0]=='analytics-report':
-            required=('sent','delivered','opened','clicked','conversions','history','revenue')
+        if key[0] in ('analytics-report','flow-summary'):
+            required=('sent','delivered','opened','clicked','conversions','history','revenue')+ (('orders',) if key[0]=='flow-summary' else ())
             if not isinstance(value,list) or len(value)!=1 or not isinstance(value[0],dict) or any(value[0].get(k) is None for k in required):raise ValueError('Incomplete analytics report')
         return value
     future=job(state(),store,key,verified,ttl=ttl)
@@ -96,7 +96,7 @@ def checkout_details(store,user,row,c):
 
 
 @isolated
-def checkout_panel(shop,store,user,row,bounds,period):
+def checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     # Scope every override to this panel or the dialog containing it.
     st.html('''<style>
     div[role="dialog"]:has(.st-key-checkout-compact)>div:first-child{padding:12px 24px 4px!important}
@@ -111,10 +111,10 @@ def checkout_panel(shop,store,user,row,bounds,period):
     .st-key-checkout-compact [data-testid="stButton"] button p{font-size:13px}
     </style>''')
     with st.container(key='checkout-compact'):
-        _checkout_panel(shop,store,user,row,bounds,period)
+        _checkout_panel(shop,store,user,row,bounds,period,paginated=paginated)
 
 
-def _checkout_panel(shop,store,user,row,bounds,period):
+def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     from pathlib import Path
     import streamlit.components.v1 as components
     from crm_component_json import render_component
@@ -125,19 +125,31 @@ def _checkout_panel(shop,store,user,row,bounds,period):
     status.selectbox('Checkout status',['Incomplete'],label_visibility='collapsed',key=slot+'-status')
     search_column,actions=st.columns([1.2,1.5],vertical_alignment='center')
     search=search_column.text_input('Search and filter',placeholder='Checkout, customer name or email',label_visibility='collapsed',key=slot+'-search')
-    records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),60)
+    if paginated:
+        criteria=(period,search.strip())
+        if st.session_state.get(slot+'-criteria')!=criteria:
+            st.session_state[slot+'-criteria']=criteria;st.session_state[slot+'-cursors']=[None]
+        cursors=st.session_state.setdefault(slot+'-cursors',[None]);cursor=cursors[-1]
+        key+=('page',search.strip(),cursor)
+        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period),page_size=51,after=cursor,search=search),60)
+    else:
+        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),60)
     if records is None:
         st.caption('Loading abandoned checkouts…' if phase!='ERROR' else 'Checkout records temporarily unavailable.');return
+    more=bool(paginated and len(records)>50)
+    if paginated:records=records[:50]
     from crm_checkout_enrollment_ui import progress,begin
     enrollment_results,busy=progress(store,row,records,slot)
     needle=search.strip().casefold()
-    visible=[c for c in records if not needle or needle in ' '.join((reference(c),display_name(c),str((c.get('analytics') or {}).get('email') or ''),str(c.get('admin_checkout_id') or ''))).casefold()]
+    visible=records if paginated else [c for c in records if not needle or needle in ' '.join((reference(c),display_name(c),str((c.get('analytics') or {}).get('email') or ''),str(c.get('admin_checkout_id') or ''))).casefold()]
     keys={c['checkout_key'] for c in visible}
     selected=[k for k in st.session_state.get(slot+'-selected',[]) if k in keys]
     available=[k for k in selected if k not in busy]
+    if paginated and any(k not in keys for k in st.session_state.get(slot+'-selected',[])):
+        st.caption('Selections on other pages are retained. Add to flow applies to this page’s selected checkouts.')
     with actions.container(horizontal=True):
         refresh=st.button('Refresh checkout details',key=slot+'-reconcile',help='Repair Shopify details only; never enrol or send')
-        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='primary')
+        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='secondary' if paginated else 'primary')
     if refresh:
         st.session_state.pop(slot+'-timing',None)
         try:
@@ -146,7 +158,10 @@ def _checkout_panel(shop,store,user,row,bounds,period):
             reconcile_requests(store)
             st.session_state[slot+'-results']=[{'Result':k,'Rows':v} for k,v in counts.items()]
             if more:st.session_state[slot+'-results'].append({'Result':'More rows remain; refresh resumes from the saved cursor','Rows':0})
-            state().get('campaign_home_cache',{}).pop((store.connect,key),None)
+            for token in list(state().get('campaign_home_cache',{})):
+                if token[0]==store.connect and token[1][:2]==('checkout-list',str(row['id'])):
+                    state()['campaign_home_cache'].pop(token,None)
+                    for group in ('automation_read_terminal','automation_read_started'):state().get(group,{}).pop(token,None)
             st.rerun(scope='fragment')
         except Exception:st.warning('Shopify refresh unavailable. Saved records retained.')
     if add:
@@ -166,7 +181,8 @@ def _checkout_panel(shop,store,user,row,bounds,period):
     event=render_component(component,rows=listing,selected=selected,key=slot+'-table',default=None)
     if event and event.get('sequence')!=st.session_state.get(slot+'-event'):
         st.session_state[slot+'-event']=event['sequence']
-        st.session_state[slot+'-selected']=[k for k in event.get('selected',[]) if k in keys]
+        elsewhere=[k for k in st.session_state.get(slot+'-selected',[]) if k not in keys] if paginated else []
+        st.session_state[slot+'-selected']=elsewhere+[k for k in event.get('selected',[]) if k in keys]
         if event.get('detail') in keys:st.session_state[slot+'-detail']=event['detail']
         retry=event.get('retry')
         if retry in keys and retry not in busy and enrollment_results.get(retry,{}).get('state')=='FAILED':
@@ -174,6 +190,13 @@ def _checkout_panel(shop,store,user,row,bounds,period):
         st.rerun(scope='fragment')
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-detail')),None)
     if chosen:checkout_details(store,user,row,chosen)
+    if paginated:
+        with st.container(horizontal=True):
+            if st.button('Previous checkouts',disabled=len(cursors)==1,key=slot+'-previous'):
+                cursors.pop();st.rerun(scope='fragment')
+            st.caption('Page '+str(len(cursors))+' · '+str(len(visible))+' checkouts')
+            if st.button('Next checkouts',disabled=not more,key=slot+'-next'):
+                last=records[-1];cursors.append((str(last['created_at']),last['checkout_key']));st.rerun(scope='fragment')
 
 def render(shop,store,user,identity,name=None):
     """Compatibility navigation for callers of the old analytics destination."""

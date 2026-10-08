@@ -7,7 +7,7 @@ from crm_automation_publish_state import has_changes,label
 
 
 @st.fragment(**({'key':'crm_automation_toolbar'} if 'key' in inspect.signature(st.fragment).parameters else {}))
-def toolbar(store,user,identity,*,editor=None,key='',cfg=None):
+def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
     from crm_campaign_recovery import flush_current
     from crm_automation_ui import changed
     from crm_automation_definition import status
@@ -52,6 +52,11 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None):
             if editor:
                 from crm_campaign_send_ui import test_control
                 test_control(store,user,editor,key,cfg=cfg)
+            elif flow_view:
+                with st.popover('Test',help='Simulate this flow without sending emails',on_change='rerun',key='flow-test-popover') as simulation:
+                    if simulation.open:
+                        from crm_flow_builder import test_flow
+                        test_flow(row)
             elif st.button('Test Flow',key='toolbar-test'):
                 name='flow-top-'+str(identity)+'simulation'
                 st.session_state[name]=not st.session_state.get(name,False);st.rerun(scope='app')

@@ -1,55 +1,69 @@
 {
-  "coldMs": 2563,
+  "coldMs": 470,
   "settingsOpen": {
-    "ms": 782,
+    "ms": 379,
     "queries": 3,
     "flowRenders": 1,
     "fullRuns": 0,
-    "thumbnailRetained": false
+    "thumbnailRetained": false,
+    "missingThumbnailFrames": 6
   },
   "settingsEdit": {
-    "ms": 403,
+    "ms": 350,
     "queries": 3,
     "flowRenders": 1,
     "fullRuns": 0,
-    "thumbnailRetained": false
+    "thumbnailRetained": false,
+    "missingThumbnailFrames": 6
   },
   "checkoutsOpen": {
-    "ms": 374,
+    "ms": 2002,
     "queries": 4,
     "flowRenders": 1,
     "fullRuns": 0,
-    "thumbnailRetained": false
+    "thumbnailRetained": false,
+    "missingThumbnailFrames": 5
   },
   "checkoutSearch": {
-    "ms": 145,
+    "ms": 380,
     "queries": 0,
     "flowRenders": 0,
     "fullRuns": 0,
-    "thumbnailRetained": true
+    "thumbnailRetained": true,
+    "missingThumbnailFrames": 0
   },
   "stepMenu": {
-    "ms": 215,
+    "ms": 222,
     "queries": 0,
     "flowRenders": 0,
     "fullRuns": 0,
-    "thumbnailRetained": true
+    "thumbnailRetained": true,
+    "missingThumbnailFrames": 0
+  },
+  "dateFilter": {
+    "ms": 434,
+    "queries": 6,
+    "flowRenders": 1,
+    "fullRuns": 0,
+    "thumbnailRetained": false,
+    "missingThumbnailFrames": 8
   },
   "editEmail": {
-    "ms": 369,
+    "ms": 416,
     "queries": 5,
     "flowRenders": 0,
     "fullRuns": 1,
-    "thumbnailRetained": false
+    "thumbnailRetained": false,
+    "missingThumbnailFrames": 10
   },
-  "warmReturnMs": 360,
+  "warmReturnMs": 246,
   "final": {
-    "queries": 115,
-    "reports": 1,
+    "queries": 174,
+    "reports": 4,
     "activity": 0,
-    "checkouts": 1,
-    "flow_renders": 5,
+    "checkouts": 3,
+    "flow_renders": 16,
     "full_runs": 3,
-    "tick": 16
+    "tick": 18
   }
 }
