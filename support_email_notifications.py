@@ -8,6 +8,7 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from support_email_provider import ImapProvider, MailboxError, load_configuration
 from support_email_runtime import POLL_SECONDS
@@ -19,6 +20,31 @@ STALE_TTL = 120
 _LOCK = threading.Lock()
 _CACHE = {"scope": None, "expires": 0, "success": 0, "value": {}, "dirty": False}
 _INVALIDATION = 0
+_REFRESH_LOCK = threading.Lock()
+_REFRESH_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix='email-count')
+_REFRESH = None
+
+
+def cached_status(scope):
+    # Credential-scoped, counts only. Never share another account's snapshot.
+    if _CACHE['scope'] != scope or not _CACHE['value']:
+        return {'available': False, 'unread_count': None}
+    return dict(_CACHE['value'])
+
+
+def fast_status():
+    """Return immediately; one coalesced provider refresh serves all browser tabs."""
+    global _REFRESH
+    cfg = load_configuration()
+    if not cfg.configured:return {'available': False, 'unread_count': None}
+    with _REFRESH_LOCK:
+        if (_REFRESH is None or _REFRESH.done()) and (
+                _CACHE['scope'] != cfg.scope or time.time() >= _CACHE['expires']):
+            _REFRESH = _REFRESH_POOL.submit(status, configuration=cfg)
+        pending = bool(_REFRESH and not _REFRESH.done())
+    result = cached_status(cfg.scope)
+    return {**result, 'refreshing': pending,
+            'stale': not result.get('available') or time.time()-result.get('checked_at',0)>TTL}
 
 
 def state_key(mailbox):
@@ -99,22 +125,20 @@ def status(*, configuration=None, provider=None, store=None, now=None):
         return {"available": False, "unread_count": None}
     clock = time.time() if now is None else now
     if not _LOCK.acquire(blocking=False):
-        return {"available": False, "unread_count": None}
+        return {**cached_status(cfg.scope), 'stale': True}
     try:
         generation = _INVALIDATION
         if _CACHE["scope"] != cfg.scope:
             _CACHE.update(scope=cfg.scope, expires=0, success=0, value={}, dirty=False, failures=0)
         cached = dict(_CACHE["value"])
         if clock < _CACHE["expires"]:
-            if clock - _CACHE["success"] > STALE_TTL:
-                return {"available": False, "unread_count": None}
-            return cached
+            return {**cached, 'stale': clock - _CACHE['success'] > TTL}
         _CACHE["expires"] = clock + TTL  # Failures are throttled too.
         adapter = provider or ImapProvider(cfg, background=True)
         try:
             value = (store or NotificationStore()).poll(adapter, now=clock, force=_CACHE["dirty"])
             if value is None:
-                return {"available": False, "unread_count": None}
+                return {**cached_status(cfg.scope), 'stale': True}
             result = {"available": True, "unread_count": int(value["unread_count"]),
                       "checked_at": float(value["checked_at"]),
                       "arrival_version": f'{value["uidvalidity"]}:{value["last_uid"]}'}
@@ -123,7 +147,7 @@ def status(*, configuration=None, provider=None, store=None, now=None):
         except Exception as error:
             if getattr(error, "code", "") == "busy":
                 _CACHE["expires"] = clock + 15
-                return cached if cached and clock - _CACHE["success"] <= STALE_TTL else {
+                return {**cached, 'stale': True} if cached else {
                     "available": False, "unread_count": None}
             if getattr(error, "code", "") != "deferred":
                 LOGGER.warning("Email notification check unavailable (%s)", type(error).__name__)
@@ -139,7 +163,7 @@ def status(*, configuration=None, provider=None, store=None, now=None):
                 _CACHE.update(value=result, success=clock, failures=0, expires=clock + TTL)
                 return dict(result)
             except Exception:
-                result = {**cached, "available": False} if cached and clock - _CACHE["success"] <= STALE_TTL else {
+                result = {**cached, "available": False, 'stale': True} if cached else {
                     "available": False, "unread_count": None}
                 _CACHE["value"] = result
                 return dict(result)

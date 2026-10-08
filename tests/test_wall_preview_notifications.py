@@ -30,11 +30,13 @@ class NotificationTests(unittest.TestCase):
     def test_three_images_one_seen_persists_and_other_user_stays_unread(self):
         rows=[self.create() for _ in range(3)]
         self.assertEqual(self.status()['unread_count'],3)
+        self.assertEqual(notifications.status(self.claims,count_only=True),{'unread_count':3,'notifications':[]})
         # Polling and opening the list are read-only.
         ledger.list_previews(status='all',include_private=True)
         self.assertEqual(self.status()['unread_count'],3)
         notifications.mark_seen(rows[0]['id'],self.user)
         self.assertEqual(self.status()['unread_count'],2)
+        self.assertEqual(notifications.status(self.claims,count_only=True),{'unread_count':2,'notifications':[]})
         self.assertNotIn(str(rows[0]['id']),[x['wall_preview_id'] for x in self.status()['notifications']])
         other={**self.claims,'sub':str(uuid.uuid4())}
         self.assertEqual(notifications.status(other)['unread_count'],3)

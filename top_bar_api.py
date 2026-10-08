@@ -864,10 +864,11 @@ async def top_bar_notifications(request: Request):
     claims = _claims(request)
     if not claims:
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    activity_rows, alerts = await run_in_threadpool(load_notification_sources, claims)
+    counts_only = request.query_params.get('counts_only') == '1'
+    activity_rows, alerts = ((), ()) if counts_only else await run_in_threadpool(load_notification_sources, claims)
     from wall_preview_notifications import status as wall_status
     try:
-        wall = await run_in_threadpool(wall_status, claims)
+        wall = await run_in_threadpool(wall_status, claims, count_only=True) if counts_only else await run_in_threadpool(wall_status, claims)
     except Exception:
         wall = {"unread_count": None, "notifications": []}
 
@@ -887,7 +888,7 @@ async def top_bar_notifications(request: Request):
 def load_order_status(claims):
     if "Orders" not in set(claims.get("allowed_routes") or ()):
         return {"action_required_count": 0, "badge_label": "", "notification": {}}
-    summary = {"action_required_count": 0, "badge_label": ""}
+    summary = {"action_required_count": None, "badge_label": ""}
     notification = {}
     supabase_configured = False
     supabase_summary_loaded = False
@@ -932,6 +933,7 @@ def load_order_status(claims):
 
         payload = order_allocator.load_orders_snapshot()
         rows = payload.get("rows") if isinstance(payload, dict) else payload
+        if rows is None:raise ValueError('Order snapshot unavailable')
         count = order_action_state.count_orders_requiring_action(rows or [])
         summary = {
             "action_required_count": count,
@@ -963,8 +965,8 @@ async def top_bar_email_status(request: Request):
     claims = _claims(request)
     if not claims or "Email" not in set(claims.get("allowed_routes") or ()):
         return _json({"ok": False, "error": "Access not approved."}, 403)
-    from support_email_notifications import status
-    result = await run_in_threadpool(status)
+    from support_email_notifications import fast_status
+    result = await run_in_threadpool(fast_status)
     return _json({"ok": True, **result})
 
 

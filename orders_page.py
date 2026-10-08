@@ -800,10 +800,18 @@ def _orders_supabase_visibility_marker():
 def _check_orders_supabase_live_refresh():
     if _certificate_action_in_progress():
         return
+    # A parallel check may finish after navigation or an account change. Never
+    # let that stale result invalidate the new workspace or interrupt an action.
+    page = st.session_state.get("current_page")
+    user = dict(st.session_state.get("sports_cave_current_user") or {})
     try:
         marker = _orders_supabase_visibility_marker()
     except Exception as error:
         print(f"ORDERS SYNC: orders_page_live_refresh_check_failed status=failed error={error}", flush=True)
+        return
+    if (st.session_state.get("current_page") != page
+            or dict(st.session_state.get("sports_cave_current_user") or {}) != user
+            or _certificate_action_in_progress()):
         return
     if not marker:
         return
@@ -827,7 +835,9 @@ def _check_orders_supabase_live_refresh():
 def _render_orders_supabase_live_refresh():
     fragment = getattr(st, "fragment", None)
     if callable(fragment):
-        @fragment(run_every=f"{ORDERS_SUPABASE_LIVE_CHECK_SECONDS}s")
+        # Read-only marker I/O must not hold up the completed Orders page.
+        # Keep the same cadence and invalidate only on a confirmed change.
+        @fragment(run_every=f"{ORDERS_SUPABASE_LIVE_CHECK_SECONDS}s", parallel=True)
         def _orders_live_refresh_fragment():
             _check_orders_supabase_live_refresh()
 

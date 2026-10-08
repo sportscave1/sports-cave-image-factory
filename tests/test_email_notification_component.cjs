@@ -59,7 +59,21 @@ assert.equal(rows.emailOpen.button.badge,null);
 assert.equal(rows.orders.button.badge.textContent,'7');
 assert.match(source,/updateSidebarBadge\("email", payload.unread_count, ""\)/);
 assert.match(source,/button span.sc-orders-action-badge \{[^}]*pointer-events: none;/);
-assert.match(source,/\[class\*="st-key-sidebar-disclosure-email-"\] button span.sc-orders-action-badge \{\s*right: 34px;/);
+assert.match(source,/\[class\*="st-key-sidebar-disclosure-email-"\] button span.sc-orders-action-badge[^{}]*\{\s*right: 34px;/);
 assert.match(source,/state.config.emailEnabled \|\| state.config.wallInboxEnabled/);
 assert.doesNotMatch(source,/setInterval\(refreshEmailStatus|later\(refreshEmailStatus/);
 console.log('Shared notification badge checks passed (collapsed/expanded, zero/unread, clear, no duplicate, Orders unchanged).');
+
+// Run the production count reducer: an outage or stale snapshot must not mean zero.
+let saved={unread_count:4,checked_at:1},counts=[];
+const reducer={state:{config:{emailEnabled:true}},Date,Number,
+ readStatusCache:()=>({payload:saved}),writeStatusCache:(_kind,value)=>saved=value,
+ updateSidebarBadge:(_route,count)=>counts.push(count),
+ doc:{querySelector:()=>null,querySelectorAll:()=>[]}};
+vm.createContext(reducer);
+vm.runInContext(source.slice(source.indexOf('const applyEmailStatus ='),source.indexOf('let emailStatusPending ='))+';this.apply=applyEmailStatus;',reducer);
+reducer.apply({unread_count:null});assert.equal(counts.at(-1),4);
+reducer.apply({unread_count:4,checked_at:1,stale:true});assert.equal(counts.at(-1),4);
+reducer.apply({unread_count:0,checked_at:2});assert.equal(counts.at(-1),0);
+reducer.apply({unread_count:8,checked_at:1});assert.equal(counts.at(-1),0);
+console.log('Count reducer: stale/outage preserved, authoritative zero clears, older responses ignored.');

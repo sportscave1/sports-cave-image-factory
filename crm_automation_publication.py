@@ -8,7 +8,7 @@ import json
 import logging
 import re
 import uuid
-from crm_logic import now
+from crm_logic import now,date
 from crm_navigation import require
 from crm_automation_definition import validate, native, status, production_document
 from crm_store import StoreUnavailable
@@ -16,6 +16,22 @@ from crm_automation_publish_state import has_changes
 
 LOG=logging.getLogger(__name__)
 MAX_ATTEMPTS=3
+PUBLICATION_SECONDS=1200
+
+
+def overdue(publication):
+    requested=date(publication.get('requested_at'))
+    return publication.get('state')=='PUBLISHING' and requested is not None and (now()-requested).total_seconds()>=PUBLICATION_SECONDS
+
+
+def expire(store,identity):
+    """Fence abandoned jobs even when the worker is offline; retain the draft/live version."""
+    with store.db() as conn:
+        conn.execute("SET LOCAL lock_timeout='2s'")
+        jobs=conn.execute("""SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s
+          AND state IN ('QUEUED','RUNNING') AND requested_at<=now()-interval '20 minutes'
+          FOR UPDATE SKIP LOCKED""",(identity,)).fetchall()
+        for job in jobs:fail(conn,job,'Publication timed out. Check the CRM worker and retry publishing.')
 
 
 def approved(flow):
@@ -42,6 +58,7 @@ def preflight(row,revision):
 def request(store,user,identity,revision):
     require(user,'crm_automations_manage')
     with store.db() as conn:
+        conn.execute("SET LOCAL lock_timeout='2s'")
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
         flow=preflight(row,revision)
         active=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND state IN ('QUEUED','RUNNING')",(identity,)).fetchone()
@@ -76,10 +93,10 @@ def prepare(store,identity,flow,version,name,env=None):
         if not step.get('enabled',True):continue
         doc=with_email_defaults(production_document(step['document']),cfg)
         validation_doc=publication_document(doc,flow['trigger'])
-        failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True).items() if not v]
-        if failures:raise ValueError('Email '+str(index+1)+' blocked: '+'; '.join(failures))
         template_id=str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))
-        validate_rendered_email(validate_tracking(validation_doc,cfg,template_id))
+        email_size=validate_rendered_email(validate_tracking(validation_doc,cfg,template_id))
+        failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True,email_size=email_size).items() if not v]
+        if failures:raise ValueError('Email '+str(index+1)+' blocked: '+'; '.join(failures))
         content={'format':'automation_delivery_v1','document':doc,'render_settings':cfg,
                  'automation_id':str(identity),'automation_version':version,'step_id':step['step_id'],
                  'trigger':flow['trigger'],'rules':flow['rules']}
@@ -152,6 +169,8 @@ def claim(store,owner):
           (state='QUEUED' AND available_at<=now()) OR (state='RUNNING' AND lease_until<now())
           ORDER BY requested_at FOR UPDATE SKIP LOCKED LIMIT 1""").fetchone()
         if not job:return None
+        if (now()-date(job['requested_at'])).total_seconds()>=PUBLICATION_SECONDS:
+            fail(conn,job,'Publication timed out. Check the CRM worker and retry publishing.');return None
         if job['attempts']>=MAX_ATTEMPTS:
             fail(conn,job,'Publication was interrupted repeatedly. Retry publishing.');return None
         return conn.execute("""UPDATE crm_automation_publish_jobs SET state='RUNNING',owner=%s,
@@ -174,6 +193,8 @@ def tick(store,owner,env=None):
         with store.db() as conn:
             locked=conn.execute('SELECT * FROM crm_automation_publish_jobs WHERE id=%s FOR UPDATE',(job['id'],)).fetchone()
             if locked['state']!='RUNNING' or locked['owner']!=owner or locked['attempts']!=job['attempts']:return True
+            if (now()-date(locked['requested_at'])).total_seconds()>=PUBLICATION_SECONDS:
+                fail(conn,locked,'Publication timed out. Check the CRM worker and retry publishing.');return True
             row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(job['automation_id'],)).fetchone()
             if not row or status(row)=='ARCHIVED' or row['config'].get('deleted_at') or row['status']!=frozen['base_status']:
                 raise ValueError('Automation changed during publication.')

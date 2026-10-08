@@ -71,8 +71,8 @@ handlers.contextmenu(right);handlers['parent-pointerdown']();assert.equal(menus.
   let now=300000,checked=0,orders=0,email=0;const scheduled=[];
   const scheduler={state:{config:{ordersEnabled:true,emailEnabled:true,orderStatusUrl:'/fixture/orders'}},
     ORDER_STATUS_REFRESH_MS:60000,EMAIL_HEARTBEAT_MS:30000,
-    refreshEmailStatus(){email++;},statusRefreshDelay(){return Math.max(0,60000-(now-checked));},
-    writeStatusCache(){checked=now;},requestJson:async()=>{orders++;return {};},
+    refreshEmailStatus(){email++;},refreshWallNotifications(){},statusRefreshDelay(){return Math.max(0,60000-(now-checked));},
+    readStatusCache:()=>({payload:{action_required_count:7}}),writeStatusCache(){checked=now;},requestJson:async()=>{orders++;return {};},
     updateOrdersBadge(){},showOrderToast(){},later(fn,delay){scheduled.push(delay);}};
   vm.createContext(scheduler);
   vm.runInContext(shell.slice(shell.indexOf('const refreshOrderStatus = async'),shell.indexOf('const compactTimerLabel ='))+';this.tick=refreshOrderStatus;',scheduler);

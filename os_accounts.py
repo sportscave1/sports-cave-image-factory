@@ -1,5 +1,7 @@
 import os
+import logging
 import threading
+import time
 import uuid
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -643,20 +645,24 @@ class PostgresAccountStore:
                 return urlunparse(parsed._replace(query=urlencode(query)))
         raise AccountStorageError("Account storage is not configured.")
 
-    def _connect(self):
+    def _connect(self, *, autocommit=False):
         try:
             import psycopg
             from psycopg.rows import dict_row
         except ImportError as error:
             raise AccountStorageError("Postgres support is not installed.") from error
+        started = time.perf_counter()
         try:
-            return psycopg.connect(
+            connection = psycopg.connect(
                 self._database_url(),
                 row_factory=dict_row,
                 connect_timeout=4,
                 prepare_threshold=None,
+                autocommit=autocommit,
                 options="-c statement_timeout=4000 -c idle_in_transaction_session_timeout=4000",
             )
+            logging.info("PERF Accounts connect_ms=%.2f", (time.perf_counter() - started) * 1000)
+            return connection
         except Exception as error:
             raise AccountStorageError("Accounts could not connect right now.") from error
 
@@ -848,7 +854,11 @@ class PostgresAccountStore:
 
     def get_user(self, user_id, *, include_removed=False):
         self.ensure_schema()
-        with self._connect() as conn:
+        # This single SELECT includes permissions in the same statement snapshot.
+        # Avoid BEGIN/COMMIT round trips without caching security-sensitive data.
+        # All mutation and schema callers retain transactional connections.
+        with self._connect(autocommit=True) as conn:
+            query_started = time.perf_counter()
             with conn.cursor() as cur:
                 if include_removed:
                     cur.execute("""SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
@@ -867,6 +877,7 @@ class PostgresAccountStore:
                         (str(user_id),),
                     )
                 row = cur.fetchone()
+                logging.info("PERF Accounts current_user_query_ms=%.2f", (time.perf_counter() - query_started) * 1000)
                 return self._clean_read_user(row)
 
     def find_user_by_login(self, login):

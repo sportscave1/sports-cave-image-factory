@@ -86,6 +86,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         if page["route"] in allowed_routes
     }
     planner_enabled = os_accounts.is_admin(user)
+    from support_email_provider import load_configuration
     revision_payload = {
         "user_id": str((user or {}).get("id") or ""),
         "session_version": int((user or {}).get("session_version") or 1),
@@ -94,6 +95,7 @@ def top_bar_config(user, *, logo_src, current_route, navigation_epoch=0):
         "planner_enabled": planner_enabled,
         "can_view_activity": os_accounts.can_view_activity_log(user),
         "can_view_all_activity": os_accounts.is_reporting_owner(user),
+        "mailbox_scope": load_configuration().scope if 'Email' in allowed_routes else None,
     }
     revision = hashlib.sha256(
         json.dumps(revision_payload, sort_keys=True).encode("utf-8")

@@ -36,10 +36,14 @@ def decode(value):
 def receipt(row):
     status = row.get('status', '')
     due=row.get('due_at')
+    created=row.get('created_at')
+    if isinstance(created,str):created=datetime.fromisoformat(created.replace('Z','+00:00'))
     if isinstance(due,str):due=datetime.fromisoformat(due.replace('Z','+00:00'))
     delay=max(1000,int((due-datetime.now(timezone.utc)).total_seconds()*1000)) if due and status=='queued' else 1000
     return {'operation_id':str(row['operation_id']), 'status':'in_progress' if status=='queued' else status,
             'retry_delay_ms':delay,
+            'reconcile_attempts':int(row.get('reconcile_attempts') or 0),
+            'verification_overdue':bool(created and status=='unknown' and (datetime.now(timezone.utc)-created).total_seconds()>900),
             'message_id':row['message_id'], 'fingerprint':row['fingerprint'],
             'sent_at':str(row.get('accepted_at') or ''),
             'notice':{'queued':'Queued securely', 'in_progress':'Sending…', 'accepted':'Sent',
@@ -103,7 +107,7 @@ class MailStore(SignalStore):
     def get_receipt(self,mailbox,operation):
         # Status refreshes must not repeatedly transfer frozen MIME/attachments.
         with self.transaction() as cur:
-            cur.execute('''SELECT operation_id,status,message_id,fingerprint,accepted_at,error_category,due_at
+            cur.execute('''SELECT operation_id,status,message_id,fingerprint,accepted_at,error_category,due_at,reconcile_attempts,created_at
                 FROM support_email_outbox WHERE mailbox=%s AND operation_id=%s''',(mailbox.lower(),operation))
             return dict(cur.fetchone() or {})
 

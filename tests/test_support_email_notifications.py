@@ -166,7 +166,10 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn('fixture-secret',str(logs.output)+str(result))
         self.assertEqual(sum(c[0]=='LOGIN' for c in self.wire.calls),1)
         self.poll(1062);self.assertEqual(sum(c[0]=='LOGIN' for c in self.wire.calls),1)
-        self.assertIsNone(self.poll(1182)['unread_count'])
+        stale=self.poll(1182)
+        self.assertEqual(stale['unread_count'],3)
+        self.assertTrue(stale['stale'])
+        self.assertFalse(stale['available'])
     def test_missing_storage_can_show_count_but_never_announces_old_mail(self):
         with patch.object(self.store,'poll',side_effect=RuntimeError('DB unavailable')):
             self.assertEqual(self.poll()['unread_count'],3)

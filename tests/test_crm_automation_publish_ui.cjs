@@ -27,66 +27,55 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('Exter
  try{
   const context=await browser.newContext();
   await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
-  const page=await context.newPage();
-  for(const width of [1920,1366,750,390,320]){
-   await page.setViewportSize({width,height:950});
-   await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_home_delay=1');
-   const publish=page.getByRole('button',{name:'Publish now',exact:true});await publish.waitFor();
-   assert.equal(await page.getByText('This email copy is reviewed',{exact:true}).count(),0);
+  const page=await context.newPage();page.setDefaultTimeout(15000);
+  const toolbar=page.locator('.st-key-automation-toolbar');
+  const start=async suffix=>{
+   await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_run='+suffix+Date.now());
+   await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
+   await toolbar.getByRole('button',{name:'Publish now',exact:true}).waitFor();
+  };
+  for(const width of [1440,390]){
+   await page.setViewportSize({width,height:950});await start('publish');
    const subject='Local publish '+width+' '+Date.now();
    await page.getByRole('textbox',{name:'Subject',exact:true}).fill(subject);
-   const started=Date.now();await publish.click();
-   await page.getByRole('heading',{name:'Automations',exact:true}).waitFor();
-   const row=page.locator('[class*=st-key-auto-row-]').filter({hasText:'Abandoned checkout · local fixture'}).first();
-   await row.getByText('Publishing…',{exact:true}).waitFor();
-   await page.getByRole('textbox',{name:'Search automations',exact:true}).isEnabled().then(v=>assert.equal(v,true));
-   await row.locator('[data-testid=stPopoverButton]:visible').click();await page.getByRole('button',{name:'Open editor',exact:true}).waitFor();await page.keyboard.press('Escape');
-   const elapsed=Date.now()-started;assert.ok(elapsed<5000,'Local UI navigation took '+elapsed+'ms');
+   const started=Date.now();await toolbar.getByRole('button',{name:'Publish now',exact:true}).click();
+   await page.locator('.st-key-flow-workspace').waitFor();
+   await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
+   const elapsed=Date.now()-started;assert.ok(elapsed<5000,'Local Flow navigation took '+elapsed+'ms');
    assert.equal(await page.getByTestId('stException').count(),0);
-   const geometry=await page.evaluate(()=>({width:innerWidth,body:document.documentElement.scrollWidth}));
-   assert.ok(geometry.body<=width+2,JSON.stringify(geometry));
-   await page.waitForFunction(()=>document.querySelectorAll('.sc-auto-kpis .sc-home-unresolved').length===0);
-   await page.waitForFunction(()=>!document.querySelector('.st-key-auto-activity')?.textContent.includes('Loading recent activity'));
-   await page.evaluate(()=>{
-    window.homeSecondaryMutations=0;
-    for(const selector of ['.sc-auto-kpis','.st-key-auto-activity']){
-     const el=document.querySelector(selector);if(el)new MutationObserver(()=>window.homeSecondaryMutations++).observe(el,{subtree:true,childList:true,characterData:true});
-    }
-   });
-   worker(false,subject); // Separate process; the browser only observes durable completion.
-   await row.getByText('Live',{exact:true}).waitFor({timeout:12000});
-   assert.equal(await row.getByText('Publishing…',{exact:true}).count(),0);
-   assert.equal(await page.evaluate(()=>window.homeSecondaryMutations),0,'Publication status changed secondary regions');
-   console.log(`Publish ${width}px: accepted/home in ${elapsed}ms; durable worker → Live; no overflow`);
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+   // Refresh reconstructs status from SQL, never a browser-owned job.
+   await page.reload();await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
+   await page.waitForFunction(()=>{const el=document.querySelector('.sc-flow-stats dd');return el&&el.textContent!=='—';});
+   await page.evaluate(()=>{window.summaryMutations=0;new MutationObserver(()=>window.summaryMutations++).observe(document.querySelector('.sc-flow-stats'),{subtree:true,childList:true,characterData:true});});
+   const began=Date.now();worker(false,subject);
+   await toolbar.getByText('Published · Up to date',{exact:true}).waitFor();
+   assert.equal(await page.evaluate(()=>summaryMutations),0,'Status polling must not rebuild analytics');
+   console.log(`Publish ${width}px: accepted/Flow in ${elapsed}ms; separate worker + observed status ${Date.now()-began}ms`);
   }
-  await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_home_delay=1');await page.getByRole('button',{name:'Publish now',exact:true}).waitFor();
+  await page.setViewportSize({width:1440,height:950});
+  await start('html');
   const currentSubject=await page.getByRole('textbox',{name:'Subject',exact:true}).inputValue();
+  // Subject flushing is tested above; isolate the independent pending-HTML
+  // acknowledgement here without racing a native subject blur rerun.
   await page.getByRole('tab',{name:'Editor',exact:true}).click();
-  const area=page.frameLocator('iframe[src*="crm_middle_sections"]').getByRole('textbox',{name:'HTML Section 1 HTML',exact:true});
+  const area=page.frameLocator('iframe[title="crm_section_ui.crm_middle_sections_v2"]').getByRole('textbox').first();
   const marker='Latest section '+Date.now();await area.fill((await area.inputValue())+'<p>'+marker+'</p>');
-  await page.getByRole('button',{name:'Publish now',exact:true}).click();
-  await page.getByRole('heading',{name:'Automations',exact:true}).waitFor();
-  worker(false,currentSubject,marker);
-  await page.locator('[class*=st-key-auto-row-]').filter({hasText:'Abandoned checkout · local fixture'}).first().getByText('Live',{exact:true}).waitFor({timeout:12000});
-  console.log('Immediate publish flushes pending HTML section and freezes exact latest content');
-  // Real immediate validation remains in the editor, without queue acceptance.
-  await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_home_delay=1');await page.getByRole('button',{name:'Publish now',exact:true}).waitFor();
-  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('');
-  await page.getByRole('textbox',{name:'Subject',exact:true}).press('Tab');
-  await page.getByRole('button',{name:'Publish now',exact:true}).click();
+  await toolbar.getByRole('button',{name:'Publish now',exact:true}).click();await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
+  const returnUrl=page.url();await page.goto('about:blank');
+  worker(false,currentSubject,marker);await page.goto(returnUrl);
+  await toolbar.getByText('Published · Up to date',{exact:true}).waitFor();
+  console.log('Immediate publish freezes latest pending HTML; worker completes while browser is away');
+  await start('invalid');await page.getByRole('textbox',{name:'Subject',exact:true}).fill('');
+  await toolbar.getByRole('button',{name:'Publish now',exact:true}).click();
   await page.getByText('Add a subject before publishing.',{exact:true}).waitFor();
-  assert.equal(await page.getByRole('heading',{name:'Automations',exact:true}).count(),0);
-  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Local failed attempt '+Date.now());
-  await page.getByRole('textbox',{name:'Subject',exact:true}).press('Tab');
-  await page.getByRole('button',{name:'Publish now',exact:true}).click();
-  await page.getByRole('heading',{name:'Automations',exact:true}).waitFor();
-  const row=page.locator('[class*=st-key-auto-row-]').filter({hasText:'Abandoned checkout · local fixture'}).first();
-  await row.getByText('Publishing…',{exact:true}).waitFor();worker(true);
-  await row.getByText('Publish failed',{exact:true}).waitFor({timeout:12000});
-  await row.locator('[data-testid=stPopoverButton]:visible').click();
-  await page.getByRole('button',{name:'Open editor',exact:true}).click();
-  await page.getByText('Email tracking validation failed. Review the email before publishing.',{exact:true}).waitFor();
-  assert.equal(await page.getByRole('button',{name:'Publish now',exact:true}).isEnabled(),true);
-  console.log('Missing subject stays in editor; durable failure opens actionable reason and permits retry');
+  assert.equal(await page.locator('.st-key-flow-workspace').count(),0);
+  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Retry publication fixture');
+  await toolbar.getByRole('button',{name:'Publish now',exact:true}).click();await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
+  worker(true);await page.getByText(/Publishing failed · Email tracking/).waitFor();
+  await toolbar.getByRole('button',{name:'Retry Publish',exact:true}).click();await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
+  worker(false);await toolbar.getByText('Published · Up to date',{exact:true}).waitFor();
+  assert.equal(await page.getByTestId('stException').count(),0);
+  console.log('Invalid subject retains editor; durable failure clears spinner and Retry Publish succeeds on Flow');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

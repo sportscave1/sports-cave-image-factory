@@ -102,7 +102,7 @@ class Workspace:
 
     def _unavailable(self, message, *, code="temporary", retry_after=0):
         s = self.state
-        if code == 'pending':
+        if code in {'pending','busy'}:
             s.update(read_pending=True, recovery_state='waiting',load_retry_at=time.monotonic()+1,
                      connection_message='Syncing…', connection_code='pending')
             return
@@ -990,6 +990,7 @@ class Workspace:
                 return
             if receipt and receipt.get("status") != "in_progress":
                 self.state["send_result"] = receipt
+                if self.durable:self.state['uncertain_checks']=6 if receipt.get('verification_overdue') else receipt.get('reconcile_attempts',0)
                 self.state["send_stage"] = "SAVING_SENT_COPY" if receipt["status"] == "accepted" else receipt["status"].upper()
 
     def advance_send(self, operation_id):
@@ -1077,6 +1078,12 @@ class Workspace:
         delivery = self.state.get("pending_sent", {}).get(operation_id) or self.state.get("last_sent", {})
         # Uncertain transport outcomes can only be searched, never appended.
         if result.get("status") == "unknown" and not operation_id:
+            if self.durable and automatic:
+                # The durable worker owns bounded provider reconciliation. Tabs
+                # observe its lightweight receipt instead of competing IMAP searches.
+                self.recover_send()
+                if self.state.get('send_result',{}).get('status')=='accepted':self._finish_send()
+                return
             checks=self.state.get('uncertain_checks',0)
             if automatic and checks>=6:return
             self.state['uncertain_checks']=checks+1

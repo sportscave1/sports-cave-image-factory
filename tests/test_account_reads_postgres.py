@@ -33,7 +33,7 @@ class AccountPostgresTests(unittest.TestCase):
         self.conn.execute("INSERT INTO os_user_page_permissions VALUES (%s,'orders',true),(%s,'dashboard',true),(%s,'settings',false)", [self.ids[1]]*3)
         self.store = os_accounts.PostgresAccountStore()
         self.store._schema_ready = True
-        self.connection_patch = patch.object(self.store, "_connect", side_effect=lambda: nullcontext(self.conn))
+        self.connection_patch = patch.object(self.store, "_connect", side_effect=lambda **kwargs: nullcontext(self.conn))
         self.connection_patch.start()
         self.addCleanup(self.connection_patch.stop)
 

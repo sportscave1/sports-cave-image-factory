@@ -13,7 +13,16 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
     from crm_automation_definition import status
     from crm_store import StoreUnavailable
     from crm_flow_builder import display_name
-    row=store.flow(identity);flow=deepcopy(row['config']['draft'])
+    try:
+        row=store.flow(identity)
+        from crm_automation_publication import overdue,expire
+        if overdue(row['config'].get('publication',{})):
+            expire(store,identity);row=store.flow(identity)
+    except StoreUnavailable:
+        st.caption('Publication status unavailable. No successful publication is confirmed.')
+        if st.button('Retry status',key='toolbar-status-retry'):st.rerun(scope='fragment')
+        return
+    flow=deepcopy(row['config']['draft'])
     editor=st.session_state.get('automation_editor') if editor else None
     if editor and str(editor['id'])==str(identity):
         for step in flow['emails']:
@@ -32,6 +41,9 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
     .automation-title strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:60px}
     .automation-state{font-size:11px;color:#65716b;white-space:nowrap;flex-shrink:0}
     .automation-current{font-size:12px;color:#6c706b;display:flex;align-items:center;justify-content:center;min-width:108px;height:38px}
+    .automation-publishing:before{content:'';width:10px;height:10px;border:1px solid #ddd;border-top-color:#a98735;border-radius:50%;margin-right:6px;animation:automation-publishing-spin 1s linear infinite}
+    @keyframes automation-publishing-spin{to{transform:rotate(360deg)}}
+    @media(prefers-reduced-motion:reduce){.automation-publishing:before{animation:none}}
     .st-key-automation-toolbar [data-testid="stPopover"]{width:auto!important}
     .st-key-toolbar-refresh{display:none!important}
     @media(max-width:1000px){.automation-title{flex-wrap:wrap;height:auto;min-height:38px}.automation-state{white-space:normal}}
@@ -60,21 +72,25 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             elif st.button('Test Flow',key='toolbar-test'):
                 name='flow-top-'+str(identity)+'simulation'
                 st.session_state[name]=not st.session_state.get(name,False);st.rerun(scope='app')
-            if busy:st.html('<span class="automation-current" role="status">Publishing…</span>')
-            elif not pending:st.html('<span class="automation-current" role="status">Up to date</span>')
-            elif st.button('Publish changes' if version else 'Publish now',type='primary',disabled=archived,key='toolbar-publish',help='Publish for new enrollments; existing recipients keep their sequence.'):
+            if busy:st.html('<span class="automation-current automation-publishing" role="status">Publishing changes…</span>')
+            elif not pending:st.html('<span class="automation-current" role="status"'+(' style="color:#327147"' if publication.get('state')=='LIVE' else '')+'>'+('Published · Up to date' if publication.get('state')=='LIVE' else 'Up to date')+'</span>')
+            elif st.button('Retry Publish' if publication.get('state')=='FAILED' else 'Publish changes' if version else 'Publish now',type='primary',disabled=archived,key='toolbar-publish',help='Publish for new enrollments; existing recipients keep their sequence.'):
                 if flush_current(force=True):
                     revision=editor['version'] if editor else row['config']['revision']
                     job=store.request_publish(user,identity,revision)
                     if not job.get('unchanged'):
                         from crm_automation_home import accepted_publication
                         accepted_publication(job)
-                    changed();st.rerun(scope='fragment')
+                    changed()
+                    if editor:
+                        from crm_automation_ui import open_flow
+                        open_flow(identity)
+                    st.rerun(scope='fragment')
             if row['status'] in ('ACTIVE','PAUSED') and not archived:
                 action='pause' if row['status']=='ACTIVE' else 'resume'
                 if st.button(action.title(),key='toolbar-lifecycle'):
                     store.lifecycle(user,identity,action);changed();st.rerun(scope='fragment')
-        if publication.get('state')=='FAILED':st.error(publication.get('error') or 'Publication failed. Retry publishing.')
+        if publication.get('state')=='FAILED':st.html('<span role="status" style="font-size:12px;color:#9c3c36">Publishing failed · '+escape(publication.get('error') or 'Retry publishing.')+'</span>')
         if busy:
             from crm_automation_analytics_ui import arm
             arm('automation-toolbar-publication',2)

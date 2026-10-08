@@ -2,7 +2,7 @@ const {chromium}=require('playwright');const {execFileSync}=require('node:child_
 (async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
  const context=await browser.newContext();await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  const page=await context.newPage();await page.setViewportSize({width:1440,height:1000});
- await page.goto('http://127.0.0.1:8540/?fixture_toolbar_live=1&fixture_run=toolbar'+Date.now());
+ await page.goto((process.env.CRM_FIXTURE_UI_URL||'http://127.0.0.1:8540')+'/?fixture_toolbar_live=1&fixture_run=toolbar'+Date.now());
  await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
  const toolbar=page.locator('.st-key-automation-toolbar');
  await toolbar.getByText('Live · v1',{exact:true}).waitFor();await toolbar.getByText('Up to date',{exact:true}).waitFor();
@@ -16,13 +16,19 @@ const {chromium}=require('playwright');const {execFileSync}=require('node:child_
  await toolbar.getByRole('button',{name:'Publish changes',exact:true}).waitFor();
  await page.reload();await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
  await toolbar.getByRole('button',{name:'Publish changes',exact:true}).waitFor();
+ await toolbar.getByRole('button',{name:'Flow',exact:true}).click();
+ await page.locator('.st-key-flow-workspace').waitFor();
  await toolbar.getByRole('button',{name:'Pause',exact:true}).click();await toolbar.getByRole('button',{name:'Resume',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
  await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Latest unsaved subject');
- await toolbar.getByRole('button',{name:'Publish changes',exact:true}).click();await toolbar.getByText('Publishing…',{exact:true}).waitFor().catch(async e=>{console.log(await page.locator('.st-key-crm-automation-editor').innerText());await page.screenshot({path:'tmp/toolbar-publish-error.png',fullPage:true});throw e;});
- execFileSync('.venv/Scripts/python.exe',['-c',"from unittest.mock import patch; from copy import deepcopy; from crm_automation_publication import tick; from crm_automation_store import AutomationStore; from tests.crm_db_fixture import connect; from tests.test_crm_send_flow import CFG,LIVE; AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG); tick(AutomationStore(connect),'toolbar-browser',env=LIVE)"],{env:{...process.env,CRM_FIXTURE_SQL_PORT:'8881'},stdio:'pipe'});
- await toolbar.getByText('Paused · v2',{exact:true}).waitFor({timeout:15000});await toolbar.getByText('Up to date',{exact:true}).waitFor();
+ await toolbar.getByRole('button',{name:'Publish changes',exact:true}).click();await toolbar.getByText('Publishing changes…',{exact:true}).waitFor().catch(async e=>{console.log(await page.locator('.st-key-crm-automation-editor').innerText());await page.screenshot({path:'tmp/toolbar-publish-error.png',fullPage:true});throw e;});
+ execFileSync('.venv/Scripts/python.exe',['-c',"from unittest.mock import patch; from copy import deepcopy; from crm_automation_publication import tick; from crm_automation_store import AutomationStore; from tests.crm_db_fixture import connect; from tests.test_crm_send_flow import CFG,LIVE; AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG); tick(AutomationStore(connect),'toolbar-browser',env=LIVE)"],{env:{...process.env,CRM_FIXTURE_SQL_PORT:process.env.CRM_FIXTURE_SQL_PORT||'8881'},stdio:'pipe'});
+ await toolbar.getByText('Paused · v2',{exact:true}).waitFor({timeout:15000});await toolbar.getByText('Published · Up to date',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
  assert.equal(await page.getByRole('textbox',{name:'Subject',exact:true}).inputValue(),'Latest unsaved subject');
+ await toolbar.getByRole('button',{name:'Flow',exact:true}).click();await page.locator('.st-key-flow-workspace').waitFor();
  await toolbar.getByRole('button',{name:'Resume',exact:true}).click();await toolbar.getByText('Live · v2',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
  await toolbar.getByRole('button',{name:'Send test',exact:false}).click();await page.getByRole('textbox',{name:'Send test email',exact:true}).waitFor();await page.keyboard.press('Escape');
  for(const width of [1000,750,390,320]){await page.setViewportSize({width,height:1000});await page.screenshot({path:`tmp/automation-toolbar-${width}.png`,fullPage:true});const overflow=await toolbar.evaluate(e=>e.scrollWidth>e.clientWidth+2);assert.equal(overflow,false,`toolbar overflow ${width}`);}
  assert.equal(await page.getByTestId('stException').count(),0);

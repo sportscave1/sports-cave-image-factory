@@ -25,6 +25,7 @@ class PublicationUiTests(unittest.TestCase):
         self.assertNotIn("['copy_reviewed']",settings)
         self.assertIn('flush_current(force=True)',editor)
         self.assertIn('store.request_publish(user,identity',editor)
+        self.assertIn('open_flow(identity)',editor)
         self.assertNotIn('store.publish(',editor)
         self.assertIn("pop('automation_selected'",editor)
         self.assertIn("query_params.pop('automation'",editor)
@@ -53,6 +54,51 @@ class PublicationUiTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class PublicationTests(unittest.TestCase):
+    def test_multistep_lifestyle_publication_renders_each_email_once(self):
+        from crm_campaign_library import insert_saved_template
+        import crm_campaign_send
+        row=self.draft('abandoned');flow=deepcopy(row['config']['draft'])
+        for n in (1,2,3):insert_saved_template(self.store,flow['emails'][0]['document'],f'builtin-lifestyle-image-{n}',1)
+        flow['emails'].append(email_step(deepcopy(flow['emails'][0]['document']),86400))
+        row=self.store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+        self.job(row)
+        with patch('crm_campaign_send.validate_tracking',wraps=crm_campaign_send.validate_tracking) as render,patch('crm_email_size.campaign_size',side_effect=AssertionError('Duplicate rendering')):
+            self.run_job()
+        live=self.state(row)
+        self.assertEqual(live['config']['publication']['state'],'LIVE')
+        self.assertEqual(render.call_count,2)
+        self.assertEqual(len(live['steps']),2)
+
+    def test_offline_worker_timeout_is_persistent_and_retryable(self):
+        from crm_automation_publication import expire
+        row=self.draft();job=self.job(row)
+        self.store.q("UPDATE crm_automation_publish_jobs SET requested_at=now()-interval '21 minutes' WHERE id=%s",(job['id'],))
+        expire(self.store,row['id'])
+        failed=self.state(row)
+        self.assertEqual(failed['config']['publication']['state'],'FAILED')
+        self.assertEqual(failed['config']['published_version'],0)
+        self.assertEqual(failed['config']['draft'],row['config']['draft'])
+        self.assertIn('timed out',failed['config']['publication']['error'])
+        retry=self.job(failed);self.assertNotEqual(job['id'],retry['id'])
+        self.run_job();self.assertEqual(self.state(row)['config']['published_version'],1)
+
+    def test_slow_worker_cannot_commit_after_deadline(self):
+        import crm_automation_publication as publication
+        row=self.draft();job=self.job(row);prepare=publication.prepare
+        def delayed(*args,**kwargs):
+            result=prepare(*args,**kwargs)
+            self.store.q("UPDATE crm_automation_publish_jobs SET requested_at=now()-interval '21 minutes' WHERE id=%s",(job['id'],))
+            return result
+        with patch.object(publication,'prepare',side_effect=delayed):self.run_job()
+        self.assertEqual(self.state(row)['config']['publication']['state'],'FAILED')
+        self.assertEqual(self.state(row)['config']['published_version'],0)
+
+    def test_expired_queued_job_is_failed_before_expensive_work(self):
+        row=self.draft();job=self.job(row)
+        self.store.q("UPDATE crm_automation_publish_jobs SET requested_at=now()-interval '21 minutes' WHERE id=%s",(job['id'],))
+        with patch('crm_automation_publication.prepare',side_effect=AssertionError('Expired work must not render')):self.run_job()
+        self.assertEqual(self.state(row)['config']['publication']['state'],'FAILED')
+
     def test_effective_content_noop_and_paused_publication(self):
         from crm_automation_publish_state import has_changes
         row=self.draft();self.job(row);self.run_job();row=self.state(row)

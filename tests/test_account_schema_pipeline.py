@@ -21,7 +21,8 @@ class AccountSchemaPipelineTests(unittest.TestCase):
         self.addCleanup(self.admin.close)
         self.admin.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(self.schema)))
         self.addCleanup(lambda: self.admin.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(self.schema))))
-        self.connect = lambda: psycopg.connect(dsn, row_factory=dict_row,
+        self.connect = lambda **kwargs: psycopg.connect(dsn, row_factory=dict_row,
+            **kwargs,
             options=f'-c search_path={self.schema},public', prepare_threshold=None)
         self.store = os_accounts.PostgresAccountStore()
         patcher = patch.object(self.store, '_connect', side_effect=self.connect)
@@ -56,6 +57,28 @@ class AccountSchemaPipelineTests(unittest.TestCase):
             conn.execute('DROP TABLE os_users')
         self.store.ensure_schema()
         self.assertTrue(self.store._schema_ready)
+
+    def test_current_user_driver_uses_statement_transaction_and_closes(self):
+        import psycopg
+        from psycopg.pq import TransactionStatus
+        self.store.ensure_schema()
+        for autocommit in (False, True):
+            with self.subTest(autocommit=autocommit):
+                states, connections = [], []
+                class Cursor(psycopg.Cursor):
+                    def execute(cursor, *args, **kwargs):
+                        result = super().execute(*args, **kwargs)
+                        states.append(cursor.connection.info.transaction_status)
+                        return result
+                def connect(**kwargs):
+                    self.assertTrue(kwargs['autocommit'])
+                    conn = self.connect(autocommit=autocommit, cursor_factory=Cursor)
+                    connections.append(conn)
+                    return conn
+                with patch.object(self.store, '_connect', side_effect=connect):
+                    self.assertEqual(self.store.get_user(uuid.uuid4()), {})
+                self.assertEqual(states, [TransactionStatus.IDLE if autocommit else TransactionStatus.INTRANS])
+                self.assertTrue(connections[0].closed)
 
     def test_automation_identity_read_preserves_timeouts_and_results(self):
         from types import SimpleNamespace

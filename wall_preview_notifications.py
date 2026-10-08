@@ -28,22 +28,24 @@ def _prefix(user_id):
     return 'wall_inbox_seen_v1:'+hashlib.sha256(str(user_id).encode()).hexdigest()+':'
 
 
-def status(claims):
+def status(claims, *, count_only=False):
     if social_media.WALL_PREVIEW_ROUTE not in set(claims.get('allowed_routes') or ()):
         return {'unread_count': 0, 'notifications': []}
     prefix = _prefix(claims.get('sub'))
     with transaction() as cur:
-        cur.execute('''SELECT p.id,p.product_title,a.created_at,count(*) OVER() AS unread_count
+        select = 'count(*) AS unread_count' if count_only else 'p.id,p.product_title,a.created_at,count(*) OVER() AS unread_count'
+        tail = '' if count_only else ' ORDER BY a.created_at DESC,p.id DESC LIMIT 10'
+        cur.execute('SELECT '+select+'''
             FROM audit_logs a JOIN public.wall_previews p ON a.entity_id=p.id::text
             WHERE a.event_type=%s AND a.entity_type='wall_preview_notification'
               AND NOT (p.attribution ? 'inbox_deleted_at' OR p.attribution ? 'inbox_deletion')
               AND (%s OR p.marketing_permission)
               AND NOT EXISTS (SELECT 1 FROM app_sync_state s WHERE s.key=%s || p.id::text)
-            ORDER BY a.created_at DESC,p.id DESC LIMIT 10''',
+            '''+tail,
             (EVENT, os_accounts.is_admin(claims), prefix))
         rows = [dict(row) for row in cur.fetchall()]
     return {'unread_count': int(rows[0]['unread_count']) if rows else 0,
-            'notifications': [{'title': 'New image received in Wall Inbox.',
+            'notifications': [] if count_only else [{'title': 'New image received in Wall Inbox.',
                 'subtitle': row['product_title'] or 'Wall Preview Inbox',
                 'route_key': social_media.WALL_PREVIEW_PAGE_KEY, 'wall_preview_id': str(row['id']),
                 'created_at': str(row['created_at'])} for row in rows]}

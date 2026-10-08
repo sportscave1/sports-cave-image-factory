@@ -44,7 +44,7 @@ class ReadService:
         with self.lock:
             now = self.clock()
             job = self.jobs.get(key)
-            if job and job[0].done() and now > job[1]:
+            if job and job[0].done() and (now > job[1] or job[0].exception() is not None):
                 self.jobs.pop(key); job = None
             if job is None:
                 # Keep queued work bounded even during rapid thread switching.
@@ -173,8 +173,8 @@ class ReadService:
         except Exception as error:
             code = getattr(error,'code','unknown')
             with self.lock:
-                if code in {'busy','pending'}:
-                    self.health['retry_at'] = self.clock()+5
+                if code in {'busy','pending','deferred'}:
+                    self.health['retry_at'] = self.clock()+max(5,float(getattr(error,'retry_after',0) or 0))
                     return
                 failures = min(7,self.health['attempts']+1)
                 delay = 900 if code in {'authentication','configuration','tls'} else min(300,15*2**(failures-1))
@@ -200,6 +200,10 @@ class ReadService:
                 if cached.get('snapshot') and cached.get('observed_at',0)>self.value.get('observed_at',-1):
                     self.value = cached
                     self.health['last_success_at'] = cached.get('synced_at')
+                    # A recent confirmed sync from the lease owner is healthy; a
+                    # restored old snapshot is usable but cannot claim Connected.
+                    if time.time()-float(cached.get('synced_at') or 0)<180:
+                        self.health.update(state='CONNECTED',category='',attempts=0,retry_at=0)
         except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_read')
 
     def index(self):

@@ -3,9 +3,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 (async()=>{
  const browser=await chromium.launch({channel:process.env.TEST_BROWSER||'chrome',headless:true});
- const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage();page.setDefaultTimeout(15000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const ids=[1,2,3].map(i=>'00000000-0000-0000-0000-'+String(i).padStart(12,'0'));
- const seen=new Set();let polls=0;
+ const seen=new Set();let polls=0,arrived=false;
  await page.exposeFunction('fixtureSeen',id=>seen.add(id));
  await page.addInitScript(()=>addEventListener('message',event=>{
    if(event.data?.type==='sc:wall-inbox-seen')void window.fixtureSeen(event.data.id);
@@ -13,7 +13,7 @@ const fs=require('node:fs');
  await page.route('**/api/os/top-bar/**',async route=>{
    let payload={ok:true,items:[],results:[]};
    if(route.request().url().endsWith('/notifications')){
-     polls++;const unread=ids.filter(id=>!seen.has(id));
+     polls++;const unread=ids.slice(0,arrived?3:1).filter(id=>!seen.has(id));
      payload={ok:true,wall_unread_count:unread.length,notifications:unread.map((id,i)=>({
        title:'New image received in Wall Inbox.',subtitle:'Fixture '+id,
        route_key:'social_media_wall_previews',wall_preview_id:id}))};
@@ -21,11 +21,22 @@ const fs=require('node:fs');
    await route.fulfill({json:payload});
  });
  await page.goto('http://127.0.0.1:8876/?notifications_fixture=1');
- const badge=page.locator('.st-key-sidebar-row-social_media_wall_previews .sc-orders-action-badge');
- await badge.getByText('3',{exact:true}).waitFor();assert.equal(seen.size,0);
+ const parent=page.locator('[class*="st-key-sidebar-disclosure-social-"]');
+ const badge=parent.locator('.sc-orders-action-badge');
+ await badge.getByText('1',{exact:true}).waitFor();assert.equal(seen.size,0);
+ for(const expanded of [true,false,true]){
+   await parent.getByRole('button').click();
+   await page.locator('.st-key-sidebar-disclosure-social-'+(expanded?'open':'closed')).waitFor();
+   await badge.getByText('1',{exact:true}).waitFor();
+   assert.equal(await badge.count(),1);
+   assert.equal(await page.locator('.st-key-sidebar-row-social_media_wall_previews .sc-orders-action-badge').count(),0);
+   assert.equal(seen.size,0,'opening or closing Social Media must not mark previews read');
+ }
  const initialPolls=polls;
+ arrived=true;
  await page.waitForFunction(()=>document.getElementById('sports-cave-os-top-bar')?.dataset.installStage==='ready');
  await page.waitForTimeout(31000);assert.ok(polls>initialPolls,'existing heartbeat automatically refreshed notifications');
+ await badge.getByText('3',{exact:true}).waitFor();
  for(const [width,height] of [[1440,900],[768,1024],[390,844],[320,568]]){
    await page.setViewportSize({width,height});await page.locator('#sc-os-notifications').click();
    await page.getByRole('button').filter({hasText:'New image received in Wall Inbox.'}).first().waitFor();

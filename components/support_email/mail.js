@@ -72,7 +72,7 @@
   }
   function recoveryFeedback(m,active=false){
     const recovery=m.recovery||{};
-    if(active)return '<span class="reconnect-spinner" aria-hidden="true"></span><span role="status">Reconnecting mailbox…</span>';
+    if(active)return '<span class="reconnect-spinner" aria-hidden="true"></span><span role="status">'+(m.read_pending?'Syncing…':'Reconnecting mailbox…')+'</span>';
     if(!recovery.state)return '';
     return `<span role="status">${esc(recovery.message)}</span>${recovery.state==='stopped'?'<button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':''}`;
   }

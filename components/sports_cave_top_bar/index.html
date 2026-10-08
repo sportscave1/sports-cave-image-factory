@@ -278,7 +278,8 @@
     .sc-os-planner-pill-state { color: #c9c3b7; font-size: 10px; white-space: nowrap; }
     .sc-os-planner-pill-time { color: #f1ca6c; flex: 0 0 auto; font-family: Consolas, "SFMono-Regular", monospace; font-size: 11px; font-variant-numeric: tabular-nums; min-width: 8ch; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
     section[data-testid="stSidebar"] .st-key-sidebar-row-orders button,
-    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button {
+    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button,
+    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-social-"] button {
       position: relative;
     }
     section[data-testid="stSidebar"] [data-testid="stButton"] button span.sc-orders-action-badge {
@@ -302,7 +303,8 @@
       top: 50%;
       transform: translateY(-50%);
     }
-    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button span.sc-orders-action-badge {
+    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] button span.sc-orders-action-badge,
+    section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-social-"] button span.sc-orders-action-badge {
       right: 34px;
     }
     #sc-os-order-toast-region {
@@ -1592,11 +1594,13 @@
       }, delay);
     };
     const updateSidebarBadge = (route, count, label, attempt = 0) => {
-      const row = doc.querySelector(route === "email"
-        ? 'section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"]'
+      const group = route === "email" ? "email" : route === "social_media_wall_previews" ? "social" : null;
+      const routeLabel = route === "orders" ? "Orders" : group === "social" ? "Social Media" : "Email";
+      const row = doc.querySelector(group
+        ? `section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-${group}-"]`
         : `section[data-testid="stSidebar"] .st-key-sidebar-row-${route}`);
-      if (route === "email") {
-        const inbox = doc.querySelector('section[data-testid="stSidebar"] .st-key-sidebar-row-email button');
+      if (group) {
+        const inbox = doc.querySelector(`section[data-testid="stSidebar"] .st-key-sidebar-row-${route} button`);
         inbox?.querySelector(".sc-orders-action-badge")?.remove();
         inbox?.removeAttribute("data-action-required-count");
         inbox?.removeAttribute("aria-label");
@@ -1613,8 +1617,7 @@
       if (!numericCount) {
         badge?.remove();
         button.removeAttribute("data-action-required-count");
-        if (route === "orders") button.setAttribute("aria-label", "Orders");
-        else button.setAttribute("aria-label", route === "social_media_wall_previews" ? "Wall Preview Inbox" : "Email");
+        button.setAttribute("aria-label", routeLabel);
         return;
       }
       if (!badge) {
@@ -1625,27 +1628,26 @@
       }
       badge.textContent = label || (numericCount > 99 ? "99+" : String(numericCount));
       button.dataset.actionRequiredCount = String(numericCount);
-      button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `${route === "social_media_wall_previews" ? "Wall Preview Inbox" : "Email"}, ${numericCount} unread`);
+      button.setAttribute("aria-label", route === "orders" ? `Orders, ${numericCount} require action` : `${routeLabel}, ${numericCount} unread`);
     };
     const updateOrdersBadge = (count, label) => updateSidebarBadge("orders", count, label);
     const applyEmailStatus = (payload) => {
       if (!state.config.emailEnabled) return;
       const previous = readStatusCache("email").payload || {};
       if (payload.unread_count !== null && Number.isInteger(payload.unread_count)) {
-        if (Date.now()/1000 - Number(payload.checked_at || 0) > 120) {
-          updateSidebarBadge("email", 0, "");
-          return;
-        }
         if (Number(payload.checked_at || 0) < Number(previous.checked_at || 0)) return;
         writeStatusCache("email", payload);
         updateSidebarBadge("email", payload.unread_count, "");
+        const badge = doc.querySelector('section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-email-"] .sc-orders-action-badge');
+        if (badge) badge.title = payload.stale || Date.now()/1000-Number(payload.checked_at||0)>120 ? 'Last known unread count · refreshing' : 'Unread email';
         doc.querySelectorAll('iframe[title^="support_email_page."]').forEach(frame =>
           frame.contentWindow?.postMessage({type:"sc:email-unread", ...payload}, parentWindow.location.origin));
-      } else if (Date.now()/1000 - Number(previous.checked_at || 0) > 120) {
-        updateSidebarBadge("email", 0, ""); // Hide unavailable state; never report a zero mailbox count.
+      } else if (Number.isInteger(previous.unread_count)) {
+        updateSidebarBadge("email", previous.unread_count, "");
       }
     };
     let emailStatusPending = false;
+    let emailRefreshFollowup = null, emailRefreshChecks = 0;
     let emailEventsController = null, emailEventVersion = '', emailEventsRetry = 1000;
     const startEmailEvents = async () => {
       if (state.destroyed || !state.config.emailEnabled || !state.config.emailEventsUrl || emailEventsController) return;
@@ -1695,6 +1697,9 @@
       try {
         const payload = await requestJson(state.config.emailStatusUrl);
         applyEmailStatus(payload);
+        if (payload.refreshing && emailRefreshChecks++ < 8 && !emailRefreshFollowup && !doc.hidden) {
+          emailRefreshFollowup = later(() => { emailRefreshFollowup = null; void refreshEmailStatus(); }, 1000);
+        } else if (!payload.refreshing) emailRefreshChecks = 0;
         state.notifications = null;
         if (state.activePanel === "notifications") renderNotifications(await loadNotifications());
       } catch (_error) { if (!state.destroyed && _error.name !== "AbortError") applyEmailStatus({unread_count:null}); }
@@ -1918,14 +1923,16 @@
         later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
         return;
       }
-      writeStatusCache("orders");
+      writeStatusCache("orders", readStatusCache("orders").payload || {});
       try {
         const payload = await requestJson(state.config.orderStatusUrl);
-        writeStatusCache("orders", {
-          action_required_count: Number(payload.action_required_count || 0),
-          badge_label: String(payload.badge_label || ""),
-        });
-        updateOrdersBadge(payload.action_required_count, payload.badge_label);
+        if (Number.isInteger(payload.action_required_count)) {
+          writeStatusCache("orders", {
+            action_required_count: payload.action_required_count,
+            badge_label: String(payload.badge_label || ""),
+          });
+          updateOrdersBadge(payload.action_required_count, payload.badge_label);
+        }
         showOrderToast(payload.notification);
       } catch (_error) {
         // Keep the last visible local state when the lightweight status read is unavailable.
@@ -2625,7 +2632,10 @@
           const payload = await requestJson(state.config.notificationsUrl);
           if (version === notificationReadVersion) {
             state.notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
-            if (Number.isInteger(payload.wall_unread_count)) updateSidebarBadge("social_media_wall_previews", payload.wall_unread_count, "");
+            if (Number.isInteger(payload.wall_unread_count)) {
+              writeStatusCache('wall',{wall_unread_count:payload.wall_unread_count});
+              updateSidebarBadge("social_media_wall_previews", payload.wall_unread_count, "");
+            }
           }
         } catch (_error) {
           if (!state.destroyed && _error.name !== "AbortError" && version === notificationReadVersion) state.notifications = [];
@@ -2640,9 +2650,21 @@
       if (wallNotificationsPending) { wallNotificationsDirty = true; return; }
       wallNotificationsPending = true;
       try {
-        state.notifications = null;
-        const items = await loadNotifications();
-        if (state.activePanel === "notifications") renderNotifications(items);
+        if (state.activePanel === "notifications") {
+          state.notifications = null;
+          renderNotifications(await loadNotifications());
+        } else {
+          const url = new URL(state.config.notificationsUrl, parentWindow.location.href);
+          url.searchParams.set('counts_only','1');
+          const payload = await requestJson(url.href);
+          if (Number.isInteger(payload.wall_unread_count)) {
+            writeStatusCache('wall',payload);
+            updateSidebarBadge('social_media_wall_previews',payload.wall_unread_count,'');
+          }
+          state.notifications = null;
+        }
+      } catch (_error) {
+        // Failure is not a confirmed zero. Keep the last authoritative badge.
       } finally {
         wallNotificationsPending = false;
         if (wallNotificationsDirty) { wallNotificationsDirty = false; void refreshWallNotifications(); }
@@ -3030,7 +3052,8 @@
         }, 250);
         if (!state.orderStatusStarted) {
           state.orderStatusStarted = true;
-          void refreshWallNotifications();
+          const cachedWall = readStatusCache('wall').payload;
+          if (Number.isInteger(cachedWall?.wall_unread_count)) updateSidebarBadge('social_media_wall_previews',cachedWall.wall_unread_count,'');
           const cachedOrders = readStatusCache("orders");
           if (cachedOrders.payload) {
             updateOrdersBadge(
@@ -3038,13 +3061,9 @@
               cachedOrders.payload.badge_label,
             );
           }
-          const orderDelay = Math.min((state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS,
-            statusRefreshDelay(state.config.ordersEnabled ? "orders" : "email", state.config.ordersEnabled ? ORDER_STATUS_REFRESH_MS : EMAIL_HEARTBEAT_MS));
           const cachedEmail = readStatusCache("email").payload;
           if (cachedEmail) applyEmailStatus(cachedEmail);
-          if (orderDelay && state.config.emailEnabled && statusRefreshDelay("email", EMAIL_HEARTBEAT_MS) === 0) void refreshEmailStatus();
-          if (orderDelay) later(refreshOrderStatus, orderDelay);
-          else refreshOrderStatus();
+          refreshOrderStatus();
         }
         if (!state.plannerStatusStarted) {
           state.plannerStatusStarted = true;

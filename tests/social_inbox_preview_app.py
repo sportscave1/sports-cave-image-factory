@@ -44,8 +44,16 @@ if st.query_params.get('notifications_fixture'):
     import top_bar
     import streamlit.components.v1 as components
     with st.sidebar:
-        for key,label in [('orders','Orders'),('email','Email'),('social_media_wall_previews','Wall Preview Inbox')]:
+        for key,label in [('orders','Orders'),('email','Email')]:
             with st.container(key='sidebar-row-'+key):st.button(label,key='fixture-nav-'+key)
+        expanded=st.session_state.get('fixture-social-expanded',False)
+        with st.container(key='sidebar-disclosure-social-'+('open' if expanded else 'closed')):
+            if st.button('Social Media',key='fixture-social-toggle'):
+                st.session_state['fixture-social-expanded']=not expanded
+                st.rerun()
+        if expanded:
+            with st.container(key='sidebar-row-social_media_wall_previews'):
+                st.button('Wall Preview Inbox',key='fixture-nav-social_media_wall_previews')
     config=top_bar.top_bar_config(user,logo_src='',current_route='Wall Preview Inbox')
     config.update(dailyPlannerEnabled=False,ordersEnabled=True,emailEnabled=False,wallInboxEnabled=True)
     components.html(top_bar.component_html(config),height=0,width=0)
