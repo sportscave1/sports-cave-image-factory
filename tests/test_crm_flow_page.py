@@ -3,7 +3,7 @@ from datetime import timedelta
 import json,os,uuid,unittest
 from unittest.mock import patch
 from crm_flow_thumbnail import InertEmail,miniature
-from crm_flow_page import rate,snippet
+from crm_flow_page import rate,snippet,delay_origin,step_performance
 from crm_automation_home_data import step_metrics
 from crm_checkout_analytics import report,window
 from crm_logic import now
@@ -13,6 +13,40 @@ from tests.test_crm_send_flow import CFG
 from tests.test_crm_simple_editor import document
 
 class PresentationTests(unittest.TestCase):
+    def test_delay_anchor_skips_disabled_steps_after_reordering(self):
+        from crm_automation_definition import email_step,new_flow
+        from crm_flow_builder import edit_sequence
+        flow=new_flow();flow['emails']=[email_step(delay_seconds=60),email_step(delay_seconds=120),email_step(delay_seconds=180)]
+        flow['emails'][0]['enabled']=False
+        self.assertEqual(delay_origin(flow['emails'],1),' after trigger')
+        self.assertEqual(delay_origin(flow['emails'],2),' after the previous enabled email')
+        moved=edit_sequence(flow,flow['emails'][2]['step_id'],'up')
+        self.assertEqual(delay_origin(moved['emails'],1),' after trigger')
+        self.assertEqual(moved['emails'][1],flow['emails'][2])
+
+    def test_metrics_error_and_recovery_use_owning_fragment_slots(self):
+        from unittest.mock import Mock
+        # A nested fragment wrapper would detach these writes from the sequence.
+        self.assertFalse(hasattr(step_performance,'__wrapped__'))
+        slots={'original':Mock(),'second':Mock()};details={k:Mock() for k in slots}
+        values=[dict(step_id='original',sent=32,opened=11,clicked=1,orders=0,delivered=32,queued=0,failed=0,skipped=0,bounced=0)]
+        with patch('crm_flow_page.st') as ui,patch('crm_flow_page.read') as read,patch('crm_flow_page.arm') as arm:
+            ui.session_state={};ui.button.return_value=False
+            for phase,data in [('LOADING',None),('ERROR',None),('READY',values),('REFRESHING',values),('TIMED_OUT',values)]:
+                read.return_value=(data,phase)
+                step_performance(Mock(),'flow',slots,details)
+                self.assertIn('sc-flow-metrics',slots['original'].html.call_args.args[0])
+            self.assertIn('32',slots['original'].html.call_args.args[0])
+            self.assertNotIn('32',slots['second'].html.call_args.args[0])
+            ui.rerun.assert_not_called()
+            ui.caption.assert_called_with('Step analytics unavailable.')
+            arm.assert_called_with('flow-steps',1)
+            with patch('crm_flow_page.refresh_reads') as refresh:
+                ui.button.side_effect=lambda label,**kwargs:label=='Retry step analytics'
+                step_performance(Mock(),'flow',slots,details)
+                refresh.assert_called_once()
+                ui.rerun.assert_called_once_with(scope='fragment')
+
     def test_thumbnail_is_inert_and_bounds_remote_images(self):
         parser=InertEmail();parser.feed('<script>secret()</script><style>@import "https://private";</style><p onclick="secret()" style="color:red;background-image:url(https://private)">Real heading</p><img src="https://cdn.shopify.com/a.jpg?width=4000"><img src="https://tracker.test/pixel"><a href="https://checkout.test/private-token">CTA</a>')
         output=''.join(parser.out)
@@ -62,8 +96,16 @@ class FlowMetricsTests(unittest.TestCase):
         for i,send in enumerate(sends):
             for event in ['email.delivered']+(['email.opened','email.opened'] if i<11 else [])+(['email.clicked'] if i==0 else []):
                 self.store.q('INSERT INTO crm_delivery_events(event_id,provider_id,event_type,occurred_at,send_id) VALUES(%s,%s,%s,now(),%s)',(str(uuid.uuid4()),send['provider_email_id'],event,send['id']))
+        before_enrollments=self.store.q('SELECT * FROM crm_automation_enrollments WHERE automation_id=%s ORDER BY id',(row['id'],))
         draft=deepcopy(row['config']['draft']);draft['emails'].reverse()
         self.store.save_flow(ADMIN,row['id'],row['name'],draft,row['config']['revision'])
+        persisted=self.store.flow(row['id'])
+        self.assertEqual(persisted['config']['draft']['emails'],draft['emails'])
+        self.assertEqual(persisted['steps'],row['steps'])
+        self.assertEqual(persisted['config']['published_version'],row['config']['published_version'])
+        self.assertEqual(persisted['status'],row['status'])
+        self.assertEqual(self.store.q('SELECT * FROM crm_automation_enrollments WHERE automation_id=%s ORDER BY id',(row['id'],)),before_enrollments)
+        self.assertEqual(self.store.q('SELECT s.* FROM crm_marketing_sends s JOIN crm_automation_enrollments j ON j.id=s.enrollment_id WHERE j.automation_id=%s',(row['id'],)),sends)
         metrics={r['step_id']:r for r in step_metrics(self.store,row['id'],window('All time'))}
         self.assertEqual((metrics[first]['sent'],metrics[first]['opened'],metrics[first]['clicked']),(32,11,1))
         self.assertNotIn(second,metrics)

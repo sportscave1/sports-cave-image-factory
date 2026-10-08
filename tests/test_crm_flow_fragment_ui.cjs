@@ -4,16 +4,15 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
  await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
- const baseline=process.env.FLOW_BASELINE==='1',base=process.env.FLOW_URL||'http://127.0.0.1:8893/';
+ const base=process.env.FLOW_URL||'http://127.0.0.1:8893/';
  const start=Date.now();await page.goto(base+'?fixture_toolbar_live=1&fixture_run=fragment'+Date.now());
  const rows=page.locator('[class*="st-key-flow-row-"]');
  await rows.nth(1).waitFor();await page.locator('.sc-flow-metrics[data-phase="READY"]').first().waitFor();
  const initialMs=Date.now()-start;
- async function closeMenu(){if(await page.getByTestId('stPopoverBody').isVisible())await page.locator('.sc-flow-stats').click();}
- async function move(index,action){await closeMenu();await rows.nth(index).getByRole('button',{name:'⋮',exact:true}).click();await page.getByTestId('stPopoverBody').getByRole('button',{name:action,exact:true}).click();}
+ async function closeMenu(){await page.locator('.sc-flow-stats').click();await page.waitForFunction(()=>[...document.querySelectorAll('[data-testid="stPopoverBody"]')].every(e=>!e.getClientRects().length));}
+ async function move(index,action){await closeMenu();await rows.nth(index).getByRole('button',{name:'⋮',exact:true}).click();await page.locator('[data-testid="stPopoverBody"]:visible').getByRole('button',{name:action,exact:true}).click();}
  const original=await rows.first().getAttribute('class'),t=Date.now();
  await move(0,'Move down');
- if(baseline){await page.getByTestId('stException').first().waitFor();assert.match(await page.getByTestId('stException').first().innerText(),/StreamlitInvalidLayoutContextError/);console.log('REPRODUCED original fragment crash');return;}
  await page.waitForFunction(c=>document.querySelectorAll('[class*="st-key-flow-row-"]')[1]?.className===c,original);
  await page.locator('.sc-flow-metrics[data-phase="READY"]').nth(1).waitFor();
  const reorderMs=Date.now()-t;
@@ -23,6 +22,13 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
  await page.locator('.sc-flow-metrics[data-phase="READY"]').nth(1).waitFor();
  await page.reload();await rows.nth(1).waitFor();assert.equal(await rows.nth(1).getAttribute('class'),original);
  await page.getByRole('button',{name:'Publish changes',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Pause',exact:true}).click();
+ await page.getByRole('button',{name:'Resume',exact:true}).waitFor().catch(async e=>{console.error(await page.locator('.st-key-flow-workspace').innerText());throw e;});
+ await page.getByRole('button',{name:'Resume',exact:true}).click();
+ await page.getByRole('button',{name:'Pause',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Test',exact:true}).click();
+ await page.getByText(/Simulation only. No customer emails/).waitFor();
+ await closeMenu();
  await page.getByRole('button',{name:'+ Add Email',exact:true}).click();await rows.nth(2).waitFor();
  await page.locator('.sc-flow-metrics[data-phase="READY"]').nth(2).waitFor();
  assert.equal(await page.locator('.sc-flow-metrics').count(),3);
