@@ -6996,10 +6996,10 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
         #{bar_id} {{
             position: relative;
             width: 100%;
-            height: 46px;
+            height: 36px;
             border: 1px solid rgba(212, 165, 76, 0.55);
-            border-radius: 14px;
-            background: #F5F2EA;
+            border-radius: 6px;
+            background: #FFFFFF;
             color: #0B0B0D;
             box-sizing: border-box;
             cursor: pointer;
@@ -7007,8 +7007,9 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
             align-items: center;
             justify-content: center;
             padding: 0 44px 0 16px;
-            font-weight: 800;
-            font-size: 0.95rem;
+            font-weight: 600;
+            font-family: "Segoe UI", system-ui, sans-serif;
+            font-size: 14px;
             line-height: 1;
             white-space: nowrap;
             overflow: hidden;
@@ -7017,10 +7018,11 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
             filter: none;
             transform: none;
         }}
+        #{bar_id}:focus-visible {{ outline: 2px solid #997322; outline-offset: -3px; }}
         #{bar_id}:hover,
         #{bar_id}:focus,
         #{bar_id}:active {{
-            background: #F5F2EA;
+            background: #FFFFFF;
             color: #0B0B0D;
             border-color: rgba(212, 165, 76, 0.55);
             box-shadow: none;
@@ -7149,7 +7151,7 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
         }})();
         </script>
         """,
-        height=54,
+        height=40,
     )
 
 
@@ -8097,7 +8099,8 @@ def get_asset_full_resolution_dropbox_path(asset):
 def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
     preview_path = asset.get("preview_path")
     if preview_path and Path(preview_path).exists():
-        st.image(str(preview_path), caption=asset["label"], width=image_width)
+        with st.container(key=f"mockups-thumb-{asset['key']}"):
+            st.image(str(preview_path), caption=asset["label"], width=image_width)
     else:
         st.caption("Preview not available.")
 
@@ -8112,7 +8115,7 @@ def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
     state_key = f"show-full-resolution::{run_dir}::{asset['key']}"
     button_key = f"toggle-full-resolution::{run_dir}::{asset['key']}"
     action_label = "Hide Full Resolution" if st.session_state.get(state_key) else "Load Full Resolution"
-    if st.button(action_label, key=button_key, use_container_width=True):
+    if st.button(action_label, key=button_key, use_container_width=False):
         st.session_state[state_key] = not st.session_state.get(state_key, False)
         st.rerun()
 
@@ -8147,20 +8150,13 @@ def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
 
 def render_generated_previews(result):
     st.subheader("Generated Previews")
-    st.caption(
-        "These are lightweight preview files only. Click Load Full Resolution on any card if you want to open or copy the higher-quality file."
-    )
-    preview_cols = st.columns(2)
+    st.caption("Lightweight previews. Load full resolution to open or copy the original-quality image.")
     base_assets = [asset for asset in result["assets"] if asset["asset_group"] == "generated"]
-
-    for index, asset in enumerate(base_assets):
-        with preview_cols[index % 2]:
-            render_preview_card(
-                asset,
-                result["run_dir"],
-                image_width=380,
-                caption_text="Use the preview for fast browsing. Load the full-resolution file before copying into ChatGPT.",
-            )
+    with st.container(key="mockups-gallery"):
+        for asset in base_assets:
+            with st.container(key=f"mockups-image-{asset['key']}"):
+                st.markdown(f"**{asset['label']}**")
+                render_preview_card(asset, result["run_dir"], image_width=260)
 
 
 def render_primary_zip_download(result, section_key):
@@ -8692,10 +8688,9 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
     st.subheader(heading)
     if caption:
         st.caption(caption)
-    cols = st.columns(3)
-
-    for index, prompt_path in enumerate(prompt_paths):
-        with cols[index % 3]:
+    with st.container(key="mockups-lifestyle-grid"):
+      for index, prompt_path in enumerate(prompt_paths):
+        with st.container(key=f"mockups-lifestyle-{prompt_path.stem}"):
             prompt_title = get_prompt_label(prompt_path)
             st.markdown(f"**{prompt_title}**")
             prompt_name = prompt_path.name
@@ -8765,11 +8760,10 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
                     render_preview_card(
                         lifestyle_asset,
                         result["run_dir"],
-                        image_width=360,
-                        caption_text="Saved. This lightweight preview is shown here, but you can load the full-resolution image before copying it into ChatGPT.",
+                        image_width=260,
+                        caption_text="Saved preview. Load full resolution for original quality.",
                     )
                     render_asset_download_controls(lifestyle_asset, result["run_dir"])
-                    st.caption("It will be included the next time you save the ZIP.")
 
             saved_asset = next(
                 (
@@ -8936,9 +8930,7 @@ def render_generation_result(result):
     ]
 
     if prompt_paths:
-        st.info(
-            "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
-        )
+        st.caption("Copy each prompt into ChatGPT, then upload the finished image to its matching card.")
         product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
 
         render_prompt_cards(
@@ -9383,229 +9375,232 @@ def build_mockup_final_prompt_items(product_name, sport_category, *, artwork_ref
 
 
 def render_mockups_page():
-    get_image_factory()
-    log_app_memory("Page load: Mockups")
-    st.title("Mockups")
-    st.caption(
-        "The existing Sports Cave Image Factory. Upload one finished artwork, generate the five core Shopify images, then download one simple ZIP bundle."
-    )
-    st.caption("Upload limit: 20MB. Working images are capped to 2000px and UI previews are capped to 900px.")
+    st.html("<style>" + (BASE_DIR / "mockups_page.css").read_text(encoding="utf-8") + "</style>")
+    with st.container(key="mockups-workspace"):
+        get_image_factory()
+        log_app_memory("Page load: Mockups")
+        st.title("Mockups")
+        st.caption("Create Shopify product images and lifestyle mockups.")
 
-    st.subheader("1. Upload Artwork")
-    uploaded_file = st.file_uploader(
-        "Upload finished Sports Cave artwork",
-        type=["jpg", "jpeg", "png", "webp"],
-        key="mockups_artwork_upload",
-    )
 
-    upload_details = None
-    upload_validation_error = None
-
-    autofill_product_name = get_product_name_from_upload(uploaded_file)
-
-    if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file_name:
-        if (
-            not st.session_state.product_name.strip()
-            or st.session_state.product_name == st.session_state.last_autofilled_product_name
-        ):
-            st.session_state.product_name = autofill_product_name
-
-        st.session_state.last_uploaded_file_name = uploaded_file.name
-        st.session_state.last_autofilled_product_name = autofill_product_name
-
-    elif uploaded_file is None and st.session_state.last_uploaded_file_name is not None:
-        if st.session_state.product_name == st.session_state.last_autofilled_product_name:
-            st.session_state.product_name = ""
-
-        st.session_state.last_uploaded_file_name = None
-        st.session_state.last_autofilled_product_name = ""
-        st.session_state.uploaded_preview_signature = None
-        st.session_state.uploaded_preview_path = None
-
-    if uploaded_file is not None:
-        try:
-            logging.info("MOCKUPS_NAV upload_processing_start selected_page=%s", st.session_state.get("selected_page"))
-            upload_details = process_uploaded_artwork_once(uploaded_file)
-            logging.info("MOCKUPS_NAV upload_processing_done selected_page=%s", st.session_state.get("selected_page"))
-        except ValueError as error:
-            upload_validation_error = str(error)
-            st.error(upload_validation_error)
-        except image_factory.MemoryLimitExceededError as error:
-            upload_validation_error = str(error)
-            st.error(upload_validation_error)
-        except Exception as error:
-            logging.exception("MOCKUPS_ARTWORK upload validation failed")
-            upload_validation_error = (image_factory.MEMORY_TELEMETRY_MESSAGE
-                                       if str(error) == image_factory.MEMORY_TELEMETRY_MESSAGE
-                                       else "Could not validate the uploaded artwork.")
-            st.error(upload_validation_error)
-
-    product_name = st.text_input(
-        "Product name",
-        key="product_name",
-        placeholder="Example: Arsenal The Wait Is Over",
-    )
-
-    sport_option = st.selectbox(
-        "Sport category",
-        options=alphabetize_options(SPORT_OPTIONS, last=("Custom",)),
-        index=0,
-    )
-
-    custom_sport = ""
-    if sport_option == "Custom":
-        custom_sport = st.text_input(
-            "Custom sport category",
-            placeholder="Example: Formula 1",
-        )
-
-    sport_category = get_sport_category(sport_option, custom_sport)
-    final_prompt_items = build_mockup_final_prompt_items(
-        product_name,
-        sport_category,
-        artwork_reference_available=uploaded_file is not None and not upload_validation_error,
-    )
-
-    st.subheader("2. Generate Core Shopify Images")
-    generate_clicked = st.button("Generate Core Shopify Images", type="primary")
-
-    if uploaded_file is not None:
-        st.subheader("Uploaded Artwork")
-        if upload_validation_error:
-            previous_preview = st.session_state.get("uploaded_preview_path")
-            if previous_preview and Path(previous_preview).exists():
-                st.image(str(previous_preview), caption="Previous valid artwork", width=400)
-            st.caption("The replacement preview is unavailable until the file validates cleanly.")
-        elif should_defer_uploaded_preview(upload_details):
-            st.session_state.uploaded_preview_signature = None
-            st.session_state.uploaded_preview_path = None
-            st.info(
-                "Preview generation was skipped for this larger upload to keep Sports Cave OS stable. "
-                "You can still generate the mockups normally."
+        setup = st.columns([1.65, 1], gap="medium")
+        with setup[0]:
+            st.subheader("1. Artwork Setup")
+            st.caption("JPG, PNG or WEBP · Up to 20MB · Working images up to 2000px; previews up to 900px.")
+            uploaded_file = st.file_uploader(
+                "Upload finished Sports Cave artwork",
+                type=["jpg", "jpeg", "png", "webp"],
+                key="mockups_artwork_upload",
             )
-            st.caption(uploaded_file.name)
-        else:
-            preview_signature = (upload_details or {}).get("signature")
-            preview_path = (upload_details or {}).get("preview_path")
-            st.session_state.uploaded_preview_signature = preview_signature
-            st.session_state.uploaded_preview_path = preview_path
 
-            preview_path = st.session_state.uploaded_preview_path
-            if preview_path and Path(preview_path).exists():
-                st.image(str(preview_path), caption=uploaded_file.name, width=400)
-            else:
-                st.caption("Lightweight preview unavailable until the upload is processed.")
+            upload_details = None
+            upload_validation_error = None
 
-    if generate_clicked:
-        temp_artwork_path = None
-        semaphore_acquired = False
-        run_signature = None
-        status_container = st.empty()
-        progress_bar = st.progress(0)
+            autofill_product_name = get_product_name_from_upload(uploaded_file)
 
-        def update_status(message, progress=None, level="info"):
-            logging.info(message)
-            if level == "error":
-                status_container.error(message)
-            elif level == "success":
-                status_container.success(message)
-            else:
-                status_container.info(message)
+            if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file_name:
+                if (
+                    not st.session_state.product_name.strip()
+                    or st.session_state.product_name == st.session_state.last_autofilled_product_name
+                ):
+                    st.session_state.product_name = autofill_product_name
 
-            if progress is not None:
-                progress_bar.progress(min(max(int(progress), 0), 100))
+                st.session_state.last_uploaded_file_name = uploaded_file.name
+                st.session_state.last_autofilled_product_name = autofill_product_name
 
-        try:
-            if uploaded_file is None:
-                raise ValueError("Please upload an artwork image first.")
-            if upload_validation_error:
-                raise ValueError(upload_validation_error)
-            if not product_name.strip():
-                raise ValueError("Please enter a product name.")
-            if not sport_category:
-                raise ValueError("Please enter a sport category.")
+            elif uploaded_file is None and st.session_state.last_uploaded_file_name is not None:
+                if st.session_state.product_name == st.session_state.last_autofilled_product_name:
+                    st.session_state.product_name = ""
 
-            update_status("Validating upload...", 5)
-            upload_details = upload_details or validate_uploaded_artwork(uploaded_file)
-            run_signature = mockups_generation_signature(
-                upload_details,
+                st.session_state.last_uploaded_file_name = None
+                st.session_state.last_autofilled_product_name = ""
+                st.session_state.uploaded_preview_signature = None
+                st.session_state.uploaded_preview_path = None
+
+            if uploaded_file is not None:
+                try:
+                    logging.info("MOCKUPS_NAV upload_processing_start selected_page=%s", st.session_state.get("selected_page"))
+                    upload_details = process_uploaded_artwork_once(uploaded_file)
+                    logging.info("MOCKUPS_NAV upload_processing_done selected_page=%s", st.session_state.get("selected_page"))
+                except ValueError as error:
+                    upload_validation_error = str(error)
+                    st.error(upload_validation_error)
+                except image_factory.MemoryLimitExceededError as error:
+                    upload_validation_error = str(error)
+                    st.error(upload_validation_error)
+                except Exception as error:
+                    logging.exception("MOCKUPS_ARTWORK upload validation failed")
+                    upload_validation_error = (image_factory.MEMORY_TELEMETRY_MESSAGE
+                                               if str(error) == image_factory.MEMORY_TELEMETRY_MESSAGE
+                                               else "Could not validate the uploaded artwork.")
+                    st.error(upload_validation_error)
+
+            product_name = st.text_input(
+                "Product name",
+                key="product_name",
+                placeholder="Example: Arsenal The Wait Is Over",
+            )
+
+            sport_option = st.selectbox(
+                "Sport category",
+                options=alphabetize_options(SPORT_OPTIONS, last=("Custom",)),
+                index=0,
+            )
+
+            custom_sport = ""
+            if sport_option == "Custom":
+                custom_sport = st.text_input(
+                    "Custom sport category",
+                    placeholder="Example: Formula 1",
+                )
+
+            sport_category = get_sport_category(sport_option, custom_sport)
+            final_prompt_items = build_mockup_final_prompt_items(
                 product_name,
                 sport_category,
-            )
-            if st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
-                update_status("This generation is already running.", 5)
-                return
-            semaphore_acquired = MOCKUPS_GENERATION_SEMAPHORE.acquire(blocking=False)
-            if not semaphore_acquired:
-                raise RuntimeError("Another image generation is already running. Try again when it finishes.")
-            st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = run_signature
-            st.session_state[MOCKUPS_LAST_RUN_SIGNATURE_KEY] = run_signature
-
-            image_factory.cleanup_stale_temp_runs()
-            update_status("Preparing lightweight working image...", 15)
-            log_app_memory("Mockup generation start")
-            suffix = Path(uploaded_file.name).suffix or ".jpg"
-            temp_parent = image_factory.create_temp_run_parent()
-            uploaded_file.seek(0)
-            with tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=suffix,
-                dir=temp_parent,
-            ) as temp_file:
-                shutil.copyfileobj(uploaded_file, temp_file)
-                temp_artwork_path = Path(temp_file.name)
-            uploaded_file.seek(0)
-
-            result = image_factory.generate_product_images(
-                product_name=product_name,
-                sport_category=sport_category,
-                artwork_file_path=temp_artwork_path,
-                base_dir=BASE_DIR,
-                status_callback=lambda msg, progress=None: update_status(msg, progress),
-                final_prompt_items=final_prompt_items,
-                output_root=temp_parent,
+                artwork_reference_available=uploaded_file is not None and not upload_validation_error,
             )
 
-            update_status("Finalising previews...", 92)
-            result = normalize_generation_result(result)
-            result["status_text"] = (
-                "Core image previews are ready. Save All to Dropbox at the bottom when finished."
-            )
-            image_factory.log_memory("Completion")
-            status_container.empty()
-            progress_bar.empty()
-            record_activity_log(
-                "mockup_generated",
-                "Mockups",
-                f"Generated mockups: {product_name.strip()}",
-                entity_type="mockup_run",
-                entity_id=str(result.get("run_dir") or ""),
-                metadata={
-                    "product_name": product_name.strip(),
-                    "sport_category": sport_category,
-                    "storage": "temporary_until_manual_save",
-                },
-            )
-            st.session_state.last_generation_result = result
-        except ValueError as error:
-            logging.info("Mockups generation validation failed: %s", error)
-            status_container.error(str(error))
-        except image_factory.MemoryLimitExceededError as error:
-            logging.exception("Generation stopped by memory limit")
-            status_container.error(str(error))
-        except Exception as error:
-            logging.exception("Generation failed")
-            status_container.error("Generation failed. Full traceback is logged in Render.")
-        finally:
-            if temp_artwork_path is not None:
-                mockup_storage.safe_unlink_temp_file(temp_artwork_path)
-            if semaphore_acquired:
-                MOCKUPS_GENERATION_SEMAPHORE.release()
-            if run_signature and st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
-                st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
+            generate_clicked = st.button("Generate Core Shopify Images", type="primary")
 
-    if st.session_state.last_generation_result is not None:
-        render_generation_result(st.session_state.last_generation_result)
+        with setup[1]:
+            if uploaded_file is not None:
+                st.subheader("Uploaded Artwork")
+                if upload_validation_error:
+                    previous_preview = st.session_state.get("uploaded_preview_path")
+                    if previous_preview and Path(previous_preview).exists():
+                        st.image(str(previous_preview), caption="Previous valid artwork", width=260)
+                    st.caption("The replacement preview is unavailable until the file validates cleanly.")
+                elif should_defer_uploaded_preview(upload_details):
+                    st.session_state.uploaded_preview_signature = None
+                    st.session_state.uploaded_preview_path = None
+                    st.info(
+                        "Preview generation was skipped for this larger upload to keep Sports Cave OS stable. "
+                        "You can still generate the mockups normally."
+                    )
+                    st.caption(uploaded_file.name)
+                else:
+                    preview_signature = (upload_details or {}).get("signature")
+                    preview_path = (upload_details or {}).get("preview_path")
+                    st.session_state.uploaded_preview_signature = preview_signature
+                    st.session_state.uploaded_preview_path = preview_path
+
+                    preview_path = st.session_state.uploaded_preview_path
+                    if preview_path and Path(preview_path).exists():
+                        st.image(str(preview_path), caption=uploaded_file.name, width=260)
+                    else:
+                        st.caption("Lightweight preview unavailable until the upload is processed.")
+
+        if generate_clicked:
+            temp_artwork_path = None
+            semaphore_acquired = False
+            run_signature = None
+            status_container = st.empty()
+            progress_bar = st.progress(0)
+
+            def update_status(message, progress=None, level="info"):
+                logging.info(message)
+                if level == "error":
+                    status_container.error(message)
+                elif level == "success":
+                    status_container.success(message)
+                else:
+                    status_container.info(message)
+
+                if progress is not None:
+                    progress_bar.progress(min(max(int(progress), 0), 100))
+
+            try:
+                if uploaded_file is None:
+                    raise ValueError("Please upload an artwork image first.")
+                if upload_validation_error:
+                    raise ValueError(upload_validation_error)
+                if not product_name.strip():
+                    raise ValueError("Please enter a product name.")
+                if not sport_category:
+                    raise ValueError("Please enter a sport category.")
+
+                update_status("Validating upload...", 5)
+                upload_details = upload_details or validate_uploaded_artwork(uploaded_file)
+                run_signature = mockups_generation_signature(
+                    upload_details,
+                    product_name,
+                    sport_category,
+                )
+                if st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
+                    update_status("This generation is already running.", 5)
+                    return
+                semaphore_acquired = MOCKUPS_GENERATION_SEMAPHORE.acquire(blocking=False)
+                if not semaphore_acquired:
+                    raise RuntimeError("Another image generation is already running. Try again when it finishes.")
+                st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = run_signature
+                st.session_state[MOCKUPS_LAST_RUN_SIGNATURE_KEY] = run_signature
+
+                image_factory.cleanup_stale_temp_runs()
+                update_status("Preparing lightweight working image...", 15)
+                log_app_memory("Mockup generation start")
+                suffix = Path(uploaded_file.name).suffix or ".jpg"
+                temp_parent = image_factory.create_temp_run_parent()
+                uploaded_file.seek(0)
+                with tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=suffix,
+                    dir=temp_parent,
+                ) as temp_file:
+                    shutil.copyfileobj(uploaded_file, temp_file)
+                    temp_artwork_path = Path(temp_file.name)
+                uploaded_file.seek(0)
+
+                result = image_factory.generate_product_images(
+                    product_name=product_name,
+                    sport_category=sport_category,
+                    artwork_file_path=temp_artwork_path,
+                    base_dir=BASE_DIR,
+                    status_callback=lambda msg, progress=None: update_status(msg, progress),
+                    final_prompt_items=final_prompt_items,
+                    output_root=temp_parent,
+                )
+
+                update_status("Finalising previews...", 92)
+                result = normalize_generation_result(result)
+                result["status_text"] = (
+                    "Core image previews are ready. Save All to Dropbox at the bottom when finished."
+                )
+                image_factory.log_memory("Completion")
+                status_container.empty()
+                progress_bar.empty()
+                record_activity_log(
+                    "mockup_generated",
+                    "Mockups",
+                    f"Generated mockups: {product_name.strip()}",
+                    entity_type="mockup_run",
+                    entity_id=str(result.get("run_dir") or ""),
+                    metadata={
+                        "product_name": product_name.strip(),
+                        "sport_category": sport_category,
+                        "storage": "temporary_until_manual_save",
+                    },
+                )
+                st.session_state.last_generation_result = result
+            except ValueError as error:
+                logging.info("Mockups generation validation failed: %s", error)
+                status_container.error(str(error))
+            except image_factory.MemoryLimitExceededError as error:
+                logging.exception("Generation stopped by memory limit")
+                status_container.error(str(error))
+            except Exception as error:
+                logging.exception("Generation failed")
+                status_container.error("Generation failed. Full traceback is logged in Render.")
+            finally:
+                if temp_artwork_path is not None:
+                    mockup_storage.safe_unlink_temp_file(temp_artwork_path)
+                if semaphore_acquired:
+                    MOCKUPS_GENERATION_SEMAPHORE.release()
+                if run_signature and st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
+                    st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
+
+        if st.session_state.last_generation_result is not None:
+            render_generation_result(st.session_state.last_generation_result)
 
 
 def current_product_upload_source_metadata():
