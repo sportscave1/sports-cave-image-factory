@@ -6993,6 +6993,7 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
     get_components_module().html(
         f"""
         <style>
+        body {{margin: 0; padding: 2px; font-family: "Segoe UI", system-ui, sans-serif;}}
         #{bar_id} {{
             position: relative;
             width: 100%;
@@ -7122,16 +7123,22 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
             const toast = document.createElement("div");
             toast.innerText = "Prompt copied";
             toast.style.position = "fixed";
-            toast.style.bottom = "22px";
-            toast.style.right = "22px";
+            toast.style.bottom = "2px";
+            toast.style.top = "2px";
+            toast.style.left = "2px";
+            toast.style.display = "flex";
+            toast.style.alignItems = "center";
+            toast.style.justifyContent = "center";
+            toast.style.fontSize = "14px";
+            toast.style.right = "2px";
             toast.style.zIndex = "999999";
             toast.style.background = "#F5F2EA";
             toast.style.color = "#0B0B0D";
             toast.style.border = "1px solid rgba(212,165,76,0.85)";
-            toast.style.borderRadius = "999px";
-            toast.style.padding = "10px 14px";
+            toast.style.borderRadius = "6px";
+            toast.style.padding = "4px 10px";
             toast.style.fontWeight = "700";
-            toast.style.boxShadow = "0 12px 32px rgba(0,0,0,0.32)";
+            toast.style.boxShadow = "none";
             document.body.appendChild(toast);
             bar.querySelector(".mockup-prompt-label").innerText = "Prompt copied";
             setTimeout(() => {{
@@ -7163,7 +7170,7 @@ def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
     if notice:
         st.success(notice)
     if prompt_editing_allowed():
-        action_cols = st.columns([8, 1])
+        action_cols = st.columns([6, 1], gap="small")
         with action_cols[0]:
             render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
         with action_cols[1]:
@@ -8689,98 +8696,98 @@ def _render_prompt_card_group(result, prompt_paths, heading, caption=None):
     if caption:
         st.caption(caption)
     with st.container(key="mockups-lifestyle-grid"):
-      for index, prompt_path in enumerate(prompt_paths):
-        with st.container(key=f"mockups-lifestyle-{prompt_path.stem}"):
-            prompt_title = get_prompt_label(prompt_path)
-            st.markdown(f"**{prompt_title}**")
-            prompt_name = prompt_path.name
-            default_prompt_text = prompt_path.read_text(encoding="utf-8")
-            prompt_id = prompt_edit_id("lifestyle", prompt_key_from_prompt_filename(prompt_name))
-            prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
-            prompt_key = f"{result['run_dir']}::{prompt_name}"
-            render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
+        for index, prompt_path in enumerate(prompt_paths):
+            with st.container(key=f"mockups-lifestyle-{prompt_path.stem}"):
+                prompt_title = get_prompt_label(prompt_path)
+                st.markdown(f"**{prompt_title}**")
+                prompt_name = prompt_path.name
+                default_prompt_text = prompt_path.read_text(encoding="utf-8")
+                prompt_id = prompt_edit_id("lifestyle", prompt_key_from_prompt_filename(prompt_name))
+                prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
+                prompt_key = f"{result['run_dir']}::{prompt_name}"
+                render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
 
-            uploaded_lifestyle_image = st.file_uploader(
-                "Upload image from ChatGPT",
-                type=["png", "jpg", "jpeg", "webp"],
-                key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
-            )
-
-            upload_error_rendered = False
-            try:
-                result = auto_register_lifestyle_upload(
-                    result,
-                    prompt_path,
-                    uploaded_lifestyle_image,
+                uploaded_lifestyle_image = st.file_uploader(
+                    "Upload image from ChatGPT",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
                 )
-            except Exception as error:
-                error_message = str(error)
-                clean_lifestyle_errors = {
-                    getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
-                    getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
-        getattr(image_factory, "MEMORY_TELEMETRY_MESSAGE", ""),
-                }
-                is_clean_lifestyle_error = (
-                    isinstance(
-                        error,
-                        (
-                            ValueError,
-                            MemoryError,
-                            getattr(image_factory, "MemoryLimitExceededError", RuntimeError),
-                        ),
+
+                upload_error_rendered = False
+                try:
+                    result = auto_register_lifestyle_upload(
+                        result,
+                        prompt_path,
+                        uploaded_lifestyle_image,
                     )
-                    or error_message in clean_lifestyle_errors
-                    or "Memory limit reached" in error_message
-                )
-                if is_clean_lifestyle_error:
-                    st.error(error_message)
-                    upload_error_rendered = True
-                    gc.collect()
-                else:
-                    st.error("Could not save the lifestyle image for this prompt.")
-                    logging.warning("Mockups lifestyle upload failed (%s)", type(error).__name__)
-                    upload_error_rendered = True
-
-            upload_lifecycle = get_lifestyle_upload_lifecycle(result, prompt_path)
-            if (
-                uploaded_lifestyle_image is not None
-                and upload_lifecycle.get("status") == "FAILED"
-                and not upload_error_rendered
-            ):
-                st.error(
-                    upload_lifecycle.get("error_message")
-                    or "Could not save the lifestyle image for this prompt."
-                )
-
-            saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
-            if saved_lifestyle_paths:
-                saved_preview_path = saved_lifestyle_paths.get("preview_path")
-                if saved_preview_path and Path(saved_preview_path).exists():
-                    lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths)
-                    render_preview_card(
-                        lifestyle_asset,
-                        result["run_dir"],
-                        image_width=260,
-                        caption_text="Saved preview. Load full resolution for original quality.",
+                except Exception as error:
+                    error_message = str(error)
+                    clean_lifestyle_errors = {
+                        getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
+                        getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
+            getattr(image_factory, "MEMORY_TELEMETRY_MESSAGE", ""),
+                    }
+                    is_clean_lifestyle_error = (
+                        isinstance(
+                            error,
+                            (
+                                ValueError,
+                                MemoryError,
+                                getattr(image_factory, "MemoryLimitExceededError", RuntimeError),
+                            ),
+                        )
+                        or error_message in clean_lifestyle_errors
+                        or "Memory limit reached" in error_message
                     )
-                    render_asset_download_controls(lifestyle_asset, result["run_dir"])
+                    if is_clean_lifestyle_error:
+                        st.error(error_message)
+                        upload_error_rendered = True
+                        gc.collect()
+                    else:
+                        st.error("Could not save the lifestyle image for this prompt.")
+                        logging.warning("Mockups lifestyle upload failed (%s)", type(error).__name__)
+                        upload_error_rendered = True
 
-            saved_asset = next(
-                (
-                    asset
-                    for asset in ensure_lifestyle_assets_registered(result)["assets"]
-                    if asset.get("key") == get_lifestyle_asset_key(prompt_name)
-                    and asset_has_downloadable_file(asset)
-                ),
-                None,
-            )
-            if saved_lifestyle_paths and saved_asset:
-                group_label = (
-                    "Product Images"
-                    if saved_asset.get("zip_group") == ASSET_CATEGORY_PRODUCT
-                    else "Social Mockups"
+                upload_lifecycle = get_lifestyle_upload_lifecycle(result, prompt_path)
+                if (
+                    uploaded_lifestyle_image is not None
+                    and upload_lifecycle.get("status") == "FAILED"
+                    and not upload_error_rendered
+                ):
+                    st.error(
+                        upload_lifecycle.get("error_message")
+                        or "Could not save the lifestyle image for this prompt."
+                    )
+
+                saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
+                if saved_lifestyle_paths:
+                    saved_preview_path = saved_lifestyle_paths.get("preview_path")
+                    if saved_preview_path and Path(saved_preview_path).exists():
+                        lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths)
+                        render_preview_card(
+                            lifestyle_asset,
+                            result["run_dir"],
+                            image_width=260,
+                            caption_text="Saved preview. Load full resolution for original quality.",
+                        )
+                        render_asset_download_controls(lifestyle_asset, result["run_dir"])
+
+                saved_asset = next(
+                    (
+                        asset
+                        for asset in ensure_lifestyle_assets_registered(result)["assets"]
+                        if asset.get("key") == get_lifestyle_asset_key(prompt_name)
+                        and asset_has_downloadable_file(asset)
+                    ),
+                    None,
                 )
-                st.caption(f"Saved - included when {group_label} is selected.")
+                if saved_lifestyle_paths and saved_asset:
+                    group_label = (
+                        "Product Images"
+                        if saved_asset.get("zip_group") == ASSET_CATEGORY_PRODUCT
+                        else "Social Mockups"
+                    )
+                    st.caption(f"Saved - included when {group_label} is selected.")
 
     return ensure_lifestyle_assets_registered(result)
 

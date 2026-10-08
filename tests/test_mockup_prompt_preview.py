@@ -581,7 +581,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("prompt_preview_rendered", mockups_page)
         self.assertLess(
             mockups_page.index("final_prompt_items = build_mockup_final_prompt_items("),
-            mockups_page.index('st.subheader("2. Generate Core Shopify Images")'),
+            mockups_page.index('generate_clicked = st.button("Generate Core Shopify Images"'),
         )
         self.assertIn("final_prompt_items=final_prompt_items", mockups_page)
         self.assertIn("render_generation_result(st.session_state.last_generation_result)", mockups_page)
