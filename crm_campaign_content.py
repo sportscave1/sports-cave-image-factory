@@ -215,6 +215,14 @@ def preflight(doc, env=None, cfg=None):
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)
     validate_document(doc); delivery=get_resend_marketing_config_status(env); c=doc['content']; counts=doc['counts']
+    from crm_abandoned_checkout import dynamic
+    if dynamic(doc):
+        # Authoring is allowed in the shared composer, but campaigns do not own
+        # recipient checkout contexts. Keep drafts saveable and delivery closed.
+        checks={'Abandoned Checkout requires a checkout recovery automation':False}
+        return {'test':checks,'live':checks.copy(),'issues':[],'section_issues':[],
+                'test_ready':False,'live_ready':False,'marketing_enabled':delivery['marketing_enabled'],
+                'policy':POLICIES[doc['market']]}
     from crm_logic import date, now
     counted=date(counts.get('checked_at'))
     recent=bool(counted and 0 <= (now()-counted).total_seconds() < 86400)

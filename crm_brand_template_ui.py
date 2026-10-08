@@ -2,9 +2,10 @@
 import streamlit as st
 import os_accounts
 from crm_store import StoreUnavailable
+from crm_template_modal import template_modal
 
 
-@st.dialog('Email default',width='small')
+@template_modal('Email default',width='small')
 def edit_default(store,user,kind,row,target=None):
     from crm_campaign_library import finish_action,action_error,template_dialog
     dialog=template_dialog()

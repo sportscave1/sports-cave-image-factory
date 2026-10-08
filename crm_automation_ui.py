@@ -136,6 +136,11 @@ def settings_control(editor,key):
 
 def detail(shop,store,actions,identity):
     store.preview_shop=shop
+    template_view=st.session_state.get('automation_template_view')
+    if template_view:
+        fn,args,kwargs=template_view
+        fn(*args,**kwargs)
+        return
     from crm_campaign_page import composer_form
     from crm_campaign_send_ui import test_control,safe_error
     from crm_campaign_recovery import flush_current

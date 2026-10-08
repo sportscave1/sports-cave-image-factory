@@ -26,7 +26,7 @@ def validate_middle(sections):
         if type(s.get('visible')) is not bool: raise ValueError('Invalid section visibility.')
         common = {'id', 'type', 'visible'}
         if 'name' in s:
-            if not isinstance(s['name'],str) or not s['name'].strip() or len(s['name'])>80:raise ValueError('Use a section name of 1–80 characters.')
+            if not isinstance(s['name'],str) or len(s['name'])>80:raise ValueError('Use a section name of up to 80 characters.')
             common.add('name')
         if s.get('type') == 'html':
             if set(s) != common | {'html_number', 'html'} or type(s['html_number']) is not int or not 1 <= s['html_number'] <= 10000 or s['html_number'] in numbers or not isinstance(s['html'], str):
@@ -97,7 +97,11 @@ def apply_event(doc, event):
             raise ValueError('Section cannot be restored here.')
         sections.insert(min(position,len(sections)),restored)
     elif selected is None: raise ValueError('Section not found.')
-    elif kind == 'rename': selected['name'] = event.get('name','').strip()
+    elif kind == 'rename':
+        name=event.get('name')
+        if not isinstance(name,str):raise ValueError('Invalid section name.')
+        if not name.strip() and not event.get('reset'):raise ValueError('Enter a section name or reset to default.')
+        selected['name']='' if event.get('reset') else name.strip()
     elif kind == 'duplicate':
         copied=deepcopy(selected);copied['id']=uuid.uuid4().hex
         if copied['type']=='html':copied['html_number']=max(s.get('html_number',0) for s in sections)+1

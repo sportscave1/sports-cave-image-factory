@@ -8,6 +8,7 @@ from crm_campaign_content import new_document, validate_document
 from crm_middle_sections import middle_sections, commit_middle
 from crm_template_cache import cached
 from crm_store import StoreUnavailable
+from crm_template_modal import template_modal
 
 # Keyed fragment reruns are available in the newer supported Streamlit runtime.
 # Older supported installs retain native dialog closure without failing imports.
@@ -78,6 +79,7 @@ def finish_action(target=None, action=None, dialog=None, clear_keys=()):
     # A targeted rerun does not garbage-collect widgets owned by the dialog.
     # Cancel must discard edits, and the next Add template form must start blank.
     for key in clear_keys:st.session_state.pop(key,None)
+    if st.session_state.pop('automation_template_view',None):st.rerun(scope='app')
     if dialog and target:st.session_state['campaign_template_close_dialog']=dialog
     st.rerun(scope=target if dialog and target else 'app')
 
@@ -87,7 +89,7 @@ def action_error():
         st.error(st.session_state.pop('campaign_template_error'))
 
 
-@st.dialog('HTML template',width='small')
+@template_modal('HTML template',width='small')
 def edit_template(store,user,row=None,target=None):
     dialog=template_dialog()
     try:
@@ -107,7 +109,7 @@ def edit_template(store,user,row=None,target=None):
     action_error()
 
 
-@st.dialog('Delete template',width='small')
+@template_modal('Delete template',width='small')
 def delete_template(store,user,row,target=None):
     dialog=template_dialog()
     st.write('Delete “'+row['name']+'”?')
@@ -137,8 +139,9 @@ def library(store,user,doc,target=None):
     action_error()
     for row in rows:
         with st.container(key='library_'+str(row['id'])):
-            st.text(row['name'])
-            with st.container(horizontal=True,gap='small'):
+            label,controls=st.columns([3,2],vertical_alignment='center')
+            label.text(row['name'])
+            with controls.container(horizontal=True,gap='small'):
                 st.button('Use',key='use_'+str(row['id']),on_click=use,args=(row,))
                 if manage:
                     if st.button('Edit',key='edit_'+str(row['id'])):edit_template(store,user,row,target)

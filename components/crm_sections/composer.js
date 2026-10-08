@@ -46,6 +46,23 @@ function remember(id,value){const history=historyFor(id,value);history.record(va
 function syncArea(s){const area=areas.get(s.id);if(!area)return;const value=drafts[s.id]??s.html;historyFor(s.id,value);if(area.value!==value){remember(s.id,area.value);area.value=value;remember(s.id,value);}}
 function recover(id,redo){const area=areas.get(id);if(!area)return;const history=historyFor(id,area.value),value=redo?history.redo():history.undo(area.value);if(value===area.value)return;area.value=value;area.focus({preventScroll:true});area.dispatchEvent(new Event('input',{bubbles:true}));try{sessionStorage.setItem('sc-section-history:'+historyScope+':'+id,JSON.stringify(history));}catch{}}
 function visibleBottom(){try{return Math.min(innerHeight,parent.innerHeight-frameElement.getBoundingClientRect().top);}catch{return innerHeight;}}
+function renameControl(s,name){
+ const wrap=el('span','','section-name-control'),menu=el('div','','section-name-menu'),form=el('form','','section-name-editor');
+ menu.setAttribute('popover','auto');menu.setAttribute('role','menu');
+ form.setAttribute('popover','auto');form.setAttribute('aria-label','Rename section');
+ const place=(popup)=>{const r=trigger.getBoundingClientRect();popup.style.left=Math.max(4,Math.min(r.left,innerWidth-260))+'px';popup.style.top=Math.max(4,Math.min(r.bottom+4,visibleBottom()-145))+'px';popup.showPopover();};
+ const trigger=button('⋮','Section options',()=>{place(menu);rename.focus();},'section-options');trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');
+ menu.addEventListener('toggle',()=>trigger.setAttribute('aria-expanded',String(menu.matches(':popover-open'))));
+ const input=document.createElement('input');input.type='text';input.maxLength=80;input.required=true;input.setAttribute('aria-label','Section name');
+ const close=()=>{form.hidePopover();trigger.focus({preventScroll:true});};
+ const rename=button('Rename','Rename',()=>{menu.hidePopover();input.value=name;input.setCustomValidity('');place(form);input.focus();input.select();});rename.setAttribute('role','menuitem');menu.append(rename);
+ form.append(input,button('Save','Save section name',()=>form.requestSubmit()),button('Cancel','Cancel rename',close),button('Reset to default','Reset section name to default',()=>{emit('rename',{id:s.id,name:'',reset:true});close();},'section-name-reset'));
+ form.onsubmit=e=>{e.preventDefault();if(!input.value.trim()){input.setCustomValidity('Enter a section name.');input.reportValidity();return;}emit('rename',{id:s.id,name:input.value.trim()});close();};
+ input.oninput=()=>input.setCustomValidity('');
+ form.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();close();}};
+ menu.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();menu.hidePopover();trigger.focus();}};
+ wrap.append(trigger,menu,form);return wrap;
+}
 function deleteControl(s){
  const trash=button('','Delete section',()=>{const r=trash.getBoundingClientRect();popup.style.top=Math.max(8,Math.min(r.bottom+4,visibleBottom()-100))+'px';popup.style.left=Math.max(8,r.right-200)+'px';popup.showPopover();cancel.focus({preventScroll:true});},'section-delete');
  trash.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg>';
@@ -86,15 +103,16 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  let card=el('section','','section');card.dataset.id=s.id;card.dataset.signature=signature;if(s.type==='catalogue')card.classList.add('catalogue');let row=el('div','','row');handle(row,s.id);
  let visibility=button('',s.visible?'Visible section — click to hide':'Hidden section — click to show',()=>emit('visible',{id:s.id,visible:!s.visible}),'visibility');
  visibility.dataset.action='visibility';visibility.setAttribute('aria-pressed',String(s.visible));visibility.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>'+(s.visible?'':'<path d="m3 3 18 18"/>')+'</svg>';row.append(visibility);
+ row.append(renameControl(s,name));
  card.classList.toggle('is-hidden',!s.visible);card.classList.toggle('is-open',!!opened[s.id]);
  let title=button(name,'Edit '+name,()=>{opened[s.id]=!opened[s.id];render();},'title');title.setAttribute('aria-expanded',!!opened[s.id]);row.append(title);
  if(s.type==='image')imageControls(row,args.image_prompt||'');
- row.append(button('✎','Rename section',()=>{const value=prompt('Section name',name);if(value?.trim())emit('rename',{id:s.id,name:value.trim()});}),button('⧉','Duplicate section',()=>emit('duplicate',{id:s.id})));
+ row.append(button('⧉','Duplicate section',()=>emit('duplicate',{id:s.id})));
  row.append(deleteControl(s),el('span',opened[s.id]?'⌃':'⌄','chevron'));card.append(row);
  if(opened[s.id]){let content=el('div','','content');if(s.type==='html'||s.type==='image'){
  let area=areas.get(s.id);
  if(!area){area=document.createElement('textarea');area.value=drafts[s.id]??s.html;area.placeholder='Paste campaign HTML here…';area.setAttribute('aria-label',name+' HTML');areas.set(s.id,area);}
- syncArea(s);
+ area.setAttribute('aria-label',name+' HTML');syncArea(s);
  const advice=el('div',s.type==='image'?imageAdvice(area.value):'','warning');advice.setAttribute('aria-live','polite');
  const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}};
  area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,args.preview_debounce||750);};area.onblur=update;

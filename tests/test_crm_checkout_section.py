@@ -1,4 +1,5 @@
 from copy import deepcopy
+import os
 import unittest
 from unittest.mock import Mock
 from crm_checkout_section import insert,editable
@@ -42,6 +43,7 @@ class CheckoutSectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):publication_document(self.doc,'welcome')
         with self.assertRaisesRegex(ValueError,'checkout recovery automation'):render_middle(self.doc)
         from crm_checkout_preview import document as preview,sample
+        self.assertFalse(preview(self.doc,sample(self.doc),test=True)[1])
         self.assertNotIn(MARKER,render_campaign(preview(self.doc,sample(self.doc),test=True)[0],CFG)['html'])
 
     def test_rename_duplicate_reorder_visibility_delete_roundtrip(self):
@@ -77,3 +79,37 @@ class CheckoutSectionTests(unittest.TestCase):
         before=deepcopy(self.doc);self.store.state.return_value['html']='Broken'
         with self.assertRaises(ValueError):insert(self.store,self.doc)
         self.assertEqual(before,self.doc)
+
+
+@unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
+class CheckoutCopyPersistenceTests(unittest.TestCase):
+    def test_campaign_and_individual_steps_reopen_independently(self):
+        from crm_automation_store import AutomationStore
+        from crm_campaign_store import CampaignStore
+        from crm_checkout_template import load,save,KEY
+        from tests.crm_db_fixture import connect
+        from tests.test_crm import ADMIN
+        store=AutomationStore(connect);previous=store.state(KEY)
+        try:
+            master=load(store);source=master['html'].replace('Still thinking it over?','Master at creation')
+            saved=save(store,ADMIN,source,master['revision'])
+            row=store.create(ADMIN,'abandoned','Independent checkout templates')
+            self.assertEqual(len(row['config']['draft']['emails']),3)
+            flow=deepcopy(row['config']['draft']);first=flow['emails'][0]['document']
+            first['middle_sections'][0]['html']=source.replace('Master at creation','Email one only')
+            commit_middle(first,first['middle_sections'])
+            updated=store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+            save(store,ADMIN,source.replace('Master at creation','Future master'),saved['revision'])
+            reopened=AutomationStore(connect).flow(row['id'])
+            docs=[s['document'] for s in reopened['config']['draft']['emails']]
+            self.assertIn('Email one only',docs[0]['custom_html'])
+            self.assertIn('Master at creation',docs[1]['custom_html'])
+            self.assertEqual(reopened['config']['published_version'],0)
+            self.assertEqual(reopened['steps'],[])
+            campaign=CampaignStore(connect);doc=document();commit_middle(doc,[]);insert(campaign,doc)
+            row=campaign.save(ADMIN,'Checkout draft only',doc)
+            self.assertEqual(CampaignStore(connect).draft(row['id'])['document'],doc)
+            self.assertIn('Future master',doc['custom_html'])
+        finally:
+            if previous:store.set_state(KEY,previous)
+            else:store.q('DELETE FROM crm_runtime_state WHERE key=%s',(KEY,))

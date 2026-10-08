@@ -18,7 +18,7 @@ def migrate(doc):
     targets=[s for s in sections if s.get('type')=='html' and s.get('visible') and MARKER in s.get('html','')]
     if len(targets)!=1 or any(re.search(r'\{\{|\{%',s.get('html','')) for s in sections):return result
     target=targets[0];before,after=target['html'].split(MARKER)
-    if target.get('name'):return result # Authored single-section checkout copies stay editable.
+    if 'name' in target:return result # Authored single-section checkout copies stay editable, including reset labels.
     class Insertion(HTMLParser):
         found=0
         def handle_comment(self,value):

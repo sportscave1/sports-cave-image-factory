@@ -3,6 +3,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from crm_abandoned_checkout import preview_context,apply_template,TEMPLATE
 from crm_checkout_preview import needs_checkout
+from crm_template_modal import template_modal
 
 
 def automation_canvas(doc,cfg,key,store,*,current_document=True):
@@ -70,7 +71,7 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
         elif pending and not loading:st.rerun(scope='app')
 
 
-@st.dialog('Default Abandoned Checkout',width='large')
+@template_modal('Default Abandoned Checkout',width='large')
 def edit_master(store,user,key):
     from crm_checkout_template import load,save
     from crm_checkout_styles import default_html
@@ -99,11 +100,13 @@ def edit_master(store,user,key):
     cancel,reset,commit=st.columns(3)
     if cancel.button('Cancel',key=key+'master_cancel'):
         for suffix in ('master_edit','master_html'):st.session_state.pop(key+suffix,None)
+        st.session_state.pop('automation_template_view',None)
         st.rerun()
     reset.button('Reset to default',key=key+'master_reset',on_click=reset_html)
     if commit.button('Save template',key=key+'master_save',type='primary'):
         try:
             save(store,user,source,row['revision'])
             for suffix in ('master_edit','master_html'):st.session_state.pop(key+suffix,None)
+            st.session_state.pop('automation_template_view',None)
             st.toast('Template saved');st.rerun()
         except (ValueError,PermissionError) as exc:st.error(str(exc))

@@ -36,7 +36,9 @@ class AutomationStore(CampaignStore):
         if trigger=='abandoned':
             from crm_automation_definition import email_step
             from crm_abandoned_checkout import apply_template
-            apply_template(doc)
+            from crm_checkout_template import load
+            from crm_checkout_section import editable
+            apply_template(doc,load(self)['html']);doc=editable(doc)
             cfg['draft']['emails']=[email_step(doc,delay) for delay in (7200,86400,172800)]
             for index,step in enumerate(cfg['draft']['emails']):
                 step.update(name=('First Reminder','Second Reminder','Final Reminder')[index],enabled=True)

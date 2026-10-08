@@ -68,3 +68,10 @@ small{font-size:11px;color:var(--editor-muted);white-space:nowrap}
 .history-button{border:0;background:transparent;color:var(--editor-muted);font-size:17px;min-height:26px;padding:0 6px}
 .drag-active{opacity:.75;box-shadow:0 3px 12px #25251e25;background:#f5f3ed;cursor:grabbing}
 .drop-before{box-shadow:0 -2px var(--editor-gold)}.drop-after{box-shadow:0 2px var(--editor-gold)}
+.section-options{border:0;background:transparent;color:var(--editor-muted);width:22px;padding:2px;flex-shrink:0;font-size:20px}
+.section-name-control{display:flex;flex-shrink:0}
+.section-name-menu,.section-name-editor{position:fixed;margin:0;border:1px solid var(--editor-line);border-radius:6px;background:#faf9f6;color:var(--editor-text);padding:8px;box-shadow:0 4px 16px #2222;font:13px/1.5 Arial,sans-serif}
+.section-name-menu button{border:0;background:transparent;width:100%;text-align:left}
+.section-name-editor{width:min(260px,calc(100vw - 8px))}
+.section-name-editor input{width:100%;padding:6px;border:1px solid var(--editor-line);border-radius:4px;margin-bottom:8px}
+.section-name-editor button{margin-right:6px}.section-name-editor .section-name-reset{border:0;background:transparent;font-size:12px;padding:4px 0;margin-top:4px}
