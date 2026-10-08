@@ -131,12 +131,18 @@ def snippet(doc):
     source=re.sub(r'<(style|script)\b[^>]*>.*?</\1>','',source,flags=re.S|re.I)
     return re.sub(r'\s+',' ',unescape(re.sub('<[^>]+>',' ',source))).strip()[:240]
 
-@st.fragment
-def step_performance(store,identity,slots,detail_slots):
-    """Replace read-only placeholders without remounting rows or thumbnails.
+def delay_origin(emails,index):
+    """Disabled rows do not advance the scheduler's timing anchor."""
+    return ' after the previous enabled email' if any(s.get('enabled',True) for s in emails[:index]) else ' after trigger'
 
-    Streamlit permits fragment output into existing empty placeholders. Each
-    .html replaces its slot, so repeated updates cannot append duplicate data.
+
+def step_performance(store,identity,slots,detail_slots):
+    """Render in the sequence fragment that owns the row placeholders.
+
+    Do not make this a nested fragment: reorder/add recreates targets during a
+    partial rerun, when external layout positions cannot be reserved. Keeping
+    slot creation, writes and retry UI in one fragment also avoids Streamlit's
+    cascading FragmentHandledException. Reads and thumbnails remain cached.
     """
     st.button('Refresh sequence metrics',key='flow-step-metrics-refresh')
     period=st.session_state.get('auto-analytics-period-'+str(identity),'All time')
@@ -164,7 +170,7 @@ def sequence(shop,store,user,identity,period):
     from crm_flow_thumbnail import thumbnail
     for i,s in enumerate(flow['emails']):
         sid=s['step_id'];prefix='flow-step-'+sid+'-';content=s['document']['content']
-        amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+(' after the previous enabled email' if i else ' after trigger')
+        amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+delay_origin(flow['emails'],i)
         with st.container(horizontal=True,key='flow-row-'+sid):
             with st.container(width=78):
                 thumbnail(store,s)

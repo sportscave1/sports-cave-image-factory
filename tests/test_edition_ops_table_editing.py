@@ -30,6 +30,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(socket.socket, "connect", side_effect=AssertionError("No network in tests")))
+        self.stack.enter_context(patch("edition_versions.kick"))
         for name in ("_write_snapshot", "_invalidate_edition_ops_cache", "record_activity_log"):
             self.stack.enter_context(patch.object(edition_ops, name))
 
@@ -44,7 +45,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         with patch.object(edition_ops, "st", fake_st), patch.object(
             edition_ops, "_configured_supabase_backend", return_value=object()
         ):
-            edition_ops.render_page()
+            edition_ops._render_table()
         kwargs = fake_st.data_editor.call_args.kwargs
         self.assertEqual(kwargs["column_order"], (
             "product_title", "handle", "edition_enabled", "edition_total", "edition_next_number",
@@ -59,8 +60,8 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             self.assertNotIn(field, fake_st.editor_payloads[0][0])
             self.assertIn(field, fake_st.session_state[edition_ops.ROWS_KEY][0])
             self.assertIn(field, edition_ops.CSV_COLUMNS)
-        self.assertIn("Existing import warning", fake_st.warnings)
-        self.assertIn("Some rows need review before they are fully synced.", fake_st.errors)
+        self.assertIn("Existing import warning", fake_st.captions)
+        self.assertTrue(any('Allocation requires review' in text for text in fake_st.captions))
         self.assertIn("edition_status", edition_ops.SHOPIFY_MIRROR_METAFIELD_KEYS)
 
     def test_numeric_config_allows_sold_out_sentinel(self):
@@ -130,8 +131,8 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             self.assertFalse(app.exception)
 
         edit_next(17)
-        self.assertEqual(stored[0]["edition_next_number"], 1)
-        self.assertIn("1 unsaved change", " ".join(item.value for item in app.caption))
+        self.assertEqual(stored[0]["edition_next_number"], 17)
+        self.assertIn("0 unsaved changes", " ".join(item.value for item in app.caption))
         app.selectbox(key="test_page").select("Home").run()
         app.selectbox(key="test_page").select("Edition Ops").run()
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 17)
@@ -148,9 +149,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_sold_count"], 0)
         self.assertEqual(app.session_state[edition_ops.ROWS_KEY][0]["edition_remaining"], 100)
         self.assertIn("0 unsaved changes", " ".join(item.value for item in app.caption))
-        backend.sync_product_edition_metafields_for_handles.assert_called_once_with(
-            ["product-1"], config={"configured": True}, ensure_schema_first=False
-        )
+        backend.sync_product_edition_metafields_for_handles.assert_not_called()
         edit_next(18)
         app.button(key="edition-ops-save-changes").click().run()
         self.assertEqual(stored[0]["edition_next_number"], 18)
@@ -186,17 +185,18 @@ class EditionOpsPointerPersistenceTests(unittest.TestCase):
 
     def test_manual_correction_updates_both_pointers_only_and_audits(self):
         before = deepcopy((self.product, self.run, self.ledger))
-        result = self.save(7, reason="manual_next_number_lowered")
+        result = self.save(17, reason="forward correction")
         writes = [call.args for call in self.cursor.execute.call_args_list if call.args[0].startswith("UPDATE")]
         self.assertEqual(writes, [
-            ("UPDATE edition_runs SET next_edition_number=%s, updated_at=now() WHERE id=%s RETURNING *", (7, 8)),
-            ("UPDATE edition_products SET next_edition_number=%s, updated_at=now() WHERE id=%s", (7, 7)),
+            ("UPDATE edition_runs SET next_edition_number=%s, updated_at=now() WHERE id=%s RETURNING *", (17, 8)),
+            ("UPDATE edition_products SET next_edition_number=%s, updated_at=now() WHERE id=%s", (17, 7)),
+            ("UPDATE edition_products SET metafields_sync_status='Pending' WHERE id=%s", (7,)),
         ])
         self.assertEqual((self.product, self.run, self.ledger), before)
         self.lookup.assert_called_once_with(self.cursor, "test-product", lock=True, create_missing=False)
-        self.assertTrue(result["manual_next_number_lowered"])
+        self.assertFalse(result["manual_next_number_lowered"])
         self.assertEqual(self.audit.call_args.kwargs["old_next"], 10)
-        self.assertEqual(self.audit.call_args.kwargs["new_next"], 7)
+        self.assertEqual(self.audit.call_args.kwargs["new_next"], 17)
         self.assertEqual(self.audit.call_args.kwargs["source"], "manual_app")
 
     def test_sold_out_next_101_is_valid_and_does_not_change_flags_or_counts(self):
@@ -205,7 +205,7 @@ class EditionOpsPointerPersistenceTests(unittest.TestCase):
         self.assertEqual(self.save(101)["next_edition_number"], 101)
         for call in self.cursor.execute.call_args_list:
             if call.args[0].startswith("UPDATE"):
-                self.assertNotIn("status=", call.args[0])
+                self.assertNotIn("SET status=", call.args[0])
                 self.assertNotIn("count=", call.args[0])
                 self.assertNotIn("active=", call.args[0])
 

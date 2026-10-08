@@ -108,7 +108,7 @@ class _Column:
 
 class _Slot:
     def caption(self, *args, **kwargs):
-        return None
+        if hasattr(self,'captions'):self.captions.append(str(args[0]))
 
     def container(self):
         return _Context()
@@ -119,6 +119,7 @@ class _FakeStreamlit:
         self.session_state = dict(session_state or {})
         self.errors = []
         self.warnings = []
+        self.captions = []
         self.editor_payloads = []
         self.column_config = SimpleNamespace(
             TextColumn=lambda *args, **kwargs: None,
@@ -130,11 +131,17 @@ class _FakeStreamlit:
     def markdown(self, *args, **kwargs):
         return None
 
+    def container(self, *args, **kwargs):
+        return _Context()
+
+    def subheader(self, *args, **kwargs):
+        return None
+
     def title(self, *args, **kwargs):
         return None
 
     def caption(self, *args, **kwargs):
-        return None
+        self.captions.append(str(args[0]))
 
     def success(self, *args, **kwargs):
         return None
@@ -321,9 +328,9 @@ class EditionOpsStabilityTests(unittest.TestCase):
             "_write_snapshot",
             side_effect=AssertionError("Edition Ops page load must not write a snapshot."),
         ):
-            edition_ops.render_page()
+            edition_ops._render_table()
         self.assertEqual(len(fake_st.editor_payloads), 1)
-        self.assertEqual(len(fake_st.editor_payloads[0]), 120)
+        self.assertEqual(len(fake_st.editor_payloads[0]), 50)
         self.assertEqual(
             set(fake_st.editor_payloads[0][0]),
             {"edition_product_id", "shopify_product_gid", *edition_ops.VISIBLE_COLUMNS},
@@ -368,7 +375,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
         ), patch.object(edition_ops, "_configured_supabase_backend", return_value=None), patch.object(
             edition_ops, "_local_cached_snapshot", return_value=None
         ):
-            edition_ops.render_page()
+            edition_ops._render_table()
         self.assertTrue(fake_st.errors)
         self.assertIn("timed out", fake_st.errors[0])
         self.assertEqual(fake_st.editor_payloads, [])

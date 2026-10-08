@@ -3140,7 +3140,7 @@ def sync_product_edition_metafields(product, config=None, request_post=None):
         ) from error
 
 
-def sync_complete_product_edition_metafields(product, config=None, request_post=None, *, verify=False):
+def sync_complete_product_edition_metafields(product, config=None, request_post=None, *, verify=False, compare=False):
     """Mirror all storefront keys in one metafieldsSet mutation.
 
     Shopify userErrors are raised by metafields_set, leaving the database ledger
@@ -3148,6 +3148,20 @@ def sync_complete_product_edition_metafields(product, config=None, request_post=
     """
     try:
         inputs = complete_product_edition_metafield_inputs(product)
+        if compare:
+            # Compare-and-set prevents a timed-out earlier request from silently
+            # replacing a newer release's confirmed metafield values.
+            data, _ = graphql_request('''query EditionMirrorDigests($id: ID!) {
+              product(id:$id){metafields(first:250){nodes{namespace key value compareDigest}}}}''',
+              {'id': inputs[0]['ownerId']},config=config,request_post=request_post)
+            product_node=data.get('product')
+            if not product_node:raise ShopifyAPIError('Product unavailable for edition mirror comparison')
+            fields={(m['namespace'],m['key']):m for m in product_node['metafields']['nodes']}
+            for item in inputs:
+                existing=fields.get((item['namespace'],item['key']))
+                if existing and not existing.get('compareDigest'):
+                    raise ShopifyAPIError('Shopify did not return the required metafield comparison digest')
+                item['compareDigest']=existing['compareDigest'] if existing else None
         response = metafields_set(inputs, config=config, request_post=request_post)
         returned = response.get("metafields") or []
         if len(returned) != len(inputs):

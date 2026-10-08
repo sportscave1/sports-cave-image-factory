@@ -48,6 +48,12 @@ def run_once():
         if not supabase_backend.is_configured():
             _log("shopify_order_reconciliation_skipped", reason="database_not_configured")
             return {"status": "skipped", "reason": "database_not_configured"}
+        # Resume durable edition transitions even when there are no new orders.
+        from edition_versions import resume_pending
+        try:
+            resume_pending()
+        except Exception as exc:
+            _log("edition_sync_recovery_failed", error=str(exc))
         with supabase_backend.shopify_order_reconciliation_lease() as lease_acquired:
             if not lease_acquired:
                 _log("shopify_order_reconciliation_already_running", reason="durable_lease_held")

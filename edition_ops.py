@@ -348,6 +348,11 @@ def _normalise_row(row, *, preserve_derived=True):
         updated["edition_remaining"] = default_remaining
         updated["edition_status"] = _widget_status(default_remaining)
     updated["remaining"] = updated["edition_remaining"]
+    if updated.get('release_revision_reason'):
+        # Numbers below a release's starting cursor are not sales, but cannot
+        # be offered as future allocations in that release either.
+        updated['edition_remaining']=min(updated['edition_remaining'],max(0,updated['edition_total']-updated['edition_next_number']+1))
+        updated['remaining']=updated['edition_remaining']
     updated["widget_status"] = updated["edition_status"]
     updated["online_store_url"] = str(updated.get("online_store_url") or updated.get("Open live product") or "")
     updated["admin_url"] = str(updated.get("admin_url") or updated.get("Open Admin") or "")
@@ -551,6 +556,9 @@ def _row_from_supabase_product(product):
         )
     row = {
         "edition_product_id": product.get("id") or product.get("edition_product_id") or "",
+        "edition_run_id": str(product.get("edition_run_id") or product.get("active_edition_run_id") or ""),
+        "run_status": product.get("run_status") or product.get("status"),
+        "release_revision_reason": product.get('release_revision_reason'),
         "shopify_product_gid": product.get("shopify_product_gid") or product.get("shopify_product_id") or "",
         "legacy_resource_id": product.get("legacy_resource_id") or "",
         "thumbnail_url": product.get("display_image_url") or product.get("featured_image_url") or "",
@@ -1457,6 +1465,8 @@ def _manual_lower_warning(row, original):
 
 def _edition_update_fields(row, original):
     fields = {
+        "expected_edition_run_id": (original or row).get("edition_run_id"),
+        "expected_next_edition_number": (original or row).get("edition_next_number"),
         "edition_name": row.get("edition_label"),
         "edition_total": row.get("edition_total"),
         "next_edition_number": row.get("edition_next_number"),
@@ -1478,7 +1488,7 @@ def _edition_update_fields(row, original):
     return fields
 
 
-def _save_changed_rows(edited_rows=None, source_rows=None):
+def _save_changed_rows(edited_rows=None, source_rows=None, *, background_sync=False):
     current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [deepcopy(_normalise_row(row)) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     if edited_rows is not None:
@@ -1516,7 +1526,7 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
         for row in _pending_shopify_sync_rows(rows)
         if _stable_row_key(row)
     }
-    rows_to_save_by_key = dict(pending_rows_by_key)
+    rows_to_save_by_key = {} if background_sync and dirty_rows_by_key else dict(pending_rows_by_key)
     rows_to_save_by_key.update(dirty_rows_by_key)
     rows_to_save = list(rows_to_save_by_key.values())
     dirty_keys_for_log = sorted(dirty_rows_by_key)
@@ -1633,6 +1643,35 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
             continue
         mirror_rows.append(_normalise_row(row))
         mirror_keys.add(key)
+
+    if background_sync:
+        # Database confirmation precedes Saved. Shopify is a separate durable
+        # mirror operation; do not hold the interactive page during HTTP calls.
+        from edition_versions import kick
+        saved = supabase_saved_keys | (mirror_keys - dirty_keys)
+        original_map = _original_rows_by_key(originals)
+        for row in rows:
+            key=_stable_row_key(row)
+            if key in saved:
+                row['sync_status']='Saved in Supabase'
+                row['sync_error']=''
+                original_map[key]=deepcopy(row)
+                kick(row['handle'])
+            elif key in supabase_errors:
+                row['sync_error']=supabase_errors[key]
+        st.session_state[ROWS_KEY]=rows
+        st.session_state[ORIGINAL_ROWS_KEY]=list(original_map.values())
+        st.session_state[EDITOR_ROWS_KEY]=deepcopy(rows)
+        st.session_state.setdefault('edition-sync-watching',set()).update(r['handle'] for r in mirror_rows)
+        st.session_state.pop('edition-sync-watch-until',None)
+        st.session_state[NOTICE_KEY]=f"Saved {len(saved)} change(s); Shopify sync pending." if saved else 'Edition number conflict — review the selected release.'
+        st.session_state[NOTICE_LEVEL_KEY]='warning' if supabase_errors else 'success'
+        if saved:
+            # Clear the shared read cache without reloading this user's table.
+            # A refreshed browser/new session must not reopen pre-save counters.
+            _cached_supabase_products_snapshot.clear()
+        _write_snapshot(rows,list(original_map.values()))
+        return
 
     mirror_success_keys = set()
     if mirror_rows:
@@ -1783,6 +1822,7 @@ def _capture_editor_changes(source_rows):
     rows = _mark_current_changes(rows, st.session_state.get(ORIGINAL_ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
     st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
+    st.session_state['edition-autosave-pending']=True
 
 
 def _merge_visible_rows(edited_rows, source_rows):
@@ -1990,15 +2030,15 @@ def _editor_visible_rows(rows):
 
 def _column_config():
     return {
-        "product_title": st.column_config.TextColumn("Product title"),
-        "handle": st.column_config.TextColumn("Handle"),
-        "edition_enabled": st.column_config.CheckboxColumn("Enabled"),
-        "edition_total": st.column_config.NumberColumn("Edition total", min_value=1, max_value=100, step=1),
+        "product_title": st.column_config.TextColumn("Product title",width="medium"),
+        "handle": st.column_config.TextColumn("Handle",width="small"),
+        "edition_enabled": st.column_config.CheckboxColumn("Enabled",width="small"),
+        "edition_total": st.column_config.NumberColumn("Limit", min_value=1, max_value=100, step=1,width="small"),
         "edition_next_number": st.column_config.NumberColumn(
-            "Next edition number", min_value=1, max_value=100000, step=1, required=True
+            "Next number", min_value=1, max_value=100000, step=1, required=True,width="small"
         ),
-        "edition_sold_count": st.column_config.NumberColumn("Sold count"),
-        "edition_remaining": st.column_config.NumberColumn("Remaining"),
+        "edition_sold_count": st.column_config.NumberColumn("Sold",width="small"),
+        "edition_remaining": st.column_config.NumberColumn("Remaining",width="small"),
         "edition_status": st.column_config.TextColumn("Status"),
         "sync_status": st.column_config.TextColumn("Sync status"),
         "admin_url": st.column_config.LinkColumn("Open Admin", display_text="Open"),
@@ -2214,10 +2254,10 @@ def _render_pull_new_products_button(target, backend):
     st.rerun()
 
 
-def _render_advanced_controls(backend, rows):
+def _render_advanced_controls(backend, rows, *, inline=False):
     if not hasattr(st, "expander"):
         return
-    with st.expander("Advanced", expanded=False):
+    with (st.container() if inline else st.expander("Advanced", expanded=False)):
         action_cols = st.columns([1, 1, 1, 1])
         if action_cols[0].button("Refresh Complete Catalogue", use_container_width=True, disabled=not backend):
             sync_completed = False
@@ -2366,144 +2406,68 @@ def _render_advanced_controls(backend, rows):
                 st.rerun()
 
 
-def render_page():
-    started = time.perf_counter()
+def _render_table():
+    """Existing native grid, with local interactions and bounded visible rows."""
     _ensure_state()
-    st.title("Edition Ops")
-    print("PERF Edition Ops render start", flush=True)
-
-    load_started = time.perf_counter()
     _hydrate_from_snapshot_once()
-    print(
-        "PERF Edition Ops hydrate "
-        f"duration_ms={int((time.perf_counter() - load_started) * 1000)}",
-        flush=True,
-    )
-    _render_import_popover_styles()
-    backend = _configured_supabase_backend()
-    rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
-    originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
-    rows_to_save = _rows_to_save(rows, originals)
-    meta = st.session_state.get(META_KEY) or {}
-    load_error = str(st.session_state.get(LOAD_ERROR_KEY) or "")
-    load_diagnostic = dict(st.session_state.get(LOAD_DIAGNOSTIC_KEY) or {})
+    if st.session_state.pop('edition-autosave-pending',False):
+        _save_changed_rows(background_sync=True)
+    backend=_configured_supabase_backend()
+    rows=_mark_current_changes(st.session_state.get(ROWS_KEY,[]),st.session_state.get(ORIGINAL_ROWS_KEY,[]))
+    st.session_state[ROWS_KEY]=rows
+    with st.container(horizontal=True,vertical_alignment='bottom'):
+        with st.container(width=130):st.subheader('Edition Ops')
+        with st.container(width='stretch'):visible,selected=_editor_visible_rows(rows)
+        with st.container(width=150):
+            status=st.selectbox('Status',['All','Active','Pending sync','Needs review'],key='edition-status-filter')
+        if st.button('Refresh',key='edition-refresh'):
+            if selected!=ALL_PRODUCTS_SELECTION:
+                from edition_version_ui import refresh_handle
+                match=next((r for r in rows if _stable_row_key(r)==selected),None)
+                if match:refresh_handle(match['handle'])
+            else:_reload_products_from_supabase()
+            st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
+        save_clicked=st.button('Save Changes',type='secondary',disabled=not backend or not rows,key='edition-ops-save-changes')
+        from edition_version_ui import advanced
+        advanced()
+    if save_clicked:
+        _save_changed_rows(background_sync=True)
+        rows=st.session_state[ROWS_KEY]
+    if st.session_state.get(NOTICE_KEY):st.caption(st.session_state[NOTICE_KEY])
+    if st.session_state.get(LOAD_ERROR_KEY):
+        st.error(st.session_state[LOAD_ERROR_KEY])
+        if not rows:return rows
+    warnings=st.session_state.pop(IMPORT_WARNINGS_KEY,[])
+    for warning in warnings:st.caption(warning)
+    originals=st.session_state.get(ORIGINAL_ROWS_KEY,[])
+    st.caption(_edition_ops_summary(rows,_changed_rows(rows,originals),_pending_shopify_sync_rows(rows)))
+    by_key={_stable_row_key(r):r for r in rows}
+    visible=[by_key[_stable_row_key(r)] for r in visible]
+    if status=='Active':visible=[r for r in visible if r['edition_enabled']]
+    elif status=='Pending sync':visible=[r for r in visible if r['sync_status'].casefold() in SHOPIFY_RETRY_STATUSES or r.get('run_status')=='pending_sync']
+    elif status=='Needs review':visible=[r for r in visible if r.get('sync_error')]
+    criteria=(selected,status)
+    if st.session_state.get('edition-grid-criteria')!=criteria:
+        st.session_state['edition-grid-criteria']=criteria;st.session_state['edition-grid-page']=0;st.session_state.pop(EDITOR_KEY,None)
+    page=st.session_state.get('edition-grid-page',0)
+    visible_page=visible[page*50:(page+1)*50]
+    st.data_editor([_editor_payload(r) for r in visible_page],hide_index=True,width='stretch',num_rows='fixed',
+        key=EDITOR_KEY,column_order=VISIBLE_COLUMNS,on_change=_capture_editor_changes,args=(deepcopy(visible_page),),
+        column_config=_column_config(),row_height=32,
+        disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url'])
+    if len(visible)>50:
+        with st.container(horizontal=True):
+            if st.button('Previous products',disabled=page==0):
+                st.session_state['edition-grid-page']=page-1;st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
+            st.caption(f'Page {page+1} · {len(visible)} products')
+            if st.button('Next products',disabled=(page+1)*50>=len(visible)):
+                st.session_state['edition-grid-page']=page+1;st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
+    for row in visible_page:
+        if row.get('sync_error'):st.caption(row['product_title']+' — Edition number conflict: '+row['sync_error'])
+    if not rows:st.caption('No products loaded. Use Advanced to reconcile the catalogue.')
+    return rows
 
-    if load_error:
-        if meta.get("cached"):
-            st.warning(f"{load_error} Showing the last successfully loaded cached display.")
-        else:
-            st.error(load_error)
-        if hasattr(st, "expander"):
-            with st.expander("Developer diagnostics", expanded=False):
-                st.caption(f"Operation: {load_diagnostic.get('operation') or 'edition_ops.products.latest'}")
-                st.caption(f"Category: {load_diagnostic.get('category') or 'database_unavailable'}")
-                st.caption(f"Exception: {load_diagnostic.get('exception_class') or 'Unavailable'}")
-                st.caption(f"Duration: {int(load_diagnostic.get('duration_ms') or 0)} ms")
 
-    warnings = st.session_state.get(IMPORT_WARNINGS_KEY) or []
-    if warnings:
-        with st.expander(f"{len(warnings)} items require review", expanded=False):
-            for warning in warnings:
-                st.write(warning)
-    st.session_state[IMPORT_WARNINGS_KEY] = []
-
-    top_cols = st.columns([4, 1]) if hasattr(st, "columns") else [None, None]
-    source_label = "cached snapshot" if meta.get("cached") else "Supabase"
-    _slot_caption(
-        top_cols[0],
-        f"{len(rows)} products \u00b7 Synced {_format_time(meta.get('last_refreshed_from_shopify'))} \u00b7 {source_label}",
-    )
-    _render_pull_new_products_button(top_cols[1], backend)
-    _render_notice()
-
-    if rows:
-        current_rows = _mark_current_changes(rows, originals)
-        st.session_state[ROWS_KEY] = current_rows
-        st.session_state[EDITOR_ROWS_KEY] = deepcopy(current_rows)
-        st.session_state[ORIGINAL_ROWS_KEY] = originals
-        changed_rows = _changed_rows(current_rows, originals)
-        retry_rows = _pending_shopify_sync_rows(current_rows)
-        rows_to_save = _rows_to_save(current_rows, originals)
-        summary_slot = st.empty()
-        summary_slot.caption(_edition_ops_summary(current_rows, changed_rows, retry_rows))
-        visible_rows, selected_product = _editor_visible_rows(current_rows)
-        save_clicked = st.button(
-            "Save Changes",
-            type="primary",
-            use_container_width=False,
-            disabled=not backend or not bool(current_rows),
-            key="edition-ops-save-changes",
-        )
-        if save_clicked:
-            with st.spinner("Saving..."):
-                _save_changed_rows()
-            _render_notice()
-            current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
-            originals = st.session_state.get(ORIGINAL_ROWS_KEY, [])
-            changed_rows = _changed_rows(current_rows, originals)
-            retry_rows = _pending_shopify_sync_rows(current_rows)
-            summary_slot.caption(_edition_ops_summary(current_rows, changed_rows, retry_rows))
-            rows_to_save = _rows_to_save(current_rows, originals)
-            saved_by_key = {_stable_row_key(row): row for row in current_rows}
-            visible_rows = [saved_by_key[_stable_row_key(row)] for row in visible_rows]
-        editor_rows = [_editor_payload(row) for row in visible_rows]
-        editor_started = time.perf_counter()
-        print(
-            "PERF Edition Ops editor start "
-            f"rows={len(editor_rows)} total_rows={len(current_rows)} selection={selected_product}",
-            flush=True,
-        )
-        st.data_editor(
-            editor_rows,
-            hide_index=True,
-            width="stretch",
-            num_rows="fixed",
-            key=EDITOR_KEY,
-            column_order=VISIBLE_COLUMNS,
-            on_change=_capture_editor_changes,
-            args=(deepcopy(visible_rows),),
-            column_config=_column_config(),
-            disabled=[
-                "product_title",
-                "handle",
-                "edition_sold_count",
-                "edition_remaining",
-                "edition_status",
-                "sync_status",
-                "admin_url",
-                "online_store_url",
-            ],
-        )
-        print(
-            "PERF Edition Ops editor done "
-            f"duration_ms={int((time.perf_counter() - editor_started) * 1000)} "
-            f"rows={len(editor_rows)}",
-            flush=True,
-        )
-        _render_advanced_controls(backend, current_rows)
-        if backend:
-            from edition_order_recovery import render as render_order_recovery
-            render_order_recovery(backend, current_rows)
-
-        errors = {row["product_title"]: row["sync_error"] for row in current_rows if row.get("sync_error")}
-        if errors:
-            st.error("Some rows need review before they are fully synced.")
-            for product_title, message in errors.items():
-                st.caption(f"{product_title}: {message}")
-    else:
-        st.caption(_edition_ops_summary([], [], []))
-        _render_advanced_controls(backend, [])
-        if not load_error:
-            st.info("No products loaded yet. Products are added by Shopify webhooks or Advanced sync.")
-
-    from design_tracking_page import render as render_design_tracking
-    render_design_tracking()
-
-    elapsed = time.perf_counter() - started
-    print(
-        "PERF Edition Ops total="
-        f"{elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))} "
-        f"queries={int(load_diagnostic.get('query_count') or (1 if rows and not meta.get('cached') else 0))} "
-        f"cached={str(bool(meta.get('cached'))).lower()}",
-        flush=True,
-    )
+def render_page():
+    from edition_version_ui import workspace
+    workspace()

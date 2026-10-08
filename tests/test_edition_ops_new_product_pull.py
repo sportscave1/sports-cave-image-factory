@@ -456,9 +456,10 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             "get_config",
             side_effect=AssertionError("Normal Edition Ops load must not call Shopify."),
         ):
-            edition_ops.render_page()
+            edition_ops._render_table()
         backend.sync_new_shopify_products_to_edition_ops.assert_not_called()
-        self.assertEqual(len(fake_st.editor_payloads[0]), 120)
+        self.assertEqual(len(fake_st.editor_payloads[0]), 50)
+        self.assertEqual(len(fake_st.session_state[edition_ops.ROWS_KEY]), 120)
 
     def test_manual_refresh_uses_complete_reconciliation_and_recovery_action_stays_gated(self):
         ui_source = inspect.getsource(edition_ops._render_advanced_controls)
