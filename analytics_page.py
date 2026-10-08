@@ -40,6 +40,10 @@ class _ReportDisplayStore:
                             lambda: self.store.latest_report(property_id, contract_key),
                             ttl=10 if contract_key == "realtime" else 30)
 
+    def peek_report(self, property_id, contract_key, start, end):
+        """Only already-loaded, unexpired display data; never start a read."""
+        return self.cache.get(("period", property_id, contract_key, str(start), str(end)))
+
     def queue_report(self, *args, **kwargs):
         result = self.store.queue_report(*args, **kwargs)
         self.cache.invalidate()
@@ -364,6 +368,8 @@ def _overview_breakdowns(store, property_id, period):
          (("activeUsers", "Active users"), ("sessions", "Sessions"))),
     )
     for tab, (key, dimensions, metrics) in zip(tabs, reports):
+        cached = (store.peek_report(property_id, key, period['start_date'], period['end_date'])
+                  if not tab.open and isinstance(store, _ReportDisplayStore) else None)
         if tab.open:
             with tab:
                 try:
@@ -371,6 +377,11 @@ def _overview_breakdowns(store, property_id, period):
                 except (analytics_reporting.AnalyticsReportingError, ValueError) as error:
                     st.error(str(getattr(error, "public_message", error)))
                     st.caption("Select this tab again to retry. Other saved reports are unchanged.")
+        elif cached is not None:
+            # Streamlit can reveal a visited tab immediately in the browser while
+            # its fragment revalidates. Unvisited tabs still fetch only on demand.
+            with tab:
+                _table(cached, dimensions, metrics)
 
 
 def _traffic(store, property_id, period):

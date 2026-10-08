@@ -10105,9 +10105,8 @@ def _refresh_session_account_if_due(user, *, max_age_seconds=0):
     checked_at = float(st.session_state.get("sports_cave_auth_checked_at") or 0)
     if time.monotonic() - checked_at < max_age_seconds:
         return user
-    status = _account_system_status()
-    if not status.get("available"):
-        return user
+    # A signed-in account needs its own current status/permissions, not a
+    # bootstrap lookup of the first administrator on every validation.
     try:
         refreshed = os_accounts.DEFAULT_STORE.get_user(user.get("id"))
     except Exception:
@@ -10188,7 +10187,6 @@ def is_app_authenticated():
         return False
 
     token = current_auth_cookie()
-    status = _account_system_status()
     valid, _reason, payload = sc_auth.validate_user_auth_token(
         token,
         password=get_app_password(),
@@ -10206,6 +10204,8 @@ def is_app_authenticated():
         clear_auth_cookie()
         return False
 
+    # Bootstrap/legacy account discovery is only needed by the login gate.
+    status = _account_system_status()
     legacy_valid, _legacy_reason = sc_auth.validate_auth_token(
         token,
         password=get_app_password(),
@@ -12776,7 +12776,9 @@ def render_active_alerts(events, today):
     )
 
 
+@st.fragment(parallel=True)
 def render_active_upcoming_events(events, today):
+    started = time.perf_counter()
     render_html_section_title("Active & Upcoming Events")
     rows = sports_cave_dashboard.build_home_event_rows(events, today, limit=8)
     if not rows:
@@ -12809,6 +12811,7 @@ def render_active_upcoming_events(events, today):
         row_height=34,
         key="home-active-upcoming-events",
     )
+    safe_startup_print(f"PERF Dashboard events={(time.perf_counter() - started):.3f}s")
 
 
 def _home_duration_label(seconds):
@@ -12820,6 +12823,7 @@ def _home_duration_label(seconds):
     return f"{minutes}m"
 
 
+@st.fragment(parallel=True)
 def render_home_weekly_work(user, local_now):
     render_html_section_title("This Week's Work")
     started = time.perf_counter()
@@ -14685,13 +14689,11 @@ def render_lightweight_dashboard_page():
     events = sports_cave_dashboard.load_calendar_events()
     with st.container(key="home-ops-dashboard"):
         home_daily_planner.render_status(st, user, local_now)
-        events_render_started = time.perf_counter()
         render_active_upcoming_events(events, today)
-        safe_startup_print(
-            f"PERF Dashboard events={(time.perf_counter() - events_render_started):.3f}s"
-        )
         render_home_weekly_work(user, local_now)
-    safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
+    # The two fragments complete independently; this measures shell/dispatch,
+    # not their completion time or the browser's time to interactive content.
+    safe_startup_print(f"PERF Dashboard shell_dispatch={(time.perf_counter() - started):.3f}s")
 
 
 def page_uses_local_database(current_page):

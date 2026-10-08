@@ -670,7 +670,10 @@ class PostgresAccountStore:
                 return
             try:
                 with self._connect() as conn:
-                    with conn.cursor() as cur:
+                    # Execute the same ordered, atomic schema setup without a
+                    # network round trip for each statement. Exiting the pipeline
+                    # confirms every result before commit and _schema_ready.
+                    with conn.pipeline(), conn.cursor() as cur:
                         cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
                         cur.execute(
                             """

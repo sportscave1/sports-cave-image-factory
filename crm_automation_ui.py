@@ -266,7 +266,8 @@ def editor_dialog(shop,store,actions,identity):
                     period=st.selectbox('Date range',list(PERIODS),index=4,key='auto-analytics-period-'+str(identity))
                     summary(store,identity,period);recent(store,existing,actions.user,period)
                 else:
-                    detail(shop,store,actions,identity,row=existing)
+                    with store.display_read_scope():
+                        detail(shop,store,actions,identity,row=existing)
         except (StoreUnavailable,ValueError,PermissionError) as exc:
             with content.container():
                 st.error(str(exc))

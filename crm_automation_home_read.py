@@ -1,5 +1,6 @@
 """Deterministic, bounded identity reads; no executor or provider dependency."""
 from time import monotonic
+from contextlib import nullcontext
 from crm_automation_read_cache import lifecycle
 
 
@@ -7,9 +8,14 @@ class BoundedStore:
     def __init__(self,store):self.store=store
     def q(self,sql,args=(),one=False):
         with self.store.db() as connection:
-            connection.execute("SET LOCAL statement_timeout = '1500ms'")
-            connection.execute("SET LOCAL lock_timeout = '500ms'")
-            cursor=connection.execute(sql,args)
+            # These ordered read-only statements need one network exchange.
+            # Keep the existing timeouts and transaction; local test adapters
+            # without psycopg pipeline support retain sequential execution.
+            pipeline = getattr(connection, 'pipeline', None)
+            with pipeline() if callable(pipeline) else nullcontext():
+                connection.execute("SET LOCAL statement_timeout = '1500ms'")
+                connection.execute("SET LOCAL lock_timeout = '500ms'")
+                cursor=connection.execute(sql,args)
             return cursor.fetchone() if one else cursor.fetchall()
 
 

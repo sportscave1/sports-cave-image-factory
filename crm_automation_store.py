@@ -1,5 +1,7 @@
 """Automation authoring; immutable publications reuse template version storage."""
 from copy import deepcopy
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import timedelta
 import json
 import uuid
@@ -8,19 +10,50 @@ from crm_navigation import require
 from crm_automation_definition import FORMAT, new_flow, validate, native, status
 from crm_logic import now, date
 
+_DISPLAY_READS = ContextVar('automation_display_reads', default=None)
+
 
 class AutomationStore(CampaignStore):
     email_mode='automation'
     step_id=None
 
+    @contextmanager
+    def display_read_scope(self):
+        """Share one definition inside one render only, never across reruns.
+
+        Fragment callbacks run after this context has exited and read fresh data.
+        Worker threads have separate contexts. All database operations invalidate
+        the memo before executing, including mutations and locked validation.
+        """
+        token = _DISPLAY_READS.set((self, {}))
+        try:
+            yield
+        finally:
+            _DISPLAY_READS.reset(token)
+
+    @contextmanager
+    def db(self):
+        scope = _DISPLAY_READS.get()
+        if scope is not None and scope[0] is self:
+            scope[1].clear()
+        with super().db() as conn:
+            yield conn
+
     def flow(self, identity,*,row=None):
         identity=str(uuid.UUID(str(identity)))
-        row=self.get('automations',identity) if row is None else row
+        scope = _DISPLAY_READS.get()
+        memo = scope[1] if scope is not None and scope[0] is self else None
+        if row is None:
+            row = memo.get(identity) if memo is not None else None
+            if row is None: row = self.get('automations',identity)
         if row and str(row['id'])!=identity:raise ValueError('Automation is unavailable.')
         if not row or not native(row) or row['config'].get('deleted_at'): raise ValueError('Automation is unavailable.')
         from crm_automation_timing import single_delay
         row=deepcopy(row)
         row['config']['draft']=single_delay(row['config']['draft'])
+        if memo is not None:
+            memo.clear()  # One requested flow only; never grow a render-wide catalogue.
+            memo[identity] = deepcopy(row)
         return row
 
     def create(self,user,trigger='welcome',name=None):
