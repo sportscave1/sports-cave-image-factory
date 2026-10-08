@@ -3,7 +3,7 @@ from datetime import date, time as local_time, timedelta
 import streamlit as st
 from crm_campaign_markets import MARKET_LABELS, audience
 
-@st.fragment(run_every=2)
+@st.fragment
 def market_control(shop,store,doc,key):
     # Polling reruns only this small fragment, never the editor or preview.
     from crm_segment_counts import COUNTS
@@ -25,6 +25,13 @@ def market_control(shop,store,doc,key):
         from crm_campaign_recovery import flush_current
         flush_current()
         st.rerun() # User selection can affect catalogue prices; hydration cannot.
+    # Reuse the visible-control timer. Streamlit's periodic fragment event can
+    # outlive this lazy tab and keep targeting its removed fragment identifier.
+    poll=key+'market-poll'
+    st.html('<style>.st-key-'+poll+'{display:none}</style>')
+    with st.container(key=poll):st.button('Refresh segment counts',key=poll+'-tick')
+    from crm_campaign_home import arm_home_poll
+    arm_home_poll(key=poll,seconds=2 if state.get('pending') else 10)
 
 
 def timing_control(doc,key):

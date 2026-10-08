@@ -9,7 +9,7 @@ if os.getenv('EMAIL_PROFILE_BASELINE')=='1':
     import subprocess,sys,types
     if not getattr(sys,'_email_profile_baseline',False):
         for name in ('crm_preview_cache','crm_html_workspace','crm_campaign_home_data','crm_campaign_home','crm_campaign_recovery','crm_recovery_ui','crm_campaign_page','crm_email_size_ui'):
-            source=subprocess.check_output(['git','show','HEAD:'+name+'.py'],text=True,encoding='utf-8')
+            source=subprocess.check_output(['git','show','2f6adbd:'+name+'.py'],text=True,encoding='utf-8')
             module=types.ModuleType(name);module.__file__=os.path.abspath(name+'.py');sys.modules[name]=module
             exec(compile(source,module.__file__,'exec'),module.__dict__)
         sys._email_profile_baseline=True
@@ -61,14 +61,6 @@ campaign_workspace(shop,CampaignStore(connect),SimpleNamespace(user=ADMIN))
 @st.fragment
 def counters():
     st.button('Profile snapshot')
-    import inspect
-    from streamlit.runtime.scriptrunner import get_script_run_ctx
-    fs=get_script_run_ctx().fragment_storage
-    metrics['fragments']={k:getattr(inspect.getclosurevars(v).nonlocals.get('non_optional_func'),'__name__','?') for k,v in fs._fragments.items()}
-    metrics['view']=st.session_state.get('campaign_view')
-    metrics['pending']=st.session_state.get('campaign_pending_open')
     st.session_state['profile_tick']=st.session_state.get('profile_tick',0)+1
     st.html('<pre id="email-profile" style="white-space:pre-wrap;overflow-wrap:anywhere">'+json.dumps({**metrics,'snapshot':st.session_state['profile_tick']})+'</pre>')
 counters()
-
-

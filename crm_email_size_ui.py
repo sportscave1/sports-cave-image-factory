@@ -10,7 +10,7 @@ def automation_size_meter(cache):
     st.html(meter_html(cache['size']))
 
 
-@st.fragment(run_every='2s')
+@st.fragment
 def size_meter(editor,key,cfg):
     from crm_email_editor_context import current as current_editor
     current=current_editor(st.session_state,editor)
@@ -39,3 +39,8 @@ def size_meter(editor,key,cfg):
         # content in diagnostics. Review/send independently validate it.
         label='Calculating…' if st.session_state.get('email_editor_mode')=='automation' else 'Unknown'
         st.html('<span class="sc-email-size" style="font-size:11px">Email size · '+label+'</span>')
+    poll=key+'size-poll'
+    st.html('<style>.st-key-'+poll+'{display:none}</style>')
+    with st.container(key=poll):st.button('Refresh email size',key=poll+'-tick')
+    from crm_campaign_home import arm_home_poll
+    arm_home_poll(key=poll,seconds=2)

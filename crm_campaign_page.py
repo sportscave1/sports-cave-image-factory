@@ -154,6 +154,15 @@ def recent_campaigns(drafts,key,user):
     home(drafts,user)
 
 
+def commit_editor_field(editor,key,field):
+    """Commit native blur events even when that event also leaves Settings."""
+    value=st.session_state[key+field]
+    if field=='name':editor['name']=value
+    else:editor['document']['content'][field]=value
+    editor['document']['copy_reviewed']=False
+    flush_current()
+
+
 @st.fragment(**({'key':COMPOSER_TARGET} if COMPOSER_TARGET else {}))
 @autosaving
 def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='campaign',settings_control=None):
@@ -173,9 +182,9 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                 if details.open:
                     from crm_prompt_ui import prompt_control,field_feedback
                     if mode!='automation':prompt_control(shop,editor,key)
-                    editor['name']=st.text_input('Automation name' if mode=='automation' else 'Campaign name',editor['name'],max_chars=150,key=key+'name')
-                    c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject')
-                    c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader')
+                    editor['name']=st.text_input('Automation name' if mode=='automation' else 'Campaign name',editor['name'],max_chars=150,key=key+'name',on_change=commit_editor_field,args=(editor,key,'name'))
+                    c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject',on_change=commit_editor_field,args=(editor,key,'subject'))
+                    c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader',on_change=commit_editor_field,args=(editor,key,'preheader'))
                     if mode!='automation':field_feedback()
                     from crm_campaign_controls import market_control,timing_control
                     if mode=='automation':

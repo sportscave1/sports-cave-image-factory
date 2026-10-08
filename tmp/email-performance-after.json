@@ -1,36 +1,36 @@
 {
   "cold": {
-    "editorMs": 1083,
+    "editorMs": 1130,
     "overlapFrames": 0,
     "giantFrames": 0,
     "openReads": 6,
     "tabMs": [
-      249,
-      119,
-      131,
-      252
+      273,
+      183,
+      140,
+      246
     ],
-    "tabReads": 2,
+    "tabReads": 1,
     "tabDefaultReads": 0,
     "longTasks": [],
-    "backMs": 231,
+    "backMs": 256,
     "backReads": 2
   },
   "warm": {
-    "editorMs": 575,
+    "editorMs": 377,
     "overlapFrames": 0,
     "giantFrames": 0,
     "openReads": 3,
     "tabMs": [
-      252,
-      112,
+      237,
       132,
-      256
+      214,
+      250
     ],
     "tabReads": 0,
     "tabDefaultReads": 0,
     "longTasks": [],
-    "backMs": 265,
+    "backMs": 237,
     "backReads": 2
   }
 }

@@ -95,7 +95,7 @@ with patch('crm_segment_counts.COUNTS.display',return_value={'counts':st.session
         source=Path('crm_campaign_home.py').read_text(encoding='utf-8')
         # Actual mounted dialogs own the pause; stale session visibility flags
         # must not strand the Home controller after native dismissal.
-        self.assertIn('document.querySelector("[role=dialog]")',source)
+        self.assertIn('document.querySelectorAll("[role=dialog],[data-testid=stPopoverBody],[role=listbox]")',source)
         self.assertIn('if(document.hidden)',source)
 
 

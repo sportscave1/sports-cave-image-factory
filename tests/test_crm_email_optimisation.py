@@ -9,6 +9,15 @@ from tests.test_crm_simple_editor import document
 from tests.test_crm_send_flow import CFG
 
 class EmailOptimisationTests(TestCase):
+    def test_native_field_callback_saves_even_when_settings_is_closed(self):
+        from crm_campaign_page import commit_editor_field
+        editor={'name':'Old','document':document()}
+        with patch('crm_campaign_page.st',MagicMock(session_state={'k-subject':'Newest','k-name':'Renamed'})),patch('crm_campaign_page.flush_current') as save:
+            commit_editor_field(editor,'k-','subject')
+            commit_editor_field(editor,'k-','name')
+        self.assertEqual(editor['document']['content']['subject'],'Newest')
+        self.assertEqual(editor['name'],'Renamed');self.assertEqual(save.call_count,2)
+
     def test_recovery_acknowledged_in_same_render_without_rerun(self):
         from crm_recovery_ui import recovery_bridge
         editor={'id':'one','version':1,'name':'Original','document':document()}
