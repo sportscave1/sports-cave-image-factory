@@ -23,7 +23,8 @@ def read(store,key,fn,ttl=180):
         try:future.result(timeout=.05)
         except Exception:pass
     data,phase=resolve(state(),store,key,future)
-    if phase in ('LOADING','REFRESHING'):st.session_state['automation-analytics-pending']=True
+    if phase in ('LOADING','REFRESHING') or (key[0]=='checkout-list' and phase=='NOT_STARTED'):
+        st.session_state['automation-analytics-pending']=True
     return data,phase
 
 def arm(key,seconds):

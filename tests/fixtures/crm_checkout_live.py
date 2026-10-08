@@ -6,7 +6,7 @@ from datetime import timedelta
 from time import monotonic,sleep
 from unittest.mock import Mock
 import streamlit as st
-from crm_logic import now
+from crm_logic import now,date
 import crm_automation_analytics_ui as ui
 from crm_flow_page import checkouts
 
@@ -28,7 +28,7 @@ class Backend:
                'sends':[{'step':0,'enrollment_id':'journey-'+str(i),'status':'ACCEPTED','provider_id':'fixture-receipt-'+str(i)}] if sent else []}
               for i in range(120)]
         if search:rows=[r for r in rows if search.casefold() in (r['analytics']['name']+' '+r['analytics']['email']).casefold()]
-        if after:rows=[r for r in rows if (r['created_at'].isoformat(),r['checkout_key'])<after]
+        if after:rows=[r for r in rows if (r['created_at'],r['checkout_key'])<(date(after[0]),after[1])]
         return rows[:page_size]
 
 steps=[{'step_id':str(i),'name':'Published email '+str(i+1),'enabled':True} for i in range(5)]

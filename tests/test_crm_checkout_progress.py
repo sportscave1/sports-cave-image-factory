@@ -63,6 +63,14 @@ class Projection(unittest.TestCase):
         item=listing([self.row],self.schema,'Australia/Sydney')[0]
         self.assertEqual(item['customer'],'name@example.test');self.assertEqual(item['created'],'9 Oct');self.assertIn('AEDT',item['created_full'])
         self.assertEqual(self.row,before);self.assertEqual(len(columns([{'step_id':str(i)} for i in range(60)])),60)
+    def test_busy_read_pool_retries_initial_checkout_load(self):
+        from types import SimpleNamespace
+        import crm_automation_analytics_ui as ui
+        state={}
+        with patch.object(ui,'st',SimpleNamespace(session_state=state)),patch.object(ui,'state',return_value={}),\
+             patch.object(ui,'job',return_value=None),patch.object(ui,'resolve',return_value=(None,'NOT_STARTED')):
+            self.assertEqual(ui.read(None,('checkout-list','flow'),lambda:[]),(None,'NOT_STARTED'))
+        self.assertTrue(state['automation-analytics-pending'])
 
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')

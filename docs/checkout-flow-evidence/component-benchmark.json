@@ -1,12 +1,12 @@
 {
   "fixture": "50 rows, Chromium, 30 repeated render samples; new table has five email columns",
   "before": {
-    "median_render_ms": 3.2000000001862645,
+    "median_render_ms": 3.799999998882413,
     "dom_elements": 570,
     "row_height": 37
   },
   "after": {
-    "median_render_ms": 0.20000000018626451,
+    "median_render_ms": 0.30000000074505806,
     "dom_elements": 622,
     "row_height": 34
   },

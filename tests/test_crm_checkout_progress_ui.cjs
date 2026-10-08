@@ -63,7 +63,8 @@ async function benchmark(page,source,p){const frame=await mount(page,source,p);r
  await resumed.locator('body').evaluate(()=>{cleanup();if(timer!==null)throw Error('Timer leaked')});
  await page.setViewportSize({width:1366,height:900});
  const after=await benchmark(page,html,payload);let beforeBench=null;
- if(fs.existsSync('tmp/checkout-table-before.html')){const old={rows:payload.rows.map(r=>({...r,reference:'#123',region:'Australia',status:'Not recovered',time_to_send:'10m remaining'})),selected:[]};beforeBench=await benchmark(page,fs.readFileSync('tmp/checkout-table-before.html','utf8'),old)}
+ const baseline=require('node:child_process').execFileSync('git',['show','675342a:components/crm_checkout_table/index.html'],{encoding:'utf8'});
+ const old={rows:payload.rows.map(r=>({...r,reference:'#123',region:'Australia',status:'Not recovered',time_to_send:'10m remaining'})),selected:[]};beforeBench=await benchmark(page,baseline,old);
  const report={fixture:'50 rows, Chromium, 30 repeated render samples; new table has five email columns',before:beforeBench,after,local_countdown_backend_requests:0,status_poll_min_seconds:15};
  fs.writeFileSync(output+'/component-benchmark.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
  console.log('PASS dynamic columns, acceptance, local ticking, drift, persisted reload, due/stale state, bounded polling, selection/details, DOM retention, sticky scroll, cleanup, desktop/narrow layouts');
