@@ -16,6 +16,43 @@ from crm_logic import now
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class DiscountDeliveryTests(unittest.TestCase):
+    def test_code_only_edit_move_save_reopen_publish_preserves_frozen_offer_and_checkout(self):
+        from crm_middle_sections import apply_event,middle_sections
+        from tests.test_crm_discount_editor_v2 import event
+        from crm_recovery_discount import prepare
+        from crm_recovery_links import inspect,verify
+        from crm_automation_runtime import render
+        f=self.f;old=deepcopy(self.j['steps']);flow=deepcopy(self.flow)
+        doc=flow['emails'][2]['document'];offer=deepcopy(doc['recovery_discount'])
+        s=next(s for s in middle_sections(doc) if s['type']=='discount')
+        html='<div style="background:#171717;color:#d4ac56;padding:12px">Collector invitation: {{discount_code}}</div>'
+        apply_event(doc,event(doc,'html',id=s['id'],html=html))
+        apply_event(doc,event(doc,'order',ids=[s['id']]+[v['id'] for v in middle_sections(doc) if v['id']!=s['id']]))
+        saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
+        reopened=f.store.flow(self.a['id'])['config']['draft']['emails'][2]['document']
+        self.assertEqual(reopened['middle_sections'][0]['html'],html)
+        self.assertEqual(reopened['recovery_discount'],offer)
+        newer=f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)
+        published=newer['config']['published_flow']['emails'][2]['document']
+        self.assertEqual(published['middle_sections'],reopened['middle_sections'])
+        self.assertEqual(published['recovery_discount'],offer)
+        self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(self.j['id'],),True)['steps'],old)
+        old_doc=f.store.template(old[2]['template_id'],old[2]['template_version'])['document']
+        self.assertIn('{{discount_value}}',next(s['html'] for s in old_doc['middle_sections'] if s['type']=='discount'))
+        verified=prepare(self.discounts,published,self.cart,self.cart['customer']['id'])
+        content=f.store.template(old[2]['template_id'],newer['config']['published_version'])
+        message=render(content,{'id':str(uuid.uuid4()),'shopify_customer_id':self.cart['customer']['id']},
+            'https://example.test/unsubscribe',{'_checkout':self.cart,'_checkout_id':self.cart['id'],
+                '_customer':self.cart['customer'],'_recovery_discount':verified})
+        urls=[u for u in inspect(message['html']).urls if '/checkouts/' in u]
+        self.assertTrue(urls);self.assertEqual(set(urls),{verified['url']})
+        verify(message,verified['url'],len(urls))
+        self.assertEqual(verified['original_url'],self.cart['abandonedCheckoutUrl'])
+        self.assertIn('Collector invitation: FIXTURE5',message['html'])
+        self.assertNotIn('{{discount_',message['html'])
+        self.assertEqual(published['recovery_discount'],offer)
+        f.provider.send.assert_not_called()
+
     def setUp(self):
         from tests.test_crm_native_automations import NativeAutomationTests
         f=NativeAutomationTests();f.setUp();self.addCleanup(f.doCleanups);self.f=f

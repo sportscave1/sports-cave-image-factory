@@ -68,6 +68,7 @@ function deleteControl(s){
  const trash=button('','Delete section',()=>{const r=trash.getBoundingClientRect();popup.style.top=Math.max(8,Math.min(r.bottom+4,visibleBottom()-100))+'px';popup.style.left=Math.max(8,r.right-200)+'px';popup.showPopover();cancel.focus({preventScroll:true});},'section-delete');
  trash.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg>';
  const popup=el('div','','section-confirm');popup.setAttribute('popover','auto');popup.setAttribute('role','dialog');popup.setAttribute('aria-label','Delete this section?');popup.append(el('div','Delete this section?'));
+ if(s.type==='discount')popup.append(el('div','Deleting the last visible offer also removes its checkout discount from this draft.'));
  const cancel=button('Cancel','Cancel delete',()=>{popup.hidePopover();trash.focus({preventScroll:true});});
  popup.append(cancel,button('Delete','Confirm delete section',()=>{
   popup.hidePopover();const snapshot=JSON.parse(JSON.stringify(args.sections.find(v=>v.id===s.id)||s));if(areas.has(s.id))snapshot.html=areas.get(s.id).value;
@@ -113,6 +114,7 @@ function render(){renderTemplates();renderDiscountPicker(document.getElementById
  row.append(deleteControl(s),el('span',opened[s.id]?'⌃':'⌄','chevron'));card.append(row);
  if(opened[s.id]){let content=el('div','','content');if(s.type==='html'||s.type==='image'||s.type==='discount'){
  if(s.type==='discount')content.append(el('div',s.offer.code+' · '+s.offer.value+(s.visible?'':' · Presentation hidden'),'discount-summary'));
+ if(s.type==='discount')content.append(el('small','Hiding or deleting the last visible offer also removes its checkout discount from this draft.'));
  let area=areas.get(s.id);
  if(!area){area=document.createElement('textarea');area.value=drafts[s.id]??s.html;area.placeholder='Paste campaign HTML here…';area.setAttribute('aria-label',name+' HTML');areas.set(s.id,area);}
  area.setAttribute('aria-label',name+' HTML');syncArea(s);

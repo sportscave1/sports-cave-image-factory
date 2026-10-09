@@ -39,6 +39,8 @@ def render(ads, result, workflow, *, source_matches=True):
     rows = workflow.get('standard_ads') or []
     if not rows:
         st.caption('Import the completed CSV to populate the ad copy and show three image slots.')
+        if result.get('workflow_mode') == 'creative_refresh':
+            ads._render_ads_final_actions(result, workflow, source_matches=source_matches)
         return
     for row in rows:
         number = row['ad_number']
@@ -50,8 +52,10 @@ def render(ads, result, workflow, *, source_matches=True):
     try:
         ads.parse_standard_ads_csv(csv_bytes(ads, result, workflow), product_name=result['product_name'])
     except ads.StandardAdsCSVError as error:
-        st.error(str(error))
-        return
+        if result.get('workflow_mode') != 'creative_refresh':
+            st.error(str(error))
+            return
+        st.caption(f'Draft copy needs completion before publishing: {error}')
     ads._render_ads_image_slots(result, workflow)
     if result.get('workflow_mode') == 'creative_refresh':
         ads._render_ads_final_actions(result, workflow, source_matches=source_matches)

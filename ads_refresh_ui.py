@@ -1,6 +1,4 @@
 """Presentation helpers scoped to Creative Refresh; no generation or provider writes."""
-import json
-
 
 def styles(st):
     css = '''<style>
@@ -46,7 +44,6 @@ def card_direction(result, position):
 def execution_review(ads, result, workflow):
     st = ads.st
     notes = workflow.setdefault('ad_notes', {})
-    records = notes.get('refresh_executions') or []
     # Historical analysis is preserved, never required or marked reviewed here.
     # Generated prompts remain available without asking users to author JSON.
     records = notes.get('refresh_executions')

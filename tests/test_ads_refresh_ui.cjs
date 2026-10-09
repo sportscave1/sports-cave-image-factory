@@ -2,7 +2,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs');
 const label=process.env.REFRESH_BROWSER_LABEL||'after';
-(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});
+(async()=>{const browser=await chromium.launch({channel:process.env.REFRESH_BROWSER_CHANNEL||'msedge',headless:true});
 try{
  const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']});
  await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
@@ -10,7 +10,7 @@ try{
  for(const kind of ['Instant Experience','Carousel']){
   const page=await context.newPage();page.setDefaultTimeout(20000);
   await page.setViewportSize({width:1366,height:900});
-  const began=Date.now();await page.goto('http://127.0.0.1:8557/?format='+encodeURIComponent(kind));
+  const began=Date.now();await page.goto('http://127.0.0.1:'+(process.env.REFRESH_UI_PORT||8557)+'/?format='+encodeURIComponent(kind));
   const saveButton=page.locator('[class*="st-key-ads-images-save-open"] button');
   try {await saveButton.waitFor();}
   catch(error){console.log((await page.locator('body').innerText()).slice(-12000));await page.screenshot({path:'tmp/refresh-browser-error.png',fullPage:true});throw error;}

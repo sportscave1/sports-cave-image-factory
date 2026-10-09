@@ -63,18 +63,16 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state[posting.PENDING_KEY]['package']['assets']),3)
 
-    def test_incomplete_analysis_leaves_visible_disabled_save_and_preserves_copy(self):
+    def test_optional_analysis_is_preserved_without_blocking_save(self):
         app=app_for()
-        editor=next(t for t in app.text_area if t.label=='Card execution notes (JSON)')
-        records=json.loads(editor.value)
-        editor.set_value('{invalid').run(timeout=30)
-        self.assertFalse(app.exception)
-        self.assertTrue(button(app,'Save now').disabled)
-        self.assertNotIn('POST NOW',[b.label for b in app.button])
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
-        self.assertEqual(workflow['ad_notes']['refresh_executions'],records)
-        next(t for t in app.text_area if t.label=='Card execution notes (JSON)').set_value(json.dumps(records)).run(timeout=30)
+        records=deepcopy(workflow['ad_notes']['refresh_executions'])
+        workflow['ad_notes']['refresh_execution_error']='Historical incomplete notes'
+        app.run(timeout=30)
+        self.assertFalse(app.exception)
+        self.assertNotIn('Card execution notes (JSON)',[t.label for t in app.text_area])
         self.assertFalse(button(app,'Save now').disabled)
+        self.assertEqual(workflow['ad_notes']['refresh_executions'],records)
 
     def test_four_and_six_card_editor_uses_source_roles_without_crash(self):
         for count in (4,6):
@@ -103,18 +101,19 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         self.assertEqual(app.session_state['fixture_media_reads'],1)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['slots'],original)
 
-    def test_duplicate_output_blocks_save(self):
+    def test_duplicate_output_remains_a_diagnostic_but_can_be_saved(self):
         value, workflow = ready_carousel()
         workflow['slots']['carousel-02']=deepcopy(workflow['slots']['carousel-01'])
         self.assertIn('Identical output image assigned to multiple refresh slots.',ads.creative_refresh_quality_issues(value,workflow))
-        with self.assertRaises(ValueError), patch.object(ads.dropbox_integration,'upload_batch',side_effect=AssertionError('No writes')):
-            ads.save_ads_images_to_dropbox('fake','/approved','/approved',value,workflow)
+        save_locally(value,workflow)
+        self.assertTrue(workflow['refresh_workspace_saved'])
 
-    def test_missing_analysis_does_not_write(self):
+    def test_missing_analysis_can_be_saved_without_fabricating_review(self):
         value,workflow=ready_carousel()
         workflow['ad_notes'].pop('refresh_executions')
-        with self.assertRaisesRegex(ValueError,'execution'), patch.object(ads.dropbox_integration,'upload_batch',side_effect=AssertionError('No writes')):
-            ads.save_ads_images_to_dropbox('fake','/approved','/approved',value,workflow)
+        save_locally(value,workflow)
+        self.assertTrue(workflow['refresh_workspace_saved'])
+        self.assertNotIn('refresh_executions',workflow['ad_notes'])
 
     def test_reference_authorities_and_all_required_copy_explicit(self):
         prompt=fixture()['master_prompt']

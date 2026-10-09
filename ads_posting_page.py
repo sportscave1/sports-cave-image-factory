@@ -635,7 +635,8 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
             updates[CAROUSEL_EXPECTED_IMAGE_NAME_KEYS[index]] = str(
                 card.get("image_filename") or ""
             )
-            updates[CAROUSEL_PRIMARY_TEXT_KEYS[index]] = primary_texts[index]
+        for key, value in zip(CAROUSEL_PRIMARY_TEXT_KEYS, primary_texts):
+            updates[key] = value
         state.update(updates)
         state.pop(RESULT_KEY, None)
         canonical_url = str(
@@ -1740,14 +1741,18 @@ def _render_post_ad():
     loaded = st.session_state.get(posting_handoff.LOADED_KEY) or {}
     if loaded:
         st.caption(f"Loaded from {loaded['source']} — saved Dropbox package")
+        if loaded.get('draft_workspace'):
+            st.caption('Draft loaded. Complete any empty copy fields and upload missing images before Create Ad. Nothing has been created in Meta.')
     if loaded.get("ad_type") == "Single Image / Video":
         # Retain the normal, validated handoff without ever reinterpreting a
         # website single-image ad as a Collection/Instant Experience.
         st.subheader("Single Image / Video — saved package review")
         st.info("This package is saved and loaded. Publishing standard single-image ads is not yet supported by Posting; Carousel and Instant Experience are supported.")
-        for ad, asset in zip(loaded["batch"]["ads"], loaded["assets"]):
+        for position, ad in enumerate(loaded["batch"]["ads"], 1):
+            asset=next((a for a in loaded['assets'] if a['position']==position),{})
             with st.container(border=True):
-                st.image(asset["data"], width=280)
+                if asset.get('data'):st.image(asset["data"], width=280)
+                else:st.caption('Image still needed')
                 st.write(ad["primary_text"])
                 st.write(ad["headline"])
                 st.caption(ad.get("description") or "")
@@ -1798,7 +1803,7 @@ def _render_post_ad():
     st.caption(
         "Create three route-specific Collection + Instant Experience ads safely in Meta."
         if ad_type == AD_TYPE
-        else "Create one standard website carousel with five ordered product mockups."
+        else f"Create one standard website carousel with {st.session_state.get(CAROUSEL_COUNT_KEY, 5)} ordered product mockups."
     )
 
     result = dict(st.session_state.get(RESULT_KEY) or {})
@@ -2453,7 +2458,7 @@ def _render_post_ad():
         if ad_type == CAROUSEL_AD_TYPE:
             st.caption(
                 f"Dataset: {dataset_label} · Format: Standard website carousel · "
-                "5 cards · 5 Primary Text variations · CTA: Shop Now · No Product Set"
+                f"{len(carousel_cards)} cards · 5 Primary Text variations · CTA: Shop Now · No Product Set"
             )
         else:
             st.caption(
@@ -2562,6 +2567,12 @@ def _render_post_ad():
         posting_mode == POSTING_MODE_EXISTING
         or customer_lifecycle_strategy == CUSTOMER_LIFECYCLE_ALL_AUDIENCES
     )
+    if ad_type == CAROUSEL_AD_TYPE and loaded.get('draft_workspace'):
+        conflicts=[c.get('card_number') for c in loaded['batch']['cards']
+                   if str(c.get('destination_url') or '').strip() not in {'',str(product_url).strip()}]
+        if conflicts:
+            ready=False
+            st.error('Saved cards '+', '.join(map(str,conflicts))+' use a different destination. Posting uses one product URL. Correct those destinations in Creative Refresh and save again before creating the ad.')
 
     if posting_mode == POSTING_MODE_EXISTING:
         existing_action = (

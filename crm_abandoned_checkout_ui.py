@@ -15,6 +15,7 @@ def automation_canvas(doc,cfg,key,store,*,current_document=True):
 
 
 def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
+    from crm_discount_section import DiscountPresentationError
     from crm_automation_preview_cache import output
     from crm_email_editor_context import current
     from crm_html_workspace import _preview_device
@@ -51,6 +52,11 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
             if not cache['message']['html'].strip():raise ValueError('Empty rendered preview')
             if not last or last[0]['html_hash']!=cache['html_hash'] or last[0].get('personalised_headers')!=cache.get('personalised_headers') or last[1:]!=(label,warning):
                 st.session_state[key+'last_good_visual']=(cache,label,warning)
+        except DiscountPresentationError as exc:
+            st.warning('Discount HTML needs attention: '+str(exc))
+            # Never show the old offer as if it represented these invalid edits.
+            # The current document/Shopify association is retained for correction.
+            return
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error('automation_preview_render_failed type=%s',type(exc).__name__)

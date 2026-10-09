@@ -68,11 +68,45 @@ class EditorDiscountTests(unittest.TestCase):
         self.assertEqual([s['html'] for s in offer_sections(self.doc)],html)
     def test_manual_amount_or_missing_authoritative_token_holds(self):
         s=add(self.doc)
-        for replacement in ('50% OFF','A$50 off','fifty percent off','Free shipping',''):
+        for replacement in ('50% OFF','A$50 off','fifty percent off','Free shipping'):
             copy=deepcopy(self.doc);copy['middle_sections'][-1]['html']=s['html'].replace('{{discount_value}}',replacement)
             with self.assertRaises(ValueError):substitute(copy)
         self.doc['middle_sections'][-1]['html']+='<p>Save 50%</p>'
         with self.assertRaises(ValueError):substitute(self.doc)
+
+    def test_code_only_and_code_plus_value_survive_edit_move_and_json_reopen(self):
+        for markup in ('<p style="color:#bd9650;font-size:24px">Collector code {{discount_code}}</p>',
+                       '<p>{{discount_code}} — {{discount_value}}</p>'):
+            doc=sectioned();s=add(doc);offer=deepcopy(doc['recovery_discount']);frozen=deepcopy(doc)
+            apply_event(doc,event(doc,'html',id=s['id'],html=markup))
+            for ids in ([s['id'],'html-1'],['html-1',s['id']]):
+                apply_event(doc,event(doc,'order',ids=ids))
+                doc=json.loads(json.dumps(doc));validate_presentation(doc)
+                self.assertEqual(doc['recovery_discount'],offer)
+                self.assertEqual(offer_sections(doc)[0]['offer'],offer)
+            rendered=render_campaign(substitute(doc),CFG)
+            self.assertIn('FIXTURE5',rendered['html']);self.assertNotIn('{{discount_',rendered['html'])
+            self.assertEqual('A$5 off' in rendered['html'],'discount_value' in markup)
+            self.assertNotEqual(offer_sections(frozen)[0]['html'],markup)
+
+    def test_code_required_even_when_amount_omitted(self):
+        s=add(self.doc)
+        for markup in ('<p>Collector offer</p>','<style>{{discount_code}}</style><p>Offer</p>','<p>{{discount_value}}</p>'):
+            self.doc['middle_sections'][-1]['html']=markup
+            with self.assertRaisesRegex(ValueError,'Keep {{discount_code}}'):validate_presentation(self.doc)
+
+    def test_preview_cache_updates_immediately_for_code_only_edit(self):
+        from crm_automation_preview_cache import output
+        s=add(self.doc);store=Mock();store.preview_warning=''
+        store.preview_document.side_effect=lambda doc:(substitute(doc),'Sample')
+        state={};cfg={**CFG,'email_defaults':{}}
+        old=output(state,store,self.doc,cfg)[0]
+        apply_event(self.doc,event(self.doc,'html',id=s['id'],html='<p>Private collector code {{discount_code}}</p>'))
+        new=output(state,store,self.doc,cfg)[0]
+        self.assertNotEqual(new['html_hash'],old['html_hash'])
+        self.assertIn('Private collector code FIXTURE5',new['message']['html'])
+        self.assertNotIn('A$5 off',new['message']['html'])
+        self.assertEqual(output(state,store,self.doc,cfg)[0],new)
     def test_removed_offer_tokens_save_as_draft_but_cannot_publish_or_render(self):
         from crm_automation_definition import new_flow,email_step,validate
         add(self.doc);self.doc['content']['subject']='Offer {{discount_value}}'

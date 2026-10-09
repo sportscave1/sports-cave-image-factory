@@ -211,6 +211,14 @@ def hydrate(state):
     package=state.get(PENDING)
     if not package:
         return False
+    # A callback/link replay is not a new editing session. Compare the same
+    # representation on both sides before touching product fields or drafts.
+    comparable=lambda value:{k:v for k,v in (value or {}).items() if k!='campaign_type_resolution'}
+    if comparable(package)==comparable(state.get(ACTIVE)):
+        state.pop(PENDING,None)
+        import logging
+        logging.getLogger(__name__).info('creative_refresh_handoff_replayed draft_preserved=true')
+        return False
     import ads_page
     state[ads_page.ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY]=package['components']['primary_text']['value']
     state[ads_page.ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY]=package['components']['headline']['value']
@@ -223,8 +231,7 @@ def hydrate(state):
         state['ads_country']=market
     resolution = resolve_campaign_type(package)
     state['ads_campaign_type'] = resolution['campaign_type']
-    previous = {k: v for k, v in (state.get(ACTIVE) or {}).items() if k != 'campaign_type_resolution'}
-    if resolution['campaign_type'] == 'Carousel' and package != previous:
+    if resolution['campaign_type'] == 'Carousel':
         state.pop(ads_page.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY, None)
         state.pop(ads_page.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY, None)
     state[ACTIVE] = {**deepcopy(package), 'campaign_type_resolution': resolution}

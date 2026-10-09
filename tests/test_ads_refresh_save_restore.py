@@ -67,7 +67,7 @@ class RefreshSaveRestoreTests(unittest.TestCase):
         self.assertEqual(winner_handoff.product_selector_rows([ROW], state), [ROW])
         self.assertNotIn('product_mapping', state[winner_handoff.ACTIVE])
 
-    def test_carousel_save_restores_all_cards_and_reports_posting_limit(self):
+    def test_carousel_save_restores_all_cards_for_posting(self):
         result, workflow = completed_ad('Carousel', 'creative_refresh')
         from ads_refresh_plan import reference_map
         result['creative_refresh_context'] = {'source_winner': {'carousel_cards': [
@@ -81,8 +81,8 @@ class RefreshSaveRestoreTests(unittest.TestCase):
         self.assertEqual(len(ads._result_image_slots(restored_result)), 6)
         self.assertEqual(len(reopened['slots']), 6)
         self.assertEqual([c['position'] for c in reopened['ad_notes']['carousel']['cards']], list(range(1,7)))
-        self.assertNotIn(handoff.SAVED_PACKAGE_KEY, reopened)
-        self.assertIn('five-card carousels only', reopened['posting_package_error'])
+        self.assertEqual(len(reopened[handoff.SAVED_PACKAGE_KEY]['batch']['cards']),6)
+        self.assertNotIn('posting_package_error',reopened)
 
     def test_workspace_save_failure_disables_post_now_and_is_retryable(self):
         result, workflow = self.ready_ie()

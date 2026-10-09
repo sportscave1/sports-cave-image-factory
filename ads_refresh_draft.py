@@ -28,15 +28,18 @@ def package(ads, result, workflow, folder):
         csv=b''  # The complete authored concepts remain in source_copy/workspace.
     else:
         copy=deepcopy(workflow.get('standard_ads') or [])
-        batch={**shared,'source_schema_kind':'saved_refresh','ads':copy}
+        batch={**shared,'source_schema_kind':'saved_refresh','ads':copy or [
+            {'ad_number':i,'primary_text':'','headline':'','description':''} for i in range(1,4)]}
         csv=bytes(result.get('creative_refresh_csv') or b'')
     assets=[]
     for spec in ads._result_image_slots(result):
         slot=(workflow.get('slots') or {}).get(spec['id']) or {}
         if not slot.get('valid') or not slot.get('data'):continue
         data=bytes(slot['data'])
+        receipt=(workflow.get('outcomes') or {}).get(spec['id']) or {}
         assets.append({**spec,'slot_id':spec['id'],'data':data,
-            'filename':slot.get('original_name') or spec['id']+'.jpg',
+            'filename':receipt.get('filename') or slot.get('original_name') or spec['id']+'.jpg',
+            'original_name':slot.get('original_name'),
             'content_type':slot.get('content_type') or 'image/jpeg',
             'processed_hash':hashlib.sha256(data).hexdigest(),
             'path':folder+'/creative-refresh-workspace.json'})

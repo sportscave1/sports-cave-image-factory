@@ -2,6 +2,7 @@
 from functools import lru_cache
 from html import escape
 import json
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -63,8 +64,14 @@ def render(st, value, *, archived=False, key_prefix='source'):
         st.warning(f'{missing} of {len(cards)} source cards could not be retrieved.')
     # Durable Refresh archives must keep working after Meta URLs expire. Cache
     # within this authenticated session; serve small previews, never base64 HTML.
+    failures=st.session_state.setdefault('meta-carousel-preview-failures',{}) if archived else {}
+    failed_positions=[]
     for view, card in zip(views, cards):
         if archived and card.get('image_sha256'):
+            digest=card['image_sha256']
+            if failures.get(digest,0)>time.monotonic():
+                failed_positions.append(view['number'])
+                continue
             try:
                 import io
                 import meta_review_store
@@ -88,8 +95,18 @@ def render(st, value, *, archived=False, key_prefix='source'):
                     url = manager.add(data, mime, 'carousel-full-'+digest)
                     thumbnail = manager.add(preview, 'image/jpeg', 'carousel-preview-'+digest)
                     view.update(preview=thumbnail, full=url)
-            except Exception:
-                pass
+                    failures.pop(digest,None)
+                else:
+                    raise ValueError('Archived source image unavailable')
+            except Exception as error:
+                import logging
+                logging.getLogger(__name__).warning('creative_refresh_archive_unavailable card=%s exception=%s',view['number'],type(error).__name__)
+                if len(failures)>=20:failures.pop(next(iter(failures)))
+                failures[digest]=time.monotonic()+30
+                failed_positions.append(view['number'])
+    if failed_positions:
+        st.caption('Archived source images unavailable for cards '+', '.join(map(str,failed_positions))+'. Your edits are retained; original source URLs are shown where available.')
+        st.button('Retry source images',key='carousel-media-retry-'+key_prefix,on_click=failures.clear)
     html = strip_html(views, refresh=archived)
     if hasattr(st, 'iframe'):
         st.iframe(html, height='content')

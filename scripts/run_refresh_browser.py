@@ -12,7 +12,7 @@ sys.path.insert(0,str(ROOT))
 
 
 def main():
-    port=8557
+    port=int(os.getenv('REFRESH_UI_PORT','8557'))
     with socket.socket() as probe:probe.bind(('127.0.0.1',port))
     (ROOT/'tmp').mkdir(exist_ok=True)
     from PIL import Image
@@ -45,7 +45,8 @@ def main():
                 except OSError:
                     if time.monotonic()>deadline:raise RuntimeError('Fixture startup timed out')
                     time.sleep(.2)
-            return subprocess.run(['node','tests/test_ads_refresh_ui.cjs'],cwd=ROOT,env=env).returncode
+            test=next((arg for arg in sys.argv[1:] if arg.endswith('.cjs')),'tests/test_ads_refresh_ui.cjs')
+            return subprocess.run(['node',test],cwd=ROOT,env=env).returncode
         finally:
             if os.name=='nt':subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             else:process.terminate()

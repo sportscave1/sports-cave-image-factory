@@ -73,6 +73,9 @@ def main():
     count = int(st.query_params.get('count', '5'))
     if 'seeded' not in st.session_state:
         result, workflow = ready_carousel(count) if kind == 'Carousel' else RefreshSaveRestoreTests().ready_ie()
+        if st.query_params.get('draft') == '1':
+            workflow['slots']={}
+            workflow['ad_notes']['refresh_executions']=[]
         for slot in workflow['slots'].values():
             slot.update(ads.ads_image_workflow.build_instant_experience_preview_thumbnail(slot['data']))
         if kind == 'Carousel':
@@ -88,6 +91,7 @@ def main():
     output = io.BytesIO(); Image.new('RGB',(640,640),'#876842').save(output,'PNG')
     def load_media(_digest):
         st.session_state['fixture_media_reads'] = st.session_state.get('fixture_media_reads',0)+1
+        if st.session_state.get('fixture_media_failure'):raise TimeoutError('Synthetic archive timeout')
         return output.getvalue(), 'image/png'
     def upload(_token, folder, items, **kwargs):
         results=[]
@@ -114,9 +118,35 @@ def main():
             stack.enter_context(patch.object(owner,name,**kwargs))
         stack.enter_context(patch('requests.sessions.Session.request',side_effect=AssertionError('No external network in fixture')))
         if st.session_state.get('current_page') == ads.POSTING_ROUTE:
+            if st.query_params.get('posting') == '1':
+                import ads_posting_page as page
+                with patch.object(page,'_product_rows_state',return_value=(ROW,)), patch.object(page,'_meta_state',return_value=({}, {}, '', '')), patch('ads_posting_progress.render_current',return_value=False):
+                    page.render_page()
+                if st.button('Return to Creative Refresh fixture'):
+                    from ads_navigation import CREATIVE_REFRESH_ROUTE
+                    st.session_state['current_page']=CREATIVE_REFRESH_ROUTE
+                    st.rerun()
+                return
             st.success('Posting handoff ready')
             st.caption(str(len(st.session_state[posting.PENDING_KEY]['package']['assets']))+' saved assets')
         else:
+            if st.query_params.get('stress')=='1':
+                @st.fragment(run_every=.5)
+                def background():
+                    st.session_state['fixture_ticks']=st.session_state.get('fixture_ticks',0)+1
+                    st.caption('Background ticks: '+str(st.session_state['fixture_ticks']))
+                background()
+                if st.button('Replay winner handoff'):
+                    source=deepcopy(st.session_state[handoff.ACTIVE])
+                    source['campaign_type_resolution']=handoff.resolve_campaign_type(source)
+                    st.session_state[handoff.PENDING]=source
+                if st.button('Fail source media'):
+                    st.session_state['fixture_media_failure']=True
+                    st.session_state.pop('meta-carousel-preview-media',None)
+                if st.button('Restore source media'):
+                    st.session_state['fixture_media_failure']=False
+                    st.session_state.pop('meta-carousel-preview-failures',None)
+                st.caption('Archive reads: '+str(st.session_state.get('fixture_media_reads',0)))
             ads.render_page('creative_refresh')
 
 

@@ -4,6 +4,9 @@ from html import unescape
 import re
 import uuid
 
+class DiscountPresentationError(ValueError):
+    """Safe, actionable offer-copy validation message for the editor."""
+
 
 def offer_sections(doc):
     return [s for s in doc.get('middle_sections',[]) if s.get('type')=='discount']
@@ -70,7 +73,7 @@ def validate_presentation(doc):
     selected=doc.get('recovery_discount')
     for s in offer_sections(doc):
         if not s['visible']:continue
-        if s['offer']!=selected:raise ValueError('Discount section does not match this email’s selected Shopify offer.')
+        if s['offer']!=selected:raise DiscountPresentationError('Discount section does not match this email’s selected Shopify offer.')
         source=s['html']
         # Check customer-visible text, not CSS dimensions or colours.
         from html.parser import HTMLParser
@@ -83,11 +86,12 @@ def validate_presentation(doc):
             def handle_data(self,data):
                 if not self.skip:self.parts.append(data)
         parser=Text();parser.feed(source);text=' '.join(parser.parts)
-        for token in ('discount_code','discount_value'):
-            if not re.search(r'{{\s*'+token+r'\s*}}',text):
-                raise ValueError('Keep {{'+token+'}} in the visible discount section so the offer stays linked to Shopify.')
+        # Presentation may omit the amount; the verified offer remains in offer /
+        # recovery_discount, independently of layout and token placement.
+        if not re.search(r'{{\s*discount_code\s*}}',text):
+            raise DiscountPresentationError('Keep {{discount_code}} in the visible discount section. {{discount_value}} is optional.')
         plain=re.sub(r'{{\s*discount_(?:code|value)\s*}}','',unescape(text))
         if re.search(r'(?:[$£€]\s*\d|\d[\d.,]*\s*(?:%|percent|dollars?|pounds?|euros?)|\b(?:one|two|five|ten|twenty|fifty|hundred)\s+(?:percent|dollars?|pounds?)|\bhalf[ -]price\b)',plain,re.I):
-            raise ValueError('Use {{discount_value}} for the offer amount. Manually entered amounts or percentages cannot be verified against Shopify.')
+            raise DiscountPresentationError('Use {{discount_value}} for the offer amount. Manually entered amounts or percentages cannot be verified against Shopify.')
         if re.search(r'\b(?:free shipping|buy\s+\d+\s+get\s+\d+)\b',plain,re.I):
-            raise ValueError('Use {{discount_value}} for the offer type and conditions, rather than an unverified promotion claim.')
+            raise DiscountPresentationError('Use {{discount_value}} for the offer type and conditions, rather than an unverified promotion claim.')

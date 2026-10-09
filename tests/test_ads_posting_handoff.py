@@ -105,7 +105,7 @@ class SavedPackageTests(unittest.TestCase):
                     self.assertEqual(state[posting.PRODUCT_KEY], product_records()[0]["identity"])
                     self.assertEqual(state[posting.SAVED_PRODUCT_URL_KEY]["url"], result["product_url"])
                     self.assertEqual(state["unrelated"], "keep")
-                    image_keys = posting.CAROUSEL_IMAGE_STATE_KEYS if ad_type == "Carousel" else posting.IMAGE_STATE_KEYS
+                    image_keys = posting.CAROUSEL_IMAGE_STATE_KEYS[:5] if ad_type == "Carousel" else posting.IMAGE_STATE_KEYS
                     for spec, key, asset in zip(ads.ads_image_workflow.campaign_image_slots(ad_type), image_keys, package["assets"]):
                         record = state[key]
                         self.assertEqual(record["data"], uploaded[asset["path"]])
@@ -120,7 +120,7 @@ class SavedPackageTests(unittest.TestCase):
                         self.assertEqual(canonical["headlines"], package["source_copy"]["headlines"])
                         self.assertEqual(canonical["descriptions"], package["source_copy"]["descriptions"])
                         csv = serialize_carousel_posting_import_csv(package["batch"]["rows"])
-                        fields = (*posting.CAROUSEL_HEADLINE_KEYS, *posting.CAROUSEL_DESCRIPTION_KEYS, *posting.CAROUSEL_PRIMARY_TEXT_KEYS)
+                        fields = (*posting.CAROUSEL_HEADLINE_KEYS[:5], *posting.CAROUSEL_DESCRIPTION_KEYS[:5], *posting.CAROUSEL_PRIMARY_TEXT_KEYS)
                         self.assertIn("refreshed", state[posting.CAROUSEL_HEADLINE_KEYS[0]])
                     else:
                         csv = package["copy_csv"]

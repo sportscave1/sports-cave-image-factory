@@ -1862,12 +1862,12 @@ def build_carousel_creative_payload(
     url_tags=META_AD_URL_PARAMETERS,
     card_count=CAROUSEL_CARD_COUNT,
 ):
-    """Build one non-catalogue, five-card Meta v26 Carousel creative."""
+    """Build one non-catalogue Meta v26 Carousel; ordinary imports default to five cards."""
 
     clean_cards = tuple(dict(card or {}) for card in cards or ())
     clean_primary_texts = tuple(str(value or "") for value in primary_texts or ())
     if not 2 <= card_count <= 10 or len(clean_cards) != card_count:
-        raise PostingValidationError("Carousel creative requires exactly five cards.")
+        raise PostingValidationError(f"Carousel creative requires exactly {card_count} cards.")
     if len(clean_primary_texts) != CAROUSEL_PRIMARY_TEXT_COUNT:
         raise PostingValidationError(
             "Carousel creative requires exactly five Primary Text variations."
@@ -3033,7 +3033,6 @@ class MetaPostingService:
                 page_id=self.client.page_id,
                 instagram_user_id=self.client.instagram_user_id,
                 cards=actual_cards,
-                card_count=len(actual_cards),
                 primary_texts=clean["carousel_primary_texts"],
                 destination_url=clean["destination_url"],
             )
