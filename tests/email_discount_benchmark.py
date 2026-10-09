@@ -24,11 +24,15 @@ def main():
     target={**selected['recovery_discount'],'original_url':checkout(9001)['abandonedCheckoutUrl']}
     before=lambda:render_campaign(original,CFG)
     after=lambda:apply_links(render_campaign(substitute(selected),CFG),target)
-    before();after()
+    from crm_discount_section import migrate_editor
+    sectioned=migrate_editor(selected)
+    edited=lambda:apply_links(render_campaign(substitute(sectioned),CFG),target)
+    before();after();edited()
     print(json.dumps({'cold_search_ms':round(cold,3),'cached_search_ms':round(warm,3),
         'cold_fixture_api_calls':calls,'cached_extra_api_calls':len(shop.calls)-calls,
         'existing_render_ms':round(min(repeat(before,number=100,repeat=3))*10,3),
-        'render_with_discount_ms':round(min(repeat(after,number=100,repeat=3))*10,3)}))
+        'render_with_discount_ms':round(min(repeat(after,number=100,repeat=3))*10,3),
+        'render_with_editable_offer_ms':round(min(repeat(edited,number=100,repeat=3))*10,3)}))
 
 
 if __name__=='__main__':main()

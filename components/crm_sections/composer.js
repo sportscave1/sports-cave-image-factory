@@ -96,8 +96,8 @@ function renderTemplates(){
   item.dataset.add='template';container.append(item);
  }
 }
-function render(){renderTemplates();for(const b of document.querySelectorAll('[data-add=visual],[data-add=flexible_checkout]'))b.hidden=!args.automation;const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;for(const card of [...root.children])if(!args.sections.some(s=>s.id===card.dataset.id))card.remove();args.sections.forEach((s,index)=>{
- const name=s.name||(s.type==='html'?'HTML Section '+s.html_number:s.type==='image'?'Image':s.type==='abandoned_checkout_products'?'Abandoned Checkout':s.type==='checkout_element'?s.settings.kind.replaceAll('_',' '):'Catalogue');if(opened[s.id]===undefined)opened[s.id]=s.html_number===1||s.type==='image';
+function render(){renderTemplates();renderDiscountPicker(document.getElementById('discount-picker'),args.discount,emit);for(const b of document.querySelectorAll('[data-add=visual],[data-add=flexible_checkout]'))b.hidden=!args.automation;const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;for(const card of [...root.children])if(!args.sections.some(s=>s.id===card.dataset.id))card.remove();args.sections.forEach((s,index)=>{
+ const name=s.name||(s.type==='discount'?'Discount':s.type==='html'?'HTML Section '+s.html_number:s.type==='image'?'Image':s.type==='abandoned_checkout_products'?'Abandoned Checkout':s.type==='checkout_element'?s.settings.kind.replaceAll('_',' '):'Catalogue');if(opened[s.id]===undefined)opened[s.id]=s.html_number===1||s.type==='image'||s.type==='discount';
  const signature=JSON.stringify({...s,html:undefined,open:opened[s.id],prompt:s.type==='image'?args.image_prompt:undefined});
  const existing=[...root.children].find(c=>c.dataset.id===s.id);
  if(existing?.dataset.signature===signature){syncArea(s);return;}
@@ -108,9 +108,11 @@ function render(){renderTemplates();for(const b of document.querySelectorAll('[d
  card.classList.toggle('is-hidden',!s.visible);card.classList.toggle('is-open',!!opened[s.id]);
  let title=button(name,'Edit '+name,()=>{opened[s.id]=!opened[s.id];render();},'title');title.setAttribute('aria-expanded',!!opened[s.id]);row.append(title);
  if(s.type==='image')imageControls(row,args.image_prompt||'');
+ if(s.type==='discount')row.append(button('Change','Change Shopify discount',()=>emit('discount_open',{id:s.id})));
  row.append(button('⧉','Duplicate section',()=>emit('duplicate',{id:s.id})));
  row.append(deleteControl(s),el('span',opened[s.id]?'⌃':'⌄','chevron'));card.append(row);
- if(opened[s.id]){let content=el('div','','content');if(s.type==='html'||s.type==='image'){
+ if(opened[s.id]){let content=el('div','','content');if(s.type==='html'||s.type==='image'||s.type==='discount'){
+ if(s.type==='discount')content.append(el('div',s.offer.code+' · '+s.offer.value+(s.visible?'':' · Presentation hidden'),'discount-summary'));
  let area=areas.get(s.id);
  if(!area){area=document.createElement('textarea');area.value=drafts[s.id]??s.html;area.placeholder='Paste campaign HTML here…';area.setAttribute('aria-label',name+' HTML');areas.set(s.id,area);}
  area.setAttribute('aria-label',name+' HTML');syncArea(s);

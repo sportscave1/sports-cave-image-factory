@@ -85,6 +85,8 @@ class ComponentJSONTests(unittest.TestCase):
         doc = new_document(); doc.update(content_mode='HTML', custom_html='<p>Body</p>')
         received = []
         def component(**payload):
+            callback=payload.pop('on_change',None)
+            self.assertTrue(callable(callback)) # Streamlit consumes callbacks outside JSON.
             received.append(json.loads(json.dumps(payload)))
         with patch('crm_section_ui.st') as ui, patch('crm_section_ui.components.declare_component', return_value=component):
             ui.session_state = {}

@@ -77,3 +77,12 @@ small{font-size:11px;color:var(--editor-muted);white-space:nowrap}
 .section-name-editor button{margin-right:6px}.section-name-editor .section-name-reset{border:0;background:transparent;font-size:12px;padding:4px 0;margin-top:4px}
 .visual-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;font-size:12px}.visual-fields label{display:flex;flex-direction:column;gap:3px}.visual-fields input,.visual-fields select{box-sizing:border-box;width:100%;min-width:0;height:30px;padding:4px;border:1px solid var(--editor-line);border-radius:4px;background:#fff;color:var(--editor-text)}.visual-fields input[type=color]{padding:2px}.add-menu [hidden]{display:none}@media(max-width:500px){.visual-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .visual-wide{grid-column:1/-1}.visual-fields textarea{box-sizing:border-box;width:100%;min-height:72px;padding:5px;border:1px solid var(--editor-line);border-radius:4px;resize:vertical;font:inherit}.visual-appearance{margin-top:8px}.visual-appearance summary{font-size:12px;cursor:pointer;color:var(--editor-muted);padding:4px 0}
+#discount-picker{margin:8px 0;padding:10px;border:1px solid #ddd8ce;border-radius:6px;background:#faf9f6;box-sizing:border-box;max-width:100%}
+#discount-picker[hidden]{display:none}
+.discount-heading,.discount-tools{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+.discount-heading strong{flex:1;font-size:13px}.discount-tools input{min-width:0;flex:1;width:100%;box-sizing:border-box;padding:7px;border:1px solid #ddd8ce;border-radius:4px}
+.discount-status,.discount-summary{font-size:11px;line-height:1.4;color:#666;margin:6px 0}
+.discount-results{height:180px;overflow:auto;overscroll-behavior:contain}
+.discount-result{display:block!important;text-align:left;width:100%;padding:8px!important;background:#fff;border:0;border-bottom:1px solid #e8e4dc;border-radius:0!important;white-space:normal;overflow-wrap:anywhere}
+.discount-result:hover:not(:disabled){background:#f4eedf}.discount-result strong,.discount-result span,.discount-result small{display:block}.discount-result span,.discount-result small{font-size:11px;margin-top:3px}.discount-result:disabled{opacity:.6;cursor:default}
+.discount-pages{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}.discount-pages button{font-size:11px;max-width:100%;white-space:normal}

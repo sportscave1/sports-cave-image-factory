@@ -35,6 +35,10 @@ def validate_middle(sections):
         elif s.get('type') == 'image':
             if set(s) != common | {'html'} or not isinstance(s['html'], str):
                 raise ValueError('Invalid Image section.')
+        elif s.get('type') == 'discount':
+            if set(s)!=common|{'offer','html'} or not isinstance(s['html'],str):raise ValueError('Invalid discount section.')
+            from crm_recovery_discount import validate
+            validate({'recovery_discount':s['offer']})
         elif s.get('type') == 'abandoned_checkout_products':
             if set(s)!=common:raise ValueError('Invalid abandoned checkout section.')
         elif s.get('type') == 'checkout_element':
@@ -60,6 +64,8 @@ def validate_middle(sections):
 
 def commit_middle(doc, sections):
     validate_middle(sections)
+    from crm_discount_section import sync,offer_sections
+    sync(doc,sections,managed=bool(offer_sections(doc)))
     doc['middle_sections'] = deepcopy(sections)
     # Compatibility mirror, never a second rendering source once sections exist.
     doc['custom_html'] = next((s['html'] for s in sections if s.get('html_number') == 1), '')
@@ -72,7 +78,7 @@ def apply_event(doc, event):
     edits = event.get('edits', {})
     if not isinstance(edits, dict): raise ValueError('Invalid pending edits.')
     for identity, html in edits.items():
-        target = next((s for s in sections if s['id'] == identity and s['type'] in ('html','image')), None)
+        target = next((s for s in sections if s['id'] == identity and s['type'] in ('html','image','discount')), None)
         if target is None or not isinstance(html,str): raise ValueError('Invalid pending edit.')
         target['html'] = html
     kind = event.get('type')
@@ -117,7 +123,7 @@ def apply_event(doc, event):
         if copied['type']=='html':copied['html_number']=max(s.get('html_number',0) for s in sections)+1
         sections.insert(sections.index(selected)+1,copied)
     elif kind == 'visible': selected['visible'] = event.get('visible')
-    elif kind == 'html' and selected['type'] in ('html', 'image'): selected['html'] = event.get('html')
+    elif kind == 'html' and selected['type'] in ('html', 'image', 'discount'): selected['html'] = event.get('html')
     elif kind == 'settings' and selected['type'] in ('catalogue','checkout_element'): selected['settings'] = deepcopy(event.get('settings'))
     elif kind == 'separate_checkout':
         from crm_checkout_elements import separate
@@ -154,10 +160,10 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
         if 'SC_CHECKOUT_RECOVERY_URL' in s.get('html',''):raise ValueError('Resolve the original checkout recovery link before rendering this email.')
         if 'SC_ABANDONED_CHECKOUT' in s.get('html',''):raise ValueError('Abandoned Checkout requires a checkout recovery automation. Campaign recipients have no checkout context.')
         if 'SC_WALL_PREVIEW_URL' in s.get('html',''):raise ValueError('Resolve the wall preview product link before rendering this email.')
-        source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)
+        source = s['html'] if s['type'] in ('html', 'image', 'discount') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,
-            campaign_key=campaign_key if s['type'] in ('html', 'image') else '',trusted_catalogue=s['type']=='catalogue')
+            campaign_key=campaign_key if s['type'] in ('html', 'image', 'discount') else '',trusted_catalogue=s['type']=='catalogue')
         if s['type'] == 'image':
             from crm_image_prompt import has_image
             result['HTML content present'] |= has_image(markup)

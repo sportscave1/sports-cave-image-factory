@@ -198,8 +198,6 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     from crm_campaign_controls import market_control,timing_control
                     if mode=='automation':
                         if settings_control:settings_control(editor,key)
-                        from crm_discount_ui import control as discount_control
-                        discount_control(shop,editor,key,getattr(drafts,'preview_trigger','abandoned'))
                     else:
                         market_control(shop,drafts,doc,key)
                         timing_control(doc,key)

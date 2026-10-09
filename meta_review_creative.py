@@ -186,6 +186,12 @@ def normalize(raw, story=None, images=None):
     message = link.get('message') or raw.get('body') or story.get('message') or ''
     if message and message not in primary_texts:
         primary_texts.insert(0, message)
+    def shared_options(field, fallback):
+        values = [obj(v)['text'] for v in rows(feed.get(field))
+                  if isinstance(obj(v).get('text'), str) and obj(v)['text'].strip()]
+        if isinstance(fallback, str) and fallback.strip() and fallback not in values:
+            values.insert(0, fallback)
+        return values
     incomplete = (source.startswith(('ambiguous_', 'unresolved_', 'story_pagination_'))
                   or (fmt not in CAROUSEL_FORMATS and bool(children or rows(feed.get('carousels'))
                       or 'CAROUSEL' in rows(feed.get('ad_formats')))))
@@ -203,6 +209,9 @@ def normalize(raw, story=None, images=None):
             'shared_primary_text': link.get('message') or raw.get('body') or story.get('message') or (primary_texts[0] if primary_texts else '') or '',
             'shared_message': link.get('message') or story.get('message') or '',
             'shared_headline': link.get('name') or raw.get('title') or '',
+            **({'shared_headlines': shared_options('titles', link.get('name') or raw.get('title')),
+                'shared_descriptions': shared_options('descriptions', link.get('description')),
+                'shared_description': link.get('description') or ''} if fmt in CAROUSEL_FORMATS else {}),
             'shared_cta': obj(link.get('call_to_action')).get('type') or raw.get('call_to_action_type') or '',
             'multi_share_optimized': link.get('multi_share_optimized') is True,
             'multi_share_end_card': link.get('multi_share_end_card') is True,

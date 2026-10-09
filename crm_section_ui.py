@@ -114,7 +114,9 @@ def middle_editor(doc, key, shop, store=None):
     from crm_email_prompt import handoff
     from crm_prompt_copy import clipboard_script
     verified=handoff(st.session_state,editor) if campaign_name else None
-    event = render_component(component,automation=getattr(store,'email_mode',None)=='automation',preview_debounce=350 if getattr(store,'email_mode',None)=='automation' else 750,clipboard_script=clipboard_script(),history_scope=doc.get('campaign_key',key),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    from crm_discount_ui import view as discount_view,callback as discount_callback
+    trigger=getattr(store,'preview_trigger',None) if getattr(store,'email_mode',None)=='automation' else None
+    event = render_component(component,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=350 if getattr(store,'email_mode',None)=='automation' else 750,clipboard_script=clipboard_script(),history_scope=doc.get('campaign_key',key),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')

@@ -27,6 +27,8 @@ class DiscountDeliveryTests(unittest.TestCase):
         flow=deepcopy(a['config']['draft']);flow['emails']=[email_step(native_document(),d) for d in (0,43200,86400)]
         third=flow['emails'][2]['document'];offer=doc(self.discounts)
         third['recovery_discount']=offer['recovery_discount'];third['content'].update(subject=offer['content']['subject'],preheader=offer['content']['preheader'])
+        from crm_discount_section import migrate_editor
+        flow['emails'][2]['document']=migrate_editor(third)
         self.flow=flow
         a=f.store.save_flow(ADMIN,a['id'],a['name'],flow,1)
         self.a=f.store.publish(ADMIN,a['id'],a['config']['revision'],env=LIVE)
@@ -38,7 +40,9 @@ class DiscountDeliveryTests(unittest.TestCase):
         f=self.f;frozen=deepcopy(self.j['steps'])
         self.send_step();self.send_step();self.assertEqual(self.discounts.calls,[])
         # A newly published selection cannot rewrite this customer's frozen journey.
-        flow=deepcopy(self.flow);flow['emails'][2]['document'].pop('recovery_discount')
+        flow=deepcopy(self.flow)
+        from crm_middle_sections import commit_middle,middle_sections
+        third=flow['emails'][2]['document'];commit_middle(third,[s for s in middle_sections(third) if s['type']!='discount'])
         flow['emails'][2]['document']['content'].update(subject='New future version',preheader='New future version')
         saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
         f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)
@@ -47,6 +51,7 @@ class DiscountDeliveryTests(unittest.TestCase):
         self.assertNotIn('discount=',messages[0]['html']);self.assertNotIn('discount=',messages[1]['html'])
         self.assertEqual(messages[2]['subject'],'Your offer: FIXTURE5');self.assertIn('A$5 off',messages[2]['html'])
         self.assertIn('discount=FIXTURE5',messages[2]['html']);self.assertNotIn('{{',messages[2]['html'])
+        self.assertIn('AN EXCLUSIVE COLLECTOR OFFER',messages[2]['html'])
         self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(self.j['id'],),True)['steps'],frozen)
         f.engine.send_one();self.assertEqual(f.provider.send.call_count,3)
         self.assertEqual(f.store.template(frozen[2]['template_id'],frozen[2]['template_version'])['document']['recovery_discount'],self.flow['emails'][2]['document']['recovery_discount'])
@@ -75,6 +80,16 @@ class DiscountDeliveryTests(unittest.TestCase):
         wire.post.assert_called_once();message=wire.post.call_args.kwargs['json']
         self.assertEqual(message['subject'],'[CAMPAIGN TEST] Your offer: FIXTURE5')
         self.assertNotIn('{{',message['html']);self.assertIn('A$5 off',message['html'])
+
+    def test_removed_offer_with_dependent_subject_is_saved_but_publication_held(self):
+        f=self.f;flow=deepcopy(self.flow);third=flow['emails'][2]['document']
+        from crm_middle_sections import commit_middle,middle_sections
+        commit_middle(third,[s for s in middle_sections(third) if s['type']!='discount'])
+        saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
+        self.assertNotIn('recovery_discount',saved['config']['draft']['emails'][2]['document'])
+        with self.assertRaises(ValueError):f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)
+        self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(self.j['id'],),True)['steps'],self.j['steps'])
+        f.provider.send.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

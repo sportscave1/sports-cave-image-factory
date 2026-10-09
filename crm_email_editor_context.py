@@ -20,7 +20,8 @@ def editable_document(doc):
     if any(s.get('type')=='abandoned_checkout_products' for s in result.get('middle_sections',[])):
         from crm_checkout_section import editable
         result=editable(result)
-    return result
+    from crm_discount_section import migrate_editor
+    return migrate_editor(result)
 
 
 def mark_content_edit(state,editor):

@@ -16,7 +16,7 @@ def valid_text(value):
     return isinstance(value,str) and not any(unicodedata.category(c).startswith('C') for c in value) and not any(x in value for x in ('{{','}}','{%','%}'))
 
 
-def validate(doc, trigger='abandoned'):
+def validate(doc, trigger='abandoned', *, allow_unselected_discount=False):
     for field in FALLBACK:
         value=doc['content'].get(field,'')
         if not isinstance(value,str) or any(unicodedata.category(c).startswith('C') for c in value):
@@ -24,7 +24,7 @@ def validate(doc, trigger='abandoned'):
         names=TOKEN.findall(value)
         if set(names)-set(VARIABLES) or any(x in TOKEN.sub('',value) for x in ('{{','}}','{%','%}')):
             raise ValueError('Use only the supported personalisation variables.')
-        if set(names)&{'discount_code','discount_value'} and not doc.get('recovery_discount'):
+        if set(names)&{'discount_code','discount_value'} and not doc.get('recovery_discount') and not allow_unselected_discount:
             raise ValueError('Select a Shopify recovery discount before using its variables.')
         if names and len(value)>250:raise ValueError('Personalised subject and preview text must be at most 250 characters.')
         if 'edition_number' in names and trigger not in ('post_purchase','fulfilled'):

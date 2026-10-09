@@ -26,7 +26,7 @@ def new_flow(trigger='welcome'):
     return {'trigger': trigger, 'rules': [], 'reentry_days': 0, 'emails': [email_step()], 'timing_version': 2}
 
 
-def validate(flow):
+def validate(flow, *, draft=False):
     if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request','timing_version','inactive_days','exit_on_purchase'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
         raise ValueError('Invalid automation definition.')
     if flow.get('timing_version',1) not in (1,2) or (flow.get('timing_version')==2 and 'abandonment_seconds' in flow):
@@ -75,8 +75,11 @@ def validate(flow):
         validate_document(step['document'])
         from crm_recovery_discount import validate as validate_discount
         validate_discount(step['document'],flow['trigger'])
+        if not draft:
+            from crm_discount_section import validate_presentation
+            validate_presentation(step['document'])
         from crm_personalisation import validate as validate_personalisation
-        validate_personalisation(step['document'],flow['trigger'])
+        validate_personalisation(step['document'],flow['trigger'],allow_unselected_discount=draft)
     return flow
 
 

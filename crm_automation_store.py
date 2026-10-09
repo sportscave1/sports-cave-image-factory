@@ -85,7 +85,7 @@ class AutomationStore(CampaignStore):
     def save_flow(self,user,identity,name,flow,revision):
         from crm_checkout_migration import migrate_flow
         from crm_automation_timing import single_delay
-        require(user,'crm_automations_manage');flow=single_delay(migrate_flow(flow));validate(flow)
+        require(user,'crm_automations_manage');flow=single_delay(migrate_flow(flow));validate(flow,draft=True)
         if not isinstance(name,str) or not name.strip() or len(name)>150: raise ValueError('Use an automation name of 1–150 characters.')
         with self.db() as conn:
             old=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()

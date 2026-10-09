@@ -37,12 +37,12 @@ def json_safe(value):
     raise TypeError('Unsupported component value type')
 
 
-def render_component(component, **payload):
+def render_component(component, *, on_change=None, **payload):
     import streamlit as st
     from streamlit.components.v1.custom_component import MarshallComponentException
     try:
         safe = json_safe(payload)
-        return component(**safe)
+        return component(**safe,**({'on_change':on_change} if on_change is not None else {}))
     except (TypeError, ValueError, MarshallComponentException) as exc:
         # Never log payloads, content, identifiers, or exception messages.
         logging.getLogger(__name__).warning('crm_component_payload_failed type=%s', type(exc).__name__)

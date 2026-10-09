@@ -37,6 +37,8 @@ def ready_carousel(count=5):
                             'Your story deserves a wall.']
     headlines = ['The Rivalry', 'Match Day', 'Collector Spirit', 'Your Football', 'Own a Memory']
     descriptions = ['Two greats', 'Recall the roar', 'A personal icon', 'Home advantage', 'Made to display']
+    copy['headlines'] = headlines.copy()
+    copy['descriptions'] = descriptions.copy()
     for i, card in enumerate(copy['cards']):
         card.update(headline=headlines[i], description=descriptions[i], destination_url=result['product_url'])
     workflow['ad_notes']['refresh_executions'] = executions(result)
@@ -58,6 +60,9 @@ def ready_carousel(count=5):
             creative_refresh_context={**result['creative_refresh_context'], 'source_winner':source})
         workflow['context_key'] = result['context_key']
         # Six-card fixture is for UI/count checks; it deliberately has incomplete analysis.
+    from tests.fixtures.carousel_evolution import attach_reviews
+    workflow['ad_notes']['refresh_executions'] = attach_reviews(
+        result,copy,workflow['ad_notes']['refresh_executions'][:count])
     ads._store_carousel_copy_notes(workflow, copy, result)
     return result, workflow
 

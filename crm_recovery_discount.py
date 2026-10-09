@@ -40,6 +40,9 @@ def recovery_url(url,code,existing=()):
 def prepare(shop,doc,checkout,customer_id):
     if not selection(doc):return None
     validate(doc,'abandoned')
+    from crm_discount_section import validate_presentation
+    try:validate_presentation(doc)
+    except ValueError as exc:raise DiscountHold('discount_copy_unverified: '+str(exc)) from None
     from crm_discount_api import fresh,CHECKOUT,AUTOMATIC,DiscountRemoved
     try:
         discount=fresh(shop,selection(doc));d=discount['facts'];clock=now()
@@ -85,6 +88,8 @@ def prepare(shop,doc,checkout,customer_id):
 
 def substitute(doc,discount=None):
     """Only the two discount tokens, on a render copy; never evaluates Liquid."""
+    from crm_discount_section import validate_presentation
+    validate_presentation(doc)
     result=deepcopy(doc);saved=selection(doc)
     values=discount or saved or {}
     tokens={'discount_code':values.get('code'),'discount_value':values.get('value')}
@@ -117,6 +122,11 @@ def substitute(doc,discount=None):
         if field in result:result[field]=replace(result[field],True)
     if 'html_sections' in result:result['html_sections']={k:replace(v,True) for k,v in result['html_sections'].items()}
     for section in result.get('middle_sections',[]):
+        if section.get('type')=='discount':
+            # Render-only lowering reuses every existing HTML recovery/link and
+            # safety transform. The saved editable offer remains bound to Shopify.
+            section['type']='image';section.pop('offer',None)
+        if not section.get('visible',True):continue
         if 'html' in section:section['html']=replace(section['html'],True)
         if section.get('type')=='checkout_element':section['settings']=block_values(section['settings'])
     return result
