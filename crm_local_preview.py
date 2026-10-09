@@ -73,6 +73,11 @@ def model(doc,cfg,store=None):
                 for marker,value in banner_fragments.items():current['html']=current['html'].replace(marker,value)
                 current['html']=current['html'].replace('SC_FRAME_BANNER_URL','')
             commit_middle(isolated,[current])
+            # Isolation must retain the email-level offer used by tokens in
+            # ordinary HTML. commit_middle normally removes it when deleting
+            # the last managed discount, but this is only a rendering slice.
+            if doc.get('recovery_discount'):
+                isolated['recovery_discount']=deepcopy(doc['recovery_discount'])
             token=digest([isolated,data])
             if token in entries:
                 resolved[s['id']]={'section':s,'html':entries[token]}

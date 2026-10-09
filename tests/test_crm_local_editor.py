@@ -39,6 +39,20 @@ class LocalEditorTests(TestCase):
         self.assertEqual(middle_sections(initial)[0]['visible'],True)
         self.assertIn('Newest draft',render_campaign(doc,CFG)['html'])
 
+    def test_isolated_html_keeps_offer_from_sibling_discount_section(self):
+        from crm_local_preview import model
+        from tests.test_crm_discount_editor_v2 import add
+        doc=sectioned();add(doc);sections=middle_sections(doc)
+        sections[0]['html']='<p>Your offer: {{discount_code}} / {{discount_value}}</p>'
+        commit_middle(doc,sections);prior=deepcopy(doc)
+        with patch('streamlit.session_state',{}):result=model(doc,CFG)
+        self.assertNotIn(sections[0]['id'],result['errors'])
+        self.assertIn('A$5 off',result['resolved'][sections[0]['id']]['html'])
+        self.assertEqual(doc,prior)
+        sections[-1]['visible']=False;commit_middle(doc,sections)
+        with patch('streamlit.session_state',{}):hidden=model(doc,CFG)
+        self.assertIn(sections[0]['id'],hidden['errors'])
+
     def test_batch_failure_is_atomic_and_rejects_duplicate_identity(self):
         doc=sectioned();prior=deepcopy(doc);base=[s['id'] for s in middle_sections(doc)]
         with self.assertRaises(ValueError):

@@ -61,8 +61,10 @@ function catalogue(s){
 }
 function sectionHtml(s,model,sections=[]){
  const signature=v=>JSON.stringify([v.type,v.html??null,v.settings??null,v.products??null,v.offer??null]);
- if(model.error_sections?.[s.id]&&signature(model.error_sections[s.id])===signature(s))throw Error(model.errors[s.id]);
- const known=Object.values(model.resolved).find(r=>signature(r.section)===signature(s));
+ const offer=sections.find(v=>v.type==='discount'&&v.visible)?.offer||(!model.managed_offer?model.offer:null);
+ const seedValid=!/{{\s*discount_(code|value)\s*}}/.test(s.html||'')||JSON.stringify(offer)===JSON.stringify(model.offer||null);
+ if(seedValid&&model.error_sections?.[s.id]&&signature(model.error_sections[s.id])===signature(s))throw Error(model.errors[s.id]);
+ const known=seedValid&&Object.values(model.resolved).find(r=>signature(r.section)===signature(s));
  if(known)return sanitize(known.html,model);
  if(s.type==='checkout_element')return sanitize(visual(s,model),model);
  if(s.type==='catalogue')return sanitize(catalogue(s),model);
@@ -72,7 +74,6 @@ function sectionHtml(s,model,sections=[]){
   if(!/{{\s*discount_code\s*}}/.test(source))throw Error('Keep {{discount_code}} in this offer section.');
   source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>esc(s.offer[k]));
  }
- const offer=sections.find(v=>v.type==='discount'&&v.visible)?.offer||(!model.managed_offer?model.offer:null);
  source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>{if(!offer)throw Error('Select a verified discount before using discount variables.');return esc(offer[k]);});
  for(const [token,value]of Object.entries(model.replacements))source=source.split(token).join(value);
  if(/{{|{%|SC_FRAME_BANNER_/.test(source))throw Error('Unresolved template variable. Correct this section; the draft is retained.');

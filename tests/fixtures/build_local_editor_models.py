@@ -38,6 +38,11 @@ def build():
             expected=render_middle(hydrate(substitute(doc),data,test=True)[0])[0]
         seed['resolved']={} # Exercise the incremental path, not its warm seed.
         cases.append(dict(section=section,model=seed,expected=expected))
+    doc=sectioned();add(doc);section=doc['middle_sections'][0]
+    section['html']='<p>Offer: {{discount_code}} / {{discount_value}}</p>'
+    commit_middle(doc,doc['middle_sections'])
+    with patch('streamlit.session_state',{}):seed=model(doc,CFG)
+    cases.append(dict(section=section,sections=doc['middle_sections'],model=seed,expected=substitute(doc)['custom_html'],sibling_offer=True))
     Path('tmp/local-editor-models.json').write_text(json.dumps(cases,default=str),encoding='utf8')
     print('Generated',len(cases),'composition cases')
 
