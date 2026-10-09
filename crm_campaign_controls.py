@@ -14,10 +14,8 @@ def market_control(shop,store,doc,key):
     selected=audience(doc['market'])
     if doc.get('audience')!=selected:doc['counts']={}
     doc['audience']=selected;doc['market_audience']=True
-    editor=st.session_state.get('campaign_editor')
-    if editor and editor['document'] is doc and not editor.get('recovery_readonly'):
-        from crm_campaign_audience_prepare import prepare_session
-        prepare_session(st.session_state,shop,store,editor,key,st.session_state.get(key+'review_preview_settings'))
+    # This dropdown needs only aggregate counts. Exact recipient preparation is
+    # owned by Review & send, including fresh eligibility and identity checks.
     st.caption('Shopify subscribed segment size. Eligible recipients and exclusions are checked before sending.')
     if state['error']:st.caption('Audience refresh delayed. Last available counts are shown; sending still requires current eligibility.')
     if doc['market']!=previous:

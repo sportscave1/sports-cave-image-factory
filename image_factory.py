@@ -1,7 +1,7 @@
 from sports_categories import sport_family
 from pathlib import Path
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
-from contextlib import suppress
+from contextlib import closing, suppress
 import hashlib
 import json
 import logging
@@ -2181,7 +2181,9 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", Image.DecompressionBombWarning)
-                    with Image.open(temp_source_path) as source_image:
+                    # Conversion releases the decoded source early; Pillow 10.4's
+                    # file-context __exit__ cannot close that source a second time.
+                    with closing(Image.open(temp_source_path)) as source_image:
                         if source_image.format not in {"JPEG", "PNG", "WEBP"}:
                             raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
                         logging.info("MOCKUPS_LIFESTYLE stage=decode dimensions=%sx%s mode=%s upload_bytes=%s",

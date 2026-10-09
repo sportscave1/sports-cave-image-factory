@@ -804,6 +804,7 @@ class PostingRequest:
     ad_type: str = AD_TYPE
     carousel_cards: tuple[CarouselCard, ...] = ()
     carousel_primary_texts: tuple[str, ...] = ()
+    carousel_card_count: int = CAROUSEL_CARD_COUNT
 
 
 def normalize_account_id(value):
@@ -1098,8 +1099,9 @@ def validate_carousel_posting_request(request):
         raise PostingValidationError("Select a product from Edition Ops.")
     destination_url = validate_destination_url(request.destination_url)
     raw_cards = tuple(getattr(request, "carousel_cards", ()) or ())
-    if len(raw_cards) != CAROUSEL_CARD_COUNT:
-        raise PostingValidationError("Provide exactly five complete Carousel cards.")
+    expected_count = getattr(request, "carousel_card_count", CAROUSEL_CARD_COUNT)
+    if not isinstance(expected_count, int) or not 2 <= expected_count <= 10 or len(raw_cards) != expected_count:
+        raise PostingValidationError(f"Provide exactly {expected_count} complete Carousel cards.")
     cards = []
     for index, card in enumerate(raw_cards, start=1):
         if not bytes(card.image_bytes or b""):
@@ -1858,12 +1860,13 @@ def build_carousel_creative_payload(
     primary_texts,
     destination_url,
     url_tags=META_AD_URL_PARAMETERS,
+    card_count=CAROUSEL_CARD_COUNT,
 ):
     """Build one non-catalogue, five-card Meta v26 Carousel creative."""
 
     clean_cards = tuple(dict(card or {}) for card in cards or ())
     clean_primary_texts = tuple(str(value or "") for value in primary_texts or ())
-    if len(clean_cards) != CAROUSEL_CARD_COUNT:
+    if not 2 <= card_count <= 10 or len(clean_cards) != card_count:
         raise PostingValidationError("Carousel creative requires exactly five cards.")
     if len(clean_primary_texts) != CAROUSEL_PRIMARY_TEXT_COUNT:
         raise PostingValidationError(
@@ -1941,7 +1944,7 @@ def verify_carousel_creative_readback(
         "page_id": str(story.get("page_id") or "") == str(page_id),
         "instagram_user_id": str(story.get("instagram_user_id") or "")
         == str(instagram_user_id),
-        "five_cards": len(actual_cards) == len(expected_cards) == CAROUSEL_CARD_COUNT,
+        "five_cards": len(actual_cards) == len(expected_cards) and 2 <= len(expected_cards) <= 10,
         "multi_share_end_card": link_data.get("multi_share_end_card") is True,
         "multi_share_optimized": link_data.get("multi_share_optimized") is True,
     }
@@ -2481,6 +2484,7 @@ class MetaPostingService:
             page_id=self.client.page_id,
             instagram_user_id=self.client.instagram_user_id,
             cards=validation_cards,
+            card_count=len(validation_cards),
             primary_texts=clean["carousel_primary_texts"],
             destination_url=clean["destination_url"],
             url_tags=self.url_tags,
@@ -2977,6 +2981,7 @@ class MetaPostingService:
                 page_id=self.client.page_id,
                 instagram_user_id=self.client.instagram_user_id,
                 cards=actual_cards,
+                card_count=len(actual_cards),
                 primary_texts=clean["carousel_primary_texts"],
                 destination_url=clean["destination_url"],
                 url_tags=self.url_tags,

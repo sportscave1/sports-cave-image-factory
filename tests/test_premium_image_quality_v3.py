@@ -128,6 +128,19 @@ class PremiumImageQualityV3Tests(unittest.TestCase):
             ads_page._render_saved_ad_post_now(result, workflow, quality_issues=[])
         button.assert_not_called()
 
+    def test_unchanged_winner_pixels_block_post_even_with_stale_upload_hash_and_review(self):
+        import hashlib
+        from tests.fixtures.refresh_ui import ready_carousel
+        result, workflow = ready_carousel()
+        slot = workflow['slots']['carousel-01']
+        result['creative_refresh_context']['refresh_plan']['references'][0]['image_sha256'] = hashlib.sha256(slot['data']).hexdigest()
+        slot['source_hash'] = 'stale-upload-hash'
+        state = {ads_page._creative_refresh_visual_review_key(result, workflow): True}
+        with patch.object(ads_page.st, 'session_state', state), patch.object(ads_page.st, 'button') as button, patch.object(ads_page.st, 'caption') as caption:
+            ads_page._render_saved_ad_post_now(result, workflow, quality_issues=[])
+        button.assert_not_called()
+        self.assertIn('Unchanged winner/canonical source', caption.call_args.args[0])
+
     def test_black_value_in_unrelated_option_does_not_verify_frame(self):
         for variant in ({'title':'Default', 'selected_options':[{'name':'Artwork colour','value':'Black'}]},
                         {'title':'Black / XL','selected_options':[{'name':'Frame','value':'White'}]}):

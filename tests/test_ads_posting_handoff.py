@@ -105,7 +105,7 @@ class SavedPackageTests(unittest.TestCase):
                     self.assertEqual(state[posting.PRODUCT_KEY], product_records()[0]["identity"])
                     self.assertEqual(state[posting.SAVED_PRODUCT_URL_KEY]["url"], result["product_url"])
                     self.assertEqual(state["unrelated"], "keep")
-                    image_keys = posting.CAROUSEL_IMAGE_STATE_KEYS if ad_type == "Carousel" else posting.IMAGE_STATE_KEYS
+                    image_keys = posting.CAROUSEL_IMAGE_STATE_KEYS[:len(package['assets'])] if ad_type == "Carousel" else posting.IMAGE_STATE_KEYS
                     for spec, key, asset in zip(ads.ads_image_workflow.campaign_image_slots(ad_type), image_keys, package["assets"]):
                         record = state[key]
                         self.assertEqual(record["data"], uploaded[asset["path"]])
@@ -120,7 +120,9 @@ class SavedPackageTests(unittest.TestCase):
                         self.assertEqual(canonical["headlines"], package["source_copy"]["headlines"])
                         self.assertEqual(canonical["descriptions"], package["source_copy"]["descriptions"])
                         csv = serialize_carousel_posting_import_csv(package["batch"]["rows"])
-                        fields = (*posting.CAROUSEL_HEADLINE_KEYS, *posting.CAROUSEL_DESCRIPTION_KEYS, *posting.CAROUSEL_PRIMARY_TEXT_KEYS)
+                        count = len(package['assets'])
+                        fields = (*posting.CAROUSEL_HEADLINE_KEYS[:count], *posting.CAROUSEL_DESCRIPTION_KEYS[:count], *posting.CAROUSEL_PRIMARY_TEXT_KEYS)
+                        self.assertFalse(any(key in state for key in posting.CAROUSEL_IMAGE_STATE_KEYS[count:]))
                         self.assertIn("refreshed", state[posting.CAROUSEL_HEADLINE_KEYS[0]])
                     else:
                         csv = package["copy_csv"]
@@ -455,7 +457,8 @@ else:
                             else meta_posting_service.build_campaign_payload(name="Campaign", catalog_id="catalog-1")
                         )
                         self.assertEqual(campaign_payload["daily_budget"], "2500")
-                        self.assertEqual(app.query_params["page"], ["ads_posting"])
+                        route = app.query_params["page"]
+                        self.assertEqual(route if isinstance(route, str) else route[0], "ads_posting")
                         primary = next(item for item in app.text_area if item.label == "Primary Text 1")
                         primary.set_value("Reviewed manual edit").run(timeout=20)
                         app.run(timeout=20)

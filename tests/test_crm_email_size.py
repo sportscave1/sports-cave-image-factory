@@ -170,7 +170,8 @@ class EmailSizeTests(unittest.TestCase):
         self.assertFalse(app.metric)
         source=Path(__file__).resolve().parents[1].joinpath('crm_campaign_page.py').read_text(encoding='utf-8')
         action=source[source.index("with toolbar.container"):source.index('new_requested=False')]
-        self.assertLess(action.index('size_meter('),action.index("st.button('Save draft'"))
+        self.assertLess(action.index('size_slot=st.empty()'),action.index("st.button('Save draft'"))
+        self.assertIn('with size_slot.container():size_meter(editor,key,cfg)',source)
 
     def test_fragment_updates_unsaved_content_locally(self):
         script='''

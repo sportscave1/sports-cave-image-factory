@@ -67,18 +67,23 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state[posting.PENDING_KEY]['package']['assets']),3)
 
-    def test_incomplete_analysis_leaves_visible_disabled_save_and_preserves_copy(self):
+    def test_historical_analysis_remains_optional_and_is_preserved_on_save(self):
         app=app_for()
-        editor=next(t for t in app.text_area if t.label=='Card execution notes (JSON)')
-        records=json.loads(editor.value)
-        editor.set_value('{invalid').run(timeout=30)
+        self.assertNotIn('Card execution notes (JSON)', [t.label for t in app.text_area])
+        workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
+        records=deepcopy(workflow['ad_notes']['refresh_executions'])
+        workflow['ad_notes']['refresh_execution_error']='Historical incomplete analysis'
+        app.run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertTrue(button(app,'Save now').disabled)
+        self.assertFalse(button(app,'Save now').disabled)
+        button(app,'Save now').click().run(timeout=30)
+        button(app,'Save 5 images here').click().run(timeout=30)
+        self.assertFalse(app.exception)
         self.assertNotIn('POST NOW',[b.label for b in app.button])
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         self.assertEqual(workflow['ad_notes']['refresh_executions'],records)
-        next(t for t in app.text_area if t.label=='Card execution notes (JSON)').set_value(json.dumps(records)).run(timeout=30)
-        self.assertFalse(button(app,'Save now').disabled)
+        _, restored=saved.loads(workflow['refresh_workspace_export'])
+        self.assertEqual(restored['ad_notes']['refresh_executions'],records)
 
     def test_four_and_six_card_editor_uses_source_roles_without_crash(self):
         for count in (4,6):
@@ -107,18 +112,26 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         self.assertEqual(app.session_state['fixture_media_reads'],1)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['slots'],original)
 
-    def test_duplicate_output_blocks_save(self):
+    def test_duplicate_output_can_save_draft_but_blocks_post_even_after_acknowledgement(self):
         value, workflow = ready_carousel()
         workflow['slots']['carousel-02']=deepcopy(workflow['slots']['carousel-01'])
         self.assertIn('Identical output image assigned to multiple refresh slots.',ads.creative_refresh_quality_issues(value,workflow))
-        with self.assertRaises(ValueError), patch.object(ads.dropbox_integration,'upload_batch',side_effect=AssertionError('No writes')):
-            ads.save_ads_images_to_dropbox('fake','/approved','/approved',value,workflow)
+        save_locally(value,workflow)
+        state={ads._creative_refresh_visual_review_key(value,workflow):True}
+        with patch.object(ads.st,'session_state',state), patch.object(ads.st,'button') as post, patch.object(ads.st,'caption') as caption:
+            ads._render_saved_ad_post_now(value,workflow,quality_issues=[])
+        post.assert_not_called()
+        self.assertIn('Identical output image',caption.call_args.args[0])
 
-    def test_missing_analysis_does_not_write(self):
+    def test_missing_analysis_draft_save_preserves_assets_without_fabricating_notes(self):
         value,workflow=ready_carousel()
         workflow['ad_notes'].pop('refresh_executions')
-        with self.assertRaisesRegex(ValueError,'execution'), patch.object(ads.dropbox_integration,'upload_batch',side_effect=AssertionError('No writes')):
-            ads.save_ads_images_to_dropbox('fake','/approved','/approved',value,workflow)
+        originals=deepcopy(workflow['slots'])
+        save_locally(value,workflow)
+        _, restored=saved.loads(workflow['refresh_workspace_export'])
+        self.assertEqual(restored['slots'],originals)
+        self.assertNotIn('refresh_executions',restored['ad_notes'])
+        self.assertEqual(restored[posting.SAVED_PACKAGE_KEY]['refresh_executions'],[])
 
     def test_reference_authorities_and_all_required_copy_explicit(self):
         prompt=fixture()['master_prompt']

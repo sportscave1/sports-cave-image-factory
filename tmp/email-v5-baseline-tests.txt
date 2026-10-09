@@ -1,0 +1,1523 @@
+C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+....2026-10-09 17:05:12.610 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:12.610 WARNING streamlit.runtime.state.session_state_proxy: Session state does not function when running a script without `streamlit run`
+2026-10-09 17:05:12.612 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:12.612 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.............crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+.....crm_control_store_unavailable type=TypeError
+crm_attribution_order_failed order_id=invalid_order_id stage=fetch_order exception_type=ConnectionError retry_attempt=4
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+crm_attribution_order_failed order_id=invalid_order_id stage=fetch_order exception_type=ConnectionError retry_attempt=4
+..crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+.crm_control_store_unavailable type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+.crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+.crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+.crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+.......F.....2026-10-09 17:05:23.701 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:23.701 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:23.701 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:23.701 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:23.701 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.........E.E..crm_shopify_unavailable capability=segments type=RuntimeError
+crm_segment_count_refresh_failed type=CapabilityUnavailable
+...EE.E...............2026-10-09 17:05:47.227 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+........crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+crm_control_store_unavailable type=TypeError
+automation_publication_cycle_failed error_class=StoreUnavailable
+checkout_cache_sync_failed type=TypeError
+........automation_read stage=delivery failure=ValueError
+.AUTOMATIONS_HOME_READ_TIMEOUT read=counts key=c7e540faadcc future=- elapsed_ms=21000
+.AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=1 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+.AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=0 rows=0
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=0
+.AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=0 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_TIMEOUT read=identities key=89d98dda1319 future=- exception=TimeoutError
+..AUTOMATIONS_HOME_READ_TIMEOUT read=activity key=d638138bf356 future=0x28ce558e1d0 elapsed_ms=21000
+...................F...................automation_publication job_id=897f4858-b6ce-4c3a-ad27-b3198cbfb6ea revision=3 state=FAILED error_class=ValueError
+..automation_publication job_id=9b2c45af-454f-42be-b58f-bc1d397a9b11 revision=2 state=FAILED error_class=ValueError
+..AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=5 rows=0
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=0
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=6 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=19 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=89d98dda1319 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=89d98dda1319 future=- elapsed_ms=27 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=89d98dda1319 future=- rows=1
+.........automation_publication job_id=5ebcab98-6729-43b4-b5a0-748ca2003e34 revision=2 state=FAILED error_class=ValueError
+....automation_publication job_id=48697bdf-9c9f-4b2c-a087-141e8dfd97c2 revision=2 state=FAILED error_class=ValueError
+automation_publication job_id=48697bdf-9c9f-4b2c-a087-141e8dfd97c2 revision=2 state=FAILED error_class=ValueError
+.automation_publication job_id=2b871a03-30ea-4942-8761-2a2aa4ab0b58 revision=2 state=QUEUED error_class=StoreUnavailable
+......AUTOMATIONS_HOME_READ_COMPLETE read=probe key=171ce9e4e0d1 future=- generation=fc9bd3979fce elapsed_ms=0 rows=1
+AUTOMATIONS_HOME_READ_START read=probe key=171ce9e4e0d1 future=0x28ce5408550 generation=fc9bd3979fce cache_entries=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=probe key=171ce9e4e0d1 future=0x28ce5408550 generation=fc9bd3979fce rows=1
+automation_read stage=probe failure=ValueError
+.AUTOMATIONS_HOME_READ_START read=checkout-list key=a26260a2e953 future=0x28ce54094d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=a26260a2e953 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=a26260a2e953 future=0x28ce54094d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=5f7fef0cf05a future=0x28ce5408850 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=5f7fef0cf05a future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=5f7fef0cf05a future=0x28ce5408850 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=ef9413d3cf90 future=0x28ce53a2950 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=ef9413d3cf90 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=ef9413d3cf90 future=0x28ce53a2950 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=fa8c942f36dc future=0x28ce549d8d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=fa8c942f36dc future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=fa8c942f36dc future=0x28ce549d8d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=c49c850d7322 future=0x28ce52ff5d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=c49c850d7322 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=c49c850d7322 future=0x28ce52ff5d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=3798043be19e future=0x28ce53e07d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=3798043be19e future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=3798043be19e future=0x28ce53e07d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=a7a63a867202 future=0x28ce549c9d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=a7a63a867202 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=a7a63a867202 future=0x28ce549c9d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=e2d93868b335 future=0x28ce53e32d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=e2d93868b335 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=e2d93868b335 future=0x28ce53e32d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=7fe06ef85fe1 future=0x28ce53d48d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=7fe06ef85fe1 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=7fe06ef85fe1 future=0x28ce53d48d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=41edf151a388 future=0x28ce549c9d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=41edf151a388 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=41edf151a388 future=0x28ce549c9d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=dd5cc4917682 future=0x28ce540b450 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=dd5cc4917682 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=dd5cc4917682 future=0x28ce540b450 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=cbc96f278566 future=0x28ce53a2950 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=cbc96f278566 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=cbc96f278566 future=0x28ce53a2950 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=4612cee9d1d2 future=0x28ce540af50 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=4612cee9d1d2 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=4612cee9d1d2 future=0x28ce540af50 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=13d06223d378 future=0x28ce54092d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=13d06223d378 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=13d06223d378 future=0x28ce54092d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=7376d23cf82f future=0x28ce549f2d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=7376d23cf82f future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=7376d23cf82f future=0x28ce549f2d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=f8a4db14878d future=0x28ce53e38d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=f8a4db14878d future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=f8a4db14878d future=0x28ce53e38d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=8bf62321d68c future=0x28ce55776d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=8bf62321d68c future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=8bf62321d68c future=0x28ce55776d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=1c2886cb31dd future=0x28ce540a850 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=1c2886cb31dd future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=1c2886cb31dd future=0x28ce540a850 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=9c44e2aec945 future=0x28ce540aad0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=9c44e2aec945 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=9c44e2aec945 future=0x28ce540aad0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=ecf4e31b51a0 future=0x28ce54817d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=ecf4e31b51a0 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=ecf4e31b51a0 future=0x28ce54817d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=99ad203e462d future=0x28ce549ff50 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=99ad203e462d future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=99ad203e462d future=0x28ce549ff50 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=1ed5c548c1e4 future=0x28ce549e550 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=1ed5c548c1e4 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=1ed5c548c1e4 future=0x28ce549e550 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=c1c6b8d244c5 future=0x28ce549d8d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=c1c6b8d244c5 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=c1c6b8d244c5 future=0x28ce549d8d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=4a443e908894 future=0x28ce5409150 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=4a443e908894 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=4a443e908894 future=0x28ce5409150 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=23830a5b6180 future=0x28ce55779d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=23830a5b6180 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=23830a5b6180 future=0x28ce55779d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=34aea794e52d future=0x28ce55776d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=34aea794e52d future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=34aea794e52d future=0x28ce55776d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=519da7ed5f8e future=0x28ce549f2d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=519da7ed5f8e future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=519da7ed5f8e future=0x28ce549f2d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=5fa26e7cc62a future=0x28ce549f0d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=5fa26e7cc62a future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=5fa26e7cc62a future=0x28ce549f0d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=f30fc023a546 future=0x28ce540a950 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=f30fc023a546 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=f30fc023a546 future=0x28ce540a950 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=1a133d2338f5 future=0x28ce5576a50 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=1a133d2338f5 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=1a133d2338f5 future=0x28ce5576a50 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=1f9115b7fb64 future=0x28ce558e750 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=1f9115b7fb64 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=1f9115b7fb64 future=0x28ce558e750 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=6119740ac0f2 future=0x28ce53e08d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=6119740ac0f2 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=6119740ac0f2 future=0x28ce53e08d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=450246cdd2fe future=0x28ce52ff5d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=450246cdd2fe future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=450246cdd2fe future=0x28ce52ff5d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=77dfe2471327 future=0x28ce55779d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=77dfe2471327 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=77dfe2471327 future=0x28ce55779d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=525c2a981f3e future=0x28ce53e07d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=525c2a981f3e future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=525c2a981f3e future=0x28ce53e07d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=be1f8e92defd future=0x28ce54084d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=be1f8e92defd future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=be1f8e92defd future=0x28ce54084d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=db6ae92c02b6 future=0x28ce53a2950 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=db6ae92c02b6 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=db6ae92c02b6 future=0x28ce53a2950 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=cdcd082a6139 future=0x28ce540a950 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=cdcd082a6139 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=cdcd082a6139 future=0x28ce540a950 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=90db7c4d8a85 future=0x28ce53d48d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=90db7c4d8a85 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=90db7c4d8a85 future=0x28ce53d48d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=49bd9fdce0e1 future=0x28ce5481850 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=49bd9fdce0e1 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=49bd9fdce0e1 future=0x28ce5481850 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=49e853177643 future=0x28ce53a0cd0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=49e853177643 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=49e853177643 future=0x28ce53a0cd0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=6e8a5dd959d4 future=0x28ce5408850 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=6e8a5dd959d4 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=6e8a5dd959d4 future=0x28ce5408850 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=13a38d10e919 future=0x28ce5481cd0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=13a38d10e919 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=13a38d10e919 future=0x28ce5481cd0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=0064140bf90b future=0x28ce53e38d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=0064140bf90b future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=0064140bf90b future=0x28ce53e38d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=7b0ef4ebfe59 future=0x28ce53e32d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=7b0ef4ebfe59 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=7b0ef4ebfe59 future=0x28ce53e32d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=b2e8f011a406 future=0x28ce54087d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=b2e8f011a406 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=b2e8f011a406 future=0x28ce54087d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=6a699cdb2d68 future=0x28ce549c9d0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=6a699cdb2d68 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=6a699cdb2d68 future=0x28ce549c9d0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=4bb1b93ed305 future=0x28ce5481b50 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=4bb1b93ed305 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=4bb1b93ed305 future=0x28ce5481b50 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=de8470da2ef5 future=0x28ce540afd0 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=de8470da2ef5 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=de8470da2ef5 future=0x28ce540afd0 generation=d99e82792e87 rows=100
+AUTOMATIONS_HOME_READ_START read=checkout-list key=9201a4c707b1 future=0x28ce5409150 generation=d99e82792e87 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=9201a4c707b1 future=- generation=d99e82792e87 elapsed_ms=0 rows=100
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=9201a4c707b1 future=0x28ce5409150 generation=d99e82792e87 rows=100
+.automation_section stage=broken failure=RuntimeError
+.AUTOMATIONS_HOME_READ_START read=probe key=171ce9e4e0d1 future=0x28ce55779d0 generation=f02b5bf0cfdf cache_entries=1
+AUTOMATIONS_HOME_READ_START read=probe key=0caca0282463 future=0x28ce53e09d0 generation=f02b5bf0cfdf cache_entries=2
+AUTOMATIONS_HOME_READ_START read=probe key=650fc36ad41e future=0x28ce53e0e50 generation=f02b5bf0cfdf cache_entries=3
+AUTOMATIONS_HOME_READ_START read=probe key=2fee9133837b future=0x28ce53e08d0 generation=f02b5bf0cfdf cache_entries=4
+AUTOMATIONS_HOME_READ_START read=probe key=3df24b2718c0 future=0x28ce52ff5d0 generation=f02b5bf0cfdf cache_entries=5
+AUTOMATIONS_HOME_READ_START read=probe key=92f606a226f4 future=0x28ce52fdb50 generation=f02b5bf0cfdf cache_entries=6
+AUTOMATIONS_HOME_READ_REUSE read=probe key=171ce9e4e0d1 future=0x28ce55779d0 
+AUTOMATIONS_HOME_READ_COMPLETE read=probe key=171ce9e4e0d1 future=- generation=f02b5bf0cfdf elapsed_ms=1 rows=0
+AUTOMATIONS_HOME_READ_COMPLETE read=probe key=0caca0282463 future=- generation=f02b5bf0cfdf elapsed_ms=1 rows=0
+....automation_render failure=RuntimeError
+.............2026-10-09 17:05:58.543 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_START read=identities key=1b86800a29a0 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=1b86800a29a0 future=- elapsed_ms=1 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=1b86800a29a0 future=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce5408750 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=table_metrics_region key=4d116133ace7 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce54810d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce54831d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce5481a50 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=kpis key=9db8abf2e809 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce549d0d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce549f4d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce549f3d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce549cbd0 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=recent key=96231d17f041 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce53e32d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce53e0e50 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce53e08d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce53e0650 generation=- rows=1
+AUTOMATIONS_HOME_READ_START read=identities key=127248d909d2 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=127248d909d2 future=- elapsed_ms=5 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=127248d909d2 future=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=dc34781c992b future=0x28ce3daf750 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3daf050 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce3dafcd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce3daee50 generation=- rows=1
+.2026-10-09 17:05:58.608 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_START read=identities key=1b86800a29a0 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=1b86800a29a0 future=- elapsed_ms=1 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=1b86800a29a0 future=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce5ffe350 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=table_metrics_region key=4d116133ace7 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3de2cd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3de2dd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce3de2550 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=kpis key=9db8abf2e809 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3de16d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce42887d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce4288550 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce42885d0 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=recent key=96231d17f041 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce428abd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce428a950 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce428af50 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce42899d0 generation=- rows=1
+..2026-10-09 17:05:58.674 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_START read=identities key=1b86800a29a0 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=1b86800a29a0 future=- elapsed_ms=1 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=1b86800a29a0 future=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3d2b5d0 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=table_metrics_region key=4d116133ace7 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3d291d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3d28fd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce3d28ed0 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=kpis key=9db8abf2e809 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3d37150 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3d36e50 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce3d36ed0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce3d36fd0 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=recent key=96231d17f041 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3d34fd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3d34c50 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=delivery key=be2b804620df future=0x28ce3d34cd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce3d34e50 generation=- rows=1
+2026-10-09 17:05:58.720 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:58.768 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:58.768 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3d66350 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=table_metrics_region key=4d116133ace7 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3ce07d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3ce05d0 generation=- rows=1
+automation_read stage=delivery failure=ValueError
+AUTOMATIONS_HOME_RERUN_REQUESTED read=kpis key=9db8abf2e809 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce3ce2150 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3ce1f50 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce3ce1a50 generation=- rows=1
+AUTOMATIONS_HOME_RERUN_REQUESTED read=recent key=96231d17f041 future=- 
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce4c15850 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce3d43bd0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce3d434d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=table key=c72931223bd6 future=0x28ce41d95d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=counts key=c7e540faadcc future=0x28ce41d98d0 generation=- rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=activity key=d638138bf356 future=0x28ce41d99d0 generation=- rows=1
+.2026-10-09 17:05:58.837 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:58.838 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:05:58.838 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...........checkout_cache_sync_failed type=TypeError
+...............checkout_cache_sync_failed type=TypeError
+......C:\Users\hello\Documents\sports-cave-image-factory\webhook_server.py:74: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\fastapi\applications.py:4598: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  return self.router.on_event(event_type)  # ty: ignore[deprecated]
+C:\Users\hello\Documents\sports-cave-image-factory\webhook_server.py:103: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("shutdown")
+...resend_webhook stage=received 
+resend_webhook stage=duplicate_ignored event_id=event
+resend_webhook stage=acknowledged duration_ms=1.2
+.crm_opt_out_sync_pending type=ValueError
+.........2026-10-09 17:06:12.708 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:12.729 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:12.748 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:12.769 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.........2026-10-09 17:06:15.752 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.752 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.781 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.781 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:15.810 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.811 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:15.838 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.838 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:15.873 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:15.915 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.915 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.937 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.937 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.957 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.957 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.976 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.976 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.997 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:15.997 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:16.031 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:16.053 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.054 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.054 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.....2026-10-09 17:06:16.063 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.063 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+.2026-10-09 17:06:16.559 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.559 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.570 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:16.601 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.601 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:16.601 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:17.378 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+...2026-10-09 17:06:17.650 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:17.714 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:06:17.807 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:17.818 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:17.835 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+campaign_home stage=counts failure=StoreUnavailable
+campaign_home stage=delivery failure=StoreUnavailable
+campaign_home stage=attribution failure=StoreUnavailable
+.2026-10-09 17:06:17.859 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:17.859 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+campaign_home stage=counts failure=StoreUnavailable
+campaign_home stage=delivery failure=StoreUnavailable
+campaign_home stage=attribution failure=StoreUnavailable
+.2026-10-09 17:06:17.880 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:17.898 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:17.947 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:17.989 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:18.026 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.026 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:06:18.048 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.067 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...2026-10-09 17:06:18.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.122 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:06:18.158 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...campaign_home stage=attribution failure=ValueError
+campaign_home stage=attribution failure=ValueError
+campaign_home stage=attribution failure=ValueError
+campaign_home stage=attribution failure=ValueError
+.campaign_home stage=table failure=StoreUnavailable
+........campaign_home stage=counts failure=StoreUnavailable
+.2026-10-09 17:06:18.205 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.205 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.217 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.217 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...2026-10-09 17:06:18.244 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..audience_prepare failed type=TypeError
+audience_prepare failed type=TypeError
+.2026-10-09 17:06:18.757 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:18.758 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:19.030 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:19.032 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:19.308 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:19.604 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:19.805 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+F......................2026-10-09 17:06:21.303 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:21.303 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:21.548 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:06:21.550 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:21.550 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:21.843 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:22.250 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:22.405 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:22.627 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:22.843 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:06:22.872 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:22.872 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:06:23.140 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:06:23.343 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+..............................AUTOMATIONS_HOME_READ_START read=checkout-list key=9891b5128026 future=0x28ce4afbad0 generation=ec2d783ea51d cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-list key=9891b5128026 future=- generation=ec2d783ea51d elapsed_ms=0 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=9891b5128026 future=0x28ce4afbad0 generation=ec2d783ea51d rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-list key=9891b5128026 future=0x28ce4afbad0 generation=ec2d783ea51d rows=1
+AUTOMATIONS_HOME_READ_START read=checkout-list key=9891b5128026 future=0x28ce650efd0 generation=ec2d783ea51d cache_entries=1
+AUTOMATIONS_HOME_READ_ERROR read=checkout-list key=9891b5128026 future=- exception=RuntimeError
+automation_read stage=checkout-list failure=RuntimeError
+...............checkout_editions_unavailable type=RuntimeError
+......................................crm_send_held phase=submission type=EmailDeliveryError
+.crm_send_held phase=submission type=EmailDeliveryError
+......crm_send_held phase=submission type=TimeoutError
+.AUTOMATIONS_HOME_READ_START read=checkout-enrollment-progress key=9a75873670bc future=0x28ce5fb6dd0 generation=349a16940f17 cache_entries=1
+AUTOMATIONS_HOME_READ_COMPLETE read=checkout-enrollment-progress key=9a75873670bc future=- generation=349a16940f17 elapsed_ms=0 rows=1
+AUTOMATIONS_HOME_RESULT_CONSUMED read=checkout-enrollment-progress key=9a75873670bc future=0x28ce5fb6dd0 generation=349a16940f17 rows=1
+2026-10-09 17:07:17.010 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.010 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.010 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.011 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.012 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.012 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.012 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:07:17.013 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.013 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.013 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...2026-10-09 17:07:17.014 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.014 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.014 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+........2026-10-09 17:07:17.041 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.043 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.043 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.046 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.048 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.048 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+....2026-10-09 17:07:17.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.060 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.061 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.062 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.063 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.065 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:17.065 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.............................checkout_sync_invalid_identity
+....crm_send_held phase=submission type=EmailDeliveryError
+crm_send_held phase=submission type=EmailDeliveryError
+crm_send_held phase=submission type=EmailDeliveryError
+crm_send_held phase=submission type=EmailDeliveryError
+crm_send_held phase=submission type=EmailDeliveryError
+crm_send_held phase=submission type=TimeoutError
+.....................crm_send_held phase=submission type=EmailDeliveryError
+.crm_send_held phase=submission type=EmailDeliveryError
+.........crm_send_held phase=submission type=TimeoutError
+........................2026-10-09 17:07:27.293 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:27.294 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:27.294 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:27.294 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:07:27.295 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:27.295 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:27.644 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:27.645 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:27.939 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:27.941 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:28.237 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:28.240 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:28.512 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+......2026-10-09 17:07:28.518 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:28.518 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:28.795 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:07:28.801 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...resend_test_send failed category=resend_unavailable http_status=0
+.........internal_checkout_contact_failed type=RuntimeError
+LOCAL SQL recipients=1093 simulated_graph_latency=5ms cold_prepare_ms=354.9 warm_review_ms=24.0 warm_review_graph_calls=0 queue_before_ms=8905.3 queue_after_ms=319.8 queue_sql_before=2197 queue_sql_after=13 queue_graph_calls=22 transport_calls=0 durable_jobs=1093
+LOCAL AppTest prepared_modal_open_ms=10.1 provider_reads_on_open=0
+SYNTHETIC recipients=50 latency=5ms old_prepare_ms=31.2 old_total_calls=5 cold_prepare_ms=26.5 cold_total_calls=5 warm_ms=0.214 warm_calls=0
+SYNTHETIC recipients=1000 latency=5ms old_prepare_ms=509.0 old_total_calls=65 cold_prepare_ms=335.7 cold_total_calls=65 warm_ms=3.794 warm_calls=0
+SYNTHETIC recipients=1093 latency=5ms old_prepare_ms=522.1 old_total_calls=72 cold_prepare_ms=327.2 cold_total_calls=72 warm_ms=3.486 warm_calls=0
+SYNTHETIC recipients=5000 latency=5ms old_prepare_ms=2939.7 old_total_calls=321 cold_prepare_ms=2089.2 cold_total_calls=321 warm_ms=17.537 warm_calls=0
+SYNTHETIC recipients=10000 latency=5ms old_prepare_ms=6675.8 old_total_calls=641 cold_prepare_ms=5477.7 cold_total_calls=641 warm_ms=48.038 warm_calls=0
+Local durable publish acceptance: 21.2 ms
+PERF controlled 12-row old path: 3.342s, SQL calls=468, commits=132, fresh lookups=24; new ack=0.009s, completed=7.886s; same fresh checks, Shopify concurrency capped at 2
+PERF 12 selected: durable acknowledgement=0.030s; independent completion while slow lookup blocked; max_inflight=4
+WARN DB read operation=edition_ops.products.latest category=sql_query_error exception_class=SupabaseNotConfigured sqlstate=none duration_ms=0 retry=false
+TRACE DB read operation=edition_ops.products.latest exception_class=SupabaseNotConfigured
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 800, in _run_read_operation
+    conn = connect()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 645, in connect
+    database_url = _database_url_with_ssl()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 612, in _database_url_with_ssl
+    raise SupabaseNotConfigured(
+    ...<2 lines>...
+    )
+
+...checkout_editions_unavailable type=DatabaseReadError
+...........discount_picker_failed type=TimeoutError
+...................................F.F...2026-10-09 17:07:35.555 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:35.555 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:35.686 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:35.688 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:35.815 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+F..2026-10-09 17:07:35.824 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:35.828 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+..........2026-10-09 17:07:35.843 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..........checkout_cache_sync_failed type=TimeoutError
+automation_source_held automation_id=fixture-flow exception_type=TimeoutError
+..........2026-10-09 17:07:37.649 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:37.741 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:07:37.833 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+E...audience_prepare failed type=TypeError
+.2026-10-09 17:07:38.284 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...2026-10-09 17:07:38.312 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.............automation_publication_poll_failed error_class=RuntimeError
+...2026-10-09 17:07:38.335 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:07:38.359 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:38.373 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+............................................................campaign_home stage=progress failure=RuntimeError
+...2026-10-09 17:07:40.382 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:40.382 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:40.614 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:40.813 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:41.000 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:07:41.003 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:41.003 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:41.147 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:41.297 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:41.382 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:41.543 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+E..2026-10-09 17:07:41.664 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:41.665 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:41.798 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:41.943 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+F.2026-10-09 17:07:42.115 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:42.115 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:42.298 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:42.417 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+E.........lifestyle_gallery_unavailable type=RuntimeError
+.........2026-10-09 17:07:43.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:43.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:43.239 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+Synthetic NZ/4 in 1000 profiles: before scanned=1000 pages=4 ms=42.1; after profiles=4 batches=1 conflict_groups=1 scan_pages=0 ms=1.5
+PERF Edition Ops read-only products+edition_orders 0.000s rows=0 queries=1 recovered=false
+.....crm_catalogue_editions_unavailable type=RuntimeError
+.....2026-10-09 17:07:43.263 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+WARN DB read operation=edition_ops.products.latest category=sql_query_error exception_class=SupabaseNotConfigured sqlstate=none duration_ms=0 retry=false
+TRACE DB read operation=edition_ops.products.latest exception_class=SupabaseNotConfigured
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 800, in _run_read_operation
+    conn = connect()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 645, in connect
+    database_url = _database_url_with_ssl()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 612, in _database_url_with_ssl
+    raise SupabaseNotConfigured(
+    ...<2 lines>...
+    )
+
+............checkout_editions_unavailable type=DatabaseReadError
+....crm_send_held phase=submission type=EmailDeliveryError
+....................................2026-10-09 17:07:52.029 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.049 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.063 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:52.064 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.066 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.067 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.067 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.067 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.075 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.076 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.076 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.076 No runtime found, using MemoryCacheStorageManager
+2026-10-09 17:07:52.076 No runtime found, using MemoryCacheStorageManager
+WARN DB read operation=edition_ops.products.latest category=sql_query_error exception_class=SupabaseNotConfigured sqlstate=none duration_ms=0 retry=false
+TRACE DB read operation=edition_ops.products.latest exception_class=SupabaseNotConfigured
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 800, in _run_read_operation
+    conn = connect()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 645, in connect
+    database_url = _database_url_with_ssl()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\supabase_backend.py", line 612, in _database_url_with_ssl
+    raise SupabaseNotConfigured(
+    ...<2 lines>...
+    )
+
+.checkout_editions_unavailable type=DatabaseReadError
+.............2026-10-09 17:07:52.548 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+....crm_picker_cached_fallback type=RuntimeError
+......2026-10-09 17:07:52.725 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..crm_shopify_unavailable capability=customers type=TimeoutError
+crm_send_held phase=revalidation type=CapabilityUnavailable
+......crm_shopify_unavailable capability=automation installed scopes type=AssertionError
+crm_shopify_unavailable capability=email order attribution (read_orders) type=AssertionError
+crm_shopify_unavailable capability=checkout identity sync type=AssertionError
+checkout_cache_sync_failed type=CapabilityUnavailable
+.crm_send_held phase=submission type=EmailDeliveryError
+...............crm_send_held phase=submission type=TimeoutError
+.crm_shopify_unavailable capability=email marketing opt-out type=AssertionError
+crm_opt_out_sync_pending type=CapabilityUnavailable
+crm_shopify_unavailable capability=automation installed scopes type=AssertionError
+crm_shopify_unavailable capability=email order attribution (read_orders) type=AssertionError
+crm_shopify_unavailable capability=checkout identity sync type=AssertionError
+checkout_cache_sync_failed type=CapabilityUnavailable
+...............2026-10-09 17:07:56.937 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:56.943 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.947 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.950 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.954 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.957 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.961 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+..2026-10-09 17:07:56.967 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:56.973 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.977 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:56.981 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+..................crm_opt_out_sync_pending type=RuntimeError
+.crm_opt_out_sync_pending type=RuntimeError
+..crm_opt_out_sync_pending type=RuntimeError
+crm_opt_out_sync_pending type=RuntimeError
+crm_opt_out_sync_pending type=RuntimeError
+...crm_opt_out_sync_pending type=RuntimeError
+.....................crm_control_store_unavailable type=RuntimeError
+C:\Python314\Lib\tempfile.py:484: ResourceWarning: Implicitly cleaning up <HTTPError 400: 'Bad Request'>
+  _warnings.warn(self.warn_message, ResourceWarning)
+crm_control_store_unavailable type=RuntimeError
+crm_control_store_unavailable type=RuntimeError
+crm_control_store_unavailable type=RuntimeError
+...2026-10-09 17:07:58.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:58.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:58.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:58.661 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:58.765 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:07:59.127 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:59.234 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.crm_attribution_mirror_unavailable
+...2026-10-09 17:07:59.557 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:59.557 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:07:59.705 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.checkout_cache_sync_failed type=TypeError
+automation_source_held automation_id=5d1f4f14-22bf-4d92-9b55-6b269061de82 exception_type=TypeError
+checkout_cache_sync_failed type=TypeError
+automation_source_held automation_id=5d1f4f14-22bf-4d92-9b55-6b269061de82 exception_type=TypeError
+.2026-10-09 17:08:00.381 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:00.381 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:00.381 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:00.477 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:00.477 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:08:00.710 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+......2026-10-09 17:08:01.285 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:01.285 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+campaign_prompt_picker_unavailable type=RuntimeError
+campaign_prompt_picker_unavailable type=RuntimeError
+campaign_prompt_picker_unavailable type=RuntimeError
+campaign_prompt_picker_unavailable type=RuntimeError
+campaign_prompt_picker_unavailable type=RuntimeError
+campaign_prompt_picker_unavailable type=RuntimeError
+campaign_prompt_picker_unavailable type=RuntimeError
+..................................................resend_test_send failed category=resend_unavailable http_status=200
+....2026-10-09 17:08:01.904 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:08:01.911 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+crm_control_store_unavailable type=TypeError
+crm_control_store_unavailable type=TypeError
+crm_control_store_unavailable type=TypeError
+crm_control_store_unavailable type=TypeError
+...2026-10-09 17:08:01.942 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...2026-10-09 17:08:01.962 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.................crm_segment_count_refresh_failed type=RuntimeError
+......2026-10-09 17:08:02.304 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:02.304 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:02.431 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:02.658 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:02.878 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:03.061 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:03.063 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:03.223 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:03.224 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:03.301 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:03.303 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:03.411 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:03.580 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:03.671 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+....crm_campaign_action_failed type=RuntimeError
+...........resend_test_send failed category=resend_unavailable http_status=0
+......2026-10-09 17:08:04.786 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:04.786 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:04.962 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:04.965 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.054 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:08:05.056 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.056 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.155 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:05.233 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:08:05.235 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.235 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.404 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:05.541 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:08:05.875 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.875 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:05.984 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:06.183 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:08:06.186 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.186 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.269 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:06.362 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:06.364 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.463 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.....2026-10-09 17:08:06.465 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.466 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+......2026-10-09 17:08:06.472 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.492 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\streamlit\runtime\fragment.py", line 442, in wrapped_fragment
+    result = non_optional_func(*args, **kwargs)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_send_ui.py", line 167, in review_finalization
+    audience_job=prepare_session(st.session_state,shop,store,editor,key,cfg)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_send_ui.py", line 276, in _review_finalization
+    return
+  File "C:\Python314\Lib\unittest\mock.py", line 1175, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\unittest\mock.py", line 1179, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\unittest\mock.py", line 1234, in _execute_mock_call
+    raise effect
+RuntimeError: UI fixture failure
+2026-10-09 17:08:06.496 Uncaught app execution
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\streamlit\runtime\fragment.py", line 442, in wrapped_fragment
+    result = non_optional_func(*args, **kwargs)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_send_ui.py", line 167, in review_finalization
+    audience_job=prepare_session(st.session_state,shop,store,editor,key,cfg)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_send_ui.py", line 276, in _review_finalization
+    return
+  File "C:\Python314\Lib\unittest\mock.py", line 1175, in __call__
+    return self._mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\unittest\mock.py", line 1179, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\unittest\mock.py", line 1234, in _execute_mock_call
+    raise effect
+RuntimeError: UI fixture failure
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\streamlit\runtime\fragment.py", line 442, in wrapped_fragment
+    result = non_optional_func(*args, **kwargs)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\streamlit\elements\dialog_decorator.py", line 96, in dialog_content
+    _ = non_optional_func(*args, **kwargs)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_send_ui.py", line 112, in review_dialog
+    .st-key-crm-review-actions [data-testid="stColumn"]:last-child > [data-testid="stVerticalBlock"]{align-items:flex-end}
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\streamlit\runtime\fragment.py", line 473, in wrap
+    return wrapped_fragment()
+  File "C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\streamlit\runtime\fragment.py", line 455, in wrapped_fragment
+    raise FragmentHandledException(e)
+streamlit.errors.FragmentHandledException: UI fixture failure
+.2026-10-09 17:08:06.518 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.518 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+..2026-10-09 17:08:06.543 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.543 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.543 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.547 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:08:06.554 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.2026-10-09 17:08:06.573 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:06.573 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+Catalogue bytes count=1 old=2025 new=1884
+Catalogue bytes count=2 old=3912 new=4243
+Catalogue bytes count=4 old=7695 new=8254
+Catalogue bytes count=6 old=11478 new=12265
+Catalogue bytes count=12 old=22833 new=24304
+Synthetic local SQL progress: 4 rows, 10 aggregate reads, mean_ms=3.32
+{"event": "shopify_orders_paid_webhook_received", "webhook_id": "event-1", "topic": "orders/paid", "has_hmac_header": false, "hmac_verified": true}
+{"event": "webhook_hmac_verified", "webhook_id": "event-1", "topic": "orders/paid", "has_hmac_header": true, "hmac_verified": true}
+{"event": "webhook_duplicate_skipped", "status": "completed", "webhook_id": "event-1", "topic": "orders/paid"}
+{"event": "shopify_orders_paid_webhook_received", "webhook_id": "event-1", "topic": "orders/paid", "has_hmac_header": false, "hmac_verified": true}
+{"event": "webhook_hmac_verified", "webhook_id": "event-1", "topic": "orders/paid", "has_hmac_header": true, "hmac_verified": true}
+{"event": "crm_paid_conversion_retry", "webhook_id": "event-1", "error_type": "RuntimeError"}
+..........................................2026-10-09 17:08:08.845 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:08.846 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:09.210 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:09.423 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.E........F.2026-10-09 17:08:09.553 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:09.553 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:09.554 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+crm_control_store_unavailable type=ConnectionError
+crm_control_store_unavailable type=ConnectionError
+crm_control_store_unavailable type=ConnectionError
+crm_control_store_unavailable type=ConnectionError
+F..crm_control_store_unavailable type=DatabaseError
+crm_control_store_unavailable type=DatabaseError
+crm_control_store_unavailable type=DatabaseError
+.2026-10-09 17:08:09.575 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:09.575 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:09.669 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+E....FF....s....2026-10-09 17:08:09.838 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+......F......2026-10-09 17:08:10.597 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:10.597 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+.crm_attribution_mirror_unavailable
+.................2026-10-09 17:08:11.440 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:11.440 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_START read=identities key=1b86800a29a0 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=1b86800a29a0 future=- elapsed_ms=5 rows=13
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=1b86800a29a0 future=- rows=13
+AUTOMATIONS_HOME_READ_START read=table key=c72931223bd6 future=0x28ce4b8a950 generation=797b1981d7d8 cache_entries=1
+AUTOMATIONS_HOME_READ_START read=counts key=c7e540faadcc future=0x28ce62e2f50 generation=797b1981d7d8 cache_entries=2
+AUTOMATIONS_HOME_READ_START read=delivery key=be2b804620df future=0x28ce62e1d50 generation=797b1981d7d8 cache_entries=3
+AUTOMATIONS_HOME_READ_START read=activity key=d638138bf356 future=0x28ce4b892d0 generation=797b1981d7d8 cache_entries=4
+E2026-10-09 17:08:11.565 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:11.565 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_COMPLETE read=table key=c72931223bd6 future=- generation=797b1981d7d8 elapsed_ms=13 rows=1
+AUTOMATIONS_HOME_READ_COMPLETE read=counts key=c7e540faadcc future=- generation=797b1981d7d8 elapsed_ms=14 rows=1
+2026-10-09 17:08:11.629 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+AUTOMATIONS_HOME_READ_COMPLETE read=activity key=d638138bf356 future=- generation=797b1981d7d8 elapsed_ms=79 rows=1
+2026-10-09 17:08:11.712 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:11.773 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+AUTOMATIONS_HOME_READ_COMPLETE read=delivery key=be2b804620df future=- generation=797b1981d7d8 elapsed_ms=213 rows=1
+2026-10-09 17:08:11.822 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+.2026-10-09 17:08:11.827 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:11.827 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:11.866 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:11.912 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:11.916 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:11.984 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:11.988 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+.2026-10-09 17:08:11.996 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:11.996 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.055 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:12.061 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:12.224 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:12.229 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:12.233 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+.2026-10-09 17:08:12.242 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.242 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.242 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.242 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.529 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+.2026-10-09 17:08:12.532 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.532 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.772 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:12.777 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.777 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.929 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-09 17:08:12.951 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:12.951 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_START read=identities key=1b86800a29a0 future=- 
+AUTOMATIONS_HOME_READ_COMPLETE read=identities key=1b86800a29a0 future=- elapsed_ms=22 rows=13
+AUTOMATIONS_HOME_RESULT_CONSUMED read=identities key=1b86800a29a0 future=- rows=13
+AUTOMATIONS_HOME_READ_START read=table key=c72931223bd6 future=0x28ce3452350 generation=05e49bc151da cache_entries=1
+AUTOMATIONS_HOME_READ_START read=counts key=c7e540faadcc future=0x28ce344d7d0 generation=05e49bc151da cache_entries=2
+AUTOMATIONS_HOME_READ_START read=delivery key=be2b804620df future=0x28ce344d850 generation=05e49bc151da cache_entries=3
+AUTOMATIONS_HOME_READ_START read=activity key=d638138bf356 future=0x28ce3465950 generation=05e49bc151da cache_entries=4
+2026-10-09 17:08:13.071 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:13.071 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+AUTOMATIONS_HOME_READ_COMPLETE read=table key=c72931223bd6 future=- generation=05e49bc151da elapsed_ms=13 rows=1
+AUTOMATIONS_HOME_READ_COMPLETE read=counts key=c7e540faadcc future=- generation=05e49bc151da elapsed_ms=29 rows=1
+AUTOMATIONS_HOME_READ_COMPLETE read=activity key=d638138bf356 future=- generation=05e49bc151da elapsed_ms=246 rows=1
+AUTOMATIONS_HOME_READ_COMPLETE read=delivery key=be2b804620df future=- generation=05e49bc151da elapsed_ms=278 rows=1
+2026-10-09 17:08:13.410 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.413 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:13.413 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:13.577 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.606 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.625 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.654 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.664 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.687 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.697 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.708 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.718 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:08:13.721 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-09 17:08:13.722 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+............crm_opt_out_sync_pending type=RuntimeError
+...resend_webhook stage=received 
+resend_webhook stage=queued event_id=evt_e8767a068b3b48ed87808b436dad799c
+resend_webhook stage=acknowledged duration_ms=5.1
+.....resend_test_send failed category=resend_unavailable http_status=0
+.................
+======================================================================
+ERROR: test_deleted_linked_segment_fails_closed_retains_stale (test_crm_audience_sync.AudienceSyncTests.test_deleted_linked_segment_fails_closed_retains_stale)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 81, in test_deleted_linked_segment_fails_closed_retains_stale
+    self.event('segments/delete',{'id':42})
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 37, in event
+    receive_shopify(self.store,topic,'fixture-'+str(self.store.version),payload or {'id':1},now())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_webhooks.py", line 48, in receive_shopify
+    return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: MemoryStore.webhook() got an unexpected keyword argument 'normalized'
+
+======================================================================
+ERROR: test_location_transfer_and_no_double_count (test_crm_audience_sync.AudienceSyncTests.test_location_transfer_and_no_double_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 65, in test_location_transfer_and_no_double_count
+    self.assertEqual(self.event(),{**before,'AU':0,'UK':2})
+                     ~~~~~~~~~~^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 37, in event
+    receive_shopify(self.store,topic,'fixture-'+str(self.store.version),payload or {'id':1},now())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_webhooks.py", line 48, in receive_shopify
+    return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: MemoryStore.webhook() got an unexpected keyword argument 'normalized'
+
+======================================================================
+ERROR: test_segment_query_change_and_rename_preserve_id (test_crm_audience_sync.AudienceSyncTests.test_segment_query_change_and_rename_preserve_id)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 74, in test_segment_query_change_and_rename_preserve_id
+    counts=self.event('segments/update',{'id':42})
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 37, in event
+    receive_shopify(self.store,topic,'fixture-'+str(self.store.version),payload or {'id':1},now())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_webhooks.py", line 48, in receive_shopify
+    return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: MemoryStore.webhook() got an unexpected keyword argument 'normalized'
+
+======================================================================
+ERROR: test_subscribe_and_unsubscribe_refresh_au_and_global_only (test_crm_audience_sync.AudienceSyncTests.test_subscribe_and_unsubscribe_refresh_au_and_global_only)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 53, in test_subscribe_and_unsubscribe_refresh_au_and_global_only
+    after=self.event('customers_email_marketing_consent/update',{'customer_id':4})
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 37, in event
+    receive_shopify(self.store,topic,'fixture-'+str(self.store.version),payload or {'id':1},now())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_webhooks.py", line 47, in receive_shopify
+    return persist(store,event_id,topic,object_id,customer_id,at,normalized)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_shopify_automation_events.py", line 62, in persist
+    with store.db() as conn:
+         ^^^^^^^^
+AttributeError: 'MemoryStore' object has no attribute 'db'
+
+======================================================================
+ERROR: test_tag_add_remove_with_no_address (test_crm_audience_sync.AudienceSyncTests.test_tag_add_remove_with_no_address)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 59, in test_tag_add_remove_with_no_address
+    c['tags']=['SC_COUNTRY_AU'];self.assertEqual(self.event(),{**before,'AU':2})
+                                                 ~~~~~~~~~~^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_sync.py", line 37, in event
+    receive_shopify(self.store,topic,'fixture-'+str(self.store.version),payload or {'id':1},now())
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_webhooks.py", line 48, in receive_shopify
+    return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: MemoryStore.webhook() got an unexpected keyword argument 'normalized'
+
+======================================================================
+ERROR: test_meter_is_in_action_row_without_new_card_and_first_paint_does_no_head (test_crm_email_size.EmailSizeTests.test_meter_is_in_action_row_without_new_card_and_first_paint_does_no_head)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_email_size.py", line 173, in test_meter_is_in_action_row_without_new_card_and_first_paint_does_no_head
+    self.assertLess(action.index('size_slot=st.empty()'),action.index("st.button('Save draft'"))
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: substring not found
+
+======================================================================
+ERROR: test_delete_confirmation_is_explicit_and_cancel_retains_draft (test_crm_html_workspace.SqlWorkspaceTests.test_delete_confirmation_is_explicit_and_cancel_retains_draft)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_html_workspace.py", line 110, in test_delete_confirmation_is_explicit_and_cancel_retains_draft
+    next(b for b in at.button if b.key=='recent_delete_'+str(identity)).click().run(timeout=20)
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+
+======================================================================
+ERROR: test_recent_open_uses_same_editor_and_protects_unsaved_compose (test_crm_html_workspace.SqlWorkspaceTests.test_recent_open_uses_same_editor_and_protects_unsaved_compose)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_html_workspace.py", line 149, in test_recent_open_uses_same_editor_and_protects_unsaved_compose
+    next(b for b in at.button if b.key=='recent_open_'+str(saved['id'])).click().run()
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+
+======================================================================
+ERROR: test_internal_test_uses_global_footer_production_render_and_never_resends (test_crm_single_footer.FooterStorageTests.test_internal_test_uses_global_footer_production_render_and_never_resends)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_single_footer.py", line 148, in test_internal_test_uses_global_footer_production_render_and_never_resends
+    preview=render_campaign(row['document'],self.store.render_settings(ENV),production=True,test_tracking=True,unsubscribe_url=TEST_UNSUBSCRIBE_URL)
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_content.py", line 152, in render_campaign
+    imported,plain,_=import_sections(doc,images_off=images_off,campaign_key=doc.get('campaign_key',''),cfg=cfg,unsubscribe_url=unsubscribe_url)
+                     ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_sections.py", line 46, in import_sections
+    footer, footer_text, footer_checks = render_footer(sections['footer'],cfg,images_off=images_off,unsubscribe_url=unsubscribe_url)
+                                         ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\hello\Documents\sports-cave-image-factory\crm_campaign_footer.py", line 73, in render_footer
+    if not has_unsubscribe_link(source):raise ValueError(UNSUBSCRIBE_REQUIRED)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Footer must contain {{UNSUBSCRIBE_URL}} before live marketing can be sent.
+
+======================================================================
+ERROR: test_empty_list_and_healthy_settings_render (test_crm_storage_recovery.SchemaRecoveryTests.test_empty_list_and_healthy_settings_render)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_storage_recovery.py", line 106, in test_empty_list_and_healthy_settings_render
+    next(t for t in at.text_input if t.label=='Find campaign').set_value('no-such-campaign-739421');at.run()
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+StopIteration
+
+======================================================================
+ERROR: test_automation_activation_fails_closed (test_crm_ui.UiTests.test_automation_activation_fails_closed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_ui.py", line 67, in test_automation_activation_fails_closed
+    panel=next(e for e in at.expander if e.label=='Workflow configuration')
+StopIteration
+
+======================================================================
+FAIL: test_editor_emits_before_preparation_and_market_fragment_can_start_it (test_crm_audience_prepare.PreparationTests.test_editor_emits_before_preparation_and_market_fragment_can_start_it)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_audience_prepare.py", line 158, in test_editor_emits_before_preparation_and_market_fragment_can_start_it
+    self.assertNotIn('prepare_session',Path('crm_campaign_controls.py').read_text(encoding='utf-8'))
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'prepare_session' not found in '\n    if save and flush_current(force=True):\n        st.toast(\'Draft saved\');st.rerun()\n    if new_requested:st.session_state[\'campaign_pending_open\']=\'new\'\n    target=st.session_state.get(\'crm_requested_route\');pending=st.session_state.get(\'campaign_pending_open\')\n    if target or pending:\n        if dirty(editor):\n            from crm_campaign_leave_ui import leave_dialog\n            leave_dialog(actions.user,lambda:continue_campaign_leave(drafts,navigate))\n        else:continue_campaign_leave(drafts,navigate)\n\n\n\ndef html_escape_name(name):\n    # Markdown title must not interpret campaign names as formatting or links.\n    import re\n    return re.sub(r\'([\\\\`*_{}\\[\\]()#+.!|<>-])\',lambda m:chr(92)+m.group(0),name)\n\n\ndef audience_editor(shop,store,doc,key,compact=False):\n    if not compact:st.caption(\'RECIPIENTS � Existing Shopify customers and consent. No recipient list is stored with a draft.\')\n    a,b=(st.container(),st.container()) if compact else st.columns([3,1])\n    if not compact:a.write(\'Include segments as a union. Exclusions always win.\')\n    old_hours=doc.get(\'smart_hours\',16)\n    doc[\'smart_hours\']=int(b.number_input(\'Smart Sending � hours\',1,168,int(old_hours),key=key+\'frequency\'))\n    if old_hours!=doc[\'smart_hours\']:doc[\'counts\']={};st.session_state.pop(key+\'count\',None)\n    if not compact:st.caption(\'Default 16 hours � based only on actual Sports Cave OS marketing sends, including future campaigns and flows. Excludes internal tests, support and transactional emails. External Klaviyo / Shopify Email history is not included.\')\n    mode=st.radio(\'Audience source\',(\'All subscribed / filters\',\'Saved segments\'),horizontal=True,key=key+\'source\')\n    current=json.dumps(doc[\'audience\'],sort_keys=True)\n    if mode.startswith(\'All\'):\n        cols=[st.container() for _ in range(4)] if compact else st.columns(4)\n        country=cols[0].selectbox(\'Country\',(\'Any\',\'AU\',\'US\',\'GB\'),key=key+\'country\')\n        normalize_sport_state(st.session_state, key+\'sport\', \'Any\')\n        sport=cols[1].selectbox(\'Interest / sport\',sport_category_options(controls=(\'Any\',)),key=key+\'sport\')\n        orders=cols[2].number_input(\'Minimum orders\',0,10000,key=key+\'orders\')\n        days=cols[3].selectbox(\'Last purchase\',(\'Any\',\'Last 30 days\',\'Last 180 days\',\'Over 180 days\'),key=key+\'days\')\n        if st.button(\'Use these filters\'):\n            rules=[rule(\'consent\',\'SUBSCRIBED\')]\n            if country!=\'Any\':rules.append(rule(\'country\',country))\n            if sport!=\'Any\':rules.append(rule(\'interest\',sport,\'contains\'))\n            if orders:rules.append(rule(\'orders\',orders,\'gte\'))\n            if days!=\'Any\':rules.append(rule(\'last_order_days\',30 if days==\'Last 30 days\' else 180,\'gte\' if days.startswith(\'Over\') else \'lte\'))\n            doc[\'audience\']={\'kind\':\'Selection\',\'name\':\'Subscribed � \'+country+\' � \'+sport,\'include\':[{\'kind\':\'Rules\',\'name\':\'Selected filters\',\'rules\':{\'all\':rules}}],\'exclude\':[]}\n    if st.button(\'Load saved segments\'):\n        page=shop.segments();st.session_state[key+\'segments\']=[{\'kind\':\'Shopify\',\'name\':s[\'name\'],\'id\':s[\'id\']} for s in page[\'nodes\']]+[{\'kind\':\'Rules\',\'name\':s[\'name\'],\'rules\':s[\'rules\']} for s in store.list(\'segments\')]\n        st.session_state[key+\'segment_cursor\']=page[\'pageInfo\'].get(\'endCursor\') if page[\'pageInfo\'].get(\'hasNextPage\') else None\n    if st.session_state.get(key+\'segment_cursor\') and st.button(\'Load more segments\'):\n        page=shop.segments(st.session_state[key+\'segment_cursor\']);st.session_state[key+\'segments\'] += [{\'kind\':\'Shopify\',\'name\':s[\'name\'],\'id\':s[\'id\']} for s in page[\'nodes\']]\n        st.session_state[key+\'segment_cursor\']=page[\'pageInfo\'].get(\'endCursor\') if page[\'pageInfo\'].get(\'hasNextPage\') else None\n    options=st.session_state.get(key+\'segments\',[])\n    if options:\n        cols=[st.container(),st.container()] if compact else st.columns(2)\n        included=cols[0].multiselect(\'Include segments\',range(len(options)),format_func=lambda i:options[i][\'name\'],key=key+\'include\')\n        excluded=cols[1].multiselect(\'Exclude segments\',range(len(options)),format_func=lambda i:options[i][\'name\'],key=key+\'exclude\')\n        if st.button(\'Apply segment selection\'):\n            if not included:st.warning(\'Choose at least one included segment.\')\n            else:doc[\'audience\']={\'kind\':\'Selection\',\'name\':\' + \'.join(options[i][\'name\'] for i in included)[:300],\'include\':[options[i] for i in included],\'exclude\':[options[i] for i in excluded]}\n    if current!=json.dumps(doc[\'audience\'],sort_keys=True):doc[\'counts\']={};st.session_state.pop(key+\'count\',None)\n    selection=doc[\'audience\'] if doc[\'audience\'][\'kind\']==\'Selection\' else {\'kind\':\'Selection\',\'name\':doc[\'audience\'][\'name\'],\'include\':[doc[\'audience\']],\'exclude\':[]}\n    st.caption(\'Selected: \'+selection[\'name\']+\' � Only explicit SUBSCRIBED profiles are eligible. Purchase is not consent.\')\n    a,b=(st.container(),st.container()) if compact else st.columns(2);restart=a.button(\'Recalculate eligibility\');previous=st.session_state.get(key+\'count\')\n    more=b.button(\'Continue calculation\',disabled=not previous or previous.get(\'complete\',False))\n    if restart or more:\n        doc[\'counts\']={}\n        st.session_state.pop(key+\'count\',None)\n        state=selection_page(shop,store,selection,previous if more else None,smart_hours=doc.get(\'smart_hours\',16));st.session_state[key+\'count\']=state\n        if state[\'complete\']:doc[\'counts\']={k:state[k] for k in (\'members\',\'eligible\',\'excluded\',\'complete\',\'checked_at\')}\n        st.rerun()\n    state=st.session_state.get(key+\'count\',doc[\'counts\']);complete=state.get(\'complete\',False)\n    cols=[st.container() for _ in range(3)] if compact else st.columns(3)\n    for col,label,value in zip(cols,(\'Matched profiles\',\'Eligible estimate\',\'Excluded\'),(state.get(\'members\',\'�\'),state.get(\'eligible\',\'�\') if complete else \'Unavailable\',sum(state.get(\'excluded\',{}).values()) if complete else \'Unavailable\')):\n        if compact:col.caption(label+\': \'+str(value))\n        else:col.metric(label,value)\n    st.caption((\'Complete\' if complete else \'Not calculated / partial � continue all pages, including consent verification\')+\' � \'+state.get(\'checked_at\',\'\')+\' � Always recheck consent, suppression and frequency before future dispatch.\')\n    with st.expander(\'Exclusion reasons + calculation detail\'):\n        st.json({\'primary_reasons\':state.get(\'excluded\',{}),\'diagnostics\':state.get(\'diagnostics\',{}),\'pages_scanned\':state.get(\'pages\',0)})\n\n\ndef layout_preview(doc,cfg,key):\n    controls=st.columns([2,2])\n    width=controls[0].selectbox(\'Layout width\',(600,430,390,375,320),format_func=lambda w:\'Desktop\' if w==600 else str(w),key=key+\'previewwidth\')\n    mode=controls[1].selectbox(\'Preview mode\',(\'Images on\',\'Images off\',\'Plain text\'),key=key+\'previewmode\')\n    rendered=render_campaign(doc,cfg,images_off=mode==\'Images off\')\n    st.caption(\'Layout preview � not a Gmail / Outlook certification\')\n    if mode==\'Plain text\':st.text_area(\'Plain-text alternative\',rendered[\'text\'],height=330,disabled=True,key=key+\'plain\')\n    else:components.html(rendered[\'html\'],width=width,height=330,scrolling=True)\n    budget=html_budget(rendered[\'html\']);st.caption(budget[\'label\'])\n    if budget[\'warning\']:st.warning(\'HTML size needs review before testing.\')\n\n\ndef message_editor(shop,store,user,editor,key,cfg):\n    doc=editor[\'document\'];c=doc[\'content\'];before=json.dumps(doc,sort_keys=True)\n    left=st.container()\n    with left:\n        delivery=get_resend_marketing_config_status()\n        with st.expander(\'Sender + campaign details\'):\n            import os\n            st.text_input(\'Sender name\',os.getenv(\'RESEND_FROM_NAME\',\'\'),disabled=True)\n            st.text_input(\'Sender address\',delivery[\'sender\'],disabled=True)\n            st.text_input(\'Reply-To\',delivery[\'reply_to\'],disabled=True)\n            st.caption(\'Approved sender configuration only. Change verified identity through the reviewed deployment configuration.\')\n            st.caption(\'Purpose: \'+doc[\'type\']+\' � Segment: \'+__import__(\'crm_campaign_markets\').MARKET_LABELS[doc[\'market\']])\n            doc[\'notes\']=st.text_area(\'Notes for prompt\',doc[\'notes\'],height=90,key=key+\'notes\')\n            doc[\'offer\']=st.text_input(\'Reviewed offer or None\',doc[\'offer\'],key=key+\'offer\')\n            doc[\'offer_reviewed\']=st.checkbox(\'I verified this offer\',doc[\'offer_reviewed\'],key=key+\'offer_reviewed\')\n        with st.expander(\'Choose template / starter\'):\n            selected=st.selectbox(\'Starter layout\',STARTERS,key=key+\'starter\')\n            replace=st.checkbox(\'Replace the current design with the selected snapshot\',key=key+\'replace\')\n            if st.button(\'Use starter\',disabled=bool(doc.get(\'blocks\') or doc.get(\'custom_html\')) and not replace):\n                doc[\'content_mode\']=\'Blocks\';doc[\'blocks\']=starter(selected);doc[\'template_ref\']={\'name\':selected,\'version\':1};reset_widgets();st.rerun()\n            templates=store.templates()\n            if templates:\n                t=st.selectbox(\'Saved template\',templates,format_func=lambda t:t[\'name\']+\' � v\'+str(t[\'version\']),key=key+\'template\')\n                if st.button(\'Use saved template\',disabled=bool(doc.get(\'blocks\') or doc.get(\'custom_html\')) and not replace):\n                    snapshot=store.template_document(t);doc[\'content_mode\']=snapshot.get(\'content_mode\',\'Blocks\');doc[\'custom_html\']=snapshot.get(\'custom_html\',doc.get(\'custom_html\',\'\'));doc[\'blocks\']=snapshot[\'blocks\'];doc[\'content\']=snapshot[\'content\'];doc[\'template_ref\']={\'id\':str(t[\'id\']),\'version\':t[\'version\'],\'name\':t[\'name\']};reset_widgets();st.rerun()\n            if os_accounts.can_access_page(user,\'crm_templates_manage\'):\n                name=st.text_input(\'Save design as template\',key=key+\'designname\')\n                if st.button(\'Save as template\'):store.save_design(user,name,doc);st.success(\'Versioned template saved. This campaign keeps its own snapshot.\')\n        if not doc.get(\'blocks\'):\n            if any(c.values()):\n                if st.button(\'Edit existing content as blocks\'):doc[\'content_mode\']=\'Blocks\';doc[\'blocks\']=legacy_blocks(c);reset_widgets();st.rerun()\n            else:st.info(\'Choose a starter or add a block. Brand header and compliance footer are locked.\')\n        with st.expander(\'Prompt factory\'):\n            from crm_prompt_factory import generate,parse,proposals,apply\n            if st.button(\'Generate Sports Cave Prompt\'):st.session_state[key+\'prompt\']=generate(doc,store.setting(\'prompts\')[\'value\'])\n            if st.session_state.get(key+\'prompt\'):\n                copy_prompt(st.session_state[key+\'prompt\']);st.code(st.session_state[key+\'prompt\'],language=None)\n            pasted=st.text_area(\'Paste generated JSON\',height=120,key=key+\'paste\')\n            if st.button(\'Validate proposed copy\'):st.session_state[key+\'proposal\']=parse(pasted,doc)\n            proposal=st.session_state.get(key+\'proposal\')\n            if proposal:\n                with st.expander(\'Generated copy brief + options\'):\n                    st.json({k:proposal[k] for k in (\'subject_options\',\'preheader_options\',\'copy\')})\n                changes=proposals(proposal,doc);st.dataframe([{\'Field\':k,**v} for k,v in changes.items()],hide_index=True)\n                selected_fields=st.multiselect(\'Apply selected fields\',list(changes),key=key+\'copyselection\')\n                if st.button(\'Apply selected copy\',disabled=not selected_fields):editor[\'document\']=apply(doc,proposal,selected_fields);reset_widgets();st.rerun()\n\n\ndef reset_widgets():\n    st.session_state[\'campaign_edit_key\']=str(uuid.uuid4())\n    if st.session_state.get(\'campaign_editor\'):st.session_state[\'campaign_editor\'][\'document\'][\'copy_reviewed\']=False\n\n\ndef block_editor(shop,doc,key):\n    blocks=doc.setdefault(\'blocks\',[])\n    st.caption(\'DESIGN � Locked brand header above; locked compliance footer below.\')\n    from crm_block_editor import sortable\n    index=sortable(doc,key)\n    if blocks:\n        b=blocks[index];bk=key+b[\'id\'];kind=b[\'type\']\n        if kind in (\'heading\',\'text\'):b[\'text\']=st.text_area(\'Block copy\',b[\'text\'],height=110,key=bk+\'text\')\n        elif kind==\'image\':\n            b[\'url\']=st.text_input(\'Image URL (public JPEG/PNG)\',b[\'url\'],key=bk+\'url\')\n            b[\'alt\']=st.text_input(\'Image alt text\',b[\'alt\'],key=bk+\'alt\');b[\'decorative\']=st.checkbox(\'Decorative image\',b[\'decorative\'],key=bk+\'decorative\')\n            image_picker(shop,b,bk)\n        elif kind==\'button\':\n            b[\'label\']=st.text_input(\'Button label\',b[\'label\'],key=bk+\'label\');b[\'url\']=st.text_input(\'Button HTTPS URL\',b[\'url\'],key=bk+\'url\')\n        elif kind==\'spacer\':b[\'height\']=int(st.number_input(\'Spacer height\',8,64,b[\'height\'],key=bk+\'height\'))\n        elif \'products\' in b:product_picker(shop,b,doc[\'market\'],bk)\n    st.caption(\'Images: public JPEG/PNG, 600�1000px wide; aim \u22641 MB. Shopify supplies a proportional JPEG derivative up to 1000px, without cropping. Other unsupported sources require conversion in the existing asset workflow. Asset byte size is not fetched automatically.\')\n\n\ndef image_picker(shop,b,key):\n    query=st.text_input(\'Find product images\',key=key+\'imagequery\')\n    if st.button(\'Search images\',key=key+\'imagesearch\'):st.session_state[key+\'imageproducts\']=shop.campaign_products(query)[\'nodes\']\n    products=st.session_state.get(key+\'imageproducts\',[])\n    images=[(p,i) for p in products for i in p.get(\'images\',{}).get(\'nodes\',[]) if asset_url(i.get(\'url\',\'\'))]\n    if images:\n        selected=st.selectbox(\'Existing Shopify image\',images,format_func=lambda x:x[0][\'title\']+\' � \'+str(x[1].get(\'altText\') or x[1].get(\'id\')),key=key+\'img\')\n        product=selected[0];page=product.get(\'images\',{})\n        if page.get(\'pageInfo\',{}).get(\'hasNextPage\') and st.button(\'More images for this product\',key=key+\'moreimg\'):\n            following=shop.campaign_images(product[\'id\'],page[\'pageInfo\'][\'endCursor\'])\n            product[\'images\']={\'nodes\':page.get(\'nodes\',[])+following[\'nodes\'],\'pageInfo\':following[\'pageInfo\']};st.rerun()\n        if st.button(\'Use image\',key=key+\'useimg\'):b[\'url\']=selected[1][\'url\'];b[\'alt\']=selected[1].get(\'altText\') or selected[0][\'title\'];reset_widgets();st.rerun()\n\n\ndef product_picker(shop,b,market,key):\n    query=st.text_input(\'Search Shopify products\',key=key+\'query\')\n    if st.button(\'Search products\',key=key+\'search\'):\n        page=shop.campaign_products(query);st.session_state[key+\'products\']=page[\'nodes\'];st.session_state[key+\'cursor\']=page[\'pageInfo\'].get(\'endCursor\') if page[\'pageInfo\'].get(\'hasNextPage\') else None\n    if st.session_state.get(key+\'cursor\') and st.button(\'More products\',key=key+\'more\'):\n        page=shop.campaign_products(query,st.session_state[key+\'cursor\']);st.session_state[key+\'products\']+=page[\'nodes\'];st.session_state[key+\'cursor\']=page[\'pageInfo\'].get(\'endCursor\') if page[\'pageInfo\'].get(\'hasNextPage\') else None\n    products=st.session_state.get(key+\'products\',[])\n    if products:\n        p=st.selectbox(\'Shopify product\',products,format_func=lambda p:p[\'title\'],key=key+\'product\')\n        image_page=p.get(\'images\',{})\n        if image_page.get(\'pageInfo\',{}).get(\'hasNextPage\') and st.button(\'More product images\',key=key+\'moreimages\'):\n            page=shop.campaign_images(p[\'id\'],image_page[\'pageInfo\'][\'endCursor\'])\n            p[\'images\']={\'nodes\':image_page.get(\'nodes\',[])+page[\'nodes\'],\'pageInfo\':page[\'pageInfo\']};st.rerun()\n        images=[i for i in p.get(\'images\',{}).get(\'nodes\',[]) if asset_url(i.get(\'url\',\'\'))]\n        img=st.selectbox(\'Product image\',images,format_func=lambda i:i.get(\'altText\') or i[\'id\'],key=key+p[\'id\']+\'image\') if images else {}\n        if img:st.image(img[\'url\'],width=120)\n        if st.button(\'Select product\',key=key+\'select\',disabled=len(b[\'products\'])>=(4 if b[\'type\']==\'product_grid\' else 1)):\n            b[\'products\'].append({\'id\':p[\'id\'],\'title\':p[\'title\'],\'url\':p.get(\'onlineStoreUrl\') or \'\', \'image\':img.get(\'url\',\'\'),\'alt\':img.get(\'altText\') or p[\'title\'],\'market\':market,\'facts_checked_at\':now().isoformat()});reset_widgets();st.rerun()\n    if b[\'products\']:\n        index=st.selectbox(\'Selected artwork\',range(len(b[\'products\'])),format_func=lambda i:b[\'products\'][i][\'title\'],key=key+\'selected\')\n        p=b[\'products\'][index];p[\'alt\']=st.text_input(\'Artwork alt text\',p.get(\'alt\',\'\'),key=key+str(index)+\'alt\')\n        variant_key=key+p[\'id\']+\'variants_data\'\n        st.caption(p[\'title\']+\' � \'+(p.get(\'currency\',\'\')+\' \'+p.get(\'price\',\'\') if p.get(\'price\') else \'Price omitted\')+\' � Edition availability omitted until verified by an approved source.\')\n        if st.button(\'Load variants / segment price\',key=key+\'variants\'):\n            st.session_state[variant_key]=shop.campaign_variants(p[\'id\'])\n        variant_page=st.session_state.get(variant_key,{})\n        variants=variant_page.get(\'nodes\',[])\n        if variant_page.get(\'pageInfo\',{}).get(\'hasNextPage\') and st.button(\'More variants\',key=key+\'morevariants\'):\n            page=shop.campaign_variants(p[\'id\'],variant_page[\'pageInfo\'][\'endCursor\']);page[\'nodes\']=variants+page[\'nodes\'];st.session_state[variant_key]=page;st.rerun()\n        if variants:\n            v=st.selectbox(\'Variant for displayed price\',variants,format_func=lambda v:v[\'title\'],key=key+p[\'id\']+\'variant\')\n            if st.button(\'Use verified segment price\',key=key+\'price\'):\n                money=shop.campaign_price(v[\'id\'],market)\n                if money:p.update(variant_id=v[\'id\'],variant_title=v[\'title\'],market=market,price=money[\'amount\'],currency=money[\'currencyCode\'],facts_checked_at=now().isoformat());st.rerun()\n                else:st.warning(\'Segment price unavailable. No price was added.\')\n        if st.button(\'Refresh canonical facts for comparison\',key=key+\'refreshproduct\'):\n            current=shop.products([p[\'id\']],fresh=True)\n            if current:\n                diff={k:{\'saved\':p.get(k),\'current\':current[0].get(remote)} for k,remote in ((\'title\',\'title\'),(\'url\',\'onlineStoreUrl\')) if p.get(k)!=current[0].get(remote)}\n                st.session_state[key+\'factdiff\']=diff\n        if key+\'factdiff\' in st.session_state:st.json(st.session_state[key+\'factdiff\']);st.caption(\'Changed facts flagged; saved edits were not overwritten. Re-select the product to use current facts.\')\n        if st.button(\'Remove artwork\',key=key+\'removeproduct\'):b[\'products\'].pop(index);reset_widgets();st.rerun()\n\n\ndef review_editor(store,user,editor,key,cfg):\n    doc=editor[\'document\'];checks=preflight(doc,cfg=cfg)\n    left,right=st.columns([4,7],gap=\'medium\')\n    with left:\n        st.caption(\'REVIEW � \'+checks[\'policy\'])\n        st.caption(\'Internal test checks: \'+str(sum(checks[\'test\'].values()))+\' / \'+str(len(checks[\'test\']))+\' passed\')\n        with st.expander(\'Internal test preflight\',expanded=not checks[\'test_ready\']):\n            for label,ok in checks[\'test\'].items():st.caption((\'\u2713 \' if ok else \'\u25cb \')+label)\n        with st.expander(\'Production readiness � blocked\'):\n            for label,ok in checks[\'live\'].items():st.caption((\'\u2713 \' if ok else \'\u25cb \')+label)\n            st.caption(\'One-click unsubscribe production path not activated. Missing legal identity is shown as a test-only warning; no segment is automatically legally cleared.\')\n        a,b=st.columns(2)\n        needs=a.button(\'Needs review\',disabled=dirty(editor))\n        ready=b.button(\'Mark test ready\',disabled=dirty(editor) or not checks[\'test_ready\'])\n        if needs or ready:\n            updated=store.save(user,editor[\'name\'],doc,editor[\'id\'],editor[\'version\'],requested_status=\'NEEDS_REVIEW\' if needs else \'TEST_READY\')\n            st.session_state[\'campaign_editor\']=deepcopy(updated);st.session_state[\'campaign_saved\']=deepcopy(updated);st.rerun()\n        if os_accounts.can_access_page(user,\'CRM Campaigns\'):\n            with st.form(key+\'test\',clear_on_submit=False):\n                recipient=st.text_input(\'Manual internal test recipient\',value=\'\')\n                confirmed=st.checkbox(\'I confirm one internal mailbox and the TEST ONLY footer / inactive unsubscribe warnings.\')\n                clicked=st.form_submit_button(\'Send internal test\',disabled=not checks[\'test_ready\'] or dirty(editor))\n            if dirty(editor):st.caption(\'Save current changes before sending a test.\')\n            if clicked:\n                saved=store.draft(editor[\'id\'])\n                if saved[\'document\']!=doc:st.warning(\'Save the current revision before testing.\')\n                else:\n                    operation=st.session_state.setdefault(key+\'test_operation\',str(uuid.uuid4()))\n                    result=store.test_campaign(user,editor[\'id\'],editor[\'version\'],recipient=recipient,confirmed=confirmed,operation_id=operation)\n                    editor[\'status\']=store.draft(editor[\'id\'])[\'status\']\n                    st.success(\'Test accepted by Resend\');st.text(result[\'message_id\']+\'\\n\'+str(result[\'accepted_at\']))\n                    if not result[\'audit_saved\']:st.warning(\'Receipt persistence needs review. Do not resend.\')\n            if st.button(\'Start a separate test attempt\'):\n                st.session_state[key+\'test_operation\']=str(uuid.uuid4());st.caption(\'New explicit test attempt prepared. Type and confirm the recipient before sending.\')\n        else:st.caption(\'Only an administrator can send a single-recipient test.\')\n        with st.expander(\'Test history\'):\n            st.dataframe([{k:r[k] for k in (\'campaign_version\',\'status\',\'provider_id\',\'created_at\',\'delivered\')} for r in store.test_history(editor[\'id\'])],hide_index=True)\n        with st.expander(\'Revision history\'):st.dataframe(store.history(editor[\'id\']),hide_index=True)\n    with right:layout_preview(doc,cfg,key)\n\n\ndef copy_prompt(value):\n    payload=json.dumps(value).replace(\'<\',\'\\\\u003c\').replace(\'>\',\'\\\\u003e\')\n    components.html(\'\'\'<button id="copy" style="background:#d6a548;border:0;border-radius:8px;padding:12px 20px;cursor:pointer">Copy Prompt</button>\n<script>document.getElementById(\'copy\').onclick=async function(){const s=\'\'\'+payload+\'\'\';\ntry { await navigator.clipboard.writeText(s); this.textContent=\'Prompt copied\'; }\ncatch(e){this.textContent=\'Use the copy icon below\';}}</script>\'\'\',height=50)\n\n\n@st.dialog(\'Send test\',width=\'large\')\ndef test_dialog(store,user,editor,key,cfg):\n    from crm_resend_marketing import DeliveryError\n    try:review_editor(store,user,editor,key+\'dialog\',cfg)\n    except (ValueError,StoreUnavailable,DeliveryError,PermissionError) as exc:st.error(str(exc))\n'
+
+======================================================================
+FAIL: test_automation_only_polling_and_debounce (test_crm_automation_preview_stability.PreviewStabilityTests.test_automation_only_polling_and_debounce)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_automation_preview_stability.py", line 68, in test_automation_only_polling_and_debounce
+    self.assertIn("not any(s['type']==BLOCK",section)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: "not any(s['type']==BLOCK" not found in '"""Compact middle composer + lazy product picker using the existing component bridge."""\nfrom copy import deepcopy\nfrom pathlib import Path\nimport logging\nimport uuid\nimport streamlit as st\nimport streamlit.components.v1 as components\nfrom crm_campaign_recovery import autosaving, flush_current\nfrom crm_component_json import render_component\nfrom crm_middle_sections import middle_sections, apply_event, commit_middle\nfrom crm_catalogue import Catalogue, product_issues, price_label, refresh_catalogues\n\n\ndef rerun_editor():\n    from crm_email_editor_context import current,mark_content_edit\n    editor=current(st.session_state)\n    if editor:mark_content_edit(st.session_state,editor)\n    flush_current()\n    from streamlit.errors import StreamlitAPIException\n    try: st.rerun(scope=\'fragment\')\n    except StreamlitAPIException: st.rerun()\n\n\n@st.dialog(\'Select products\', width=\'medium\', on_dismiss=\'rerun\')\n@autosaving\ndef product_picker(doc, section_id, catalogue, key, editor_key=None):\n    section = next(s for s in middle_sections(doc) if s[\'id\']==section_id)\n    basket = st.session_state.setdefault(key+\'basket\', {p[\'id\']:deepcopy(p) for p in section[\'products\']})\n    query = st.text_input(\'Search products�\', max_chars=150, key=key+\'search_text\')\n    try:\n        choices = catalogue.collections()\n        if choices.get(\'stale\'): st.caption(\'Showing cached collections. Refresh will retry shortly.\')\n        st.session_state[key+\'collections\'] = choices[\'rows\']\n    except Exception:\n        st.caption(\'Collections temporarily unavailable. Existing selection retained.\')\n    options = {r[\'id\']:r[\'title\'] for r in st.session_state.get(key+\'collections\',[])}\n    old = st.session_state.get(key+\'collection\',\'\')\n    if old and old not in options: options[old] = \'Selected collection (unavailable)\'\n    collection = st.selectbox(\'Collection\', [\'\',*options], format_func=lambda i:options.get(i,\'All collections\'), key=key+\'collection\')\n    active = st.checkbox(\'Active only\', True, key=key+\'active_control\')\n    submitted = st.button(\'Search\', key=key+\'search_button\')\n    # Text inputs submit on Enter/blur, not every keystroke. Dialog reruns stay local.\n    filters = (query.strip(),active,collection)\n    if filters != st.session_state.get(key+\'filters\'):\n        st.session_state[key+\'filters\'] = filters\n        st.session_state[key+\'offset\'] = 0; st.session_state.pop(key+\'page\', None)\n        st.session_state[key+\'generation\'] = uuid.uuid4().hex\n    try:\n        if key+\'page\' not in st.session_state:\n            with st.spinner(\'Loading products�\'):\n                page = catalogue.search(query,st.session_state.get(key+\'offset\',0),active,collection)\n                st.session_state[key+\'page\'] = page\n        page = st.session_state[key+\'page\']\n        facts = page[\'rows\']\n        if page.get(\'stale\'):st.caption(\'Showing cached products. Refresh will retry shortly.\')\n        if not facts:st.caption(\'No products found in this collection.\' if collection else \'No matching products.\')\n        for p in facts:\n            a,b,c = st.columns([1,7,2], vertical_alignment=\'center\')\n            selected = a.checkbox(\'Select \'+p[\'title\'],p[\'id\'] in basket,label_visibility=\'collapsed\',key=key+st.session_state[key+\'generation\']+p[\'id\'])\n            if selected: basket[p[\'id\']] = p\n            else: basket.pop(p[\'id\'], None)\n            with b.container(horizontal=True,vertical_alignment=\'center\'):\n                from crm_campaign_html import email_image_url\n                if email_image_url(p[\'image\']): st.image(email_image_url(p[\'image\']),width=38)\n                st.text(p[\'title\'])\n            c.caption(p[\'status\'])\n        left,right=st.columns(2)\n        if left.button(\'Previous\',disabled=st.session_state.get(key+\'offset\',0)==0,key=key+\'prev\'):\n            st.session_state[key+\'offset\']-=12;st.session_state.pop(key+\'page\');st.session_state[key+\'generation\']=uuid.uuid4().hex;st.rerun(scope=\'fragment\')\n        if right.button(\'Next\',disabled=not page[\'more\'],key=key+\'next\'):\n            st.session_state[key+\'offset\']=st.session_state.get(key+\'offset\',0)+12;st.session_state.pop(key+\'page\');st.session_state[key+\'generation\']=uuid.uuid4().hex;st.rerun(scope=\'fragment\')\n        st.caption(\'Selected: \'+str(len(basket))+\' / 12\')\n        cancel,add=st.columns(2)\n        if cancel.button(\'Cancel\',key=key+\'cancel\'):\n            st.session_state.pop(key+\'basket\',None);st.rerun()\n        if add.button(\'Add selected\',type=\'primary\',disabled=len(basket)>12,key=key+\'add\'):\n            with st.spinner(\'Checking current product facts�\'):\n                selected = catalogue.resolve(list(basket),doc[\'market\'],fresh=True)\n            sections=middle_sections(doc)\n            next(s for s in sections if s[\'id\']==section_id)[\'products\']=selected\n            commit_middle(doc,sections);doc[\'copy_reviewed\']=False\n            if editor_key:\n                previous=st.session_state.get(editor_key+\'catalogue_loaded\',(doc[\'market\'],()))\n                known=set(previous[1]) if previous[0]==doc[\'market\'] else set()\n                known.update(p[\'id\'] for p in selected)\n                visible=tuple(sorted({p[\'id\'] for s in sections if s[\'type\']==\'catalogue\' and s[\'visible\'] for p in s[\'products\']}))\n                if set(visible)<=known:\n                    st.session_state[editor_key+\'catalogue_loaded\']=(doc[\'market\'],visible)\n            st.session_state.pop(key+\'basket\',None);st.rerun()\n    except Exception as exc:\n        logging.getLogger(__name__).warning(\'crm_catalogue_picker_failed type=%s\',type(exc).__name__)\n        st.warning(\'Product catalogue is temporarily unavailable. Your selections are retained.\')\n        if st.button(\'Retry product loading\',key=key+\'retry\'):\n            st.session_state.pop(key+\'page\',None);st.rerun(scope=\'fragment\')\n\n\ndef middle_editor(doc, key, shop, store=None):\n    # Opening a saved snapshot is read-only. The existing Refresh action and\n    # final test/send validation own fresh product facts, never tab activation.\n    sections = middle_sections(doc)\n    warnings = {s[\'id\']:[issue for p in s[\'products\'] for issue in product_issues(p,s[\'settings\'])]\n                for s in sections if s[\'type\']==\'catalogue\'}\n    component = components.declare_component(\'crm_middle_sections_v2\',path=str(Path(__file__).parent/\'components\'/\'crm_sections\'))\n    templates=[]\n    if store is not None:\n        from crm_campaign_library import library_rows\n        from crm_store import StoreUnavailable\n        try:templates=[{k:r[k] for k in (\'id\',\'name\',\'version\')} for r in library_rows(store)]\n        except StoreUnavailable:st.caption(\'Templates temporarily unavailable. Add HTML and Add Catalogue remain available.\')\n    from crm_image_prompt import image_prompt\n    from crm_email_editor_context import current\n    editor = current(st.session_state,{})\n    campaign_name = editor.get(\'name\', \'\') if editor.get(\'document\') is doc else \'\'\n    from crm_email_prompt import handoff\n    from crm_prompt_copy import clipboard_script\n    verified=handoff(st.session_state,editor) if campaign_name else None\n    from crm_discount_ui import view as discount_view,callback as discount_callback\n    trigger=getattr(store,\'preview_trigger\',None) if getattr(store,\'email_mode\',None)==\'automation\' else None\n    event = render_component(component,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,\'email_mode\',None)==\'automation\',preview_debounce=350 if getattr(store,\'email_mode\',None)==\'automation\' else 750,clipboard_script=clipboard_script(),history_scope=doc.get(\'campaign_key\',key),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+\'section_event\'),key=key+\'middle\',default=None)\n    if st.session_state.get(key+\'section_error\'):st.warning(st.session_state.pop(key+\'section_error\'))\n    if event and event.get(\'event\') != st.session_state.get(key+\'section_event\'):\n        st.session_state[key+\'section_event\'] = event.get(\'event\')\n        try:\n            if event.get(\'type\')==\'add\' and event.get(\'kind\')==\'checkout\':\n                if store is None:raise ValueError(\'Template storage is unavailable.\')\n                from crm_checkout_section import insert\n                insert(store,doc,event);rerun_editor()\n            elif event.get(\'type\')==\'add\' and event.get(\'kind\')==\'template\':\n                if store is None:raise ValueError(\'Template storage is unavailable.\')\n                from crm_campaign_library import insert_saved_template\n                from crm_store import StoreUnavailable\n                try:\n                    with st.spinner(\'Loading template...\'):\n                        insert_saved_template(store,doc,event.get(\'template_id\'),event.get(\'version\'))\n                except (ValueError,StoreUnavailable):raise ValueError(\'Template could not be loaded.\') from None\n                rerun_editor()\n            elif event.get(\'type\')==\'picker\':\n                if not any(s[\'id\']==event.get(\'id\') and s[\'type\']==\'catalogue\' for s in sections): raise ValueError(\'Catalogue not found.\')\n                picker_key=key+\'picker_\'+event[\'id\']\n                for suffix in (\'basket\',\'page\'):st.session_state.pop(picker_key+suffix,None)\n                st.session_state[picker_key+\'generation\']=uuid.uuid4().hex\n                product_picker(doc,event[\'id\'],Catalogue(shop),picker_key,editor_key=key)\n            elif event.get(\'type\')==\'refresh\':\n                with st.spinner(\'Refreshing catalogue facts�\'):\n                    refreshed=refresh_catalogues(doc,Catalogue(shop))\n                doc.update(refreshed);doc[\'copy_reviewed\']=False\n                rerun_editor()\n            else:\n                apply_event(doc,event);doc[\'copy_reviewed\']=False\n                rerun_editor()\n        except ValueError as exc:\n            st.session_state[key+\'section_error\']=str(exc);rerun_editor()\n        except Exception as exc:\n            logging.getLogger(__name__).warning(\'crm_catalogue_editor_failed type=%s\',type(exc).__name__)\n            st.session_state[key+\'section_error\']=\'Catalogue facts could not be refreshed. Saved content is retained; retry before testing.\'\n            rerun_editor()\n'
+
+======================================================================
+FAIL: test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions (test_crm_campaign_sections.SectionPersistenceTests.test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_campaign_sections.py", line 154, in test_ui_defaults_rerun_and_edits_persist_without_hidden_conversions
+    self.assertNotIn('html_sections', saved)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'html_sections' unexpectedly found in {'tags': [], 'type': 'Collector Launch', 'notes': '', 'offer': 'None', 'blocks': [], 'counts': {}, 'market': 'AU', 'content': {'ps': '', 'body': '', 'intro': '', 'cta_url': '', 'eyebrow': '', 'subject': '', 'headline': '', 'hero_alt': '', 'hero_url': '', 'cta_label': '', 'preheader': '', 'secondary': '', 'product_block': ''}, 'product': {}, 'audience': {'kind': 'Rules', 'name': 'Subscribed � AUSTRALIA', 'rules': {'all': [{'op': 'eq', 'field': 'consent', 'value': 'SUBSCRIBED'}, {'op': 'eq', 'field': 'country', 'value': 'AU'}]}}, 'objective': 'Launch', 'custom_html': '<!doctype html><html><head><style>body{display:none}</style></head><body><table><tr><td><h1>A collector moment</h1><p>Discover the collection.</p><a href="https://www.sportscaveshop.com">Explore</a></td></tr></table></body></html>', 'send_timing': {'mode': 'now'}, 'smart_hours': 16, 'campaign_key': 'sc_2f8ad630ef8348fc84e464e4d266ac06', 'content_mode': 'HTML', 'template_ref': {}, 'copy_reviewed': False, 'html_sections': {'footer': '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#171717">\n<tr><td align="center" style="padding:24px;color:#eeeeeb;background-color:#171717;border-top:3px solid #c9a33f;font-family:Arial;font-size:13px;line-height:1.6">\n<p><strong>{{BUSINESS_NAME}}</strong></p>\n<p><a href="https://www.instagram.com/sportscaveshop/" style="color:#dfc986">Instagram</a> � <a href="https://www.facebook.com/profile.php?id=100090408036260" style="color:#dfc986">Facebook</a> � <a href="https://au.pinterest.com/SportsCaveShop/" style="color:#dfc986">Pinterest</a></p>\n<p><a href="{{WEBSITE_URL}}" style="color:#eeeeeb">Website</a> � <a href="{{CONTACT_URL}}" style="color:#eeeeeb">{{CONTACT_EMAIL}}</a></p>\n<p>{{BUSINESS_ADDRESS}}</p>\n<p>{{MARKETING_DISCLOSURE}}</p>\n<p><a href="{{UNSUBSCRIBE_URL}}" style="color:#dfc986">Unsubscribe</a>{{PRIVACY_LINK}}</p>\n</td></tr></table>', 'header': '<table role="presentation" width="100%" cellspacing="0" cellpadding="0">\n<tr><td style="padding:22px 24px;background-color:#171717;color:#ffffff;border-bottom:3px solid #b49450;font-family:Arial;font-size:20px;font-weight:700">\nSPORTS CAVE\n<p style="font-family:Arial;font-size:11px;color:#dfc986">CAMPAIGN TEST / PREVIEW � LIVE MARKETING DISABLED</p>\n</td></tr>\n</table>'}, 'offer_reviewed': False, 'market_audience': True, 'middle_sections': [{'id': 'html-1', 'html': '<!doctype html><html><head><style>body{display:none}</style></head><body><table><tr><td><h1>A collector moment</h1><p>Discover the collection.</p><a href="https://www.sportscaveshop.com">Explore</a></td></tr></table></body></html>', 'type': 'html', 'visible': True, 'html_number': 1}], 'renderer_version': 1}
+
+======================================================================
+FAIL: test_edits_update_draft_render_not_draft_or_historical_snapshot (test_crm_email_defaults.EmailDefaultsTests.test_edits_update_draft_render_not_draft_or_historical_snapshot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_email_defaults.py", line 59, in test_edits_update_draft_render_not_draft_or_historical_snapshot
+    self.assertIn('Latest header',current['html']);self.assertIn('Latest website',current['html'])
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Latest header' not found in '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><style>@media only screen and (max-width:480px){.sc-stack{display:block!important;width:100%!important;box-sizing:border-box!important}}@media only screen and (min-width:540px){.sc-cat-3{width:33.333%!important}.sc-cat-4{width:25%!important}}</style><!--[if mso]><style>.sc-cat-item{width:100%!important}</style><![endif]--></head><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all">A sporting moment</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff"><tr><td><table role="presentation" width="100%" cellspacing="0" cellpadding="0">\n<tr><td style="padding:22px 24px;background-color:#171717;color:#ffffff;border-bottom:3px solid #b49450;font-family:Arial;font-size:20px;font-weight:700">\nSPORTS CAVE\n<p style="font-family:Arial;font-size:11px;color:#dfc986">CAMPAIGN TEST / PREVIEW � LIVE MARKETING DISABLED</p>\n</td></tr>\n</table><table><tr><td><h1>A collector moment</h1><p>Discover the collection.</p><a href="https://www.sportscaveshop.com?utm_source=sports_cave_os&amp;utm_medium=email&amp;utm_campaign=sc_fe1e821b0e3349efbebde9343615857b&amp;utm_content=html_1&amp;sc_campaign_id=sc_fe1e821b0e3349efbebde9343615857b&amp;sc_test=1">Explore</a></td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#171717">\n<tr><td align="center" style="padding:24px;color:#eeeeeb;background-color:#171717;border-top:3px solid #c9a33f;font-family:Arial;font-size:13px;line-height:1.6">\n<p><strong>Sports Cave</strong></p>\n<p><a href="https://www.instagram.com/sportscaveshop/" style="color:#dfc986">Instagram</a> � <a href="https://www.facebook.com/profile.php?id=100090408036260" style="color:#dfc986">Facebook</a> � <a href="https://au.pinterest.com/SportsCaveShop/" style="color:#dfc986">Pinterest</a></p>\n<p><a href="https://www.sportscaveshop.com" style="color:#eeeeeb">Website</a> � <a href="mailto:replies@example.test" style="color:#eeeeeb">replies@example.test</a></p>\n<p></p>\n<p>You�re receiving this marketing email because you subscribed to Sports Cave updates.</p>\n<p><span style="color:#dfc986">Unsubscribe</span> � <a href="https://www.sportscaveshop.com/policies/privacy-policy" style="color:#dfc986">Privacy</a></p>\n</td></tr></table></td></tr></table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
+
+======================================================================
+FAIL: test_mocked_test_payload_uses_latest_defaults_and_native_link (test_crm_email_defaults.EmailDefaultsTests.test_mocked_test_payload_uses_latest_defaults_and_native_link)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_email_defaults.py", line 124, in test_mocked_test_payload_uses_latest_defaults_and_native_link
+    self.assertIn('Latest test header',payload['html']);self.assertIn(TEST_UNSUBSCRIBE_URL,payload['html'])
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'Latest test header' not found in '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><style>@media only screen and (max-width:480px){.sc-stack{display:block!important;width:100%!important;box-sizing:border-box!important}}@media only screen and (min-width:540px){.sc-cat-3{width:33.333%!important}.sc-cat-4{width:25%!important}}</style><!--[if mso]><style>.sc-cat-item{width:100%!important}</style><![endif]--></head><body style="margin:0;background:#f7f5ef;color:#171717;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;mso-hide:all">A sporting moment</div><table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center"><!--[if mso]><table role="presentation" width="600"><tr><td><![endif]--><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#fff"><tr><td><table role="presentation" width="100%" cellspacing="0" cellpadding="0">\n<tr><td style="padding:22px 24px;background-color:#171717;color:#ffffff;border-bottom:3px solid #b49450;font-family:Arial;font-size:20px;font-weight:700">\nSPORTS CAVE\n<p style="font-family:Arial;font-size:11px;color:#dfc986"></p>\n</td></tr>\n</table><table><tr><td><h1>A collector moment</h1><p>Discover the collection.</p><a href="https://www.sportscaveshop.com?utm_source=sports_cave_os&amp;utm_medium=email&amp;utm_campaign=sc_aaec3829e4f641baa16ecb9630ba025f&amp;utm_content=html_1&amp;sc_campaign_id=sc_aaec3829e4f641baa16ecb9630ba025f&amp;sc_test=1">Explore</a></td></tr></table><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#171717">\n<tr><td align="center" style="padding:24px;color:#eeeeeb;background-color:#171717;border-top:3px solid #c9a33f;font-family:Arial;font-size:13px;line-height:1.6">\n<p><strong>Sports Cave</strong></p>\n<p><a href="https://www.instagram.com/sportscaveshop/" style="color:#dfc986">Instagram</a> � <a href="https://www.facebook.com/profile.php?id=100090408036260" style="color:#dfc986">Facebook</a> � <a href="https://au.pinterest.com/SportsCaveShop/" style="color:#dfc986">Pinterest</a></p>\n<p><a href="https://www.sportscaveshop.com?utm_source=sports_cave_os&amp;utm_medium=email&amp;utm_campaign=sc_aaec3829e4f641baa16ecb9630ba025f&amp;utm_content=link_5e4f61c1b6bb&amp;sc_campaign_id=sc_aaec3829e4f641baa16ecb9630ba025f&amp;sc_test=1" style="color:#eeeeeb">Website</a> � <a href="mailto:replies@example.test" style="color:#eeeeeb">replies@example.test</a></p>\n<p></p>\n<p>You�re receiving this marketing email because you subscribed to Sports Cave updates.</p>\n<p><a href="https://www.sportscaveshop.com/account/unsubscribe?token=synthetic-test-only" style="color:#dfc986">Unsubscribe</a> � <a href="https://www.sportscaveshop.com/policies/privacy-policy" style="color:#dfc986">Privacy</a></p>\n</td></tr></table></td></tr></table><!--[if mso]></td></tr></table><![endif]--></td></tr></table></body></html>'
+
+======================================================================
+FAIL: test_ui_has_only_global_edit_actions_and_preserves_body (test_crm_email_defaults.EmailDefaultsTests.test_ui_has_only_global_edit_actions_and_preserves_body)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_email_defaults.py", line 139, in test_ui_has_only_global_edit_actions_and_preserves_body
+    self.assertEqual(len(edits),2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+AssertionError: 3 != 2
+
+======================================================================
+FAIL: test_empty_compose_creates_no_draft_and_initial_reads_are_bounded (test_crm_html_workspace.SqlWorkspaceTests.test_empty_compose_creates_no_draft_and_initial_reads_are_bounded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_html_workspace.py", line 129, in test_empty_compose_creates_no_draft_and_initial_reads_are_bounded
+    self.assertTrue(any('Campaigns' in m.value for m in at.markdown))
+    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_manifest_is_reviewed_and_check_never_connects (test_crm_storage_recovery.RecoveryTests.test_manifest_is_reviewed_and_check_never_connects)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_storage_recovery.py", line 22, in test_manifest_is_reviewed_and_check_never_connects
+    self.assertEqual(run_migrations.DEPLOYMENT_MIGRATIONS[-len(run_migrations.CRM_MIGRATIONS):],run_migrations.CRM_MIGRATIONS)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Tuples differ: ('20261004_wall_preview_customer_identity.sql',[486 chars]sql') != ('20260927093818_crm_marketing_v1.sql', '202609[489 chars]sql')
+
+First differing element 0:
+'20261004_wall_preview_customer_identity.sql'
+'20260927093818_crm_marketing_v1.sql'
+
+Diff is 1145 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_outage_keeps_navigation_and_blocks_creating (test_crm_storage_recovery.RecoveryTests.test_outage_keeps_navigation_and_blocks_creating)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_storage_recovery.py", line 82, in test_outage_keeps_navigation_and_blocks_creating
+    self.assertTrue(at.error)
+    ~~~~~~~~~~~~~~~^^^^^^^^^^
+AssertionError: ElementList() is not true
+
+======================================================================
+FAIL: test_failure_not_cached (test_crm_template_picker.TemplateCacheTests.test_failure_not_cached)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_template_picker.py", line 56, in test_failure_not_cached
+    self.assertEqual(library_rows(s),[]);self.assertEqual(s.html_library.call_count,2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [{'id': 'builtin-lifestyle-image-1', 'name[367 chars]rue}] != []
+
+First list contains 4 additional elements.
+First extra element 0:
+{'id': 'builtin-lifestyle-image-1', 'name': 'Lifestyle Image 1', 'version': 1, 'builtin': True}
+
++ []
+- [{'builtin': True,
+-   'id': 'builtin-lifestyle-image-1',
+-   'name': 'Lifestyle Image 1',
+-   'version': 1},
+-  {'builtin': True,
+-   'id': 'builtin-lifestyle-image-2',
+-   'name': 'Lifestyle Image 2',
+-   'version': 1},
+-  {'builtin': True,
+-   'id': 'builtin-lifestyle-image-3',
+-   'name': 'Lifestyle Image 3',
+-   'version': 1},
+-  {'builtin': True,
+-   'id': 'builtin-frame-synced-banner',
+-   'name': 'See It In Your Cave � Frame-Synced Banner',
+-   'version': 1}]
+
+======================================================================
+FAIL: test_metadata_shared_sorted_and_copied_without_bodies (test_crm_template_picker.TemplateCacheTests.test_metadata_shared_sorted_and_copied_without_bodies)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_template_picker.py", line 26, in test_metadata_shared_sorted_and_copied_without_bodies
+    self.assertEqual([r['name'] for r in library_rows(s)],['Alpha','Trust Icons'])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['Alp[13 chars]cons', 'Lifestyle Image 1', 'Lifestyle Image 2[63 chars]ner'] != ['Alp[13 chars]cons']
+
+First list contains 4 additional elements.
+First extra element 2:
+'Lifestyle Image 1'
+
++ ['Alpha', 'Trust Icons']
+- ['Alpha',
+-  'Trust Icons',
+-  'Lifestyle Image 1',
+-  'Lifestyle Image 2',
+-  'Lifestyle Image 3',
+-  'See It In Your Cave � Frame-Synced Banner']
+
+======================================================================
+FAIL: test_locked_assets_have_attribution_not_body_misattribution (test_crm_test_preflight_issues.TestPreflightIssues.test_locked_assets_have_attribution_not_body_misattribution)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\hello\Documents\sports-cave-image-factory\tests\test_crm_test_preflight_issues.py", line 90, in test_locked_assets_have_attribution_not_body_misattribution
+    self.assertEqual(len(issues),2)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+AssertionError: 0 != 2
+
+----------------------------------------------------------------------
+Ran 1195 tests in 183.037s
+
+FAILED (failures=12, errors=11, skipped=1)
+READY CRM schema and migration ledger verified; source=DATABASE_URL

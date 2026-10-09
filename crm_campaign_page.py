@@ -373,7 +373,7 @@ def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
         from crm_email_size_ui import size_meter
         st.session_state[key+'review_preview_settings']=cfg
         st.session_state[key+'editor_emitted']=False
-        size_meter(editor,key,cfg)
+        size_slot=st.empty()
         save=st.button('Save draft',type='secondary',disabled=not available or bool(editor['archived_at']) or bool(editor.get('recovery_readonly')))
         from crm_campaign_send_ui import test_control
         test_control(drafts,actions.user,editor,key,available,cfg=cfg)
@@ -381,10 +381,8 @@ def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
         send_control(shop,drafts,actions.user,editor,key,cfg,available)
     new_requested=False
     composer_form(shop,drafts,actions,editor,key,cfg,choices if available else None,available)
+    with size_slot.container():size_meter(editor,key,cfg)
     st.session_state[key+'editor_emitted']=True
-    if available and not editor.get('archived_at') and not editor.get('recovery_readonly'):
-        from crm_campaign_audience_prepare import prepare_session
-        prepare_session(st.session_state,shop,drafts,editor,key,cfg)
     if save and flush_current(force=True):
         st.toast('Draft saved');st.rerun()
     if new_requested:st.session_state['campaign_pending_open']='new'

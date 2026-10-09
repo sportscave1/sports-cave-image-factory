@@ -241,16 +241,20 @@ class SendFlowUiTests(unittest.TestCase):
         self.assertEqual(sum(p.proto.popover.label=='Send test' for p in at.get('popover')),1)
     def test_form_submission_routes_to_shared_test_and_reports_success(self):
         at=self.app();at.run(timeout=20)
+        at.session_state[at.session_state['campaign_edit_key']+'test_popover']=True;at.run(timeout=20)
         with patch('crm_campaign_send_ui.send_test',return_value={'audit_saved':True}) as send:
             next(t for t in at.text_input if t.label=='Send test email').set_value('internal@example.test')
+            at.session_state[at.session_state['campaign_edit_key']+'test_popover']=True
             next(b for b in at.button if b.label=='→').click().run(timeout=20)
             self.assertFalse(at.exception);send.assert_called_once()
             self.assertEqual(send.call_args.args[3],'internal@example.test')
             self.assertTrue(any('Test email sent to internal@example.test' in s.value for s in at.success))
     def test_failed_test_returns_visible_safe_error(self):
         at=self.app();at.run(timeout=20)
+        at.session_state[at.session_state['campaign_edit_key']+'test_popover']=True;at.run(timeout=20)
         with patch('crm_campaign_send_ui.send_test',side_effect=DeliveryError('sender_rejected')):
             next(t for t in at.text_input if t.label=='Send test email').set_value('internal@example.test')
+            at.session_state[at.session_state['campaign_edit_key']+'test_popover']=True
             next(b for b in at.button if b.label=='→').click().run(timeout=20)
             self.assertTrue(any('Sender/domain rejected' in s.value for s in at.error))
     def test_first_send_now_is_review_only_and_shows_off(self):

@@ -242,7 +242,7 @@ def asset_issues(slots, source_hashes=()):
         output_digest = hashlib.sha256(slot['data']).hexdigest() if slot.get('data') else ''
         if (digest and digest in hashes) or (output_digest and output_digest in output_hashes):
             issues.append('Identical output image assigned to multiple refresh slots.')
-        if digest and digest in source_hashes:
+        if (digest and digest in source_hashes) or (output_digest and output_digest in source_hashes):
             issues.append('Unchanged winner/canonical source assigned as a refreshed image.')
         hashes.append(digest)
         output_hashes.append(output_digest)

@@ -64,7 +64,8 @@ try{
     await page.getByRole('textbox',{name:'Card 1 headline',exact:true}).waitFor();
     await page.waitForFunction(()=>[...document.querySelectorAll('input')].some(e=>e.value==='Local CSV Review'));
     await page.keyboard.press('Escape');
-    await page.waitForFunction(()=>document.querySelector('[class*="st-key-ads-images-save-open"] button')?.disabled===true);
+    await page.waitForFunction(()=>document.querySelector('[class*="st-key-ads-images-save-open"] button')?.disabled===false);
+    assert.equal(await page.getByRole('button',{name:'POST NOW',exact:true}).count(),0,'Draft copy edits never bypass review');
     await page.getByRole('button',{name:/^(?:table_view )?CSV$/}).click();
     await page.locator('[class*="st-key-ads-carousel-copy-csv-import"] input[type="file"]').setInputFiles('tmp/refresh-test-copy-valid.csv');
     await page.waitForFunction(()=>[...document.querySelectorAll('input')].some(e=>e.value==='The Rivalry'));

@@ -124,12 +124,24 @@ def validate_saved_package(package):
         raise SavedPackageError("Only Meta campaigns can enter Meta Posting.")
     if package.get("ad_type") not in {"Carousel", "Instant Experience", "Single Image / Video"}:
         raise SavedPackageError("The saved package has an unsupported ad type.")
-    if not package.get("folder") or not package.get("package_id") or not package.get("copy_csv"):
+    draft = package.get('draft_workspace') is True and package.get('creative_refresh') is True
+    if not package.get("folder") or not package.get("package_id") or (not draft and not package.get("copy_csv")):
         raise SavedPackageError("The saved package is missing its Dropbox reference or copy.")
     if content_hash({key: value for key, value in package.items() if key != "package_hash"}) != package.get("package_hash"):
         raise SavedPackageError("The saved package payload is damaged or has changed. Save it again.")
     specs = campaign_image_slots(package["ad_type"])
     assets = package.get("assets") or ()
+    if draft:
+        if package['ad_type']=='Carousel':
+            cards=package['batch'].get('cards') or []
+            if not 2 <= len(cards) <= 10 or [c.get('card_number') for c in cards] != list(range(1,len(cards)+1)):
+                raise SavedPackageError('Saved Carousel card order is invalid.')
+            specs=[{'id':f'carousel-{i:02d}','position':i,'label':f'Card {i}'} for i in range(1,len(cards)+1)]
+        positions=[asset.get('position') for asset in assets]
+        if len(set(positions))!=len(positions):raise SavedPackageError('Saved image positions are duplicated.')
+        mapped={spec['position']:spec for spec in specs}
+        if any(position not in mapped for position in positions):raise SavedPackageError('Saved image position is invalid.')
+        specs=[mapped[position] for position in positions]
     if len(assets) != len(specs):
         raise SavedPackageError(f"The saved {package['ad_type']} package needs {len(specs)} images.")
     for spec, asset in zip(specs, assets):

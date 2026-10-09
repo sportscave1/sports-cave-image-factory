@@ -1,0 +1,770 @@
+{
+  "samples": [
+    {
+      "session": 0,
+      "kind": "cold",
+      "firstUsefulMs": 1323,
+      "previewReadyMs": 1328.2000000029802,
+      "reads": 8,
+      "dbWaitMs": 172.42829999304377,
+      "editorTabMs": 237.5,
+      "previewSwitchMs": 119.19999999552965,
+      "templatesMs": 124.79999999701977,
+      "backMs": 227.20000000298023
+    },
+    {
+      "session": 0,
+      "kind": "warm",
+      "firstUsefulMs": 365.20000000298023,
+      "previewReadyMs": 388.5,
+      "reads": 3,
+      "dbWaitMs": 14.106399998127017,
+      "editorTabMs": 206.79999999701977,
+      "previewSwitchMs": 90.59999999403954,
+      "templatesMs": 196.19999999552965,
+      "backMs": 195.30000000447035
+    },
+    {
+      "session": 1,
+      "kind": "cold",
+      "firstUsefulMs": 827.7999999970198,
+      "previewReadyMs": 832.7999999970198,
+      "reads": 4,
+      "dbWaitMs": 39.67480000574142,
+      "editorTabMs": 223.60000000149012,
+      "previewSwitchMs": 81.79999999701977,
+      "templatesMs": 103.10000000149012,
+      "backMs": 196.19999999552965
+    },
+    {
+      "session": 1,
+      "kind": "warm",
+      "firstUsefulMs": 337.29999999701977,
+      "previewReadyMs": 344.20000000298023,
+      "reads": 3,
+      "dbWaitMs": 14.401400003407616,
+      "editorTabMs": 208.70000000298023,
+      "previewSwitchMs": 94.39999999850988,
+      "templatesMs": 212.79999999701977,
+      "backMs": 198.60000000149012
+    },
+    {
+      "session": 2,
+      "kind": "cold",
+      "firstUsefulMs": 539.3000000044703,
+      "previewReadyMs": 652,
+      "reads": 4,
+      "dbWaitMs": 45.845799999369774,
+      "editorTabMs": 226.10000000149012,
+      "previewSwitchMs": 112.69999999552965,
+      "templatesMs": 143.69999999552965,
+      "backMs": 235.10000000149012
+    },
+    {
+      "session": 2,
+      "kind": "warm",
+      "firstUsefulMs": 335.5,
+      "previewReadyMs": 338.6000000014901,
+      "reads": 3,
+      "dbWaitMs": 13.28119999379851,
+      "editorTabMs": 235.10000000149012,
+      "previewSwitchMs": 94.89999999850988,
+      "templatesMs": 209.09999999403954,
+      "backMs": 189.79999999701977
+    },
+    {
+      "session": 3,
+      "kind": "cold",
+      "firstUsefulMs": 462.80000000447035,
+      "previewReadyMs": 511.80000000447035,
+      "reads": 3,
+      "dbWaitMs": 9.488800009421539,
+      "editorTabMs": 230.10000000149012,
+      "previewSwitchMs": 80,
+      "templatesMs": 110.69999999552965,
+      "backMs": 201
+    },
+    {
+      "session": 3,
+      "kind": "warm",
+      "firstUsefulMs": 393.70000000298023,
+      "previewReadyMs": 402.70000000298023,
+      "reads": 3,
+      "dbWaitMs": 46.7761000036262,
+      "editorTabMs": 211.79999999701977,
+      "previewSwitchMs": 95.89999999850988,
+      "templatesMs": 97.5,
+      "backMs": 207.29999999701977
+    },
+    {
+      "session": 4,
+      "kind": "cold",
+      "firstUsefulMs": 821.2999999970198,
+      "previewReadyMs": 823.2999999970198,
+      "reads": 4,
+      "dbWaitMs": 37.45820000767708,
+      "editorTabMs": 218.90000000596046,
+      "previewSwitchMs": 87.29999999701977,
+      "templatesMs": 109.19999999552965,
+      "backMs": 220.19999999552965
+    },
+    {
+      "session": 4,
+      "kind": "warm",
+      "firstUsefulMs": 843.8000000044703,
+      "previewReadyMs": 846.2000000029802,
+      "reads": 3,
+      "dbWaitMs": 58.23489999602316,
+      "editorTabMs": 213.89999999850988,
+      "previewSwitchMs": 102.70000000298023,
+      "templatesMs": 206.39999999850988,
+      "backMs": 252
+    },
+    {
+      "session": 5,
+      "kind": "cold",
+      "firstUsefulMs": 837.2999999970198,
+      "previewReadyMs": 839.6000000014901,
+      "reads": 4,
+      "dbWaitMs": 79.1567000123905,
+      "editorTabMs": 220.29999999701977,
+      "previewSwitchMs": 84.39999999850988,
+      "templatesMs": 109.40000000596046,
+      "backMs": 231.39999999850988
+    },
+    {
+      "session": 5,
+      "kind": "warm",
+      "firstUsefulMs": 835.6000000014901,
+      "previewReadyMs": 838.2000000029802,
+      "reads": 3,
+      "dbWaitMs": 15.232999990985263,
+      "editorTabMs": 214.40000000596046,
+      "previewSwitchMs": 102.79999999701977,
+      "templatesMs": 118.60000000149012,
+      "backMs": 211
+    },
+    {
+      "session": 6,
+      "kind": "cold",
+      "firstUsefulMs": 493.20000000298023,
+      "previewReadyMs": 539.1000000014901,
+      "reads": 3,
+      "dbWaitMs": 12.043100003211293,
+      "editorTabMs": 208.89999999850988,
+      "previewSwitchMs": 72.10000000149012,
+      "templatesMs": 198.69999999552965,
+      "backMs": 193.89999999850988
+    },
+    {
+      "session": 6,
+      "kind": "warm",
+      "firstUsefulMs": 321.90000000596046,
+      "previewReadyMs": 325,
+      "reads": 3,
+      "dbWaitMs": 10.4739000016707,
+      "editorTabMs": 236.80000000447035,
+      "previewSwitchMs": 97.39999999850988,
+      "templatesMs": 116.30000000447035,
+      "backMs": 206.70000000298023
+    },
+    {
+      "session": 7,
+      "kind": "cold",
+      "firstUsefulMs": 472.79999999701977,
+      "previewReadyMs": 520.5,
+      "reads": 3,
+      "dbWaitMs": 10.491900007764343,
+      "editorTabMs": 229.29999999701977,
+      "previewSwitchMs": 80.5,
+      "templatesMs": 109.39999999850988,
+      "backMs": 194.39999999850988
+    },
+    {
+      "session": 7,
+      "kind": "warm",
+      "firstUsefulMs": 335.70000000298023,
+      "previewReadyMs": 342.20000000298023,
+      "reads": 3,
+      "dbWaitMs": 10.281100003339816,
+      "editorTabMs": 206.60000000149012,
+      "previewSwitchMs": 84.5,
+      "templatesMs": 111.39999999850988,
+      "backMs": 285.5
+    },
+    {
+      "session": 8,
+      "kind": "cold",
+      "firstUsefulMs": 500.5,
+      "previewReadyMs": 554.2000000029802,
+      "reads": 3,
+      "dbWaitMs": 11.993200008873828,
+      "editorTabMs": 223,
+      "previewSwitchMs": 99,
+      "templatesMs": 145.70000000298023,
+      "backMs": 225
+    },
+    {
+      "session": 8,
+      "kind": "warm",
+      "firstUsefulMs": 835.6000000014901,
+      "previewReadyMs": 838,
+      "reads": 3,
+      "dbWaitMs": 28.48930000618566,
+      "editorTabMs": 239.79999999701977,
+      "previewSwitchMs": 102.60000000149012,
+      "templatesMs": 120.20000000298023,
+      "backMs": 193.79999999701977
+    },
+    {
+      "session": 9,
+      "kind": "cold",
+      "firstUsefulMs": 841.5999999940395,
+      "previewReadyMs": 843.5999999940395,
+      "reads": 4,
+      "dbWaitMs": 15.679500000260305,
+      "editorTabMs": 227.10000000149012,
+      "previewSwitchMs": 97.59999999403954,
+      "templatesMs": 133.19999999552965,
+      "backMs": 227.20000000298023
+    },
+    {
+      "session": 9,
+      "kind": "warm",
+      "firstUsefulMs": 839.2999999970198,
+      "previewReadyMs": 841.3999999985099,
+      "reads": 3,
+      "dbWaitMs": 11.223899993638042,
+      "editorTabMs": 242.89999999850988,
+      "previewSwitchMs": 80.20000000298023,
+      "templatesMs": 118.30000000447035,
+      "backMs": 211.19999999552965
+    },
+    {
+      "session": 10,
+      "kind": "cold",
+      "firstUsefulMs": 545.5,
+      "previewReadyMs": 592.7999999970198,
+      "reads": 4,
+      "dbWaitMs": 35.5522000027122,
+      "editorTabMs": 226.90000000596046,
+      "previewSwitchMs": 69.59999999403954,
+      "templatesMs": 119.10000000149012,
+      "backMs": 192.89999999850988
+    },
+    {
+      "session": 10,
+      "kind": "warm",
+      "firstUsefulMs": 352.29999999701977,
+      "previewReadyMs": 359.09999999403954,
+      "reads": 3,
+      "dbWaitMs": 11.380300005839672,
+      "editorTabMs": 207.19999999552965,
+      "previewSwitchMs": 82.29999999701977,
+      "templatesMs": 123,
+      "backMs": 205.69999999552965
+    },
+    {
+      "session": 11,
+      "kind": "cold",
+      "firstUsefulMs": 365.80000000447035,
+      "previewReadyMs": 576.2000000029802,
+      "reads": 3,
+      "dbWaitMs": 11.401799994928297,
+      "editorTabMs": 220.20000000298023,
+      "previewSwitchMs": 107.89999999850988,
+      "templatesMs": 218.39999999850988,
+      "backMs": 195.60000000149012
+    },
+    {
+      "session": 11,
+      "kind": "warm",
+      "firstUsefulMs": 827.6000000014901,
+      "previewReadyMs": 829.7999999970198,
+      "reads": 3,
+      "dbWaitMs": 11.125699995318428,
+      "editorTabMs": 227.69999999552965,
+      "previewSwitchMs": 93.39999999850988,
+      "templatesMs": 135.69999999552965,
+      "backMs": 238.79999999701977
+    }
+  ],
+  "profiles": [
+    {
+      "session": 0,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 5.986600001051556
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 15.585900000587571
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 15.969899999618065
+        },
+        {
+          "sql": "SELECT * FROM crm_workspace_settings WHERE key=ANY(%s)",
+          "ms": 16.464399996038992
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 15.435099994647317
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 45.702499999606516
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 54.00450000161072
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 3.279399999883026
+        }
+      ]
+    },
+    {
+      "session": 0,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 6.543499999679625
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 4.096700002264697
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.466199996182695
+        }
+      ]
+    },
+    {
+      "session": 1,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.450700005691033
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 4.352299998572562
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 25.081400002818555
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 5.790399998659268
+        }
+      ]
+    },
+    {
+      "session": 1,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 6.921300002431963
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.770000002987217
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.7100999979884364
+        }
+      ]
+    },
+    {
+      "session": 2,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.319699997722637
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 4.074800002854317
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 27.824899996630847
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 9.626400002161972
+        }
+      ]
+    },
+    {
+      "session": 2,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 5.519099999219179
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.922799995052628
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.839299999526702
+        }
+      ]
+    },
+    {
+      "session": 3,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 3.794100004597567
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 2.8549000053317286
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.839799999492243
+        }
+      ]
+    },
+    {
+      "session": 3,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 28.268300004128832
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 14.897000000928529
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.6107999985688366
+        }
+      ]
+    },
+    {
+      "session": 4,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.007500006991904
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 15.363599995907862
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 15.162000003329013
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 2.9251000014482997
+        }
+      ]
+    },
+    {
+      "session": 4,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 6.428499997127801
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 24.172099998395424
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 27.634300000499934
+        }
+      ]
+    },
+    {
+      "session": 5,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 19.06530000269413
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 13.522100001864601
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 29.563900003267918
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 17.005400004563853
+        }
+      ]
+    },
+    {
+      "session": 5,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 6.649599999946076
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 4.735899994557258
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.847499996481929
+        }
+      ]
+    },
+    {
+      "session": 6,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 5.10260000010021
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.747900002053939
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.1926000010571443
+        }
+      ]
+    },
+    {
+      "session": 6,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.477999995287973
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.44290000066394
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.5530000057187863
+        }
+      ]
+    },
+    {
+      "session": 7,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.882799999904819
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.1087000024854206
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.500400005374104
+        }
+      ]
+    },
+    {
+      "session": 7,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.3443000031402335
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.080099995713681
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.8567000044859014
+        }
+      ]
+    },
+    {
+      "session": 8,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.69120000343537
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 4.276900006516371
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.0250999989220873
+        }
+      ]
+    },
+    {
+      "session": 8,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 5.78230000246549
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.9823000042815693
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 18.7246999994386
+        }
+      ]
+    },
+    {
+      "session": 9,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.7228999974322505
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.5636000029626302
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.758999999263324
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 3.6340000006021
+        }
+      ]
+    },
+    {
+      "session": 9,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.934500000672415
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.3831999971880578
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.9061999957775697
+        }
+      ]
+    },
+    {
+      "session": 10,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 8.975400000053924
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.00250000145752
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.974300005007535
+        },
+        {
+          "sql": "SELECT value FROM crm_runtime_state WHERE key=%s",
+          "ms": 20.59999999619322
+        }
+      ]
+    },
+    {
+      "session": 10,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.362700005003717
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.8578000021516345
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 3.1597999986843206
+        }
+      ]
+    },
+    {
+      "session": 11,
+      "kind": "cold",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 5.040500000177417
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.6257999963709153
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.7354999983799644
+        }
+      ]
+    },
+    {
+      "session": 11,
+      "kind": "warm",
+      "sql": [
+        {
+          "sql": "SELECT * FROM crm_campaign_drafts WHERE id=%s",
+          "ms": 4.9956000002566725
+        },
+        {
+          "sql": "SELECT key,version FROM crm_workspace_settings WHERE key=ANY(%s) ORDER BY key",
+          "ms": 3.447099996265024
+        },
+        {
+          "sql": "SELECT * FROM crm_campaigns WHERE id=%s",
+          "ms": 2.6829999987967312
+        }
+      ]
+    }
+  ]
+}

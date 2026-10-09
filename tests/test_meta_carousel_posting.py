@@ -779,6 +779,19 @@ class CarouselCsvAndUiTests(unittest.TestCase):
 
 
 class CarouselServiceTests(unittest.TestCase):
+    def test_four_card_refresh_creates_and_verifies_exact_count_with_mocked_meta(self):
+        client = FakeCarouselClient()
+        original = carousel_request()
+        request = carousel_request(carousel_cards=original.carousel_cards[:4], carousel_card_count=4)
+        result = MetaPostingService(client=client, store=FakePostingStore(),
+                                    carousel_validator=AcceptingCarouselValidator()).create_paused_campaign(request)
+        self.assertEqual(result['status'], 'COMPLETE')
+        self.assertEqual(client.calls.count('ad_image'), 4)
+        self.assertEqual(client.calls.count('carousel_ad'), 1)
+        self.assertTrue(carousel_ad_result(result['ad_results'])['carousel_verification']['verified'])
+        with self.assertRaises(PostingValidationError):
+            validate_carousel_posting_request(carousel_request(carousel_cards=original.carousel_cards[:4]))
+
     def test_new_mode_creates_one_paused_carousel_and_no_instant_experience_work(self):
         client = FakeCarouselClient()
         store = FakePostingStore()

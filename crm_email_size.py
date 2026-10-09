@@ -51,6 +51,15 @@ def analyze_rendered_email(html,text,asset_metadata=None):
             'unknown_asset_count':len(urls)-len(known),'checked_asset_count':len(known)}
 
 
+def with_asset_metadata(local,metadata):
+    """Refresh optional remote-byte facts without parsing unchanged email HTML."""
+    known=[metadata.get(url) for url in local['asset_urls']]
+    known=[n for n in known if isinstance(n,int) and n>=0]
+    return {**local,'remote_asset_bytes':sum(known),'largest_asset_bytes':max(known,default=0),
+            'large_asset_count':sum(n>LARGE_ASSET_BYTES for n in known),
+            'unknown_asset_count':len(local['asset_urls'])-len(known),'checked_asset_count':len(known)}
+
+
 def render_production(doc,cfg,campaign_id=None,unsubscribe_url=None,send_id=None):
     from crm_campaign_content import render_campaign
     from crm_tracking import send_identity

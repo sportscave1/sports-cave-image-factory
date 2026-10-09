@@ -113,21 +113,22 @@ POSTING_IMAGE_RUNTIME_VERSION = "2026-09-01-durable-source-v2"
 PRIMARY_TEXT_KEYS = tuple(f"{STATE_PREFIX}primary_text_{index}" for index in range(1, 4))
 HEADLINE_KEYS = tuple(f"{STATE_PREFIX}headline_{index}" for index in range(1, 4))
 DESCRIPTION_KEYS = tuple(f"{STATE_PREFIX}description_{index}" for index in range(1, 4))
-CAROUSEL_IMAGE_KEYS = tuple(f"{STATE_PREFIX}carousel_image_{index}" for index in range(1, 6))
+CAROUSEL_COUNT_KEY = STATE_PREFIX + "carousel_card_count"
+CAROUSEL_IMAGE_KEYS = tuple(f"{STATE_PREFIX}carousel_image_{index}" for index in range(1, 11))
 CAROUSEL_IMAGE_STATE_KEYS = tuple(
-    f"{STATE_PREFIX}carousel_image_state_{index}" for index in range(1, 6)
+    f"{STATE_PREFIX}carousel_image_state_{index}" for index in range(1, 11)
 )
 CAROUSEL_HEADLINE_KEYS = tuple(
-    f"{STATE_PREFIX}carousel_headline_{index}" for index in range(1, 6)
+    f"{STATE_PREFIX}carousel_headline_{index}" for index in range(1, 11)
 )
 CAROUSEL_DESCRIPTION_KEYS = tuple(
-    f"{STATE_PREFIX}carousel_description_{index}" for index in range(1, 6)
+    f"{STATE_PREFIX}carousel_description_{index}" for index in range(1, 11)
 )
 CAROUSEL_PRIMARY_TEXT_KEYS = tuple(
     f"{STATE_PREFIX}carousel_primary_text_{index}" for index in range(1, 6)
 )
 CAROUSEL_EXPECTED_IMAGE_NAME_KEYS = tuple(
-    f"{STATE_PREFIX}carousel_expected_image_name_{index}" for index in range(1, 6)
+    f"{STATE_PREFIX}carousel_expected_image_name_{index}" for index in range(1, 11)
 )
 IMAGE_KEY = IMAGE_KEYS[0]
 PRIMARY_TEXT_KEY = PRIMARY_TEXT_KEYS[0]
@@ -612,13 +613,15 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
         primary_texts = tuple(
             str(value or "") for value in (batch or {}).get("primary_texts") or ()
         )
-        if len(cards) != 5 or len(primary_texts) != 5:
+        count = len(cards) if batch.get("saved_refresh_draft") else 5
+        if not 2 <= count <= 10 or len(cards) != count or len(primary_texts) != 5:
             raise PostingImportCSVError(
                 "Carousel Posting CSV must contain five cards and five Primary Text variations."
             )
         _prepare_posting_run_for_import(state)
         matched = match_posting_import_product(batch, product_records)
         updates = {
+            CAROUSEL_COUNT_KEY: count,
             PRODUCT_KEY: str(matched.get("identity") or ""),
             PRODUCT_TRACK_KEY: str(matched.get("identity") or ""),
             COUNTRY_KEY: str(batch.get("country") or ""),
@@ -632,7 +635,8 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
             updates[CAROUSEL_EXPECTED_IMAGE_NAME_KEYS[index]] = str(
                 card.get("image_filename") or ""
             )
-            updates[CAROUSEL_PRIMARY_TEXT_KEYS[index]] = primary_texts[index]
+        for key, text in zip(CAROUSEL_PRIMARY_TEXT_KEYS, primary_texts):
+            updates[key] = text
         state.update(updates)
         state.pop(RESULT_KEY, None)
         canonical_url = str(
@@ -650,7 +654,7 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
             "sport": str(batch.get("sport_category") or ""),
             "campaign_type": CAROUSEL_AD_TYPE,
             "ads_loaded": 1,
-            "cards_loaded": 5,
+            "cards_loaded": count,
             "variations_loaded": 5,
         }
     ads = tuple(dict(row or {}) for row in (batch or {}).get("ads") or ())
@@ -778,7 +782,8 @@ def consume_saved_posting_package(product_records, *, state=None):
         "product_identity": staging[PRODUCT_KEY], "url": batch["product_url"],
     }
     image_keys = CAROUSEL_IMAGE_STATE_KEYS if package["ad_type"] == "Carousel" else IMAGE_STATE_KEYS
-    for key, asset in zip(image_keys, package["assets"]):
+    for asset in package["assets"]:
+        key = image_keys[asset["position"] - 1]
         try:
             record = build_meta_posting_image_record(
                 asset["data"], original_name=asset["filename"],
@@ -889,7 +894,7 @@ def _posting_form_ready(
 
 def _carousel_form_ready(
     *, product_title, product_url, cards, primary_texts, country, sport,
-    dataset_id, identities_ready,
+    dataset_id, identities_ready, card_count=5,
 ):
     return bool(
         product_title
@@ -898,7 +903,8 @@ def _carousel_form_ready(
         and sport
         and dataset_id
         and identities_ready
-        and len(tuple(cards or ())) == 5
+        and 2 <= card_count <= 10
+        and len(tuple(cards or ())) == card_count
         and all(
             card.get("image")
             and not card.get("image_error")
@@ -967,6 +973,7 @@ def _build_posting_request(
             )
             for card in carousel_cards or ()
         ),
+        carousel_card_count=len(carousel_cards) if carousel_cards else 5,
         carousel_primary_texts=tuple(
             str(value or "") for value in carousel_primary_texts or ()
         ),
@@ -2193,7 +2200,7 @@ def _render_post_ad():
                     }
                 )
     else:
-        for index in range(1, 6):
+        for index in range(1, int(st.session_state.get(CAROUSEL_COUNT_KEY, 5)) + 1):
             with st.container(border=True):
                 st.markdown(f"**CAROUSEL CARD {index}**")
                 asset_col, copy_col = st.columns([1, 2])
@@ -2521,6 +2528,7 @@ def _render_post_ad():
     )
     form_ready = (
         _carousel_form_ready(
+            card_count=int(st.session_state.get(CAROUSEL_COUNT_KEY, 5)),
             product_title=product_title,
             product_url=product_url,
             cards=carousel_cards,
