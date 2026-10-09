@@ -69,16 +69,19 @@ class DiscountDeliveryTests(unittest.TestCase):
         self.send_step();self.f.engine.send_one();self.assertEqual(self.f.provider.send.call_count,2)
         row=self.f.store.q('SELECT status,error_code FROM crm_marketing_sends WHERE enrollment_id=%s AND step_index=2',(self.j['id'],),True)
         self.assertEqual(row['status'],'BLOCKED');self.assertIn('discount_verification_unavailable',row['error_code'])
-    def test_mocked_internal_provider_has_resolved_offer_and_disabled_recovery(self):
+    def test_mocked_internal_provider_has_resolved_offer_and_owned_recovery(self):
         f=self.f;f.store.step_id=self.flow['emails'][2]['step_id'];f.store.draft_identity=self.a['id']
         f.store.preview_shop=f.shop;f.shop.abandoned_preview.return_value={'nodes':[self.cart],'pageInfo':{'hasNextPage':False}}
         from crm_campaign_send import send_test
-        from tests.crm_fixtures import TestRecipientShop
+        from tests.test_crm_customer_test import fixture,USER
+        _,cart,customer,evidence=fixture(f.shop,self.cart)
+        self.discounts.checkout.update(id=cart['id'],customer=customer,abandonedCheckoutUrl=cart['abandonedCheckoutUrl'])
         editor=f.store.draft(self.a['id']);wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
-        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
-            send_test(f.store,ADMIN,editor,'internal@example.test',str(uuid.uuid4()),env=LIVE,session=wire)
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_checkout.contact_record',return_value=evidence):
+            send_test(f.store,USER,editor,'internal@example.test',str(uuid.uuid4()),env=LIVE,session=wire)
         wire.post.assert_called_once();message=wire.post.call_args.kwargs['json']
-        self.assertEqual(message['subject'],'[CAMPAIGN TEST] Your offer: FIXTURE5')
+        self.assertEqual(message['subject'],'Your offer: FIXTURE5')
+        self.assertIn('discount=FIXTURE5',message['html']);self.assertNotIn('Recovery action disabled',message['html'])
         self.assertNotIn('{{',message['html']);self.assertIn('A$5 off',message['html'])
 
     def test_removed_offer_with_dependent_subject_is_saved_but_publication_held(self):

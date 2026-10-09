@@ -267,7 +267,11 @@ class AutomationStore(CampaignStore):
         label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')
         return (personalise(rendered,values_from_preview(data)) if has_personalisation(rendered) else rendered),label
 
-    def test_document(self,doc,operation_id):
+    def test_document(self,doc,operation_id,*,recipient=None,customer=None,shop=None):
+        if recipient is not None and self.flow(self.draft_identity)['config']['draft']['trigger']=='abandoned':
+            from crm_test_checkout import document
+            from crm_shopify import Shopify
+            return document(shop or getattr(self,'preview_shop',None) or Shopify(),doc,recipient,customer)
         from crm_recovery_discount import substitute,selection as discount_selection
         if discount_selection(doc):
             from crm_discount_api import fresh
@@ -282,7 +286,9 @@ class AutomationStore(CampaignStore):
         if not needs_checkout(doc) and not has_personalisation(doc):return doc
         if has_personalisation(doc) and not needs_checkout(doc):
             trigger=self.flow(self.draft_identity)['config']['draft']['trigger']
-            if trigger!='abandoned':return personalise(doc,values_from_preview(None),trigger=trigger)
+            if trigger!='abandoned':
+                from crm_personalisation import resolve
+                return personalise(doc,resolve({},customer,trigger=trigger) if customer else values_from_preview(None),trigger=trigger)
         from crm_frame_banner_template import present,resolve
         from crm_lifestyle_images import present as has_lifestyle,resolve as resolve_lifestyle
         from crm_abandoned_checkout import dynamic

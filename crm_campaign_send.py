@@ -115,10 +115,13 @@ def send_test(store,user,editor,recipient,operation_id,*,env=None,session=None):
     if not single_email(recipient):raise ValueError('Enter one valid email address.')
     doc=deepcopy(editor['document']);doc['copy_reviewed']=True
     validation_doc=doc
-    if getattr(store,'email_mode',None)=='automation':
-        store.draft_identity=editor['id'];validation_doc=store.test_document(doc,operation_id)
-    checks=preflight(validation_doc,env,store.render_settings(env))
-    failed=[k for k,v in checks['test'].items() if not v]
+    automation=getattr(store,'email_mode',None)=='automation'
+    if automation:
+        from crm_test_recipient import authorize_internal
+        authorize_internal(user,recipient,env)
+        store.draft_identity=editor['id']
+    checks=preflight(validation_doc,env,store.render_settings(env)) if not automation else None
+    failed=[k for k,v in checks['test'].items() if not v] if checks else []
     if failed:
         from crm_campaign_issues import CampaignValidationError
         raise CampaignValidationError(checks)

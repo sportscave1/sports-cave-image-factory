@@ -126,16 +126,12 @@ class CampaignStore(WorkspaceRecords):
         if not automation and self.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):raise ValueError('Queued and sent campaigns are read-only. Duplicate to test.')
         if not single_email(recipient):raise DeliveryError('invalid_recipient')
         if confirmed is not True:raise DeliveryError('confirmation_required')
+        if automation:
+            from crm_test_recipient import authorize_internal
+            authorize_internal(user,recipient,env)
         operation=str(uuid.UUID(str(operation_id)))
         if row['version']!=version or row['archived_at']: raise ValueError('Reload the current editable campaign before testing.')
         cfg=self.render_settings(env)
-        render_doc=row['document']
-        if automation:
-            self.draft_identity=identity;render_doc=self.test_document(render_doc,operation)
-        checks=preflight(render_doc,env,cfg)
-        if not checks['test_ready']:
-            from crm_campaign_issues import CampaignValidationError
-            raise CampaignValidationError(checks)
         digest=fingerprint(row['document'],cfg)
         from crm_resend_marketing import get_resend_marketing_config_status
         delivery=get_resend_marketing_config_status(env)
@@ -146,18 +142,36 @@ class CampaignStore(WorkspaceRecords):
         prior=self.q('SELECT * FROM crm_internal_tests WHERE id=%s',(operation,),True)
         if prior:
             return self._test_receipt(prior,identity,version,digest,recipient,automation_step_id=self.step_id if automation else None)
+        from crm_test_recipient import test_recipient_customer
+        from crm_native_unsubscribe import native_unsubscribe_url
+        if automation:
+            from crm_shopify import Shopify
+            shop=shop or getattr(self,'preview_shop',None) or Shopify()
+        customer=test_recipient_customer(self,recipient,shop=shop)
+        unsubscribe_url=native_unsubscribe_url(customer)
+        render_doc=row['document']
+        if automation:
+            self.draft_identity=identity
+            render_doc=self.test_document(render_doc,operation,recipient=recipient,customer=customer,shop=shop)
+        checks=preflight(render_doc,env,cfg)
+        if not checks['test_ready']:
+            from crm_campaign_issues import CampaignValidationError
+            raise CampaignValidationError(checks)
         if catalogue_sections:
             from crm_catalogue import Catalogue, verify_catalogues
             from crm_shopify import Shopify
             verify_catalogues(row['document'], Catalogue(shop or Shopify()))
-        from crm_test_recipient import test_recipient_url
-        unsubscribe_url=test_recipient_url(self,recipient,shop=shop)
         rendered=render_campaign(render_doc,cfg,unsubscribe_url=unsubscribe_url,production=True,test_tracking=True)
         if automation:
             from crm_abandoned_checkout import reject_unresolved
             reject_unresolved(rendered['html']);reject_unresolved(rendered['text'])
+            from crm_recovery_links import sources,inspect,checkout_url,verify
+            urls=[u for source in sources(render_doc) for u in inspect(source).urls if checkout_url(u)]
+            if urls:
+                if len(set(urls))!=1:raise ValueError('Test recovery destinations do not match.')
+                verify(rendered,urls[0],len(urls))
         # Production-authentic content, still a manual TEST transport and receipt.
-        rendered['subject']='[CAMPAIGN TEST] '+rendered['subject']
+        if not automation:rendered['subject']='[CAMPAIGN TEST] '+rendered['subject']
         rendered['unsubscribe_url']=unsubscribe_url
         with self.db() as conn:
             # Serialize per-user attempts across sessions, preserving receipt replay.

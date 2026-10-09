@@ -128,7 +128,7 @@ class NativeAutomationTests(unittest.TestCase):
         self.customer['lastOrder']['createdAt']=now().isoformat()
         advance(self.engine,self.due(journeys[0]));self.provider.send.assert_not_called()
 
-    def test_legacy_checkout_send_test_fallback_preserves_draft_and_blocks_publish(self):
+    def test_legacy_checkout_send_test_cannot_send_sample_fallback(self):
         from tests.test_crm_checkout_preview_fallback import PreviewFallbackTests
         from crm_campaign_send import send_test
         from tests.crm_fixtures import TestRecipientShop
@@ -139,12 +139,11 @@ class NativeAutomationTests(unittest.TestCase):
         self.store.preview_shop.abandoned_preview.side_effect=RuntimeError('Synthetic unavailable')
         wire=Mock();wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
         editor=self.store.draft(a['id']);operation=str(uuid.uuid4())
-        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
-            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
-            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
-        wire.post.assert_called_once();payload=wire.post.call_args.kwargs['json']
-        self.assertIn('MY CUSTOM HEADLINE',payload['html']);self.assertIn('Recovery action disabled',payload['html'])
-        self.assertNotIn('{{',payload['html']);self.assertNotIn('/checkouts/',payload['html'])
+        from tests.test_crm_customer_test import fixture,USER
+        self.store.preview_shop,_,_,_=fixture();self.store.preview_shop.recent_test_checkouts.return_value={'nodes':[],'pageInfo':{'hasNextPage':False}}
+        with self.assertRaisesRegex(ValueError,'No matching'):
+            send_test(self.store,USER,editor,'internal@example.test',operation,env=LIVE,session=wire)
+        wire.post.assert_not_called()
         saved=self.store.flow(a['id']);self.assertEqual(saved['config']['draft']['emails'][0]['document']['middle_sections'],doc['middle_sections'])
         with self.assertRaisesRegex(ValueError,'Unresolved'):self.store.publish(ADMIN,a['id'],saved['config']['revision'],env=LIVE)
 
@@ -172,22 +171,24 @@ class NativeAutomationTests(unittest.TestCase):
         self.provider.send.assert_called_once()
         self.assertEqual(self.store.q('SELECT status FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)['status'],'RECOVERED')
 
-    def test_dynamic_checkout_manual_test_real_latest_without_recovery_link_or_draft_data(self):
+    def test_dynamic_checkout_manual_test_recipient_owned_links_without_draft_data(self):
         from tests.test_crm_abandoned_checkout import checkout,native_document
         from crm_campaign_send import send_test
         from tests.crm_fixtures import TestRecipientShop
         a=self.store.create(ADMIN,'abandoned','Checkout test local fixture');self.created.append(str(a['id']))
         flow=deepcopy(a['config']['draft']);flow['emails']=[email_step(native_document(),0)]
         a=self.store.save_flow(ADMIN,a['id'],a['name'],flow,1);self.store.step_id=flow['emails'][0]['step_id']
-        self.store.preview_shop=Mock();self.store.preview_shop.abandoned_preview.return_value={'nodes':[checkout(83)],'pageInfo':{'hasNextPage':False}}
+        from tests.test_crm_customer_test import fixture,USER
+        self.store.preview_shop,cart,customer,evidence=fixture()
         editor=self.store.draft(a['id']);operation=str(uuid.uuid4());wire=Mock()
         wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
-        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
-            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
-            send_test(self.store,ADMIN,editor,'internal@example.test',operation,env=LIVE,session=wire)
-        wire.post.assert_called_once();self.store.preview_shop.abandoned_preview.assert_called_once_with(after=None,fresh=True)
-        payload=wire.post.call_args.kwargs['json'];self.assertIn('Recovery action disabled',payload['html'])
-        self.assertNotIn('/checkouts/83/',str(payload));self.assertIn('A$199.50',payload['html'])
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_checkout.contact_record',return_value=evidence):
+            send_test(self.store,USER,editor,'internal@example.test',operation,env=LIVE,session=wire)
+            send_test(self.store,USER,editor,'internal@example.test',operation,env=LIVE,session=wire)
+        wire.post.assert_called_once();self.store.preview_shop.recent_test_checkouts.assert_called_once_with(after=None)
+        self.store.preview_shop.abandoned_preview.assert_not_called()
+        payload=wire.post.call_args.kwargs['json'];self.assertNotIn('Recovery action disabled',payload['html'])
+        self.assertIn('/checkouts/83/',str(payload));self.assertIn('A$199.50',payload['html'])
         saved=self.store.flow(a['id'])['config']['draft']['emails'][0]['document']
         self.assertNotIn('/checkouts/83/',str(saved));self.assertTrue(any(s['type']=='abandoned_checkout_products' for s in saved['middle_sections']))
 
@@ -373,8 +374,8 @@ class NativeAutomationTests(unittest.TestCase):
         editor=self.store.draft(a['id']);operation=str(uuid.uuid4());wire=Mock()
         wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
         before=self.store.q('SELECT count(*) n FROM crm_campaign_drafts',one=True)['n']
-        user={**ADMIN,'role':'worker','page_permissions':['crm_automations_manage']}
-        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
+        user={**ADMIN,'email':'internal@example.test'}
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_shopify.Shopify',return_value=TestRecipientShop()):
             first=send_test(self.store,user,editor,'internal@example.test',operation,env=LIVE,session=wire)
             second=send_test(self.store,user,editor,'internal@example.test',operation,env=LIVE,session=wire)
         self.assertEqual(first['message_id'],second['message_id']);wire.post.assert_called_once()

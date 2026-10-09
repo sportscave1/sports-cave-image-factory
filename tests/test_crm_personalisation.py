@@ -136,13 +136,15 @@ class PersonalisationSQLTests(unittest.TestCase):
         test_doc=fixture.store.test_document(doc,str(uuid.uuid4()))
         self.assertEqual(test_doc['content']['subject'],message['subject'])
         from crm_campaign_send import send_test
-        from tests.crm_fixtures import TestRecipientShop
+        from tests.test_crm_customer_test import fixture as owned_fixture,USER
+        fixture.store.preview_shop,owned,customer,evidence=owned_fixture(cart=cart)
+        customer['firstName']='Fixture'
         editor=fixture.store.draft(a['id']);wire=Mock()
         wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
-        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_recipient.Shopify',return_value=TestRecipientShop()):
-            send_test(fixture.store,ADMIN,editor,'internal@example.test',str(uuid.uuid4()),env=LIVE,session=wire)
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_test_checkout.contact_record',return_value=evidence):
+            send_test(fixture.store,USER,editor,'internal@example.test',str(uuid.uuid4()),env=LIVE,session=wire)
         wire.post.assert_called_once()
-        self.assertEqual(wire.post.call_args.kwargs['json']['subject'],'[CAMPAIGN TEST] '+message['subject'])
+        self.assertEqual(wire.post.call_args.kwargs['json']['subject'],message['subject'])
         fixture.shop.abandoned_preview.assert_not_called()
 
 

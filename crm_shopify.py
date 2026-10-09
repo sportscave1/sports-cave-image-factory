@@ -86,6 +86,7 @@ CHECKOUTS = '''query CrmCheckouts($after:String,$query:String) {
  nodes { id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id } shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 } } '''+PAGE+' } }'
 CHECKOUT_FIELDS=CHECKOUT_FIELDS.replace('customer { id }',CHECKOUT_IDENTITY)
 CHECKOUTS=CHECKOUTS.replace('customer { id }',CHECKOUT_IDENTITY)
+TEST_CHECKOUTS=CHECKOUTS.replace('CrmCheckouts(', 'CrmTestCheckouts(').replace('sortKey:CREATED_AT,','sortKey:CREATED_AT,reverse:true,')
 CHECKOUT = 'query CrmCheckout($id:ID!) { node(id:$id) { ... on AbandonedCheckout { '+CHECKOUT_FIELDS+' } } }'
 CHECKOUT_PREVIEW_FIELDS=CHECKOUT_FIELDS.replace('customer { id }','customer { id firstName lastName email }')
 CHECKOUT_PREVIEW='''query CrmAbandonedPreview($after:String) { abandonedCheckouts(first:5,after:$after,sortKey:CREATED_AT,reverse:true,query:"recovery_state:not_recovered") { nodes { '''+CHECKOUT_PREVIEW_FIELDS+' } '+PAGE+' } }'
@@ -303,6 +304,8 @@ class Shopify:
         return self.query(COUNT, {'query':query}, 'segment counts', 45)['customerSegmentMembers']['totalCount']
     def checkouts(self, after=None, query=None, fresh=False):
         return self.query(CHECKOUTS, {'after':after, 'query':query}, 'abandoned checkouts', 20, fresh)['abandonedCheckouts']
+    def recent_test_checkouts(self, after=None):
+        return self.query(TEST_CHECKOUTS, {'after':after, 'query':'status:open recovery_state:not_recovered'}, 'abandoned checkouts', 0, True)['abandonedCheckouts']
     def checkout(self, checkout_id, fresh=False):
         checkout=self.query(CHECKOUT, {'id':gid(checkout_id, 'AbandonedCheckout')}, 'abandoned checkouts', 20, fresh).get('node')
         if checkout:

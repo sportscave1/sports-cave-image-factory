@@ -57,7 +57,7 @@ def test_control(store,user,editor,key,available=True,cfg=None):
         with st.form(key+'single_test',clear_on_submit=False,border=False):
             if automation:
                 from crm_checkout_preview import needs_checkout
-                if needs_checkout(editor['document']):st.caption('Abandoned checkout preview · sample fallback if unavailable · recovery action disabled in test emails.')
+                if needs_checkout(editor['document']):st.caption('Uses your authorized test address’s own verified checkout. No automation journey is started.')
             cols=st.columns([6,1],vertical_alignment='bottom',gap='small')
             recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Send test uses the real Shopify unsubscribe link for this customer.')
             submit=cols[1].form_submit_button('→',help='Send this test email',disabled=bool(st.session_state.get(key+'test_busy')))
