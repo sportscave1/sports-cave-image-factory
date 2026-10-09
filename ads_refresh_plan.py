@@ -281,7 +281,8 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
         # Historical saved execution notes remain valid. The new physical block
         # is injected into newly built prompts; do not invalidate completed work.
         full_rules = build_sports_cave_image_realism_rules(include_product_lock=True,
-            allow_intentional_detail_crop=is_detail, include_physical_realism=False)
+            allow_intentional_detail_crop=is_detail, include_physical_realism=False,
+            include_premium_realism=False)
         required = ('camera', 'lighting', 'product_placement') if is_detail else ('architecture', 'layout', 'wall_palette', 'wall_material', 'camera')
         extras = ('furniture', 'lighting', 'flooring', 'background', 'product_placement')
         if not isinstance(dimensions, dict):
@@ -311,8 +312,12 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
                 issues.append(f'Execution {i}: declared scene barely changes the winner; redesign architecture and layout.')
         prompt = str(execution.get('image_prompt') or '')
         # Existing saved workspaces may contain the previously approved collective-source wording.
-        old_carousel_authority = ('The supplied winning Carousel cards collectively supply '
-                                  'the immutable product authority')
+        old_carousel_authority = ('The supplied winning Carousel cards collectively supply the immutable product authority. '
+            'Inspect ALL supplied full-resolution winning cards together to establish exact artwork, printed internal background, '
+            'text, faces, logos, plaque, aspect ratio and frame colour/thickness/depth/bevel. Preserve these exactly; '
+            'never invent hidden or illegible details. Each individual card supplies its own creative role and broad room family. '
+            'Only the external environment and execution may change. If product details conflict or cannot be established, '
+            'stop and request complete original winning cards. Do not redraw or reconstruct the product.')
         authority_present = ((CAROUSEL_AUTHORITY in prompt or old_carousel_authority in prompt)
                              if campaign_type == 'Carousel' else AUTHORITY in prompt)
         if full_rules not in prompt or not authority_present or product.casefold() not in prompt.casefold() or expected not in prompt:

@@ -72,12 +72,9 @@ CAMERA_VARIATIONS = (
 def resolved_camera_variation(visual, index, context, variation_token):
     """Deterministically choose one of five safe angles; edits and reruns stay stable."""
     user_choice = str(visual.get("resolved_camera_variation") or "").strip()
-    if user_choice in CAMERA_VARIATIONS:
+    if user_choice:
         return user_choice
-    identity = "|".join((str(context.get("product_sport") or ""),
-                         str(context.get("product_era") or ""),
-                         str(context.get("artwork_mood") or ""),
-                         str(variation_token or "standard"), str(index)))
+    identity = "|".join((str(variation_token or "standard"), str(index)))
     digest = hashlib.sha256(identity.encode("utf-8")).digest()
     return CAMERA_VARIATIONS[int.from_bytes(digest[:4], "big") % len(CAMERA_VARIATIONS)]
 

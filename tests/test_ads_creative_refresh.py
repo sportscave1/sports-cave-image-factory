@@ -289,13 +289,15 @@ class CreativeRefreshNavigationTests(unittest.TestCase):
                 force_open_routes=ads_navigation.ADS_ROUTES,
             )
         )
-        for selector in (
-            ".st-key-sidebar-ads-children,",
-            '.st-key-sidebar-ads-children div[data-testid="stButton"] button,',
-        ):
-            self.assertIn(selector, source)
-        self.assertIn("max-width: calc(100% - 1.15rem);", source)
-        self.assertIn("width: calc(100% - 1.15rem);", source)
+        from sidebar_theme import SIDEBAR_CSS
+        self.assertIn('key="sidebar-ads-children"', source)
+        self.assertIn('from sidebar_theme import SIDEBAR_CSS', source)
+        self.assertIn('st.markdown("<style>" + SIDEBAR_CSS + "</style>"', source)
+        selector = 'section[data-testid="stSidebar"] [class*="st-key-sidebar-"][class*="-children"]'
+        self.assertIn(selector + ' {', SIDEBAR_CSS)
+        self.assertIn(selector + ' [data-testid="stButton"] button {', SIDEBAR_CSS)
+        self.assertIn('width:100%;max-width:100%;', SIDEBAR_CSS)
+        self.assertIn('padding-left:41px !important;', SIDEBAR_CSS)
 
     def test_seo_cannot_claim_the_creative_refresh_route(self):
         self.assertNotIn(
@@ -1027,8 +1029,13 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         component_source = (
             ROOT / "ui_components" / "prompt_copy" / "index.html"
         ).read_text(encoding="utf-8")
-        self.assertIn("navigator.clipboard.writeText(promptText)", component_source)
-        self.assertIn('document.execCommand("copy")', component_source)
+        self.assertIn('<script src="clipboard.js"></script>', component_source)
+        self.assertIn("const text=String(args.prompt_text||'');", component_source)
+        self.assertIn('await window.scCopyText(text)', component_source)
+        clipboard_source = (ROOT / "ui_components" / "prompt_copy" / "clipboard.js").read_text(encoding="utf-8")
+        self.assertIn('root.navigator.clipboard.writeText(String(text))', clipboard_source)
+        self.assertIn("root.document.execCommand('copy')", clipboard_source)
+        self.assertIn('else if(copied)setComponentValue(Boolean(args.prompt_text))', component_source)
         self.assertIn('streamlit:setComponentValue', component_source)
         self.assertIn("#d4a54c", component_source.casefold())
         self.assertIn("✓ Prompt copied", (ROOT / "ads_creative_refresh.py").read_text(encoding="utf-8"))

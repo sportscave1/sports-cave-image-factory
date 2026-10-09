@@ -91,14 +91,16 @@ def verify_live_black_frame_variant(shopify_product_id, expected_handle):
     variants = product.get("variants") or []
     def is_black(variant):
         title = str(variant.get("title") or "").strip()
-        if re.match(r"^Black\s*(?:/|[-–]|$)", title, re.I):
-            return True
-        return any(str(opt.get("value") or "").strip().casefold() == "black"
-                   for opt in (variant.get("selected_options") or []) if isinstance(opt, dict))
+        frame_options = [opt for opt in (variant.get("selected_options") or [])
+                         if isinstance(opt, dict) and 'frame' in str(opt.get('name') or '').casefold()]
+        if frame_options:
+            return any(str(opt.get("value") or "").strip().casefold() in {"black", "black frame", "black framed"}
+                       for opt in frame_options)
+        return bool(re.match(r"^Black(?:\s+frame(?:d)?)?\s*(?:/|[-–]|$)", title, re.I))
     blacks = [v for v in variants if isinstance(v, dict) and is_black(v)]
     if not blacks:
         raise ValueError("No explicitly Black framed variant was found in the live Shopify data.")
-    # Prefer the largest verified framed variant, not an inferred size or price.
+    # XL is a reference-link preference only, never a physical-size override.
     xl = [v for v in blacks if re.search(r"\b(?:XL|EXTRA LARGE)\b", str(v.get("title") or ""), re.I)]
     variant = (xl or blacks)[0]
     legacy_id = str(variant.get("legacy_resource_id") or "").strip()

@@ -207,8 +207,8 @@ class PhysicalWorkflowTests(unittest.TestCase):
         import ads_page as ads
         from tests.test_ads_refresh_plan import fixture
         baseline = json.loads(Path('tests/fixtures/refresh_unaffected_prompts.json').read_text())
-        # Image prompts intentionally changed; the old SHA fixtures are evidence of the
-        # pre-upgrade text, not a production contract after explicit user approval.
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads(Path('tests/fixtures/premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         self.assertEqual(len(baseline), 25)
         for identity in baseline:
             mode,category,kind = identity.split('/',2)
@@ -217,6 +217,7 @@ class PhysicalWorkflowTests(unittest.TestCase):
             prompt = ads.build_ads_prompt(value['product_name'],category,'Australia',kind,product_url=value['product_url'],
                 variation_token='baseline',creative_refresh_context=context)
             with self.subTest(identity=identity):
+                self.assertEqual(contract_shape(prompt), structures[identity])
                 self.assertIn(physical.MARKER,prompt)
                 self.assertIn('GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY',prompt)
                 self.assertIn('SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3',prompt)
@@ -353,7 +354,7 @@ class PhysicalWorkflowTests(unittest.TestCase):
         prompt = email.visual_contract()
         self.assertEqual(prompt.count(physical.MARKER),1)
         original = Path('prompts/sports_cave_email_visual_v1.txt').read_text(encoding='utf-8').strip()
-        self.assertEqual(strip_physical(prompt),original)
+        self.assertEqual(strip_physical(prompt),original + '\n\n' + blocks.SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3)
         self.assertIn('1200x900',prompt)
 
     def test_design_studio_original_artwork_not_reactivated_as_mockup_generator(self):

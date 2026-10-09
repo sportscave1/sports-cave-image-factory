@@ -138,6 +138,8 @@ with patch.object(ads, '_ads_image_workflow', return_value=workflow), patch.obje
         for obsolete in ('Build it in Meta', 'Final Ad Review', 'Execution notes', 'Refresh checks',
                          'Refresh analysis & standalone briefs', 'Attach WINNER_IE', 'st.iframe'):
             self.assertNotIn(obsolete, visible)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=20)
         next(b for b in app.button if b.label == 'POST NOW').click().run(timeout=20)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state['current_page'], ads.POSTING_ROUTE)

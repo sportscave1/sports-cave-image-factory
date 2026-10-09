@@ -47,22 +47,35 @@ The final scene must look like real professional interior photography, not an AI
 
 
 def build(filename, base=None, *, avoid_angles=()):
+    body = str(base or TEMPLATE).strip()
+    if SCENE.search(body):
+        return body
+    # Custom fixed prompts may contain free-text directions or editable variables.
+    # Do not draw conflicting random settings over an authored composition.
+    if body != TEMPLATE.strip():
+        return (
+            f'{body}\n\n{MARKER}\nSelected room: As specified in the editable prompt\n'
+            'Selected camera angle: As specified in the editable prompt\n'
+            'Honour the authored room, camera, lighting and variables. If no camera is specified, '
+            'use a natural eye-level straight-on view. Keep the complete frame rigid and readable.\n'
+            f'{END}'
+        )
     room = random.choice(ROOMS[filename])
     available_angles = tuple(a for a in ANGLES if a not in avoid_angles) or ANGLES
     angle = random.choice(available_angles)
-    body = SCENE.sub('', base or TEMPLATE).strip()
     return (
         f'{body}\n\n{MARKER}\nSelected room: {room}\n'
         f'Selected camera angle: {angle}\n{ANGLE_GUIDANCE[angle]}\n'
-        'Use only this selected room and angle; they replace any earlier room or '
-        'camera direction. Keep the artwork unchanged and the room premium, '
+        'Use this selected room and angle unless the user explicitly edits them. '
+        'Keep the artwork unchanged and the room premium, '
         f'minimal and product-page friendly.\n{END}'
     )
 
 
 def preserve_selection(override, generated):
-    """A stored prompt edit must not erase the run's resolved room/angle choice."""
+    """Retain explicit edits; fill only a missing scene from the saved generation."""
+    from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
     scene = SCENE.search(generated)
-    if not scene or override == generated:
-        return override
-    return SCENE.sub('', override).strip() + '\n\n' + scene.group(0)
+    if scene and not SCENE.search(override):
+        override = override.strip() + '\n\n' + scene.group(0)
+    return append_sports_cave_image_realism_rules(override)

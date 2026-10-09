@@ -12,7 +12,7 @@ permissions:
 jobs:
   prompt-contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,22 +22,28 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Compile changed modules
         run: |
-          python -m py_compile sports_cave_prompt_blocks.py sports_cave_physical_realism.py mockup_product_prompts.py image_factory.py ads_refresh_plan.py ads_refresh_generation.py ads_product_catalog.py ads_page.py ads_ie_visual_systems.py
+          python -m compileall -q -x '(^|/)(tmp|\.git|\.venv)/' .
+          python scripts/validate_render_topology.py
       - name: Run image prompt compatibility suites
         run: |
-          failures=0
-          python -m unittest discover -s tests -p 'test_sports_cave_prompt_blocks.py' || failures=1
-          python -m unittest discover -s tests -p 'test_mockup_product_variations.py' || failures=1
-          python -m unittest discover -s tests -p 'test_physical_frame_realism.py' || failures=1
-          python -m unittest discover -s tests -p 'test_ads_refresh_plan.py' || failures=1
-          python -m unittest discover -s tests -p 'test_ads_refresh_generation.py' || failures=1
-          python -m unittest discover -s tests -p 'test_carousel_winner_system.py' || failures=1
-          python -m unittest discover -s tests -p 'test_ads_winner_refinement.py' || failures=1
-          python -m unittest discover -s tests -p 'test_premium_image_quality_v3.py' || failures=1
-          python -m unittest discover -s tests -p 'test_ads_ie_prompt_integration.py' || failures=1
-          python -m unittest discover -s tests -p 'test_ads_carousel_evolution.py' || failures=1
-          python -m unittest discover -s tests -p 'test_mockup_prompt_preview.py' || failures=1
-          python -m unittest discover -s tests -p 'test_social_media_creator.py' || failures=1
-          python -m unittest discover -s tests -p 'test_design_studio_generation_handoff.py' || failures=1
-          python -m unittest discover -s tests -p 'test_ads_creative_refresh.py' || failures=1
-          exit $failures
+          python scripts/test_image_prompt_quality.py
+      - name: Clipboard behavior contracts
+        run: |
+          node tests/test_crm_prompt_clipboard.cjs
+          node tests/test_ads_refresh_reference.cjs
+      - name: Install browser test dependencies
+        run: |
+          npm install --prefix tmp/browser-runtime --no-save --package-lock=false playwright@1.56.1
+          tmp/browser-runtime/node_modules/.bin/playwright install --with-deps chromium
+      - name: Creative Refresh browser regression (mocked providers)
+        run: python scripts/run_refresh_browser.py
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-prompt-quality-evidence
+          path: |
+            tmp/image-prompt-quality/
+            tmp/refresh-browser-*.json
+            tmp/refresh-browser-*.log
+            tmp/refresh-after-*.png

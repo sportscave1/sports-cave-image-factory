@@ -9507,7 +9507,7 @@ def ensure_current_ads_result_prompt(result):
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
     content_current = not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"]))
     if result.get("prompt_contract_version") == expected_version and content_current:
-        return result
+        return _upgrade_saved_ads_visual_rules(result)
     old_master_prompt = str(result.get("master_prompt") or "")
     old_generated_output = str(result.get("generated_ad_output") or "")
     refreshed = build_ads_result_record(
@@ -9528,6 +9528,19 @@ def ensure_current_ads_result_prompt(result):
     if old_generated_output and old_generated_output != old_master_prompt:
         merged["generated_ad_output"] = old_generated_output
     return merged
+
+
+def _upgrade_saved_ads_visual_rules(result):
+    """Enrich a saved image brief in memory without rebuilding its scene or saving it."""
+    from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
+    old = str(result.get("master_prompt") or "")
+    upgraded = append_sports_cave_image_realism_rules(old, physical_product=result.get("product_metadata"))
+    if upgraded == old:
+        return result
+    updated = {**result, "master_prompt": upgraded}
+    if result.get("generated_ad_output") == old:
+        updated["generated_ad_output"] = upgraded
+    return updated
 
 
 def _new_ads_image_workflow(result):
@@ -12893,6 +12906,8 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
         st.caption(google_ads.POSTING_HELP)
         return
     issues = quality_issues if quality_issues is not None else creative_refresh_quality_issues(result, workflow)
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        issues = list(issues) + _creative_refresh_visual_review_issues(result, workflow)
     if issues:
         st.caption("Complete refresh quality checks before POST NOW.")
         return
@@ -14299,14 +14314,18 @@ def creative_refresh_quality_issues(result, workflow):
 
 
 def _creative_refresh_visual_review_key(result, workflow):
-    """Source-sensitive user acknowledgement; no byte scans or persistent schema changes."""
-    slot_keys = [
-        (spec["id"], str(((workflow.get("slots") or {}).get(spec["id"]) or {}).get("source_hash") or ""))
-        for spec in _result_image_slots(result)
-    ]
-    identity = json.dumps([result.get("context_key"), result.get("campaign_type"), slot_keys],
-                          sort_keys=True, ensure_ascii=False)
-    return "ads-refresh-visual-qa::" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
+    """Bind manual review to the same content checked by the saved-package gate."""
+    identity = posting_handoff.content_hash({
+        "source": _ads_saved_source_signature(result, workflow),
+        "product_metadata": result.get("product_metadata"),
+    })
+    return "ads-refresh-visual-qa::" + identity[:24]
+
+
+def _creative_refresh_visual_review_issues(result, workflow):
+    if not st.session_state.get(_creative_refresh_visual_review_key(result, workflow), False):
+        return ["Visually compare each uploaded image with its exact product and winning card before POST NOW."]
+    return []
 
 
 def _render_ads_final_actions(result, workflow, *, source_matches=True):
@@ -14317,22 +14336,19 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
         with st.container(key='ads-refresh-actions'):
             # Keep the existing Save / POST NOW actions compact. Only posting needs
             # the explicit visual sign-off; draft saving remains completely unchanged.
-            visual_issues = []
             if _ads_image_valid_slots(result, workflow):
                 with st.expander("Final visual verification — required before POST NOW", expanded=False):
                     st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, clear acrylic/glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
-                    reviewed = st.checkbox(
+                    st.checkbox(
                         "I checked every refreshed image against its product and winner references",
                         key=_creative_refresh_visual_review_key(result, workflow),
                     )
-                    if not reviewed:
-                        visual_issues.append("Visually compare each uploaded image with its exact product and winning card before POST NOW.")
             save_col, post_col = st.columns(2)
             with save_col:
                 _render_ads_image_save(result, workflow, quality_issues=issues)
             with post_col:
                 _render_saved_ad_post_now(result, workflow, source_matches=source_matches,
-                                          quality_issues=issues + visual_issues)
+                                          quality_issues=issues)
     else:
         _render_ads_image_save(result, workflow)
         _render_saved_ad_post_now(result, workflow, source_matches=source_matches)

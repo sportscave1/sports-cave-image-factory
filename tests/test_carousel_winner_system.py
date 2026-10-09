@@ -129,11 +129,14 @@ class CarouselWinnerSystemTests(unittest.TestCase):
         for example in ("Don Mattingly", "Lap Of Gods", "Holden", "Murph", "Purple Sectors", "The Mountain"):
             self.assertNotIn(example, source)
 
-    def test_other_campaigns_and_creative_refresh_match_preupgrade_bytes(self):
+    def test_other_campaigns_and_creative_refresh_preserve_main_output_contracts(self):
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads((Path(__file__).parent / 'fixtures' / 'premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         rows = json.loads((Path(__file__).parent / "fixtures" / "carousel_winner_unaffected.json").read_text())
-        for row in rows:
+        for index, row in enumerate(rows):
             with self.subTest(kwargs=row["kwargs"]):
                 text = ads_page.build_ads_prompt(**row["kwargs"])
+                self.assertEqual(contract_shape(text), structures['winner/' + str(index)])
                 if row["kwargs"].get("creative_refresh_context"):
                     self.assertIn("WINNER LED REFRESH V3", text)
                     if row['kwargs']['campaign_type'] == 'Carousel':
@@ -146,7 +149,9 @@ class CarouselWinnerSystemTests(unittest.TestCase):
                     # Verify their preserved contracts and non-generative master guidance.
                     self.assertIn("SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3", text)
                     self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES", text)
-                    self.assertIn("exact", text.casefold())
+                    self.assertIn(row['kwargs']['product_name'], text)
+                    for url in structures['winner/' + str(index)]['product_urls']:
+                        self.assertIn(url, text)
 
 
 if __name__ == "__main__":

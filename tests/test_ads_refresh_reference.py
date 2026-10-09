@@ -96,8 +96,9 @@ class ReferenceCleanupTests(unittest.TestCase):
         st.link_button.assert_called_once_with('Find product image','/files-window?relative_path=04_OUTPUT/product-images',icon=':material/folder_open:')
         self.assertEqual(st.session_state,before)
         source=(ROOT/'ads_page.py').read_text(encoding='utf-8')
-        self.assertIn("if is_creative_refresh and campaign_type != 'Carousel':\n        from ads_refresh_reference import render_product_image_link",source)
-        self.assertIn('elif not is_creative_refresh and not is_google:\n        render_product_artwork_reference(product_selection, product_url)',source)
+        self.assertIn('render_product_artwork_reference(product_selection, product_url, creative_refresh=True)',source)
+        self.assertIn("if campaign_type != 'Carousel':\n            from ads_refresh_reference import render_product_image_link\n            render_product_image_link(st)",source)
+        self.assertIn('elif not is_google:\n        render_product_artwork_reference(product_selection, product_url)',source)
         self.assertNotIn('shopify',Path(reference.__file__).read_text(encoding='utf-8').lower())
 
     def test_format_and_provenance_survive_existing_save_and_posting(self):

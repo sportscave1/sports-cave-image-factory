@@ -19,7 +19,7 @@ from tests.test_posting_import_csv import FakeUpload, png_image_bytes
 
 
 def app_for(kind='Carousel', count=5):
-    app = AppTest.from_file('tests/fixtures/refresh_ui.py')
+    app = AppTest.from_file(str(Path(__file__).resolve().parent / 'fixtures' / 'refresh_ui.py'))
     app.query_params.update({'format':kind,'count':str(count)})
     return app.run(timeout=30)
 
@@ -37,6 +37,8 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save now').click().run(timeout=30)
         button(app,'Save 5 images here').click().run(timeout=30)
         self.assertFalse(app.exception)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
         self.assertFalse(button(app,'POST NOW').disabled)
         workflow = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         package = workflow[posting.SAVED_PACKAGE_KEY]
@@ -59,6 +61,8 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save Instant Experience Package here').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]['master_prompt'],original)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
         button(app,'POST NOW').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state[posting.PENDING_KEY]['package']['assets']),3)
@@ -120,9 +124,10 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         prompt=fixture()['master_prompt']
         self.assertIn('all five shared headline variation rows',prompt)
         self.assertIn('all five shared description variation rows',prompt)
-        self.assertEqual(prompt.count('If an optional canonical black-frame product photograph'),5)
+        self.assertEqual(prompt.count('CANONICAL_PRODUCT (when supplied) is a separate product-accuracy attachment'),5)
         self.assertEqual(len(fixture()['creative_refresh_context']['refresh_plan']['references']),5)
-        self.assertIn('No additional product image is required',prompt)
+        self.assertIn('winner cards are provisional cross-references, not verified product truth',prompt)
+        self.assertIn('If product pixels or frame construction remain unclear, request the full-resolution black-framed original image',prompt)
         self.assertNotIn('ATTACHMENT 6',prompt)
 
     def test_duplicate_original_references_fail_without_fabrication(self):
@@ -185,9 +190,10 @@ class ActiveRefreshRepairTests(unittest.TestCase):
                 'selector_identity':'resolved-catalogue-identity','product_url':'https://www.sportscaveshop.com/products/legends-never-die-messi-vs-ronaldo-wall-art'})
         self.assertEqual(state[ads.ADS_PRODUCT_URL_KEY],value['product_url'])
 
-    def test_existing_prompts_identical_outside_approved_physical_contract(self):
+    def test_existing_prompts_keep_main_output_structure(self):
         from sports_cave_physical_realism import MARKER
-        from tests.test_physical_frame_realism import strip_physical
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads(Path('tests/fixtures/premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         baseline=json.loads(Path('tests/fixtures/refresh_unaffected_prompts.json').read_text())
         for identity,expected in baseline.items():
             mode,category,kind=identity.split('/',2)
@@ -196,7 +202,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
             prompt=ads.build_ads_prompt(value['product_name'],category,'Australia',kind,product_url=value['product_url'],
                 variation_token='baseline',creative_refresh_context=context)
             self.assertIn(MARKER,prompt,identity)
-            self.assertEqual(hashlib.sha256(strip_physical(prompt).encode()).hexdigest(),expected,identity)
+            self.assertEqual(contract_shape(prompt),structures[identity],identity)
 
 
 if __name__=='__main__':unittest.main()

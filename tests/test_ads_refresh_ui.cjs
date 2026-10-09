@@ -2,7 +2,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs');
 const label=process.env.REFRESH_BROWSER_LABEL||'after';
-(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});
+(async()=>{const browser=await chromium.launch({...(process.platform==='win32'?{channel:'msedge'}:{}),headless:true});
 try{
  const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']});
  await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
@@ -50,6 +50,8 @@ try{
    await copyFrame.getByRole('button',{name:'Copy Prompt',exact:true}).click();
    await copyFrame.locator('[role="status"]').filter({hasText:'Prompt copied'}).waitFor();
    const copied=await page.evaluate(()=>navigator.clipboard.readText());
+   const expected=JSON.parse(fs.readFileSync('tmp/refresh-expected-prompts.json','utf8'))[kind];
+   assert.equal(copied.replace(/\r\n/g,'\n'),expected.replace(/\r\n/g,'\n'),'Complete prompt copied exactly');
    assert.ok(copied.includes(kind==='Carousel'?'TRUE WINNER CAROUSEL REFRESH':'INSTANT EXPERIENCE WINNER REFINEMENT'));
    assert.ok(copied.includes('Legends Never Die'));
    if(kind==='Instant Experience'){
@@ -57,14 +59,22 @@ try{
     await page.getByText(/refresh-test-upload.png · 1024/).waitFor();
     metrics[kind].uploadAndPreview=true;
    }else{
-    await page.getByRole('button',{name:/CSV/}).click();
+    await page.getByRole('button',{name:/^(?:table_view )?CSV$/}).click();
     await page.locator('[class*="st-key-ads-carousel-copy-csv-import"] input[type="file"]').setInputFiles('tmp/refresh-test-copy.csv');
     await page.getByRole('textbox',{name:'Card 1 headline',exact:true}).waitFor();
     await page.waitForFunction(()=>[...document.querySelectorAll('input')].some(e=>e.value==='Local CSV Review'));
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(()=>document.querySelector('[class*="st-key-ads-images-save-open"] button')?.disabled===true);
+    await page.getByRole('button',{name:/^(?:table_view )?CSV$/}).click();
+    await page.locator('[class*="st-key-ads-carousel-copy-csv-import"] input[type="file"]').setInputFiles('tmp/refresh-test-copy-valid.csv');
+    await page.waitForFunction(()=>[...document.querySelectorAll('input')].some(e=>e.value==='The Rivalry'));
     await page.keyboard.press('Escape');metrics[kind].csvImport=true;
    }
    const start=Date.now();await saveButton.click();
    await page.getByRole('button',{name:kind==='Carousel'?'Save 5 images here':'Save Instant Experience Package here',exact:true}).click();
+   assert.equal(await page.getByRole('button',{name:'POST NOW',exact:true}).count(),0,'Save succeeds before visual sign-off');
+   await page.getByText('Final visual verification — required before POST NOW',{exact:true}).click();
+   await page.getByText('I checked every refreshed image against its product and winner references',{exact:true}).click();
    await page.getByRole('button',{name:'POST NOW',exact:true}).waitFor();metrics[kind].mockSaveMs=Date.now()-start;
    assert.equal(await page.getByTestId('stException').count(),0);
    await page.getByRole('button',{name:'POST NOW',exact:true}).click();

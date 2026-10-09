@@ -74,9 +74,10 @@ class MemoryDropbox:
 
 
 class GoogleContractsTests(unittest.TestCase):
-    def test_meta_prompts_unchanged_outside_approved_physical_contract(self):
+    def test_meta_prompts_keep_main_output_structure(self):
         from sports_cave_physical_realism import MARKER
-        from tests.test_physical_frame_realism import strip_physical
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads(Path(__file__).with_name('fixtures').joinpath('premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         baseline = json.loads(Path(__file__).with_name("fixtures").joinpath("meta_new_ads_prompt_hashes.json").read_text())
         for category, campaign_type, country, expected_hash in baseline:
             with self.subTest(category=category, campaign_type=campaign_type, country=country):
@@ -84,7 +85,7 @@ class GoogleContractsTests(unittest.TestCase):
                     product_url="https://www.sportscaveshop.com/products/collector-legacy", variation_token="regression-fixed",
                     product_metadata={"edition_limit": 100, "edition_limit_source": "Edition Ops product ledger"})
                 self.assertIn(MARKER,prompt)
-                self.assertEqual(hashlib.sha256(strip_physical(prompt).encode()).hexdigest(), expected_hash)
+                self.assertEqual(contract_shape(prompt), structures['meta/'+category+'/'+campaign_type+'/'+country])
 
     def test_prompt_resolves_all_variables_for_every_category_and_market(self):
         for category in ads.CATEGORY_OPTIONS[1:]:

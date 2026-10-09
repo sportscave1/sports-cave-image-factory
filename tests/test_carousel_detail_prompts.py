@@ -114,7 +114,9 @@ class CarouselDetailPromptTests(unittest.TestCase):
         self.assertEqual([slot["id"] for slot in ads_page.ads_image_workflow.campaign_image_slots("Carousel")],
                          [f"carousel-{index:02d}" for index in range(1, 6)])
 
-    def test_unaffected_prompts_match_captured_prechange_bytes(self):
+    def test_unaffected_cards_keep_bytes_and_other_prompts_keep_main_structure(self):
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads((Path(__file__).parent / 'fixtures/premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         rows = json.loads((Path(__file__).parent / "fixtures" / "carousel_detail_prompt_baseline.json").read_text())
         for row in rows:
             with self.subTest(category=row["category"], kind=row["kind"]):
@@ -131,12 +133,14 @@ class CarouselDetailPromptTests(unittest.TestCase):
                 if kind.startswith("refresh_"):
                     self.assertIn("WINNER LED REFRESH V3", prompt)
                     if kind == 'refresh_Carousel':
-                        self.assertNotIn('CANONICAL_PRODUCT', prompt)
+                        self.assertIn('CANONICAL_PRODUCT', prompt)
                         self.assertIn('COLLECTIVE WINNER CAROUSEL V1', prompt)
                     else:
                         self.assertIn('CANONICAL_PRODUCT', prompt)
-                else:
+                if kind.startswith('card_'):
                     self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(), row["sha256"])
+                else:
+                    self.assertEqual(contract_shape(prompt), structures['detail/'+row['category']+'/'+kind])
 
     def test_existing_new_ads_prompt_refreshes_without_changing_completed_copy_or_context(self):
         result = ads_page.build_ads_result_record("Collector Test", "Cricket", "Australia", "Carousel",

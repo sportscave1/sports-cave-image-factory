@@ -352,10 +352,12 @@ class MockupPromptPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir)
             shutil.copytree(ROOT / "templates", base_dir / "templates")
+            artwork_path = base_dir / "artwork.png"
+            Image.new("RGB", (1800, 1200), "#385477").save(artwork_path)
             result = image_factory.generate_product_images(
                 "Preview Test Product",
                 "Tennis",
-                ROOT / "input" / "artwork.jpg",
+                artwork_path,
                 base_dir=base_dir,
                 final_prompt_items=prompt_items,
             )

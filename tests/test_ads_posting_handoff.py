@@ -430,6 +430,10 @@ else:
                         self.assertNotIn("POST NOW", [button.label for button in app.button])
                         app.session_state["source_matches"] = True
                         app.run(timeout=20)
+                        if source == ads.ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+                            self.assertNotIn("POST NOW", [button.label for button in app.button])
+                            app.session_state[ads._creative_refresh_visual_review_key(result, workflow)] = True
+                            app.run(timeout=20)
                         self.assertIn("POST NOW", [button.label for button in app.button])
                         self.assertFalse(any("CTA is incompatible" in item.value for item in app.info))
                         app.button[0].click().run(timeout=20)

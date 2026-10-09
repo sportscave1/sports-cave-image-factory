@@ -233,6 +233,8 @@ with patch.object(ads, '_render_ads_image_save'):
         self.assertNotIn('POST NOW', [b.label for b in app.button])
         next(b for b in app.button if b.label == 'Simulate successful save').click().run(timeout=20)
         self.assertFalse(app.exception)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=20)
         self.assertIn('POST NOW', [b.label for b in app.button])
 
 

@@ -40,6 +40,21 @@ def _text(value):
     return value.strip()[:160] if isinstance(value, str) else ''
 
 
+def is_unframed(metadata=None):
+    """Use explicit selected construction, never infer it from an image or title."""
+    data = physical_metadata(metadata)
+    variant = data.get('selected_variant')
+    selected = data.get('frame_finish') or data.get('frame_label')
+    if isinstance(variant, dict):
+        selected = selected or variant.get('frame_finish') or variant.get('title')
+    elif isinstance(variant, str):
+        selected = selected or variant
+    spec = data.get('frame_specs') or {}
+    if isinstance(spec, dict) and spec.get('verified') is True and spec.get('source'):
+        selected = selected or spec.get('frame_finish')
+    return bool(re.search(r'\bunframed\b', _text(selected), re.I))
+
+
 def _positive(value):
     if isinstance(value, bool):
         return None

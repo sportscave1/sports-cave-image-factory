@@ -43,12 +43,12 @@ class ProductVariationsTests(unittest.TestCase):
                 _,_,paths,_=image_factory.generate_lifestyle_prompt_pack('Collector','Tennis','collector',root,reference,prompt_items=first)
             self.assertEqual([p.read_text(encoding='utf-8').strip() for p in paths],[i['prompt'] for i in first])
 
-    def test_saved_editor_override_keeps_current_run_selection_once(self):
+    def test_saved_editor_override_keeps_explicit_selection_once(self):
         generated=prompts.build('01-man-cave-prompt.txt')
         override='Custom lighting preference\n'+prompts.build('02-office-prompt.txt')
         merged=prompts.preserve_selection(override,generated)
         self.assertIn('Custom lighting preference',merged)
-        self.assertEqual(prompts.SCENE.findall(merged),prompts.SCENE.findall(generated))
+        self.assertEqual(prompts.SCENE.findall(merged),prompts.SCENE.findall(override))
         self.assertEqual(prompts.preserve_selection(merged,generated),merged)
 
     def test_only_three_active_cards_and_no_social_section_or_upload_changes(self):

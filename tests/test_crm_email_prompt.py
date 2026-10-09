@@ -75,7 +75,8 @@ class EmailPromptTests(unittest.TestCase):
  def test_contract_dynamic_sections_compatibility_and_visual_rules(self):
   result=self.generate()['prompt']
   for expected in ('BODY ONLY','<=60 KB','HTML SECTION 1','IMAGE — INSERT HERE','CATALOGUE — INSERT HERE',
-    '320px','600px','60–140','2–7','2–4','actual pixels','all four','4:3','1200x900','6–10mm','4000–4700K','8–15%','3–6%',
+    '320px','600px','60–140','2–7','2–4','actual pixels','all four','4:3','1200x900','6–10mm','4000–4700K',
+    'acrylic/Perspex or glass matching the original product','subtle but clearly visible room-based reflection',
     'no JavaScript carousel','native Image poster','unknown facts','at most two','no image overlays'):
    self.assertIn(expected.lower(),result.lower())
  def test_dialog_open_is_local_no_reader_or_catalogue(self):

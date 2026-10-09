@@ -322,7 +322,8 @@ class DynamicRefreshTests(unittest.TestCase):
             value = self.result(n)
             prompt = value['master_prompt']
             self.assertIn(f'ONE refreshed {n}-CARD', prompt)
-            self.assertNotIn('CANONICAL_PRODUCT', prompt)
+            self.assertIn('CANONICAL_PRODUCT', prompt)
+            self.assertIn('product reference is NOT a new Carousel card', prompt)
             self.assertIn(f'Image {n} = Card {n} = WINNER_CARD_{n}', prompt)
             self.assertNotIn(f'WINNER_CARD_{n+1}', prompt)
             self.assertEqual(prompt.count('PRODUCT: Verified Product Wall Art'), n)
