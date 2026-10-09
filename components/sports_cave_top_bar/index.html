@@ -47,7 +47,7 @@
   const css = `
     :root {
       --sc-topbar-height: 64px;
-      --sc-sidebar-width: 300px;
+      --sc-sidebar-width: 244px;
     }
     header[data-testid="stHeader"],
     [data-testid="stToolbar"],
@@ -2756,8 +2756,11 @@
     const updateSidebarWidth = () => {
       const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
       if (sidebar) sidebar.id = "sports-cave-mobile-sidebar";
-      const width = sidebar ? Math.round(sidebar.getBoundingClientRect().width) : 300;
-      doc.documentElement.style.setProperty("--sc-sidebar-width", `${Math.max(width, 240)}px`);
+      const width = sidebar ? Math.round(sidebar.getBoundingClientRect().width) : 244;
+      const value = `${width > 0 ? width : 244}px`;
+      if (doc.documentElement.style.getPropertyValue("--sc-sidebar-width") !== value) {
+        doc.documentElement.style.setProperty("--sc-sidebar-width", value);
+      }
     };
     const handleViewportChange = () => {
       updateSidebarWidth();

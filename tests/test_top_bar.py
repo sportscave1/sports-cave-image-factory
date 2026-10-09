@@ -467,8 +467,8 @@ class TopBarComponentTests(unittest.TestCase):
         self.assertIn("height: calc(100dvh - var(--sc-topbar-height))", app_source)
         from sidebar_theme import SIDEBAR_CSS
         self.assertIn('[data-testid="stSidebarHeader"]', SIDEBAR_CSS)
-        self.assertIn("height:40px", SIDEBAR_CSS)
-        self.assertIn("height:37px", SIDEBAR_CSS)
+        self.assertIn("min-height:35px", SIDEBAR_CSS)
+        self.assertIn("min-height:33px", SIDEBAR_CSS)
         # The shell preserves native sidebar scroll across rerenders.
         self.assertNotIn("scrollTop = 0", COMPONENT_PATH.read_text(encoding="utf-8"))
 
