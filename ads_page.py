@@ -14314,21 +14314,22 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
         if not source_matches:
             issues = ['Settings changed. Select Submit to prepare the matching refresh before saving.'] + issues
         with st.container(key='ads-refresh-actions'):
+            # Keep the existing Save / POST NOW actions compact. Only posting needs
+            # the explicit visual sign-off; draft saving remains completely unchanged.
+            visual_issues = []
+            if _ads_image_valid_slots(result, workflow):
+                with st.expander("Final visual verification — required before POST NOW", expanded=False):
+                    st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, clear acrylic/glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
+                    reviewed = st.checkbox(
+                        "I checked every refreshed image against its product and winner references",
+                        key=_creative_refresh_visual_review_key(result, workflow),
+                    )
+                    if not reviewed:
+                        visual_issues.append("Visually compare each uploaded image with its exact product and winning card before POST NOW.")
             save_col, post_col = st.columns(2)
             with save_col:
                 _render_ads_image_save(result, workflow, quality_issues=issues)
             with post_col:
-                # No automated pixel-inspection service is available in this workflow.
-                # A fresh acknowledgement is required when images change; drafts can still save.
-                visual_issues = []
-                if _ads_image_valid_slots(result, workflow):
-                    st.caption("Visual product check — compare each uploaded image with the Black-frame original and its matching winner. Confirm frame/glazing, premium shadows, exact artwork and genuinely new surroundings.")
-                    reviewed = st.checkbox(
-                        "I visually checked every refreshed image against its product and winner references",
-                        key=_creative_refresh_visual_review_key(result, workflow),
-                    )
-                    if not reviewed:
-                        visual_issues.append("Visually compare the uploaded images with their exact source product and original winner before POST NOW.")
                 _render_saved_ad_post_now(result, workflow, source_matches=source_matches,
                                           quality_issues=issues + visual_issues)
     else:

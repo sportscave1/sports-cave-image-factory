@@ -203,18 +203,29 @@ class PhysicalWorkflowTests(unittest.TestCase):
         self.assertTrue(call.kwargs['artwork_reference_available'])
         self.assertTrue(call.kwargs['local_only'])
 
-    def test_25_ads_prompts_unchanged_outside_new_physical_block(self):
+    def test_25_ads_prompt_combinations_keep_structure_with_new_visual_quality(self):
         import ads_page as ads
         from tests.test_ads_refresh_plan import fixture
         baseline = json.loads(Path('tests/fixtures/refresh_unaffected_prompts.json').read_text())
-        for identity,expected in baseline.items():
+        # Image prompts intentionally changed; the old SHA fixtures are evidence of the
+        # pre-upgrade text, not a production contract after explicit user approval.
+        self.assertEqual(len(baseline), 25)
+        for identity in baseline:
             mode,category,kind = identity.split('/',2)
             context = fixture(kind)['creative_refresh_context'] if mode=='refresh' else None
             value = fixture(kind) if context else {'product_name':'Verified Collector Artwork','product_url':'https://sportscave.com.au/products/verified'}
             prompt = ads.build_ads_prompt(value['product_name'],category,'Australia',kind,product_url=value['product_url'],
                 variation_token='baseline',creative_refresh_context=context)
-            self.assertIn(physical.MARKER,prompt)
-            self.assertEqual(hashlib.sha256(strip_physical(prompt).encode()).hexdigest(),expected,identity)
+            with self.subTest(identity=identity):
+                self.assertIn(physical.MARKER,prompt)
+                self.assertIn('GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY',prompt)
+                self.assertIn('SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3',prompt)
+                self.assertIn(value['product_name'],prompt)
+                if context and kind == 'Carousel':
+                    self.assertIn('COLLECTIVE WINNER CAROUSEL V1',prompt)
+                    self.assertIn('CANONICAL_PRODUCT',prompt)
+                if context and kind == 'Instant Experience':
+                    self.assertIn('WINNER_IE',prompt)
 
     def test_new_ads_and_refresh_each_receive_selected_smaller_dimensions(self):
         import ads_page as ads

@@ -36,7 +36,6 @@ class PremiumImageQualityV3Tests(unittest.TestCase):
                 got = mock.build('01-man-cave-prompt.txt', avoid_angles=set(mock.ANGLES) - {angle})
             self.assertIn('Selected camera angle: ' + angle, got)
             self.assertIn('Preserve the supplied artwork and frame exactly', got)
-            self.assertIn('fully', 'fully')  # Preserve orientation and safe frame rules.
 
     def test_ie_five_variations_are_repeatable_without_changing_slot_identity(self):
         context = {'product_sport': 'Motorsport', 'product_era': 'historic', 'artwork_mood': 'heritage'}
