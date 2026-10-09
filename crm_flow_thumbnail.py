@@ -69,23 +69,23 @@ def thumbnail(store,step,row):
 
 SCRIPT='''<script>(()=>{
  if(window.scFlowThumbController){window.scFlowThumbController.scan();return;}
- const visible=new Set(), attempts=new Map();let observed=new WeakSet();
+ const visible=new Set(), attempts=new Map();let observed=new WeakSet(),nextWake=0;
  const root=()=>document.querySelector('.st-key-flow-workspace');
  const preview=e=>{const host=e.target.closest?.('.sc-flow-thumbnail');if(host&&(e.type==='click'||['Enter',' '].includes(e.key))){e.preventDefault();document.querySelector('.st-key-'+host.dataset.preview+' button')?.click();}};
  document.addEventListener('click',preview);document.addEventListener('keydown',preview);
  const observer=new IntersectionObserver(entries=>{for(const e of entries){if(e.isIntersecting)visible.add(e.target);else visible.delete(e.target);}pump();},{rootMargin:'80px'});
  const pump=()=>{
    if(!root()){observer.disconnect();observed=new WeakSet();visible.clear();attempts.clear();return;}
-   let count=0;
+   if(nextWake>Date.now())return;
    for(const e of visible){
      if(!e.isConnected){observer.unobserve(e);visible.delete(e);continue;}
      if(!['DEFERRED','LOADING','BUSY'].includes(e.dataset.phase))continue;
      const key=e.dataset.key,now=Date.now(),last=attempts.get(key)||{at:0,start:now};
      if(now-last.start>90000){e.dataset.phase='ERROR';e.textContent='Preview unavailable. Click to open email.';continue;}
-     if(1500>now-last.at)continue;
+     if(1200>now-last.at)continue;
      const button=document.querySelector('.st-key-'+key+'load button');
      // Missing controls are retried after mount; never mark them loaded early.
-     if(button){attempts.set(key,{at:now,start:last.start});button.click();if(++count===2)break;}
+     if(button){attempts.set(key,{at:now,start:last.start});nextWake=now+200;button.click();break;}
    }
  };
  const scan=()=>{
@@ -96,6 +96,6 @@ SCRIPT='''<script>(()=>{
    });pump();
  };
  let queued=false;new MutationObserver(()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;scan();});}}).observe(document.body,{childList:true,subtree:true});
- setInterval(()=>{if(root())scan();},1500);
+ setInterval(()=>{if(root())scan();},300);
  window.scFlowThumbController={scan};scan();
 })()</script>'''

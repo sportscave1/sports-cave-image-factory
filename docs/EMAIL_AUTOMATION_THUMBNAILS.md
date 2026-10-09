@@ -33,3 +33,5 @@ One broader existing test (`test_automation_only_polling_and_debounce`) fails on
 
 ## Production status
 Pending rollout verification. The production browser tool failed to initialize with `helper_unknown_error: setup refresh had errors`; SSH access returned `Permission denied (publickey)`. These prevent authenticated visual verification unless access recovers. Render deployment and synthetic renderer readiness can still be checked independently. No Blueprint sync, topology change, flow activation, manual publication or live email send is part of this release.
+
+Final controller refinement serializes wakeups to avoid coalesced Streamlit clicks: all five initially visible cached thumbnails completed in **1477 ms** in a 1440px Chromium check.

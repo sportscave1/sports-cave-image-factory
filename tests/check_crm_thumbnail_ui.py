@@ -22,6 +22,7 @@ with sync_playwright() as pw:
             except Exception:preview=None
             results.append({'baseline':baseline,'run':run,'initial_ms':round(initial,1),'first_thumbnail_ms':round(preview,1) if preview else None,'images':page.locator('.sc-flow-thumbnail img').count(),'errors':errors})
         if not baseline:
+            page.wait_for_function("[...document.querySelectorAll('.sc-flow-thumbnail')].slice(0,5).every(e=>e.querySelector('img')?.naturalWidth>0)",timeout=30000)
             assert page.locator('.sc-flow-thumbnail img').count()<12
             assert page.locator('iframe').count()==0
             page.locator('.sc-flow-thumbnail').last.scroll_into_view_if_needed()
