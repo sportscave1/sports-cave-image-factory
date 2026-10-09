@@ -91,6 +91,10 @@ def reference_map(campaign_type, source=None):
                 raise ValueError('Complete winning Carousel required. Reload the winner from Meta Review.')
             if len(cards)<2 or any(not isinstance(c,dict) or c.get('position')!=i or not (c.get('image_url') or c.get('image_sha256')) or c.get('image_unavailable') for i,c in enumerate(cards,1)):
                 raise ValueError('Complete winning Carousel required. Reload the winner from Meta Review.')
+            for field in ('image_sha256', 'image_hash', 'image_url'):
+                identities = [c[field] for c in cards if c.get(field)]
+                if len(identities) != len(set(identities)):
+                    raise ValueError('The same winning image occupies multiple Carousel positions. Reload and verify the original ordered cards before refreshing.')
         count = len(cards) if cards else 5  # Existing manual New Ads default only.
         by_position = {}
         for index, card in enumerate(cards, 1):
@@ -302,6 +306,8 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
         if full_rules not in prompt or (CAROUSEL_AUTHORITY if campaign_type == 'Carousel' else AUTHORITY) not in prompt or product.casefold() not in prompt.casefold() or expected not in prompt:
             issues.append(f'Execution {i}: missing full shared rules, product authority or exact reference.')
         if campaign_type == 'Carousel':
+            if any(prompt.strip() == str(old.get('image_prompt') or '').strip() for old in executions[:i-1] if isinstance(old, dict)):
+                issues.append(f'Execution {i}: repeated image prompt; supply this card’s own new execution.')
             anchor = refresh_plan['references'][i-1]
             if any(r['label'] not in prompt for r in refresh_plan['references']):
                 issues.append(f'Execution {i}: list every winning product-authority reference in the standalone prompt.')
@@ -341,6 +347,7 @@ def carousel_standalone_brief(product, reference, *, scene='', role='', detail=F
     return f"""PRODUCT: {product}
 REFERENCE: {reference}; inspect this exact attachment AND all other winning cards for collective product fidelity.
 {CAROUSEL_AUTHORITY}
+If an optional canonical black-frame product photograph is supplied, use it only for exact artwork/frame fidelity, never for its room, wall, furniture, camera or lighting. It is not an additional creative card. Do not duplicate that stock mockup or the original winner; resolve conflicting product details before generation.
 Collective reference attachments: {', '.join(references) or 'Explicitly list every supplied WINNER_CARD label in the final prompt'}.
 Concept anchor: {scene or 'Determine the broad room family from this exact winning card'}.
 Advertising role: {role or 'Determine this card role from the actual attachment'}.

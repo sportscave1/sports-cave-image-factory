@@ -7,6 +7,21 @@ from pathlib import Path
 PRODUCT_IMAGES_FOLDER = '04_OUTPUT/product-images'
 
 
+def load_winner_media(state, source, loader):
+    """One immutable archived winner per authenticated session; never cache failures."""
+    digest = source.get('image_sha256')
+    user = state.get('sports_cave_current_user') or {}
+    scope = (str(user.get('id') or ''), str(source.get('ad_account_id') or ''), digest)
+    cached = state.get('ads-refresh-winner-media') or {}
+    if cached.get('scope') == scope:
+        return cached['data'], cached['mime']
+    state.pop('ads-refresh-winner-media', None)
+    data, mime = loader(digest)
+    if data and len(data) <= 8 * 1024 * 1024:
+        state['ads-refresh-winner-media'] = {'scope': scope, 'data': data, 'mime': mime}
+    return data, mime
+
+
 @lru_cache(maxsize=1)
 def _source():
     return (Path(__file__).resolve().parent / 'components/ads_refresh_reference/index.html').read_text(encoding='utf-8')

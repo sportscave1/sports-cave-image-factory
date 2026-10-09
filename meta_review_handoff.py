@@ -315,7 +315,7 @@ def render_source(st):
     source=st.session_state.get(ACTIVE)
     if not source:
         return False
-    with st.container(border=True):
+    with st.container(border=True, key='ads-refresh-winner'):
         st.markdown('**WINNER FROM META REVIEW**')
         if st.session_state.get('meta-review-product-error'): st.warning(st.session_state['meta-review-product-error'])
         if source.get('mode')=='best_components':
@@ -331,11 +331,19 @@ def render_source(st):
             render_shared_primary_text(st, source)
             return True
         try:
-            data,mime=store.load_media(source['image_sha256'])
+            from ads_refresh_reference import load_winner_media
+            data,mime=load_winner_media(st.session_state, source, store.load_media)
             if data:
-                st.image(data,width=320)
-                from ads_refresh_reference import render_winning_image_copy
-                render_winning_image_copy(data, mime)
+                preview, actions = st.columns([1, 3])
+                with preview:
+                    st.image(data,width=200)
+                with actions:
+                    st.markdown('**Winning advertisement · creative reference**')
+                    if source.get('ad_name'):
+                        st.caption(source['ad_name'])
+                    st.caption('Use this winner for creative direction. The canonical product image, when supplied, defines the exact artwork and frame.')
+                    from ads_refresh_reference import render_winning_image_copy
+                    render_winning_image_copy(data, mime)
             else:
                 st.error('Stored winner image unavailable. Repeat the handoff from Meta Review.')
         except Exception:

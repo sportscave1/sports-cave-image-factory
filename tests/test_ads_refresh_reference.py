@@ -74,9 +74,10 @@ class ReferenceCleanupTests(unittest.TestCase):
 
     def test_reference_preview_bytes_and_source_preserved_without_old_controls(self):
         source=winner();st=MagicMock();st.session_state={handoff.ACTIVE:copy.deepcopy(source)};st.query_params={}
+        st.columns.return_value=(MagicMock(),MagicMock())
         with patch.object(handoff.store,'load_media',return_value=(b'original-bytes','image/jpeg')),patch.object(reference,'render_winning_image_copy') as copy_image:
             self.assertTrue(handoff.render_source(st))
-        st.image.assert_called_once_with(b'original-bytes',width=320)
+        st.image.assert_called_once_with(b'original-bytes',width=200)
         copy_image.assert_called_once_with(b'original-bytes','image/jpeg')
         st.download_button.assert_not_called();st.expander.assert_not_called();st.button.assert_not_called()
         self.assertEqual(st.session_state[handoff.ACTIVE],source)

@@ -1,0 +1,319 @@
+{
+  "date": "2026-10-09",
+  "baseline_ref": "b274b054235be54854fd972006eb9e7a46a707c7",
+  "scope": "Offline fixtures and mocked providers; no real generated creatives or production timing claims",
+  "browser_before": {
+    "Instant Experience": {
+      "loadedMs": 2091,
+      "viewports": {
+        "390": {
+          "height": 6308,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": [
+            {
+              "x": 16,
+              "y": 2151.9375,
+              "width": 358
+            },
+            {
+              "x": 16,
+              "y": 3391.859375,
+              "width": 358
+            },
+            {
+              "x": 16,
+              "y": 4631.78125,
+              "width": 358
+            }
+          ]
+        },
+        "750": {
+          "height": 4430,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": [
+            {
+              "x": 16,
+              "y": 1871.953125,
+              "width": 718
+            },
+            {
+              "x": 16,
+              "y": 2584.546875,
+              "width": 718
+            },
+            {
+              "x": 16,
+              "y": 3297.140625,
+              "width": 718
+            }
+          ]
+        },
+        "1024": {
+          "height": 4487,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": [
+            {
+              "x": 80,
+              "y": 1871.953125,
+              "width": 864
+            },
+            {
+              "x": 80,
+              "y": 2610.828125,
+              "width": 864
+            },
+            {
+              "x": 80,
+              "y": 3349.703125,
+              "width": 864
+            }
+          ]
+        },
+        "1366": {
+          "height": 4443,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": [
+            {
+              "x": 80,
+              "y": 1871.953125,
+              "width": 1206
+            },
+            {
+              "x": 80,
+              "y": 2611.109375,
+              "width": 1206
+            },
+            {
+              "x": 80,
+              "y": 3350.265625,
+              "width": 1206
+            }
+          ]
+        }
+      }
+    },
+    "Carousel": {
+      "loadedMs": 1530,
+      "viewports": {
+        "390": {
+          "height": 12740,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": []
+        },
+        "750": {
+          "height": 5750,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": []
+        },
+        "1024": {
+          "height": 5690,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": []
+        },
+        "1366": {
+          "height": 5744,
+          "overflow": false,
+          "headingY": 80,
+          "coverPanels": []
+        }
+      }
+    }
+  },
+  "browser_after": {
+    "Instant Experience": {
+      "loadedMs": 1687,
+      "viewports": {
+        "390": {
+          "height": 4674,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": [
+            {
+              "x": 16,
+              "y": 1742.21875,
+              "width": 358
+            },
+            {
+              "x": 16,
+              "y": 2589.75,
+              "width": 358
+            },
+            {
+              "x": 16,
+              "y": 3437.28125,
+              "width": 358
+            }
+          ]
+        },
+        "750": {
+          "height": 4135,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": [
+            {
+              "x": 16,
+              "y": 1268.65625,
+              "width": 718
+            },
+            {
+              "x": 16,
+              "y": 2099.8125,
+              "width": 718
+            },
+            {
+              "x": 16,
+              "y": 2930.96875,
+              "width": 718
+            }
+          ]
+        },
+        "1024": {
+          "height": 4126,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": [
+            {
+              "x": 80,
+              "y": 1282.28125,
+              "width": 864
+            },
+            {
+              "x": 80,
+              "y": 2113.4375,
+              "width": 864
+            },
+            {
+              "x": 80,
+              "y": 2944.59375,
+              "width": 864
+            }
+          ]
+        },
+        "1366": {
+          "height": 2436,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": [
+            {
+              "x": 80,
+              "y": 1282.28125,
+              "width": 391.328125
+            },
+            {
+              "x": 487.328125,
+              "y": 1282.28125,
+              "width": 391.34375
+            },
+            {
+              "x": 894.671875,
+              "y": 1282.28125,
+              "width": 391.328125
+            }
+          ]
+        }
+      },
+      "uploadAndPreview": true,
+      "mockSaveMs": 707,
+      "copyAndSaveAndPost": true
+    },
+    "Carousel": {
+      "loadedMs": 1628,
+      "viewports": {
+        "390": {
+          "height": 10590,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": []
+        },
+        "750": {
+          "height": 5191,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": []
+        },
+        "1024": {
+          "height": 5153,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": []
+        },
+        "1366": {
+          "height": 5087,
+          "overflow": false,
+          "headingY": 64,
+          "coverPanels": []
+        }
+      },
+      "csvImport": true,
+      "mockSaveMs": 1801,
+      "copyAndSaveAndPost": true
+    }
+  },
+  "unchanged_upload_cpu": {
+    "source_bytes": 10649729,
+    "iterations": 60,
+    "scope": "Unchanged upload CPU only; no network or artificial latency",
+    "before_median_ms": 4.80755,
+    "after_median_ms": 0.0004
+  },
+  "archived_ie_reads_over_six_renders": {
+    "before": 6,
+    "after": 1
+  },
+  "tests": {
+    "focused": {
+      "run": 469,
+      "passed": 468,
+      "failures": 1,
+      "seconds": 33.81
+    },
+    "extended": {
+      "run": 303,
+      "failed_assertions_including_subtests": 14,
+      "errors": 1,
+      "seconds": 155.612
+    },
+    "new_repair_cases": 15,
+    "unchanged_prompt_comparisons": 25,
+    "targeted_url_reference_repair_check": {
+      "run": 26,
+      "passed": 26,
+      "seconds": 11.745
+    },
+    "baseline_reproduction": {
+      "reference": "b274b05",
+      "tests_run": 9,
+      "failures": [
+        "test_initial_setup_is_compact_and_optional_sections_start_collapsed (tests.test_ads_page.AdsPageTests.test_initial_setup_is_compact_and_optional_sections_start_collapsed)",
+        "test_submit_supported_result_renders_compact_sections_with_url_parameters (tests.test_ads_page.AdsPageTests.test_submit_supported_result_renders_compact_sections_with_url_parameters)",
+        "test_submit_valid_category_campaign_renders_category_specific_output (tests.test_ads_page.AdsPageTests.test_submit_valid_category_campaign_renders_category_specific_output)",
+        "test_ads_disclosure_uses_shared_toggle_and_submenu_layout_contract (tests.test_ads_creative_refresh.CreativeRefreshNavigationTests.test_ads_disclosure_uses_shared_toggle_and_submenu_layout_contract)",
+        "test_primary_copy_component_uses_browser_clipboard_and_reports_the_click (tests.test_ads_creative_refresh.CreativeRefreshV2Tests.test_primary_copy_component_uses_browser_clipboard_and_reports_the_click)",
+        "test_other_campaigns_and_creative_refresh_match_preupgrade_bytes (tests.test_carousel_winner_system.CarouselWinnerSystemTests.test_other_campaigns_and_creative_refresh_match_preupgrade_bytes) (kwargs={'product_name': 'Collector Regression', 'category': 'Cricket', 'country': 'Australia', 'campaign_type': 'Instant Experience', 'variation_token': 'fixed-regression', 'product_url': 'https://example.com/products/collector'})",
+        "test_other_campaigns_and_creative_refresh_match_preupgrade_bytes (tests.test_carousel_winner_system.CarouselWinnerSystemTests.test_other_campaigns_and_creative_refresh_match_preupgrade_bytes) (kwargs={'product_name': 'Collector Regression', 'category': 'Baseball', 'country': 'Australia', 'campaign_type': 'Instant Experience', 'variation_token': 'fixed-regression', 'product_url': 'https://example.com/products/collector'})",
+        "test_other_campaigns_and_creative_refresh_match_preupgrade_bytes (tests.test_carousel_winner_system.CarouselWinnerSystemTests.test_other_campaigns_and_creative_refresh_match_preupgrade_bytes) (kwargs={'product_name': 'Collector Regression', 'category': 'NBA', 'country': 'Australia', 'campaign_type': 'Instant Experience', 'variation_token': 'fixed-regression', 'product_url': 'https://example.com/products/collector'})",
+        "test_other_campaigns_and_creative_refresh_match_preupgrade_bytes (tests.test_carousel_winner_system.CarouselWinnerSystemTests.test_other_campaigns_and_creative_refresh_match_preupgrade_bytes) (kwargs={'product_name': 'Collector Regression', 'category': 'Motorsport', 'country': 'Australia', 'campaign_type': 'Instant Experience', 'variation_token': 'fixed-regression', 'product_url': 'https://example.com/products/collector'})",
+        "test_other_campaigns_and_creative_refresh_match_preupgrade_bytes (tests.test_carousel_winner_system.CarouselWinnerSystemTests.test_other_campaigns_and_creative_refresh_match_preupgrade_bytes) (kwargs={'product_name': 'Collector Regression', 'category': 'Football', 'country': 'Australia', 'campaign_type': 'Instant Experience', 'variation_token': 'fixed-regression', 'product_url': 'https://example.com/products/collector'})",
+        "test_unaffected_prompts_match_captured_prechange_bytes (tests.test_carousel_detail_prompts.CarouselDetailPromptTests.test_unaffected_prompts_match_captured_prechange_bytes) (category='Motorsport', kind='Instant Experience')",
+        "test_unaffected_prompts_match_captured_prechange_bytes (tests.test_carousel_detail_prompts.CarouselDetailPromptTests.test_unaffected_prompts_match_captured_prechange_bytes) (category='Football', kind='Instant Experience')",
+        "test_unaffected_prompts_match_captured_prechange_bytes (tests.test_carousel_detail_prompts.CarouselDetailPromptTests.test_unaffected_prompts_match_captured_prechange_bytes) (category='Cricket', kind='Instant Experience')",
+        "test_unaffected_prompts_match_captured_prechange_bytes (tests.test_carousel_detail_prompts.CarouselDetailPromptTests.test_unaffected_prompts_match_captured_prechange_bytes) (category='NBA', kind='Instant Experience')",
+        "test_ie_refresh_all_three_briefs_include_premium_fomo_rules (tests.test_ads_winner_refinement.WinnerRefinementTests.test_ie_refresh_all_three_briefs_include_premium_fomo_rules)"
+      ],
+      "errors": [
+        "test_ambiguous_asset_labels_and_multiple_sequences_fail_closed (tests.test_meta_carousel_detail.DetailTests.test_ambiguous_asset_labels_and_multiple_sequences_fail_closed)"
+      ]
+    },
+    "browser_upload_csv_clipboard_save_post": "passed",
+    "clipboard_fallback_node": "passed",
+    "py_compile": "passed",
+    "diff_check": "passed"
+  }
+}

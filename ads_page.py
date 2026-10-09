@@ -13,6 +13,7 @@ import re
 import secrets
 import sys
 import time
+from contextlib import nullcontext
 from datetime import date, datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -23,6 +24,7 @@ import streamlit.components.v1 as components
 import ads_posting_handoff as posting_handoff
 import ads_refresh_winners
 import ads_refresh_generation
+import ads_refresh_ui
 import ads_standard_workflow
 import ads_package_paths
 from ads_creation_ui import creation_instructions
@@ -1605,7 +1607,6 @@ def prepare_ads_product_url_state(
     rows=None,
     selection=None,
 ):
-    del result
     if selection is None:
         selection = resolve_edition_ops_product_selection(product_name, rows=rows)
         selection["selector_identity"] = (
@@ -1617,6 +1618,15 @@ def prepare_ads_product_url_state(
                 else ""
             )
         )
+    restored = st.session_state.get('ads-refresh-restored-url')
+    if (_active_ads_workflow_mode() == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and restored
+            and restored.get('context_key') == (result or {}).get('context_key')):
+        st.session_state.pop('ads-refresh-restored-url', None)
+        if _ads_result_matches_selection(restored, selection, product_name):
+            st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = selection.get('selector_identity') or ''
+            st.session_state[ADS_PRODUCT_URL_KEY] = restored['product_url']
+            st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY] = True
+            st.session_state[ADS_PRODUCT_URL_INITIALIZED_KEY] = True
     _synchronise_ads_product_url_state(selection)
 
     selected_label = selection.get("selected_label") or ""
@@ -1678,6 +1688,7 @@ def render_prompt_copy_button(
     primary=False,
     disabled=False,
     track_copy=False,
+    compact=False,
 ):
     prompt_text = creation_instructions(prompt_text)
     if track_copy:
@@ -1706,6 +1717,7 @@ def render_prompt_copy_button(
     disabled_attribute = " disabled" if disabled else ""
     aria_disabled = "true" if disabled else "false"
     cursor = "not-allowed" if disabled else "pointer"
+    radius, padding = ("4px", "7px 10px") if compact else ("14px", "12px 14px")
     components.html(
         f"""
         <div style="padding:2px 0;">
@@ -1715,7 +1727,7 @@ def render_prompt_copy_button(
             aria-label="{safe_label}"
             aria-describedby="{status_id}"
             aria-disabled="{aria_disabled}"
-            style="width:100%;border:1px solid {border};border-radius:14px;padding:12px 14px;background:{background};color:{foreground};font-weight:700;font-size:0.95rem;cursor:{cursor};box-sizing:border-box;"
+            style="width:100%;border:1px solid {border};border-radius:{radius};padding:{padding};background:{background};color:{foreground};font-weight:700;font-size:0.95rem;cursor:{cursor};box-sizing:border-box;"
             {disabled_attribute}
           >
             {safe_label}
@@ -1761,7 +1773,7 @@ def render_prompt_copy_button(
         }})();
         </script>
         """,
-        height=64,
+        height=48 if compact else 64,
     )
     return None
 
@@ -9459,7 +9471,7 @@ def ads_prompt_contract_version_for_campaign(
         if campaign_type == "Instant Experience":
             version += f"; WINNER LED THREE ENVIRONMENTS V3"
         elif campaign_type == 'Carousel':
-            version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT
+            version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1'
     return version
 
 
@@ -9733,10 +9745,16 @@ def _remove_ads_image_slot(result, slot_id):
 def _process_ads_image_upload(result, workflow, slot, uploaded_file):
     if uploaded_file is None:
         return
+    existing = (workflow.get("slots") or {}).get(slot["id"]) or {}
+    refresh = result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    upload_identity = [getattr(uploaded_file, 'file_id', None), uploaded_file.name, getattr(uploaded_file, 'size', None)]
+    if refresh and upload_identity[0] and existing.get('_upload_identity') == upload_identity:
+        return
     source_bytes = uploaded_file.getvalue()
     source_hash = ads_image_workflow.source_image_signature(source_bytes)
-    existing = (workflow.get("slots") or {}).get(slot["id"]) or {}
     if existing.get("source_hash") == source_hash:
+        if refresh:
+            existing['_upload_identity'] = upload_identity
         return
     try:
         is_instant_experience = _is_instant_experience_result(result)
@@ -9776,6 +9794,12 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
                 source_bytes,
                 original_name=uploaded_file.name,
             )
+        if refresh and not is_instant_experience:
+            try:
+                processed.update(ads_image_workflow.build_instant_experience_preview_thumbnail(
+                    processed['data'], source_hash=hashlib.sha256(processed['data']).hexdigest()))
+            except Exception:
+                pass  # A thumbnail failure must not discard a valid full-quality creative.
         processed.update(
             {
                 "slot_id": slot["id"],
@@ -9801,6 +9825,8 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
             "valid": False,
             "error": str(error),
         }
+    if refresh:
+        processed['_upload_identity'] = upload_identity
     workflow.setdefault("slots", {})[slot["id"]] = processed
     outcomes = workflow.setdefault("outcomes", {})
     has_other_saved = any(
@@ -12061,12 +12087,16 @@ def _render_carousel_setup_notes(result, workflow):
         for position, slot in enumerate(slot_specs, start=1):
             card = carousel["cards"][position - 1]
             saved_slot = ((workflow.get("slots") or {}).get(slot["id"]) or {})
-            role, _role_description = IMAGE_ORDER[position - 1]
+            refresh = result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+            heading, direction = (ads_refresh_ui.card_direction(result, position) if refresh
+                                  else (f'Card {position} — {IMAGE_ORDER[position - 1][0]}', ''))
             with st.container(
                 border=True,
                 key=f"ads-carousel-card-copy::{context_key}::{slot['id']}",
             ):
-                st.markdown(f"**Card {position} — {role}**")
+                st.markdown(f"**{heading}**")
+                if direction:
+                    st.caption(direction)
                 image_filename = _carousel_actual_image_filename(
                     result,
                     workflow,
@@ -12081,7 +12111,7 @@ def _render_carousel_setup_notes(result, workflow):
                 image_column, details_column = st.columns([1, 3])
                 with image_column:
                     if saved_slot.get("valid") and saved_slot.get("data"):
-                        st.image(saved_slot["data"], width="stretch")
+                        st.image(saved_slot.get("preview_data") or saved_slot["data"], width=100 if refresh else "stretch")
                     else:
                         st.caption(f"Upload Carousel {position} above.")
                 with details_column:
@@ -12150,24 +12180,7 @@ def _render_ads_setup_notes(result, workflow):
     if result.get("campaign_type") == "Carousel":
         _render_carousel_setup_notes(result, workflow)
         if ((result.get('creative_refresh_context') or {}).get('refresh_plan') or {}).get('carousel_contract') == ads_refresh_generation.plan.CAROUSEL_CONTRACT:
-            with st.expander('Winner refresh execution review', expanded=False):
-                st.caption('Paste the execution-notes JSON returned with the CSV. These checks validate declarations; inspect the final images before use.')
-                notes = workflow.setdefault('ad_notes', {})
-                text = st.text_area('Card execution notes (JSON)',
-                    value=json.dumps(notes.get('refresh_executions') or [], ensure_ascii=False, indent=2),
-                    key=f"carousel-refresh-executions::{result['context_key']}", height=160)
-                try:
-                    candidate = json.loads(text)
-                    issues = ads_refresh_generation.plan.execution_issues(candidate,
-                        result['creative_refresh_context']['refresh_plan'], result['product_name'], 'Carousel')
-                    notes['refresh_executions'] = candidate
-                    for issue in issues:
-                        st.warning(issue)
-                    if not issues:
-                        st.success('Execution declarations complete. Visual approval remains your responsibility.')
-                except (ValueError, TypeError):
-                    notes['refresh_executions'] = []
-                    st.warning('Paste a valid JSON array containing every card execution.')
+            ads_refresh_ui.execution_review(sys.modules[__name__], result, workflow)
         return
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -12271,15 +12284,19 @@ def _render_instant_experience_concepts(result, workflow):
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     st.caption("Upload one cover and one Description, Headline and CTA per visual." if _is_ie_copy_v2(result) else "Upload one cover and one matching Primary Text / Headline pair per creative." if _refresh_copy_count(result) == 1 else "Upload one cover for each Instant Experience route, then paste the three matching description options beneath it.")
 
-    for concept in _ie_concepts_for_result(result):
+    compact_refresh = result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    concept_columns = st.columns(3) if compact_refresh else []
+    for concept_index, concept in enumerate(_ie_concepts_for_result(result)):
         concept_id = concept["id"]
         slot = slot_by_concept.get(concept_id) or {}
         heading = f"{concept['display_name'].upper()} — {concept['supporting_label']}"
         if not _is_ie_copy_v2(result) and _refresh_copy_count(result) == 1:
             heading = f"REFRESH CREATIVE {concept['position']} — WINNER REFINEMENT"
-        with st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
+        if compact_refresh:
+            heading = f"Refresh {concept['position']} · Winner refinement"
+        with (concept_columns[concept_index] if compact_refresh else nullcontext()), st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
             st.markdown(f"**{heading}**")
-            image_column, copy_column = st.columns([1, 2])
+            image_column, copy_column = (st.container(), st.container()) if compact_refresh else st.columns([1, 2])
             with image_column:
                 uploaded_file = st.file_uploader(
                     slot.get("label") or f"{concept['display_name']} Cover",
@@ -12302,20 +12319,23 @@ def _render_instant_experience_concepts(result, workflow):
                     else:
                         st.caption("Preview not available. The original image is still retained.")
                     original_name = saved_slot.get("original_name") or "Uploaded cover"
-                    st.caption(f"Filename: {original_name}")
-                    st.caption(
-                        "Original: "
-                        f"{saved_slot.get('source_width') or saved_slot.get('output_width')} x "
-                        f"{saved_slot.get('source_height') or saved_slot.get('output_height')} px"
-                    )
-                    st.caption(f"Original size: {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
+                    if compact_refresh:
+                        st.caption(f"{original_name} · {saved_slot.get('source_width') or saved_slot.get('output_width')} × {saved_slot.get('source_height') or saved_slot.get('output_height')} px · {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
+                    else:
+                        st.caption(f"Filename: {original_name}")
+                        st.caption(
+                            "Original: "
+                            f"{saved_slot.get('source_width') or saved_slot.get('output_width')} x "
+                            f"{saved_slot.get('source_height') or saved_slot.get('output_height')} px"
+                        )
+                        st.caption(f"Original size: {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
                     output_filename = _meta_output_filename(result, workflow, slot)
                     export_image = _instant_experience_export_image_details(
                         result,
                         saved_slot,
                     )
                     st.download_button(
-                        "Download Full-Resolution Cover",
+                        "Download cover" if compact_refresh else "Download Full-Resolution Cover",
                         data=export_image["data"],
                         file_name=output_filename,
                         mime=export_image.get("content_type")
@@ -12341,7 +12361,8 @@ def _render_instant_experience_concepts(result, workflow):
                     ):
                         _remove_ads_image_slot(result, slot["id"])
                         st.rerun()
-                    st.caption("Drop or browse for a replacement at any time.")
+                    if not compact_refresh:
+                        st.caption("Drop or browse for a replacement at any time.")
                 elif saved_slot.get("error"):
                     st.error(saved_slot["error"])
                     if st.button(
@@ -12362,8 +12383,9 @@ def _render_instant_experience_concepts(result, workflow):
                         variations[index - 1],
                         index,
                     )
-                    st.markdown("**Ad Copy**" if _is_ie_copy_v2(result) else "**Primary Text / Description**" if _refresh_copy_count(result) == 1 else f"**{variation['description_label']}**")
-                    field_columns = st.columns([2, 1, 1])
+                    if not compact_refresh:
+                        st.markdown("**Ad Copy**" if _is_ie_copy_v2(result) else "**Primary Text / Description**" if _refresh_copy_count(result) == 1 else f"**{variation['description_label']}**")
+                    field_columns = [st.container() for _ in INSTANT_EXPERIENCE_COPY_FIELDS] if compact_refresh else st.columns([2, 1, 1])
                     for field_column, (field_key, field_label) in zip(
                         field_columns,
                         INSTANT_EXPERIENCE_COPY_FIELDS,
@@ -12397,6 +12419,7 @@ def _render_instant_experience_concepts(result, workflow):
                                     key=f"{widget_key}::copy",
                                     label="Copy Description",
                                     success_label="Description copied",
+                                    compact=compact_refresh,
                                 )
                     variations[index - 1] = variation
                 concept_notes[concept_id] = variations
@@ -12415,7 +12438,8 @@ def _render_instant_experience_concepts(result, workflow):
                     and ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("data")
                 )
                 copy_status = ("Copy complete" if complete_count else "Copy needed") if _is_ie_copy_v2(result) else f"{complete_count} of {_refresh_copy_count(result)} copy pairs complete"
-                st.caption(f"{concept['display_name']}: {'Image ready' if image_ready else 'Image needed'} • {copy_status}")
+                display_name = f"Refresh {concept['position']}" if compact_refresh else concept['display_name']
+                st.caption(f"{display_name}: {'Image ready' if image_ready else 'Image needed'} • {copy_status}")
 
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -12518,7 +12542,11 @@ def _render_ads_image_slots(result, workflow):
             else:
                 label = (f"CREATIVE REFRESH {slot['position']}" if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and result.get("campaign_type") == "Single Image / Video" else slot['label'])
                 st.markdown(f"**{label}**")
-            if result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
+            if result.get("campaign_type") == "Carousel" and result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+                heading, direction = ads_refresh_ui.card_direction(result, slot['position'])
+                st.caption(heading)
+                st.caption(direction)
+            elif result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
                 title, body = IMAGE_ORDER[index]
                 st.caption(f"Card {index + 1}: {title}")
                 st.caption(body)
@@ -12532,7 +12560,7 @@ def _render_ads_image_slots(result, workflow):
             _process_ads_image_upload(result, workflow, slot, uploaded_file)
             saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
             if saved_slot.get("valid"):
-                st.image(saved_slot["data"], width="stretch")
+                st.image(saved_slot.get("preview_data") or saved_slot["data"], width="stretch")
                 output_label = (
                     f"{saved_slot.get('output_width')} x {saved_slot.get('output_height')} "
                     f"{saved_slot.get('output_format')}"
@@ -12850,13 +12878,14 @@ def _restore_saved_carousel_posting_package(result, workflow):
     _retain_saved_posting_package(result, workflow, outcomes, items, folder)
 
 
-def _render_saved_ad_post_now(result, workflow, *, source_matches=True):
+def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_issues=None):
     if google_ads.platform_for(result) != "meta":
         st.button("Post Now", disabled=True, help=google_ads.POSTING_HELP,
                   key=f"google-post-disabled::{result['context_key']}")
         st.caption(google_ads.POSTING_HELP)
         return
-    if creative_refresh_quality_issues(result, workflow):
+    issues = quality_issues if quality_issues is not None else creative_refresh_quality_issues(result, workflow)
+    if issues:
         st.caption("Complete refresh quality checks before POST NOW.")
         return
     package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
@@ -13316,7 +13345,7 @@ def _render_instant_experience_package_save(result, workflow):
         package_saved = package_saved and bool(workflow.get('refresh_workspace_saved'))
 
     if st.button(
-        ("Saved" if package_saved else "Save") if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Instant Experience Package",
+        ("Saved" if package_saved else "Save now") if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Instant Experience Package",
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
@@ -13469,12 +13498,14 @@ def _render_instant_experience_package_save(result, workflow):
             st.error(f"{row.get('concept')}: {row.get('error') or 'Upload failed.'}")
 
 
-def _render_ads_image_save(result, workflow):
+def _render_ads_image_save(result, workflow, *, quality_issues=None):
     if not _result_image_slots(result):
         return
-    issues = creative_refresh_quality_issues(result, workflow)
+    issues = quality_issues if quality_issues is not None else creative_refresh_quality_issues(result, workflow)
     if issues:
-        st.caption("Refresh checks: " + " · ".join(issues))
+        st.button('Save now', disabled=True, icon=':material/save:',
+                  key=f"ads-images-save-open::{result['context_key']}", use_container_width=True)
+        st.caption("Before saving: " + " · ".join(issues))
         return
     if _is_instant_experience_result(result):
         _render_instant_experience_package_save(result, workflow)
@@ -13529,7 +13560,7 @@ def _render_ads_image_save(result, workflow):
     else:
         st.caption(f"{len(valid_slots)} of {required_count} images ready.")
     if st.button(
-        "Save" if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Images",
+        ("Saved" if all_saved else "Save now") if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Images",
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
@@ -14210,6 +14241,8 @@ def creative_refresh_quality_issues(result, workflow):
             return ["Complete all production carousel copy fields before saving."]
     issues = []  # Older/non-Carousel packages retain their optional-notes contract.
     if result.get('campaign_type') == 'Carousel' and plan.get('carousel_contract') == ads_refresh_generation.plan.CAROUSEL_CONTRACT:
+        if (workflow.get('ad_notes') or {}).get('refresh_execution_error'):
+            issues.append(str(workflow['ad_notes']['refresh_execution_error']))
         issues += ads_refresh_generation.plan.execution_issues(
             (workflow.get('ad_notes') or {}).get('refresh_executions'), plan, result['product_name'], 'Carousel')
         rows = [dict(primary_text=v) for v in carousel['primary_texts']]
@@ -14229,11 +14262,15 @@ def creative_refresh_quality_issues(result, workflow):
 
 def _render_ads_final_actions(result, workflow, *, source_matches=True):
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        save_col, post_col = st.columns(2)
-        with save_col:
-            _render_ads_image_save(result, workflow)
-        with post_col:
-            _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
+        issues = creative_refresh_quality_issues(result, workflow)
+        if not source_matches:
+            issues = ['Settings changed. Select Submit to prepare the matching refresh before saving.'] + issues
+        with st.container(key='ads-refresh-actions'):
+            save_col, post_col = st.columns(2)
+            with save_col:
+                _render_ads_image_save(result, workflow, quality_issues=issues)
+            with post_col:
+                _render_saved_ad_post_now(result, workflow, source_matches=source_matches, quality_issues=issues)
     else:
         _render_ads_image_save(result, workflow)
         _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
@@ -14247,14 +14284,16 @@ def render_supported_result(result, *, source_matches=True):
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         workflow = _ads_image_workflow(result)
         st.subheader('1. Copy this ChatGPT prompt')
-        render_prompt_copy_button(result['master_prompt'], f"ads-prompt::{result['context_key']}")
+        render_prompt_copy_button(result['master_prompt'], f"ads-prompt::{result['context_key']}", compact=True)
         if result['campaign_type'] == 'Instant Experience':
-            _render_instant_experience_concepts(result, workflow)
+            with st.container(key='ads-refresh-ie-grid'):
+                _render_instant_experience_concepts(result, workflow)
         elif result['campaign_type'] == 'Single Image / Video':
             ads_standard_workflow.render(sys.modules[__name__], result, workflow, source_matches=source_matches)
             return
         else:
-            _render_ads_image_slots(result, workflow)
+            with st.container(key='ads-refresh-output-grid'):
+                _render_ads_image_slots(result, workflow)
             _render_ads_setup_notes(result, workflow)
         _render_ads_final_actions(result, workflow, source_matches=source_matches)
         return
@@ -14452,6 +14491,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         unsafe_allow_html=True,
     )
     if is_creative_refresh:
+        ads_refresh_ui.styles(st)
         st.title("Creative Refresh")
         import ads_refresh_saved
         if st.query_params.get('handoff_id') or st.session_state.get('meta-review-refresh-pending'):

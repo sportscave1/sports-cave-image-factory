@@ -75,6 +75,16 @@ def loads(data):
 def restore(data, state):
     import ads_page as ads
     result, workflow = loads(data)
+    # A reopened save owns its fields, even if this session edited the same run.
+    # Remove only widgets for this exact context; other drafts remain available.
+    context_key = result['context_key']
+    for key in list(state):
+        if str(key).startswith(('ads-', 'carousel-refresh-executions::')) and (
+            str(key).endswith('::' + context_key) or '::' + context_key + '::' in str(key)
+        ):
+            state.pop(key, None)
+    for slot in (workflow.get('slots') or {}).values():
+        slot.pop('_upload_identity', None)
     workflow['refresh_workspace_export'] = bytes(data)
     context = result.get('creative_refresh_context') or {}
     state.pop('meta-review-refresh-pending', None)
@@ -94,6 +104,10 @@ def restore(data, state):
     else:
         state[ads.ADS_PRODUCT_SELECTOR_KEY] = result['product_name']
     state[ads.ADS_PRODUCT_URL_KEY] = result['product_url']
+    # Catalogue autofill must not replace a saved alias/tracking URL on rerender.
+    state[ads.ADS_PRODUCT_URL_MANUALLY_EDITED_KEY] = True
+    state[ads.ADS_PRODUCT_URL_INITIALIZED_KEY] = True
+    state['ads-refresh-restored-url'] = {key: result.get(key) for key in ('context_key', 'product_id', 'product_name', 'product_url')}
     state[ads.ADS_CREATIVE_REFRESH_WINNING_PRIMARY_TEXT_KEY] = context.get('winning_primary_text', '')
     state[ads.ADS_CREATIVE_REFRESH_WINNING_HEADLINE_KEY] = context.get('winning_headline', '')
     for key, field in (('ads_category', 'category'), ('ads_country', 'country'), ('ads_campaign_type', 'campaign_type')):

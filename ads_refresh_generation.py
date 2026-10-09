@@ -283,6 +283,7 @@ Verified product facts: {json.dumps(product_metadata or {}, ensure_ascii=False, 
 ATTACH EXACTLY {n} ORIGINAL WINNING CARD IMAGES, IN SOURCE ORDER
 {mappings}
 These are {n} winning Carousel cards, collectively the product authority and individually the creative authority. No additional product image is required.
+An optional black-framed product-fidelity reference, if supplied, is authoritative for its verified printed artwork, names, signatures, colours, geometry, frame thickness/depth/bevel and glazing only. It is NOT a creative/background reference, source card or finished output. Ignore its external wall, furniture, room, lighting and camera angle. Never reproduce its stock mockup scene. Keep exactly {n} winning cards and {n} refreshed outputs; do not add an extra card or demand a duplicate mandatory upload. Resolve any product conflict with the winner before proceeding.
 CSV template is a separate non-image attachment. For a legacy manual winner, attach every labelled card and supply its matching headline/description and shared primary texts before proceeding.
 Missing references: list every missing labelled image and stop. One winning image cannot stand in for {n} cards. Complete winning Carousel required. Reload the winner from Meta Review.
 OS has not analysed winner pixels. Inspect the actual full-resolution attachments, never infer visual details from metadata.
@@ -311,6 +312,7 @@ Product physics comes first: faithful frame thickness/depth/bevel, realistic tra
 
 REFRESH THE WINNING COPY
 Return exactly five shared Primary Text variations AND {n} matching card headline/description pairs. Analyse each supplied source primary text separately; retain its useful emotional/collector appeal but create a new hook, argument and expression. Refresh each card's OWN original headline and description in its original role. Do not reuse winner copy, shuffle the source phrases, make synonym-only edits, repeat sibling openings or duplicate descriptions. Fixed verified facts, product names and mandatory CTAs may repeat; do not invent scarcity, stock, offers, demand or endorsements.
+Also complete all five shared headline variation rows and all five shared description variation rows already present in the CSV template. Those shared copy choices are separate from card-specific headlines/descriptions. No required production copy cell may remain blank; an incomplete template cannot be saved for Posting.
 {ads.build_country_language_guidance(country)}
 {ads.build_carousel_card_copy_rules().replace('For all five carousel cards:', f'For all {n} carousel cards:')}
 Keep the EXACT existing CSV headers, row identities, five shared-copy slots, {n} ordered card fields, upload slots and Posting contract. No execution metadata in CSV columns. Use {url} for every card destination. Return completed downloadable UTF-8 CSV with correctly quoted commas/newlines. Generate images only when requested.
