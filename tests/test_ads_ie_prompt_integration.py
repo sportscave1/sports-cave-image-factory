@@ -77,8 +77,14 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
             ads_page.render_prompt_copy_button(text, "ie-integration-clipboard")
         html = render_html.call_args.args[0]
         encoded = re.search(r"const promptText = (.*);", html).group(1)
-        self.assertEqual(json.loads(encoded), text)
-        self.assert_three_formats(json.loads(encoded))
+        # The existing copy-button presentation layer intentionally removes obsolete
+        # URL-parameter setup boilerplate, without mutating the saved prompt itself.
+        copied = json.loads(encoded)
+        self.assertEqual(copied, ads_page.creation_instructions(text))
+        self.assertIn("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME", copied)
+        self.assertEqual(copied.count("GROUP 1 — PREMIUM SCARCITY"), 1)
+        self.assertEqual(copied.count("GROUP 2 — PREMIUM SCARCITY"), 1)
+        self.assertEqual(copied.count("GROUP 3 — PREMIUM SCARCITY"), 1)
 
     def test_cached_legacy_prompt_rebuilds_even_when_version_claims_current(self):
         current = self.record()

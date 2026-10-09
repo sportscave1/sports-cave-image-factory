@@ -111,7 +111,7 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
         prompt = fixture()['master_prompt']
         for family in ('bedroom', 'man cave', 'office', 'lounge'):
             self.assertIn(f'{family} -> new {family}', prompt)
-        for phrase in ('detail-role -> new detail execution','INDIVIDUAL WINNER ANALYSIS','collectively supply the immutable product authority',
+        for phrase in ('detail-role -> new detail execution','INDIVIDUAL WINNER ANALYSIS','CANONICAL_PRODUCT, when supplied as the original black-framed Shopify product reference, has FIRST authority',
                        'glass','bevel','contact shadow','ambient occlusion','wall separation','every word','mitred joins'):
             self.assertIn(phrase,prompt)
 

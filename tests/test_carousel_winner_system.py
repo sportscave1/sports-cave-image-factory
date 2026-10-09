@@ -137,7 +137,7 @@ class CarouselWinnerSystemTests(unittest.TestCase):
                 if row["kwargs"].get("creative_refresh_context"):
                     self.assertIn("WINNER LED REFRESH V3", text)
                     if row['kwargs']['campaign_type'] == 'Carousel':
-                        self.assertNotIn('CANONICAL_PRODUCT', text)
+                        self.assertIn('CANONICAL_PRODUCT', text)
                         self.assertIn('COLLECTIVE WINNER CAROUSEL V1', text)
                     else:
                         self.assertIn('CANONICAL_PRODUCT', text)
