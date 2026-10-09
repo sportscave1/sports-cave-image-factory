@@ -9,7 +9,9 @@ def corrected_url(url,previous):
     target=urlsplit(url)
     query=parse_qsl(target.query,keep_blank_values=True)
     keys={k.casefold() for k,_ in query}
-    for key,value in parse_qsl(urlsplit(previous).query,keep_blank_values=True):
+    try:previous_query=urlsplit(previous).query
+    except ValueError:previous_query=''
+    for key,value in parse_qsl(previous_query,keep_blank_values=True):
         if (key.casefold().startswith('utm_') or key.casefold() in ('fbclid','gclid','msclkid')) and key.casefold() not in keys:
             query.append((key,value));keys.add(key.casefold())
     return urlunsplit((target.scheme,target.netloc,target.path,urlencode(query),target.fragment))
@@ -25,6 +27,8 @@ def correct(state,row,previous_url):
     original=deepcopy(source.get('product_mapping') or {})
     updated['product_mapping']=deepcopy(product)
     updated.update({k:v for k,v in product.items() if k!='canonical_row'})
+    updated['record_key']=ads._edition_ops_product_record_key(row)
+    if 'product_name' in updated:updated['product_name']=product['product_title']
     updated.setdefault('product_correction',{'ad_id':source.get('ad_id'),'decision_id':source.get('decision_id'),'original_mapping':original})
     updated['product_correction']['selected_mapping']=deepcopy(product)
     state['meta-review-refresh-source']=updated

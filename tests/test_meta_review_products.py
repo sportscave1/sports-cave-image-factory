@@ -146,7 +146,7 @@ class PersistenceHydrationTests(unittest.TestCase):
 
 
 class SelectorTests(unittest.TestCase):
-    def test_existing_selector_ranks_candidates_and_confirms_selection(self):
+    def test_existing_selector_ranks_candidates_and_corrects_only_draft(self):
         source={**PACKAGE,'product_resolution':{'candidates':[products.canonical(CATALOGUE[1]),products.canonical(CATALOGUE[0])]}}
         with patch.object(store,'confirm_product_mapping',side_effect=lambda p,product,actor:{**p,'product_mapping':product}) as save:
             app=AppTest.from_string('''import streamlit as st
@@ -154,6 +154,7 @@ import ads_page as a
 from tests.test_meta_review_products import CATALOGUE,PACKAGE
 import meta_review_products as p
 st.session_state[a.ADS_ACTIVE_WORKFLOW_MODE_KEY]=a.ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+st.session_state.setdefault('ads_category','Motorsport')
 st.session_state.setdefault('meta-review-refresh-source',{**PACKAGE,'product_resolution':{'candidates':[p.canonical(CATALOGUE[1]),p.canonical(CATALOGUE[0])]}})
 a.render_product_name_input(rows=CATALOGUE)
 ''').run()
@@ -161,8 +162,9 @@ a.render_product_name_input(rows=CATALOGUE)
             self.assertEqual(app.selectbox[0].options[0],CATALOGUE[1]['product_title'])
             app.selectbox[0].select('id::102').run()
             self.assertFalse(app.exception)
-        self.assertEqual(save.call_args.args[1]['product_id'],'102')
-        self.assertEqual(app.session_state['ads_category'],'NBA')
+        save.assert_not_called()
+        self.assertEqual(app.session_state['meta-review-refresh-source']['product_mapping']['product_id'],'102')
+        self.assertEqual(app.session_state['ads_category'],'Motorsport')
 
     def test_new_ads_with_old_handoff_source_does_not_persist_mapping(self):
         with patch.object(store,'confirm_product_mapping') as save:

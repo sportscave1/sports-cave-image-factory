@@ -34,6 +34,7 @@ class ProductCorrectionTests(unittest.TestCase):
             self.select(MURPHY)
         self.assertFalse(self.issue());source=self.state[handoff.ACTIVE]
         self.assertEqual(source['product_id'],'202');self.assertEqual(source['product_handle'],MURPHY['product_handle'])
+        self.assertEqual(source['record_key'],'202')
         self.assertEqual(self.state[ads.ADS_PRODUCT_URL_KEY],MURPHY['online_store_url'])
         self.assertEqual(source['components'],self.source['components'])
         self.assertEqual(self.state['ads_category'],'Motorsport');self.assertEqual(self.state['ads_country'],'USA')
@@ -56,6 +57,9 @@ class ProductCorrectionTests(unittest.TestCase):
         correction.select_from_url(ROWS)
         self.assertEqual(self.state[handoff.ACTIVE],self.source)
         self.assertIn('could not be matched',self.state['meta-review-product-error'])
+    def test_selection_recovers_from_malformed_manually_entered_url(self):
+        self.state[ads.ADS_PRODUCT_URL_KEY]='https://[broken'
+        self.select(MURPHY);self.assertFalse(self.issue())
     def test_other_ad_and_original_history_are_unchanged(self):
         other=deepcopy(self.source);other['ad_id']='carousel-2'
         self.state['other_saved_refresh']=other
@@ -79,6 +83,41 @@ class ProductCorrectionTests(unittest.TestCase):
     def test_manual_exact_name_resolves_actual_identity(self):
         self.state[ads.ADS_PRODUCT_SELECTOR_KEY]=MURPHY['product_title'];ads._on_ads_product_selector_changed(ROWS)
         self.assertFalse(self.issue());self.assertEqual(self.state[handoff.ACTIVE]['product_id'],'202')
+    def test_corrected_identity_reaches_carousel_and_ie_submit_and_exports(self):
+        from tests.test_ads_refresh_workflow import winner
+        from ads_refresh_saved import dumps,loads
+        for campaign in ('Carousel','Instant Experience'):
+            source=winner(campaign=='Carousel');source['product_mapping']=products.canonical(BROCK)
+            self.state[handoff.ACTIVE]=source;handoff.hydrate_product(self.state,source['product_mapping'])
+            self.select(MURPHY)
+            current=self.state[handoff.ACTIVE]
+            context={'winning_primary_text':source['components']['primary_text']['value'],
+                     'winning_headline':source['components']['headline']['value'],**generation.source_context(current)}
+            result=ads.build_ads_result_record(MURPHY['product_title'],'Motorsport','Australia',campaign,
+                product_url=self.state[ads.ADS_PRODUCT_URL_KEY],product_id=current['product_id'],creative_refresh_context=context)
+            self.assertEqual(result['product_id'],'202');self.assertEqual(result['product_url'],MURPHY['online_store_url'])
+            self.assertEqual(result['creative_refresh_context']['source_winner']['product_mapping']['product_id'],'202')
+            restored,_=loads(dumps(result,{'context_key':result['context_key']}))
+            self.assertEqual(restored['product_name'],MURPHY['product_title'])
+            self.assertIn(MURPHY['product_title'],result['master_prompt'])
+    def test_corrected_saved_package_enters_existing_posting_form(self):
+        from tests.test_ads_posting_handoff import completed_ad,save_locally
+        import ads_posting_handoff as posting_handoff
+        import ads_posting_page as posting
+        self.select(MURPHY)
+        for campaign in ('Carousel','Instant Experience'):
+            result,workflow=completed_ad(campaign,'creative_refresh')
+            result.update(product_name=MURPHY['product_title'],product_id='202',product_url=MURPHY['online_store_url'],
+                          creative_refresh_context=generation.source_context(self.state[handoff.ACTIVE]))
+            if campaign=='Carousel':
+                for card in workflow['ad_notes']['carousel']['cards']:card['destination_url']=MURPHY['online_store_url']
+            save_locally(result,workflow)
+            self.assertNotIn('posting_package_error',workflow,workflow.get('posting_package_error'))
+            package=workflow[posting_handoff.SAVED_PACKAGE_KEY]
+            self.assertEqual(package['batch']['product_id'],'202')
+            state={};posting_handoff.queue_saved_package(package,state=state)
+            self.assertTrue(posting.consume_saved_posting_package(ads.build_ads_product_selector_records(ROWS),state=state))
+            self.assertEqual(state[posting.SAVED_PRODUCT_URL_KEY]['url'],MURPHY['online_store_url'])
 
 
 class ProductSelectorUITests(unittest.TestCase):
