@@ -1,0 +1,26 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+{ULTIMATE_MOMENT_CONTRACT_VERSION}
+
+MOMENT LOCK HANDOFF - AUTHORITATIVE
+Use the ULTIMATE MOMENT LOCK and MOMENT LOCK CONFIRMATION from the preceding Research and Find Images responses plus the exact selected-asset mappings below. Stop and return to Find Images if a selected source depicts another event, season, uniform, venue or celebration, or if the composition would require reconstructing history. Never reinterpret the lock as a generic sports-poster brief.
+
+PREMIUM LIMITED-EDITION SPORTING ARTEFACT
+Build an original composition around one definitive authentic photograph of the exact moment. The default hierarchy is: historic photograph; emotion/action; event-specific headline; event context; athlete name where required; authentic signature; concise verified stat/date line; then subtle Sports Cave/Limited Edition details. The hero must dominate at Shopify-thumbnail size. Choose chest-up, waist-up, strong three-quarter or complete iconic action according to what best communicates the real moment; do not shrink the athlete for decoration or force every source into the same crop.
+
+Use one of these quality principles according to the lock, never as a template copy: an iconic single action with restrained stadium context; defining-event storytelling with one commanding hero and an exact historic line; or a premium photographic collage where every additional authentic same-event image strengthens the story and one hero remains unmistakably dominant. A second athlete or equal principal is prohibited unless the locked moment genuinely requires that person. Ultimate Moments is not Rivalry Face-Off.
+
+EVENT-SPECIFIC STORYTELLING
+Make clear within about three seconds why this photograph matters. Use a strong 2-5 word collector headline tied directly to the athlete and event. Do not invent a quote or use generic AI copy such as UNSTOPPABLE, GREATNESS, LEGEND, CHAMPION or DESTINY without a verified athlete-specific meaning. Where useful, include one quiet factual line for the verified milestone, result, record, date, opponent, venue or competition; do not fill the design with statistics.
+
+The background is atmospheric evidence from the same story: the genuine venue, crowd, scoreboard, track, court, field, trophy environment, architecture or event lighting. Do not use a random smoky arena, unrelated crowd, fake scoreboard, generic AI stadium, arbitrary spotlights, fantasy sparks or dramatic clouds. Reference-only environment images guide factual setting and must not be presented as another event's real photograph.
+
+SPORTS CAVE FINISH
+Landscape 4:3 with one refined, continuous inset border and every important element inside the safe area. Use deep black, charcoal, muted grey, warm ivory, restrained antique gold, controlled highlights, cinematic contrast, subtle photographic grain and understated archival texture. Fine film grain, gentle vignette, faded pigment, light paper texture, minute scratches or controlled distressed type may support a premium archival collectible. Avoid neon/orange glow, fake HDR, plastic skin, bloom, glowing outlines, obvious particles, cheap lens flare, excessive sparks, gaming-poster styling and oversaturated team colours.
+
+Use only an authentic verified signature asset, secondary and tastefully integrated; never invent cursive and present it as authentic. Keep the Sports Cave Collector Series mark, LIMITED EDITION and 001 / 100 treatment small, engraved/printed/editorial and subordinate to the photograph rather than UI-like.

@@ -1,0 +1,26 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: DYNAMIC SCENE TEMPLATE
+SOURCE: mockup_product_prompts.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Exact shared base copied from Git; the possible rooms and angles are source-defined, while one is randomly resolved for each generated prompt.
+
+===== SOURCE PROMPT / BUILDER =====
+Create a 1024 x 1024 photorealistic ecommerce lifestyle mockup using the supplied framed Sports Cave artwork as the exact reference.
+Preserve the supplied artwork and frame exactly: colours, text, badge, layout, complete outer frame and landscape proportions. Do not redesign, crop, blur, stretch, warp or distort the artwork.
+Place the frame realistically on a wall at eye level with believable scale, physical mounting, natural contact shadows and restrained glass reflections that do not obscure the artwork.
+Keep the framed artwork the clear focal hero. Use a premium, clean, minimal, polished and uncluttered room that supports rather than competes with the product.
+Use believable natural light, controlled highlights and realistic material texture. Avoid excessive darkness, noisy props, neon signs, distracting memorabilia, extra wall art, people, text overlays and watermarks.
+Use the single selected room and camera direction below. Allow subtle variation in furniture layout, lighting direction, wall material, decor, room proportions and composition within that room style.
+Keep perspective natural and architectural lines straight. No extreme side angles, awkward perspective, fisheye or independently distorted frame/artwork. The design must remain clearly readable.
+The final scene must look like real professional interior photography, not an AI-generated or over-styled room.
+
+SPORTS CAVE PRODUCT PAGE SCENE V1
+Selected room: [RANDOMLY SELECT ONE BELOW]
+- Modern man cave with pool table
+- Sports collector room with tasteful display shelving
+- Luxury media room / entertainment den
+- Premium garage lounge / workshop retreat
+- Whiskey lounge / gentleman’s retreat
+Selected camera angle: [RANDOMLY SELECT: straight-on / slightly angled from left / slightly angled from right]
+Only one room and one angle are selected per generation; keep the frame unchanged.
+END PRODUCT PAGE SCENE

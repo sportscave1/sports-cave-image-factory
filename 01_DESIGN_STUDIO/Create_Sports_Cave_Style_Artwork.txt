@@ -1,0 +1,123 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: APP DEFAULT TEMPLATE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Extracted verbatim from CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT. F-string expressions and task references may require dynamic runtime assembly.
+
+===== SOURCE PROMPT / BUILDER =====
+Use the images above found and uploaded to create a premium Sports Cave style limited-edition collector artwork.
+
+Use the selected hero image as the immutable principal subject asset. Composite the original supplied subject unchanged into the generated Sports Cave environment.
+Use additional subject images as immutable subject assets only when they are meant to appear in the final artwork.
+Use the selected background/support image as the atmosphere and story reference that may be adapted or regenerated around the preserved subject.
+Use detail references only as factual accuracy references unless specifically selected as visible subjects.
+Use the Sports Cave limited-edition plaque attached to this project and place it in the best possible location in the design.
+
+Create the artwork in landscape 4:3 ratio.
+
+The artwork must feel like a premium framed collector piece, not a normal sports poster.
+
+It must feel:
+
+Premium
+Cinematic
+Realistic
+Nostalgic
+Emotional
+Collector-focused
+Masculine
+Limited edition
+Framed-first
+Wall-worthy
+Timeless
+Print-ready
+
+The final reaction should be:
+
+"I need that on my wall."
+
+Use the creative direction from the previous research:
+
+Moment:
+[PASTE SELECTED MOMENT]
+
+Hero subject:
+[PASTE HERO IMAGE DIRECTION]
+
+Background/support:
+[PASTE BACKGROUND IMAGE DIRECTION]
+
+Title:
+[PASTE SELECTED TITLE]
+
+Emotional hook:
+[PASTE WHY THIS MOMENT MATTERS]
+
+Design the piece in true Sports Cave collector style:
+
+Dark cinematic foundation
+Deep black and charcoal atmosphere
+Premium warm lighting
+Subtle gold accents only
+Realistic hero subject
+Atmospheric background depth
+Strong negative space
+Clean premium typography
+Limited-edition plaque integrated naturally
+No clutter
+No cheap effects
+No social media graphic energy
+No random logos
+No messy text
+No fake-looking AI faces
+No warped hands or distorted bodies
+No incorrect jerseys, kits, cars, trophies, or eras
+
+The subject must be the hero.
+
+The background should support the story without distracting.
+
+The limited-edition plaque must feel like a real collector plate or memorabilia marker.
+It should be readable, premium, sharp, subtle, and properly lit.
+Place it where it improves the design most:
+bottom left, bottom centre, bottom right, near the title, or in darker negative space.
+
+Use gold sparingly for premium emphasis only:
+title accents, thin dividers, plaque detail, small collector details, subtle highlights.
+
+Do not flood the artwork with gold.
+
+Typography:
+Use a short, powerful, cinematic title.
+Make the title feel like a collector piece or film title.
+Use elegant serif or cinematic uppercase typography.
+Keep text minimal.
+Do not make it look like an ad.
+
+Realism:
+Prioritise accurate likeness, natural lighting, correct kit/car/venue details, realistic shadows, believable depth, and print-ready sharpness.
+
+Sport-specific mood:
+If NBA: dark arena, court glow, crowd energy, championship spotlight.
+If football/soccer: stadium lights, pitch glow, trophy atmosphere, national or club pride.
+If AFL/NRL: floodlights, turf texture, rivalry tension, old-school stadium emotion.
+If cricket: MCG-style atmosphere, pitch texture, sunset, test-match nostalgia.
+If motorsport: Bathurst-style mountain roads, pit lane, garage shadows, smoke, vintage grit, golden-hour racing atmosphere.
+If boxing/UFC: ring lighting, harsh shadows, sweat, black-and-white grit, dramatic spotlights.
+If horse racing: track dust, grandstand atmosphere, prestige, championship heritage.
+If tennis/golf: clean luxury, championship heritage, controlled lighting, premium club atmosphere.
+
+Final output standard:
+A premium 4:3 landscape Sports Cave limited-edition collector artwork.
+
+It should look like:
+
+A premium framed collector piece
+A tribute to sporting greatness
+A limited-edition drop
+A man cave centrepiece
+A piece of sporting history
+
+Make it feel like Sports Cave:
+
+Premium limited-edition sports wall art for fans who collect moments, not posters.

@@ -1,0 +1,130 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Original Python builder preserved as text because final prompts contain dynamic product, country, market and image information.
+
+===== SOURCE PROMPT / BUILDER =====
+def build_generic_single_image_video_prompt(product_name, category, country, campaign_type):
+    product_name = _clean_product_name(product_name)
+    specific_pattern = bool(get_category_winner_angle(category))
+    pattern_heading = (
+        f"SPORTS CAVE {str(category or '').upper()} SINGLE IMAGE VIDEO WINNER PATTERN"
+        if specific_pattern
+        else "SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN"
+    )
+    fallback_note = (
+        ""
+        if specific_pattern
+        else "\nINTERNAL NOTE\nUsing generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.\n"
+    )
+    category_block = build_category_winner_angle_block(category, campaign_type, country)
+    category_setting = get_instant_experience_setting(category)
+    return f"""{pattern_heading}
+
+PRODUCT
+Product name: {product_name}
+Category: {category}
+Market: {country}
+Campaign type: {campaign_type}
+{fallback_note}
+
+I have attached the exact Sports Cave product image being advertised.
+
+Analyse the attached image and product title before writing.
+
+Use the supplied product name as the source of identity. Do not invent unsupported facts, teams, years, trophies, signatures, licensing, records or stock claims.
+
+{build_country_campaign_localisation_note(category, country)}
+
+{build_universal_sports_cave_rules(category)}
+
+{category_block}
+
+Create a Meta Single Image/Video ad package.
+
+PRIMARY TEXT
+
+Create 5 strong primary text variants.
+
+Rules:
+- Short, human, emotional and collector-driven.
+- Use identity, nostalgia, scarcity and ownership.
+- Mention limited editions naturally.
+- Do not use generic AI phrases such as elevate your space, ultimate tribute or perfect addition.
+
+HEADLINE
+
+Create 5 headline options.
+
+Rules:
+- Short, urgent and category-specific.
+- Make them feel like Sports Cave collector advertising, not generic wall art.
+
+DESCRIPTION
+
+Create 5 short description lines.
+
+Rules:
+- Scarcity-driven and premium.
+- Keep each line compact and human.
+
+CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
+
+Create one creative prompt for the selected product.
+
+The prompt must instruct the image/video generator:
+- Use the uploaded image as the exact reference for the framed Sports Cave artwork.
+- Keep the exact artwork, colours, text, frame, badge, crop and layout unchanged.
+- Make the selected framed product the hero.
+- Use this category-relevant setting: {category_setting}.
+- Style: cinematic, premium, masculine, collector-focused and believable.
+- No fake logos, fake team branding, clutter, extra artwork competing with the product or unsupported text overlays.
+
+CTA GUIDANCE
+
+Use:
+Claim Your Edition
+
+OUTPUT THE AD-COPY PORTION IN THIS FORMAT
+
+PRIMARY TEXT
+
+Variant 1:
+[copy]
+
+Variant 2:
+[copy]
+
+Variant 3:
+[copy]
+
+Variant 4:
+[copy]
+
+Variant 5:
+[copy]
+
+HEADLINE
+
+1. [headline]
+2. [headline]
+3. [headline]
+4. [headline]
+5. [headline]
+
+DESCRIPTION
+
+1. [description]
+2. [description]
+3. [description]
+4. [description]
+5. [description]
+
+CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
+
+[one creative prompt]
+
+CTA GUIDANCE
+
+Claim Your Edition"""

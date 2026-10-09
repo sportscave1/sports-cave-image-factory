@@ -1,0 +1,54 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Individual image prompts are assembled per slide/format from these exact directions and the common visual builder.
+
+===== SOURCE PROMPT / BUILDER =====
+def _reel_still_prompts(payload):
+    directions = (
+        (
+            "Still 1 - Hook",
+            "Create a scroll-stopping close or medium-close opening with the sporting emotion first and the exact product clearly connected to it.",
+        ),
+        (
+            "Still 2 - Product reveal",
+            "Show the complete exact framed edition as the dominant hero in a real premium environment. The product must be immediately readable.",
+        ),
+        (
+            "Still 3 - Physical proof",
+            "Use a distinct close detail showing approved frame, glass, plaque, print or making proof without changing the product.",
+        ),
+        (
+            "Still 4 - Branded end card",
+            "Finish on the cleanest complete product view. Preserve premium negative space "
+            "for the exact logo and one CTA in the deterministic branded end-card stage.",
+        ),
+    )
+    prompts = []
+    for index, (label, direction) in enumerate(directions, start=1):
+        branding_plan = _reel_branding_plan(
+            payload,
+            label=label,
+            index=index,
+            total=len(directions),
+        )
+        prompts.append(
+            {
+                "label": label,
+                "overlay": branding_plan["copy"]["headline"],
+                "branding_plan": branding_plan,
+                "prompt": _visual_prompt(
+                    payload,
+                    label=label,
+                    direction=direction,
+                    branding_plan=branding_plan,
+                    dimensions=("9:16", "1080 x 1920"),
+                    sequence_rule=(
+                        "Use a clearly different camera viewpoint and composition from the other "
+                        "Reel stills while keeping the same exact protected product."
+                    ),
+                ),
+            }
+        )
+    return prompts

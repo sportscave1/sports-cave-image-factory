@@ -1,0 +1,8 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+Build the hierarchy around visible proof of the verified accomplishment. Championship mode must use an authentic trophy lift, podium or directly relevant title celebration with strong upward victorious energy, accurate trophy, season, venue and confetti cues when supported. Achievement mode must centre the correct award, record, statistic, date, equipment or defining photograph and communicate authority without falsely implying a championship. Use one distinct athlete; a second real photograph may show only that athlete and only when essential. Never turn an ordinary portrait into a champion with typography or use unrelated celebration imagery. Never invent a future or hypothetical achievement as fact.

@@ -1,0 +1,8 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+Treat the uploaded completed design as the immutable edit target. Change only the requested element, applying the exact replacement only inside the smallest possible local region. Preserve every unrequested subject, face, expression, pose, layout, title, typography, signature, border, plaque, colour, crop, shadow and texture pixel-for-pixel. Do not enhance, modernise or regenerate the artwork for a local edit. Add no people. If a legacy design already contains more than two people, preserve them and warn rather than silently removing anyone.

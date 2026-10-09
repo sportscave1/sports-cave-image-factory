@@ -1,0 +1,8 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+Treat the selected archival frame as the artwork's historical object, not raw material for a modern scene. Use the whole photograph wherever possible. Preserve authentic film grain, age, contrast, edge character and period atmosphere. Correct only verified dust, fading, tonal imbalance and local print damage conservatively. Use restrained archival typography and mounting treatment. Never rebuild faces, hands, uniforms, cars, crowds, track details or missing scenery; never smooth grain into AI detail; never colourise unless explicitly requested. Incidental people already in the source may remain but must not become newly composed heroes.

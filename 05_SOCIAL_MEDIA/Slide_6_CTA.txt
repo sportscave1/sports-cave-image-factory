@@ -1,0 +1,13 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: DYNAMIC IMAGE DIRECTION
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: This file captures one distinct image's direction; use the shared visual builder for the complete composed prompt.
+
+===== SOURCE PROMPT / BUILDER =====
+IMAGE ROLE: Slide 6 - CTA
+CREATIVE DIRECTION (exact repository wording):
+Finish with a product-led conversion image. Keep the complete frame large and dramatic. Use only verified scarcity or launch context and leave a restrained safe area for the separately supplied CTA overlay.
+
+RUNTIME BASE: Universal_Visual_Generation_Builder.txt
+This direction is combined with product and brand locks, market rules, aspect ratio and selection context at runtime.

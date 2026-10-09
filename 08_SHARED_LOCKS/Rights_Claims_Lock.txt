@@ -1,0 +1,9 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Required social image-generation protections.
+
+===== SOURCE PROMPT / BUILDER =====
+ACCURACY, RIGHTS AND CLAIMS - MANDATORY
+Never fabricate a price, live edition count, deadline, offer, delivery claim, review, customer story, result, athlete endorsement or official affiliation. Use only claims explicitly supplied in the structured brief. Do not use or suggest unlicensed broadcast clips, athlete photography or third-party creator footage. Use only source material whose usage rights are already approved; if rights are uncertain, stop and request confirmation rather than using the asset. Keep product, athlete, team, event, artwork and competition names exactly as supplied.

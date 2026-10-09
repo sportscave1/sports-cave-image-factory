@@ -1,0 +1,22 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: MANDATORY CONTRACT
+SOURCE: ads_refresh_generation.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Reusable validation contract for refreshed Instant Experience cover images.
+
+===== SOURCE PROMPT / BUILDER =====
+CRITICAL PRODUCT REALISM — PASS/FAIL
+Before designing the room, establish the Sports Cave framed product as a real physical object.
+The image FAILS and must be regenerated if any of these are missing:
+1. EXACT CANONICAL FRAME
+Match CANONICAL_PRODUCT frame thickness, bevel profile, depth and outer proportions exactly. Never thin, thicken, flatten, simplify or reinterpret the frame. The winning advertisement must never override canonical frame construction.
+2. CLEAR REAL GLASS
+The artwork must visibly sit behind genuine transparent glazing. Show restrained but clearly visible room-based reflections across part of the glass, following the flat glass plane and actual room windows/lights with realistic highlight falloff. Keep reflections subtle without obscuring artwork details. Never a matte, frameless, digitally pasted or flat poster look.
+3. PREMIUM FRAME BEVEL LIGHTING
+Room light must naturally interact with the physical black frame. At least one front bevel and, where perspective permits, one frame side/depth edge must visibly catch realistic light. The frame must read as a three-dimensional premium physical object.
+4. WALL SEPARATION
+The frame sits physically in front of the wall: believable mounting depth, subtle gap/separation and ambient occlusion immediately behind it. Never painted directly onto the wall.
+5. CONTACT SHADOW
+Show a soft but clearly visible contact shadow behind/below the frame. Direction, softness and intensity must match the room's primary light source.
+6. PRODUCT FIRST
+Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, visible real glass, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.

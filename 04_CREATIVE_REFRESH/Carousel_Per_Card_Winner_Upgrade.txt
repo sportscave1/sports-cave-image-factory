@@ -1,0 +1,23 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_refresh_plan.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Per-card upgrade/visual execution prompt; still requires winning image inspection.
+
+===== SOURCE PROMPT / BUILDER =====
+def carousel_standalone_brief(product, reference, *, scene='', role='', detail=False, dimensions='1080 x 1080', references=()):
+    return f"""PRODUCT: {product}
+REFERENCE: {reference}; inspect this exact attachment AND all other winning cards for collective product fidelity.
+{CAROUSEL_AUTHORITY}
+If an optional canonical black-frame product photograph is supplied, use it only for exact artwork/frame fidelity, never for its room, wall, furniture, camera or lighting. It is not an additional creative card. Do not duplicate that stock mockup or the original winner; resolve conflicting product details before generation.
+Collective reference attachments: {', '.join(references) or 'Explicitly list every supplied WINNER_CARD label in the final prompt'}.
+Concept anchor: {scene or 'Determine the broad room family from this exact winning card'}.
+Advertising role: {role or 'Determine this card role from the actual attachment'}.
+Keep / Change / Improvement: record this card's observed role, winning visual/copy principle and what to retain, then specify a substantially NEW execution and concrete upgrade. A winning carousel does not prove individual card causality.
+Same family, new execution: bedroom -> new bedroom; man cave -> new man cave; office -> new office; lounge -> new lounge; detail-role -> new detail execution. Never swap a bedroom for a bar. Preserve defining functional objects, not the old furniture or literal composition.
+Gallery hallway/console -> new gallery/entrance with framing and display quality still central. Home bar/motorsport room -> redesigned functional home bar. An edition-detail/magnification card still directs attention to the existing verified badge; never change edition numbers. Preserve vehicles, sponsors, signatures and all printed details along with faces and typography. Do not invent text overlays.
+Redesign architecture and layout, wall palette/material, camera composition plus at least two of furniture, lighting, flooring, background or product placement. No recolour, camera-angle-only sibling or copied room. For a verified detail role, specify a genuinely new detail composition, light and product placement instead of inventing a room.
+Output: square {dimensions}; preserve production safe areas and deterministic Sports Cave overlays separately from the PRINTED artwork. Product remains the mobile-readable hero. {'Intentional detail crop is permitted only for this verified detail-card role; never redraw hidden details.' if detail else 'Show the full outer frame, matching the winning product exactly.'}
+Use source-preserving compositing where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Resolve conflicting or unreadable product detail before generation; never guess.
+PREMIUM PHYSICAL PRODUCT: preserve frame thickness, bevel and mounting depth, realistic bevel lighting, transparent glass with subtle room-based reflections, wall separation, soft contact shadow and ambient occlusion. Preserve verified unglazed/unframed construction. Never add glare over faces or print; no flat poster, pasted mockup, floating frame or CGI showroom.
+{build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=detail)}"""

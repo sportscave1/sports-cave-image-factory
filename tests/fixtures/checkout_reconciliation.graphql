@@ -1,6 +1,0 @@
-query AutomationCheckoutReconciliation($after:String,$query:String) {
- abandonedCheckouts(first:100,after:$after,query:$query,sortKey:CREATED_AT,reverse:true) { nodes {
- id createdAt updatedAt completedAt abandonedCheckoutUrl customer { id firstName lastName email }
- shippingAddress { countryCodeV2 } billingAddress { countryCodeV2 }
- totalPriceSet { shopMoney { amount currencyCode } }
- } pageInfo { hasNextPage endCursor } } }

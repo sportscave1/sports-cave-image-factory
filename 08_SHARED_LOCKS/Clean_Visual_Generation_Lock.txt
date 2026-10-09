@@ -1,0 +1,9 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Required social image-generation protections.
+
+===== SOURCE PROMPT / BUILDER =====
+STAGE 1 - CLEAN VISUAL GENERATION
+Generate the exact product-led photograph or footage as a clean master. Preserve safe negative space for the supplied overlay plan, but do not render a Sports Cave logo, headline, CTA, button, price, countdown, sale sticker, poll, quiz, slider, question box, link sticker or newly generated advertising typography into the clean visual. Keep all existing text inside the protected product artwork unchanged. The clean master must remain useful on its own and must not contain an AI-generated approximation of the company logo.

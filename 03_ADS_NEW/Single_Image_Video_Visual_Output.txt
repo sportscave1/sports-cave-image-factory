@@ -1,0 +1,34 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Original Python builder preserved as text because final prompts contain dynamic product, country, market and image information.
+
+===== SOURCE PROMPT / BUILDER =====
+def build_single_image_video_visual_output_requirements(campaign_moment=None, *, selected_country=""):
+    campaign_moment_visual_context = build_campaign_moment_visual_context(
+        campaign_moment,
+        selected_country=selected_country,
+    )
+    campaign_moment_visual_block = (
+        f"\n\n{campaign_moment_visual_context}"
+        if campaign_moment_visual_context
+        else ""
+    )
+    return """SINGLE IMAGE / VIDEO VISUAL REQUIREMENTS
+
+Preserve the existing Single Image / Video route and output fields.
+
+Upgrade its existing creative brief into exactly one complete standalone creative prompt using the dynamic room-realism, product-lock, frame-and-glass, LAST-IMAGE VARIATION LOCK and sport-and-country adaptation rules. Do not create a five-prompt Carousel sequence.
+
+Place this one enhanced creative prompt after every existing copy, headline, description, CTA, setup and URL-parameter field.
+
+{campaign_moment_visual_block}
+
+CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
+
+[one complete standalone image or video prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]
+
+Return exactly one creative prompt.""".format(
+        campaign_moment_visual_block=campaign_moment_visual_block
+    )

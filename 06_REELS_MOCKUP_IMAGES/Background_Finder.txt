@@ -1,0 +1,93 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RESEARCH BUILDER
+SOURCE: social_media_reels_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Chooses suitable background before generating the actual image.
+
+===== SOURCE PROMPT / BUILDER =====
+def _build_background_finder_default(product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
+    product_handle = sanitize_handle(product_handle, "product-handle")
+    product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
+    sport_category = str(sport_category or "").strip() or "sport"
+    creative_notes = str(creative_notes or "").strip() or "No extra creative notes supplied."
+    creative_context = ""
+    if creative_notes != "No extra creative notes supplied.":
+        creative_context = f"\n\nAdditional creative direction from the VA: {creative_notes}"
+    return f"""Act as the premium creative director for Sports Cave.
+
+Use the uploaded black framed Sports Cave product mockup as the product reference.
+Analyse the uploaded product image directly instead of relying on product metadata.
+Use the supplied image, not a screenshot or compressed preview.{creative_context}
+
+Your job is to find the perfect background / room reference for social media reel content and lifestyle mockups for this exact product.
+
+Analyse the uploaded artwork carefully:
+- sport
+- athlete/team/moment
+- artwork colours
+- mood
+- energy
+- room style that would make this product feel premium
+- likely buyer identity
+- best collector-room environment
+
+Search the web for realistic room/background ideas that would suit this product.
+Look for backgrounds that would work as a realistic base image for placing this framed Sports Cave artwork into the scene.
+
+Give me multiple strong background directions, including:
+- luxury {sport_category} collector room
+- premium {sport_category} man cave
+- minimal {sport_category} living room
+- dark cinematic collector room
+- modern neutral lounge
+- home office / study
+- sports bar room
+- trophy room
+- bedroom/private retreat
+- hallway/entry statement wall
+- fireplace wall
+- home gym if relevant
+- garage/workshop only if sport is motorsport
+- clean close-up wall setup
+
+For each background option, provide:
+1. Room style name
+2. Why it suits this artwork
+3. Best mood for Meta ads
+4. Colour fit with the artwork
+5. What to avoid
+6. Suggested image search phrase
+7. Whether it suits:
+   - person holding/admires artwork
+   - person hanging/adjusting artwork
+   - person standing back admiring wall
+   - artwork-only wall mockup
+8. Score out of 10
+
+Then choose the top 3 best background options and tell me which one is the best overall.
+
+Prioritise:
+- premium realism
+- believable scale
+- masculine collector appeal
+- dark/warm Sports Cave feeling
+- luxury sports memorabilia styling
+- colours that blend naturally with the artwork
+- room references that make the frame look real, not pasted on
+
+Avoid:
+- messy rooms
+- cheap-looking rooms
+- obvious AI rooms
+- clutter
+- neon signs unless very subtle
+- random sports logos
+- fake trophies
+- distorted architecture
+- busy backgrounds that compete with the artwork
+- rooms where the frame placement would look unrealistic
+
+Return the answer as a clean carousel/list of background options I can choose from.
+
+Do not generate the mockup yet.
+Only help me choose the best background/reference room for this product."""

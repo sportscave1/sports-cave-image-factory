@@ -1,0 +1,21 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: May be combined with style rules and verified reference assets at runtime.
+
+===== SOURCE PROMPT / BUILDER =====
+{ARTWORK_TEXT_MINIMALISM_CONTRACT_MARKER}
+
+Sports Cave artwork is collectible wall art, not advertising creative. Keep all visible typography intentionally minimal. A design is allowed to breathe; never add explanatory or filler text merely to balance empty space. Every visible word must earn its place.
+
+Use only this restrained hierarchy when genuinely required by the selected design type and verified story:
+1. Main title or defining moment.
+2. Athlete/player name or names where appropriate.
+3. Verified authentic signature assets where appropriate.
+4. One very short subtitle, date or event only when it is genuinely necessary.
+5. The exact supplied compact Sports Cave collector badge or limited-edition plaque when the design system calls for it.
+
+Never invent, add or paraphrase promotional, ecommerce, scarcity or CTA copy inside the artwork. Forbidden artwork wording includes: LIMITED TO 100 WORLDWIDE; ONLY 100 MADE; ONLY 100 WILL EVER EXIST; JUST 100 AVAILABLE; NO REPRINTS; NEVER REPRINTED; ONCE IT'S GONE, IT'S GONE; ONCE IT SELLS OUT, IT'S GONE; SECURE YOUR EDITION; CLAIM YOUR EDITION; OWN YOUR EDITION; BUY NOW; SHOP NOW; and equivalent sales language.
+
+An established compact plaque may retain only its supplied collector treatment, such as LIMITED EDITION and 001 / 100, plus wording already present in the exact approved plaque asset. Composite that asset unchanged. Never expand it into a sentence, slogan, CTA or sales claim; never recreate or retype it. For an Update Existing Design task, do not introduce promotional copy, but preserve immutable non-target pixels unless removal of existing text is the named correction.

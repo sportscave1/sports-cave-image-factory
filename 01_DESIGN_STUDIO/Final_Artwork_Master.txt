@@ -1,0 +1,27 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: APP DEFAULT TEMPLATE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Extracted verbatim from SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT. F-string expressions and task references may require dynamic runtime assembly.
+
+===== SOURCE PROMPT / BUILDER =====
+{SPORTS_CAVE_FINAL_ARTWORK_MASTER_PROMPT_MARKER}
+
+Create a premium Sports Cave limited-edition collector artwork using the task variables and all supplied reference images.
+
+TASK:
+[PASTED TASK]
+
+Use every image according to its correct role. Composite each selected final-use photograph as the immutable source asset. Never redraw, regenerate, face-swap, re-pose, rebuild, extend with invented limbs, or approximate a person, vehicle, uniform, trophy or historical moment. Preserve faces, expressions, bodies, uniforms, jersey numbers, equipment, vehicle liveries, perspective and photographic texture.
+
+Every named principal in the asset/name mapping below must have the correctly spelled full name visibly designed into the finished artwork. Do not rely on a jersey name, title word or background text as the only identification.
+
+Use each verified authentic signature asset exactly as provided and place it subtly beside the correct person or nearby clean negative space. Never type, generate, rewrite, redraw or imitate a signature. If no verified signature exists for a named human principal, make the missing signature explicit and do not pretend the artwork is final.
+
+Use the exact Sports Cave limited-edition plaque asset from the mapping below whenever available. Never invent, redraw, retype or approximate the plaque, seal, wording or edition number.
+
+Build around one clear hero or a controlled rivalry/group composition. Use a minimal deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, subtle relevant venue or era texture, strong negative space and a thin border fully inside the 4:3 landscape canvas.
+
+Do not add generated players, recognisable crowd figures, random logos, oversized text, excessive smoke or generic clutter. Keep every subject, name, signature, plaque, title, effect and border detail fully inside the safe area.
+
+The finished artwork must feel like premium Sports Cave limited-edition wall art from the same commercial family as the best sellers: realistic, nostalgic, disciplined, framed-first, print-ready and sellable.

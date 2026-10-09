@@ -1,0 +1,12 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: MANDATORY CONTRACT
+SOURCE: ads_carousel_winner.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Used when generating high-conversion carousel images.
+
+===== SOURCE PROMPT / BUILDER =====
+HIGH-CONVERSION CAROUSEL QUALITY — WINNER STANDARD
+Select the strongest connected five-card sequence from verified product data. No duplicate headlines or descriptions, no commas or full stops, no truncated words or awkward abbreviations. Count every headline and description using Python len(): maximum 17 characters including spaces. Rewrite failures before returning the campaign.
+Prefer short recognisable identity, supported fan recognition, a different defining product hook, For The Cave ownership, and verified scarcity. Limited Edition is the approved Card 1 description when verified; it is not banned generic filler. For The Cave is the approved standard Card 4 headline. Reusing an identity in a fan phrase is allowed when useful; do not duplicate whole lines or weaken clarity to enforce arbitrary word bans.
+Match each headline, description, creative direction and image prompt. Card 1 remains the close-up product hero; Cards 2–5 use four different fan environments, Card 4 always the Sports Cave. Card 5 is lifestyle scarcity, not a detail-prop photograph.
+Never invent athlete/team identities, achievements, dates, quantities, numbering, signatures, licensing, manufacturing or product features. Keep current country language, sport terminology, CTA, URLs, UTM parameters and five Primary Text variants. Silently reject weak or invalid candidates and output only the finished campaign.

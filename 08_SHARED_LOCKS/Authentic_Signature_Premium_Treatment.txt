@@ -1,0 +1,105 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Added to specific generation prompts by the Design Studio pipeline.
+
+===== SOURCE PROMPT / BUILDER =====
+{SPORTS_CAVE_SIGNATURE_PREMIUM_TREATMENT_MARKER}
+
+Only use the supplied, selected or reliably sourced authentic signature belonging to the featured person.
+
+The signature is an identity-locked reference. Preserve its genuine handwritten structure exactly, including:
+
+* Letter shapes
+* Initials and recognisable marks
+* Natural slant and baseline
+* Stroke direction and connections
+* Loops, crossings and overlaps
+* Spacing and proportions
+* Flourish shapes and lengths
+* Beginning and ending strokes
+* Natural pressure and line-weight variation
+* Overall width-to-height ratio
+
+Do not redraw, reinterpret, simplify, correct, beautify or replace the authentic signature.
+
+Do not generate an approximate signature from the person’s name. Do not use a script font, invented handwriting or generic autograph styling.
+
+If no reliable signature reference is supplied or found, omit the signature. Never fabricate one.
+
+PREMIUM VISUAL TREATMENT
+
+Present the authentic signature as a thin, elegant and restrained collector detail.
+
+The signature should feel:
+
+* Refined
+* Handwritten
+* Authentic
+* Lightly weighted
+* Clean and precise
+* Understated
+* Premium
+* Integrated into the artwork
+
+Use a clean single-colour treatment such as restrained warm gold, champagne gold, muted silver, soft ivory or subtle off-white—whichever best suits the artwork.
+
+Keep the signature’s scale modest. It should reward closer viewing without competing with the main hero, title, plaque or central story.
+
+Where the source signature contains scan noise, a heavy background, compression or an artificial halo, clean only those unwanted artefacts. Preserve the actual handwritten stroke paths and natural pressure variation.
+
+Where technically possible, use the supplied signature as a preserved composited asset instead of asking the image model to recreate it.
+
+Do not force a naturally bold section of an authentic signature into an artificial hairline. Preserve genuine stroke variation while ensuring the overall presentation remains visually light through restrained scale, clean colour and minimal effects.
+
+ABSOLUTELY DO NOT USE:
+
+* Thick or chunky signature rendering
+* Artificially bold strokes
+* Generic cursive fonts
+* Invented or approximate autographs
+* Redesigned letter shapes
+* Calligraphy-style reinterpretations
+* Heavy outlines
+* Multiple stacked strokes
+* Drop shadows
+* Strong glows
+* Bevelled or embossed effects
+* Bright yellow-gold colouring
+* Thick metallic foil effects
+* Oversized signatures
+* Repeated or duplicated signatures
+* Signatures used as background texture
+* Signatures crossing a face, body or vehicle
+* Signatures touching or covering the border
+* Signatures placed outside the Sports Cave border
+
+PLACEMENT AND CONTAINMENT
+
+Place the signature once only, in a clean area of negative space where it complements the composition.
+
+The signature must:
+
+* Remain fully inside the Sports Cave branded border
+* Maintain a comfortable safety gap from the border
+* Remain completely legible
+* Avoid covering faces, hands, uniforms, vehicles or important details
+* Avoid competing with the title or collector plaque
+* Sit naturally within the composition
+* Look intentionally placed rather than pasted on
+* Remain smaller and visually quieter than the main title
+
+If the signature does not fit cleanly, scale it down proportionally or move it inward. Never crop, stretch, squash, warp or wrap it.
+
+SIGNATURE PRIORITY
+
+The visual hierarchy must remain:
+
+1. Supplied main hero or heroes
+2. Title and defining sporting story
+3. Sports Cave plaque and collector information
+4. Authentic signature
+5. Minimal atmospheric details
+
+The signature adds authenticity and collector value. It must never become the dominant visual element.

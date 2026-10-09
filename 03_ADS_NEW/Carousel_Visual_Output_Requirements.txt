@@ -1,0 +1,122 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Original Python builder preserved as text because final prompts contain dynamic product, country, market and image information.
+
+===== SOURCE PROMPT / BUILDER =====
+def build_carousel_visual_output_requirements(
+    template_key,
+    campaign_moment=None,
+    *,
+    product_name="",
+    category="",
+    selected_country="",
+    workflow_mode=ADS_WORKFLOW_MODE_NEW,
+    product_metadata=None,
+    variation_token="",
+):
+    roles = get_carousel_visual_roles(template_key)
+    scenes = resolve_carousel_visual_scenes(
+        product_name, category, selected_country, variation_token=variation_token,
+        product_metadata=product_metadata, campaign_moment=campaign_moment,
+    ) if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW else None
+    schema = []
+    for index, role in enumerate(roles, start=1):
+        schema.append(
+            build_carousel_image_prompt_schema(
+                index,
+                role,
+                campaign_moment,
+                product_name=product_name,
+                category=category,
+                selected_country=selected_country,
+                workflow_mode=workflow_mode,
+                resolved_scene=scenes[index - 1] if scenes else None,
+                variation_token=variation_token,
+            )
+        )
+    schema_text = "\n".join(schema).rstrip()
+    detail_rules = ""
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        detail_rules = """CAROUSEL RESOLVED ROOM SET — MANDATORY:
+Card 1 remains the premium close-up wall hero, 65-80% useful composition, complete outside frame, no furniture or lifestyle room. Use its resolved low-saturation wall tone and slight product-photography angle.
+Cards 2–5 are FOUR different premium lifestyle environments, 45-65% useful composition. Card 4 always uses Premium Man Cave / Sports Cave. No repeated room family or principal architecture; vary furniture, camera, wall and lighting/time combinations. Include both lighter and darker walls. At most one additional strongly sport-specific setting is selected from verified sport, never guessed team identity. Each scene must plausibly belong to a different fan/property. Product suitability wins over arbitrary colour matching.
+Card 5 is the fourth lifestyle room with a collector/scarcity purpose. Keep genuine edition details readable through composition and light, never alter or magnify printed pixels. No added image scarcity text or detail prop.
+Resolve all five fingerprints before final output. Keep the resolved scene fields in each standalone prompt and coordinate creative direction with the same scene. Preserve LAST-IMAGE VARIATION LOCK; use prior visible images to avoid repeating the same architecture/furniture/light combination while keeping Card 4 a cave. Do not print unresolved choices or internal tokens on the image.
+
+"""
+    prompt = f"""CAROUSEL VISUAL STORY REQUIREMENTS
+
+After every existing Carousel copy, card, primary-text, CTA, setup and URL-parameter field, output exactly {CAROUSEL_CARD_COUNT} complete image-generation prompts. Map one prompt to each generated card in the existing approved order and role structure.
+
+The response is incomplete unless it contains the exact image-generation section heading shown below followed by all five exact card-prompt headings. Under each card heading, write the entire detailed prompt in full. A Creative direction line may remain in the card-copy section as supplementary context, but it can never substitute for, abbreviate or satisfy the required standalone image prompt.
+
+Do not output only Creative direction. Do not output one shared prompt followed by five short variations. Do not use "same as above", "apply the shared rules", "use the previous prompt" or a list of differences. Do not shorten the prompts to save response length. Each card prompt must work when copied by itself into a fresh ChatGPT conversation with the supplied product image.
+
+Every generated carousel image prompt must begin with the mandatory square-format lock below, then follow the required prompt order. No carousel image prompt may omit, weaken, paraphrase or contradict the square-format lock, product-dominance principle, card camera-distance lock, strict product lock or carousel photorealism requirements. No card-specific template, sport adaptation, country direction, previous-image variation instruction, scarcity idea or room-composition idea may override the 1:1 square requirement, product prominence, complete-frame visibility, artwork accuracy or photorealism requirements.
+
+For every generated carousel prompt, use this priority order:
+
+1. Mandatory 1:1 square-format lock
+2. Card-specific visual purpose
+3. Product-dominance principle
+4. Card camera-distance lock
+5. Strict product lock
+6. Carousel photorealism requirements
+7. Exact uploaded-product/artwork lock
+8. Room, camera, lighting and realism instructions
+9. Previous-image variation lock
+10. Sport and country adaptation
+11. Prohibited elements
+12. Final mandatory square-format check
+
+Each prompt must be based on the selected product name, selected sport, selected country, the emotional meaning of that specific card, that card's exact generated headline, that card's exact generated description, its role and position in the overall story, the uploaded product artwork, and only verified product and scarcity information already permitted by the copy system.
+
+The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, ultra-realistic premium lifestyle photography, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
+
+Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card: a close-up wall product photograph with the frame occupying approximately 65-80% of the useful square composition. Cards 2-5 may show more of the environment, but only moderately; none may become a distant room shot. Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.
+
+Use this direct conversion-focused visual progression while preserving the selected template's approved role labels:
+
+- Card 1: product identity and a scroll-stopping close-up hero based on the Mockups/Reel Close-Up Premium Wall Shot.
+- Card 2: the verified moment, era or legacy.
+- Card 3: an emotional collector hook.
+- Card 4: fan ownership and how the framed edition commands the wall.
+- Card 5: scarcity, limited edition and no second run, using only verified claims and edition details.
+
+For every card, make the exact generated headline, exact generated description, creative direction and image prompt communicate the same clear selling idea. The room, wall, lighting, angle and composition must visibly support that idea. Favour premium but believable homes and ownership environments that help shoppers imagine owning the artwork. Do not use abstract room symbolism when it weakens a direct commercial presentation.
+
+Privately develop a fresh visual concept from the selected product before writing the five prompts. Do not output that reasoning.
+
+Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message without zooming out so far that the framed artwork becomes small. For Card 1, variation means restrained wall material, wall colour, lighting and frame-depth treatment only; do not create a full room scene for Card 1.
+
+Coordinate the five prompts as a deliberately varied photographic sequence. Each card after Card 1 must use a visibly different camera viewpoint and artwork placement from the preceding card while preserving Card 1 as the closest product hero, Cards 2-4 as product-dominant medium or medium-close lifestyle images, and Card 5 as a close, dramatic scarcity image.
+
+No two cards may repeat the room type, house architecture, wall treatment, wall colour family, main furniture layout, lighting setup, time-of-day treatment, camera composition, camera height or artwork placement. Card 1 is intentionally a close-up wall product shot, so do not force it into a living room, entry gallery, office, man cave, home bar or other room type for the sake of variety.
+
+Do not merely recolour the same room. Do not default to a generic office, living room, man cave, collector room and close-up sequence.
+
+Treat this as a new creative run. Do not default to room combinations you have previously supplied for Sports Cave. Build a fresh set from the product title, sport, country, card copy and emotional story. Within this run, do not repeat a room type, wall treatment, principal furniture arrangement, lighting setup or camera composition.
+
+Visual variety must never alter, regenerate, crop or distort the supplied artwork or frame. Never crop the outer frame or let the artwork extend beyond its border. Never let room variety, furniture scale, architecture, negative space, sport atmosphere, country adaptation or scarcity emphasis make the framed product secondary. Avoid five near-identical framed mockups with only minor furniture changes.
+
+Normally do not place the card headline or description inside the image because Meta supplies those fields separately. Only include in-image card text if the existing approved campaign template explicitly requires it.
+
+Do not add prices, discounts, fake buttons, fake UI, watermarks, promotional stickers, unsupported text, fake edition details or random copy.
+
+Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
+
+{detail_rules}IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
+
+{schema_text}
+
+Return exactly these five image-prompt entries and no sixth prompt."""
+
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        prompt = prompt.replace("- Card 2: the verified moment, era or legacy.", "- Card 2: supported fan identity with memory or present-day connection.")
+        prompt = prompt.replace("- Card 3: an emotional collector hook.", "- Card 3: a defining verified product hook distinct from Card 1.")
+        prompt = prompt.replace("- Card 4: fan ownership and how the framed edition commands the wall.", "- Card 4: For The Cave ownership in the mandatory Sports Cave environment.")
+        prompt = prompt.replace("Cards 2-4 as product-dominant medium or medium-close lifestyle images, and Card 5 as a close, dramatic scarcity image.", "Cards 2–5 as four distinct product-dominant lifestyle images, with a stronger medium-close collector presentation for Card 5.")
+        prompt = prompt.replace("- Card 5: scarcity, limited edition and no second run, using only verified claims and edition details.", "- Card 5: authentic verified scarcity in the fourth distinct lifestyle room; never imply no second run without verification.")
+    return prompt

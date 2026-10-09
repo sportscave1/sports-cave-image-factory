@@ -1,0 +1,8 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+Make the finished piece feel like an authentic memory from its era. Use one dominant genuine period photograph, or two authentic principals only when the verified shared memory requires both. Preserve period grain, uniforms, equipment, venue colour and age character. Use restrained archival typography, warm but truthful grading, stadium shadow, gentle haze and dark edges. Do not duplicate the athlete or any other subject, modernise the image, turn it into a generic digital montage, add fantasy lighting or manufacture a crowd. The emotion must come from the photographed memory rather than effects or an old date pasted onto a modern graphic.

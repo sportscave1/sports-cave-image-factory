@@ -1,0 +1,44 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+{LEGENDS_JERSEY_DISPLAY_CONTRACT_VERSION}
+
+JERSEY SOURCE LOCK HANDOFF - AUTHORITATIVE
+Use only the exact two photographs and exact principal mappings in the preceding JERSEY SOURCE LOCK and selected-asset mapping below. They are immutable final-use sources for the bodies and jerseys. Stop and return to Find Images if a mapping is missing, if a surname/number is not genuinely present and readable, or if the composition would require generating, rotating, mirroring, reconstructing or repainting an athlete or jersey. Never let a legacy prompt, desired symmetry or visual cleanup override this lock.
+
+REFERENCE PRIORITY
+Reproduce the repeatable visual system of the approved Ohtani vs Judge master. Bryant vs Jordan and Messi vs Ronaldo support the same series. Purple Reign is a negative reference only. Do not borrow its custom headline, split-world composition, action subject, purple neon, scale imbalance, ornate double frame or loose collector details.
+
+FIXED ARTWORK IDENTITY - OVERRIDES TASK TITLE AND EVERY LEGACY INSTRUCTION
+The main artwork title must be exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}. Use the exact locked subtitle in the Legends variable map below: [SURNAME 1] VS [SURNAME 2]. The task's DESIGN TITLE, visible schedule title and concept title are metadata only. Never render PURPLE REIGN, THE DYNASTY, AFC SUPREMACY or any other custom concept title. Exactly two task principals, their two full lower names, their two verified signatures, the official Sports Cave Collector Series circular badge and the LIMITED EDITION / 001 / 100 plaque are required.
+
+Both jersey-number fields in the locked variable map must contain exact verified numerals before final generation. If either still contains a verification placeholder, conflicts with its selected source or is not clearly readable in that authentic source, stop and return to Research/Find Images. Never guess or generate a number.
+
+MASTER REAR JERSEY COMPOSITION
+Composite exactly one selected genuine rear or restrained rear-three-quarter source photograph per principal. Place them side by side, both looking toward the same field, stadium, arena, court or sporting environment. Give them comparable size, height, crop and visual importance. Use large shoulders and jersey backs; subjects should occupy about 60-70% of artwork height and normally crop around upper thighs or waist. Keep heads, shoulders, jersey surnames and numbers completely visible. Do not mix front and rear orientation, create a face-off, twist either athlete toward the viewer, make one athlete dominant, or place them in separate visual worlds.
+
+BACKGROUND AND ATMOSPHERE
+Use one unified, dark and minimal sporting environment behind both athletes: deep stadium black, smoked charcoal, a low-detail crowd or architecture, diffused floodlights, dark tunnel/field/court/track atmosphere where relevant, subtle historical texture and controlled central separation. Let authentic team colours come primarily from the real uniforms and slightly desaturate them toward archival printed sports photography. The athlete must emerge naturally from the environment rather than look pasted on. No bright stadium behind a dark jersey, hard halo, split tunnel, hard diagonal divide, two-location montage, purple neon corridor, giant architecture, fake flames, orange sparks, extra players, recognisable spectators or generated crowd figures.
+
+No split tunnel. No bright synthetic jersey-display stage.
+
+DARK ARCHIVAL PHOTOGRAPHIC FINISH
+Reduce overall brightness. Allow shoulders and parts of each jersey to fall naturally into shadow while keeping real surnames and numbers legible. Use believable source exposure, curves, tonal blending, natural shadow and only restrained photographic edge light. Preserve natural neck/skin tone, pores where visible, hair/helmet detail, fabric texture and natural shadow transitions. Avoid glossy or plastic jerseys, porcelain/waxy skin, CG helmets, beauty filtering, hard cutout edges, synthetic stitching, glowing numbers, fake metallic fabric and equal illumination across every surface.
+
+Apply sophisticated collector grunge sparingly: unified film grain, archival print/dark paper texture, minute dust and scratches, faded pigment, slight ink distress, restrained edge wear, gentle vignette, local shadow falloff and subtle stadium haze. Preserve source detail, surnames and numbers. No giant scratches, paint splashes, messy overlays, aggressive masks, excessive smoke, obvious particles or generic grunge-preset finish. The result must feel like a museum-quality vintage sports print, not AI fan art, a video-game render, glossy merchandise poster or new-uniform advertisement.
+
+UPPER TYPOGRAPHY
+Use a large centred uppercase premium serif title reading exactly {LEGENDS_JERSEY_DISPLAY_FIXED_TITLE}, widely spaced in muted antique gold or warm ivory. Put the exact uppercase surname subtitle directly beneath it, optionally with one short thin gold divider on each side. Preserve generous breathing room. Text must not touch the border, athletes or background numbers and must remain legible at Shopify-thumbnail size. Avoid bright yellow/orange, glowing or chrome gold, heavy 3D bevels and decorative lettering that competes with the jerseys. The jerseys are the hero; typography frames the history.
+
+LOWER COLLECTOR STRUCTURE
+Place one thin rectangular full-name plate beneath each corresponding athlete. Print each principal's complete supplied name exactly once in the correct plate. Place that principal's exact verified signature beneath the same nameplate. Both signatures must have the same colour, apparent stroke thickness, visual scale and finish while preserving their genuine stroke paths. Keep them restrained, mapped correctly, fully contained and clear of athlete, nameplates, badge and plaque. Place the exact official Sports Cave Collector Series circular badge at lower centre, with the exact approved LIMITED EDITION plaque beside or integrated with it. The plaque must visibly preserve LIMITED EDITION and 001 / 100. Badge and plaque stay subtle, premium and uncropped. Never generate, redraw, retype or approximate either asset; if either exact approved asset is not mapped, state that the artwork is incomplete and stop before final generation.
+
+BORDER AND OUTPUT
+Landscape 4:3, print-ready. Use one thin continuous inset antique-gold rectangular border with print-safe margins. Keep title, subtitle, heads, shoulders, bodies, surnames, numbers, names, signatures, badge, plaque and every effect inside it. No ornate or double frame and nothing crossing the border.
+
+PURPLE REIGN FAILURE EXCLUSIONS
+No custom headline; action pose; front/rear mix; scale imbalance; split stadium/tunnel; purple neon; incompatible camera angles/crops; large loose names without matched nameplates; floating signatures; incomplete central collector layout; ornate double border; general rivalry poster; extra people; or reconstructed identity-bearing pixels. A polished rivalry poster is still a failed Legends Jersey Display.

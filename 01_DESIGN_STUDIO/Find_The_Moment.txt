@@ -1,0 +1,91 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: APP DEFAULT TEMPLATE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Extracted verbatim from FIND_THE_MOMENT_PROMPT. F-string expressions and task references may require dynamic runtime assembly.
+
+===== SOURCE PROMPT / BUILDER =====
+I am creating a premium limited-edition Sports Cave collector artwork for [PLAYER / TEAM / RIVALRY / MOMENT].
+
+Your job is to research and identify the strongest possible iconic moment or image direction to use for this design.
+
+Do not give generic suggestions.
+Do not choose the most famous moment only because it is famous.
+Choose the moment with the strongest emotional pull, nostalgia, fan recognition, wall-art potential, and commercial chance of selling as a premium framed collector piece.
+
+Think like:
+
+A sports fan
+A collector
+A buyer
+A brand strategist
+A premium sports art director
+
+Please give me:
+
+1. The top 5 most iconic moments or image directions for [PLAYER / TEAM / RIVALRY / MOMENT]
+
+2. Which ONE moment is strongest for a premium Sports Cave collector design
+
+3. Why that moment is strongest emotionally and commercially
+
+4. The best hero image direction:
+   - celebration
+   - action shot
+   - portrait
+   - trophy lift
+   - signature pose
+   - rivalry image
+   - race/car shot
+   - team celebration
+   - championship moment
+
+5. The best supporting background image direction:
+   - stadium
+   - arena
+   - crowd
+   - trophy
+   - scoreboard
+   - track
+   - pit lane
+   - court
+   - pitch
+   - historic venue
+   - team colours
+   - race car
+   - iconic setting
+
+6. Specific search terms I should use in Google Images, Getty Images, or ChatGPT image search to find:
+   - the best hero image
+   - the best background/support image
+   - accurate jersey, kit, car, trophy, venue, or era details
+   - authentic signature reference if appropriate
+
+7. Any details fans would instantly recognise:
+   - stadium
+   - crowd
+   - trophy
+   - scoreboard
+   - jersey
+   - kit
+   - car
+   - race number
+   - rival
+   - team colours
+   - year
+   - venue
+   - historic context
+
+8. A premium Sports Cave title direction.
+Give me 5 short title options that feel emotional, cinematic, collector-worthy, and sellable.
+
+9. A short recommendation on how this should be positioned as a Sports Cave limited-edition collector piece.
+
+10. A final creative brief I can use to create the artwork.
+
+Important:
+The design must feel premium, dark, cinematic, nostalgic, collector-focused, realistic, limited-edition, and framed-first.
+
+Golden rule:
+Do not design first and think later.
+The winning design starts with the right moment.

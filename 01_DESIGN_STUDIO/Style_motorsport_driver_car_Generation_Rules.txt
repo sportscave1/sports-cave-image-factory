@@ -1,0 +1,8 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+Create a historically exact driver-and-machine portrait using one authentic driver source and one authentic photograph of the verified car from the same verified season, race, team and livery. The car may be the largest visual object, with the driver providing human authority; neither should look pasted into an impossible shared moment. Preserve sponsor typography, race number, bodywork, wheels, helmet and suit. Use restrained pit-lane, garage, circuit or mountain-road atmosphere appropriate to the event. Never modernise, reliver, mirror or regenerate the car, and never pair a driver from one season with another season's machine.

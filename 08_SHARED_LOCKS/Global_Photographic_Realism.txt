@@ -1,0 +1,37 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: sports_cave_prompt_blocks.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: A reusable block; included conditionally in generation prompts.
+
+===== SOURCE PROMPT / BUILDER =====
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PHOTOREALISM AND HUMAN REALISM - MANDATORY
+These rules apply to every ChatGPT request that creates, transforms, extends, composites, animates or otherwise produces a Sports Cave image or visual. These rules override any conflicting creative direction, style request, workflow note, room idea, camera idea, campaign concept or platform instruction.
+
+The final output must look like genuine professional photography or physically believable real-world footage. It must not look AI-generated, CGI, rendered, illustrated, painted, plastic, glossy, video-game-like, synthetic, over-smoothed, over-sharpened or fake.
+
+Use natural professional photography:
+- believable camera perspective, scale, lens choice and depth
+- straight architectural lines and physically possible room geometry
+- realistic furniture, wall, floor, ceiling and material proportions
+- natural textures on timber, paper, glass, plaster, fabric, metal and skin
+- consistent light direction, colour temperature, reflections and shadows
+- realistic contact shadows, ambient occlusion and object weight
+- no excessive HDR, bloom, glow, sharpening, fisheye distortion, fake blur or synthetic colour grading
+- no floating, melted, duplicated, malformed, impossible, intersecting or physically incoherent objects
+- no warped walls, bent shelves, impossible windows, distorted furniture, fake luxury clutter or random generated props
+
+When people appear, they must look like real people photographed in the scene:
+- Faces must remain natural, recognisable and anatomically correct
+- realistic faces, skin texture, hair, eyes, teeth, hands, fingers, wrists, arms, anatomy, posture and clothing
+- natural asymmetry and believable imperfections
+- correct number of limbs and fingers
+- no waxy skin, mannequin bodies, duplicated fingers, melted hands, disconnected limbs, uncanny eyes, fake smiles or stock-model posing
+- people, hands, furniture, glare, logos, branding and overlays must never cover the hero product or important product details unless the workflow explicitly asks for a separate deterministic branded export layer
+
+Respect the requested output format exactly:
+- use the exact requested dimensions and aspect ratio
+- compose for that canvas from the start rather than cropping from another format
+- keep all critical subject matter inside platform-safe areas when safe areas are supplied
+- before returning, inspect the final result for correct dimensions, clean geometry, realistic materials, consistent light, readable product details and absence of obvious AI artifacts

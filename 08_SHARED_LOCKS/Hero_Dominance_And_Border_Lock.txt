@@ -1,0 +1,145 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Added to specific generation prompts by the Design Studio pipeline.
+
+===== SOURCE PROMPT / BUILDER =====
+{DESIGN_STUDIO_HERO_DOMINANCE_MARKER}
+
+The supplied and approved main hero subjects must dominate the finished artwork. These may include an athlete, driver, team, rivalry pair, vehicle, motorcycle, jersey, trophy, or another specifically supplied principal subject.
+
+Use only the supplied main heroes. Do not invent, generate, duplicate, reconstruct, or add any additional athletes, players, drivers, teammates, opponents, coaches, spectators, or human figures.
+
+ABSOLUTELY DO NOT ADD:
+
+* AI-generated background players
+* Faceless or poorly formed people
+* Headless or partially visible bodies
+* Anonymous athletes or teammates
+* Fake crowd members with recognisable bodies or faces
+* Player silhouettes that compete with the main heroes
+* Ghosted or duplicated versions of the hero
+* Random helmets, limbs, faces, uniforms, or human shapes
+* Additional people merely to fill empty space
+
+If multiple supplied heroes are required for a team or rivalry design, preserve and use those supplied heroes only. Never generate extra supporting players.
+
+The supplied main heroes must carry the emotional and visual weight of the composition. Their faces, bodies, vehicles, uniforms, or defining details must remain clearly visible and immediately recognisable.
+
+Keep the background minimal, cinematic, relevant and controlled. Build atmosphere with elements such as:
+
+* Stadium or circuit architecture
+* Empty stands or indistinct crowd texture
+* Lighting, shadows and subtle spotlights
+* Smoke, haze, dust, rain or sparks
+* Track, turf, court or arena textures
+* Scoreboards, goal structures or venue landmarks
+* Restrained team colours and subtle historical details
+
+Any crowd treatment must remain distant, abstract, blurred and textural. It must not contain recognisable individual people, faces, bodies or AI-generated players.
+
+Do not overcrowd the composition. Do not fill negative space with unnecessary subjects. Negative space is intentional and should make the main heroes feel larger, stronger and more premium.
+
+The final hierarchy must always be:
+
+1. Supplied main heroes
+2. Title and essential collector storytelling
+3. Sports Cave limited-edition plaque or collector details
+4. Restrained venue atmosphere
+5. Minimal supporting effects
+
+{DESIGN_STUDIO_LIMITED_EDITION_BORDER_MARKER}
+
+Every finished collector artwork must include a clean, precise and premium Sports Cave border inside the artwork canvas.
+
+The border must feel custom-designed for an expensive limited-edition sports collectible—not like a generic poster outline, picture frame, television graphic or template.
+
+Create a refined Sports Cave border using:
+
+* Deep black, charcoal or near-black foundations
+* Fine warm-gold or muted-metallic pinlines
+* Clean layered keylines
+* Precise symmetrical spacing
+* Restrained geometric corner detailing
+* Subtle plaque-inspired collector accents
+* Consistent thickness on every edge
+* Clear separation between the artwork and its outer boundary
+* Safe internal margins suitable for professional printing and framing
+
+The border should be detailed enough to signal “limited edition” but restrained enough to remain masculine, timeless and premium. It should frame the story without competing with the heroes.
+
+The border must remain:
+
+* Perfectly straight
+* Symmetrical
+* Crisp and uninterrupted
+* Consistent on all four sides
+* Fully contained inside the canvas
+* Free from warping, broken corners or uneven thickness
+* Compatible with the required landscape 4:3 composition
+
+DO NOT USE:
+
+* Thick generic borders
+* Cheap gold gradients
+* Bright yellow gold
+* Neon effects
+* Ornate Victorian decoration
+* Excessive filigree
+* Busy sports-broadcast graphics
+* Random corner shapes
+* Uneven or misaligned lines
+* Fake external frames or wall mockups
+* Borders that crop or cover the supplied heroes
+* Decorative elements that overpower the artwork
+
+The border, plaque and artwork must feel like one cohesive Sports Cave collector product.
+
+{DESIGN_STUDIO_STRICT_BORDER_CONTAINMENT_MARKER}
+
+The Sports Cave branded border is a hard containment boundary for the entire composition.
+
+Every visual element must remain completely inside the inner edge of the border, including:
+
+* Main heroes and all supplied subjects
+* Heads, hair, helmets, hands, feet and equipment
+* Cars, motorcycles, jerseys and trophies
+* Titles, names, dates, statistics and supporting text
+* Signatures, logos, flags and collector details
+* Sports Cave plaque and edition information
+* Stadiums, tracks and venue elements
+* Smoke, sparks, rain, dust, haze and lighting effects
+* Shadows, glows, textures and decorative graphics
+
+Nothing may overlap, sit over, pass through, hide or extend beyond the border. No element may be placed between the border lines or outside the bordered artwork area.
+
+Maintain a clean internal safety gap between important content and the border. Keep heroes, faces, typography, signatures, plaques and essential details comfortably inset from all four edges.
+
+If a hero, vehicle, title or other element does not fit safely inside the border:
+
+1. Reduce its scale.
+2. Reposition it inward.
+3. Adjust the composition around it.
+
+Never crop the element against the border or allow it to break through the border.
+
+The border must always render as the uninterrupted topmost structural layer. All four sides and all four corners must remain fully visible, perfectly straight, symmetrical and free from obstruction.
+
+The background artwork may fill the interior area up to the border, but it must stop cleanly at the border. Outside the border, allow only a clean, uniform deep-black or near-black outer margin. Do not continue scenery, lighting, smoke, people, vehicles, typography or decorative effects outside the border.
+
+ABSOLUTELY DO NOT ALLOW:
+
+* Heroes breaking through the border
+* Heads, helmets or hair crossing a border line
+* Vehicles or equipment extending outside the border
+* Titles or signatures sitting over the border
+* Plaques attached across the border
+* Smoke, sparks, glow or lighting spilling beyond it
+* Background scenery continuing outside it
+* Border lines hidden behind artwork
+* Cropped or missing border sections
+* Broken, warped or uneven corners
+* Any intentional “pop-out” or layered-over-border effect
+
+The finished design must look like one precisely contained, professionally printed Sports Cave limited-edition collector artwork. Nothing inside the composition may escape its branded border.

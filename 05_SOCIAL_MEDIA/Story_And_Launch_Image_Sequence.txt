@@ -1,0 +1,67 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Individual image prompts are assembled per slide/format from these exact directions and the common visual builder.
+
+===== SOURCE PROMPT / BUILDER =====
+def _story_prompts(payload):
+    launch = payload["format"] == "Launch sequence" or payload["content_focus"] == "Launch/event"
+    frames = [
+        (
+            "Frame 1 - Hook",
+            "Use a close visual that restores the memory or creates immediate curiosity. "
+            "For a cold audience, the exact framed product must be immediately visible.",
+        ),
+        ("Frame 2 - Interaction", "Create a simple visual with clean negative space for one native poll, quiz, slider or question sticker. Do not render the sticker."),
+        ("Frame 3 - Product bridge", "Reveal the complete exact framed Sports Cave edition in a premium real setting."),
+        ("Frame 4 - Proof", "Show approved product, making, collector or quality proof. Never imply a generated room is a customer home."),
+        (
+            "Frame 5 - CTA",
+            "Finish with the cleanest and strongest product shot in the sequence. Keep the "
+            "exact product dominant and preserve clean space for one native link sticker and CTA.",
+        ),
+    ]
+    if launch:
+        frames.insert(
+            2,
+            ("Frame 3 - Anticipation", "Build launch anticipation with an approved detail or silhouette without inventing product features or release claims."),
+        )
+        frames.insert(
+            -1,
+            ("Frame 6 - Verified launch detail", "Show one verified release, offer or scarcity detail visually without rendering promotional text into the photograph."),
+        )
+    prompts = []
+    previous = ""
+    for index, (label, direction) in enumerate(frames, start=1):
+        branding_plan = _story_branding_plan(
+            payload,
+            label=label,
+            index=index,
+            total=len(frames),
+        )
+        sequence = (
+            "Establish the visual language for this Story."
+            if index == 1
+            else (
+                f"Use a different camera angle, distance, wall colour or frame placement from "
+                f"{previous}, while preserving the exact product and a coherent sequence."
+            )
+        )
+        prompts.append(
+            {
+                "label": label,
+                "overlay": branding_plan["copy"]["headline"],
+                "branding_plan": branding_plan,
+                "prompt": _visual_prompt(
+                    payload,
+                    label=label,
+                    direction=direction,
+                    branding_plan=branding_plan,
+                    dimensions=("9:16", "1080 x 1920"),
+                    sequence_rule=sequence,
+                ),
+            }
+        )
+        previous = label
+    return prompts

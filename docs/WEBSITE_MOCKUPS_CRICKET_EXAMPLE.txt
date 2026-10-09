@@ -1,5 +1,0 @@
-Retired Website Mockups V2 prompt example.
-
-The V2 prompt builder was reverted to the Mockups workflow at commit 5c228df.
-Use the restored individual Copy Prompt controls on the Mockups page.
-This file is retained rather than deleted as requested.

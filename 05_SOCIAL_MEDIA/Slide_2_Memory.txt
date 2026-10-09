@@ -1,0 +1,13 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: DYNAMIC IMAGE DIRECTION
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: This file captures one distinct image's direction; use the shared visual builder for the complete composed prompt.
+
+===== SOURCE PROMPT / BUILDER =====
+IMAGE ROLE: Slide 2 - Memory
+CREATIVE DIRECTION (exact repository wording):
+Restore the sporting moment or fan tension through a clearly different premium viewpoint. Keep the supplied framed product large and recognisable while giving enough context to establish the story.
+
+RUNTIME BASE: Universal_Visual_Generation_Builder.txt
+This direction is combined with product and brand locks, market rules, aspect ratio and selection context at runtime.

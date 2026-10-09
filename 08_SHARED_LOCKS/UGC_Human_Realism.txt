@@ -1,0 +1,83 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: sports_cave_prompt_blocks.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: A reusable block; included conditionally in generation prompts.
+
+===== SOURCE PROMPT / BUILDER =====
+UGC HUMAN REALISM REQUIREMENTS:
+If a person appears in the scene, make them look like a real everyday customer captured on a modern phone camera, not a model, actor, mannequin, stock-photo subject, or AI-generated person.
+
+The person must look naturally human:
+- realistic facial structure
+- natural asymmetry
+- real skin texture with pores
+- subtle under-eye detail
+- natural hairline and hair texture
+- realistic beard/stubble if present
+- normal hands and fingers
+- believable wrists, arms, shoulders, neck, posture, and body proportions
+- natural clothing folds, seams, cuffs, fabric weight, and slight wrinkles
+- realistic shoes, socks, sleeves, hoodie, t-shirt, jeans, shorts, or casual homewear
+- believable body language and natural customer posture
+- relaxed facial expression, not over-posed
+- normal eye direction and natural head angle
+- subtle imperfections that real phone footage would capture
+
+The person should feel like a happy customer casually filming or appearing in a real UGC-style home video:
+- natural movement
+- slightly imperfect posture
+- casual handling of the frame
+- believable grip on the frame
+- realistic hand placement on the frame edges
+- natural scale compared to the artwork, sofa, wall, room, and furniture
+- no glamour posing
+- no fashion-shoot lighting on the person
+- no overly perfect skin
+- no waxy texture
+- no plastic skin
+- no airbrushed face
+- no distorted hands
+- no twisted fingers
+- no fake smile
+- no uncanny eyes
+- no blurred facial features
+- no duplicated limbs
+- no warped anatomy
+
+Camera style:
+The scene should feel like premium UGC captured on an iPhone or modern phone camera by a real customer in their home.
+Use natural handheld realism, subtle camera imperfection, slight lens softness, realistic depth of field, true-to-life lighting, and believable motion.
+It should still feel premium and cinematic, but not staged like a commercial photoshoot.
+
+Lighting:
+Match the person naturally to the room lighting.
+The face, hands, clothing, and body must share the same light direction, shadow softness, colour temperature, and contrast as the room.
+Add realistic contact shadows where the person touches the floor, wall, frame, sofa, table, or nearby objects.
+The person must feel physically inside the room, not pasted on.
+
+Clothing:
+Use realistic casual customer clothing that fits the room:
+- black hoodie
+- plain t-shirt
+- relaxed jacket
+- jeans
+- joggers
+- casual sneakers
+- neutral colours
+- no loud branding
+- no fake logos
+- no unreadable graphic text
+- no sports team logos unless supplied
+- no luxury fashion styling
+- no costumes
+
+Age and identity:
+Use a believable adult customer, usually male 25-55 unless the prompt specifically asks otherwise.
+Do not make the person look like a celebrity, athlete, influencer, model, or fake AI character.
+Do not over-muscularize the body.
+Do not exaggerate jawline, cheekbones, hands, height, or body shape.
+
+UGC realism target:
+The final scene should look like a real happy customer has just installed, received, held, or admired their Sports Cave artwork in their own home.
+A viewer should feel the product is real, the room is real, the person is real, and the moment is believable.

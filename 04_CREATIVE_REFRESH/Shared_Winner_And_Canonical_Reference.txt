@@ -1,0 +1,23 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_refresh_plan.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Per-card upgrade/visual execution prompt; still requires winning image inspection.
+
+===== SOURCE PROMPT / BUILDER =====
+def standalone_brief(product, reference, *, scene='', role='', style=None, detail=False, dimensions='1080 x 1080', references=()):
+    if reference.startswith('WINNER_CARD_'):
+        return carousel_standalone_brief(product, reference, scene=scene, role=role, detail=detail, dimensions=dimensions, references=references)
+    style = style or {}
+    return f'''PRODUCT: {product}
+REFERENCE: {reference}; inspect this exact attachment. CANONICAL_PRODUCT is the independent immutable product authority.
+{AUTHORITY}
+Keep/Change/Improvement rationale: after inspecting {reference}, record observed concept, advertising role, product prominence, mood, hierarchy, clutter and copy appeal. Preserve the concept and role; do not claim causal sales evidence for an individual carousel card.
+Concept anchor: {scene or 'Determine from this winner attachment; do not substitute another reference'}.
+Advertising role: {role or 'Determine from this winner attachment'}.
+Candidate execution (subject to visual compatibility): {json.dumps(style, ensure_ascii=False)}
+Redesign architecture and layout, wall palette/material and camera composition, plus at least two of furniture, lighting, flooring, background or product placement. Describe each concrete change in the final brief. Keep defining objects (including a pool table for a billiards concept). Never replace a bar with an office. For an intentional detail card preserve its detail function rather than force a room.
+Design a genuinely new photograph, not a recolour, crop or angle sibling. Product remains the mobile-readable hero, never a tiny object in a wide interior. Compare with the winner and every sibling; revise near-duplicate rooms, palettes, layouts and copy openings.
+Output: square {dimensions}; preserve production safe areas and deterministic branded overlays, do not alter printed artwork. Camera perspective transforms the whole rigid product only. Explicitly describe mounting depth, contact shadow, light direction and restrained glazing reflections in the final execution. {'Intentional detail crop is permitted only for this verified detail-card role; do not invent or redraw details.' if detail else 'Show the full outer black frame.'}
+Use an existing source-preserving composite where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Do not paste the canonical external stock-photo background rectangle into the new scene.
+{build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=detail)}'''

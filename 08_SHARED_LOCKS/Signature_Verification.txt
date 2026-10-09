@@ -1,0 +1,12 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: May be combined with style rules and verified reference assets at runtime.
+
+===== SOURCE PROMPT / BUILDER =====
+VERIFIED SIGNATURE CONTRACT - NO GENERATION OR APPROXIMATION
+
+Every signature must come from one clear, verifiable reference mapped to the correct named principal. Composite the complete authentic handwritten mark while preserving its stroke path, proportions and orientation. Never invent, approximate, trace, redraw, rewrite, font-set or ask the image-generation model to create a signature. If no clear verified reference exists, state SIGNATURE UNAVAILABLE and leave it absent rather than fabricating it.
+
+When multiple signatures appear, preserve each authentic individual form while presenting them with the same colour, comparable displayed size, similar visual weight, matching apparent line thickness, brightness and opacity, balanced border spacing and clear readability at Shopify-thumbnail size. No signature may dominate another. Placement must follow the selected design type and the corresponding principal; consistency does not require an identical layout for every style.

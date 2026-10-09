@@ -1,0 +1,42 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: APP DEFAULT TEMPLATE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Extracted verbatim from HARSH_REVIEW_PROMPT. F-string expressions and task references may require dynamic runtime assembly.
+
+===== SOURCE PROMPT / BUILDER =====
+Give me a harsh truth review of this Sports Cave design.
+
+Rate it out of 10 as a premium limited-edition collector artwork.
+
+I want brutal honesty.
+
+Tell me:
+
+1. Every named principal appears with the correct full name
+2. Every human principal has the correct verified authentic signature
+3. Signatures are correctly mapped, elegant, subtle and not oversized
+4. The exact Sports Cave plaque is present, subtle, unchanged and correctly positioned
+5. The title and names remain readable at Shopify-thumbnail size
+6. Principal subjects remain original photographic assets with no AI reconstruction
+7. The background is relevant, restrained and not generic clutter
+8. No extra players, generated people or recognisable crowd figures appear
+9. The composition feels premium, intentional, framed-first and wall-worthy
+10. The smallest exact correction needed to make it sellable
+
+Do not be polite.
+Be commercially honest.
+Judge it like it needs to become a bestseller.
+
+Rule:
+Hard-cap the score at 6/10 if a required principal is too small to recognise at thumbnail size; a distant or full-body source materially weakens the hero treatment; one of two principals is reduced to a minor background element; an unsuitable crop makes the face, jersey or sporting identity unclear; the Find Images response contains only links instead of visible candidates; or any required name, verified signature or exact plaque is missing, fabricated, incorrectly mapped or unreadable.
+
+A premium result that satisfies the full contract and needs only minimal changes may score 10/10. Do not invent trivial faults simply to avoid a high score.
+
+Preserve the existing artwork and recommend the smallest exact crop, proportional scale or positioning edit that makes it premium, emotional, collector-worthy and ready to sell. If the source itself is unsuitable, require replacing only that source photograph through Find Images.
+
+{design_studio_styles.HERO_PHOTOGRAPHIC_DOMINANCE_CONTRACT}
+
+{design_studio_styles.ARTWORK_TEXT_MINIMALISM_CONTRACT}
+
+{design_studio_styles.ARTWORK_TEXT_MINIMALISM_REVIEW_CONTRACT}

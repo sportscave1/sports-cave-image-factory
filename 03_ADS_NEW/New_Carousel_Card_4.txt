@@ -1,0 +1,156 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: CARD-SPECIFIC DYNAMIC BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: One card per slot; do not interpret its placeholders as final resolved creative text.
+
+===== SOURCE PROMPT / BUILDER =====
+CARD POSITION: 4 OF 5
+The below is the exact production card builder source; runtime supplies that card's distinct concept, photograph, style, product and metadata.
+
+def build_carousel_image_prompt_schema(
+    index,
+    role,
+    campaign_moment=None,
+    *,
+    product_name="",
+    category="",
+    selected_country="",
+    workflow_mode=ADS_WORKFLOW_MODE_NEW,
+    resolved_scene=None,
+    variation_token="",
+):
+    product_name = _clean_product_name(product_name)
+    category = _normalise_option_label(category) or "selected sport category"
+    selected_country = _normalise_option_label(selected_country) or "selected market"
+    required_purposes = {
+        1: "Product identity and a scroll-stopping product hero.",
+        2: "The verified moment, era or legacy connected to the product.",
+        3: "An emotional collector hook rooted in memory, identity or pride.",
+        4: "Fan ownership and how the framed edition commands the wall.",
+        5: "Scarcity, limited edition and no second run, using only verified claims.",
+    }
+    square_lock = build_carousel_square_format_lock()
+    product_dominance_lock = build_carousel_product_dominance_principle_lock()
+    camera_distance_lock = build_carousel_card_camera_distance_lock(index, category=category, workflow_mode=workflow_mode)
+    strict_product_lock = build_carousel_strict_product_lock()
+    product_lock = build_product_lock_visual_rules()
+    frame_and_glass_rules = build_frame_and_glass_visual_rules()
+    room_realism_rules = build_room_realism_visual_rules()
+    photorealism_lock = build_carousel_photorealism_lock()
+    variation_lock = build_last_image_variation_visual_rules()
+    sequential_variation_lock = build_carousel_sequential_photo_variation_lock(index)
+    sport_country_adaptation = build_sport_country_visual_adaptation(
+        category,
+        selected_country,
+    )
+    creative_direction = f"Use the exact Card {index} headline, description and supplementary creative direction generated earlier in this campaign to shape one concrete scene. Do not render the Meta headline or description inside the image unless the approved card concept explicitly requires on-image text. The creative-direction line is additional context only and must never replace or shorten this complete prompt."
+    scene_description = "Describe the concrete room or wall, wall colour and material, camera position, lens character, lighting direction, furniture context and emotional atmosphere in full. Do not return a summary, shorthand variation, shared base prompt, list of changes or reference to instructions elsewhere."
+    if index == 1 and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        square_lock = square_lock.replace("Compose the entire room, framed product", "Compose the wall, framed product")
+        product_dominance_lock = product_dominance_lock.replace(
+            "Use varied rooms, wall colours, camera positions and viewing angles without creating distant product shots.",
+            "Vary wall lighting and camera placement only within this card's required wall and angle limits, without creating distant product shots.",
+        )
+        frame_and_glass_rules = frame_and_glass_rules.replace(
+            "The black frame must appear", "The supplied frame must appear"
+        ).replace("realistic black timber or frame depth", "realistic source frame depth; black timber only when the source uses it")
+        photorealism_lock = photorealism_lock.replace(
+            "genuine high-end interior photograph", "genuine high-end product photograph"
+        ).replace(
+            "convincing timber depth", "convincing depth in its exact source material"
+        ).replace(
+            "Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic.",
+            "Keep the wall restrained and believable. No people, furniture or decor. Only the framed product and the objects explicitly required by this card may appear.",
+        )
+        sport_country_adaptation = sport_country_adaptation.replace("furniture tone", "wall tone").replace(
+            " unless an existing approved creative direction explicitly requires an extremely subtle one", ""
+        )
+        room_realism_rules = """DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+Use a clean premium wall, physically believable wall texture, true photographic scale, consistent directional light, contact shadows and ambient occlusion. Show no lifestyle room scene, room decor, furniture, people or clutter. Preserve the uploaded frame as a rigid mounted object. The card-specific wall treatment and allowed objects are mandatory; room variety cannot introduce extra props or a different scene."""
+        variation_lock = """LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+Analyze the uploaded Sports Cave product image and previous images for the same product. Make this a distinct photograph using light direction, subtle wall texture, camera height and physical depth within this card's mandatory camera, wall, composition and object limits. Never sacrifice the product lock or change a resolved wall tone to create variation. Do not introduce furniture, room decor or sporting props. Repeat this complete lock in the returned standalone prompt."""
+        scene_description = "Describe the required wall tone and finish, product camera angle, lens character, physical glazing, lighting and contact shadows in full. The card-specific composition is authoritative; do not create a lifestyle room scene or add furniture. Do not return a summary or refer to another prompt."
+        if index == 1:
+            sequential_variation_lock = sequential_variation_lock.replace(
+                "Vary naturally between perspectives such as a subtle left three-quarter angle, right three-quarter angle, straight-on view, slightly higher or lower camera position, or a different off-centre placement. These are examples only; choose the most realistic premium composition for each card.",
+                "Retain the required subtle 5–12 degree off-axis angle; vary its side, lighting or camera height without using a flat straight-on catalogue view.",
+            )
+        else:
+            required_purposes[5] = "Truthful scarcity through a physical magnifying glass over the genuine numbered-edition detail."
+            creative_direction = "Use Card 5's copy only to understand its verified collector purpose. The physical magnifying glass over actual edition detail is the authoritative visual. Do not render any headline, description, campaign offer, urgency text or extra overlay inside this image."
+    if normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_NEW:
+        if resolved_scene is None:
+            resolved_scene = resolve_carousel_visual_scenes(
+                product_name, category, selected_country, variation_token=variation_token,
+                campaign_moment=campaign_moment,
+            )[index - 1]
+        required_purposes.update({
+            2: "Supported fan identity and relevant memory or present-day connection.",
+            3: "A defining verified product hook distinct from Card 1.",
+            4: "For The Cave ownership in a Premium Man Cave / Sports Cave.",
+            5: "Authentic scarcity in the fourth distinct premium lifestyle room.",
+        })
+        scene_description = carousel_winner.scene_block(resolved_scene, variation_token)
+        if index == 1:
+            camera_distance_lock = camera_distance_lock.replace(
+                carousel_nostalgic_wall_treatment(category),
+                f"Resolved close-up wall: {resolved_scene['wall_family']}. Use restrained low saturation, no team-colour branding and no saturated wall. Match the actual artwork palette, brightness, mood, era, market and unchanged frame colour.",
+            )
+        sequential_variation_lock = sequential_variation_lock.replace(
+            "Vary naturally between perspectives such as a subtle left three-quarter angle, right three-quarter angle, straight-on view, slightly higher or lower camera position, or a different off-centre placement. These are examples only; choose the most realistic premium composition for each card.",
+            "Use this card's single resolved camera family and artwork placement, coordinated with the other resolved cards.",
+        )
+        variation_lock += "\nPreserve this card's resolved room family; Card 4 must always remain Premium Man Cave / Sports Cave. If prior images repeat a scene, vary architecture, furniture arrangement, placement and lighting within the assigned family, then print one resolved scene. Keep Cards 2–5 distinct. Never expose tokens or fingerprints as ad text."
+        frame_and_glass_rules = frame_and_glass_rules.replace("The black frame must appear", "The supplied frame must appear").replace("realistic black timber or frame depth", "realistic source frame depth; black timber only when the source uses it")
+        photorealism_lock = photorealism_lock.replace("convincing timber depth", "convincing depth in the exact source frame material")
+        sport_country_adaptation = sport_country_adaptation.replace(" unless an existing approved creative direction explicitly requires an extremely subtle one", "")
+    campaign_moment_visual_context = build_campaign_moment_visual_context(
+        campaign_moment,
+        selected_country=selected_country,
+    )
+    campaign_moment_visual_block = (
+        f"\n\n{campaign_moment_visual_context}"
+        if campaign_moment_visual_context
+        else ""
+    )
+    final_check = build_carousel_final_square_format_check()
+    return f"""CARD {index} IMAGE GENERATION PROMPT
+
+Create a complete, production-ready image for Carousel Card {index}. Create a 1024 × 1024 square image.
+
+Selected Sports Cave product: {product_name}
+Selected sport: {category}
+Selected market: {selected_country}
+Approved card role: {role}
+Required card purpose: {required_purposes[index]}
+
+{creative_direction}
+
+{scene_description}
+
+{square_lock}
+
+Card-specific visual purpose: {required_purposes[index]}
+
+{product_dominance_lock}
+
+{camera_distance_lock}
+
+{strict_product_lock}
+
+{product_lock}
+
+{frame_and_glass_rules}
+
+{room_realism_rules}
+
+{photorealism_lock}
+
+{variation_lock}
+
+{sequential_variation_lock}
+
+{sport_country_adaptation}{campaign_moment_visual_block}
+
+{final_check}"""

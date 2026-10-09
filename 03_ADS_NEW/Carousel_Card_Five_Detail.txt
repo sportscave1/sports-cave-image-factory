@@ -1,0 +1,10 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: MANDATORY CONTRACT
+SOURCE: ads_carousel_winner.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Used when generating high-conversion carousel images.
+
+===== SOURCE PROMPT / BUILDER =====
+CARD 5 PRODUCT-PROMINENT LIFESTYLE SCARCITY — MANDATORY:
+Use the fourth distinct premium lifestyle room after Cards 2–4, with a stronger medium-close collector composition. Target approximately 45-65% of the useful square composition; never zoom out into a distant wide room. Keep the complete outer frame visible. Convey collectibility through the premium setting, frame prominence and restrained lighting.
+Keep a genuine edition plate/badge readable when it exists in the immutable product; use composition and light only. Never alter or magnify printed pixels artificially, invent an edition number or require an edition-detail asset when none is present. No magnifier prop or added scarcity text. Scarcity belongs in the verified Meta copy. Preserve all shared artwork, frame, glass, mounting, shadow and realism rules.

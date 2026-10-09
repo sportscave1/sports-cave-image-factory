@@ -1,0 +1,24 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: MANDATORY CONTRACT
+SOURCE: ads_refresh_generation.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Reusable validation contract for refreshed Instant Experience cover images.
+
+===== SOURCE PROMPT / BUILDER =====
+FINAL PRODUCT REALISM REJECTION GATE
+Before returning the generated image, reject and regenerate it if ANY of these are true:
+- glass cannot be visually identified
+- artwork looks like a flat matte print
+- frame looks like a flat black border
+- canonical frame thickness has changed
+- frame depth is missing where perspective should reveal it
+- frame bevel lighting is absent
+- mounting separation from the wall is not believable
+- contact shadow is missing
+- ambient occlusion behind the frame is missing
+- glass reflection conflicts with room lighting
+- glass reflection washes out artwork details
+- frame geometry is distorted
+- product appears digitally pasted onto the wall
+- product appears to float
+- image looks CGI-rendered or obviously AI-generated rather than genuine interior photography

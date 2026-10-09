@@ -1,0 +1,29 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+{RIVALRY_FACE_OFF_CORE_PRINCIPLES_MARKER}
+
+Create one original Sports Cave Rivalry Face-Off collector artwork around the verified rivalry-specific emotional hook. THE MENTALITY is a benchmark only for emotional tension, close-up realism, premium restraint and collector appeal. Do not recreate, duplicate or reskin it. Do not reuse its title, exact portrait positions, smoke pattern, border geometry or layout measurements. The result must belong to the same premium Sports Cave collector family while having its own title, atmosphere, identity and emotional reason to exist.
+
+TWO OPPOSING CO-EQUAL HEROES
+Two opposing co-equal heroes carry the artwork. Use exactly two principal rivals. No third person. Both must be visually dominant, recognisable at Shopify-thumbnail size and balanced in importance. Prefer close portrait, head-and-shoulders or upper-torso presentation with comparable facial scale, aligned eye lines where natural, controlled central negative space and immediate psychological confrontation. Adapt positioning, crop depth and central spacing to the authentic sources and rivalry story. Never reduce either rival to a ghost, background figure or secondary action image.
+
+AUTHENTIC SOURCE PHOTOGRAPHS
+Use exactly one selected real final-use photograph for each principal as an immutable source asset. Composite the actual photographs. Preserve identity, facial structure, expression, eye direction, skin texture, hair, body proportions, pose, uniform, equipment, era and photographic characteristics. Do not mirror, rotate, repose or reconstruct either person. Never regenerate a face, face-swap, turn a head, manufacture eye contact, combine a face from one source with another body, change a uniform or jersey number, remove authentic equipment or invent missing anatomy. Build and simplify the artwork around the available crops. Never create a generated jersey-back replacement. Jersey-back artwork belongs to the separate Legends Jersey Display style.
+
+ONE ORIGINAL COLLECTOR TITLE ONLY
+Use the single strongest rivalry-specific collector title selected from the research. It should usually contain one to four words, feel like a memorable film title or legendary chapter, remain readable at thumbnail size and avoid advertising language. Do not automatically start with THE, use VS, use the principals' names or reuse a benchmark/example title. Show no subtitle, Legacy Edition, Rivalry Edition, Collector's Edition, tagline, supporting line, descriptive sentence or second headline unless the user explicitly requests a special-release secondary line.
+
+UNIQUE RESTRAINED VISUAL IDENTITY
+Use a deep-black or charcoal foundation with minimal rivalry-supporting atmosphere: controlled shadow, faint dust or smoke, gentle central haze, restrained team-colour undertones, subtle historic texture or minimal sport-relevant environmental detail. The two authentic faces and uniforms provide the meaningful colour. Vary the portrait relationship, crop balance, central divide, lighting direction, atmospheric treatment, border/divider detail, nameplate proportions and signature placement according to this rivalry. Do not reuse one smoke, split-colour, subject-placement or lighting template. Avoid bright split backgrounds, giant stadium lights, explosions, lightning, flames, excessive particles, generated crowds, extra players, large logos, generic AI sports scenery and clutter.
+
+SPORTS CAVE COLLECTOR ARCHITECTURE
+Keep the finished artwork landscape 4:3, framed-first and photographically realistic. Use cinematic contrast while preserving natural skin tones, facial detail, uniforms and equipment. Apply only restrained edge integration, rim light and global grading needed to blend the real photographs. Use one thin refined symmetrical gold border fully inside the canvas. Gold remains secondary and may be used sparingly for the title, border, full principal names, thin dividers, signature treatment and exact plaque details.
+
+Use both correctly spelled full principal names with similar visual weight, clearly mapped and secondary to the title and portraits. Use one authentic signature for each principal rival. Preserve the genuine strokes, map each signature correctly, keep both restrained and inside the border, and never type, invent, approximate or generate either signature.
+
+Use the exact supplied official Sports Cave plaque asset. Preserve its emblem, SPORTS CAVE COLLECTOR SERIES wording, LIMITED EDITION wording, 001 / 100 numbering, typeface, gold-and-black finish, texture, borders, spacing and proportions. Keep it readable, uncropped, undistorted, inside the border and secondary to the rivals and title. Never recreate, redraw, retype or replace it. If either verified signature or the exact plaque asset is missing, state that the collector artwork is incomplete rather than fabricating it.

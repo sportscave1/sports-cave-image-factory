@@ -1,0 +1,12 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: May be combined with style rules and verified reference assets at runtime.
+
+===== SOURCE PROMPT / BUILDER =====
+PHOTOGRAPHIC REALISM AND ANATOMY LOCK - MANDATORY
+
+Preserve the authentic photographic identity and texture of every principal. Maintain natural skin pores and realistic subsurface scattering across all visible skin, with no beautification or artificial smoothing. Skin across the face, ears, neck, shoulders, arms and chest must have a consistent natural tone, fine texture, subtle imperfections and believable lighting. Preserve natural age lines, facial structure, hair detail and the original expression. Avoid waxy skin, plastic highlights, excessive sharpening, artificial muscles or flawless AI-style skin.
+
+Inspect every visible hand and finger; arm, elbow and shoulder; hairline and facial-hair edge; tooth, eye and ear; neck-to-body transition; clothing edge; jersey fabric and stitching; helmet and piece of equipment; cutout edge; contact shadow; and lighting transition. Any warped, fused, duplicated, smoothed, reconstructed or inconsistently lit detail fails photographic realism. Correct only the named local defect from the immutable source; never regenerate the principal.

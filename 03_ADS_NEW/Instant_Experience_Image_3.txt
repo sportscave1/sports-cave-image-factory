@@ -1,0 +1,255 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: THREE-COVER DYNAMIC BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: One distinct image prompt per route. Real product facts, on-image copy, camera and room choices are resolved dynamically.
+
+===== SOURCE PROMPT / BUILDER =====
+IMAGE 3 — LEFT-ANGLE: bar / collector lounge
+
+def build_instant_experience_canonical_prompt_v4(
+    index,
+    visual,
+    *,
+    product_name,
+    category,
+    country,
+    product_url="",
+    campaign_moment=None,
+):
+    product_name = _clean_product_name(product_name)
+    category = _normalise_option_label(category) or "selected sport category"
+    country = _normalise_option_label(country) or "selected market"
+    product_url = _clean_product_url(product_url)
+    shared_realism_rules = build_sports_cave_image_realism_rules(include_product_lock=True)
+    ie_quality_contract = build_instant_experience_image_quality_contract(visual)
+    campaign_moment_visual_context = build_campaign_moment_visual_context(
+        campaign_moment,
+        selected_country=country,
+    )
+    campaign_moment_visual_block = (
+        f"\n\n{campaign_moment_visual_context}"
+        if campaign_moment_visual_context
+        else ""
+    )
+    fingerprint = standard_instant_experience_fingerprint(
+        index,
+        visual,
+        category=category,
+    )
+    resolved_json = json.dumps(fingerprint, ensure_ascii=False, indent=2)
+    scarcity_note = (
+        "The edition limit is verified. Use the resolved headline and route FOMO line exactly."
+        if visual.get("scarcity_verified")
+        else (
+            "No verified edition limit is available in the supplied metadata. Use the resolved safe fallback headline "
+            "and supporting line exactly. Do not use the route FOMO line or invent a number."
+        )
+    )
+    return f"""{visual["prompt_heading"]}
+
+Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
+
+Do not generate the image automatically from this Ads-planning response.
+
+{ie_visuals.VERSION}
+
+{ie_visuals.camera_wall_rules(visual)}
+
+PRODUCT AND VERIFIED METADATA
+
+- Product name: {product_name}
+- Sport/category: {category}
+- Country/market: {country}
+- Destination URL for ad setup only: {product_url or "[exact product-page URL from the Ads form]"}
+- Route key: {visual["route_key"]}
+- Route name: {visual["route"]}
+- Camera role: {visual["camera_role"]}
+- Product sport used for room selection: {visual.get("product_sport")}
+- Product era/mood classification: {visual.get("product_era")} / {visual.get("artwork_mood")}
+- Edition limit used: {visual.get("edition_limit_used")}
+- Edition limit source: {visual.get("edition_limit_source")}
+
+{scarcity_note}
+
+RESOLVED ROUTE VARIABLES — FOLLOW EXACTLY
+
+- Camera angle: {visual["camera_side"]}
+- Camera instruction: {visual["camera_instruction"]}
+- Room profile: {visual["room_profile"]}
+- Room type: {visual["room_type"]}
+- Room materials: {visual["room_materials"]}
+- Wall finish: {visual["wall_finish"]}
+- Wall colour: {visual["wall_colour"]}
+- Primary cue: {visual["primary_cue"]}
+- Secondary cue: {visual["secondary_cue"]}
+- Natural light: {visual["lighting"]}
+- Time of day: {visual["time_of_day"]}
+- Product dominance: {visual["shot_distance"]}
+- Lens character: {visual["lens"]}
+- Fixed footer: {visual["overlay_position"]}
+
+Resolved prompt metadata:
+{resolved_json}
+
+CANONICAL SPORTS CAVE MASTER PROMPT
+
+Create one ultra-realistic 1024 x 1024 Meta Instant Experience cover for Sports Cave.
+
+The final image must be:
+- exactly 1024 x 1024 pixels
+- true 1:1 square
+- sRGB
+- designed for mobile viewing
+- clear and readable at a 256 x 256 preview
+
+Composition is locked:
+- Upper photographed residential room scene: approximately 72–76% of the canvas.
+- Fixed opaque black footer: approximately the bottom 24–28% of the canvas.
+- Framed product width: approximately {visual["product_width"]} of the canvas.
+- Complete frame visible with no cropped outer frame edges.
+- Safe margins: 64-72 pixels.
+- The supplied framed product is the largest and most important visual element.
+
+The three-image package must produce:
+1. RIGHT-angle hallway / gallery, Room 1, with bottom banner.
+2. CENTRE / straight-on man cave / office / den, Room 2, with bottom banner.
+3. LEFT-angle bar / lounge, Room 3, with bottom banner.
+
+This route must deliver only its assigned camera role: {visual["route"]}.
+
+PRODUCT LOCK — ABSOLUTE
+
+The selected product and artwork are protected assets. Use original supplied product pixels wherever the current pipeline supports compositing.
+
+Preserve exactly:
+- athletes and facial features
+- bodies, hands, hairstyles, uniforms and poses
+- all existing words, numbers and signatures
+- existing badges and logos
+- artwork colours and contrast
+- artwork composition
+- frame proportions
+- complete product boundaries
+
+Never recreate, redraw, mirror, crop, extend, stretch, warp, blur, recolour or replace the artwork. Never place promotional copy inside the supplied artwork. Never add competing sports artwork to the room.
+
+ROOM SELECTION AND ENVIRONMENT
+
+Use the resolved room profile because it was selected from the product's available sport, era, artwork mood, palette and campaign context. The product supplies the sport. The room supplies the lifestyle.
+
+Room direction:
+- {visual["room_profile"]}
+- {visual["room_materials"]}
+- Primary cue: {visual["primary_cue"]}
+- Secondary cue: {visual["secondary_cue"]}
+
+Use the assigned furniture arrangement and restrained secondary styling cluster. A private drinks cabinet or bar shelf is allowed for Room 3; avoid branded bottle displays. Do not add team flags, jerseys, additional athlete pictures, readable televisions, sport-specific logos, neon signs, pool tables, excessive trophies or memorabilia.
+
+MANDATORY SEAMLESS WALL SYSTEM
+
+Every wall must be seamless, residential, premium, matte, realistically textured, visually quiet and free from unexplained lines.
+
+Approved wall finish for this route: {visual["wall_finish"]}.
+Resolved wall colour for this route: {visual["wall_colour"]}.
+
+Include extremely subtle natural microtexture, gentle organic tonal variation, realistic light falloff, soft brightness variation and approximately 2-4% visible mottling. No obvious repeated pattern.
+
+Never generate horizontal wall lines, vertical wall lines, tile lines, grout, stone-slab divisions, concrete formwork divisions, panel joins, timber slats, decorative panels, geometric grooves, repeated seams, wainscoting, moulding behind the artwork, brick outlines, wallpaper stripes, rectangular wall sections, artificial shadow bands, lines passing behind the frame, commercial hotel-lobby walls, corporate office walls or property-showroom walls.
+
+A genuine doorway, window edge or room corner is allowed only near the outer part of the scene. It must follow correct perspective and must not pass behind or visually divide the framed product. Reject an otherwise strong generation if an unexplained line appears anywhere on the wall.
+
+FRAME, GLASS AND MOUNTING REALISM
+
+Frame:
+- slim-to-medium black timber moulding
+- approximately 18-22 mm visible front face
+- approximately 28-34 mm wall projection
+- sharp 45-degree mitred corners
+- restrained satin-black finish
+- subtle irregular timber grain
+- physically consistent construction
+- natural frame depth appropriate to the selected camera angle
+
+Mounting:
+- believable 6-10 mm mounting gap
+- narrow contact shadow
+- softer secondary shadow
+- slightly more shadow beneath the frame
+- shadow direction consistent with room lighting
+- no black halo, uniform digital drop shadow or floating product
+
+Glass:
+- clear gallery-style glazing
+- approximately 8-15% partial reflection coverage
+- approximately 3-6% reflection opacity
+- one believable room or window reflection
+- reflection stops at the inner frame edge
+- artwork remains crisp
+- no plastic film, wrinkles, full-surface haze or glare over important faces, text or signatures
+
+LIGHTING
+
+Use one physically consistent source of soft daylight with restrained warm ambient fill. Resolved room lighting: {visual['lighting']}. Keep one coherent key-light direction.
+- Approximate temperature: 4000-4700K.
+- Match lighting across wall, furniture, frame and glass.
+- Use realistic falloff.
+- Keep peripheral room elements slightly softer than the product.
+- Do not darken or recolour the protected artwork.
+
+Never use a spotlight directly above the frame, glowing outlines, rim lighting, fog, smoke, light rays, heavy vignettes, conflicting light directions or excessive golden lighting.
+
+FIXED BLACK FOOTER AND DETERMINISTIC TYPOGRAPHY
+
+Use the centralized fixed opaque footer and on-image copy-fit contracts below without altering the existing typography hierarchy:
+- deep matte charcoal near #101112 or #121314
+- extremely subtle premium paper or fine-grain texture
+- one 1-pixel muted-gold boundary line across the scene transition
+- no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
+
+Add all promotional typography as a deterministic flat post-production layer inside the footer using real fonts after the room/product photograph is composed. Do not rely on the image-generation model to organically render copy in the photographed scene.
+
+Resolved on-image copy:
+HEADLINE: {visual.get("headline_text")}
+SUPPORTING LINE: {visual.get("supporting_line")}
+CTA: {visual.get("cta_text")}
+
+Use this image’s assigned supporting line exactly. The other two images must use their own different supporting lines. Only the headline, CTA and banner styling may be shared. Never copy description text onto the image.
+
+Typography:
+- Headline: premium Sports Cave editorial serif, warm ivory.
+- Supporting line: Montserrat Regular or Medium, warm off-white.
+- CTA: Montserrat SemiBold or Bold, muted antique gold.
+- No fake button, price, discount, arrow or second CTA.
+
+Meaningful gold underline:
+- If the headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number.
+- Width: visible number width plus approximately 4-8 pixels.
+- Gap beneath the number: approximately 5-7 pixels.
+- Thickness: 2 pixels.
+- Colour close to #C7A15A.
+- Use clean or subtly tapered ends.
+- No floating centred dash, bright yellow, orange, glitter, metallic gradient or strong glow.
+- The underline must move automatically when the edition limit changes.
+- If exact number-level positioning cannot be guaranteed, underline approximately 96-100% of the complete measured headline. Never place an arbitrary decorative line beneath empty space.
+
+INSTANT EXPERIENCE CORE QUALITY CONTRACTS
+
+{ie_quality_contract}
+
+AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
+
+{shared_realism_rules}
+
+{build_sport_country_visual_adaptation(category, country)}{campaign_moment_visual_block}
+
+FINAL ROUTE CHECK
+
+- The three rooms are distinct at thumbnail size; each uses its assigned right / centre / left camera.
+- This route uses its exact camera role and is not a mirrored duplicate of another route.
+- Wall colour and cues differ from the other routes.
+- Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.
+- The room never becomes a themed sports bar.
+- The fixed black footer remains within approximately 24–28% of the canvas height.
+- No unresolved placeholders remain.
+- No unverified quantity or scarcity fact is introduced."""

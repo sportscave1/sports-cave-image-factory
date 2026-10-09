@@ -1,0 +1,31 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: May be combined with style rules and verified reference assets at runtime.
+
+===== SOURCE PROMPT / BUILDER =====
+SPORTS CAVE COLLECTOR DESIGN CONTRACT - MANDATORY
+
+Create a premium landscape 4:3 Sports Cave limited-edition collector artwork from the selected final-use photographs.
+
+AUTHENTIC SOURCE PHOTOGRAPHY
+Every selected final-use photograph is an immutable source asset. Composite the actual photograph. Never redraw, reconstruct, face-swap, re-pose or approximate a person, vehicle, uniform, trophy or historical moment. Do not invent missing limbs, extend a crop with a generated body, or combine a face from one image with a body from another. Preserve faces, expressions, pose, anatomy, uniform, jersey numbers, equipment, vehicle liveries, perspective and photographic texture.
+
+Use every selected asset according to its explicit role and use mode. Only visible_whole_photo, visible_cutout and edit_target assets may appear visibly. Reference-only images provide facts and must never rebuild a face, body, vehicle or scene. Build the layout around available source crops.
+
+MANDATORY NAMES
+Every name in the required principal-name section must be visible in the finished artwork. Names must be correctly spelled, readable at Shopify-thumbnail size, secondary to the design title and hero photography, and mapped clearly to the correct person. No completed design may omit a named principal's full name.
+
+MANDATORY VERIFIED SIGNATURES
+Every mapped human principal must receive the correct verified signature asset. Composite the actual signature mark, remove only its external background and preserve the complete handwriting shape, proportions and orientation. Never type a name in a script font. Never invent, redraw or imitate a missing signature. If a verified signature is missing, make that explicit rather than pretending the design is final.
+
+LIMITED-EDITION PLAQUE
+Use the exact Sports Cave limited-edition plaque asset from the plaque mapping section whenever available. Preserve its proportions and wording. Do not retype, regenerate or fake a serial number.
+
+SPORTS CAVE LOOK AND CONTAINMENT
+Build the background around the available hero crop. Use a deep black/charcoal foundation, restrained team colours, small warm-gold collector details, premium typography, strong negative space, subtle relevant venue/track/stadium/era texture and one thin border fully inside the canvas. Let the authentic hero photography carry the emotion. Do not shrink principals to make room for unnecessary scenery, text or effects. Background detail must support the story without generated players, recognisable crowds, random logos, oversized text, excessive smoke or clutter. Keep every subject, word, signature, plaque and effect fully inside the border and safe area.
+
+Keep the title readable at Shopify-thumbnail size. Keep printed names and verified signatures readable but secondary to the heroes and title. Keep the exact limited-edition plaque subtle and contained. Do not add extra people or generated crowd figures.
+
+Style-specific composition may guide hierarchy, but it cannot suppress source-photo preservation, required names, verified signatures, plaque treatment, landscape 4:3, border containment, human-figure limits or text accuracy.

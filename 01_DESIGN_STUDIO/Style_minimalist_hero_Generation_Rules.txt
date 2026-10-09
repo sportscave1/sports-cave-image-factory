@@ -1,0 +1,8 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: STYLE COMPONENT
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Only the style-specific generation rules. build_generation_prompt() also assembles common rules, asset mappings, locks, and task context.
+
+===== SOURCE PROMPT / BUILDER =====
+Use one dominant authentic subject, one disciplined focal idea, genuine negative space, limited typography and a tightly controlled palette. Default to one source photograph; a second photograph of the same athlete is exceptional and must strengthen the same idea without becoming a collage, with maximum two visible figures of that same person. Use flat or subtly textured black/charcoal, restrained team colour and a small gold collector accent. Avoid unnecessary statistics, duplicate portraits, large effects, detailed stadiums, crowds, trophy collages, extra players and decorative filler.

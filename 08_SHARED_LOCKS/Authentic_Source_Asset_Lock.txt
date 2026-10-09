@@ -1,0 +1,12 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: SHARED RULE
+SOURCE: design_studio_styles.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: May be combined with style rules and verified reference assets at runtime.
+
+===== SOURCE PROMPT / BUILDER =====
+AUTHENTIC SOURCE ASSET LOCK - IMMUTABLE AFTER APPROVAL
+
+Every approved photograph is an immutable source asset. Composite its real photographic pixels. Never redraw or regenerate a face, loosely imitate a principal, face-swap or re-pose a person. Do not mirror or reverse a principal. Do not turn a head, redirect an eye-line, change an authentic expression or proportion, invent missing arms, hands, shoulders or other anatomy, combine a face from one photograph with another body, or reconstruct a uniform, jersey surname, number, trophy, piece of equipment or vehicle.
+
+Allowed operations are non-generative cropping, proportional scaling, positioning, masking, cutout extraction, restrained colour grading and lighting integration that preserve the source identity and factual details. If a source cannot support the selected composition without prohibited reconstruction, stop and replace it during Find Images. Generation and correction must never repair an unsuitable source by inventing identity-bearing pixels.

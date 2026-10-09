@@ -1,0 +1,97 @@
+folder,filename,kind,source,characters
+"03_ADS_GOOGLE","Google_Demand_Gen_Nine_Image_Assets.txt","original","prompts/google_demand_gen_v1.txt",22184
+"07_EMAIL","Email_Image_Preparation.txt","original","prompts/sports_cave_email_image_v1.txt",6422
+"07_EMAIL","Email_Visual_Realism.txt","original","prompts/sports_cave_email_visual_v1.txt",2611
+"01_DESIGN_STUDIO","Expired_Edition_Next_Chapter.txt","original","design_studio_prompts/expired_edition_next_chapter_prompt.txt",19408
+"09_RESEARCH_SUPPORT","Find_Images_High_Quality_Search.txt","original","design_studio_prompts/SPORTS-CAVE-HIGH-QUALITY-IMAGE-SEARCH-PROMPT-V2.txt",1358
+"01_DESIGN_STUDIO","Style_ultimate_moment_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",3505
+"01_DESIGN_STUDIO","Style_rivalry_faceoff_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",4843
+"01_DESIGN_STUDIO","Style_legends_jersey_display_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",7023
+"01_DESIGN_STUDIO","Style_nostalgic_tribute_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",649
+"01_DESIGN_STUDIO","Style_motorsport_driver_car_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",639
+"01_DESIGN_STUDIO","Style_minimalist_hero_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",596
+"01_DESIGN_STUDIO","Style_championship_achievement_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",713
+"01_DESIGN_STUDIO","Style_vintage_restoration_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",646
+"01_DESIGN_STUDIO","Style_update_existing_Generation_Rules.txt","STYLE COMPONENT","design_studio_styles.py",549
+"01_DESIGN_STUDIO","Upgrade_Existing_Design.txt","APP DEFAULT TEMPLATE","design_studio_page.py",13381
+"01_DESIGN_STUDIO","Design_Generation_Template.txt","APP DEFAULT TEMPLATE","design_studio_page.py",4838
+"01_DESIGN_STUDIO","Final_Artwork_Master.txt","APP DEFAULT TEMPLATE","design_studio_page.py",2119
+"01_DESIGN_STUDIO","Master_Design_System.txt","APP DEFAULT TEMPLATE","design_studio_page.py",9924
+"01_DESIGN_STUDIO","Find_The_Moment.txt","APP DEFAULT TEMPLATE","design_studio_page.py",2324
+"01_DESIGN_STUDIO","Create_Sports_Cave_Style_Artwork.txt","APP DEFAULT TEMPLATE","design_studio_page.py",3938
+"01_DESIGN_STUDIO","Harsh_Artwork_Review.txt","APP DEFAULT TEMPLATE","design_studio_page.py",2085
+"08_SHARED_LOCKS","Subject_Preservation_Lock.txt","SHARED RULE","design_studio_page.py",7277
+"08_SHARED_LOCKS","Hero_Dominance_And_Border_Lock.txt","SHARED RULE","design_studio_page.py",6441
+"08_SHARED_LOCKS","Authentic_Signature_Premium_Treatment.txt","SHARED RULE","design_studio_page.py",3736
+"08_SHARED_LOCKS","Global_Photographic_Realism.txt","SHARED RULE","sports_cave_prompt_blocks.py",2590
+"08_SHARED_LOCKS","Product_And_Mockup_Lock.txt","SHARED RULE","sports_cave_prompt_blocks.py",4575
+"08_SHARED_LOCKS","UGC_Human_Realism.txt","SHARED RULE","sports_cave_prompt_blocks.py",3193
+"08_SHARED_LOCKS","Video_Artwork_Freeze.txt","SHARED RULE","sports_cave_prompt_blocks.py",2901
+"08_SHARED_LOCKS","Common_Generation_Contract.txt","SHARED RULE","design_studio_styles.py",3147
+"08_SHARED_LOCKS","Final_Generation_Execution.txt","SHARED RULE","design_studio_styles.py",3521
+"08_SHARED_LOCKS","Authentic_Source_Asset_Lock.txt","SHARED RULE","design_studio_styles.py",1021
+"08_SHARED_LOCKS","Photographic_Realism_Contract.txt","SHARED RULE","design_studio_styles.py",1092
+"08_SHARED_LOCKS","Artwork_Text_Minimalism.txt","SHARED RULE","design_studio_styles.py",1650
+"08_SHARED_LOCKS","Signature_Verification.txt","SHARED RULE","design_studio_styles.py",990
+"02_MOCKUPS","Product_Page_Man_Cave.txt","DYNAMIC SCENE TEMPLATE","mockup_product_prompts.py",1898
+"02_MOCKUPS","Product_Page_Office.txt","DYNAMIC SCENE TEMPLATE","mockup_product_prompts.py",1816
+"02_MOCKUPS","Product_Page_Living_Room.txt","DYNAMIC SCENE TEMPLATE","mockup_product_prompts.py",1820
+"02_MOCKUPS","Close_Up_Wall_Physical_Frame.txt","original","image_factory.py",2494
+"03_ADS_NEW","Single_Image_And_Video_New_Ads_Master.txt","RUNTIME BUILDER","ads_page.py",3084
+"03_ADS_NEW","New_Ads_Image_Generation_Requirements.txt","RUNTIME BUILDER","ads_page.py",1818
+"03_ADS_NEW","Carousel_Visual_Output_Requirements.txt","RUNTIME BUILDER","ads_page.py",11269
+"03_ADS_NEW","Instant_Experience_Image_Canonical_Master.txt","RUNTIME BUILDER","ads_page.py",11205
+"03_ADS_NEW","Instant_Experience_Room_Differentiation.txt","RUNTIME BUILDER","ads_page.py",1831
+"03_ADS_NEW","Single_Image_Video_Visual_Output.txt","RUNTIME BUILDER","ads_page.py",1223
+"03_ADS_NEW","Carousel_Image_Prompt_Master_Schema.txt","RUNTIME BUILDER","ads_page.py",10421
+"03_ADS_NEW","New_Carousel_Card_1.txt","CARD-SPECIFIC DYNAMIC BUILDER","ads_page.py",10587
+"03_ADS_NEW","New_Carousel_Card_2.txt","CARD-SPECIFIC DYNAMIC BUILDER","ads_page.py",10587
+"03_ADS_NEW","New_Carousel_Card_3.txt","CARD-SPECIFIC DYNAMIC BUILDER","ads_page.py",10587
+"03_ADS_NEW","New_Carousel_Card_4.txt","CARD-SPECIFIC DYNAMIC BUILDER","ads_page.py",10587
+"03_ADS_NEW","New_Carousel_Card_5.txt","CARD-SPECIFIC DYNAMIC BUILDER","ads_page.py",10587
+"03_ADS_NEW","Instant_Experience_Image_1.txt","THREE-COVER DYNAMIC BUILDER","ads_page.py",11254
+"03_ADS_NEW","Instant_Experience_Image_2.txt","THREE-COVER DYNAMIC BUILDER","ads_page.py",11256
+"03_ADS_NEW","Instant_Experience_Image_3.txt","THREE-COVER DYNAMIC BUILDER","ads_page.py",11251
+"04_CREATIVE_REFRESH","Carousel_Winner_Refresh_Master.txt","RUNTIME BUILDER","ads_refresh_generation.py",9934
+"04_CREATIVE_REFRESH","Instant_Experience_Winner_Refresh_Master.txt","RUNTIME BUILDER","ads_refresh_generation.py",11026
+"04_CREATIVE_REFRESH","Instant_Experience_Standalone_Cover_Brief.txt","RUNTIME BUILDER","ads_refresh_generation.py",1680
+"04_CREATIVE_REFRESH","Instant_Experience_Premium_Frame_And_Scarcity.txt","RUNTIME BUILDER","ads_refresh_generation.py",6057
+"04_CREATIVE_REFRESH","Instant_Experience_Critical_Product_Realism.txt","MANDATORY CONTRACT","ads_refresh_generation.py",1786
+"04_CREATIVE_REFRESH","Instant_Experience_Final_Realism_Rejection.txt","MANDATORY CONTRACT","ads_refresh_generation.py",799
+"04_CREATIVE_REFRESH","Carousel_Per_Card_Winner_Upgrade.txt","RUNTIME BUILDER","ads_refresh_plan.py",3239
+"04_CREATIVE_REFRESH","Shared_Winner_And_Canonical_Reference.txt","RUNTIME BUILDER","ads_refresh_plan.py",2527
+"03_ADS_NEW","Carousel_Card_Five_Detail.txt","MANDATORY CONTRACT","ads_carousel_winner.py",823
+"03_ADS_NEW","Carousel_Premium_Winner_Quality.txt","MANDATORY CONTRACT","ads_carousel_winner.py",1402
+"90_LEGACY_REFERENCE","Legacy_Creative_Refresh_Builder.txt","LEGACY BUILDER","ads_creative_refresh.py",10004
+"05_SOCIAL_MEDIA","Universal_Visual_Generation_Builder.txt","RUNTIME BUILDER","social_media_creator.py",1905
+"05_SOCIAL_MEDIA","Carousel_Six_Slide_Prompt_Sequence.txt","RUNTIME BUILDER","social_media_creator.py",2959
+"05_SOCIAL_MEDIA","Story_And_Launch_Image_Sequence.txt","RUNTIME BUILDER","social_media_creator.py",2651
+"05_SOCIAL_MEDIA","Reels_Four_Still_Image_Sequence.txt","RUNTIME BUILDER","social_media_creator.py",1892
+"05_SOCIAL_MEDIA","Static_Post_Pinterest_UGC_Images.txt","RUNTIME BUILDER","social_media_creator.py",1406
+"08_SHARED_LOCKS","Clean_Visual_Generation_Lock.txt","SHARED RULE","social_media_creator.py",560
+"08_SHARED_LOCKS","Rights_Claims_Lock.txt","SHARED RULE","social_media_creator.py",594
+"05_SOCIAL_MEDIA","Slide_1_Hook.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",451
+"05_SOCIAL_MEDIA","Slide_2_Memory.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",446
+"05_SOCIAL_MEDIA","Slide_3_Meaning.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",425
+"05_SOCIAL_MEDIA","Slide_4_Product_bridge.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",436
+"05_SOCIAL_MEDIA","Slide_5_Proof.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",419
+"05_SOCIAL_MEDIA","Slide_6_CTA.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",452
+"05_SOCIAL_MEDIA","Frame_1_Hook.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",397
+"05_SOCIAL_MEDIA","Frame_2_Interaction.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",384
+"05_SOCIAL_MEDIA","Frame_3_Product_bridge.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",336
+"05_SOCIAL_MEDIA","Frame_4_Proof.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",355
+"05_SOCIAL_MEDIA","Frame_5_CTA.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",408
+"05_SOCIAL_MEDIA","Still_1_Hook.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",380
+"05_SOCIAL_MEDIA","Still_2_Product_reveal.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",389
+"05_SOCIAL_MEDIA","Still_3_Physical_proof.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",375
+"05_SOCIAL_MEDIA","Still_4_Branded_end_card.txt","DYNAMIC IMAGE DIRECTION","social_media_creator.py",412
+"06_REELS_MOCKUP_IMAGES","Background_Finder.txt","RESEARCH BUILDER","social_media_reels_studio_page.py",3155
+"06_REELS_MOCKUP_IMAGES","Person_Holding_And_Admiring.txt","DYNAMIC IMAGE TEMPLATE","social_media_reels_studio_page.py",3164
+"06_REELS_MOCKUP_IMAGES","Person_Hanging_Or_Adjusting.txt","DYNAMIC IMAGE TEMPLATE","social_media_reels_studio_page.py",3304
+"06_REELS_MOCKUP_IMAGES","Person_Standing_Back_Admiring.txt","DYNAMIC IMAGE TEMPLATE","social_media_reels_studio_page.py",2995
+"06_REELS_MOCKUP_IMAGES","Artwork_Only_On_Wall.txt","DYNAMIC IMAGE TEMPLATE","social_media_reels_studio_page.py",3054
+"90_LEGACY_REFERENCE","Retired_Mockups_Reel_16_man_cave_reel.txt","RETIRED MOCKUP PROMPT","image_factory.py",2819
+"90_LEGACY_REFERENCE","Retired_Mockups_Reel_17_living_room_reel.txt","RETIRED MOCKUP PROMPT","image_factory.py",2852
+"90_LEGACY_REFERENCE","Retired_Mockups_Reel_18_office_reel.txt","RETIRED MOCKUP PROMPT","image_factory.py",2863
+"90_LEGACY_REFERENCE","Retired_Mockups_Reel_19_home_sports_bar_reel.txt","RETIRED MOCKUP PROMPT","image_factory.py",2879
+"90_LEGACY_REFERENCE","Retired_Mockups_Reel_20_collector_display_room_reel.txt","RETIRED MOCKUP PROMPT","image_factory.py",3090

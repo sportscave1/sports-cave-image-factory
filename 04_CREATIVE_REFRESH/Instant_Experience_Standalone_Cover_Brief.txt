@@ -1,0 +1,26 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_refresh_generation.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: GitHub default implementation only. Winner photos, card count, verified product facts and copy are inserted dynamically.
+
+===== SOURCE PROMPT / BUILDER =====
+def ie_refresh_standalone_brief(ads, product, *, style):
+    """Prioritise product physics only for Creative Refresh IE contracts."""
+    base = plan.standalone_brief(product, 'WINNER_IE', style=style, dimensions='1024 x 1024')
+    header, _, execution = base.partition(plan.AUTHORITY)
+    shared = plan.build_sports_cave_image_realism_rules(include_product_lock=True)
+    execution = execution.removesuffix(shared).strip()
+    # Keep the shared rules and existing footer contract intact, emitted once.
+    authority, separator, rules = ie_refresh_image_rules().partition('PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM')
+    goal = 'Evolve that principle into three substantially fresh rooms; never merely recolour or change camera angle.'
+    authority = authority.replace(goal+' ', '')
+    header = header.replace('PRODUCT: '+product, 'PRODUCT: '+product+'\nOutput: square 1024 x 1024')
+    execution = execution.replace('Output: square 1024 x 1024; ', '')
+    return '\n\n'.join((header.strip(), plan.AUTHORITY, authority.strip(),
+                        IE_CRITICAL_PRODUCT_REALISM, goal, execution,
+                        ads.build_instant_experience_fixed_opaque_footer_rules(),
+                        ads.build_instant_experience_on_image_copy_fit_rules(),
+                        separator + rules,
+                        'Preserve this order in each final standalone image prompt: product/output size, winner and canonical authorities, CRITICAL PRODUCT REALISM — PASS/FAIL, refresh goal and room, product placement, footer copy, full product-lock/realism rules, FINAL PRODUCT REALISM REJECTION GATE last.',
+                        shared, IE_FINAL_PRODUCT_REALISM_GATE))

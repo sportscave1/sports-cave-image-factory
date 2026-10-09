@@ -1,0 +1,53 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RETIRED MOCKUP PROMPT
+SOURCE: image_factory.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Historical social Reel prompt kept in code for compatibility. New workflows live in Social Media Reels Studio.
+
+===== SOURCE PROMPT / BUILDER =====
+Using the uploaded Sports Cave artwork and black landscape frame as the exact reference, create a 1080 x 1920 vertical 9:16 ultra-realistic lifestyle mockup for Meta/Facebook/Instagram Reels.
+
+            This image must show the artwork as a premium statement piece inside a refined modern living room.
+
+            Keep the exact same artwork and exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, signatures, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the artwork or frame.
+
+            Place the framed artwork mounted at realistic eye-level height on a premium living room wall.
+
+            The room should feel clean, masculine, expensive, and believable.
+            Use a warm neutral home interior: soft greige wall, matte plaster, warm beige, off-white, muted taupe, soft concrete, or warm grey.
+
+            Include subtle decor only: part of a premium sofa, low side table, floor lamp edge, soft rug texture, or minimal foreground object.
+            Keep everything understated.
+            The artwork must be the clear hero.
+
+            Do not add people.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add neon signs.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not add clutter.
+
+            Frame realism: premium black timber frame, realistic thickness, sharp corners, subtle texture, clean edges, believable wall mounting.
+
+            Glass realism: add realistic glass over the artwork with soft natural reflections and subtle premium glare.
+            The glare should feel real and controlled without covering important artwork detail.
+
+            Lighting: soft natural daylight mixed with warm interior highlights.
+            Premium cinematic shadows behind and below the frame.
+            The artwork should look physically mounted, not pasted onto the wall.
+
+            Vertical Reels composition:
+            1080 x 1920 vertical canvas.
+            Frame sits in the central safe area and remains fully visible.
+            Do not crop the frame.
+            Do not place the frame too low.
+            Use the vertical room height to show scale, wall texture, and premium home atmosphere.
+            The framed artwork should take roughly 65–80% of the image width.
+            Use a fresh editorial camera angle with slight depth, but keep the landscape frame proportions accurate.
+
+            Final result:
+            a photorealistic premium living room Reels mockup with the exact uploaded Sports Cave framed artwork, realistic glass, warm natural light, believable scale, and a high-end home feel that makes buyers imagine it on their own wall.

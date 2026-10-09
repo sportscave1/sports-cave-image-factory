@@ -1,0 +1,70 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Individual image prompts are assembled per slide/format from these exact directions and the common visual builder.
+
+===== SOURCE PROMPT / BUILDER =====
+def _carousel_prompts(payload):
+    slides = (
+        (
+            "Slide 1 - Hook",
+            "Lead with the sporting memory, rivalry or collector identity. Use one strong hero image and a clean central focal point. The cover hook is added later in Canva; do not render new copy into the photograph.",
+        ),
+        (
+            "Slide 2 - Memory",
+            "Restore the sporting moment or fan tension through a clearly different premium viewpoint. Keep the supplied framed product large and recognisable while giving enough context to establish the story.",
+        ),
+        (
+            "Slide 3 - Meaning",
+            "Build the emotional collector hook: why this memory still matters. Use a distinct wall colour, camera angle and off-centre frame placement without reducing product prominence.",
+        ),
+        (
+            "Slide 4 - Product bridge",
+            "Move from sporting emotion to ownership. Show how the exact framed edition commands a real premium wall. Use a medium or medium-close composition, never a distant room photograph.",
+        ),
+        (
+            "Slide 5 - Proof",
+            "Show believable physical proof: frame depth, glass, plaque, print detail, mounting or an approved real proof asset. Never invent a review, customer room or edition number.",
+        ),
+        (
+            "Slide 6 - CTA",
+            "Finish with a product-led conversion image. Keep the complete frame large and dramatic. Use only verified scarcity or launch context and leave a restrained safe area for the separately supplied CTA overlay.",
+        ),
+    )
+    prompts = []
+    previous = ""
+    for index, (label, direction) in enumerate(slides, start=1):
+        branding_plan = _carousel_branding_plan(
+            payload,
+            label=label,
+            index=index,
+            total=len(slides),
+        )
+        variation = (
+            "This is the first visual and establishes the sequence."
+            if index == 1
+            else (
+                f"This photograph must be visibly different from {previous}: use a different "
+                "camera viewpoint, wall treatment and frame placement. Do not repeat a nearly "
+                "identical crop or room layout. Preserve continuity through the same exact product "
+                "and premium campaign lighting, not by duplicating the photograph."
+            )
+        )
+        prompts.append(
+            {
+                "label": label,
+                "overlay": branding_plan["copy"]["headline"],
+                "branding_plan": branding_plan,
+                "prompt": _visual_prompt(
+                    payload,
+                    label=label,
+                    direction=direction,
+                    branding_plan=branding_plan,
+                    dimensions=("4:5", "1080 x 1350"),
+                    sequence_rule=variation,
+                ),
+            }
+        )
+        previous = label
+    return prompts

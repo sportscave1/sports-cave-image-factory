@@ -1,0 +1,209 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: LEGACY BUILDER
+SOURCE: ads_creative_refresh.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Original older builder retained for compatibility; not the primary ads_page workflow.
+
+===== SOURCE PROMPT / BUILDER =====
+def build_creative_refresh_prompt(inputs, diagnosis):
+    inputs = dict(inputs or {})
+    campaign_type = _clean_text(inputs.get("campaign_type"))
+    country = _clean_text(inputs.get("country"))
+    moment = ads_page.normalize_campaign_moment(
+        inputs.get("campaign_moment"),
+        selected_country=country,
+    )
+    moment_block = ads_page.build_campaign_moment_copy_relevance_block(
+        moment,
+        selected_country=country,
+        campaign_type=campaign_type,
+    )
+    audience = dict(inputs.get("audience_context") or {})
+    performance_summary = build_performance_evidence_summary(diagnosis)
+    route_fields = "\n".join(f"- {field}." for field in ROUTE_OUTPUT_FIELDS)
+    approved_ctas = ", ".join(
+        (
+            "Claim Your Edition",
+            "Secure Your Edition",
+            "Claim This Edition",
+            "Secure This Edition",
+        )
+    )
+    return f"""{CREATIVE_REFRESH_VERSION}
+
+ROLE AND OBJECTIVE
+
+Act as Sports Cave's senior Meta creative strategist, performance diagnostician, direct-response copywriter and photorealistic art director. Use one commercially successful winning ad to create exactly three controlled challenger routes. Preserve the supported reason the winner worked while materially refreshing what customers see. Do not promise, predict or guarantee improved performance.
+
+REFERENCE ROLES - MANDATORY
+
+Two different references are supplied:
+
+1. Exact Sports Cave product source - immutable product asset.
+2. Original winning ad creative - strategy, composition and style reference only.
+
+The winning creative must never replace the exact product source. Never extract, crop or reconstruct a degraded product from the winning room mockup when the exact source product is available. The winner may guide premium tone, hierarchy, colour relationships and emotional character, but must not force the exact room, camera position or composition to repeat.
+
+INPUT SUMMARY
+
+{build_input_summary(inputs)}
+
+PERFORMANCE EVIDENCE
+
+{performance_summary}
+
+Treat the diagnosis as directional evidence, not causal proof. If evidence is absent, mixed or confounded, state the uncertainty and still create the controlled refresh package. Higher CPM is auction-cost context and must not be presented as proof of creative fatigue.
+
+WINNER DNA ANALYSIS - REQUIRED BEFORE WRITING ADS
+
+Inspect the attached winning creative and identify:
+
+- Core emotional angle.
+- Opening hook.
+- Promise.
+- Ownership reason.
+- Scarcity mechanism.
+- CTA intent.
+- Product scale and prominence.
+- Composition and visual hierarchy.
+- Camera perspective.
+- Room archetype.
+- Wall treatment and materials.
+- Lighting mood and direction.
+- Dominant colour palette.
+- Typography character and placement.
+- On-image copy hierarchy.
+- Premium collector cues.
+- Elements likely to have made the creative recognisable.
+
+Separate supported observations from assumptions. Do not infer product facts from visual ambiguity. Create a concise Lock vs Change Matrix before producing any route.
+
+KNOWN WINNER CONTEXT
+
+{build_winner_dna_summary(inputs)}
+
+PROTECTED ELEMENTS AND USER DIRECTION
+
+{build_lock_change_strategy(inputs)}
+
+REFRESH INTENSITY
+
+Selected intensity: {_prompt_context_value(inputs.get('refresh_intensity'), 'Balanced')}.
+
+- Conservative: preserve more of the winner's composition family while still satisfying every mandatory route change.
+- Balanced: preserve the winner insight and hierarchy while making each route obviously fresh at thumbnail size.
+- Bold: use stronger composition and scene departures without losing the verified product, promise, emotional reason to own it or Sports Cave character.
+
+MANDATORY ROUTE 1 — WINNER EVOLUTION
+
+Purpose: the closest evolution of the proven winner.
+
+Preserve the core emotional angle, message architecture, premium style family, product prominence and recognisable visual hierarchy.
+
+Change the camera angle, crop or product scale, lighting direction, headline wording, supporting wording and at least one material environmental detail. It must feel familiar but freshly produced, not duplicated.
+
+MANDATORY ROUTE 2 — SCENE EXPANSION
+
+Purpose: carry the same winning message into a visibly different premium environment.
+
+Preserve the core promise, fan emotion, collector positioning, CTA intent and product fidelity.
+
+Change the room type or environmental setting, wall material, camera perspective, lighting mood, secondary emotional emphasis and copy phrasing. This route must be visibly different from the original winner and Route 1.
+
+MANDATORY ROUTE 3 — PATTERN INTERRUPT
+
+Purpose: create the boldest new composition while preserving the underlying winner insight.
+
+Preserve the exact product, verified claims, primary emotional reason to own it, premium Sports Cave character and collector-led action.
+
+Change the composition, visual rhythm, setting or product presentation, hook wording, secondary angle, lighting and wall treatment. Keep it recognisably derived from the winner's strategy; do not turn it into unrelated generic advertising.
+
+FRESHNESS SEPARATION CONTRACT
+
+- All three routes must be meaningfully different from the original winning creative and from one another.
+- Use three different camera perspectives, room/wall/setting treatments, lighting directions or moods, and fresh copy hooks.
+- Keep the exact Sports Cave product as the dominant subject.
+- Do not return three minor colour or wording variations.
+- Do not recreate the original room with only small furniture changes.
+- Do not change so many variables that the winner's underlying reason is lost.
+- Inspect the supplied winner before selecting directions. If it already uses a left angle, do not blindly repeat a left-angle composition.
+
+MATCHED OUTPUT REQUIRED FOR EACH ROUTE
+
+{route_fields}
+
+Every route's copy and image prompt must be internally matched. Route 1 may be the closest copy evolution. Routes 2 and 3 must express the same supported reason to buy in meaningfully fresher language.
+
+COPY AND FACTUAL ACCURACY CONTRACT
+
+Use concise, human, emotional Sports Cave copy with product-specific fan language and appropriate country localisation. Preserve the winning message architecture without merely repeating its wording.
+
+Never use these generic AI phrases: Elevate your space; Transform your room; Ultimate tribute; Perfect addition; Must-have; Stunning masterpiece; Timeless decor; Bring your walls to life.
+
+Do not invent facts, records, dates, teams, athletes, venues, edition quantities, signatures, authentication, prices, discounts, delivery claims or offers. Do not claim that a refresh will double results, guarantee improvement or definitely beat the winner.
+
+Approved collector-led creative CTAs are: {approved_ctas}. Do not use "Own the Feeling". Where the selected campaign type has a stricter existing CTA contract, that stricter contract wins.
+
+{ads_page.SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1}
+
+{ads_page.build_country_language_guidance(country)}
+
+{moment_block or 'No campaign moment is active. Keep the package evergreen and do not invent an event or offer.'}
+
+ON-IMAGE COPY CONTRACT
+
+Each route may place only its exact approved on-image headline, optional supporting line and on-image CTA on the image. Keep that wording concise, readable and subordinate to the product. Do not put Primary Text, Meta headline, Meta description, targeting information, performance claims, prices, discounts, offers or additional advertising wording on the image unless the selected existing campaign contract explicitly permits it.
+
+AUDIENCE CONTEXT - STRATEGY ONLY
+
+- Audience type: {_prompt_context_value(audience.get('audience_type'))}
+- Approximate audience size: {_prompt_context_value(audience.get('audience_size'))}
+- Age range: {_prompt_context_value(audience.get('age_range'))}
+- Gender targeting: {_prompt_context_value(audience.get('gender_targeting'))}
+- Interests: {_prompt_context_value(audience.get('interests'))}
+- Placements: {_prompt_context_value(audience.get('placements'))}
+- Campaign objective: {_prompt_context_value(audience.get('campaign_objective'))}
+- Optimisation event: {_prompt_context_value(audience.get('optimisation_event'))}
+- Attribution setting: {_prompt_context_value(audience.get('attribution_setting'))}
+
+Use audience context only to improve strategy. Never automatically place audience size, targeting details, interests or attribution settings in customer-facing copy.
+
+{build_creative_refresh_format_contract(campaign_type)}
+
+IMAGE PROMPT REFERENCE CONTRACT - REPEAT IN ALL THREE STANDALONE PROMPTS
+
+Each route's complete standalone image-generation prompt must explicitly state:
+
+1. Exact Sports Cave product source - immutable product asset.
+2. Original winning ad creative - strategy and style reference only.
+
+Never write "same as previous prompt", "use the shared lock above" or any other cross-reference. Repeat the complete product-fidelity lock and realism lock inside every one of the three returned image prompts.
+
+{build_creative_refresh_product_lock()}
+
+{build_creative_refresh_realism_lock()}
+
+TESTING GUIDANCE
+
+- Keep the original winning ad as the control while it remains commercially viable.
+- Do not edit or overwrite the winner in place.
+- Keep the audience, offer, objective, optimisation event and landing page stable during the first creative comparison where practical.
+- Launch the three refreshed ads as new challengers.
+- Do not claim that one route will win before sufficient delivery data exists.
+- Record which refreshed route becomes the next control.
+
+RESPONSE ORDER - EXACT
+
+1. Fatigue Evidence Summary.
+2. Winner DNA.
+3. Lock vs Change Matrix.
+4. Refresh 1 — Winner Evolution.
+5. Refresh 2 — Scene Expansion.
+6. Refresh 3 — Pattern Interrupt.
+7. Recommended Test Order.
+8. Final Quality Check.
+
+Provide all copy and all three complete standalone image prompts in the first text response before using any image tool.
+
+"Do not generate any image automatically. Only generate Refresh Image 1, 2 or 3 after I explicitly request that image."
+"""

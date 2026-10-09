@@ -1,0 +1,41 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Original Python builder preserved as text because final prompts contain dynamic product, country, market and image information.
+
+===== SOURCE PROMPT / BUILDER =====
+def build_instant_experience_set_differentiation_rules(visual):
+    sibling_lines = []
+    for sibling in visual.get("sibling_summaries", ()):
+        sibling_lines.append(
+            "- {route}: camera={camera}; room={room}; wall={wall}; finish={finish}; "
+            "primary cue={primary}; secondary cue={secondary}; light={light}; FOMO={fomo}.".format(
+                route=sibling["route"],
+                camera=sibling["camera_side"],
+                room=sibling["room_profile"],
+                wall=sibling["wall_colour"],
+                finish=sibling["wall_material"],
+                primary=sibling["primary_cue"],
+                secondary=sibling["secondary_cue"],
+                light=sibling["lighting"],
+                fomo=sibling["supporting_line"],
+            )
+        )
+    return f"""{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
+INSTANT EXPERIENCE SET DIFFERENTIATION - PREMIUM ROOM SYSTEM V4
+
+This route's advertising job is: {visual["purpose"]}
+
+Resolved sibling fingerprints supplied for comparison:
+{chr(10).join(sibling_lines)}
+
+Within one three-image package:
+- Preserve the same immutable product and shared realism in three distinct premium rooms.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 man cave / office / den with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 bar / lounge with the same fixed bottom 24–28% black/gold banner.
+- Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
+- Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned supporting line.
+
+{_instant_experience_route_wording_rules(visual)}"""

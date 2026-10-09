@@ -1,0 +1,32 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: ads_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Original Python builder preserved as text because final prompts contain dynamic product, country, market and image information.
+
+===== SOURCE PROMPT / BUILDER =====
+def build_standard_ads_image_prompt_requirements(product_name, category, country):
+    clean_product = _clean_product_name(product_name)
+    return f"""STANDARD SPORTS CAVE IMAGE-GENERATION REQUIREMENTS
+
+Every returned Image Generation Prompt must be a complete standalone production prompt. It must repeat all relevant requirements below in full so it can be pasted into a fresh image-generation conversation without relying on another ad, shared preamble or prior message.
+
+Selected exact product: {clean_product}
+
+Each prompt must specify a true 1:1 square 1024 × 1024 Meta-ready composition, exact selected product/artwork fidelity, realistic premium framing and glass, believable mounting and shadows, product-dominant mobile readability, a purposeful layout, camera position and product scale, premium black/gold/warm-white Sports Cave language where appropriate, restrained typography where the ad requires it, and an uncluttered environment appropriate to the selected sport and country. It must state the exact headline, supporting text and CTA that may appear on-image, or explicitly state that no on-image wording is required. Never put the full Primary Text on the image.
+
+Do not use "same as previous", "use the shared rules above", a short visual description or any other cross-reference. Do not reconstruct the product artwork from the winning-ad reference. Do not add unnecessary people, props or visual clutter unless that ad's controlled strategy genuinely requires them.
+
+{build_carousel_square_format_lock()}
+
+{build_product_lock_visual_rules()}
+
+{build_frame_and_glass_visual_rules()}
+
+{build_room_realism_visual_rules()}
+
+{build_last_image_variation_visual_rules()}
+
+{build_sport_country_visual_adaptation(category, country)}
+
+{build_sports_cave_image_realism_rules(include_product_lock=True)}"""

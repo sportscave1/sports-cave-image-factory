@@ -1,0 +1,120 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: DYNAMIC IMAGE TEMPLATE
+SOURCE: social_media_reels_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Source-defined scene branch, also augmented by shared realism and product locks.
+
+===== SOURCE PROMPT / BUILDER =====
+"{opening}
+
+{IMAGE_PRODUCT_SOURCE_NOTE}
+
+SCENE
+
+Create a premium Sports Cave lifestyle scene inside the selected background/reference room.
+
+A lifelong {sport_category} collector is holding the framed artwork naturally with both hands at chest height.
+
+He is admiring the artwork before deciding where to hang it in his Sports Cave.
+
+The moment should feel authentic, quiet, proud, and collector-driven.
+
+The room should feel masculine, premium, warm, and believable.
+
+Use the selected background as the base environment.
+Keep the background restrained and realistic.
+
+{IMAGE_PERSON_REALISM_HOLDING}
+
+{HUMAN_ANATOMY_LOCK}
+
+{NEGATIVE_HUMAN_ANATOMY}
+
+{HUMAN_ANATOMY_QA_REJECT}
+
+FRAME REALISM
+
+The black frame must look like a real premium framed product:
+- premium matte black timber frame
+- realistic timber or frame depth
+- sharp square mitred corners
+- subtle frame texture
+- accurate landscape proportions
+- believable thickness
+- realistic physical weight in the hands
+- natural pressure where hands touch the frame
+- realistic contact shadows around the fingers
+- frame edges remain perfectly straight
+- no bending
+- no wobbling
+- no rubbery frame
+- no pasted-on look
+- no floating frame
+
+GLASS REALISM
+
+Add ultra-realistic museum-quality glass over the artwork.
+
+The glass should have soft natural reflections from the room.
+Use subtle premium glare only.
+The glare must never hide or ruin the artwork.
+The artwork must remain sharp and readable.
+
+ROOM REALISM
+
+Use the selected background/reference room as the base.
+
+The room must remain realistic, premium, and believable.
+
+Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
+No warped walls.
+No impossible furniture.
+No random logos.
+No fake trophies.
+No clutter.
+No messy room.
+No obvious AI room.
+No extra wall art competing with the product.
+
+The scene should feel like a real customer has just received the framed Sports Cave artwork and is about to place it in his dream room.
+
+LIGHTING
+
+Use premium cinematic lighting.
+
+Soft natural light.
+Warm interior glow.
+Controlled highlights.
+Realistic shadows.
+Soft ambient bounce light.
+Subtle reflection on glass.
+The lighting should feel like a luxury home, not a studio.
+
+COMPOSITION
+
+Square 1024 x 1024 canvas.
+
+The framed artwork is the hero.
+
+Show the full artwork and full frame clearly.
+Show believable scale.
+Use a professional DSLR / 50mm lens look.
+Slight natural viewing angle is allowed, but the frame and artwork must keep correct landscape proportions.
+The person should support the artwork naturally without blocking it.
+
+NEGATIVE RULES
+
+Do not add text overlays.
+Do not add watermarks.
+Do not add fake logos.
+Do not add extra people.
+Do not add random sports branding.
+Do not make the room cluttered.
+Do not make the person look AI.
+Do not make the hands distorted.
+Do not make the frame float.
+Do not make the frame glossy, cartoon, CGI, rubbery, warped, or fake.
+
+FINAL RESULT
+
+Photorealistic premium Sports Cave collector-room mockup with a realistic customer holding the exact uploaded framed artwork, perfect frame realism, realistic hands, museum glass, premium shadows, and believable lighting.

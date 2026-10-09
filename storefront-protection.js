@@ -1,2 +1,0 @@
-/* Compatibility loader for older installations. Current themes use Shopify CDN assets. */
-(()=>{const base=new URL('.',document.currentScript.src);const css=document.createElement('link');css.rel='stylesheet';css.href=new URL('storefront-protection.css',base);document.head.appendChild(css);const script=document.createElement('script');script.src=new URL('storefront-protection-runtime.js',base);script.dataset.scProtectionConfig=new URL('api/storefront-protection/config',base);script.defer=true;document.head.appendChild(script);})();

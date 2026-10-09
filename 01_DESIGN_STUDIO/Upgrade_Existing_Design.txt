@@ -1,0 +1,465 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: APP DEFAULT TEMPLATE
+SOURCE: design_studio_page.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Extracted verbatim from UPGRADE_EXISTING_DESIGN_PROMPT. F-string expressions and task references may require dynamic runtime assembly.
+
+===== SOURCE PROMPT / BUILDER =====
+turn this Sports Cave piece into a premium Sports Cave collector-style limited-edition artwork.
+
+Use the uploaded Sports Cave design as the core idea and starting point, but do not feel locked into the old layout, old typography, old title treatment, or old border treatment if they are not premium enough.
+
+Important:
+Inside this Sports Cave Designs project/folder, there are project source files called Sports Cave limited edition plaque, including files such as:
+- limited-edition-plaque.psd
+- limited-edition-plaque.png
+
+When designing, look in the project sources of this project and use the Sports Cave limited edition plaque as the badge/plaque element inside the final design.
+
+Place that plaque in the best possible spot so the final artwork feels genuinely limited edition, collectible, premium, and framed-first.
+
+Do not simply clean up the design.
+Do not make it look like a normal poster.
+Do not make it look like a social media graphic.
+
+Transform it into a premium limited-edition framed sports collectible built around nostalgia, identity, legacy, rivalry, emotion, and ownership.
+
+The final artwork must feel like something a fan proudly hangs in a man cave, home bar, office, games room, living room, bedroom, or sports room.
+
+MANDATORY OUTPUT FORMAT
+
+Create the artwork in landscape 4:3 ratio.
+
+The design must feel:
+
+Premium
+Cinematic
+Emotional
+Nostalgic
+Collector-focused
+Masculine
+Limited edition
+Framed-first
+Wall-worthy
+Timeless
+Realistic
+Print-ready
+
+The final reaction should be:
+
+"I need that on my wall."
+
+Not:
+
+"That's a nice poster."
+
+STEP 1 - UNDERSTAND THE CURRENT DESIGN
+
+First, study the uploaded design carefully.
+
+Identify:
+
+The athlete, team, car, rivalry, moment, quote, championship, or emotional idea
+The main subject or subjects
+The sport and era
+The existing title and text
+The strongest emotional hook
+What the design is trying to make fans feel
+What is weak, cheap, cluttered, unrealistic, or not collector-worthy
+
+Keep the core idea, but upgrade the execution to Sports Cave premium collector standard.
+
+STEP 2 - RESEARCH BETTER REALISTIC REFERENCES
+
+Use web/image search to identify the real athlete, team, car, moment, rivalry, or event shown in the current design.
+
+Search for better, more realistic visual references of:
+
+The athlete or athletes
+The exact sporting moment
+The celebration or pose
+The car, race, jersey, kit, uniform, gloves, trophy, stadium, arena, track, or scene
+The correct era and visual details
+Any authentic signature references if appropriate
+
+Use the searched images as factual realism and accuracy references for the surrounding design, background, era, venue, lighting and details.
+If a real subject image has been supplied, do not use references to replace, redraw, re-pose, face-swap or reinterpret that subject.
+
+Do not blindly copy a random photo.
+Use the best references to improve background believability, lighting integration, jersey or vehicle factual accuracy, era detail, venue accuracy, and emotional authenticity without changing any supplied principal subject.
+
+If the uploaded design already has a strong supplied real subject pose, preserve that subject, pose and emotion, then rebuild only the generated Sports Cave environment and collector design elements around it.
+
+STEP 3 - FIND THE EMOTIONAL HOOK
+
+Before designing, choose the strongest selling emotion.
+
+The design must trigger at least one of these:
+
+Legend
+Rivalry
+Championship memory
+Career-defining moment
+National pride
+Club/team identity
+Era nostalgia
+Childhood memory
+Greatness
+Legacy
+Tribute
+Ownership
+Man cave pride
+
+Ask:
+
+Why does this moment matter?
+What memory does it unlock?
+Why would a fan proudly display this?
+Why would someone fear missing out once the edition sells out?
+
+Build the artwork around that answer.
+
+STEP 4 - SPORTS CAVE VISUAL STYLE
+
+Use a dark cinematic foundation:
+
+Deep black
+Charcoal
+Smoke
+Stadium darkness
+Arena shadows
+Garage shadows
+Track grit
+Historic textures
+Vintage atmosphere
+Warm cinematic light
+Subtle dust particles
+Soft light rays
+Strong shadow depth
+
+The artwork should feel expensive before it is even framed.
+
+Use gold sparingly as a premium accent only.
+
+Good gold use:
+
+Title accents
+Thin dividers
+Small border details
+Edition plaque
+Collector details
+Subtle highlights
+Signature glow
+Small typography accents
+
+Do not flood the artwork with gold.
+Gold should feel rare, premium, and intentional.
+
+Avoid bright random colours unless they are part of the team, jersey, car, nation, or moment.
+
+STEP 5 - COMPOSITION RULES
+
+The subject must always be the hero.
+
+Use strong negative space.
+Keep the layout clean.
+Make it readable as a Shopify thumbnail.
+Make it powerful as a framed wall artwork.
+Make it premium in a black frame.
+
+Do not overcrowd the design with too many athletes, trophies, logos, badges, quotes, stats, or effects.
+
+The composition should feel cinematic, not busy.
+
+Use depth:
+
+Foreground subject
+Atmospheric background
+Soft stadium/arena/track glow
+Subtle texture
+Premium title placement
+Integrated collector plaque
+
+Every element must earn its place.
+
+STEP 6 - SPORT-SPECIFIC BACKGROUND DIRECTION
+
+Choose the background based on the sport.
+
+NBA:
+Dark arena atmosphere, tunnel lighting, court reflections, crowd glow, smoke, legacy portrait mood, championship spotlight.
+
+Football/Soccer:
+Stadium lights, trophy atmosphere, pitch glow, national pride, crowd energy, dramatic night-match lighting.
+
+AFL/NRL:
+Floodlights, turf texture, club identity, rivalry tension, old-school stadium emotion.
+
+Cricket:
+MCG-style atmosphere, pitch texture, sunset, test-match nostalgia, crowd lights, historic cricket mood.
+
+Motorsport:
+Track environment, Bathurst-style mountain roads, pit lane, garage shadows, smoke, vintage grit, golden-hour racing atmosphere.
+
+Boxing/UFC:
+Ring lighting, harsh shadows, sweat, black-and-white grit, dramatic spotlights, intensity, legacy quote energy.
+
+Horse Racing:
+Track dust, grandstand atmosphere, racing silks, golden prestige, championship heritage.
+
+Tennis/Golf:
+Premium club atmosphere, clean luxury, championship heritage, controlled lighting, elegant composition.
+
+The background must support the story without distracting from the subject.
+
+STEP 7 - TITLE SYSTEM
+
+Do not keep the existing title just because it is already in the design.
+
+The title should be upgraded according to the stronger concept, stronger emotional hook, and premium collector direction of the new design.
+
+If the old title is weak, generic, poorly worded, too basic, or not collector-worthy, replace it.
+
+Use the title that best fits the upgraded design direction, not the original design by default.
+
+The title must be short, emotional, memorable, and powerful.
+
+Good title style examples:
+
+The King of Spin
+The Rivals
+The Mentality
+The Last Shot
+The Final Crown
+Legends Never Die
+Built For Greatness
+One-Two Finish
+Six Laps Ahead
+The Champion's Walk
+The King Of The Mountain
+The Moment That Made Him
+For Brock
+The City Waited
+
+Avoid generic titles like:
+
+Sports Poster
+Player Wall Art
+Premium Print
+Motivational Artwork
+Greatest Ever
+Legend Design
+
+The title must create the story.
+
+Use elegant serif or cinematic typography.
+Use uppercase tracking where appropriate.
+Keep text minimal.
+Do not make the artwork look like an advertisement.
+
+STEP 8 - LIMITED EDITION PLAQUE SYSTEM
+
+Use the Sports Cave limited edition plaque from the project sources in the Sports Cave Designs folder.
+
+This is not optional.
+Use it as the badge/plaque element in the final design.
+
+Possible source files include:
+- limited-edition-plaque.psd
+- limited-edition-plaque.png
+
+Place the plaque in the best natural location for this specific composition.
+
+The plaque must blend naturally into the artwork and never overpower the design.
+
+It should feel like a real memorabilia plate, gallery stamp, or collector edition marker.
+
+The plaque should enhance collectibility without becoming the focal point.
+
+Make it sharp, realistic, readable, premium, and properly lit.
+
+Strong placement options:
+
+Bottom left
+Bottom centre
+Bottom right
+Near the title
+Integrated into a collector plate zone
+Subtle plaque area in darker negative space
+
+Do not place the plaque randomly.
+Do not make it look pasted on.
+Do not make it too large.
+Do not hide it so much that it loses collector value.
+
+STEP 9 - BORDER SYSTEM
+
+Upgrade the border treatment so it feels more elegant and more Sports Cave.
+
+Important border direction:
+Make the border longer horizontally and slightly less tall vertically so it feels more rectangular and refined.
+
+The border must feel:
+
+Elegant
+Premium
+Collector-style
+Sports Cave branded in feel
+Balanced
+Subtle
+Clean
+Not bulky
+Not cheap
+Not overly decorative
+
+Use a refined Sports Cave style border with controlled gold detailing if needed.
+
+The border should help frame the artwork and elevate the premium collector look, not distract from the subject.
+
+Avoid:
+Thick clunky borders
+Cheap poster-style frames
+Overly ornate decorative borders
+Square-looking heavy border shapes
+Anything that feels generic or templated
+
+The border should feel sleek, tasteful, and purpose-built for a premium limited-edition Sports Cave artwork.
+
+STEP 10 - SIGNATURE SYSTEM
+
+Where appropriate, include only a valid authentic signature asset supplied by the user or retrieved through the Find Images workflow.
+
+Only use an authentic supplied or selected signature asset if it improves the memorabilia feeling.
+
+Place it naturally in:
+
+Dark sky
+Background shadows
+Near the title
+Near the subject
+Near the collector plaque
+Empty negative space
+
+The authentic signature asset should feel subtle and premium.
+
+Do not make it oversized.
+Do not put it in a box unless it looks like part of a premium memorabilia plate.
+Do not invent, imitate, redraw, trace, font-set or regenerate a signature.
+If no valid authentic signature asset is available, omit signatures entirely.
+
+STEP 11 - REALISM RULES
+
+Prioritise realism above everything.
+
+Avoid:
+
+AI faces
+Warped hands
+Distorted bodies
+Floating feet
+Fake shadows
+Random logos
+Unreadable text
+Messy typography
+Cartoon rendering
+Plastic skin
+Overdone glow
+Pasted-on cutout subjects
+Incorrect jerseys, kits, cars, trophies, or eras
+
+Requirements:
+
+Natural blending
+Correct lighting
+Proper contact shadows
+Realistic textures
+Accurate facial likeness
+Realistic body proportions
+Sharp print-ready details
+No messy text
+No fake-looking elements
+No awkward cropping
+No stretched or distorted subjects
+
+The subject must feel physically present in the scene.
+
+STEP 12 - UPGRADE THE EXISTING DESIGN
+
+Keep the strongest parts of the uploaded design:
+
+The core subject
+The emotional idea
+The sport and era
+The key fan memory
+The collector direction
+
+Only keep the existing title if it is already genuinely strong enough for the upgraded premium concept.
+Otherwise replace it with a stronger, more collector-worthy title.
+
+Upgrade the weak parts:
+
+Improve realism
+Improve lighting
+Improve depth
+Improve typography
+Improve background atmosphere
+Improve composition
+Improve plaque integration
+Improve border elegance
+Make the border longer horizontally and slightly shorter vertically so it feels more rectangular and premium
+Improve premium black-and-gold collector feeling
+Remove clutter
+Remove cheap poster-shop elements
+Remove social-media-style layout
+Remove anything that does not increase emotion, collectibility, or wall appeal
+
+The final should feel like a Sports Cave premium limited-edition drop, not just a redesigned poster.
+
+STEP 13 - FINAL BESTSELLER CHECKLIST
+
+Before finalising, make sure the artwork passes this checklist:
+
+Does it trigger nostalgia?
+Does it celebrate a legend, rivalry, team, championship, or iconic moment?
+Does it feel emotional?
+Does it feel premium?
+Does it feel collectible?
+Does it work in black and gold?
+Is the title powerful and upgraded where needed?
+Is the Sports Cave limited-edition plaque properly used?
+Is the border elegant, longer horizontally, and slightly less tall vertically?
+Is the subject realistic?
+Is the lighting cinematic?
+Does it look print-ready?
+Would it look incredible framed?
+Would it stand out as a Shopify thumbnail?
+Would a fan proudly display it?
+Does it feel Sports Cave?
+Does it make the fan think, "I need that on my wall"?
+
+FINAL OUTPUT STANDARD
+
+Create a premium 4:3 landscape Sports Cave collector artwork.
+
+Use the uploaded design as the core reference, preserve every supplied principal subject unchanged, and rebuild the surrounding Sports Cave collector environment into a darker, more cinematic, more realistic, more emotional, more premium limited-edition piece.
+
+Use factual reference images from web/image search only for background adaptation, lighting, era detail, venue accuracy and collector atmosphere where needed.
+
+Make the subject heroic.
+Make the background atmospheric.
+Make the title stronger where needed.
+Use the Sports Cave limited edition plaque from the project sources as the badge/plaque element.
+Make the border more elegant, more Sports Cave styled, longer horizontally, and slightly less tall vertically.
+Make the whole design feel framed-first and wall-worthy.
+
+This must look like:
+
+A premium framed collector piece
+A tribute to sporting greatness
+A limited-edition drop
+A man cave centrepiece
+A piece of sporting history
+
+The final artwork must feel like Sports Cave:
+
+Premium limited-edition sports wall art for fans who collect moments, not posters.

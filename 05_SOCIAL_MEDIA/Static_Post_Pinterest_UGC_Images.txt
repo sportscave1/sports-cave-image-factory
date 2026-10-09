@@ -1,0 +1,38 @@
+SPORTS CAVE OS — GITHUB PROMPT SNAPSHOT
+CATEGORY: RUNTIME BUILDER
+SOURCE: social_media_creator.py
+SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
+NOTE: Individual image prompts are assembled per slide/format from these exact directions and the common visual builder.
+
+===== SOURCE PROMPT / BUILDER =====
+def _static_prompts(payload):
+    direction = {
+        "Pinterest Pin": (
+            "Create an evergreen vertical room-inspiration and shopping visual. Keep the exact "
+            "product prominent, use realistic premium architecture and leave restrained clean "
+            "space outside the artwork for a separately added keyword title."
+        ),
+        "UGC/collector proof": (
+            "Create or select a believable proof-led image. If it is generated, label it as a "
+            "lifestyle mockup rather than a customer home. Prefer approved real product or "
+            "collector material whenever available."
+        ),
+        "Static feed post": (
+            "Create one strong product-led feed photograph with a clear emotional hook, one hero "
+            "frame and enough premium context to feel real without becoming a room advertisement."
+        ),
+    }.get(payload["format"], "Create one premium product-led Sports Cave visual.")
+    branding_plan = _static_branding_plan(payload, label="Final visual")
+    return [
+        {
+            "label": "Final visual",
+            "overlay": branding_plan["copy"]["headline"],
+            "branding_plan": branding_plan,
+            "prompt": _visual_prompt(
+                payload,
+                label="final",
+                direction=direction,
+                branding_plan=branding_plan,
+            ),
+        }
+    ]
