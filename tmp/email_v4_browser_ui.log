@@ -1,0 +1,155 @@
+INFO:     Started server process [29760]
+INFO:     Waiting for application startup.
+2026-10-09 17:13:03.787 Application startup complete.
+2026-10-09 17:13:03.788 Uvicorn running on http://127.0.0.1:8543 (Press CTRL+C to quit)
+INFO:     127.0.0.1:62110 - "GET / HTTP/1.1" 200 OK
+2026-10-09 17:13:04.214 127.0.0.1:62110 - "GET / HTTP/1.1" 200
+INFO:     127.0.0.1:63710 - "GET / HTTP/1.1" 200 OK
+2026-10-09 17:13:04.820 127.0.0.1:63710 - "GET / HTTP/1.1" 200
+INFO:     127.0.0.1:61909 - "GET / HTTP/1.1" 200 OK
+2026-10-09 17:13:04.821 127.0.0.1:61909 - "GET / HTTP/1.1" 200
+INFO:     127.0.0.1:63710 - "GET /static/media/SourceSansVF-Upright.ttf.BsWL4Kly.woff2 HTTP/1.1" 200 OK
+2026-10-09 17:13:04.844 127.0.0.1:63710 - "GET /static/media/SourceSansVF-Upright.ttf.BsWL4Kly.woff2 HTTP/1.1" 200
+INFO:     127.0.0.1:61909 - "GET /static/media/SourceSansVF-Upright.ttf.BsWL4Kly.woff2 HTTP/1.1" 200 OK
+2026-10-09 17:13:04.845 127.0.0.1:61909 - "GET /static/media/SourceSansVF-Upright.ttf.BsWL4Kly.woff2 HTTP/1.1" 200
+INFO:     127.0.0.1:57149 - "GET /static/css/index.M0-f_CLq.css HTTP/1.1" 200 OK
+2026-10-09 17:13:04.848 127.0.0.1:57149 - "GET /static/css/index.M0-f_CLq.css HTTP/1.1" 200
+INFO:     127.0.0.1:59621 - "GET /static/js/index.dkY5s53S.js HTTP/1.1" 200 OK
+2026-10-09 17:13:04.848 127.0.0.1:59621 - "GET /static/js/index.dkY5s53S.js HTTP/1.1" 200
+INFO:     127.0.0.1:53588 - "GET /static/css/index.M0-f_CLq.css HTTP/1.1" 200 OK
+2026-10-09 17:13:04.852 127.0.0.1:53588 - "GET /static/css/index.M0-f_CLq.css HTTP/1.1" 200
+INFO:     127.0.0.1:53660 - "GET /static/js/index.dkY5s53S.js HTTP/1.1" 200 OK
+2026-10-09 17:13:04.853 127.0.0.1:53660 - "GET /static/js/index.dkY5s53S.js HTTP/1.1" 200
+INFO:     127.0.0.1:53660 - "GET /_stcore/health HTTP/1.1" 200 OK
+2026-10-09 17:13:05.058 127.0.0.1:53660 - "GET /_stcore/health HTTP/1.1" 200
+INFO:     127.0.0.1:53588 - "GET /_stcore/host-config HTTP/1.1" 200 OK
+2026-10-09 17:13:05.059 127.0.0.1:53588 - "GET /_stcore/host-config HTTP/1.1" 200
+INFO:     127.0.0.1:59621 - "GET /_stcore/health HTTP/1.1" 200 OK
+2026-10-09 17:13:05.063 127.0.0.1:59621 - "GET /_stcore/health HTTP/1.1" 200
+INFO:     127.0.0.1:57149 - "GET /_stcore/host-config HTTP/1.1" 200 OK
+2026-10-09 17:13:05.063 127.0.0.1:57149 - "GET /_stcore/host-config HTTP/1.1" 200
+2026-10-09 17:13:05.069 127.0.0.1:63699 - "WebSocket /_stcore/stream" [accepted]
+2026-10-09 17:13:05.070 connection open
+INFO:     127.0.0.1:53588 - "GET /favicon.png HTTP/1.1" 200 OK
+2026-10-09 17:13:05.071 127.0.0.1:53588 - "GET /favicon.png HTTP/1.1" 200
+2026-10-09 17:13:05.073 127.0.0.1:63476 - "WebSocket /_stcore/stream" [accepted]
+2026-10-09 17:13:05.074 connection open
+INFO:     127.0.0.1:57149 - "GET /favicon.png HTTP/1.1" 200 OK
+2026-10-09 17:13:05.074 127.0.0.1:57149 - "GET /favicon.png HTTP/1.1" 200
+INFO:     127.0.0.1:55915 - "GET /static/js/Html.oJkhUkEr.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.567 127.0.0.1:55915 - "GET /static/js/Html.oJkhUkEr.js HTTP/1.1" 200
+INFO:     127.0.0.1:55915 - "GET /static/js/Button.D0kRCRsF.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.599 127.0.0.1:55915 - "GET /static/js/Button.D0kRCRsF.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /static/js/iconPosition.CY47f4C7.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.599 127.0.0.1:51778 - "GET /static/js/iconPosition.CY47f4C7.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /static/js/ButtonGroup.C-5OFb1K.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.640 127.0.0.1:51778 - "GET /static/js/ButtonGroup.C-5OFb1K.js HTTP/1.1" 200
+INFO:     127.0.0.1:55915 - "GET /static/js/useBasicWidgetState.C674_qFj.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.641 127.0.0.1:55915 - "GET /static/js/useBasicWidgetState.C674_qFj.js HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /static/js/inputUtils.BZnYy1KE.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.643 127.0.0.1:62528 - "GET /static/js/inputUtils.BZnYy1KE.js HTTP/1.1" 200
+INFO:     127.0.0.1:61775 - "GET /static/js/useUpdateUiValue.DxLOa8lS.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.644 127.0.0.1:61775 - "GET /static/js/useUpdateUiValue.DxLOa8lS.js HTTP/1.1" 200
+INFO:     127.0.0.1:52365 - "GET /static/js/TextInput.Cyh_WsIr.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.644 127.0.0.1:52365 - "GET /static/js/TextInput.Cyh_WsIr.js HTTP/1.1" 200
+INFO:     127.0.0.1:55577 - "GET /static/js/InputInstructions.CdXeHGKW.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.644 127.0.0.1:55577 - "GET /static/js/InputInstructions.CdXeHGKW.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /static/media/MaterialSymbols-Rounded.WDh_BksD.woff2 HTTP/1.1" 200 OK
+2026-10-09 17:13:05.646 127.0.0.1:51778 - "GET /static/media/MaterialSymbols-Rounded.WDh_BksD.woff2 HTTP/1.1" 200
+INFO:     127.0.0.1:55915 - "GET /static/js/input.Dbu0xBeW.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.649 127.0.0.1:55915 - "GET /static/js/input.Dbu0xBeW.js HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /static/js/base-input.Bg_42oFt.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.649 127.0.0.1:62528 - "GET /static/js/base-input.Bg_42oFt.js HTTP/1.1" 200
+INFO:     127.0.0.1:55577 - "GET /static/js/Selectbox.BVJhx6w-.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.650 127.0.0.1:55577 - "GET /static/js/Selectbox.BVJhx6w-.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/Html.oJkhUkEr.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.781 127.0.0.1:61780 - "GET /static/js/Html.oJkhUkEr.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/Button.D0kRCRsF.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.814 127.0.0.1:61780 - "GET /static/js/Button.D0kRCRsF.js HTTP/1.1" 200
+INFO:     127.0.0.1:58214 - "GET /static/js/iconPosition.CY47f4C7.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.815 127.0.0.1:58214 - "GET /static/js/iconPosition.CY47f4C7.js HTTP/1.1" 200
+INFO:     127.0.0.1:51053 - "GET /static/js/ButtonGroup.C-5OFb1K.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.817 127.0.0.1:51053 - "GET /static/js/ButtonGroup.C-5OFb1K.js HTTP/1.1" 200
+INFO:     127.0.0.1:64098 - "GET /static/js/useBasicWidgetState.C674_qFj.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.818 127.0.0.1:64098 - "GET /static/js/useBasicWidgetState.C674_qFj.js HTTP/1.1" 200
+INFO:     127.0.0.1:60235 - "GET /static/js/TextInput.Cyh_WsIr.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.818 127.0.0.1:60235 - "GET /static/js/TextInput.Cyh_WsIr.js HTTP/1.1" 200
+INFO:     127.0.0.1:58214 - "GET /static/media/MaterialSymbols-Rounded.WDh_BksD.woff2 HTTP/1.1" 200 OK
+2026-10-09 17:13:05.819 127.0.0.1:58214 - "GET /static/media/MaterialSymbols-Rounded.WDh_BksD.woff2 HTTP/1.1" 200
+INFO:     127.0.0.1:55677 - "GET /static/js/InputInstructions.CdXeHGKW.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.819 127.0.0.1:55677 - "GET /static/js/InputInstructions.CdXeHGKW.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/useUpdateUiValue.DxLOa8lS.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.820 127.0.0.1:61780 - "GET /static/js/useUpdateUiValue.DxLOa8lS.js HTTP/1.1" 200
+INFO:     127.0.0.1:51053 - "GET /static/js/inputUtils.BZnYy1KE.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.822 127.0.0.1:51053 - "GET /static/js/inputUtils.BZnYy1KE.js HTTP/1.1" 200
+INFO:     127.0.0.1:64098 - "GET /static/js/input.Dbu0xBeW.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.822 127.0.0.1:64098 - "GET /static/js/input.Dbu0xBeW.js HTTP/1.1" 200
+INFO:     127.0.0.1:60235 - "GET /static/js/base-input.Bg_42oFt.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.823 127.0.0.1:60235 - "GET /static/js/base-input.Bg_42oFt.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/Selectbox.BVJhx6w-.js HTTP/1.1" 200 OK
+2026-10-09 17:13:05.824 127.0.0.1:61780 - "GET /static/js/Selectbox.BVJhx6w-.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /favicon.png HTTP/1.1" 200 OK
+2026-10-09 17:13:06.580 127.0.0.1:51778 - "GET /favicon.png HTTP/1.1" 200
+INFO:     127.0.0.1:58214 - "GET /favicon.png HTTP/1.1" 200 OK
+2026-10-09 17:13:06.759 127.0.0.1:58214 - "GET /favicon.png HTTP/1.1" 200
+INFO:     127.0.0.1:58214 - "GET /static/js/ComponentInstance.DsmFJHtV.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.062 127.0.0.1:58214 - "GET /static/js/ComponentInstance.DsmFJHtV.js HTTP/1.1" 200
+INFO:     127.0.0.1:60235 - "GET /static/js/urls.BRPKJgsc.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.064 127.0.0.1:60235 - "GET /static/js/urls.BRPKJgsc.js HTTP/1.1" 200
+INFO:     127.0.0.1:64098 - "GET /static/js/IFrameUtil.0n70gnmO.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.065 127.0.0.1:64098 - "GET /static/js/IFrameUtil.0n70gnmO.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/withCalculatedWidth.CkdEK_fo.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.065 127.0.0.1:61780 - "GET /static/js/withCalculatedWidth.CkdEK_fo.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /static/js/ComponentInstance.DsmFJHtV.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.069 127.0.0.1:51778 - "GET /static/js/ComponentInstance.DsmFJHtV.js HTTP/1.1" 200
+INFO:     127.0.0.1:55577 - "GET /static/js/withCalculatedWidth.CkdEK_fo.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.069 127.0.0.1:55577 - "GET /static/js/withCalculatedWidth.CkdEK_fo.js HTTP/1.1" 200
+INFO:     127.0.0.1:55915 - "GET /static/js/urls.BRPKJgsc.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.069 127.0.0.1:55915 - "GET /static/js/urls.BRPKJgsc.js HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /static/js/IFrameUtil.0n70gnmO.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.070 127.0.0.1:62528 - "GET /static/js/IFrameUtil.0n70gnmO.js HTTP/1.1" 200
+crm_segment_count_refresh_failed type=TypeError
+2026-10-09 17:13:07.131 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-09 17:13:07.131 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+INFO:     127.0.0.1:58214 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200 OK
+2026-10-09 17:13:07.248 127.0.0.1:58214 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200 OK
+2026-10-09 17:13:07.248 127.0.0.1:61780 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200 OK
+2026-10-09 17:13:07.249 127.0.0.1:51778 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200 OK
+2026-10-09 17:13:07.249 127.0.0.1:62528 - "GET /component/crm_recovery_ui.campaign_recovery/index.html?streamlitUrl=http%3A%2F%2F127.0.0.1%3A8543%2F HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /component/crm_recovery_ui.campaign_recovery/recovery.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.258 127.0.0.1:61780 - "GET /component/crm_recovery_ui.campaign_recovery/recovery.js HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /component/crm_recovery_ui.campaign_recovery/recovery.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.264 127.0.0.1:62528 - "GET /component/crm_recovery_ui.campaign_recovery/recovery.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /static/js/IFrame.BTtn53Z-.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.289 127.0.0.1:51778 - "GET /static/js/IFrame.BTtn53Z-.js HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /static/js/Radio.CUhr8Ytd.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.289 127.0.0.1:62528 - "GET /static/js/Radio.CUhr8Ytd.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/Radio.CUhr8Ytd.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.299 127.0.0.1:61780 - "GET /static/js/Radio.CUhr8Ytd.js HTTP/1.1" 200
+INFO:     127.0.0.1:58214 - "GET /static/js/IFrame.BTtn53Z-.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.299 127.0.0.1:58214 - "GET /static/js/IFrame.BTtn53Z-.js HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /static/js/FormSubmitContent.CncrHuwk.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.466 127.0.0.1:62528 - "GET /static/js/FormSubmitContent.CncrHuwk.js HTTP/1.1" 200
+INFO:     127.0.0.1:51778 - "GET /static/js/hastscript.CdO75HTK.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.485 127.0.0.1:51778 - "GET /static/js/hastscript.CdO75HTK.js HTTP/1.1" 200
+INFO:     127.0.0.1:55577 - "GET /static/media/SourceCodeVF-Upright.ttf.BjWn63N-.woff2 HTTP/1.1" 200 OK
+2026-10-09 17:13:07.486 127.0.0.1:55577 - "GET /static/media/SourceCodeVF-Upright.ttf.BjWn63N-.woff2 HTTP/1.1" 200
+INFO:     127.0.0.1:62528 - "GET /static/js/StreamlitSyntaxHighlighter.m6pCiOx6.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.486 127.0.0.1:62528 - "GET /static/js/StreamlitSyntaxHighlighter.m6pCiOx6.js HTTP/1.1" 200
+INFO:     127.0.0.1:64098 - "GET /static/media/SourceCodeVF-Upright.ttf.BjWn63N-.woff2 HTTP/1.1" 200 OK
+2026-10-09 17:13:07.652 127.0.0.1:64098 - "GET /static/media/SourceCodeVF-Upright.ttf.BjWn63N-.woff2 HTTP/1.1" 200
+INFO:     127.0.0.1:58214 - "GET /static/js/FormSubmitContent.CncrHuwk.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.653 127.0.0.1:58214 - "GET /static/js/FormSubmitContent.CncrHuwk.js HTTP/1.1" 200
+INFO:     127.0.0.1:60235 - "GET /static/js/hastscript.CdO75HTK.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.653 127.0.0.1:60235 - "GET /static/js/hastscript.CdO75HTK.js HTTP/1.1" 200
+INFO:     127.0.0.1:61780 - "GET /static/js/StreamlitSyntaxHighlighter.m6pCiOx6.js HTTP/1.1" 200 OK
+2026-10-09 17:13:07.653 127.0.0.1:61780 - "GET /static/js/StreamlitSyntaxHighlighter.m6pCiOx6.js HTTP/1.1" 200
+2026-10-09 17:13:08.003 connection closed
+2026-10-09 17:13:08.174 connection closed

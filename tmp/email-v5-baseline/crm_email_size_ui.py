@@ -31,8 +31,7 @@ def size_meter(editor,key,cfg):
         from crm_email_asset_size import metadata
         assets=metadata(local['asset_urls'],start=bool(st.session_state.get(key+'editor_emitted')))
         if cache.get('assets')!=assets or 'report' not in cache:
-            from crm_email_size import with_asset_metadata
-            cache['report']=with_asset_metadata(local,assets);cache['assets']=assets.copy()
+            cache['report']=analyze_rendered_email(message['html'],message['text'],assets);cache['assets']=assets.copy()
         report=cache['report']
         st.html(meter_html(report))
     except Exception:

@@ -5,6 +5,14 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 import streamlit as st
 import requests
+if os.getenv('EMAIL_V5_BASELINE')=='1':
+    import sys,types,subprocess
+    if not getattr(sys,'_email_v5_baseline',False):
+        for name in ('crm_email_size','crm_email_size_ui','crm_campaign_controls','crm_campaign_send_ui','crm_campaign_page'):
+            source=subprocess.check_output(['git','show','7f1481e1f7e54eb3665e3d0b9df789531e15eb5b:'+name+'.py'],text=True,encoding='utf-8')
+            module=types.ModuleType(name);module.__file__=os.path.abspath(name+'.py');sys.modules[name]=module
+            exec(compile(source,module.__file__,'exec'),module.__dict__)
+        sys._email_v5_baseline=True
 if os.getenv('EMAIL_PROFILE_BASELINE')=='1':
     import subprocess,sys,types
     if not getattr(sys,'_email_profile_baseline',False):
@@ -38,7 +46,13 @@ def setup():
     original=Store.q
     def query(self,*args,**kwargs):
         with lock:metrics['queries']+=1
-        return original(self,*args,**kwargs)
+        if os.getenv('EMAIL_V5_MEASURE')!='1' and os.getenv('EMAIL_V5_PROFILE')!='1':return original(self,*args,**kwargs)
+        import time
+        started=time.perf_counter()
+        try:return original(self,*args,**kwargs)
+        finally:
+            with lock:
+                metrics.setdefault('sql',[]).append({'sql':args[0], 'ms':(time.perf_counter()-started)*1000})
     Store.q=query
     original_defaults=CampaignStore.default_sections
     def defaults(self,*args,**kwargs):
@@ -51,6 +65,17 @@ def setup():
         with lock:metrics['renders']+=1
         return original_render(*args,**kwargs)
     crm_preview_cache.render_campaign=render
+    if os.getenv('EMAIL_V5_PROFILE')=='1':
+        import crm_campaign_page,cProfile,pstats
+        selected=crm_campaign_page._selected_campaign
+        def profiled(*a,**kw):
+            profiler=cProfile.Profile();profiler.enable()
+            try:return selected(*a,**kw)
+            finally:
+                profiler.disable();stats=pstats.Stats(profiler)
+                rows=sorted(stats.stats.items(),key=lambda item:item[1][3],reverse=True)[:60]
+                with lock:metrics['server_profile']=[{'file':k[0].rsplit('\\',1)[-1],'line':k[1],'function':k[2],'calls':v[1],'own_ms':v[2]*1000,'total_ms':v[3]*1000} for k,v in rows]
+        crm_campaign_page._selected_campaign=profiled
     return metrics
 
 metrics=setup()

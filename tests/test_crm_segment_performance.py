@@ -119,7 +119,9 @@ class ComposerTests(unittest.TestCase):
                     at.session_state[at.session_state['campaign_edit_key']+'panel']=tab
                     at.run(timeout=10);self.assertFalse(at.exception)
                 with patch('crm_campaign_send_ui.send_test',return_value={'audit_saved':True}) as send:
+                    at.session_state[at.session_state['campaign_edit_key']+'test_popover']=True;at.run(timeout=10)
                     next(t for t in at.text_input if t.label=='Send test email').set_value('manual@example.org')
+                    at.session_state[at.session_state['campaign_edit_key']+'test_popover']=True
                     next(b for b in at.button if b.label=='→').click().run(timeout=10)
                     send.assert_called_once();self.assertFalse(release.is_set());self.assertFalse(at.exception)
                 cache.loader.assert_called_once()

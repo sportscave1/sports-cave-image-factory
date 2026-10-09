@@ -55,7 +55,9 @@ class GroupTests(unittest.TestCase):
     def test_modal_expected_failure_renders_structured_readiness(self):
         from streamlit.testing.v1 import AppTest
         app=AppTest.from_file('tests/fixtures/crm_test_preflight_preview.py').run()
+        app.session_state['preflight_fixture_test_popover']=True;app.run()
         app.text_input[0].set_value('fixture@example.com')
+        app.session_state['preflight_fixture_test_popover']=True
         next(button for button in app.button if button.label=='→').click().run()
         self.assertFalse(app.exception)
         self.assertFalse(app.error)

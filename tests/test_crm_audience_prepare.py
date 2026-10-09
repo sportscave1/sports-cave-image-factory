@@ -152,11 +152,11 @@ class PreparationTests(unittest.TestCase):
         self.assertIn("status='ACCEPTED'",db.q.call_args_list[1].args[0])
         self.assertIn('test_send=false',db.q.call_args_list[1].args[0])
 
-    def test_editor_emits_before_preparation_and_market_fragment_can_start_it(self):
+    def test_exact_audience_preparation_is_deferred_until_review(self):
         source=Path('crm_campaign_page.py').read_text(encoding='utf-8')
-        selected=source.split("st.session_state[key+'editor_emitted']=True",1)[1]
-        self.assertIn('prepare_session',selected)
-        self.assertIn('prepare_session',Path('crm_campaign_controls.py').read_text(encoding='utf-8'))
+        self.assertNotIn('prepare_session',source)
+        self.assertNotIn('prepare_session',Path('crm_campaign_controls.py').read_text(encoding='utf-8'))
+        self.assertIn('prepare_session',Path('crm_campaign_send_ui.py').read_text(encoding='utf-8'))
 
     def test_campaign_switch_retains_only_one_active_audience_cache(self):
         session={};editor={'document':self.doc}

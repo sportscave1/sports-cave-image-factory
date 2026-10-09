@@ -24,12 +24,7 @@ def safe_error(exc):
 def test_control(store,user,editor,key,available=True,cfg=None):
     automation=getattr(store,'email_mode',None)=='automation'
     from crm_email_editor_context import current,saved_key
-    with st.popover('Send test',disabled=not available or not os_accounts.can_access_page(user,'CRM Automations' if automation else 'CRM Campaigns') or bool(editor.get('archived_at')),key=key+'test_popover',on_change='rerun') as popover:
-        mounted_key=key+'test_mounted'
-        if popover.open:st.session_state[mounted_key]=True
-        # A form's unsent text may exist only in the browser. Once opened, keep
-        # its widgets mounted across close/reopen instead of discarding that text.
-        if not st.session_state.get(mounted_key):return
+    with st.popover('Send test',disabled=not available or not os_accounts.can_access_page(user,'CRM Automations' if automation else 'CRM Campaigns') or bool(editor.get('archived_at')),key=key+'test_popover',on_change='rerun'):
         from crm_campaign_test_ui import test_styles, readiness
         from crm_campaign_issues import CampaignValidationError
         from crm_campaign_content import preflight
@@ -38,14 +33,13 @@ def test_control(store,user,editor,key,available=True,cfg=None):
         checks=None
         active=current(st.session_state,editor)
         if str(active.get('id'))==str(editor.get('id')):editor=active
-        if popover.open:
-            try:
-                review_doc=deepcopy(editor['document']);review_doc['copy_reviewed']=True
-                if automation:
-                    review_doc,_=store.preview_document(review_doc)
-                checks=preflight(review_doc,cfg=cfg if cfg is not None else store.render_settings())
-            except Exception as exc:
-                st.caption('Readiness unavailable · '+safe_error(exc))
+        try:
+            review_doc=deepcopy(editor['document']);review_doc['copy_reviewed']=True
+            if automation:
+                review_doc,_=store.preview_document(review_doc)
+            checks=preflight(review_doc,cfg=cfg if cfg is not None else store.render_settings())
+        except Exception as exc:
+            st.caption('Readiness unavailable · '+safe_error(exc))
         from pathlib import Path
         scripts=Path(__file__).with_name('components')/'campaign_recovery'
         controls_js='\n'.join(scripts.joinpath(name).read_text(encoding='utf-8') for name in ('test_flush.js','test_sections.js'))
