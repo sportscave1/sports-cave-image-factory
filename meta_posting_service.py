@@ -2018,7 +2018,10 @@ class SupabasePostingStore:
                 if retry and not reserved:
                     cur.execute("""UPDATE meta_posting_submissions SET status='VALIDATING',safe_error=NULL,updated_at=now()
                         WHERE submission_id=%s::uuid AND status='FAILED'
-                        AND lease_token IS NULL RETURNING submission_id""",(identity,))
+                        AND lease_token IS NULL
+                        AND COALESCE(safe_error,'') NOT LIKE 'The Meta request failed.%'
+                        AND COALESCE(safe_error,'') NOT LIKE 'The Meta Carousel request failed.%'
+                        RETURNING submission_id""",(identity,))
                     reserved=bool(cur.fetchone())
             conn.commit()
         return reserved
@@ -2076,6 +2079,11 @@ class SupabasePostingStore:
                     (target_submission_id,),
                 )
                 existing = dict(cur.fetchone() or {})
+                if str(existing.get('safe_error') or '').startswith(('The Meta request failed.', 'The Meta Carousel request failed.')):
+                    raise PostingAmbiguousError(
+                        'The earlier failure did not record its cause. Reconcile this submission in Meta before resuming; no replacement objects were created.',
+                        result=existing,
+                    )
                 if str(existing.get("request_fingerprint") or "") != request_data["request_fingerprint"]:
                     raise PostingValidationError(
                         "This Posting run changed after Meta creation began. Retry it unchanged "
@@ -2105,6 +2113,8 @@ class SupabasePostingStore:
                     )
                     existing = dict(cur.fetchone() or {})
                 conn.commit()
+                if claimed:
+                    self._lease_token = lease_token
                 return {"claimed": bool(claimed), "record": claimed or existing}
 
     def update_stage(self, submission_id, status, **fields):
@@ -2136,17 +2146,26 @@ class SupabasePostingStore:
             assignments.extend(["lease_token=NULL", "lease_expires_at=NULL"])
         if status == "COMPLETE":
             assignments.append("completed_at=now()")
+        elif status not in {"FAILED", "AMBIGUOUS", "ABANDONED_EXTERNALLY"}:
+            assignments.append("lease_expires_at=CASE WHEN lease_token IS NOT NULL THEN now() + interval '2 minutes' ELSE lease_expires_at END")
         params.append(str(submission_id))
+        lease = getattr(self, '_lease_token', None)
+        fence = (" AND lease_token=%s::uuid AND lease_expires_at>now()" if lease
+                 else " AND status NOT IN ('COMPLETE','AMBIGUOUS','ABANDONED_EXTERNALLY')")
+        if lease:
+            params.append(lease)
         backend = self._backend()
         backend.ensure_ads_schema()
         with backend.connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     f"UPDATE meta_posting_submissions SET {', '.join(assignments)} "
-                    "WHERE submission_id=%s::uuid RETURNING *",
+                    "WHERE submission_id=%s::uuid" + fence + " RETURNING *",
                     tuple(params),
                 )
                 row = dict(cur.fetchone() or {})
+                if lease and not row:
+                    raise PostingBusyError('Posting lease changed. The saved result was not overwritten.')
             conn.commit()
         return row
 
@@ -2239,8 +2258,9 @@ class MetaPostingService:
         clock=None,
         carousel_validator=None,
     ):
-        self.client = client or MetaPostingClient()
-        self.store = store or SupabasePostingStore()
+        from meta_posting_recovery import RecoveryClient, RecoveryStore
+        self.store = RecoveryStore(store or SupabasePostingStore())
+        self.client = RecoveryClient(client or MetaPostingClient(), self.store)
         self.url_tags = str(url_tags or "")
         self._progress_callback = progress_callback
         self._clock = clock or time.perf_counter
@@ -2253,6 +2273,8 @@ class MetaPostingService:
         )
 
     def _start_performance_trace(self):
+        self.store.route = 0
+        self.client.resume_verified = False
         now = float(self._clock())
         self._performance_started = now
         self._performance_last = now
@@ -2277,6 +2299,9 @@ class MetaPostingService:
         self._performance_last = now
 
     def _progress(self, message):
+        route = re.match(r'Creating Ad (\d+) of 3', str(message))
+        if route:
+            self.store.route = int(route.group(1))
         callback = self._progress_callback
         if not callable(callback):
             return
@@ -3116,6 +3141,8 @@ class MetaPostingService:
         except MetaAdsAmbiguousResultError as error:
             self._ambiguous(submission_id, error, record=record)
         except MetaAdsApiError as error:
+            from meta_posting_recovery import diagnostic
+            diagnostic(error, self.store.operation, submission_id)
             safe_error = sanitize_meta_error(error)
             ad_result["status"] = "FAILED"
             ad_result["safe_error"] = safe_error
@@ -3127,10 +3154,8 @@ class MetaPostingService:
             )
             raise PostingError(safe_error, result=result) from error
         except Exception as error:
-            safe_error = (
-                "The Meta Carousel request failed. Any objects already created remain "
-                "paused and are listed below."
-            )
+            from meta_posting_recovery import diagnostic
+            safe_error = diagnostic(error, self.store.operation, submission_id)
             ad_result["status"] = "FAILED"
             ad_result["safe_error"] = safe_error
             result = self.store.update_stage(
@@ -3912,6 +3937,8 @@ class MetaPostingService:
         except MetaAdsAmbiguousResultError as error:
             self._ambiguous(submission_id, error, record=record)
         except MetaAdsApiError as error:
+            from meta_posting_recovery import diagnostic
+            diagnostic(error, self.store.operation, submission_id)
             safe_error = sanitize_meta_error(error)
             if active_ad_index is not None:
                 ad_results[active_ad_index]["status"] = "FAILED"
@@ -3921,9 +3948,8 @@ class MetaPostingService:
             )
             raise PostingError(safe_error, result=result) from error
         except Exception as error:
-            safe_error = (
-                "The Meta request failed. Any objects already created remain paused and are listed below."
-            )
+            from meta_posting_recovery import diagnostic
+            safe_error = diagnostic(error, self.store.operation, submission_id)
             if active_ad_index is not None:
                 ad_results[active_ad_index]["status"] = "FAILED"
                 ad_results[active_ad_index]["safe_error"] = safe_error

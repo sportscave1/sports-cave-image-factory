@@ -24213,12 +24213,10 @@ ADS_SCHEMA_MIGRATIONS = (
 
 
 def ensure_ads_schema():
-    ensure_schema()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            for migration in ADS_SCHEMA_MIGRATIONS:
-                cur.execute(migration.read_text(encoding="utf-8"))
-        conn.commit()
+    # Posting and progress reads must never run DDL (including base schema DDL).
+    import ads_schema
+    import sys
+    ads_schema.ensure(sys.modules[__name__])
 
 
 def save_ads_copy_pack(pack, *, created_by="sports_cave_os"):

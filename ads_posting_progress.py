@@ -44,7 +44,9 @@ def render_current(*, compact=False):
         import ads_posting_page as posting
         try:
             row = JOBS.snapshot(identity)
-        except Exception:
+        except Exception as error:
+            from meta_posting_recovery import diagnostic
+            diagnostic(error, 'checkpoint_status_read', identity)
             failures = st.session_state.get('posting_status_failures', 0) + 1
             st.session_state['posting_status_failures'] = failures
             st.warning('Posting status is temporarily unavailable. The job may still be running. Do not submit again.')
@@ -72,7 +74,7 @@ def render_current(*, compact=False):
         st.subheader('Creating your Meta ads' if status not in TERMINAL else 'Meta posting result')
         if compact and status not in TERMINAL:
             st.button('Create Ad', disabled=True, key='posting_create_in_progress')
-        st.progress(progress_value(row), text=f'{done} of {total} ads confirmed · Paused · final verification required'
+        st.progress(progress_value(row), text=f'{done} of {total} ads confirmed · final PAUSED verification required'
                     if status != 'COMPLETE' else f'{done} of {total} ads verified · PAUSED')
         if (status in TERMINAL and not row.get('running_here')
                 and st.session_state.get('posting_finished_job') != identity):
@@ -96,6 +98,8 @@ def render_current(*, compact=False):
                     st.rerun()
             if status in {'AMBIGUOUS', 'ABANDONED_EXTERNALLY'} or not row.get('can_retry'):
                 st.caption('No automatic retry. Reconcile the saved IDs in Meta before any new submission.')
+            if row.get('needs_original_inputs'):
+                st.caption('After a server restart, return to posting setup and restore the original images and copy. Create Ad will resume this same job only if its saved content fingerprint matches.')
             if st.button('Back to posting setup', key='posting_result_setup'):
                 clear()
                 st.rerun()

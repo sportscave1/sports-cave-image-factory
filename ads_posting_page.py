@@ -2615,12 +2615,15 @@ def _render_post_ad():
         from meta_posting_jobs import JOBS
         from ads_posting_progress import track
         try:
-            JOBS.submit(request)
+            if st.session_state.get(RESULT_KEY, {}).get('status') == 'FAILED':
+                JOBS.resume(request)
+            else:
+                JOBS.submit(request)
             track(request.submission_id)
         except Exception as error:
             st.session_state[PROCESSING_KEY] = False
-            from meta_ads_client import sanitize_meta_error
-            st.error('Posting could not be started: ' + sanitize_meta_error(error))
+            from meta_posting_recovery import diagnostic
+            st.error(diagnostic(error, 'checkpoint_reservation', request.submission_id))
             # A reservation may have committed before the connection failed.
             # Preserve its identity and recover status instead of resubmitting.
             try:

@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
   const browser = await chromium.launch({channel: 'chrome', headless: true});
   try {
     const page = await browser.newPage({viewport: {width: 1280, height: 900}});
+    await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto('http://127.0.0.1:8891');
@@ -25,7 +26,10 @@ const assert = require('node:assert/strict');
     await page.reload();
     await page.getByRole('button', {name: 'Retry incomplete steps', exact: true}).click();
     const success = process.env.POST_AD_COMPACT_PROGRESS ? 'Ads created successfully in Meta' : '3 Meta ads created successfully';
-    await page.getByText(success, {exact: false}).first().waitFor({timeout: 20000});
+    await page.getByText(success, {exact: false}).first().waitFor({timeout: 20000}).catch(async error => {
+      console.error('Mocked posting result:', await page.locator('body').innerText());
+      throw error;
+    });
     await page.getByRole('link', {name: 'Open in Ads Manager', exact: true}).waitFor();
     assert.equal(new URL(page.url()).searchParams.get('meta_posting_job'), identity);
     await page.screenshot({path: 'tmp/meta-posting-complete.png', fullPage: true});

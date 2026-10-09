@@ -3,7 +3,9 @@ import {PGlite} from './fixtures/crm/node_modules/@electric-sql/pglite/dist/inde
 import {readFileSync} from 'node:fs';
 import http from 'node:http';
 const db = new PGlite();
-for (const name of ['20260831_meta_posting_v1', '20260901_meta_posting_v2',
+for (const name of ['20260626_ads_intelligence_v1', '20260626_ads_intelligence_v2_breakdowns',
+  '20260626_ads_product_mapping_v1', '20260707_marketing_factory_copy_packs',
+  '20260831_meta_posting_v1', '20260901_meta_posting_v2',
   '20260901_meta_posting_v3', '20260903_meta_posting_customer_lifecycle',
   '20260903_meta_posting_carousel', '20260903_meta_posting_run_identity']) {
   await db.exec(readFileSync(`migrations/${name}.sql`, 'utf8'));

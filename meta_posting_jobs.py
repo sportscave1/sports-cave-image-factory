@@ -68,16 +68,22 @@ class PostingJobs:
         except PostingBusyError:
             pass # Another valid lease is authoritative; never overwrite it.
         except PostingError as exc:
-            row = store.get(identity)
-            if row.get('status') not in TERMINAL:
-                # Validation before ledger claim is safely retryable; after claim
-                # a missing response must be reconciled before any new writes.
-                status = 'FAILED' if row.get('request_fingerprint') == 'pending' else 'AMBIGUOUS'
-                store.update_stage(identity, status, safe_error=sanitize_meta_error(exc))
-        except Exception:
+            try:
+                row = store.get(identity)
+                if row.get('status') not in TERMINAL:
+                    # Validation before ledger claim is safely retryable; after claim
+                    # a missing response must be reconciled before any new writes.
+                    status = 'FAILED' if row.get('request_fingerprint') == 'pending' else 'AMBIGUOUS'
+                    store.update_stage(identity, status, safe_error=sanitize_meta_error(exc))
+            except Exception as error:
+                from meta_posting_recovery import diagnostic
+                diagnostic(error, 'checkpoint_error_reconciliation', identity)
+        except Exception as error:
+            from meta_posting_recovery import diagnostic
+            message = diagnostic(error, 'background_posting', identity)
             try:
                 store.update_stage(identity, 'AMBIGUOUS', safe_error=(
-                    'Posting stopped unexpectedly. Review the saved Meta IDs before '
+                    message + ' Review the saved Meta IDs before '
                     'retrying; no automatic replay was attempted.'
                 ))
             except Exception:
@@ -85,6 +91,7 @@ class PostingJobs:
 
     def snapshot(self, identity):
         row = self.store_factory().get(identity)
+        from meta_posting_recovery import requires_reconciliation
         with self.lock:
             job = self.jobs.get(str(identity))
             running = bool(job and not job['future'].done())
@@ -94,12 +101,23 @@ class PostingJobs:
                 'last_operation': job['message'] if job else '',
                 'elapsed_seconds': int(monotonic() - job['started_at']) if running else None,
                 'operation_seconds': int(monotonic() - job['operation_at']) if running else None,
-                'can_retry': bool(job and not running and row.get('status') == 'FAILED'),
+                'can_retry': bool(job and not running and row.get('status') == 'FAILED'
+                                  and not requires_reconciliation(row)),
+                'needs_original_inputs': bool(not job and row.get('status') == 'FAILED'
+                                             and not requires_reconciliation(row)),
             }
 
     def retry(self, identity):
         with self.lock:
             request = self.jobs[str(identity)]['request']
+        return self.submit(request, retry=True)
+
+    def resume(self, request):
+        """Restart recovery with original inputs; claim verifies the fingerprint.
+
+        Upload buffers are intentionally not stored in the database. The caller
+        must restore the original request and its submission ID, never a new ID.
+        """
         return self.submit(request, retry=True)
 
 JOBS = PostingJobs()

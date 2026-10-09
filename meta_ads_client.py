@@ -1413,7 +1413,7 @@ class MetaPostingClient:
         )
         campaign_id = str(result.get("id") or "")
         if not campaign_id:
-            raise MetaAdsApiError("Meta did not return a campaign ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return a campaign ID.")
         return campaign_id
 
     def create_adset(self, payload):
@@ -1424,7 +1424,7 @@ class MetaPostingClient:
         )
         adset_id = str(result.get("id") or "")
         if not adset_id:
-            raise MetaAdsApiError("Meta did not return an ad set ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return an ad set ID.")
         return adset_id
 
     def find_campaigns_by_name(self, name):
@@ -1449,7 +1449,7 @@ class MetaPostingClient:
         )
         photo_id = str(payload.get("id") or payload.get("post_id") or "")
         if not photo_id:
-            raise MetaAdsApiError("Meta did not return a Page photo ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return a Page photo ID.")
         return photo_id
 
     def create_canvas_element(self, element_type, specification):
@@ -1465,7 +1465,7 @@ class MetaPostingClient:
         )
         element_id = str(payload.get("id") or "")
         if not element_id:
-            raise MetaAdsApiError("Meta did not return an Instant Experience element ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return an Instant Experience element ID.")
         return element_id
 
     def canvases(self):
@@ -1552,7 +1552,7 @@ class MetaPostingClient:
         )
         canvas_id = str(payload.get("id") or "")
         if not canvas_id:
-            raise MetaAdsApiError("Meta did not return an Instant Experience ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return an Instant Experience ID.")
         return canvas_id
 
     def create_collection_creative(self, payload):
@@ -1566,7 +1566,7 @@ class MetaPostingClient:
         )
         creative_id = str(result.get("id") or "")
         if not creative_id:
-            raise MetaAdsApiError("Meta did not return a creative ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return a creative ID.")
         return creative_id
 
     def create_carousel_creative(self, payload):
@@ -1585,7 +1585,7 @@ class MetaPostingClient:
         )
         creative_id = str(result.get("id") or "")
         if not creative_id:
-            raise MetaAdsApiError("Meta did not return a Carousel creative ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return a Carousel creative ID.")
         return creative_id
 
     def configured_campaign(self, campaign_id):
@@ -1599,6 +1599,37 @@ class MetaPostingClient:
             },
             config=self.config,
         )
+
+    def verify_posting_resume(self, record):
+        """GET-only ownership/configuration gate before resuming any mutation."""
+        from meta_posting_recovery import verify_resume_objects
+        result = verify_resume_objects(self, record)
+        for row in record.get('ad_results') or []:
+            if row.get('meta_image_hash'):
+                image = self.ad_image_details(row['meta_image_hash'])
+                if str(image.get('hash') or '') != str(row['meta_image_hash']):
+                    raise MetaAdsApiError('Saved image could not be verified. No replacement was uploaded.')
+            photo_id = str(row.get('meta_page_photo_id') or '')
+            if photo_id:
+                photo = _request(photo_id, params={'fields':'id'}, config=self.config,
+                                 access_token=self.page_access_token)
+                if str(photo.get('id') or '') != photo_id:
+                    raise MetaAdsApiError('Saved Page photo could not be verified. No replacement was uploaded.')
+            canvas_id = str(row.get('meta_instant_experience_id') or '')
+            if canvas_id and str(self.instant_experience(canvas_id).get('id') or '') != canvas_id:
+                raise MetaAdsApiError('Saved Instant Experience could not be verified. No replacement was created.')
+            # Existing destination verification inspects child elements where
+            # supported and otherwise requires exact persisted creation provenance.
+            creative_id = str(row.get('meta_creative_id') or '')
+            if creative_id and str(self.creative(creative_id).get('id') or '') != creative_id:
+                raise MetaAdsApiError('Saved creative could not be verified. No replacement was created.')
+            ad_id = str(row.get('meta_ad_id') or '')
+            if ad_id:
+                ad = self.ad(ad_id)
+                if (str(ad.get('id') or '') != ad_id or str(ad.get('adset_id') or '') != str(record.get('adset_id') or '')
+                        or str(ad.get('configured_status') or ad.get('status') or '').upper() != 'PAUSED'):
+                    raise MetaAdsApiError('Saved ad is not verified PAUSED under the original ad set. No replacement was created.')
+        return result
 
     def configured_adset(self, adset_id):
         return _request(
@@ -1647,7 +1678,7 @@ class MetaPostingClient:
         image = next(iter(images.values()), {}) if isinstance(images, dict) else {}
         image_hash = str(image.get("hash") or "")
         if not image_hash:
-            raise MetaAdsApiError("Meta did not return an image reference.")
+            raise MetaAdsAmbiguousResultError("Meta did not return an image reference.")
         return image_hash
 
     def creatives(self):
@@ -1696,7 +1727,7 @@ class MetaPostingClient:
         )
         creative_id = str(payload.get("id") or "")
         if not creative_id:
-            raise MetaAdsApiError("Meta did not return a creative ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return a creative ID.")
         return creative_id
 
     def adset_ads(self, adset_id):
@@ -1736,7 +1767,7 @@ class MetaPostingClient:
         )
         ad_id = str(payload.get("id") or "")
         if not ad_id:
-            raise MetaAdsApiError("Meta did not return an ad ID.")
+            raise MetaAdsAmbiguousResultError("Meta did not return an ad ID.")
         return ad_id
 
     def ad_copies(self, source_ad_id):

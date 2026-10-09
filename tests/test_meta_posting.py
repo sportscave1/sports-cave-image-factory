@@ -2813,8 +2813,10 @@ class PostingServiceTests(unittest.TestCase):
         self.assertEqual(client.calls.count("read_creative"), 7)
         self.assertEqual(client.calls.count("read_product_set_health"), 0)
         self.assertEqual(store.claims, 1)
-        self.assertEqual(len(store.stages), 28)
-        self.assertEqual(store.claims + len(store.stages), 29)
+        # Original 28 checkpoints plus an intent/result pair for each of 29
+        # Meta mutations. Every route keeps its own separate canvas elements.
+        self.assertEqual(len(store.stages), 86)
+        self.assertEqual(store.claims + len(store.stages), 87)
         self.assertEqual(
             [
                 payload["object_story_spec"]["link_data"]["message"]
