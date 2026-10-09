@@ -86,7 +86,7 @@ def flush_current(*,force=False):
         return True
     store,user=context
     saved=st.session_state.get('campaign_saved',{})
-    if not force and saved and checkpoint(editor)==checkpoint(saved):return True
+    if saved and editor.get('document')==saved.get('document') and editor.get('name')==saved.get('name'):return True
     try:
         updated=save_checkpoint(store,user,editor)
         from crm_campaign_home_data import invalidate_after_save

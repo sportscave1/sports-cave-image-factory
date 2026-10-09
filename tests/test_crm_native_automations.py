@@ -256,6 +256,15 @@ class NativeAutomationTests(unittest.TestCase):
         self.store.lifecycle(ADMIN,a['id'],'resume')
         self.assertIsNotNone(self.store.claim_send())
         self.assertEqual(self.store.flow(a['id'])['status'],'ACTIVE')
+
+    def test_resume_due_claim_uses_database_clock_despite_application_skew(self):
+        a=self.published(delays=(0,86400));j=self.enroll(a);advance(self.engine,self.due(j))
+        # Deterministic reproduction of the intermittent immediate-claim failure:
+        # lifecycle used Python time while queue claims use PostgreSQL now().
+        with patch('crm_automation_store.now',return_value=now()+timedelta(seconds=2)):
+            self.store.lifecycle(ADMIN,a['id'],'pause')
+            self.store.lifecycle(ADMIN,a['id'],'resume')
+        self.assertIsNotNone(self.store.claim_send())
     def test_step_progression_delay_restart_and_duplicate_execution(self):
         a=self.published(delays=(0,3600));j=self.enroll(a);j=self.due(j)
         advance(self.engine,j);advance(self.engine,j)

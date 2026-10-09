@@ -39,9 +39,10 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('Exter
    const subject='Local publish '+width+' '+Date.now();
    await page.getByRole('textbox',{name:'Subject',exact:true}).fill(subject);
    const started=Date.now();await toolbar.getByRole('button',{name:'Publish now',exact:true}).click();
-   await page.locator('.st-key-flow-workspace').waitFor();
    await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
-   const elapsed=Date.now()-started;assert.ok(elapsed<5000,'Local Flow navigation took '+elapsed+'ms');
+   assert.equal(await page.locator('.st-key-flow-workspace').count(),0,'Publishing must retain the editor');
+   assert.equal(await page.getByRole('textbox',{name:'Subject',exact:true}).inputValue(),subject);
+   const elapsed=Date.now()-started;assert.ok(elapsed<5000,'Local publication acknowledgement took '+elapsed+'ms');
    assert.equal(await page.getByTestId('stException').count(),0);
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
    // Refresh reconstructs status from SQL, never a browser-owned job.
@@ -51,7 +52,7 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('Exter
    const began=Date.now();worker(false,subject);
    await toolbar.getByText('Published · Up to date',{exact:true}).waitFor();
    assert.equal(await page.evaluate(()=>summaryMutations),0,'Status polling must not rebuild analytics');
-   console.log(`Publish ${width}px: accepted/Flow in ${elapsed}ms; separate worker + observed status ${Date.now()-began}ms`);
+   console.log(`Publish ${width}px: accepted in editor in ${elapsed}ms; separate worker + observed status ${Date.now()-began}ms`);
   }
   await page.setViewportSize({width:1440,height:950});
   await start('html');
@@ -76,6 +77,6 @@ with patch('requests.sessions.Session.request',side_effect=AssertionError('Exter
   await toolbar.getByRole('button',{name:'Retry Publish',exact:true}).click();await toolbar.getByText('Publishing changes…',{exact:true}).waitFor();
   worker(false);await toolbar.getByText('Published · Up to date',{exact:true}).waitFor();
   assert.equal(await page.getByTestId('stException').count(),0);
-  console.log('Invalid subject retains editor; durable failure clears spinner and Retry Publish succeeds on Flow');
+  console.log('Invalid subject retains editor; durable failure clears spinner and Retry Publish succeeds without leaving the editor');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -17,7 +17,8 @@
   busy=true;
   const requested=command;
   const scope=document.querySelector('.st-key-crm-composer-controls');
-  const note=document.createElement('span');note.setAttribute('role','status');note.textContent='Saving latest edits…';
+  document.querySelectorAll('[data-publication-ack]').forEach(n=>n.remove());
+  const note=document.createElement('span');note.setAttribute('role','status');note.dataset.publicationAck='true';note.textContent='Saving latest edits…';
   button().parentElement.append(note);
   try{
    document.activeElement?.blur();
@@ -36,7 +37,18 @@
    });
    nativePending=false;
    const current=button(requested);if(requested==='Save draft'&&current?.disabled){note.remove();return;}if(!current||current.disabled)throw new Error('Command changed');
-   note.remove();allowed=true;try{current.click();}finally{allowed=false;}
+   if(requested==='Save draft')note.remove();
+   else{
+    note.textContent='Submitting publication…';
+    // Keep immediate feedback painted until a persisted backend state replaces
+    // it. A slow/unknown response is never presented as a successful publish.
+    const observer=new MutationObserver(()=>{
+     if(!note.isConnected||document.querySelector('.automation-current, [data-testid="stAlert"]')){observer.disconnect();note.remove();clearTimeout(timer);}
+    });
+    const timer=setTimeout(()=>{observer.disconnect();if(note.isConnected){note.textContent='Publication not yet confirmed. Checking saved status…';document.querySelector('.st-key-toolbar-refresh button')?.click();}},15000);
+    observer.observe(document.querySelector('.st-key-crm-automation-editor')||document.body,{childList:true,subtree:true});
+   }
+   allowed=true;try{current.click();}finally{allowed=false;}
   }catch{note.textContent='Save your latest edits, then retry publishing.';}
   finally{busy=false;}
  },true);

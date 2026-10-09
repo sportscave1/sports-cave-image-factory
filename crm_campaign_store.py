@@ -61,6 +61,7 @@ class CampaignStore(WorkspaceRecords):
                 if not old or old['version']!=version: raise ValueError('Campaign changed elsewhere. Reload before saving.')
                 if conn.execute('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,)).fetchone():raise ValueError('A queued or sent campaign is read-only. Duplicate to edit.')
                 if old['archived_at']: raise ValueError('Archived campaigns are read-only. Duplicate to edit.')
+                if old['name']==name and old['document']==document and old['status']==status:return old
                 row=conn.execute('UPDATE crm_campaign_drafts SET name=%s,document=%s::jsonb,status=%s,version=version+1,updated_at=now(),tested_version=NULL WHERE id=%s RETURNING *',(name,json.dumps(document),status,identity)).fetchone()
             else:
                 row=conn.execute('INSERT INTO crm_campaign_drafts(name,document,status,created_by) VALUES(%s,%s::jsonb,%s,%s) RETURNING *',(name,json.dumps(document),status,actor)).fetchone()

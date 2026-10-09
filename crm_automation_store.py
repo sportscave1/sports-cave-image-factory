@@ -129,9 +129,11 @@ class AutomationStore(CampaignStore):
     def lifecycle(self,user,identity,action):
         require(user,'crm_automations_manage')
         with self.db() as conn:
-            row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+            row=conn.execute('SELECT *,now() AS transition_at FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
             if not row or row['config'].get('deleted_at'): raise ValueError('Automation unavailable.')
-            cfg=deepcopy(row['config']);current=status(row);target=row['status'];at=now()
+            # Claims and due timestamps use the same database clock. Host clock
+            # skew must not push already-due work into the future on resume.
+            cfg=deepcopy(row['config']);current=status(row);target=row['status'];at=date(row['transition_at'])
             if action=='pause' and current=='ACTIVE': target='PAUSED';cfg['paused_at']=at.isoformat()
             elif action=='resume' and current=='PAUSED' and cfg.get('published_version'):
                 target='ACTIVE'
@@ -270,8 +272,8 @@ class AutomationStore(CampaignStore):
     def save(self,user,name,document,identity=None,version=None,**_):
         row=self.flow(identity);flow=deepcopy(row['config']['draft'])
         step=next(s for s in flow['emails'] if s['step_id']==self.step_id);step['document']=deepcopy(document)
-        self.save_flow(user,identity,name,flow,version)
-        return self.draft(identity)
+        saved=self.save_flow(user,identity,name,flow,version)
+        return self.draft(identity,row=saved)
 
     def _history(self,*args,**kwargs):
         # The shared test receipt itself is the immutable automation test audit.

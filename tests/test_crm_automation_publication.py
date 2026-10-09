@@ -25,7 +25,7 @@ class PublicationUiTests(unittest.TestCase):
         self.assertNotIn("['copy_reviewed']",settings)
         self.assertIn('flush_current(force=True)',editor)
         self.assertIn('store.request_publish(user,identity',editor)
-        self.assertIn('open_flow(identity)',editor)
+        self.assertNotIn('open_flow(identity)',editor)  # Publishing retains editor/scroll.
         self.assertNotIn('store.publish(',editor)
         self.assertIn("pop('automation_selected'",editor)
         self.assertIn("query_params.pop('automation'",editor)
@@ -293,6 +293,52 @@ class PublicationTests(unittest.TestCase):
             jobs=list(pool.map(lambda _:self.job(row),range(2)))
         self.assertEqual(jobs[0]['id'],jobs[1]['id'])
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_publish_jobs WHERE automation_id=%s',(row['id'],),True)['n'],1)
+
+    def test_lost_commit_ack_is_reconciled_without_another_version(self):
+        from contextlib import contextmanager
+        import crm_automation_publication as publication
+        row=self.draft();self.job(row);original_db=self.store.db;original_commit=publication.commit;lost=[]
+        def commit(*args,**kwargs):
+            result=original_commit(*args,**kwargs);lost.append(True);return result
+        @contextmanager
+        def ambiguous_db():
+            with original_db() as conn:yield conn
+            if lost:lost.pop();raise StoreUnavailable('Synthetic commit response lost')
+        with patch.object(self.store,'db',ambiguous_db),patch.object(publication,'commit',side_effect=commit):
+            tick(self.store,'local-worker',env=LIVE)
+        current=self.state(row)
+        self.assertEqual(current['config']['published_version'],1)
+        self.assertEqual(current['config']['publication']['state'],'LIVE')
+        self.assertTrue(self.job(current)['unchanged'])
+        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_publish_jobs WHERE automation_id=%s',(row['id'],),True)['n'],1)
+
+    def test_reused_worker_connection_keeps_real_sql_transactions_isolated(self):
+        from crm_publication_connection import Connection
+        class Raw:
+            closed=False
+            def __init__(self):self.fixture=connect()
+            def transaction(self):return self.fixture
+            def execute(self,*args,**kwargs):return self.fixture.execute(*args,**kwargs)
+            def close(self):self.closed=True
+        from unittest.mock import Mock
+        factory=Mock(side_effect=Raw);connection=Connection(factory)
+        store=AutomationStore(connection);key='v4-connection-'+uuid.uuid4().hex
+        store.set_state(key,{'kept':True});self.assertEqual(store.state(key),{'kept':True})
+        self.assertEqual(factory.call_count,1)
+        with self.assertRaises(ValueError):
+            with store.db() as conn:
+                conn.execute('UPDATE crm_runtime_state SET value=%s::jsonb WHERE key=%s',('{"kept":false}',key))
+                raise ValueError('rollback fixture')
+        self.assertEqual(store.state(key),{'kept':True});self.assertEqual(factory.call_count,2)
+        connection.close()
+
+    def test_unchanged_campaign_save_retains_revision_and_history(self):
+        from crm_campaign_store import CampaignStore
+        campaign=CampaignStore(connect)
+        row=campaign.save(ADMIN,'Unchanged fixture',document(),env=LIVE)
+        history=campaign.history(row['id'])
+        saved=campaign.save(ADMIN,row['name'],row['document'],row['id'],row['version'],env=LIVE)
+        self.assertEqual(saved['version'],row['version']);self.assertEqual(campaign.history(row['id']),history)
 
     def test_old_worker_completion_is_fenced_after_lease_reclaim(self):
         import crm_automation_publication as publication

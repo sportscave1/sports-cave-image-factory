@@ -158,7 +158,10 @@ def detail(shop,store,actions,identity,*,row=None):
         if not flush_current():return
         editor=None;row=store.flow(identity);flow=row['config']['draft']
     if editor is None:
-        editor=store.draft(identity,row=row);editor['document']=html_document(editor['document'])
+        from crm_email_editor_context import editable_document
+        editor=store.draft(identity,row=row);editor['document']=editable_document(editor['document'])
+        # Normalize the editable representation before taking its clean baseline.
+        # Nothing is persisted until an operator actually edits it.
         st.session_state['automation_editor']=editor;st.session_state['automation_saved']=deepcopy(editor)
     st.session_state['automation_step']=step['step_id'];st.session_state['automation_editor_context']=(store,user)
     store.preview_trigger=flow['trigger']
@@ -197,8 +200,7 @@ def detail(shop,store,actions,identity,*,row=None):
         return
     # The toolbar just rendered this exact snapshot. Only a subsequent edit
     # needs its independent refresh; mounting the composer is not an edit.
-    import json
-    st.session_state['_automation_toolbar_value']=json.dumps([editor['name'],editor['document'],editor.get('version')],sort_keys=True)
+    st.session_state['_automation_toolbar_value']=(editor['name'],editor.get('version'),False,st.session_state.get('campaign_save_status'))
     composer_form(shop,store,actions,editor,key,cfg,None,True,mode='automation',settings_control=settings_control)
     st.session_state[key+'editor_emitted']=True
 

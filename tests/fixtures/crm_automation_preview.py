@@ -5,6 +5,14 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 import streamlit as st
 import requests
+if os.getenv('EMAIL_PROFILE_AUTOMATION_BASELINE')=='1':
+    import subprocess,sys,types
+    if not getattr(sys,'_email_v4_baseline',False):
+        for name in ('crm_campaign_store','crm_automation_store','crm_automation_publication','crm_email_editor_context','crm_campaign_recovery','crm_section_ui','crm_automation_toolbar','crm_campaign_page','crm_automation_ui'):
+            source=subprocess.check_output(['git','show','736cd66:'+name+'.py'],text=True,encoding='utf8')
+            module=types.ModuleType(name);module.__file__=os.path.abspath(name+'.py');sys.modules[name]=module
+            exec(compile(source,module.__file__,'exec'),module.__dict__)
+        sys._email_v4_baseline=True
 from crm_automation_store import AutomationStore
 from crm_automation_definition import email_step
 from tests.crm_db_fixture import connect
@@ -17,8 +25,15 @@ os.environ.update(LIVE)
 requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionError('External network forbidden'))
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
 
+if os.getenv('EMAIL_V4_BACKGROUND_PUBLICATION')=='1':
+    @st.cache_resource
+    def local_publisher():
+        from tests.fixtures.email_v4_publisher import start
+        return start()
+    local_publisher()
+
 @st.cache_resource
-def setup(legacy_preview=False,test_run='',steps=2):
+def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False):
     store=AutomationStore(connect)
     from crm_logic import now
     store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
@@ -34,12 +49,12 @@ def setup(legacy_preview=False,test_run='',steps=2):
                 doc=flow['emails'][0]['document'];doc['middle_sections'].pop(1)
                 doc['middle_sections'][0]['html']=LEGACY;doc['custom_html']=LEGACY
         row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
-        if state!='DRAFT':row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
+        if state!='DRAFT' or (kind=='abandoned' and checkout_live):row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
         if state=='PAUSED':store.lifecycle(ADMIN,row['id'],'pause')
         identities.append(str(row['id']))
     return identities
 
-identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)))
+identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')))
 if st.query_params.get('fixture_toolbar_live') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[0];st.session_state['fixture_selected']=True
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):

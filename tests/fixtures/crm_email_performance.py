@@ -8,8 +8,8 @@ import requests
 if os.getenv('EMAIL_PROFILE_BASELINE')=='1':
     import subprocess,sys,types
     if not getattr(sys,'_email_profile_baseline',False):
-        for name in ('crm_preview_cache','crm_html_workspace','crm_campaign_home_data','crm_campaign_home','crm_campaign_recovery','crm_recovery_ui','crm_campaign_page','crm_email_size_ui'):
-            source=subprocess.check_output(['git','show','2f6adbd:'+name+'.py'],text=True,encoding='utf-8')
+        for name in ('crm_preview_cache','crm_html_workspace','crm_campaign_home_data','crm_campaign_home','crm_campaign_store','crm_email_editor_context','crm_section_ui','crm_campaign_recovery','crm_recovery_ui','crm_campaign_page','crm_email_size_ui'):
+            source=subprocess.check_output(['git','show',os.getenv('EMAIL_PROFILE_BASELINE_REF','2f6adbd')+':'+name+'.py'],text=True,encoding='utf-8')
             module=types.ModuleType(name);module.__file__=os.path.abspath(name+'.py');sys.modules[name]=module
             exec(compile(source,module.__file__,'exec'),module.__dict__)
         sys._email_profile_baseline=True

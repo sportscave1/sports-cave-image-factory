@@ -30,6 +30,18 @@ def main(argv=None):
     enrollment=Processor(store,Shopify())
     enrollment_thread=threading.Thread(target=enrollment.run,args=(stop,),name='checkout-enrollment-poll',daemon=True)
     enrollment_thread.start()
+    # The existing publication queue must not wait behind external maintenance.
+    # --once retains the synchronous Engine tick for administrative/test callers.
+    publication_thread=None
+    if not args.once:
+        from crm_automation_publication import run as publication_run
+        from crm_automation_store import AutomationStore
+        logging.getLogger('crm_automation_publication').setLevel(logging.INFO)
+        publication_thread=threading.Thread(target=publication_run,
+            args=(AutomationStore(store.connect),owner+'-publication',stop),
+            name='automation-publication-poll',daemon=True)
+        engine.publication_background=True
+        publication_thread.start()
     while not stop.is_set():
         try:
             from wall_preview_archive import tick as archive_tick
@@ -53,6 +65,7 @@ def main(argv=None):
         if args.once:break
         stop.wait(30)
     stop.set();enrollment_thread.join(timeout=6)
+    if publication_thread:publication_thread.join(timeout=6)
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

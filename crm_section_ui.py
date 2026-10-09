@@ -12,6 +12,9 @@ from crm_catalogue import Catalogue, product_issues, price_label, refresh_catalo
 
 
 def rerun_editor():
+    from crm_email_editor_context import current,mark_content_edit
+    editor=current(st.session_state)
+    if editor:mark_content_edit(st.session_state,editor)
     flush_current()
     from streamlit.errors import StreamlitAPIException
     try: st.rerun(scope='fragment')
@@ -92,22 +95,8 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
 
 
 def middle_editor(doc, key, shop, store=None):
-    if any(s.get('type')=='abandoned_checkout_products' for s in doc.get('middle_sections',[])):
-        from crm_checkout_section import editable
-        doc.update(editable(doc))
-    # Resolve only selected, visible products once per opened draft/market/selection.
-    # Preview size and text edits never trigger product/edition reads.
-    selection=(doc['market'],tuple(sorted({p['id'] for s in middle_sections(doc)
-        if s['type']=='catalogue' and s['visible'] for p in s['products']})))
-    if selection[1] and st.session_state.get(key+'catalogue_loaded')!=selection:
-        st.session_state[key+'catalogue_loaded']=selection
-        try:
-            with st.spinner('Loading selected product facts…'):
-                current=refresh_catalogues(doc,Catalogue(shop),fresh=False)
-            if current!=doc:doc.update(current);doc['copy_reviewed']=False
-        except Exception as exc:
-            logging.getLogger(__name__).warning('crm_catalogue_load_failed type=%s',type(exc).__name__)
-            st.warning('Current product facts are unavailable. Saved preview retained; refresh catalogue facts before testing.')
+    # Opening a saved snapshot is read-only. The existing Refresh action and
+    # final test/send validation own fresh product facts, never tab activation.
     sections = middle_sections(doc)
     warnings = {s['id']:[issue for p in s['products'] for issue in product_issues(p,s['settings'])]
                 for s in sections if s['type']=='catalogue'}

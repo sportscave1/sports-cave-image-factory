@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import uuid
+from time import perf_counter
 from crm_logic import now,date
 from crm_navigation import require
 from crm_automation_definition import validate, native, status, production_document
@@ -17,6 +18,49 @@ from crm_automation_publish_state import has_changes
 LOG=logging.getLogger(__name__)
 MAX_ATTEMPTS=3
 PUBLICATION_SECONDS=1200
+
+
+def run(store,owner,stop,*,interval=1.0):
+    """One bounded consumer in the existing worker, using the same durable claims.
+
+    Maintenance/Shopify calls cannot delay queue pickup. No UI-owned executor,
+    new service, independent scheduler, or delivery work is introduced. The
+    owner/attempt fence still protects against crashes and overlapping workers.
+    """
+    connection=None
+    if store.connect is None:
+        from supabase_backend import connect
+        from crm_publication_connection import Connection
+        from crm_automation_store import AutomationStore
+        connection=Connection(connect);store=AutomationStore(connection)
+    try:
+        while not stop.is_set():
+            try:
+                worked=tick(store,owner)
+            except Exception as exc:
+                LOG.warning('automation_publication_poll_failed error_class=%s',type(exc).__name__)
+                stop.wait(5)
+                continue
+            # Avoid a hot loop, but drain queued work without another maintenance pass.
+            stop.wait(.05 if worked else interval)
+    finally:
+        if connection:connection.close()
+
+
+def progress(store,identity):
+    """Small persisted job read; never infer success from elapsed time."""
+    return store.q("""SELECT state,requested_at,started_at,available_at,attempts
+        FROM crm_automation_publish_jobs WHERE automation_id=%s
+        AND state IN ('QUEUED','RUNNING') ORDER BY requested_at DESC LIMIT 1""",(identity,),True)
+
+
+def progress_text(job):
+    if not job:return 'Reconciling publication status…'
+    age=max(0,int((now()-date(job['requested_at'])).total_seconds()))
+    operation='Validating and storing publication' if job['state']=='RUNNING' else 'Waiting for publication worker'
+    if job['state']=='QUEUED' and job.get('attempts',0):operation='Storage unavailable · waiting for bounded retry'
+    if age>=30:operation+=' · taking longer than expected; current live version retained'
+    return operation+' · '+str(age)+'s'
 
 
 def overdue(publication):
@@ -114,12 +158,17 @@ def prepare(store,identity,flow,version,name,env=None):
 
 def commit(store,conn,row,flow,bundles,steps,version,publication=None):
     config=deepcopy(row['config']);identity=row['id']
-    for template_id,name,content in bundles:
-        conn.execute("""INSERT INTO crm_templates(id,template_key,name,kind,version,content)
-          VALUES(%s,%s,%s,'Automation',%s,%s::jsonb) ON CONFLICT(id) DO UPDATE SET
-          version=excluded.version,content=excluded.content,updated_at=now()""",
-          (template_id,'automation-email:'+template_id,name,version,json.dumps(content)))
-        conn.execute('INSERT INTO crm_template_versions(template_id,version,content) VALUES(%s,%s,%s::jsonb)',(template_id,version,json.dumps(content)))
+    # Two statements for 1..N emails, with the same transaction and immutable
+    # version constraint. No per-email network round trips or partial commits.
+    payload=json.dumps([{'id':i,'name':n,'content':c} for i,n,c in bundles])
+    conn.execute("""INSERT INTO crm_templates(id,template_key,name,kind,version,content)
+      SELECT b.id,'automation-email:'||b.id::text,b.name,'Automation',%s,b.content
+      FROM jsonb_to_recordset(%s::jsonb) AS b(id uuid,name text,content jsonb)
+      ON CONFLICT(id) DO UPDATE SET version=excluded.version,
+      content=excluded.content,updated_at=now()""",(version,payload))
+    conn.execute("""INSERT INTO crm_template_versions(template_id,version,content)
+      SELECT b.id,%s,b.content FROM jsonb_to_recordset(%s::jsonb)
+      AS b(id uuid,name text,content jsonb)""",(version,payload))
     config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
     config['published']['timing_version']=flow.get('timing_version',1)
     config['published'].update(inactive_days=flow.get('inactive_days',180),exit_on_purchase=flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back')))
@@ -186,10 +235,13 @@ def fail(conn,job,reason):
 
 
 def tick(store,owner,env=None):
+    started=perf_counter()
     job=claim(store,owner)
     if not job:return False
     try:
+        preparing=perf_counter()
         frozen=job['snapshot'];prepared=prepare(store,job['automation_id'],frozen['flow'],job['publication_version'],frozen['name'],env)
+        prepared_at=perf_counter()
         with store.db() as conn:
             locked=conn.execute('SELECT * FROM crm_automation_publish_jobs WHERE id=%s FOR UPDATE',(job['id'],)).fetchone()
             if locked['state']!='RUNNING' or locked['owner']!=owner or locked['attempts']!=job['attempts']:return True
@@ -202,7 +254,8 @@ def tick(store,owner,env=None):
                 raise ValueError('A newer publication exists.')
             commit(store,conn,row,*prepared,job['publication_version'],row['config']['publication'])
             conn.execute("UPDATE crm_automation_publish_jobs SET state='SUCCEEDED',completed_at=now(),lease_until=NULL,error=NULL WHERE id=%s",(job['id'],))
-        LOG.info('automation_publication job_id=%s revision=%s state=SUCCEEDED',job['id'],job['revision'])
+        LOG.info('automation_publication job_id=%s revision=%s state=SUCCEEDED claim_ms=%.1f validate_ms=%.1f commit_ms=%.1f',
+                 job['id'],job['revision'],(preparing-started)*1000,(prepared_at-preparing)*1000,(perf_counter()-prepared_at)*1000)
     except Exception as exc:
         with store.db() as conn:
             locked=conn.execute('SELECT * FROM crm_automation_publish_jobs WHERE id=%s FOR UPDATE',(job['id'],)).fetchone()

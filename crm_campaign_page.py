@@ -36,6 +36,9 @@ def open_editor(row):
     editor['document']['audience']=audience(editor['document']['market'])
     editor['document'].setdefault('send_timing',{'mode':'now'})
     commit_middle(editor['document'],middle_sections(editor['document']))
+    if any(s.get('type')=='abandoned_checkout_products' for s in editor['document'].get('middle_sections',[])):
+        from crm_checkout_section import editable
+        editor['document']=editable(editor['document'])
     editor['recovery_seed']=uuid.uuid4().hex
     st.session_state['campaign_saved']=deepcopy(editor)
     st.session_state.pop('campaign_save_error',None)
@@ -157,9 +160,12 @@ def recent_campaigns(drafts,key,user):
 def commit_editor_field(editor,key,field):
     """Commit native blur events even when that event also leaves Settings."""
     value=st.session_state[key+field]
+    previous=editor['name'] if field=='name' else editor['document']['content'][field]
+    if previous==value:return
     if field=='name':editor['name']=value
     else:editor['document']['content'][field]=value
-    editor['document']['copy_reviewed']=False
+    from crm_email_editor_context import mark_content_edit
+    mark_content_edit(st.session_state,editor)
     flush_current()
 
 
@@ -173,8 +179,8 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
     from crm_recovery_ui import recovery_bridge
     if available and mode=='campaign':recovery_bridge(drafts,actions.user,editor,key)
     doc=editor['document'];c=doc['content']
-    if 'email_defaults' in cfg:doc.setdefault('html_sections',deepcopy(cfg['email_defaults']))
-    before=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True)
+    # Rendering resolves inherited defaults without writing them into the draft.
+    before=deepcopy({k:v for k,v in doc.items() if k!='copy_reviewed'})
     with st.container(horizontal=True,gap='small',key='crm-composer-layout'):
         with st.container(width=360,height=680,border=False,key='crm-composer-controls'):
             details,html_tab,templates_tab=st.tabs(['Settings','Editor','Templates'],key=key+'panel',on_change='rerun')
@@ -205,10 +211,13 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     from crm_campaign_library import library
                     library(drafts,actions.user,doc,target=COMPOSER_TARGET)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
-    if before!=json.dumps({k:v for k,v in doc.items() if k!='copy_reviewed'},sort_keys=True):doc['copy_reviewed']=False
+    if before!={k:v for k,v in doc.items() if k!='copy_reviewed'}:
+        from crm_email_editor_context import mark_content_edit
+        mark_content_edit(st.session_state,editor)
     flush_current()
     if mode=='automation':
-        toolbar_value=json.dumps([editor['name'],doc,editor.get('version')],sort_keys=True)
+        saved=st.session_state.get('automation_saved',{})
+        toolbar_value=(editor['name'],editor.get('version'),doc!=saved.get('document') or editor['name']!=saved.get('name'),st.session_state.get('campaign_save_status'))
         if st.session_state.get('_automation_toolbar_value')!=toolbar_value:
             st.session_state['_automation_toolbar_value']=toolbar_value
             # Wake only the toolbar after the composer has finished rendering.

@@ -61,7 +61,8 @@ class SqlWorkspaceTests(unittest.TestCase):
         for status in ('ARCHIVED','TESTED','TEST_READY'):
             row=self.draft();self.store.q('UPDATE crm_campaign_drafts SET status=%s WHERE id=%s',(status,row['id']))
             with self.assertRaises(ValueError):self.store.delete_draft(ADMIN,row['id'],row['version'],confirmed=True,confirmed_name=row['name'])
-        row=self.draft();updated=self.store.save(ADMIN,row['name'],row['document'],row['id'],row['version'])
+        row=self.draft();changed=deepcopy(row['document']);changed['content']['subject']+=' edited'
+        updated=self.store.save(ADMIN,row['name'],changed,row['id'],row['version'])
         with self.assertRaises(ValueError):self.store.delete_draft(ADMIN,row['id'],row['version'],confirmed=True,confirmed_name=row['name'])
         self.assertEqual(self.store.draft(row['id'])['version'],updated['version'])
 

@@ -1,9 +1,22 @@
 """Compact native controls; publication authority remains in the backend."""
-from copy import deepcopy
 from html import escape
 import inspect
 import streamlit as st
 from crm_automation_publish_state import has_changes,label
+
+
+def definition(store,state,identity):
+    """Only the current flow is cached, scoped to this authenticated session.
+
+    Every rerun checks database updated_at. Mutations still lock and validate a
+    fresh row; cached documents are solely for display and dirty comparison.
+    """
+    marker=store.q('SELECT updated_at FROM crm_automations WHERE id=%s',(identity,),True)
+    token=(str(identity),marker and marker['updated_at'])
+    cached=state.get('_automation_toolbar_definition')
+    if not cached or cached[0]!=token:
+        cached=(token,store.flow(identity));state['_automation_toolbar_definition']=cached
+    return cached[1]
 
 
 @st.fragment(**({'key':'crm_automation_toolbar'} if 'key' in inspect.signature(st.fragment).parameters else {}))
@@ -14,7 +27,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
     from crm_store import StoreUnavailable
     from crm_flow_builder import display_name
     try:
-        row=store.flow(identity)
+        row=definition(store,st.session_state,identity)
         from crm_automation_publication import overdue,expire
         if overdue(row['config'].get('publication',{})):
             expire(store,identity);row=store.flow(identity)
@@ -22,13 +35,15 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         st.caption('Publication status unavailable. No successful publication is confirmed.')
         if st.button('Retry status',key='toolbar-status-retry'):st.rerun(scope='fragment')
         return
-    flow=deepcopy(row['config']['draft'])
     editor=st.session_state.get('automation_editor') if editor else None
-    if editor and str(editor['id'])==str(identity):
-        for step in flow['emails']:
-            if step['step_id']==store.step_id:step['document']=deepcopy(editor['document'])
     dirty=bool(editor and (editor['document']!=st.session_state.get('automation_saved',{}).get('document') or editor['name']!=st.session_state.get('automation_saved',{}).get('name')))
-    pending=has_changes(store,row,flow);version=row['config']['published_version']
+    # Saved draft vs live is separate from editor vs saved. One session-local
+    # comparison is reused until the authoritative definition changes.
+    token=(str(identity),row.get('updated_at'),row['config']['revision'],row['config']['published_version'])
+    comparison=st.session_state.get('_automation_published_comparison')
+    if not comparison or comparison[0]!=token:
+        comparison=(token,has_changes(store,row));st.session_state['_automation_published_comparison']=comparison
+    pending=comparison[1];version=row['config']['published_version']
     publication=row['config'].get('publication',{});busy=publication.get('state')=='PUBLISHING';archived=status(row)=='ARCHIVED'
     st.html('''<style>
     .st-key-automation-toolbar{gap:8px!important;align-items:center!important;flex-wrap:wrap!important;margin:0 0 8px!important}
@@ -55,7 +70,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                 if flush_current(force=True):
                     st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')
             title=display_name(editor['name'] if editor else row['name'])
-            st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong><span class="automation-state">'+escape(label(row,pending))+'</span></div>')
+            st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong><span class="automation-state">'+escape(label(row,pending)+(' · Unsaved changes' if dirty else ''))+'</span></div>')
             if editor and st.button('Flow',key='toolbar-sequence',help='Return to this flow’s sequence'):
                 if flush_current(force=True):
                     st.session_state['automation_composing']=False;st.session_state.pop('automation_editor',None);st.rerun(scope='app')
@@ -80,7 +95,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                         from crm_shopify import Shopify
                         control(Shopify(),store,user,row['trigger_type'],key+'flow_',automation=row)
             if busy:st.html('<span class="automation-current automation-publishing" role="status">Publishing changes…</span>')
-            elif not pending:st.html('<span class="automation-current" role="status"'+(' style="color:#327147"' if publication.get('state')=='LIVE' else '')+'>'+('Published · Up to date' if publication.get('state')=='LIVE' else 'Up to date')+'</span>')
+            elif not pending and not dirty:st.html('<span class="automation-current" role="status"'+(' style="color:#327147"' if publication.get('state')=='LIVE' else '')+'>'+('Published · Up to date' if publication.get('state')=='LIVE' else 'Up to date')+'</span>')
             elif st.button('Retry Publish' if publication.get('state')=='FAILED' else 'Publish changes' if version else 'Publish now',type='primary',disabled=archived,key='toolbar-publish',help='Publish for new enrollments; existing recipients keep their sequence.'):
                 if flush_current(force=True):
                     revision=editor['version'] if editor else row['config']['revision']
@@ -89,9 +104,6 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                         from crm_automation_home import accepted_publication
                         accepted_publication(job)
                     changed()
-                    if editor:
-                        from crm_automation_ui import open_flow
-                        open_flow(identity)
                     st.rerun(scope='fragment')
             if row['status'] in ('ACTIVE','PAUSED') and not archived:
                 action='pause' if row['status']=='ACTIVE' else 'resume'
@@ -99,6 +111,9 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                     store.lifecycle(user,identity,action);changed();st.rerun(scope='fragment')
         if publication.get('state')=='FAILED':st.html('<span role="status" style="font-size:12px;color:#9c3c36">Publishing failed · '+escape(publication.get('error') or 'Retry publishing.')+'</span>')
         if busy:
+            from crm_automation_publication import progress,progress_text
+            try:st.caption(progress_text(progress(store,identity)))
+            except StoreUnavailable:st.caption('Publication status temporarily unavailable. Checking again; success is not yet confirmed.')
             from crm_automation_analytics_ui import arm
             arm('automation-toolbar-publication',2)
         from pathlib import Path

@@ -5,10 +5,10 @@ const context=await browser.newContext({viewport:{width:1440,height:1000}});
 await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
 const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
 if(process.env.EMAIL_SLOW){const cdp=await context.newCDPSession(page);await cdp.send('Emulation.setCPUThrottlingRate',{rate:4});await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:150,downloadThroughput:200000,uploadThroughput:100000});}
-await page.goto('http://127.0.0.1:8543/');await page.locator('.sc-home-row').first().waitFor();
+const initialHomeStarted=Date.now();await page.goto('http://127.0.0.1:8543/');await page.locator('.sc-home-row').first().waitFor();const initialHomeMs=Date.now()-initialHomeStarted;
 async function count(){const prior=await page.locator('#email-profile').innerText();await page.getByRole('button',{name:'Profile snapshot',exact:true}).click();await page.waitForFunction(old=>document.querySelector('#email-profile')?.textContent!==old,prior);return JSON.parse(await page.locator('#email-profile').innerText());}
 async function sample(){await page.evaluate(()=>{window.samples=[];window.sampling=true;window.started=performance.now();function tick(){if(!window.sampling)return;const home=document.querySelector('.sc-home-kpis'),editor=document.querySelector('.st-key-crm-selected-campaign');window.samples.push({ms:performance.now()-window.started,home:!!home,editor:!!editor,giant:[...document.querySelectorAll('.sc-home-icon img')].some(e=>e.getBoundingClientRect().width>40)});requestAnimationFrame(tick)}tick()});}
-const result={};
+const result={initialHomeMs};
 for(const kind of ['cold','warm']){
  const before=await count();await page.locator('.st-key-crm-home-table [data-testid=stPopoverButton]').first().click();
  await sample();const t=Date.now();await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('textbox',{name:'Subject',exact:true}).waitFor();

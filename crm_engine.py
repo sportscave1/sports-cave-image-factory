@@ -385,7 +385,8 @@ class Engine:
             try:
                 from crm_automation_publication import tick as publication_tick
                 from crm_automation_store import AutomationStore
-                publication_tick(AutomationStore(self.store.connect),owner)
+                if not getattr(self,'publication_background',False):
+                    publication_tick(AutomationStore(self.store.connect),owner)
             except Exception as exc:
                 logging.getLogger(__name__).warning('automation_publication_cycle_failed error_class=%s',type(exc).__name__)
             events=self.store.q("SELECT * FROM crm_webhook_events WHERE status='PENDING' AND provider<>'resend' ORDER BY received_at LIMIT 10")
