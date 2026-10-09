@@ -5325,6 +5325,7 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "wall_finish": visual.get("wall_finish", visual["wall_material"]),
         "camera_family": visual["camera_side"],
         "camera_angle": visual["camera_side"],
+        "camera_angle_refinement": visual.get("resolved_camera_variation", ""),
         "shot_distance": visual["shot_distance"],
         "lighting_direction": visual["lighting"],
         "time_of_day": visual["time_of_day"],

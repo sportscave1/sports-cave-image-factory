@@ -35,4 +35,9 @@ jobs:
           python -m unittest discover -s tests -p 'test_ads_winner_refinement.py' || failures=1
           python -m unittest discover -s tests -p 'test_premium_image_quality_v3.py' || failures=1
           python -m unittest discover -s tests -p 'test_ads_ie_prompt_integration.py' || failures=1
+          python -m unittest discover -s tests -p 'test_ads_carousel_evolution.py' || failures=1
+          python -m unittest discover -s tests -p 'test_mockup_prompt_preview.py' || failures=1
+          python -m unittest discover -s tests -p 'test_social_media_creator.py' || failures=1
+          python -m unittest discover -s tests -p 'test_design_studio_generation_handoff.py' || failures=1
+          python -m unittest discover -s tests -p 'test_ads_creative_refresh.py' || failures=1
           exit $failures

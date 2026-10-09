@@ -65,8 +65,8 @@ CAMERA_VARIATIONS = (
     "eye-level, balanced natural perspective",
     "a little above artwork centre with minimal downward perspective",
     "just below artwork centre with very subtle upward perspective",
-    "closer medium-close viewpoint showing physically real frame bevel",
-    "slightly farther camera with natural room context but a large, readable frame",
+    "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role",
+    "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role",
 )
 
 def resolved_camera_variation(visual, index, context, variation_token):
