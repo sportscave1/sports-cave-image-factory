@@ -1,4 +1,5 @@
 from __future__ import annotations
+import sports_cave_physical_realism as physical_realism
 
 
 SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER = "SPORTS_CAVE_IMAGE_REALISM_RULES_V1"
@@ -102,7 +103,8 @@ Mandatory final product inspection:
 - confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts"""
 
 
-def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, allow_intentional_detail_crop: bool = False) -> str:
+def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, allow_intentional_detail_crop: bool = False,
+                                         physical_product=None, include_physical_realism: bool = True) -> str:
     sections = [
         SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
         "AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES",
@@ -120,6 +122,8 @@ def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, 
                                 'only the explicitly supported detail card may crop the source photograph; never alter the artwork pixels or frame geometry')
             lock += '\n\nINTENTIONAL DETAIL CARD ONLY: retain the verified source detail and its advertising function. A photographic detail crop is permitted; never redraw, magnify printed pixels independently, invent details or force a lifestyle-room scene.'
         sections.append(lock)
+        if include_physical_realism:
+            sections.append(physical_realism.build(physical_product))
     else:
         sections.append(
             "ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION\n"
@@ -137,14 +141,24 @@ def append_sports_cave_image_realism_rules(
     *,
     include_product_lock: bool = True,
     required_ending: str = "",
+    physical_product=None,
 ) -> str:
     prompt_text = str(prompt_text or "").strip()
     if prompt_has_sports_cave_image_realism_rules(prompt_text):
-        return prompt_text
-
-    block = build_sports_cave_image_realism_rules(
-        include_product_lock=include_product_lock
-    )
+        # Stored V1 prompts retain their exact rules/creative text; add only the
+        # missing physical contract. Repeated wrapping must remain idempotent.
+        if not include_product_lock:
+            return prompt_text
+        if physical_realism.MARKER in prompt_text:
+            return physical_realism.apply_context(prompt_text, physical_product)
+        block = physical_realism.build(physical_product)
+    else:
+        has_physical = physical_realism.MARKER in prompt_text
+        if has_physical and include_product_lock:
+            prompt_text = physical_realism.apply_context(prompt_text, physical_product)
+        block = build_sports_cave_image_realism_rules(
+            include_product_lock=include_product_lock, physical_product=physical_product,
+            include_physical_realism=not has_physical)
     ending = str(required_ending or "").strip()
     if ending and prompt_text.rstrip().endswith(ending):
         body = prompt_text.rstrip()[: -len(ending)].rstrip()
@@ -394,6 +408,7 @@ def append_sports_cave_prompt_blocks(
     include_human: bool = False,
     include_video: bool = False,
     include_product_lock: bool = True,
+    physical_product=None,
 ) -> str:
     result = str(prompt_text or "").strip()
     if include_human:
@@ -401,6 +416,7 @@ def append_sports_cave_prompt_blocks(
     result = append_sports_cave_image_realism_rules(
         result,
         include_product_lock=include_product_lock,
+        physical_product=physical_product,
     )
     if include_video:
         result = append_unique_block(result, SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK)

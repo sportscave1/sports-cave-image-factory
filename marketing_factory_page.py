@@ -798,6 +798,7 @@ END PROMPT"""
     return append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=True,
+        physical_product=inputs,
     )
 
 
@@ -878,6 +879,7 @@ def _build_pack(inputs):
     mockup = append_sports_cave_image_realism_rules(
         mockup,
         include_product_lock=True,
+        physical_product=inputs,
     )
     checklist = "\n".join(f"- {item}" for item in QUALITY_CHECKS)
     return {

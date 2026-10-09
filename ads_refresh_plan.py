@@ -6,6 +6,7 @@ import json
 import random
 import re
 from difflib import SequenceMatcher
+import ads_carousel_evolution as carousel_copy
 
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
 
@@ -139,7 +140,7 @@ def build_plan(context, campaign_type, product, category, seed, history=()):
     identity = identity_hash(context, campaign_type, product, category)
     return {'version': VERSION, 'run_id': hashlib.sha256((identity+str(seed)).encode()).hexdigest()[:24],
             'identity_hash': identity, 'product': product, 'category': category, 'campaign_type': campaign_type,
-            **({'carousel_contract': CAROUSEL_CONTRACT} if campaign_type == 'Carousel' else {}),
+            **({'carousel_contract': CAROUSEL_CONTRACT, 'copy_contract': carousel_copy.CONTRACT} if campaign_type == 'Carousel' else {}),
             'seed': str(seed), 'references': reference_map(campaign_type, source),
             'styles': select_styles(seed, product=product, category=category, history=history) if campaign_type != 'Carousel' else [],
             'recent_styles': deepcopy(list(history)[-30:]),
@@ -152,7 +153,7 @@ def current_plan(context, campaign_type, product, category, seed, history=()):
     expected = len(reference_map(campaign_type, (context or {}).get('source_winner'))) if campaign_type == 'Carousel' else 2
     structural = (isinstance(refs, list) and len(refs) == expected
                   and all(isinstance(r, dict) for r in refs)
-                  and (saved.get('carousel_contract') == CAROUSEL_CONTRACT and refs == reference_map(campaign_type, (context or {}).get('source_winner')) if campaign_type == 'Carousel' else refs[-1].get('label') == 'CANONICAL_PRODUCT')
+                  and (saved.get('carousel_contract') == CAROUSEL_CONTRACT and saved.get('copy_contract') == carousel_copy.CONTRACT and refs == reference_map(campaign_type, (context or {}).get('source_winner')) if campaign_type == 'Carousel' else refs[-1].get('label') == 'CANONICAL_PRODUCT')
                   and (campaign_type == 'Carousel' or len(saved.get('styles') or []) == 3))
     if structural and saved.get('version') == VERSION and saved.get('identity_hash') == identity_hash(context, campaign_type, product, category):
         return saved
@@ -274,7 +275,10 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
             issues.append(f'Execution {i}: complete scene, role, keep/change/rationale and standalone brief.')
         dimensions = execution.get('execution') or {}
         is_detail = campaign_type == 'Carousel' and 'detail' in str(execution.get('role') or '').casefold()
-        full_rules = build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=is_detail)
+        # Historical saved execution notes remain valid. The new physical block
+        # is injected into newly built prompts; do not invalidate completed work.
+        full_rules = build_sports_cave_image_realism_rules(include_product_lock=True,
+            allow_intentional_detail_crop=is_detail, include_physical_realism=False)
         required = ('camera', 'lighting', 'product_placement') if is_detail else ('architecture', 'layout', 'wall_palette', 'wall_material', 'camera')
         extras = ('furniture', 'lighting', 'flooring', 'background', 'product_placement')
         if not isinstance(dimensions, dict):
@@ -353,6 +357,7 @@ Concept anchor: {scene or 'Determine the broad room family from this exact winni
 Advertising role: {role or 'Determine this card role from the actual attachment'}.
 Keep / Change / Improvement: record this card's observed role, winning visual/copy principle and what to retain, then specify a substantially NEW execution and concrete upgrade. A winning carousel does not prove individual card causality.
 Same family, new execution: bedroom -> new bedroom; man cave -> new man cave; office -> new office; lounge -> new lounge; detail-role -> new detail execution. Never swap a bedroom for a bar. Preserve defining functional objects, not the old furniture or literal composition.
+Gallery hallway/console -> new gallery/entrance with framing and display quality still central. Home bar/motorsport room -> redesigned functional home bar. An edition-detail/magnification card still directs attention to the existing verified badge; never change edition numbers. Preserve vehicles, sponsors, signatures and all printed details along with faces and typography. Do not invent text overlays.
 Redesign architecture and layout, wall palette/material, camera composition plus at least two of furniture, lighting, flooring, background or product placement. No recolour, camera-angle-only sibling or copied room. For a verified detail role, specify a genuinely new detail composition, light and product placement instead of inventing a room.
 Output: square {dimensions}; preserve production safe areas and deterministic Sports Cave overlays separately from the PRINTED artwork. Product remains the mobile-readable hero. {'Intentional detail crop is permitted only for this verified detail-card role; never redraw hidden details.' if detail else 'Show the full outer frame, matching the winning product exactly.'}
 Use source-preserving compositing where available. Prompt instructions alone cannot guarantee pixel-perfect fidelity. Resolve conflicting or unreadable product detail before generation; never guess.

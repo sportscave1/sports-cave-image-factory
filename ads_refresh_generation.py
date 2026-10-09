@@ -280,6 +280,8 @@ Campaign format: Carousel
 Product page URL: {url}
 Verified product facts: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
 
+{plan.carousel_copy.instruction(winner, refs)}
+
 ATTACH EXACTLY {n} ORIGINAL WINNING CARD IMAGES, IN SOURCE ORDER
 {mappings}
 These are {n} winning Carousel cards, collectively the product authority and individually the creative authority. No additional product image is required.
@@ -311,10 +313,10 @@ Each final prompt must name {product}, its exact WINNER_CARD_N, all collective p
 Product physics comes first: faithful frame thickness/depth/bevel, realistic transparent glass/reflections consistent with actual lights, bevel lighting, wall separation, soft contact shadow, ambient occlusion, mobile-readable product prominence and genuine interior photography. No invented construction, flat matte poster treatment of glazed products, distorted frame, CGI sheen or pasted rectangle. Reject unclear artwork details rather than regenerate them from imagination.
 
 REFRESH THE WINNING COPY
-Return exactly five shared Primary Text variations AND {n} matching card headline/description pairs. Analyse each supplied source primary text separately; retain its useful emotional/collector appeal but create a new hook, argument and expression. Refresh each card's OWN original headline and description in its original role. Do not reuse winner copy, shuffle the source phrases, make synonym-only edits, repeat sibling openings or duplicate descriptions. Fixed verified facts, product names and mandatory CTAs may repeat; do not invent scarcity, stock, offers, demand or endorsements.
+Return exactly five shared Primary Text variations AND {n} matching card headline/description pairs under {plan.carousel_copy.CONTRACT}. Refresh each card's OWN original headline and description in its original role. Keep the same argument, psychological trigger, tone and source-relative rhythm/length; improve its expression. Fixed verified facts, product names and mandatory CTAs may repeat; do not invent scarcity, stock, offers, demand or endorsements.
 Also complete all five shared headline variation rows and all five shared description variation rows already present in the CSV template. Those shared copy choices are separate from card-specific headlines/descriptions. No required production copy cell may remain blank; an incomplete template cannot be saved for Posting.
 {ads.build_country_language_guidance(country)}
-{ads.build_carousel_card_copy_rules().replace('For all five carousel cards:', f'For all {n} carousel cards:')}
+CAROUSEL CARD CHARACTER LIMIT: Maximum 17 characters each for headline and description, including spaces/punctuation. No commas or full stops, no truncated words. The original card's selling role takes priority; do not replace premium framing or personal sports-space desire with general sporting history. Shared Meta options are separate from this limit.
 Keep the EXACT existing CSV headers, row identities, five shared-copy slots, {n} ordered card fields, upload slots and Posting contract. No execution metadata in CSV columns. Use {url} for every card destination. Return completed downloadable UTF-8 CSV with correctly quoted commas/newlines. Generate images only when requested.
 {ads.build_campaign_moment_copy_relevance_block(campaign_moment, selected_country=country, campaign_type='Carousel')}
 VISUAL CAMPAIGN MOMENT RULE
@@ -326,10 +328,10 @@ STANDALONE EXECUTION CONTRACTS — COMPLETE AFTER INSPECTING THE ACTUAL ATTACHME
 
 EXECUTION NOTES — {n} JSON records alongside CSV, in source order
 Each record: position, winner_reference, reference_inspected=true and collective_product_inspected=true only after inspecting all winning images; observations object with scene_category, ad_role, defining_objects, composition, product_attention, strengths, clutter, mood_contrast, copy_hook, tone, structure, emotional_appeal and execution (observed architecture, layout, wall_palette, wall_material, camera, furniture, lighting, flooring, background, product_placement). Record unknowns honestly; resolve required unknowns before finalising. Then scene (preserved broad family), role, keep (winning principle), change (concrete new execution), improvement (upgrade rationale), execution (NEW architecture/layout/wall_palette/wall_material/camera plus at least two of furniture/lighting/flooring/background/product_placement), image_prompt (complete standalone final brief). For verified detail roles use camera, lighting and product_placement as required source/new dimensions instead of forcing room architecture.
-Compare the declared new dimensions against the observed source and all siblings. Reject unchanged architecture/layout with mere colour or angle swaps, missing analysis, generic placeholders, missing product-lock/realism, near-duplicate rooms or copied copy. These deterministic declarations do not certify pixel fidelity; inspect generated images before use. Never claim a visual similarity score.
+Include the source-mapped copy_review, shared_copy_review and visual_review objects specified by {plan.carousel_copy.CONTRACT} in this same JSON array, outside the CSV. Compare the declared new dimensions against the observed source and all siblings. Reject unchanged architecture/layout with mere colour or angle swaps, missing analysis, generic placeholders, missing product-lock/realism, near-duplicate rooms or unchanged unprotected sentences. These deterministic declarations do not certify pixel fidelity; inspect generated images before use. Never claim a visual similarity score.
 
 FINAL BATCH CHECK
-Exactly {n} source cards, {n} independent analyses, {n} new same-family executions, {n} standalone image prompts, five shared Primary Text variations and {n} new card headline/description pairs; same order, same product, no copied room or copy. Complete all required fields before marking ready.
+Exactly {n} source cards, {n} independent analyses, {n} new same-family executions, {n} standalone image prompts, five shared Primary Text variations and {n} refreshed card headline/description pairs; same order, same product and strategy, no copied room or unchanged unprotected sentences. Complete all required fields before marking ready.
 
 EXACT CSV TEMPLATE
 {template}'''.strip()

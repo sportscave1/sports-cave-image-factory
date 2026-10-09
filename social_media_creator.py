@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import social_media_branding
+from sports_cave_physical_realism import physical_metadata
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
 
@@ -658,7 +659,9 @@ def normalise_creator_input(payload):
             or payload.get("verified_edition_limit")
         )
     )
+    physical = physical_metadata(payload)
     return {
+        **({"physical_product": physical} if physical else {}),
         "scheduled_date": selected_date,
         "content_focus": _single_line(payload.get("content_focus"), 80),
         "collection": _single_line(payload.get("collection"), 240),
@@ -1404,6 +1407,7 @@ Verify the exact aspect ratio and dimensions, the supplied product is unchanged,
     return append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=True,
+        physical_product=payload,
     )
 
 
@@ -1607,6 +1611,7 @@ Final check: the exact Sports Cave product remains unchanged throughout every fr
         prompt_text = append_sports_cave_image_realism_rules(
             prompt_text,
             include_product_lock=True,
+            physical_product=payload,
         )
         prompts.append(
             {

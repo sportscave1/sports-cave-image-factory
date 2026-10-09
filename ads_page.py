@@ -39,6 +39,7 @@ from ads_meta_contract import META_AD_URL_PARAMETERS, META_DEFAULT_CTA
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
 import os_accounts
+import sports_cave_physical_realism as physical_realism
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
     build_sports_cave_image_realism_rules,
@@ -1228,7 +1229,9 @@ def instant_experience_product_metadata_from_selection(selection, *, category=""
         or row.get("edition_total_source")
         or ("Edition Ops product ledger" if edition_limit else "")
     )
+    physical = physical_realism.physical_metadata(row)
     return {
+        **({'physical_product': physical} if physical else {}),
         "product_sport": _normalise_option_label(category),
         "product_type": _normalise_option_label(row.get("product_type") or row.get("Product type")),
         "collections": _edition_ops_product_collections_from_row(row),
@@ -7409,9 +7412,10 @@ def _configure_refresh_copy(result, workflow):
 
 
 def build_instant_experience_winner_refinement_prompt(product_name, category, country, product_url, context, *, product_metadata=None, campaign_moment=None):
-    return ads_refresh_generation.build_prompt(
+    prompt = ads_refresh_generation.build_prompt(
         sys.modules[__name__], product_name, category, country, "Instant Experience", product_url, context,
         product_metadata=product_metadata, campaign_moment=campaign_moment)
+    return physical_realism.apply_context(prompt, product_metadata)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -9046,14 +9050,16 @@ def build_ads_prompt(
     creative_refresh_context=None,
 ):
     if campaign_type in {"Single Image / Video", "Carousel"} and creative_refresh_context:
-        return ads_refresh_generation.build_prompt(
+        prompt = ads_refresh_generation.build_prompt(
             sys.modules[__name__], product_name, category, country, campaign_type, product_url,
             creative_refresh_context, campaign_moment=campaign_moment, product_metadata=product_metadata)
+        return physical_realism.apply_context(prompt, product_metadata)
     if campaign_type == "Instant Experience" and creative_refresh_context:
-        return build_instant_experience_winner_refinement_prompt(
+        prompt = build_instant_experience_winner_refinement_prompt(
             product_name, category, country, product_url, creative_refresh_context,
             product_metadata=product_metadata, campaign_moment=campaign_moment,
         )
+        return physical_realism.apply_context(prompt, product_metadata)
     template_key = get_template_key(category, campaign_type)
     settings = None
     if campaign_type == "Instant Experience":
@@ -9103,7 +9109,8 @@ def build_ads_prompt(
             compose_final_ads_prompt(prompt, **prompt_kwargs),
             creative_refresh_context,
         )
-    return compose_final_ads_prompt(prompt, **prompt_kwargs)
+    return physical_realism.apply_context(
+        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata)
 
 
 def render_insufficient_winner_data():
@@ -9471,8 +9478,8 @@ def ads_prompt_contract_version_for_campaign(
         if campaign_type == "Instant Experience":
             version += f"; WINNER LED THREE ENVIRONMENTS V3"
         elif campaign_type == 'Carousel':
-            version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1'
-    return version
+            version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
+    return version + '; PHYSICAL FRAME REALISM V2'
 
 
 def _instant_experience_visual_contract_is_current(prompt):
@@ -14251,7 +14258,12 @@ def creative_refresh_quality_issues(result, workflow):
         limit = _positive_int_or_none(metadata.get('edition_limit'))
         fixed_facts = ([f'limited to {limit}', f'{limit} editions worldwide', f'only {limit} editions']
                        if limit and metadata.get('edition_limit_source') else [])
-        issues += ads_refresh_generation.plan.copy_issues(rows, result['product_name'], context, fixed_facts)
+        if plan.get('copy_contract') == ads_refresh_generation.plan.carousel_copy.CONTRACT:
+            issues += ads_refresh_generation.plan.carousel_copy.quality_issues(
+                carousel, (workflow.get('ad_notes') or {}).get('refresh_executions'), context,
+                plan['references'], result['product_name'], result['product_url'], fixed_facts)
+        else:
+            issues += ads_refresh_generation.plan.copy_issues(rows, result['product_name'], context, fixed_facts)
     source_hashes = [r.get("image_sha256") for r in plan["references"] if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:

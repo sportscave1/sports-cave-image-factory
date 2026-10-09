@@ -7444,6 +7444,7 @@ def build_current_mockup_prompt_items_for_result(result):
         result.get("sport_category"),
         labels_by_filename=PROMPT_LABELS,
         local_only=True,
+        product_metadata=result.get("product_metadata") or result,
         artwork_reference_available=bool(
             result.get("black_framed_webp_path")
             or result.get("black_framed_dropbox_path")

@@ -185,7 +185,9 @@ class ActiveRefreshRepairTests(unittest.TestCase):
                 'selector_identity':'resolved-catalogue-identity','product_url':'https://www.sportscaveshop.com/products/legends-never-die-messi-vs-ronaldo-wall-art'})
         self.assertEqual(state[ads.ADS_PRODUCT_URL_KEY],value['product_url'])
 
-    def test_unaffected_prompts_are_byte_identical_to_prechange(self):
+    def test_existing_prompts_identical_outside_approved_physical_contract(self):
+        from sports_cave_physical_realism import MARKER
+        from tests.test_physical_frame_realism import strip_physical
         baseline=json.loads(Path('tests/fixtures/refresh_unaffected_prompts.json').read_text())
         for identity,expected in baseline.items():
             mode,category,kind=identity.split('/',2)
@@ -193,7 +195,8 @@ class ActiveRefreshRepairTests(unittest.TestCase):
             value=fixture(kind) if context else {'product_name':'Verified Collector Artwork','product_url':'https://sportscave.com.au/products/verified'}
             prompt=ads.build_ads_prompt(value['product_name'],category,'Australia',kind,product_url=value['product_url'],
                 variation_token='baseline',creative_refresh_context=context)
-            self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(),expected,identity)
+            self.assertIn(MARKER,prompt,identity)
+            self.assertEqual(hashlib.sha256(strip_physical(prompt).encode()).hexdigest(),expected,identity)
 
 
 if __name__=='__main__':unittest.main()

@@ -1861,6 +1861,7 @@ def build_lifestyle_prompt_items(
     labels_by_filename=None,
     local_only=False,
     artwork_reference_available=True,
+    product_metadata=None,
 ):
     labels_by_filename = labels_by_filename or {}
     prompt_items = []
@@ -1902,6 +1903,7 @@ def build_lifestyle_prompt_items(
             prompt_text,
             include_human=prompt_includes_human_scene(prompt_text),
             include_video=is_reels_prompt_filename(filename),
+            physical_product=product_metadata,
         )
         prompt_items.append(
             {

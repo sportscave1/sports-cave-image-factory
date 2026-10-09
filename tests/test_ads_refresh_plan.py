@@ -26,6 +26,15 @@ def fixture(campaign='Carousel', seed='synthetic-v3'):
     source = winner(campaign == 'Carousel')
     source['carousel_cards'] = [dict(position=i, image_url=f'https://example.fbcdn.net/card{i}.png',
                                    scene=scene, role=role) for i, (scene, role) in enumerate(zip(SCENES, ROLES), 1)]
+    if campaign == 'Carousel':
+        # Explicit synthetic originals for the source-relative copy contract.
+        source['shared_primary_texts'] = ['Two legends. One unforgettable rivalry.',
+            'That unforgettable roar of the stands.', 'Remember the memories worth collecting.',
+            'Your football passion belongs at home.', 'Give that favourite memory a wall.']
+        for card, headline, description in zip(source['carousel_cards'],
+                ('The Great Rivalry','Remember Match Day','Collectors Pride','Home For Football','A Framed Memory'),
+                ('Football Greats','Stadium Memories','A Collector Icon','Pride In Place','Your Rivalry Story')):
+            card.update(headline=headline, description=description)
     context = dict(winning_primary_text='Two legends. One unforgettable rivalry.',
                    winning_headline='Legends Never Die', source_winner=source)
     return ads.build_ads_result_record(TITLE, 'Football', 'Australia', campaign,
@@ -271,6 +280,8 @@ class RefreshPlanTests(unittest.TestCase):
             card['description'] = carousel['descriptions'][i]
             card['destination_url'] = value['product_url']
         ads._store_carousel_copy_notes(workflow,carousel)
+        from tests.fixtures.carousel_evolution import attach_reviews
+        workflow['ad_notes']['refresh_executions'] = attach_reviews(value,carousel,executions(value))
         with patch.object(ads.st,'session_state',{}):
             data = ads.build_carousel_copy_csv(value,workflow)
             ads.apply_carousel_copy_csv(value,workflow,data)
@@ -278,7 +289,7 @@ class RefreshPlanTests(unittest.TestCase):
         package = workflow[handoff.SAVED_PACKAGE_KEY]
         self.assertEqual(len(package['assets']),5)
         self.assertEqual([a['position'] for a in package['assets']],list(range(1,6)))
-        self.assertEqual(package['refresh_executions'],executions(value))
+        self.assertEqual(package['refresh_executions'],workflow['ad_notes']['refresh_executions'])
         state = {}; handoff.queue_saved_package(package,state=state)
         self.assertTrue(posting.consume_saved_posting_package(ads.build_ads_product_selector_records([ROW]),state=state))
         self.assertEqual(state[handoff.LOADED_KEY]['source_provenance'],value['creative_refresh_context'])

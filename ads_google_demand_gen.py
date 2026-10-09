@@ -115,7 +115,7 @@ def build_google_prompt(product_name, category, country, product_url, *, campaig
     # Inject shared localisation/realism guidance before the main objective, preserving the final STOP.
     guidance = ("\nVERIFIED PRODUCT CONTEXT\n" + context_block + "\n\n"
                 + ads.build_country_language_guidance(country) + "\n\n"
-                + ads.build_sports_cave_image_realism_rules() + "\n\n")
+                + ads.build_sports_cave_image_realism_rules(physical_product=metadata) + "\n\n")
     return prompt.replace("==================================================\nOBJECTIVE", guidance + "==================================================\nOBJECTIVE", 1)
 
 

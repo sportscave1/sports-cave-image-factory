@@ -897,7 +897,8 @@ def _brief_lines(brief):
 def build_prompt_2(project, brief=None):
     project = dict(project or {})
     brief = validate_brief(brief or project.get("brief") or {}, article_ready=True)
-    realism = build_sports_cave_image_realism_rules(include_product_lock=True)
+    realism = build_sports_cave_image_realism_rules(include_product_lock=True,
+        physical_product=project.get('product_metadata') or project)
     return f"""SPORTS CAVE SEO BLOG ARTICLE AND IMAGE CREATION - PROMPT 2
 
 Continue in the same conversation as Prompt 1 and use the completed research brief below.
