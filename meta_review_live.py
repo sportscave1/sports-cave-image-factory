@@ -5,6 +5,9 @@ import hashlib
 import json
 import logging
 import time
+from concurrent.futures import Future
+from threading import Lock
+import meta_review_retry as retry
 
 import meta_ads_client as meta
 import meta_review_benchmarks as benchmarks
@@ -19,6 +22,30 @@ INSIGHT_FIELDS = ('date_start,date_stop,campaign_id,campaign_name,adset_id,adset
                   'actions,action_values,cost_per_action_type,purchase_roas,website_purchase_roas,cost_per_outbound_click')
 CACHE_TTL = 120
 CACHE_LIMIT = 24
+ERROR_TTL = 10
+_flights = {}
+_flight_lock = Lock()
+
+
+def singleflight(key, loader):
+    """Coalesce concurrent identical reports across sessions in this process."""
+    with _flight_lock:
+        future = _flights.get(key)
+        owner = future is None
+        if owner:
+            future = _flights[key] = Future()
+    if not owner:
+        return deepcopy(future.result())
+    try:
+        result = loader()
+        future.set_result(result)
+        return result
+    except BaseException as error:
+        future.set_exception(error)
+        raise
+    finally:
+        with _flight_lock:
+            _flights.pop(key, None)
 REPORTABLE_CAMPAIGN_STATUSES = ('ACTIVE', 'PAUSED', 'ARCHIVED')
 LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +59,7 @@ def non_deleted(row):
 def safe_error(error):
     if isinstance(error, meta.MetaAdsApiError):
         return meta.sanitize_meta_error(str(error))[:350]
-    if isinstance(error, ValueError):
+    if isinstance(error, (ValueError, TimeoutError)):
         return meta.sanitize_meta_error(str(error))[:250]
     return 'The live Meta request could not be completed. Try Refresh From Meta again.'
 
@@ -47,7 +74,7 @@ def invalidate(cache, account_scope):
     # Keep the last successful response for an explicitly labelled stale fallback.
     for key, entry in cache.items():
         if key[0] == account_scope:
-            entry['expires'] = 0
+            entry['expires'] = entry.get('retry_not_before', 0)
 
 
 def cached_read(cache, key, loader, *, clock=time.monotonic):
@@ -56,13 +83,16 @@ def cached_read(cache, key, loader, *, clock=time.monotonic):
     if old.get('expires', 0) > now:
         return deepcopy(old)
     try:
-        data = loader()
+        data = singleflight(key, loader)
         entry = {'data': data, 'refreshed_at': datetime.now(timezone.utc).isoformat(),
                  'error': '', 'stale': False}
     except Exception as error:
         entry = {'data': old.get('data'), 'refreshed_at': old.get('refreshed_at'),
                  'error': safe_error(error), 'stale': old.get('data') is not None}
-    entry['expires'] = clock() + CACHE_TTL  # Also prevent failed-request rerun storms.
+        if isinstance(error, meta.MetaAdsApiError):
+            entry['retry_not_before'] = clock() + retry.retry_after(error.retry_after)
+    entry['expires'] = clock() + (ERROR_TTL if entry['error'] else CACHE_TTL)
+    entry['expires'] = max(entry['expires'], entry.get('retry_not_before', 0))
     cache[key] = entry
     while len(cache) > CACHE_LIMIT:
         del cache[next(iter(cache))]
@@ -81,7 +111,7 @@ class Reader:
         if time.monotonic() >= self.deadline:
             raise ValueError('Live Meta read reached its time limit. Narrow the date range or status.')
         # The existing client is GET-only, uses the configured API version and a 30s timeout.
-        return meta._request(path, params=params, config=self.config)
+        return retry.get(path, params, self.config, self.deadline)
 
     def pages(self, path, params):
         rows, seen = [], set()
@@ -114,7 +144,7 @@ def date_params(since, until):
     return {'time_range': json.dumps({'since': str(since), 'until': str(until)})}
 
 
-def load_campaigns(config, since, until, status='Active and paused'):
+def load_campaigns(config, since, until, status='Active and paused', *, reader=None):
     if status in ('All', 'COMPLETED'):
         statuses = list(REPORTABLE_CAMPAIGN_STATUSES)
     elif status == 'Active and paused':
@@ -123,7 +153,7 @@ def load_campaigns(config, since, until, status='Active and paused'):
         statuses = [status]
     else:
         raise ValueError('Unsupported live campaign status. Use ACTIVE, PAUSED or ARCHIVED.')
-    reader = Reader(config)
+    reader = reader or Reader(config)
     account = reader.get(config['ad_account_id'], {'fields': 'account_id,name,currency,timezone_name'})
     if not isinstance(account, dict) or str(account.get('account_id')) != config['ad_account_id'].removeprefix('act_'):
         raise ValueError('Meta returned a different ad account. Check the existing account configuration.')
@@ -146,10 +176,11 @@ def filter_campaigns(rows, query='', status='All'):
 
 def load_overview(config, since, until):
     """Campaign metadata plus one paginated account-level range report; no ad reads."""
-    result = load_campaigns(config, since, until, status='All')
+    reader = Reader(config)
+    result = load_campaigns(config, since, until, status='All', reader=reader)
     fields = ','.join(field for field in INSIGHT_FIELDS.split(',')
                       if field not in ('ad_id','ad_name','adset_id','adset_name'))
-    rows = Reader(config).pages(config['ad_account_id'] + '/insights', {
+    rows = reader.pages(config['ad_account_id'] + '/insights', {
         'fields': fields, 'level': 'campaign', 'use_unified_attribution_setting': 'true',
         **date_params(since, until)})
     reports = {}
@@ -160,22 +191,24 @@ def load_overview(config, since, until):
         if key in reports and reports[key] != row:
             raise ValueError('Meta returned conflicting campaign range reports. Refresh again.')
         reports[key] = row
-    countries = load_countries(config, config['ad_account_id'], 'campaign', since, until)
+    countries = load_countries(config, config['ad_account_id'], 'campaign', since, until, reader=reader)
+    by_campaign = {}
+    for row in countries:
+        by_campaign.setdefault(str(row.get('campaign_id')), []).append(row)
     for campaign in result['campaigns']:
         metrics = benchmarks.graph_metrics(reports.get(campaign['campaign_id'], {}), website=True)
         # This overview explicitly promises Meta-reported ROAS, not a synthesized ratio.
         metrics['roas'] = metrics['reported_roas']
         campaign['metrics'] = metrics
-        campaign['benchmark'] = benchmarks.evaluate(metrics,country=benchmarks.market([
-            r for r in countries if str(r.get('campaign_id'))==campaign['campaign_id']]),
+        campaign['benchmark'] = benchmarks.evaluate(metrics,country=benchmarks.market(by_campaign.get(campaign['campaign_id'], [])),
             currency=result['account'].get('currency','UNKNOWN'))
     return result
 
 
-def load_countries(config, identity, level, since, until):
+def load_countries(config, identity, level, since, until, *, reader=None):
     # Separate delivery-only report: never sum broken-down reach/conversions into totals.
     try:
-        return Reader(config).pages(str(identity)+'/insights', {
+        return (reader or Reader(config)).pages(str(identity)+'/insights', {
             'fields': level+'_id,spend', 'level':level, 'breakdowns':'country',
             'use_unified_attribution_setting':'true', **date_params(since,until)})
     except meta.MetaAdsApiError as error:
@@ -220,7 +253,7 @@ def load_campaign(config, campaign_id, since, until):
         if key in metrics and metrics[key]['raw'] != row:
             raise ValueError('Meta returned conflicting range reports for an ad. Refresh the campaign.')
         metrics[key] = {'ad_id': key, 'date': row.get('date_start') or str(since or until), 'raw': row}
-    country_rows = load_countries(config,campaign_id,'ad',since,until)
+    country_rows = load_countries(config,campaign_id,'ad',since,until,reader=reader)
     return {'ads': list(ads.values()), 'creatives': list(creatives.values()), 'daily': list(metrics.values()),
         'adsets': [{**r, 'adset_id': str(r['id']), 'adset_name': r.get('name'), 'raw': r} for r in sets if r.get('id')],
         'country_delivery':country_rows,

@@ -203,19 +203,22 @@ def va_styled(rows, evidence):
              for label,key in VA_CAMPAIGN_METRICS if label in frame}
     if 'Status' in frame: formats['Status']=lambda value: '● ACTIVE' if value=='ACTIVE' else value
     result=frame.style.format(formats,na_rep='—')
-    styles=pd.DataFrame('',index=frame.index,columns=frame.columns)
+    style_rows=[]
     palette={'GREEN':'color: #287044','AMBER':'color: #926600','RED':'color: #ae3434','NEUTRAL':'color: #777777'}
     for i,row in enumerate(evidence):
+        cells={}
         b=row.get('benchmark') or {}; rec=row.get('recency') or {}
-        if 'Status' in styles:
+        if 'Status' in frame.columns:
             status=row.get('effective_status') or row.get('status')
-            styles.loc[i,'Status']='color: #287044; background-color: #edf5ef; font-weight: 600' if status=='ACTIVE' else 'color: #777777'
+            cells['Status']='color: #287044; font-weight: 600' if status=='ACTIVE' else 'color: #777777'
         for label,key in [('ROAS','roas'),('CPA','cpa')]:
-            if label in styles: styles.loc[i,label]=palette[b.get('cells',{}).get(key,{}).get('band','NEUTRAL')]
-        if 'Last Sale' in styles: styles.loc[i,'Last Sale']=palette[rec.get('band','NEUTRAL')]
+            if label in frame.columns: cells[label]=palette[b.get('cells',{}).get(key,{}).get('band','NEUTRAL')]
+        if 'Last Sale' in frame.columns: cells['Last Sale']=palette[rec.get('band','NEUTRAL')]
         action=rec.get('action',b.get('recommendation'))
         band='GREEN' if action in ('TOP WINNER','KEEP RUNNING') else 'RED' if action in ('STOP CAMPAIGN','STOP / REPLACE','REFRESH CREATIVE') else 'NEUTRAL' if action in ('LEARNING','NO DATA','PAUSED','ARCHIVED','HISTORICAL') else 'AMBER'
-        if 'Action' in styles: styles.loc[i,'Action']=palette[band]+'; font-weight: 600'
+        if 'Action' in frame.columns: cells['Action']=palette[band]+'; font-weight: 600'
+        style_rows.append(cells)
+    styles=pd.DataFrame(style_rows,index=frame.index,columns=frame.columns).fillna('')
     return result.apply(lambda _:styles,axis=None)
 
 

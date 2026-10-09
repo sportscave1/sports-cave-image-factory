@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+from contextvars import ContextVar
 from datetime import date, timedelta
 
 import requests
@@ -10,6 +11,7 @@ import requests
 DEFAULT_META_API_VERSION = "v26.0"
 META_BASE_URL = "https://graph.facebook.com"
 LOGGER = logging.getLogger(__name__)
+READ_TIMEOUT = ContextVar('meta_read_timeout', default=30)
 
 META_AD_PREVIEW_FORMATS = (
     "MOBILE_FEED_STANDARD",
@@ -34,6 +36,8 @@ class MetaAdsApiError(RuntimeError):
         error_user_title="",
         error_user_msg="",
         request_path="",
+        is_transient=None,
+        retry_after=None,
     ):
         super().__init__(sanitize_meta_error(message))
         self.status_code = status_code
@@ -44,6 +48,8 @@ class MetaAdsApiError(RuntimeError):
         self.error_user_title = sanitize_meta_error(error_user_title)[:500]
         self.error_user_msg = sanitize_meta_error(error_user_msg)[:1000]
         self.request_path = str(request_path or "")
+        self.is_transient = is_transient
+        self.retry_after = retry_after
 
 
 class MetaAdsAmbiguousResultError(MetaAdsApiError):
@@ -238,9 +244,11 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
     fbtrace_id = ""
     error_user_title = ""
     error_user_msg = ""
+    is_transient = None
     try:
         payload = response.json()
         error = payload.get("error") or {}
+        is_transient = error.get('is_transient')
         if error.get("message"):
             message = f"{message}: {error.get('message')}"
         error_code = error.get("code")
@@ -279,6 +287,8 @@ def _raise_for_meta_error(response, *, request_path="", secrets=()):
         error_user_title=error_user_title,
         error_user_msg=error_user_msg,
         request_path=request_path,
+        is_transient=is_transient,
+        retry_after=(getattr(response, 'headers', {}) or {}).get('Retry-After'),
     )
 
 
@@ -293,7 +303,7 @@ def _request(path, params=None, config=None, access_token=None):
         config.get("access_token") if access_token is None else str(access_token)
     )
     try:
-        response = requests.get(url, params=request_params, timeout=30)
+        response = requests.get(url, params=request_params, timeout=READ_TIMEOUT.get())
     except requests.RequestException as error:
         raise MetaAdsApiError(sanitize_meta_error("Meta is unavailable. Try again shortly.")) from error
     _raise_for_meta_error(

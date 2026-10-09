@@ -306,13 +306,27 @@ class LivePageTests(unittest.TestCase):
     def test_failure_without_cache_never_shows_historical_campaigns(self):
         self.at.session_state['meta-review-live-cache']={}
         self.overview.side_effect=meta.MetaAdsApiError('Permission denied'); self.at.run()
-        self.assertTrue(any('LIVE META UNAVAILABLE' in e.value for e in self.at.error))
+        self.assertTrue(any('Meta connection warning' in e.value for e in self.at.warning))
+        self.assertFalse(any('No campaigns' in e.value for e in self.at.info))
         self.assertFalse(self.at.dataframe); self.old.assert_not_called()
 
     def test_failed_refresh_labels_prior_live_campaigns_stale(self):
+        reads=self.recency.call_count
         self.overview.side_effect=meta.MetaAdsApiError('Unavailable'); self.refresh()
-        self.assertTrue(any('stale cached Meta results' in c.value for c in self.at.error))
+        self.assertTrue(any('STALE CACHED META' in c.value and 'Refreshed' in c.value for c in self.at.caption))
+        self.assertEqual(self.recency.call_count,reads)
         self.assertTrue(self.at.dataframe); self.old.assert_not_called()
+
+    def test_empty_success_and_failed_cached_empty_are_distinct(self):
+        self.overview.return_value={'account':{},'campaigns':[]}
+        self.refresh()
+        self.assertTrue(any('No campaigns matched' in c.value for c in self.at.info))
+        self.assertFalse(self.at.warning)
+        self.at.run()  # Reset AppTest's prior button trigger before the next click.
+        self.overview.side_effect=meta.MetaAdsApiError('Unavailable')
+        self.refresh()
+        self.assertTrue(any('cached report contains no campaigns' in c.value for c in self.at.caption))
+        self.assertFalse(self.at.info)
 
     def test_full_details_expand_on_creative_row(self):
         self.details()

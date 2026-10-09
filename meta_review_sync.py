@@ -5,6 +5,7 @@ import time
 from urllib.parse import urlparse
 
 import meta_ads_client as meta
+import meta_review_retry as retry
 import meta_review_store as store
 
 LOGGER=logging.getLogger(__name__)
@@ -33,13 +34,7 @@ class Reader:
     def get(self, path, params):
         if time.monotonic() >= self.deadline:
             raise TimeoutError('Meta sync time limit reached. Select a shorter date range and retry. History was retained.')
-        # Existing client uses a 30s request timeout. Total sync <= deadline + one request.
-        for attempt in range(2):
-            try:
-                return meta._request(path, params=params, config=self.config)
-            except meta.MetaAdsApiError as error:
-                if attempt or error.status_code not in (502, 503, 504) or time.monotonic() >= self.deadline:
-                    raise
+        return retry.get(path, params, self.config, self.deadline)
 
     def pages(self, path, params):
         rows, afters = [], set()

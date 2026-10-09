@@ -1,5 +1,6 @@
 """On-demand live Meta review. Saved decisions are optional Supabase context."""
 from collections import defaultdict
+from copy import deepcopy
 from contextlib import nullcontext
 from html import escape
 from datetime import date, datetime, timedelta
@@ -354,7 +355,7 @@ def simple_winner(ads,history,context,selected=None):
 
 def live_status(entry, label):
     if entry['error']:
-        st.error('LIVE META UNAVAILABLE · '+entry['error'])
+        st.warning('Meta connection warning · '+entry['error']+' · Use Refresh From Meta to retry.', icon='⚠️')
     if entry.get('refreshed_at'):
         stamp = datetime.fromisoformat(entry['refreshed_at']).astimezone(ZoneInfo('Australia/Sydney'))
         source = 'STALE CACHED META' if entry['stale'] else 'LIVE META · brief cache'
@@ -379,8 +380,7 @@ def render_campaign_details(config, campaign, since, until):
     with st.spinner('Reading selected campaign…'):
         entry=live.cached_read(cache,(live.scope(config),'campaign',cid,since,until),
             lambda:live.load_campaign(config,cid,since,until))
-    if entry.get('error'):
-        st.error('Meta campaign data unavailable. Please retry Refresh From Meta.')
+    live_status(entry, 'Campaign ads')
     if entry['data'] is None: return
     history=entry['data']
     history['currency']=(campaign.get('benchmark') or {}).get('currency','UNKNOWN')
@@ -468,11 +468,22 @@ def render_page():
     .stMainBlockContainer:has(.meta-review-page-marker) h1 { padding-top:0; padding-bottom:.4rem; font-size:1.8rem; }
     .st-key-meta-review-toolbar [data-testid="stHorizontalBlock"] { gap:.65rem; align-items:end; }
     .st-key-meta-review-toolbar button, .st-key-meta-review-toolbar input { min-height:38px; }
+    .stMainBlockContainer:has(.meta-review-page-marker) { font-family:'Segoe UI',system-ui,sans-serif; }
+    .stMainBlockContainer:has(.meta-review-page-marker) [data-testid="stDataFrame"] { border:1px solid #dedede; border-radius:4px; overflow:hidden; }
+    .st-key-meta-review-toolbar { padding:8px 0; border-bottom:1px solid #e5e5e5; }
+    .st-key-meta-review-toolbar button:focus-visible { outline:2px solid #96732e; outline-offset:2px; }
+    .st-key-meta-review-toolbar [data-baseweb="input"], .st-key-meta-review-toolbar [data-baseweb="select"] > div { background:#fff; border-color:#d8d8d8; border-radius:4px; }
+    .st-key-meta-review-toolbar [data-baseweb="input"]:focus-within { border-color:#96732e; box-shadow:0 0 0 1px #96732e; }
+    .stMainBlockContainer:has(.meta-review-page-marker) [data-testid="stAlert"] { padding:.4rem .65rem; border:1px solid #e4ddc9; background:#faf8f0; border-radius:4px; }
     .st-key-meta-review-toolbar button[kind="primary"] { background:#b99448; border-color:#b99448; color:#171510; white-space:nowrap; }
     .st-key-meta-review-winner-controls button[kind="primary"] { background:#b99448; border-color:#b99448; color:#171510; }
     @media (max-width:1100px) {
       .st-key-meta-review-toolbar [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
       .st-key-meta-review-toolbar [data-testid="stColumn"] { min-width:220px; flex:1 1 40%; }
+    }
+    @media (max-width:600px) {
+      .st-key-meta-review-toolbar [data-testid="stColumn"] { min-width:0; flex:1 1 100%; }
+      .stMainBlockContainer:has(.meta-review-page-marker) { padding-inline:12px; }
     }
     div[role="dialog"]:has(.meta-review-modal-marker) {
         width:min(96vw,1380px); max-width:96vw; max-height:92vh; overflow-y:auto;
@@ -496,7 +507,7 @@ def render_page():
         return
     since,until=period
     if not config.get('configured'):
-        render_campaign_list([],config,account_scope,period,today)
+        render_campaign_list([],config,account_scope,period,today,failed=True)
         st.caption('Meta connection unavailable · Configure the existing account connection.')
         st.dataframe([],column_order=['Campaign','Status','Started']+[label for label,_ in tables.METRICS],hide_index=True,width='stretch',placeholder='—')
         return
@@ -506,20 +517,40 @@ def render_page():
             lambda:live.load_overview(config,since,until))
     data=entry['data']
     account=(data or {}).get('account',{})
-    if entry['error']: st.error('LIVE META UNAVAILABLE · '+entry['error']+(' · Showing stale cached Meta results.' if entry['stale'] else ''))
+    live_status(entry, 'Campaign report')
     if data is None or not data['campaigns']:
-        render_campaign_list([],config,account_scope,period,today)
+        render_campaign_list([],config,account_scope,period,today,failed=bool(entry['error']),cached_empty=bool(entry['stale']))
         return
+    if entry['stale']:
+        # Keep the complete prior view; don't combine failed-period totals with
+        # newly fetched supplemental observations or trigger optional reads.
+        render_campaign_list(data['campaigns'],config,account_scope,period,today)
+        return
+    preview=st.empty()
+    sale_key=(account_scope,'last-sale-campaigns')
+    if (cache.get(sale_key) or {}).get('expires',0)<=live.time.monotonic():
+        # Stream complete primary metrics before the optional conversion-hour
+        # request. This temporary read-only grid is replaced in-place below.
+        with preview.container():
+            st.caption('Campaign totals loaded · Checking recent sales…')
+            pending=tables.va_campaign_rows(tables.sort_campaigns(data['campaigns']))
+            for item in pending:
+                item['Last Sale']='Checking…'
+                item['Action']='Checking recent sales…'
+            st.dataframe(tables.va_styled(pending,[]),hide_index=True,width='stretch',
+                         placeholder='—',height=min(660,40+32*len(pending)),row_height=32)
     sale_entry=live.cached_read(cache,(account_scope,'last-sale-campaigns'),
         lambda:recency.load(config,config['ad_account_id'],'campaign',account.get('timezone_name') or 'Australia/Sydney'))
     for row in data['campaigns']:
         row['recency']=recency.signal(row,sale_entry['data'])
         row['account_timezone']=account.get('timezone_name') or 'Australia/Sydney'
+    cache[(account_scope,'overview',since,until)]['data']=deepcopy(data)
+    preview.empty()
     render_campaign_list(data['campaigns'],config,account_scope,period,today)
 
 
 @st.fragment
-def render_campaign_list(campaigns,config,account_scope,period,today):
+def render_campaign_list(campaigns,config,account_scope,period,today,failed=False,cached_empty=False):
     with st.container(key='meta-review-toolbar'):
         controls=st.columns([1.1,2.5,1.1,1.8],vertical_alignment='bottom',gap='small')
         refresh=controls[0].button('Refresh From Meta',type='primary',disabled=not config.get('configured'))
@@ -539,7 +570,11 @@ def render_campaign_list(campaigns,config,account_scope,period,today):
     since,until=selected_period
     rows=campaign_search.search_campaigns(tables.sort_campaigns(campaigns,sort_by),query)
     if not rows:
-        st.info('No matching campaigns.' if query.strip() else 'No live campaigns returned.')
+        if failed:
+            st.caption('The cached report contains no campaigns; the current request failed. Use Refresh From Meta to check this scope again.' if cached_empty else
+                       'No complete report is available for this account and reporting period. Use Refresh From Meta to retry.')
+        else:
+            st.info('No matching campaigns.' if query.strip() else 'No campaigns matched the selected reporting scope.')
         return
     search_key='-'+hashlib.sha256(query.encode()).hexdigest()[:12] if query else ''
     key=f"meta-review-campaign-table-{sort_by}-{since}-{until}-{st.session_state.get('meta-review-table-epoch',0)}{search_key}"
