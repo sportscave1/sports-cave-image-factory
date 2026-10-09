@@ -195,7 +195,10 @@ def publish_direct(store,user,identity,revision,env=None):
         if not has_changes(store,fresh,flow,conn):return fresh
         if fresh['config'].get('publication',{}).get('state')=='PUBLISHING':raise ValueError('A publication is already in progress.')
         if fresh['config']['published_version']!=version-1:raise ValueError('A newer publication exists.')
-        return commit(store,conn,fresh,*prepared,version)
+        result=commit(store,conn,fresh,*prepared,version)
+    from crm_thumbnail_cache import prewarm
+    prewarm(prepared[1],version,store)
+    return result
 
 
 def safe_reason(exc):
@@ -257,6 +260,8 @@ def tick(store,owner,env=None):
                 raise ValueError('A newer publication exists.')
             commit(store,conn,row,*prepared,job['publication_version'],row['config']['publication'])
             conn.execute("UPDATE crm_automation_publish_jobs SET state='SUCCEEDED',completed_at=now(),lease_until=NULL,error=NULL WHERE id=%s",(job['id'],))
+        from crm_thumbnail_cache import prewarm
+        prewarm(prepared[1],job['publication_version'],store)
         LOG.info('automation_publication job_id=%s revision=%s state=SUCCEEDED claim_ms=%.1f validate_ms=%.1f commit_ms=%.1f',
                  job['id'],job['revision'],(preparing-started)*1000,(prepared_at-preparing)*1000,(perf_counter()-prepared_at)*1000)
     except Exception as exc:

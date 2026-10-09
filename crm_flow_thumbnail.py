@@ -48,32 +48,54 @@ def miniature(source,settings):
     return ''.join(parser.out)
 
 @st.fragment
-def thumbnail(store,step):
-    from crm_preview_cache import presentation_document
-    source=json.dumps(presentation_document(step['document']),sort_keys=True,default=str)
-    digest=hashlib.sha256(source.encode()).hexdigest()[:20]
-    key='flow-thumb-'+step['step_id']+'-'+digest
+def thumbnail(store,step,row):
+    import base64
+    from crm_thumbnail_cache import selection,request,source_loader
+    from crm_thumbnail_store import private_store
+    digest,label,live=selection(row,step)
+    key='flow-thumb-'+step['step_id']+'-'+digest[:20]
     with st.container(key=key):
-        if st.button('Load email thumbnail',key=key+'load') or st.session_state.get(key):
+        wake=st.button('Load email thumbnail',key=key+'load')
+        phase='DEFERRED';data=None
+        if wake or st.session_state.get(key):
             st.session_state[key]=True
-            try:
-                # Rendering settings are shared per route; no repeated default
-                # reads for every visible card. Authored sections own their copy.
-                cfg=st.session_state.get('_flow_thumbnail_settings')
-                if cfg is None:cfg=store.render_settings();st.session_state['_flow_thumbnail_settings']=cfg
-                value=miniature(source,json.dumps(cfg,sort_keys=True,default=str))
-                st.html('<div id="'+key+'" class="sc-flow-thumbnail" role="button" tabindex="0" data-email="'+escape(value,quote=True)+'" data-preview="flow-preview-'+step['step_id']+'" aria-label="Preview saved email design"></div>')
-            except (ValueError,RuntimeError):st.caption('Preview unavailable')
-        else:st.html('<div class="sc-flow-thumb-trigger" data-key="'+key+'" style="width:76px;height:100px;background:#f3f1ec" aria-label="Email thumbnail loading"></div>')
+            phase,data=request(digest,source_loader(store,row,step,live),private_store(store))
+        if data:
+            body='<img width="76" height="100" loading="lazy" decoding="async" alt="'+escape(label+' email preview')+'" src="data:image/webp;base64,'+base64.b64encode(data).decode()+'">'
+        else:
+            text={'DEFERRED':'Preview','LOADING':'Preparing preview?','BUSY':'Preview queued?','ERROR':'Preview unavailable. Click to open email.'}[phase]
+            body='<span role="status">'+text+'</span>'
+        st.html('<div id="'+key+'" class="sc-flow-thumbnail" role="button" tabindex="0" data-phase="'+phase+'" data-key="'+key+'" data-preview="flow-preview-'+step['step_id']+'" aria-label="Open '+escape(label)+' email preview" style="width:76px;height:100px;overflow:hidden;background:#fff;font-size:10px;display:flex;align-items:center;justify-content:center">'+body+'</div><small style="font-size:10px">'+escape(label)+'</small>')
 
 SCRIPT='''<script>(()=>{
- if(window.scFlowThumbObserver)return;
-
- const seen=new WeakSet();const queue=[];let active=null;
- const pump=()=>{if(active?.isConnected)return;active=null;while(queue.length){const e=queue.shift();if(!e.isConnected)continue;active=e;document.querySelector('.st-key-'+e.dataset.key+'load button')?.click();break;}};
- const preview=e=>{const host=e.target.closest?.('.sc-flow-thumbnail');if(host&&(e.type==='click'||['Enter',' '].includes(e.key))){e.preventDefault();document.querySelector('.st-key-'+host.dataset.preview+' button')?.click();}};document.addEventListener('click',preview);document.addEventListener('keydown',preview);
- const observer=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;observer.unobserve(entry.target);queue.push(entry.target);pump();}},{rootMargin:'100px'});
- const scan=()=>{const root=document.querySelector('.st-key-crm-automation-editor');if(!root){observer.disconnect();queue.length=0;active=null;return;}root.querySelectorAll('.sc-flow-thumbnail:not([data-mounted])').forEach(e=>{e.dataset.mounted='1';const shadow=e.attachShadow({mode:'open'});const style=document.createElement('style');style.textContent=':host{display:block;width:76px;height:100px;overflow:hidden;background:white}.email{width:600px;transform:scale(.1266);transform-origin:top left;pointer-events:none;color:#222;font:14px Arial}';const email=document.createElement('div');email.className='email';email.innerHTML=e.dataset.email;shadow.append(style,email);delete e.dataset.email;});root.querySelectorAll('.sc-flow-thumb-trigger').forEach(e=>{if(!seen.has(e)){seen.add(e);observer.observe(e);}});pump()};
- let queued=false;const mutations=new MutationObserver(()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;scan()})}});
- mutations.observe(document.body,{childList:true,subtree:true});window.scFlowThumbObserver=observer;scan();
+ if(window.scFlowThumbController){window.scFlowThumbController.scan();return;}
+ const visible=new Set(), attempts=new Map();let observed=new WeakSet();
+ const root=()=>document.querySelector('.st-key-flow-workspace');
+ const preview=e=>{const host=e.target.closest?.('.sc-flow-thumbnail');if(host&&(e.type==='click'||['Enter',' '].includes(e.key))){e.preventDefault();document.querySelector('.st-key-'+host.dataset.preview+' button')?.click();}};
+ document.addEventListener('click',preview);document.addEventListener('keydown',preview);
+ const observer=new IntersectionObserver(entries=>{for(const e of entries){if(e.isIntersecting)visible.add(e.target);else visible.delete(e.target);}pump();},{rootMargin:'80px'});
+ const pump=()=>{
+   if(!root()){observer.disconnect();observed=new WeakSet();visible.clear();attempts.clear();return;}
+   let count=0;
+   for(const e of visible){
+     if(!e.isConnected){observer.unobserve(e);visible.delete(e);continue;}
+     if(!['DEFERRED','LOADING','BUSY'].includes(e.dataset.phase))continue;
+     const key=e.dataset.key,now=Date.now(),last=attempts.get(key)||{at:0,start:now};
+     if(now-last.start>90000){e.dataset.phase='ERROR';e.textContent='Preview unavailable. Click to open email.';continue;}
+     if(1500>now-last.at)continue;
+     const button=document.querySelector('.st-key-'+key+'load button');
+     // Missing controls are retried after mount; never mark them loaded early.
+     if(button){attempts.set(key,{at:now,start:last.start});button.click();if(++count===2)break;}
+   }
+ };
+ const scan=()=>{
+   root()?.querySelectorAll('.sc-flow-thumbnail').forEach(e=>{
+     if(!observed.has(e)){observed.add(e);observer.observe(e);}
+     const img=e.querySelector('img');
+     if(img&&!img.dataset.guarded){img.dataset.guarded='1';const failed=()=>{e.dataset.phase='ERROR';e.textContent='Preview unavailable. Click to open email.';};img.addEventListener('error',failed);if(img.complete&&!img.naturalWidth)failed();}
+   });pump();
+ };
+ let queued=false;new MutationObserver(()=>{if(!queued){queued=true;requestAnimationFrame(()=>{queued=false;scan();});}}).observe(document.body,{childList:true,subtree:true});
+ setInterval(()=>{if(root())scan();},1500);
+ window.scFlowThumbController={scan};scan();
 })()</script>'''

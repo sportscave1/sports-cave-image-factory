@@ -25,3 +25,6 @@ svix==1.99.1
 # official, universal wheel that the successful build installed, hash verified.
 # This bypasses that index lookup without removing Svix/webhook verification.
 python-dateutil @ https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl#sha256=a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+
+# Used only by the isolated background email-thumbnail renderer.
+playwright==1.63.0

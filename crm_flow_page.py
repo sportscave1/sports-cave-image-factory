@@ -173,7 +173,7 @@ def sequence(shop,store,user,identity,period):
         amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+delay_origin(flow['emails'],i)
         with st.container(horizontal=True,key='flow-row-'+sid):
             with st.container(width=78):
-                thumbnail(store,s)
+                thumbnail(store,s,row)
                 if st.button('Preview email',key='flow-preview-'+sid):st.session_state['flow_preview_step']=sid
             with st.container(width='stretch'):
                 name=s.get('name') or 'Email '+str(i+1);subject=content.get('subject') or 'Subject not configured';preheader=content.get('preheader') or ''
@@ -193,12 +193,14 @@ def sequence(shop,store,user,identity,period):
     step_performance(store,identity,slots,detail_slots)
     preview=next((s for s in flow['emails'] if s['step_id']==st.session_state.get('flow_preview_step')),None)
     if preview:
-        st.caption('Saved email preview · neutral sample data')
+        from crm_thumbnail_cache import selection,source_loader
+        _,label,live=selection(row,preview)
+        st.caption(label+' email preview - neutral sample data')
         from crm_html_workspace import flow_preview
         from crm_checkout_preview import needs_checkout,document,sample
-        doc=deepcopy(preview['document'])
+        doc,cfg=source_loader(store,row,preview,live)()
         if needs_checkout(doc):doc,_=document(doc,sample(doc))
-        flow_preview(doc,store.render_settings(),'flow-readonly-'+preview['step_id'])
+        flow_preview(doc,cfg,'flow-readonly-'+preview['step_id'])
         if st.button('Close preview'):st.session_state.pop('flow_preview_step',None);st.rerun(scope='fragment')
     refresh_toolbar()
 

@@ -152,6 +152,9 @@ if __name__ == "__main__":
     # Readiness logging is diagnostic only. Never delay port binding on a
     # Shopify Admin API call during a process restart.
     collector_vault.log_collector_vault_readiness(check_shopify=False)
+    if os.getenv('RENDER'):
+        from crm_thumbnail_cache import warm_renderer
+        warm_renderer()
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),
