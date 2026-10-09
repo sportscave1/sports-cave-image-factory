@@ -47,28 +47,8 @@ def execution_review(ads, result, workflow):
     st = ads.st
     notes = workflow.setdefault('ad_notes', {})
     records = notes.get('refresh_executions') or []
-    selected = result['creative_refresh_context']['refresh_plan']
-    issues = ads.ads_refresh_generation.plan.execution_issues(records, selected, result['product_name'], 'Carousel')
-    with st.expander('Winner refresh execution review', expanded=bool(issues)):
-        st.caption('Paste the card analysis and prompts returned with the CSV. Required before Save now. Final images still need visual review.')
-        key = f"carousel-refresh-executions::{result['context_key']}"
-        args = {'key': key, 'height': 120}
-        if key not in st.session_state:
-            args['value'] = json.dumps(records, ensure_ascii=False, indent=2)
-        text = st.text_area('Card execution notes (JSON)', **args)
-        try:
-            candidate = json.loads(text)
-            issues = ads.ads_refresh_generation.plan.execution_issues(candidate, selected, result['product_name'], 'Carousel')
-            notes['refresh_executions'] = candidate
-            notes.pop('refresh_execution_error', None)
-        except (ValueError, TypeError):
-            # Retain the last valid analysis; invalid current edits must still block Save/Post.
-            notes['refresh_execution_error'] = 'Paste a valid JSON array containing every card execution.'
-            issues = [notes['refresh_execution_error']]
-        if issues:
-            st.warning('\n'.join('• '+issue for issue in issues))
-        else:
-            st.caption('All card declarations complete · visually review the finished images before use.')
+    # Historical analysis is preserved, never required or marked reviewed here.
+    # Generated prompts remain available without asking users to author JSON.
     records = notes.get('refresh_executions')
     if not isinstance(records, list):
         return

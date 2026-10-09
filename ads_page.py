@@ -11738,13 +11738,10 @@ def instant_experience_package_ready(result, workflow):
         return False
     _configure_refresh_copy(result, workflow)
     return (_instant_experience_image_ready_count(workflow) == len(INSTANT_EXPERIENCE_CONCEPTS)
-            and instant_experience_copy_complete(workflow) and not creative_refresh_quality_issues(result, workflow))
+            and instant_experience_copy_complete(workflow))
 
 
 def _instant_experience_package_items(result, workflow):
-    issues = creative_refresh_quality_issues(result, workflow)
-    if issues:
-        raise ValueError("Creative Refresh checks: " + " · ".join(issues))
     _configure_refresh_copy(result, workflow)
     _compact_instant_experience_slots(workflow)
     if not instant_experience_copy_complete(workflow):
@@ -12892,9 +12889,6 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
         st.caption(google_ads.POSTING_HELP)
         return
     issues = quality_issues if quality_issues is not None else creative_refresh_quality_issues(result, workflow)
-    if issues:
-        st.caption("Complete refresh quality checks before POST NOW.")
-        return
     package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
     if not package and source_matches and result.get("campaign_type") == "Carousel":
         _restore_saved_carousel_posting_package(result, workflow)
@@ -12935,16 +12929,17 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
 
 def save_ads_images_to_dropbox(access_token, root_path, destination, result, workflow, *, progress_callback=None):
     """Use the existing Ads save; persist a reopenable refresh only after uploads."""
-    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        validation = validate_ads_inputs(result['product_name'], result['category'], result['country'],
-                                         result['campaign_type'], product_url=result['product_url'])
-        if validation:
-            raise ValueError(validation)
-        if not ads_images_ready(result, workflow):
-            raise ValueError('Complete all required generated images before saving this refresh.')
+    refresh = result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH
+    if refresh:
         workflow['refresh_workspace_saved'] = False
-    outcomes = _save_ads_images_to_dropbox(access_token, root_path, destination, result, workflow,
-                                         progress_callback=progress_callback)
+        workflow.pop('refresh_workspace_export', None)
+    if refresh and _is_instant_experience_result(result) and not instant_experience_package_ready(result, workflow):
+        import ads_refresh_draft
+        ads_refresh_draft.prepare_folder(sys.modules[__name__], access_token, root_path, destination, result, workflow)
+        outcomes = dict(workflow.get('outcomes') or {})
+    else:
+        outcomes = _save_ads_images_to_dropbox(access_token, root_path, destination, result, workflow,
+                                             progress_callback=progress_callback)
     if result.get('workflow_mode') != ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         return outcomes
     if any(row.get('status') == 'failed' for row in outcomes.values()):
@@ -12953,6 +12948,9 @@ def save_ads_images_to_dropbox(access_token, root_path, destination, result, wor
     workflow['outcomes'] = outcomes
     workflow['refresh_workspace_saved'] = True
     folder = workflow['saved_folder_path']
+    if not workflow.get(posting_handoff.SAVED_PACKAGE_KEY):
+        import ads_refresh_draft
+        workflow[posting_handoff.SAVED_PACKAGE_KEY] = ads_refresh_draft.package(sys.modules[__name__], result, workflow, folder)
     try:
         data = ads_refresh_saved.dumps(result, workflow)
         uploaded = dropbox_integration.upload_batch(access_token, folder,
@@ -12966,6 +12964,7 @@ def save_ads_images_to_dropbox(access_token, root_path, destination, result, wor
         workflow.pop(posting_handoff.SAVED_PACKAGE_KEY, None)
         raise ValueError('The saved refresh workspace could not be persisted. Save again before POST NOW.')
     workflow['refresh_workspace_export'] = data
+    workflow['refresh_saved_signature'] = _ads_saved_source_signature(result, workflow)
     return outcomes
 
 
@@ -12989,9 +12988,6 @@ def _save_ads_images_to_dropbox(
         workflow.setdefault("ad_notes", {})["instant_experience_concepts"] = (
             _instant_experience_copy_notes_with_widget_state(result, workflow)
         )
-    refresh_issues = creative_refresh_quality_issues(result, workflow)
-    if refresh_issues:
-        raise ValueError("Creative Refresh checks: " + " · ".join(refresh_issues))
     clean_root = dropbox_integration.normalize_dropbox_path(root_path)
     clean_destination = dropbox_integration.normalize_dropbox_path(destination)
     if not dropbox_integration.path_is_within_root(clean_destination, clean_root):
@@ -13347,7 +13343,7 @@ def _render_instant_experience_package_save(result, workflow):
             and ads_package_paths.saved_files_are_flat(workflow)
         )
     if not package_ready:
-        st.caption("Complete all three covers and their single copy pairs before saving the package." if _refresh_copy_count(result) == 1 else "Complete all three covers and all nine description options before saving the package.")
+        st.caption("Draft can be saved now. Complete the three covers and copy in Posting before creating ads." if _refresh_copy_count(result) == 1 else "Draft can be saved now. Complete missing covers and copy before creating ads.")
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         package_saved = package_saved and bool(workflow.get('refresh_workspace_saved'))
 
@@ -13356,7 +13352,7 @@ def _render_instant_experience_package_save(result, workflow):
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
-        disabled=bool(workflow.get("saving")) or package_saved or not package_ready,
+        disabled=bool(workflow.get("saving")) or package_saved or (not package_ready and result.get("workflow_mode") != ADS_WORKFLOW_MODE_CREATIVE_REFRESH),
         use_container_width=True,
     ):
         workflow["save_open"] = True
@@ -13389,7 +13385,7 @@ def _render_instant_experience_package_save(result, workflow):
     if action_columns[0].button(
         action_label,
         key=f"ads-images-save-confirm::{result['context_key']}",
-        disabled=bool(workflow.get("saving")) or package_saved or not package_ready,
+        disabled=bool(workflow.get("saving")) or package_saved or (not package_ready and result.get("workflow_mode") != ADS_WORKFLOW_MODE_CREATIVE_REFRESH),
         use_container_width=True,
     ):
         workflow["saving"] = True
@@ -13509,11 +13505,6 @@ def _render_ads_image_save(result, workflow, *, quality_issues=None):
     if not _result_image_slots(result):
         return
     issues = quality_issues if quality_issues is not None else creative_refresh_quality_issues(result, workflow)
-    if issues:
-        st.button('Save now', disabled=True, icon=':material/save:',
-                  key=f"ads-images-save-open::{result['context_key']}", use_container_width=True)
-        st.caption("Before saving: " + " · ".join(issues))
-        return
     if _is_instant_experience_result(result):
         _render_instant_experience_package_save(result, workflow)
         return
@@ -13574,11 +13565,10 @@ def _render_ads_image_save(result, workflow, *, quality_issues=None):
         disabled=(
             bool(workflow.get("saving"))
             or all_saved
-            or (result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH and not ready)
         ),
         use_container_width=True,
     ):
-        if not has_valid_upload and not any(_ads_notes_for_workflow(workflow).values()):
+        if result.get("workflow_mode") != ADS_WORKFLOW_MODE_CREATIVE_REFRESH and not has_valid_upload and not any(_ads_notes_for_workflow(workflow).values()):
             st.warning("Upload at least one valid generated image or add setup notes before saving.")
             return
         workflow["save_open"] = True
@@ -14274,13 +14264,17 @@ def creative_refresh_quality_issues(result, workflow):
 
 def _render_ads_final_actions(result, workflow, *, source_matches=True):
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-        issues = creative_refresh_quality_issues(result, workflow)
+        issues = []
         if not source_matches:
             issues = ['Settings changed. Select Submit to prepare the matching refresh before saving.'] + issues
         with st.container(key='ads-refresh-actions'):
             save_col, post_col = st.columns(2)
             with save_col:
-                _render_ads_image_save(result, workflow, quality_issues=issues)
+                if source_matches:
+                    _render_ads_image_save(result, workflow, quality_issues=[])
+                else:
+                    st.button('Save now', disabled=True, key=f"ads-images-save-open::{result['context_key']}")
+                    st.caption('Product settings changed. Apply them with Submit before saving this refresh.')
             with post_col:
                 _render_saved_ad_post_now(result, workflow, source_matches=source_matches, quality_issues=issues)
     else:
