@@ -232,18 +232,32 @@ def render(content,row,unsubscribe,context=None):
             raise ValueError('Personalisation recipient context mismatch.')
         wanted=set(TOKEN.findall(doc['content']['subject'])+TOKEN.findall(doc['content']['preheader']))
         doc=personalise(doc,resolve(source,customer,trigger=content.get('trigger'),wanted=wanted),trigger=content.get('trigger'))
-    from crm_abandoned_checkout import dynamic,hydrate,context as checkout_context,reject_unresolved
+    from crm_abandoned_checkout import dynamic,hydrate,reject_unresolved
     from crm_frame_banner_template import present as has_banner
     from crm_lifestyle_images import present as has_lifestyle
-    if dynamic(doc) or ((has_banner(doc) or has_lifestyle(doc)) and content.get('trigger')=='abandoned'):
+    from crm_recovery_links import pasted
+    recovery_data=None; recovery_expected=0; recovery_required=False
+    if dynamic(doc) or pasted(doc) or ((has_banner(doc) or has_lifestyle(doc)) and content.get('trigger')=='abandoned'):
         source=(context or {}).get('_checkout')
         if content.get('trigger')!='abandoned' or not source or source.get('id')!=(context or {}).get('_checkout_id') or (source.get('customer') or {}).get('id')!=row['shopify_customer_id']:
             raise ValueError('Checkout recipient context mismatch.')
-        doc=hydrate(doc,checkout_context(source))
+        from crm_recovery_links import destination, inspect, sources, checkout_url
+        from crm_recovery_links import present as recovery_present
+        from crm_checkout_styles import count
+        from crm_checkout_elements import recovery_actions
+        recovery_required=bool(count(doc) or recovery_present(doc) or recovery_actions(doc))
+        from crm_abandoned_checkout import render_context
+        recovery_data=render_context(source,doc)
+        recovery_data['recovery_url']=destination(recovery_data,discount)
+        doc=hydrate(doc,recovery_data)
+        recovery_expected=sum(sum(checkout_url(url) for url in inspect(html).urls) for html in sources(doc))
     if not all(production_checks(doc,content['render_settings'],reviewed_audience=True).values()):raise ValueError('Automation production readiness failed.')
     message=render_campaign(doc,content['render_settings'],unsubscribe_url=unsubscribe,production=True,
                             campaign_id=str(row['id']),send_id=send_identity(row['id']))
-    message=apply_links(message,discount)
+    if recovery_data is not None and (recovery_required or recovery_expected):
+        from crm_recovery_links import verify
+        verify(message,recovery_data['recovery_url'],recovery_expected)
+    else:message=apply_links(message,discount)
     reject_unresolved(message['html']);reject_unresolved(message['text'])
     validate_rendered_email(message);message['unsubscribe_url']=unsubscribe
     return message

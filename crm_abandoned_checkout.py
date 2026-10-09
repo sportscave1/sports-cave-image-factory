@@ -12,11 +12,37 @@ TEMPLATE='Abandoned Checkout — Collector Reminder'
 def dynamic(doc):
     from crm_checkout_styles import count
     from crm_wall_preview_template import present
-    return bool(count(doc)) or present(doc)
+    from crm_recovery_links import present as recovery_present
+    from crm_checkout_elements import checkout_required as elements_present
+    return bool(count(doc)) or present(doc) or recovery_present(doc) or elements_present(doc)
+
+
+def needs_items(doc):
+    from crm_checkout_styles import count
+    from crm_wall_preview_template import present as wall
+    from crm_lifestyle_images import present as lifestyle
+    from crm_frame_banner_template import present as banner
+    from crm_checkout_elements import TYPE,DYNAMIC
+    return bool(count(doc)) or wall(doc) or lifestyle(doc) or banner(doc) or any(
+        s.get('visible') and s.get('type')==TYPE and (s['settings']['kind'] in DYNAMIC or s['settings']['action'] in ('wall','product'))
+        for s in doc.get('middle_sections',[]))
+
+
+def render_context(checkout,doc):
+    if needs_items(doc):
+        from crm_checkout_styles import count
+        editions=bool(count(doc)) or any(s.get('visible') and s.get('type')=='checkout_element' and s['settings']['kind']=='edition' for s in doc.get('middle_sections',[]))
+        return context(checkout,edition_reader=None if editions else lambda **_:[])
+    from crm_recovery_links import destination
+    if not isinstance(checkout,dict) or checkout.get('completedAt') or not re.fullmatch(r'gid://shopify/AbandonedCheckout/\d+',checkout.get('id','')):
+        raise ValueError('Verified checkout unavailable or already recovered.')
+    result={'checkout_id':checkout['id'],'recovery_url':checkout.get('abandonedCheckoutUrl',''),'items':[]}
+    destination(result)
+    return result
 
 
 def reject_unresolved(value):
-    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_WALL_PREVIEW_URL|SC_FRAME_BANNER_|SC_LIFESTYLE_IMAGE_',str(value)):
+    if re.search(r'\{\{|\{%|SC_ABANDONED_CHECKOUT|SC_CHECKOUT_RECOVERY_URL|SC_WALL_PREVIEW_URL|SC_FRAME_BANNER_|SC_LIFESTYLE_IMAGE_',str(value)):
         raise ValueError('Unresolved checkout template syntax. Use the Abandoned Checkout template instead of Liquid.')
 
 
@@ -167,7 +193,7 @@ def edition_label(edition):
     limit=edition.get('limit');number=edition.get('next')
     if type(limit) is not int or limit<1:return ''
     if type(number) is int and 1<=number<=limit and edition.get('remaining',0)>0:
-        return 'YOUR EDITION NUMBER WILL BE #'+str(number).zfill(3 if limit==100 else len(str(limit)))+'/'+str(limit)
+        return 'NEXT AVAILABLE EDITION · #'+str(number).zfill(3 if limit==100 else len(str(limit)))+'/'+str(limit)
     return 'LIMITED TO '+str(limit)+' WORLDWIDE'
 
 
@@ -176,6 +202,8 @@ def block_html(data,*,test=False):
     rows=[]
     for index,item in enumerate(data['items']):
         image='' if not item['image'] else '<img class="sc-cart-image" src="'+escape(item['image'],quote=True)+'" alt="'+escape(item['title'],quote=True)+'" style="display:block;width:100%;height:auto">'
+        if image and not (test or data.get('preview_only')):
+            image='<a href="'+escape(data['recovery_url'],quote=True)+'">'+image+'</a>'
         from crm_catalogue import price_label
         price=price_label({'currency':item['currency'],'price':item['amount']}) if item['amount'] is not None else 'Price unavailable in sample preview'
         variant,dimensions=variant_details(item['variant']);label=edition_label(item.get('edition'))
@@ -195,16 +223,23 @@ def block_html(data,*,test=False):
 def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None,shop=None):
     from crm_checkout_styles import MARKER,compile_document
     from crm_wall_preview_template import resolve
-    result=resolve(doc,data)
+    from crm_checkout_elements import resolve as resolve_elements
+    result=resolve(resolve_elements(doc,data,shop=shop),data)
     from crm_frame_banner_template import resolve as resolve_banner
     result=resolve_banner(result,data)
     from crm_lifestyle_images import resolve as resolve_lifestyle
     result=resolve_lifestyle(result,data,shop=shop)
+    from crm_recovery_links import resolve as resolve_recovery, destination
+    from crm_checkout_styles import count
+    from crm_recovery_links import present as recovery_present
+    if data and not (test or data.get('preview_only')) and (count(result) or recovery_present(result)): destination(data)
+    result=resolve_recovery(result,data,test=test)
     for section in result.get('middle_sections',[]):
         if section['type']==BLOCK:
             if section['visible'] and not data:raise ValueError('No recent abandoned checkout available for preview.')
             section.update(type='image',html=block_html(data,test=test) if section['visible'] else '')
         elif section['type'] in ('html','image'):
+            if not section['visible']:section['html']='';continue
             if MARKER in section['html']:
                 if not data:raise ValueError('Checkout context could not be resolved.')
                 section['html']=section['html'].replace(MARKER,block_html(data,test=test))
@@ -217,6 +252,8 @@ def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None,shop=None)
     reject_unresolved(result.get('custom_html',''))
     from crm_checkout_migration import join_fragments
     join_fragments(result)
+    from crm_recovery_links import inspect,sources
+    for source in sources(result):inspect(source)
     if not preview:return compile_document(result,strict=True)
     try:return compile_document(result,strict=False)
     except Exception as exc:
@@ -240,11 +277,20 @@ def publication_document(doc,trigger):
     doc=substitute(doc)
     from crm_checkout_styles import MARKER,count,compile_document
     total=count(doc)
+    from crm_recovery_links import present as recovery_present, inspect, sources, resolve as resolve_recovery
+    from crm_recovery_links import checkout_url
+    if any(checkout_url(url) for source in sources(doc) for url in inspect(source).urls):
+        raise ValueError('Use SC_CHECKOUT_RECOVERY_URL instead of a pasted customer checkout URL.')
+    from crm_checkout_elements import checkout_required as elements_present, recovery_actions, resolve as resolve_elements
+    actions=sum(inspect(source).actions for source in sources(doc))+recovery_actions(doc)+total
+    if (recovery_present(doc) or elements_present(doc)) and trigger!='abandoned':raise ValueError('Checkout visual elements and recovery links require Checkout abandoned trigger.')
     from crm_wall_preview_template import present,resolve
     if present(doc) and trigger!='abandoned':raise ValueError('Dynamic wall preview links require Checkout abandoned trigger or a manually configured product URL.')
     if total and trigger!='abandoned':raise ValueError('Abandoned Checkout template requires Checkout abandoned trigger.')
     if total>1:raise ValueError('Use exactly one abandoned checkout products block.')
-    result=resolve(doc,None)
+    from crm_checkout_preview import sample
+    result=resolve(resolve_elements(doc,sample(doc)),None)
+    result=resolve_recovery(result,offline=True)
     from crm_frame_banner_template import resolve as resolve_banner
     result=resolve_banner(result)
     from crm_lifestyle_images import resolve as resolve_lifestyle
@@ -261,6 +307,7 @@ def publication_document(doc,trigger):
         if s['type'] in ('html','image'):
             s['html']=s['html'].replace(MARKER,'');reject_unresolved(s['html'])
     result['custom_html']=result.get('custom_html','').replace(MARKER,'');reject_unresolved(result['custom_html'])
+    if trigger=='abandoned' and not actions:raise ValueError('Keep at least one visible Recover Checkout button or linked image.')
     if 'middle_sections' not in doc:result.pop('middle_sections',None)
     return compile_document(result) if total else result
 
@@ -270,7 +317,14 @@ def apply_template(doc,html=None):
     from crm_checkout_styles import MARKER,default_html
     import uuid
     html=default_html() if html is None else html
-    if html.count(MARKER)!=1:raise ValueError('Keep exactly one protected checkout insertion point.')
+    if MARKER not in html:
+        from crm_checkout_template import validate
+        validate(html)
+        doc['content_mode']='HTML'
+        commit_middle(doc,[{'id':uuid.uuid4().hex,'type':'html','html_number':1,'visible':True,'html':html}])
+        doc['copy_reviewed']=False
+        return
+    if html.count(MARKER)!=1:raise ValueError('Use at most one native checkout block.')
     before,after=html.split(MARKER)
     sections=[{'id':uuid.uuid4().hex,'type':'html','html_number':1,'visible':True,'html':before},
       {'id':uuid.uuid4().hex,'type':BLOCK,'visible':True},

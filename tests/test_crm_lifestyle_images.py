@@ -89,6 +89,7 @@ class LifestyleTests(unittest.TestCase):
         self.assertIn('gallery-2.jpg',render_campaign(result,CFG)['html'])
         self.assertIn(TOKENS[2],doc['custom_html'])
         self.assertNotIn(TOKENS[2],render_campaign(doc,CFG)['html'])
+        doc['custom_html']+='<a href="SC_CHECKOUT_RECOVERY_URL">Return to checkout</a>'
         self.assertNotIn(TOKENS[2],publication_document(doc,'abandoned')['custom_html'])
 
     def test_reordering_editing_and_removing_preserve_original(self):

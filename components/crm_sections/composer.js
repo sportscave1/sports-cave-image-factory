@@ -22,12 +22,13 @@ addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignGoToSection===goT
 const areas=new Map(),histories=new Map();let historyScope='',deleted=null,deleteTimer=null;
 
 const height=()=>parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:document.body.scrollHeight+4},'*');
-const emit=(type,extra={})=>{if(pending){if(type!=='html')queue.push([type,{...extra,edits:{...drafts,...extra.edits}}]);return;}pending=true;inFlight=crypto.randomUUID();parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{event:inFlight,base:args.sections.map(s=>s.id),type,...extra,edits:Object.fromEntries(Object.entries({...extra.edits,...drafts}).filter(([id])=>args.sections.some(s=>s.id===id)))}},'*');};
+const emit=(type,extra={})=>{if(!['html','settings'].includes(type))for(const commit of [...pendingCopyInputs.values()])commit();if(pending){if(type!=='html')queue.push([type,{...extra,edits:{...drafts,...extra.edits}}]);return;}pending=true;inFlight=crypto.randomUUID();parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{event:inFlight,base:args.sections.map(s=>s.id),type,...extra,edits:Object.fromEntries(Object.entries({...extra.edits,...drafts}).filter(([id])=>args.sections.some(s=>s.id===id)))}},'*');};
 // Send test must wait for the server acknowledgement, not merely textarea blur.
 const flushSections=()=>new Promise((resolve,reject)=>{
  const started=Date.now(),scope=historyScope;
  const check=()=>{
   if(scope!==historyScope||Date.now()-started>10000)return reject(new Error('Section changes could not be synchronized. Retry after saving.'));
+  const invalid=root.querySelector('.visual-fields input:invalid,.visual-fields textarea:invalid');if(invalid){invalid.reportValidity();return reject(new Error('Correct invalid element settings before saving or sending.'));}
   for(const commit of [...pendingCopyInputs.values()])commit();
   for(const area of areas.values())clearTimeout(area.saveTimer);
   const entry=Object.entries(drafts)[0];
@@ -83,7 +84,7 @@ function showDeleted(){
 function reorder(section,id,target,after=null){if(section){const s=args.sections.find(s=>s.id===section);emit('product_order',{id:section,ids:moveId(s.products.map(p=>p.id),id,target)});}else {const ids=after===null?moveId(args.sections.map(s=>s.id),id,target):insertAt(args.sections.map(s=>s.id),id,target,after);emit('order',{ids});placeCards(ids);}}
 function handle(row,id,section=null){let h=button('⋮⋮','Drag to reorder section; Alt + Up or Down',()=>{},'handle');h.dataset.drag=id;h.dataset.section=section||'';
  h.onkeydown=e=>{if(e.altKey&&['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();const ids=section?args.sections.find(s=>s.id===section).products.map(p=>p.id):args.sections.map(s=>s.id),i=ids.indexOf(id),j=i+(e.key==='ArrowUp'?-1:1);if(j>=0&&j<ids.length)reorder(section,id,ids[j]);}};row.append(h);}
-function changeSettings(s,patch){const current=settingsDrafts[s.id]||s.settings;const next={...current,...patch,display:{...current.display,...(patch.display||{})}};settingsDrafts[s.id]=next;emit('settings',{id:s.id,settings:next});}
+function changeSettings(s,patch){const current=settingsDrafts[s.id]||s.settings;const next={...current,...patch};if(s.type==='catalogue')next.display={...current.display,...(patch.display||{})};if(JSON.stringify(current)===JSON.stringify(next))return;settingsDrafts[s.id]=next;emit('settings',{id:s.id,settings:next});}
 function renderTemplates(){
  const container=document.getElementById('saved-templates');container.replaceChildren();
  if((args.templates||[]).length)container.append(el('hr'));
@@ -95,13 +96,13 @@ function renderTemplates(){
   item.dataset.add='template';container.append(item);
  }
 }
-function render(){renderTemplates();const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;for(const card of [...root.children])if(!args.sections.some(s=>s.id===card.dataset.id))card.remove();args.sections.forEach((s,index)=>{
- const name=s.name||(s.type==='html'?'HTML Section '+s.html_number:s.type==='image'?'Image':s.type==='abandoned_checkout_products'?'Abandoned Checkout':'Catalogue');if(opened[s.id]===undefined)opened[s.id]=s.html_number===1||s.type==='image';
+function render(){renderTemplates();for(const b of document.querySelectorAll('[data-add=visual],[data-add=flexible_checkout]'))b.hidden=!args.automation;const focus=document.activeElement,label=focus?.getAttribute('aria-label'),sectionId=focus?.closest('.section')?.dataset.id,dragId=focus?.dataset.drag,action=focus?.dataset.action,start=focus?.selectionStart,end=focus?.selectionEnd,scroll=focus?.scrollTop;for(const card of [...root.children])if(!args.sections.some(s=>s.id===card.dataset.id))card.remove();args.sections.forEach((s,index)=>{
+ const name=s.name||(s.type==='html'?'HTML Section '+s.html_number:s.type==='image'?'Image':s.type==='abandoned_checkout_products'?'Abandoned Checkout':s.type==='checkout_element'?s.settings.kind.replaceAll('_',' '):'Catalogue');if(opened[s.id]===undefined)opened[s.id]=s.html_number===1||s.type==='image';
  const signature=JSON.stringify({...s,html:undefined,open:opened[s.id],prompt:s.type==='image'?args.image_prompt:undefined});
  const existing=[...root.children].find(c=>c.dataset.id===s.id);
  if(existing?.dataset.signature===signature){syncArea(s);return;}
  let card=el('section','','section');card.dataset.id=s.id;card.dataset.signature=signature;if(s.type==='catalogue')card.classList.add('catalogue');let row=el('div','','row');handle(row,s.id);
- let visibility=button('',s.visible?'Visible section — click to hide':'Hidden section — click to show',()=>emit('visible',{id:s.id,visible:!s.visible}),'visibility');
+ let visibility=button('',s.visible?'Visible section — click to hide':'Hidden section — click to show',()=>{const visible=!s.visible;emit('visible',{id:s.id,visible});s.visible=visible;render();},'visibility');
  visibility.dataset.action='visibility';visibility.setAttribute('aria-pressed',String(s.visible));visibility.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>'+(s.visible?'':'<path d="m3 3 18 18"/>')+'</svg>';row.append(visibility);
  row.append(renameControl(s,name));
  card.classList.toggle('is-hidden',!s.visible);card.classList.toggle('is-open',!!opened[s.id]);
@@ -117,9 +118,14 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}};
  area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,args.preview_debounce||750);};area.onblur=update;
  const historyTools=el('div','','history-tools');historyTools.append(button('↶','Undo last edit',()=>recover(s.id,false),'history-button'),button('↷','Redo last edit',()=>recover(s.id,true),'history-button'));
- content.append(historyTools,area);if(s.type==='image')content.append(advice);
+ if(args.automation&&s.html.includes('<!--SC_ABANDONED_CHECKOUT-->'))content.append(button('Separate checkout elements','Separate checkout into optional visual elements',()=>emit('separate_checkout',{id:s.id})));content.append(historyTools,area);if(s.type==='image')content.append(advice);
+ }else if(s.type==='checkout_element'){
+ visualControls(s,content,{el,change:patch=>changeSettings(s,patch),debounce:(input,field,commit)=>{
+  let timer;const inputKey=s.id+':'+field;const save=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);commit();};
+  input.oninput=()=>{signalPending({id:s.id,[field]:input.value});pendingCopyInputs.set(inputKey,save);clearTimeout(timer);timer=setTimeout(save,350);};input.onchange=save;
+ }});
  }else if(s.type==='abandoned_checkout_products'){
- content.append(el('div','Products, variants, quantities, prices and recovery link resolve from each customer’s own checkout.','warning'));
+ if(args.automation)content.append(button('Separate checkout elements','Separate checkout into optional visual elements',()=>emit('separate_checkout',{id:s.id})));content.append(el('div','Products, variants, quantities, prices and recovery link resolve from each customer’s own checkout.','warning'));
  }else{
  const tools=el('div','','tools');tools.append(button('Select products','Select products for '+name,()=>emit('picker',{id:s.id})),button('↻','Refresh current Shopify and Edition Ops facts',()=>emit('refresh',{id:s.id})));content.append(tools);
  s.products.forEach(p=>{let pr=el('div','','product');pr.dataset.product=p.id;pr.dataset.parent=s.id;handle(pr,p.id,s.id);let info=el('div','','product-info');info.append(el('span',p.title));if(!p.edition)info.append(el('div','Edition data not connected','warning'));pr.append(info,button('×','Remove '+p.title,()=>emit('product_remove',{id:s.id,product_id:p.id})));content.append(pr);});
@@ -130,7 +136,7 @@ function render(){renderTemplates();const focus=document.activeElement,label=foc
  for(const warning of (args.warnings||{})[s.id]||[])content.append(el('div',warning,'warning'));
  }
  card.append(content);}if(existing)existing.replaceWith(card);else root.append(card);
- });placeCards(args.sections.map(s=>s.id));if(label&&document.activeElement!==focus){const next=[...root.querySelectorAll('[aria-label]')].find(n=>(action?n.dataset.action===action:n.getAttribute('aria-label')===label)&&n.closest('.section')?.dataset.id===sectionId&&(!dragId||n.dataset.drag===dragId));if(next){next.focus({preventScroll:true});if(next.tagName==='TEXTAREA'){next.setSelectionRange(start,end);next.scrollTop=scroll;}}}height();}
+ });placeCards(args.sections.map(s=>s.id));if(label&&document.activeElement!==focus){const next=[...root.querySelectorAll('[aria-label]')].find(n=>(action?n.dataset.action===action:n.getAttribute('aria-label')===label)&&n.closest('.section')?.dataset.id===sectionId&&(!dragId||n.dataset.drag===dragId));if(next){next.focus({preventScroll:true});if(start!==null&&start!==undefined&&['TEXTAREA','INPUT'].includes(next.tagName)){next.setSelectionRange(start,end);next.scrollTop=scroll;}}}height();}
 document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{document.getElementById('add').open=false;emit('add',{kind:b.dataset.add,reserved_html_number:deleted?.section.html_number||0});});
 const addMenu=document.getElementById('add'),addTrigger=addMenu.querySelector('summary');
  addMenu.ontoggle=()=>{addTrigger.setAttribute('aria-expanded',String(addMenu.open));height();};

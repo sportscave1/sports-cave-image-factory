@@ -115,7 +115,8 @@ class PersistedProgress(unittest.TestCase):
         from tests.test_crm import ADMIN
         from tests.test_crm_send_flow import LIVE
         a,key,_,_=self.automatic();reconcile(self.engine,a);before=self.read(a,key)
-        flow=deepcopy(a['config']['draft']);flow['emails'] += [email_step(document(),3600),email_step(document(),7200)]
+        recovery=document();recovery['custom_html']+='<a href="SC_CHECKOUT_RECOVERY_URL">Return to checkout</a>'
+        flow=deepcopy(a['config']['draft']);flow['emails'] += [email_step(recovery,3600),email_step(recovery,7200)]
         flow['emails'][1]['enabled']=False
         saved=self.store.save_flow(ADMIN,a['id'],a['name'],flow,a['config']['revision'])
         # Draft does not affect the two current published columns.

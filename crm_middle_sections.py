@@ -16,8 +16,8 @@ def middle_sections(doc):
 
 
 def validate_middle(sections):
-    if not isinstance(sections, list) or not 0 <= len(sections) <= 20:
-        raise ValueError('Use up to 20 middle sections.')
+    if not isinstance(sections, list):
+        raise ValueError('Invalid middle sections.')
     ids, numbers = set(), set()
     for s in sections:
         if not isinstance(s, dict) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,80}', str(s.get('id', ''))) or s['id'] in ids:
@@ -37,6 +37,10 @@ def validate_middle(sections):
                 raise ValueError('Invalid Image section.')
         elif s.get('type') == 'abandoned_checkout_products':
             if set(s)!=common:raise ValueError('Invalid abandoned checkout section.')
+        elif s.get('type') == 'checkout_element':
+            from crm_checkout_elements import validate
+            if set(s) != common | {'settings'}: raise ValueError('Invalid visual element.')
+            validate(s['settings'])
         elif s.get('type') == 'catalogue':
             from crm_catalogue import validate_snapshot
             if set(s) != common | {'products', 'settings'}: raise ValueError('Invalid catalogue section.')
@@ -75,7 +79,13 @@ def apply_event(doc, event):
     selected = next((s for s in sections if s['id'] == event.get('id')), None)
     if kind == 'add':
         identity = uuid.uuid4().hex
-        if event.get('kind') == 'html':
+        if event.get('kind') == 'visual':
+            from crm_checkout_elements import element
+            sections.append(element())
+        elif event.get('kind') == 'flexible_checkout':
+            from crm_checkout_elements import starter
+            sections.extend(starter())
+        elif event.get('kind') == 'html':
             reserved = event.get('reserved_html_number', 0)
             if type(reserved) is not int or not 0 <= reserved <= 10000: raise ValueError('Invalid reserved section number.')
             sections.append(dict(id=identity, type='html', visible=True,
@@ -108,7 +118,11 @@ def apply_event(doc, event):
         sections.insert(sections.index(selected)+1,copied)
     elif kind == 'visible': selected['visible'] = event.get('visible')
     elif kind == 'html' and selected['type'] in ('html', 'image'): selected['html'] = event.get('html')
-    elif kind == 'settings' and selected['type'] == 'catalogue': selected['settings'] = deepcopy(event.get('settings'))
+    elif kind == 'settings' and selected['type'] in ('catalogue','checkout_element'): selected['settings'] = deepcopy(event.get('settings'))
+    elif kind == 'separate_checkout':
+        from crm_checkout_elements import separate
+        if selected['type'] not in ('html','image','abandoned_checkout_products'): raise ValueError('Select a native checkout block.')
+        separate(sections, selected)
     elif kind == 'remove':
         if event.get('confirmed') is not True: raise ValueError('Confirm section removal.')
         sections.remove(selected)
@@ -123,6 +137,9 @@ def apply_event(doc, event):
 
 
 def render_middle(doc, *, images_off=False, campaign_key=''):
+    from crm_checkout_elements import checkout_required, resolve as resolve_elements
+    if checkout_required(doc):raise ValueError('Resolve checkout data before rendering this automation.')
+    doc=resolve_elements(doc,None)
     from crm_lifestyle_images import resolve as resolve_lifestyle
     doc=resolve_lifestyle(doc)
     from crm_frame_banner_template import resolve as resolve_banner
@@ -133,7 +150,8 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
     present = False
     for s in middle_sections(doc):
         if not s['visible']: continue
-        if s['type']=='abandoned_checkout_products':raise ValueError('Resolve checkout data before rendering this automation.')
+        if s['type'] in ('abandoned_checkout_products','checkout_element'):raise ValueError('Resolve checkout data before rendering this automation.')
+        if 'SC_CHECKOUT_RECOVERY_URL' in s.get('html',''):raise ValueError('Resolve the original checkout recovery link before rendering this email.')
         if 'SC_ABANDONED_CHECKOUT' in s.get('html',''):raise ValueError('Abandoned Checkout requires a checkout recovery automation. Campaign recipients have no checkout context.')
         if 'SC_WALL_PREVIEW_URL' in s.get('html',''):raise ValueError('Resolve the wall preview product link before rendering this email.')
         source = s['html'] if s['type'] in ('html', 'image') else catalogue_html(s, campaign_key=campaign_key)

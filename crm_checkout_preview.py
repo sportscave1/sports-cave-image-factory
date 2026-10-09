@@ -18,7 +18,8 @@ def sources(doc):
 def needs_checkout(doc):
     from crm_frame_banner_template import present
     from crm_lifestyle_images import present as lifestyle_present
-    return dynamic(doc) or legacy(doc) or present(doc) or lifestyle_present(doc)
+    from crm_recovery_links import pasted
+    return dynamic(doc) or legacy(doc) or present(doc) or lifestyle_present(doc) or pasted(doc)
 
 
 def sample(doc):

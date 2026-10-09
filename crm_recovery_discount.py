@@ -118,6 +118,7 @@ def substitute(doc,discount=None):
     if 'html_sections' in result:result['html_sections']={k:replace(v,True) for k,v in result['html_sections'].items()}
     for section in result.get('middle_sections',[]):
         if 'html' in section:section['html']=replace(section['html'],True)
+        if section.get('type')=='checkout_element':section['settings']=block_values(section['settings'])
     return result
 
 

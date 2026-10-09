@@ -219,6 +219,8 @@ class NativeAutomationTests(unittest.TestCase):
         a=self.store.create(ADMIN,kind,'Automation '+uuid.uuid4().hex)
         self.created.append(str(a['id']))
         flow=deepcopy(a['config']['draft']);flow['emails']=[email_step(document(),d) for d in delays]
+        if kind=='abandoned':
+            for step in flow['emails']:step['document']['custom_html']+='<a href="SC_CHECKOUT_RECOVERY_URL">Return to checkout</a>'
         for s in flow['emails']:s['document']['copy_reviewed']=True
         a=self.store.save_flow(ADMIN,a['id'],a['name'],flow,1)
         return self.store.publish(ADMIN,a['id'],a['config']['revision'],env=LIVE)

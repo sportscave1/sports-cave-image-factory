@@ -43,7 +43,7 @@ def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False):
         flow['emails']=[email_step(document(),0 if i==0 else 86400) for i in range(steps)]
         if kind=='abandoned':
             from crm_abandoned_checkout import apply_template
-            apply_template(flow['emails'][0]['document'])
+            for email in flow['emails']:apply_template(email['document'])
             if legacy_preview:
                 from tests.test_crm_checkout_preview_fallback import LEGACY
                 doc=flow['emails'][0]['document'];doc['middle_sections'].pop(1)

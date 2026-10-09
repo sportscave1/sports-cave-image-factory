@@ -1,14 +1,14 @@
 """Editable master HTML in existing runtime-state storage; drafts own copied HTML."""
 from copy import deepcopy
 import json
-from crm_checkout_styles import MARKER,CLASSES,default_html,rules,upgrade_html
+from crm_checkout_styles import MARKER,default_html,rules
 
 KEY='abandoned_checkout_master_v1'
 
 
 def load(store):
     row=store.state(KEY)
-    return {**row,'html':upgrade_html(row['html'])} if row else {'revision':0,'html':default_html()}
+    return deepcopy(row) if row else {'revision':0,'html':default_html()}
 
 
 def validate(html):
@@ -17,18 +17,16 @@ def validate(html):
     from crm_checkout_preview import sample
     from crm_checkout_styles import compile_html
     from crm_email_size import LIMIT_BYTES
-    if not isinstance(html,str) or html.count(MARKER)!=1:raise ValueError('Keep exactly one <!--SC_ABANDONED_CHECKOUT--> insertion point.')
-    reject_unresolved(html.replace(MARKER,''))
+    from crm_recovery_links import inspect, resolve
+    if not isinstance(html,str) or html.count(MARKER)>1:raise ValueError('Use at most one native checkout block; additional recovery buttons are supported.')
+    if not html.count(MARKER) and not inspect(html).actions:raise ValueError('Keep at least one recovery action using SC_CHECKOUT_RECOVERY_URL.')
     theme=rules(html)
-    if not CLASSES<=set(theme):raise ValueError('Keep the sc-cart-* class styling contract; edit its values freely.')
-    # Reserved image/CTA elements come only from checked checkout data.
-    from html.parser import HTMLParser
-    class Protected(HTMLParser):
-        def handle_starttag(self,tag,attrs):
-            attrs=dict(attrs)
-            if {'sc-cart-button','sc-cart-image'} & set(attrs.get('class','').split()):raise ValueError('Keep checkout image and recovery CTA inside the protected block.')
-    Protected().feed(html)
-    hydrated=compile_html(html.replace(MARKER,block_html(sample({}),test=True)),theme)
+    from crm_wall_preview_template import resolve as wall
+    from crm_lifestyle_images import resolve as lifestyle
+    from crm_frame_banner_template import resolve as banner
+    copy=resolve(lifestyle(banner(wall({'custom_html':html},None))),offline=True)
+    hydrated=compile_html(copy['custom_html'].replace(MARKER,block_html(sample({}),test=True)),theme)
+    reject_unresolved(hydrated)
     markup,_,checks=import_html(hydrated)
     if not all(checks.values()):raise ValueError('Use safe email HTML, valid public image URLs and HTTPS links.')
     if max(len(html.encode()),len(markup.encode()))>LIMIT_BYTES:raise ValueError('Keep the template below 95 KB. Final hydrated size is rechecked before sending.')

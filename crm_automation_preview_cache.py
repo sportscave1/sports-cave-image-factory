@@ -17,12 +17,9 @@ def output(state,store,doc,cfg,identity=None):
     cache=entries.get(token)
     if cache is None:
         message=render_production(hydrated,cfg,identity)
-        if doc.get('recovery_discount'):
-            from crm_recovery_discount import apply_links
-            pin=state.get('_automation_checkout_pin') or {}
-            data=pin.get('last_good') or {}
-            if data.get('recovery_url'):
-                message=apply_links(message,{**doc['recovery_discount'],'original_url':data['recovery_url']})
+        from crm_recovery_links import inspect,sources,checkout_url,verify
+        recovery=[url for source in sources(hydrated) for url in inspect(source).urls if checkout_url(url)]
+        if recovery:verify(message,recovery[0],len(recovery))
         cache={'token':token,'html_hash':hashlib.sha256(message['html'].encode('utf-8')).hexdigest(),'message':message,'size':analyze_rendered_email(message['html'],message['text'])}
         from crm_personalisation import present
         if present(doc):cache['personalised_headers']={k:hydrated['content'][k] for k in ('subject','preheader')}

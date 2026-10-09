@@ -1,0 +1,48 @@
+// Disposable SQL and mock Shopify only. No external browser requests permitted.
+const {chromium}=require('playwright');const assert=require('node:assert/strict');
+const sql=async(sql,args=[])=>{const r=await fetch('http://127.0.0.1:8873',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sql,args})});assert.ok(r.ok);return (await r.json()).rows;};
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const ctx=await browser.newContext();await ctx.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ const page=await ctx.newPage();page.setDefaultTimeout(20000);await page.setViewportSize({width:1440,height:950});
+ await page.goto('http://127.0.0.1:8533/?fixture_checkout=1&fixture_profile=1&fixture_run=recovery'+Date.now());
+ await page.getByRole('button',{name:'Edit Email',exact:true}).first().waitFor();
+ const [flow]=await sql('SELECT id,config FROM crm_automations WHERE name=$1 ORDER BY updated_at DESC LIMIT 1',['Abandoned checkout · local fixture']);
+ const config=async()=>(await sql('SELECT config FROM crm_automations WHERE id=$1',[flow.id]))[0].config;
+ const began=Date.now();await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();
+ await page.getByRole('tab',{name:'Editor',exact:true}).click();
+ const frame=page.frameLocator('iframe[title="crm_section_ui.crm_middle_sections_v2"]');
+ const separate=frame.getByRole('button',{name:'Separate checkout into optional visual elements',exact:true});await separate.waitFor();const openMs=Date.now()-began;
+ await page.waitForTimeout(700);assert.deepEqual(await config(),flow.config,'Opening the editor must not revise its design');
+ const start=Date.now();await separate.click();await frame.getByRole('button',{name:'Edit edition',exact:true}).waitFor();const separateMs=Date.now()-start;
+ const card=frame.locator('.section').filter({has:frame.getByRole('button',{name:'Edit edition',exact:true})});
+ const visibility=card.getByRole('button',{name:'Visible section — click to hide',exact:true});
+ const hideStart=Date.now();await visibility.click();await card.locator('.visibility[aria-pressed=false]').waitFor();const hideMs=Date.now()-hideStart;
+ await page.waitForFunction(()=>!document.querySelector('iframe[title="crm_section_ui.crm_middle_sections_v2"]').contentDocument.querySelector('.section:has(.title[aria-label="Edit edition"]) .visibility[aria-pressed=true]'));
+ await card.getByRole('button',{name:'Edit edition',exact:true}).click();
+ await card.getByRole('combobox',{name:'Edition appearance',exact:true}).selectOption('badge');
+ await card.getByText('Appearance',{exact:true}).click();
+ await card.getByRole('spinbutton',{name:'Font size (px)',exact:true}).fill('22');
+ await card.getByRole('spinbutton',{name:'Font size (px)',exact:true}).press('Tab');
+ await page.waitForTimeout(700);
+ await card.getByRole('spinbutton',{name:'Font size (px)',exact:true}).fill('2');
+ const invalid=await page.evaluate(async()=>{try{await window.scCampaignFlushSections();return '';}catch(e){return e.message;}});assert.match(invalid,/Correct invalid element/);
+ await card.getByRole('spinbutton',{name:'Font size (px)',exact:true}).fill('22');await card.getByRole('spinbutton',{name:'Font size (px)',exact:true}).press('Tab');await page.waitForTimeout(500);
+ const snap=await config();const edition=snap.draft.emails[0].document.middle_sections.find(s=>s.settings?.kind==='edition');
+ assert.equal(edition.visible,false);assert.equal(edition.settings.edition_style,'badge');assert.equal(edition.settings.size,22);
+ const headline=frame.locator('.section').filter({has:frame.getByRole('button',{name:'Edit headline',exact:true})});await headline.locator('.title').click();
+ await headline.getByRole('textbox',{name:'Text',exact:true}).fill('My independently editable heading');await headline.getByRole('textbox',{name:'Text',exact:true}).press('Tab');
+ await page.waitForFunction(()=>[...document.querySelectorAll('iframe')].some(f=>f.srcdoc.includes('My independently editable heading')));
+ const cta=frame.locator('.section').filter({has:frame.getByRole('button',{name:'Edit button',exact:true})}).first();
+ await cta.locator('.title').click();await cta.getByRole('textbox',{name:'Text',exact:true}).fill('Claim Your Edition');
+ await cta.getByRole('button',{name:'Duplicate section',exact:true}).click();await frame.getByRole('button',{name:'Edit button',exact:true}).nth(1).waitFor();
+ await cta.getByRole('button',{name:'Drag to reorder section; Alt + Up or Down',exact:true}).press('Alt+ArrowUp');
+ await page.waitForTimeout(700);const saved=await config();assert.equal(saved.draft.emails[0].document.middle_sections.filter(s=>s.settings?.kind==='button').length,2);
+ assert.ok(saved.draft.emails[0].document.middle_sections.filter(s=>s.settings?.kind==='button').every(s=>s.settings.text==='Claim Your Edition'),'Duplicate must include pending text');
+ const beforeReopen=JSON.stringify(saved);await page.getByRole('tab',{name:'Settings',exact:true}).click();await page.getByRole('tab',{name:'Editor',exact:true}).click();
+ await frame.getByRole('button',{name:'Edit edition',exact:true}).waitFor();await page.waitForTimeout(700);assert.equal(JSON.stringify(await config()),beforeReopen);
+ await page.screenshot({path:'tmp/recovery-elements-desktop.png',fullPage:true});
+ for(const width of [1024,390]){await page.setViewportSize({width,height:950});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));}
+ await page.screenshot({path:'tmp/recovery-elements-mobile.png',fullPage:true});
+ assert.equal(await page.getByTestId('stException').count(),0);
+ console.log(JSON.stringify({openMs,separateMs,hideMs,independentCopy:true,hiddenEditionPersists:true,duplicateAndMove:true,unchangedReopen:true,mobileOverflow:false}));
+}finally{await browser.close();}})().catch(e=>{console.error(e);process.exit(1);});

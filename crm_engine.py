@@ -161,8 +161,8 @@ class Engine:
                     from reviews_submission import prepare_email
                     from reviews_store import ReviewsStore
                     content=prepare_email(content,row,enrollment,self.shop,ReviewsStore(self.store.connect))
-                from crm_abandoned_checkout import dynamic,complete
-                if dynamic(content['document']):context['_checkout']=complete(self.shop,context.get('_checkout'))
+                from crm_abandoned_checkout import needs_items,complete
+                if needs_items(content['document']):context['_checkout']=complete(self.shop,context.get('_checkout'))
                 from crm_recovery_discount import prepare as prepare_discount,selection as discount_selection
                 if discount_selection(content['document']):
                     context['_recovery_discount']=prepare_discount(self.shop,content['document'],context.get('_checkout') or {},row['shopify_customer_id'])

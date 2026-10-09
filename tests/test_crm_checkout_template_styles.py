@@ -60,12 +60,13 @@ class TemplateStyleTests(unittest.TestCase):
 
     def test_validation_accepts_visual_changes_rejects_unsafe_or_broken_contract(self):
         validate(default_html())
+        # Class presence and fixed checkout positions are no longer design rules.
+        validate(default_html().replace('.sc-cart-variant {','.arbitrary {'))
+        validate(default_html()+'<a class="sc-cart-button" href="https://example.test">More information</a>')
         for bad in (default_html().replace(MARKER,''),default_html()+MARKER,
                     default_html()+'{{ item.product_title }}',default_html()+'<script>alert(1)</script>',
                     default_html().replace('color:#ffffff;','color:expression(alert(1));'),
-                    default_html().replace('.sc-cart-variant {','.arbitrary {'),
-                    default_html()+'<a href="http://unsafe.test">Unsafe</a>',
-                    default_html()+'<a class="sc-cart-button" href="https://example.test">Override</a>'):
+                    default_html()+'<a href="http://unsafe.test">Unsafe</a>'):
             with self.subTest(bad=bad[-60:]),self.assertRaises(ValueError):validate(bad)
 
     def test_publication_rejects_duplicate_native_blocks(self):

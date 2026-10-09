@@ -90,7 +90,7 @@ class WallSectionTests(unittest.TestCase):
         self.assertNotIn(TOKEN,render_campaign(preview,CFG)['html'])
         with self.assertRaisesRegex(ValueError,'Resolve the wall preview'):render_middle(doc)
         with self.assertRaisesRegex(ValueError,'Checkout abandoned'):publication_document(doc,'welcome')
-        self.assertNotIn(TOKEN,render_campaign(publication_document(doc,'abandoned'),CFG)['html'])
+        with self.assertRaisesRegex(ValueError,'at least one'):publication_document(doc,'abandoned')
         self.assertEqual(original,doc)
 
     def test_dispatch_uses_only_bound_checkout_not_editor_preview(self):

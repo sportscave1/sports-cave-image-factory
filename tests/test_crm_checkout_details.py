@@ -42,7 +42,7 @@ class CheckoutDetailsTests(TestCase):
         reader.assert_called_once_with(product_ids=['gid://shopify/Product/123'],handles=[],limit=100)
         for _ in range(3):
             html=block_html(data)
-            self.assertIn('YOUR EDITION NUMBER WILL BE #052/100',html)
+            self.assertIn('NEXT AVAILABLE EDITION · #052/100',html)
             self.assertNotIn('RESERVED',html)
         self.assertEqual(reader.call_count,1)
 
@@ -78,9 +78,10 @@ class CheckoutDetailsTests(TestCase):
         legacy=legacy.replace('.sc-cart-variant { color:#b79335;', '.sc-cart-variant { color:#aabbcc;')
         store=Mock();store.state.return_value={'revision':5,'html':legacy}
         result=load(store)
-        self.assertIn('color:#aabbcc',result['html']);self.assertIn('.sc-cart-dimensions',result['html'])
+        self.assertIn('color:#aabbcc',result['html']);self.assertNotIn('.sc-cart-dimensions',result['html'])
         self.assertEqual(store.state.return_value['html'],legacy)
-        self.assertEqual(upgrade_html(result['html']),result['html'])
+        self.assertEqual(result['html'],legacy)  # Opening a master never restores deleted source.
+        self.assertIn('.sc-cart-dimensions',upgrade_html(result['html']))  # Legacy render-copy compatibility remains.
         self.assertTrue(rules(result['html']))
 
     def test_new_classes_are_restricted_to_semantic_tags(self):

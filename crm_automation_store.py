@@ -244,6 +244,9 @@ class AutomationStore(CampaignStore):
         import streamlit as st
         data,note=preview_context(st.session_state,self.preview_shop,auto_refresh=False,slot='_automation_checkout_pin')
         if not data:data=sample(doc)
+        if doc.get('recovery_discount') and not data.get('preview_only'):
+            from crm_recovery_discount import recovery_url
+            data={**data,'recovery_url':recovery_url(data['recovery_url'],doc['recovery_discount']['code'])}
         from crm_automation_preview_cache import digest
         token=digest([doc,data])
         entries=st.session_state.get('_automation_hydrations',{})

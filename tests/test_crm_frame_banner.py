@@ -75,11 +75,12 @@ class BannerTests(unittest.TestCase):
     def test_campaign_generic_and_offline_publication(self):
         doc=self.doc();original=deepcopy(doc)
         with patch.object(assets,'fetch',side_effect=AssertionError('No network without checkout')):
-            for resolved in (doc,publication_document(doc,'welcome'),publication_document(doc,'abandoned')):
+            for resolved in (doc,publication_document(doc,'welcome')):
                 html=render_campaign(resolved,CFG)['html']
                 self.assertNotIn(banner.PREFIX,html);self.assertNotIn('PREVIEW IN MY CAVE',html)
                 self.assertIn('SEE IT IN YOUR CAVE',html)
         self.assertEqual(doc,original)
+        with self.assertRaisesRegex(ValueError,'at least one'):publication_document(doc,'abandoned')
 
     def test_verified_crop_and_cache_key_contains_no_customer_data(self):
         with patch.object(assets,'fetch',return_value=picture()) as fetch,patch.object(assets,'wall_source',return_value=SOURCE),patch.object(assets,'public_asset',return_value='https://assets.example.com/banner.jpg') as upload:
