@@ -5,7 +5,7 @@ SOURCE COMMIT: 05505958ed65c92e5fa491081e29f8fdb0bcc331
 NOTE: Source-defined scene branch, also augmented by shared realism and product locks.
 
 ===== SOURCE PROMPT / BUILDER =====
-"{opening}
+{opening}
 
 {IMAGE_PRODUCT_SOURCE_NOTE}
 
