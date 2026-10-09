@@ -6,7 +6,7 @@ import streamlit as st
 from crm_automation_analytics_ui import read,arm,state,checkout_panel
 from crm_checkout_analytics import PERIODS,window,report
 from crm_automation_home_data import step_metrics
-from crm_automation_definition import TRIGGERS,email_step,status
+from crm_automation_definition import email_step,status
 from crm_automation_timing import delay_controls
 from crm_flow_builder import save,edit_sequence
 
@@ -27,7 +27,6 @@ STYLE='''<style>
 .st-key-flow-workspace .st-key-automation-toolbar button{min-height:32px!important;height:32px!important;border-radius:4px!important}
 .st-key-flow-workspace .automation-title,.st-key-flow-workspace .automation-current{height:32px}
 .st-key-flow-step-metrics-refresh{display:none!important}
-.st-key-flow-settings{border-top:1px solid #e8e6df;padding-top:6px}
 .st-key-flow-workspace [data-testid="stExpander"] details{border-radius:4px!important}
 .st-key-flow-workspace [data-testid="stExpander"] summary{min-height:32px;padding:4px 8px;font-size:13px}
 .sc-flow-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:0;padding:0!important}
@@ -206,44 +205,6 @@ def sequence(shop,store,user,identity,period):
 
 
 @st.fragment
-def flow_settings(store,user,identity):
-    from crm_automation_definition import RULE_FIELDS,validate
-    row=store.flow(identity);flow=deepcopy(row['config']['draft'])
-    key='flow-settings-'+str(identity)
-    with st.container(key='flow-settings'):
-        st.subheader('Flow Settings')
-        if status(row)=='ARCHIVED':
-            st.caption('Archived · '+TRIGGERS[flow['trigger']][1]);return
-        # Forms batch harmless typing locally. Only explicit Save persists the
-        # draft and wakes the toolbar; analytics/checkouts/previews stay mounted.
-        with st.form(key,border=False):
-            name_col,trigger_col,cooldown_col=st.columns([2,2,1])
-            name=name_col.text_input('Flow name',row['name'],max_chars=150)
-            flow['trigger']=trigger_col.selectbox('Entry trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda k:TRIGGERS[k][1])
-            flow['reentry_days']=cooldown_col.selectbox('Re-entry cooldown',[0,7,30,90],index=[0,7,30,90].index(flow['reentry_days']),format_func=lambda d:'Once ever' if d==0 else str(d)+' days')
-            mandatory=flow['trigger'] in ('abandoned','win_back')
-            flow['exit_on_purchase']=st.checkbox('Exit after a new purchase',value=True if mandatory else flow.get('exit_on_purchase',False),disabled=mandatory)
-            st.caption('Unsubscribe, suppression and recipient eligibility are checked before every email.')
-            with st.popover('Entry rules and advanced settings'):
-                inactive_days=st.number_input('Days since last purchase (Win Back)',1,3650,flow.get('inactive_days',180))
-                if flow['trigger']=='win_back':flow['inactive_days']=inactive_days
-                rules=st.data_editor(flow['rules'] or [{'field':'market','condition':'is','value':'AU'}],num_rows='dynamic',
-                    column_config={'field':st.column_config.SelectboxColumn('Field',options=list(RULE_FIELDS)),'condition':st.column_config.SelectboxColumn('Condition',options=['is','at_least']),'value':st.column_config.TextColumn('Value')})
-                flow['rules']=rules if st.checkbox('Apply these entry rules (AND)',bool(flow['rules'])) else []
-                st.caption('Initial delay starts at the trigger. Subsequent delays start after the preceding enabled email is accepted by the provider.')
-                st.caption('Check that Shopify or another marketing platform is not sending the same recovery sequence. External sends are not visible here.')
-            if st.form_submit_button('Save flow settings'):
-                try:
-                    if flow['trigger'] in ('abandoned','win_back'):flow['exit_on_purchase']=True
-                    validate(flow)
-                    if save(store,user,row,flow,name,rerun=False):
-                        st.session_state['flow-toolbar-dirty']=True
-                        st.toast('Flow settings saved');st.rerun(scope='fragment')
-                except (ValueError,PermissionError) as exc:st.error(str(exc))
-        refresh_toolbar()
-
-
-@st.fragment
 def recipient_details(store,user,identity):
     with st.popover('Recipient timelines and scheduled deliveries',on_change='rerun',key='flow-recipients-'+str(identity)) as panel:
         if panel.open:
@@ -302,7 +263,6 @@ def flow_page(shop,store,user,row):
         if error:st.warning(error)
         analytics_controls(store,row['id'])
         sequence(shop,store,user,row['id'],'All time')
-        flow_settings(store,user,row['id'])
         recipient_details(store,user,row['id'])
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
     from crm_flow_thumbnail import SCRIPT
