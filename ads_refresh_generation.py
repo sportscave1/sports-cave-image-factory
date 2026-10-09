@@ -40,7 +40,7 @@ Match the canonical black frame thickness and depth exactly. Do not visually thi
 The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. If depth/glazing cannot be established from the supplied source, request an additional canonical reference rather than invent construction details.
 
 PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM — include these requirements explicitly in EACH final image prompt:
-Premium real-glass glazing with subtle but visible room-based reflections, physically believable highlight falloff on the glazing, realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glass. Keep reflections restrained and consistent with actual windows/lamps and camera angle; printed artwork text/details remain clear. If the canonical product is explicitly verified as unglazed, preserve that construction instead of adding glass.
+Premium real-glass glazing only when the verified pane is glass; for an acrylic/Perspex product use equally premium reflective transparent acrylic glazing, both with subtle but visible room-based reflections, physically believable highlight falloff on the glazing, realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glass. Keep reflections restrained and consistent with actual windows/lamps and camera angle; printed artwork text/details remain clear. If the canonical product is explicitly verified as unglazed, preserve that construction instead of adding glass.
 Use real interior photography, believable wall texture/materials and room proportions, tasteful premium furniture, physically credible lighting sources and high-end but lived-in interior credibility. Product remains the dominant mobile-readable hero on a real customer's wall.
 The final result must feel like a genuine premium lifestyle photograph taken in a real home, not a rendered showroom, not an AI room, and not a flat composited mockup.
 Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
@@ -70,7 +70,7 @@ Before designing the room, establish the Sports Cave framed product as a real ph
 The image FAILS and must be regenerated if any of these are missing:
 1. EXACT CANONICAL FRAME
 Match CANONICAL_PRODUCT frame thickness, bevel profile, depth and outer proportions exactly. Never thin, thicken, flatten, simplify or reinterpret the frame. The winning advertisement must never override canonical frame construction.
-2. CLEAR REAL GLASS
+2. CLEAR REAL GLASS OR ACRYLIC GLAZING
 The artwork must visibly sit behind genuine transparent glazing. Show restrained but clearly visible room-based reflections across part of the glass, following the flat glass plane and actual room windows/lights with realistic highlight falloff. Keep reflections subtle without obscuring artwork details. Never a matte, frameless, digitally pasted or flat poster look.
 3. PREMIUM FRAME BEVEL LIGHTING
 Room light must naturally interact with the physical black frame. At least one front bevel and, where perspective permits, one frame side/depth edge must visibly catch realistic light. The frame must read as a three-dimensional premium physical object.
@@ -278,22 +278,27 @@ Category: {category}
 Market: {country}
 Campaign format: Carousel
 Product page URL: {url}
+LIVE BLACK-FRAME VERIFICATION: open the supplied live product URL, select the Black frame variant and compare the visible original product gallery, text, border and construction. Use the verified Black variant link supplied by Sports Cave OS if available. A URL is not proof pixels were inspected; disclose when direct visual verification is unavailable.
+Verified Black variant source data (when explicitly checked): {json.dumps((product_metadata or {}).get('verified_black_variant') or {}, ensure_ascii=False, default=str)}
 Verified product facts: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
 
 {plan.carousel_copy.instruction(winner, refs)}
 
-ATTACH EXACTLY {n} ORIGINAL WINNING CARD IMAGES, IN SOURCE ORDER
+ATTACH EXACTLY {n} ORIGINAL WINNING CARD IMAGES IN SOURCE ORDER + SEPARATE CANONICAL PRODUCT WHEN AVAILABLE
 {mappings}
-These are {n} winning Carousel cards, collectively the product authority and individually the creative authority. No additional product image is required.
-An optional black-framed product-fidelity reference, if supplied, is authoritative for its verified printed artwork, names, signatures, colours, geometry, frame thickness/depth/bevel and glazing only. It is NOT a creative/background reference, source card or finished output. Ignore its external wall, furniture, room, lighting and camera angle. Never reproduce its stock mockup scene. Keep exactly {n} winning cards and {n} refreshed outputs; do not add an extra card or demand a duplicate mandatory upload. Resolve any product conflict with the winner before proceeding.
+WINNER_CARD_1 through WINNER_CARD_{n} are advertising reference images, not immutable original product artwork.
+CANONICAL_PRODUCT is the optional additional black-framed original Shopify product photo. It defines actual artwork/frame fidelity, NOT the new room/background. Do not import its original external setting or copy the old winner.
+Keep exactly {n} original card slots and {n} refreshed outputs. The product reference is NOT a new Carousel card. Four original cards mean four new images; five original cards mean five.
+Inspect all {n} full-resolution winning images and select BEST_WINNER_CLOSEUP only after comparing actual useful frame/detail clarity, rigid corners, legible text and lack of distortion. Use it as SECONDARY supporting evidence, never over the original Shopify source. A simulated magnifier does not prove detail accuracy. If none is suitable, declare unavailable.
+If product pixels or frame construction remain unclear, request the full-resolution black-framed original image; never guess product details.
 CSV template is a separate non-image attachment. For a legacy manual winner, attach every labelled card and supply its matching headline/description and shared primary texts before proceeding.
 Missing references: list every missing labelled image and stop. One winning image cannot stand in for {n} cards. Complete winning Carousel required. Reload the winner from Meta Review.
 OS has not analysed winner pixels. Inspect the actual full-resolution attachments, never infer visual details from metadata.
 
-PRODUCT AUTHORITY — SHARED ACROSS ALL CARDS
+PRODUCT ACCURACY AND WINNING CREATIVE AUTHORITIES — SHARED ACROSS ALL CARDS
 {plan.CAROUSEL_AUTHORITY}
-Explicitly list all {n} product-authority references in every standalone prompt. Lock the same product across the whole batch. Printed internal background is immutable; external room, wall, furniture and lighting must be newly executed.
-If one card is angled or partly obscured, cross-reference clearer product views in the other winning cards. Never borrow another card's external room or create different interpretations of the artwork.
+List the {n} winner labels in each standalone prompt and CANONICAL_PRODUCT when supplied. Record the inspected BEST_WINNER_CLOSEUP label separately as a secondary source. Lock unchanged printed artwork across all images; only the outside room/wall/furniture/light may change.
+Cross-check unclear winner details against the supplied canonical product, not a generated visual approximation. Never borrow another card's exterior room or redraw the artwork.
 
 SOURCE CARDS — CARD N MUST REMAIN CARD N
 {json.dumps(refs, ensure_ascii=False)}

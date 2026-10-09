@@ -5325,6 +5325,7 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "wall_finish": visual.get("wall_finish", visual["wall_material"]),
         "camera_family": visual["camera_side"],
         "camera_angle": visual["camera_side"],
+        "camera_angle_refinement": visual.get("resolved_camera_variation", ""),
         "shot_distance": visual["shot_distance"],
         "lighting_direction": visual["lighting"],
         "time_of_day": visual["time_of_day"],
@@ -5551,8 +5552,8 @@ FRAME, GLASS AND MOUNTING REALISM
 
 Frame:
 - slim-to-medium black timber moulding
-- approximately 18-22 mm visible front face
-- approximately 28-34 mm wall projection
+- match the actual source's visible front moulding; no invented fixed front-face measurement
+- believable source-matched side-depth/wall projection only when evidence supports it
 - sharp 45-degree mitred corners
 - restrained satin-black finish
 - subtle irregular timber grain
@@ -5560,7 +5561,7 @@ Frame:
 - natural frame depth appropriate to the selected camera angle
 
 Mounting:
-- believable 6-10 mm mounting gap
+- subtle source-consistent wall separation; do not invent a precise mounting-gap depth
 - narrow contact shadow
 - softer secondary shadow
 - slightly more shadow beneath the frame
@@ -5568,9 +5569,9 @@ Mounting:
 - no black halo, uniform digital drop shadow or floating product
 
 Glass:
-- clear gallery-style glazing
-- approximately 8-15% partial reflection coverage
-- approximately 3-6% reflection opacity
+- clear transparent acrylic/Perspex or glass, matching the verified product
+- a restrained yet clearly visible window/room reflection across part of the correct glazing
+- gentle photographic reflection strength matched to the room lighting
 - one believable room or window reflection
 - reflection stops at the inner frame edge
 - artwork remains crisp
@@ -9506,7 +9507,7 @@ def ensure_current_ads_result_prompt(result):
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
     content_current = not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"]))
     if result.get("prompt_contract_version") == expected_version and content_current:
-        return result
+        return _upgrade_saved_ads_visual_rules(result)
     old_master_prompt = str(result.get("master_prompt") or "")
     old_generated_output = str(result.get("generated_ad_output") or "")
     refreshed = build_ads_result_record(
@@ -9527,6 +9528,19 @@ def ensure_current_ads_result_prompt(result):
     if old_generated_output and old_generated_output != old_master_prompt:
         merged["generated_ad_output"] = old_generated_output
     return merged
+
+
+def _upgrade_saved_ads_visual_rules(result):
+    """Enrich a saved image brief in memory without rebuilding its scene or saving it."""
+    from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
+    old = str(result.get("master_prompt") or "")
+    upgraded = append_sports_cave_image_realism_rules(old, physical_product=result.get("product_metadata"))
+    if upgraded == old:
+        return result
+    updated = {**result, "master_prompt": upgraded}
+    if result.get("generated_ad_output") == old:
+        updated["generated_ad_output"] = upgraded
+    return updated
 
 
 def _new_ads_image_workflow(result):
@@ -12888,6 +12902,13 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
                   key=f"google-post-disabled::{result['context_key']}")
         st.caption(google_ads.POSTING_HELP)
         return
+    issues = list(quality_issues or [])
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        issues += _creative_refresh_asset_issues(result, workflow)
+        issues += _creative_refresh_visual_review_issues(result, workflow)
+    if issues:
+        st.caption("Before POST NOW: " + " · ".join(dict.fromkeys(issues)))
+        return
     package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
     if not package and source_matches and result.get("campaign_type") == "Carousel":
         _restore_saved_carousel_posting_package(result, workflow)
@@ -14212,19 +14233,44 @@ def _render_final_ad_review(result):
     )
 
 
-def render_product_artwork_reference(selection, product_url):
+def render_product_artwork_reference(selection, product_url, *, creative_refresh=False):
+    """A collapsed, read-only product source panel shared by New Ads and Refresh."""
     from ads_product_catalog import product_reference_image_url
     row = (selection or {}).get("row") or {}
     image_url = product_reference_image_url(row)
     with st.expander("Canonical black-frame product image", expanded=False):
-        st.caption("Attachment 2 is the product accuracy reference. Use the exact black-frame website artwork; verify the featured image before attaching it.")
+        if creative_refresh:
+            st.caption("PRODUCT REFERENCE ONLY — exact artwork and black frame, not its stock background. The original winning ads remain separate creative references and retain their existing card numbers.")
+        else:
+            st.caption("Attachment 2 is the product accuracy reference. Use the exact black-frame website artwork; verify the featured image before attaching it.")
         if image_url:
             st.image(image_url, width=220)
             st.link_button("Open website product image", image_url)
         if is_valid_product_page_url(product_url):
-            st.link_button("Open product page / download black-frame artwork", product_url)
+            st.link_button("Open live product page — select Black frame", product_url)
         if not image_url:
-            st.caption("No image is available in the shared product catalog. Obtain the black-frame image from the product page.")
+            st.caption("No verified black-frame image is available from the shared catalog. Check the live product and attach its original Black-frame photo.")
+        if creative_refresh:
+            shopify_id = str(row.get("shopify_product_id") or row.get("product_id") or "").strip()
+            expected_handle = _edition_ops_product_handle_from_row(row)
+            if shopify_id and expected_handle:
+                if st.button("Verify live Black-frame variant", key="ads-refresh-verify-live-black"):
+                    try:
+                        from ads_product_catalog import verify_live_black_frame_variant
+                        verified = verify_live_black_frame_variant(shopify_id, expected_handle)
+                        st.session_state["ads-refresh-verified-black-product"] = verified
+                    except Exception as error:
+                        # A failed verification never falls back to a guessed variant.
+                        st.session_state.pop("ads-refresh-verified-black-product", None)
+                        st.warning(str(error) if isinstance(error, ValueError) else
+                                   "Shopify Black-variant verification is unavailable. Check the product manually.")
+                checked = st.session_state.get("ads-refresh-verified-black-product") or {}
+                if (checked.get("shopify_product_id") == shopify_id
+                        and checked.get("product_handle") == expected_handle):
+                    st.link_button("Open verified Black-frame variant", checked["variant_url"])
+                    if checked.get("original_black_image_url"):
+                        st.link_button("Open live Black-frame product photo", checked["original_black_image_url"])
+                    st.caption("Shopify metadata was checked live. Inspect the actual product photograph before confirming artwork and frame fidelity; this is not an automatic pixel-level verification.")
 
 
 def creative_refresh_quality_issues(result, workflow):
@@ -14257,12 +14303,37 @@ def creative_refresh_quality_issues(result, workflow):
                 plan['references'], result['product_name'], result['product_url'], fixed_facts)
         else:
             issues += ads_refresh_generation.plan.copy_issues(rows, result['product_name'], context, fixed_facts)
-    source_hashes = [r.get("image_sha256") for r in plan["references"] if r.get("image_sha256")]
+    issues += _creative_refresh_asset_issues(result, workflow)
+    return list(dict.fromkeys(issues))
+
+
+def _creative_refresh_asset_issues(result, workflow):
+    """Check uploaded bytes without making historical execution notes a draft gate."""
+    context = result.get("creative_refresh_context") or {}
+    plan = context.get("refresh_plan") or {}
+    source_hashes = [r.get("image_sha256") for r in plan.get("references", []) if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:
         source_hashes.append(canonical_hash)
-    issues += ads_refresh_generation.plan.asset_issues(list((workflow.get("slots") or {}).values()), source_hashes)
-    return list(dict.fromkeys(issues))
+    return ads_refresh_generation.plan.asset_issues(list((workflow.get("slots") or {}).values()), source_hashes)
+
+
+def _creative_refresh_visual_review_key(result, workflow):
+    """Bind manual review to the same content checked by the saved-package gate."""
+    identity = posting_handoff.content_hash({
+        "source": _ads_saved_source_signature(result, workflow),
+        "product_metadata": result.get("product_metadata"),
+    })
+    return "ads-refresh-visual-qa::" + identity[:24]
+
+
+def _creative_refresh_visual_review_issues(result, workflow):
+    # Empty saved drafts may enter Posting to add assets; Create Ad still validates them.
+    if not _ads_image_valid_slots(result, workflow):
+        return []
+    if not st.session_state.get(_creative_refresh_visual_review_key(result, workflow), False):
+        return ["Visually compare each uploaded image with its exact product and winning card before POST NOW."]
+    return []
 
 
 def _render_ads_final_actions(result, workflow, *, source_matches=True):
@@ -14271,6 +14342,15 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
         if not source_matches:
             issues = ['Settings changed. Select Submit to prepare the matching refresh before saving.'] + issues
         with st.container(key='ads-refresh-actions'):
+            # Keep the existing Save / POST NOW actions compact. Only posting needs
+            # the explicit visual sign-off; draft saving remains completely unchanged.
+            if _ads_image_valid_slots(result, workflow):
+                with st.expander("Final visual verification — required before POST NOW", expanded=False):
+                    st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, clear acrylic/glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
+                    st.checkbox(
+                        "I checked every refreshed image against its product and winner references",
+                        key=_creative_refresh_visual_review_key(result, workflow),
+                    )
             save_col, post_col = st.columns(2)
             with save_col:
                 if source_matches:
@@ -14279,7 +14359,8 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
                     st.button('Save now', disabled=True, key=f"ads-images-save-open::{result['context_key']}")
                     st.caption('Product settings changed. Apply them with Submit before saving this refresh.')
             with post_col:
-                _render_saved_ad_post_now(result, workflow, source_matches=source_matches, quality_issues=issues)
+                _render_saved_ad_post_now(result, workflow, source_matches=source_matches,
+                                          quality_issues=issues)
     else:
         _render_ads_image_save(result, workflow)
         _render_saved_ad_post_now(result, workflow, source_matches=source_matches)
@@ -14623,10 +14704,12 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         import ads_refresh_product
         st.button('Use product from URL',key='ads-refresh-product-from-url',
                   on_click=ads_refresh_product.select_from_url,args=(product_rows,))
-    if is_creative_refresh and campaign_type != 'Carousel':
-        from ads_refresh_reference import render_product_image_link
-        render_product_image_link(st)
-    elif not is_creative_refresh and not is_google:
+    if is_creative_refresh:
+        render_product_artwork_reference(product_selection, product_url, creative_refresh=True)
+        if campaign_type != 'Carousel':
+            from ads_refresh_reference import render_product_image_link
+            render_product_image_link(st)
+    elif not is_google:
         render_product_artwork_reference(product_selection, product_url)
     campaign_moment = render_campaign_moment_section()
     creative_refresh_context = None
@@ -14758,6 +14841,15 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                 product_selection,
                 category=category,
             )
+            if is_creative_refresh:
+                verified_black = st.session_state.get("ads-refresh-verified-black-product") or {}
+                selected_shopify_id = str(
+                    (product_selection.get("row") or {}).get("shopify_product_id") or ""
+                )
+                if (verified_black.get("shopify_product_id") == selected_shopify_id
+                        and verified_black.get("product_handle") ==
+                            _edition_ops_product_handle_from_row(product_selection.get("row") or {})):
+                    product_metadata["verified_black_variant"] = dict(verified_black)
             context_key = ads_result_context_key(
                 product_id,
                 product_name,

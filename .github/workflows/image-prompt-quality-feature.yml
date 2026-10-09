@@ -1,0 +1,49 @@
+name: Image prompt quality tests (feature branch only)
+
+on:
+  push:
+    branches:
+      - feature/premium-image-prompts-v3-2026-10-09
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prompt-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.8'
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt pglast
+      - name: Compile changed modules
+        run: |
+          python -m compileall -q -x '(^|/)(tmp|\.git|\.venv)/' .
+          python scripts/validate_render_topology.py
+      - name: Run image prompt compatibility suites
+        run: |
+          python scripts/test_image_prompt_quality.py
+      - name: Clipboard behavior contracts
+        run: |
+          node tests/test_crm_prompt_clipboard.cjs
+          node tests/test_ads_refresh_reference.cjs
+      - name: Install browser test dependencies
+        run: |
+          npm install --prefix tmp/browser-runtime --no-save --package-lock=false playwright@1.56.1
+          tmp/browser-runtime/node_modules/.bin/playwright install --with-deps chromium
+      - name: Creative Refresh browser regression (mocked providers)
+        run: python scripts/run_refresh_browser.py
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-prompt-quality-evidence
+          path: |
+            tmp/image-prompt-quality/
+            tmp/refresh-browser-*.json
+            tmp/refresh-browser-*.log
+            tmp/refresh-after-*.png

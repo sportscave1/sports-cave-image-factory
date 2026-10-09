@@ -3,6 +3,34 @@ import sports_cave_physical_realism as physical_realism
 
 
 SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER = "SPORTS_CAVE_IMAGE_REALISM_RULES_V1"
+SPORTS_CAVE_PREMIUM_REALISM_MARKER = "SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3"
+
+# Additive visual quality contract: editable prompt text and scene variables retain authority.
+# Apply only to generation prompts; this is not a data migration or a runtime image inspector.
+SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3 = """SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3
+PHOTOGRAPHIC PRODUCT QUALITY — APPLIES WHEN AN EXISTING FRAMED PRODUCT IS SHOWN
+Treat the artwork and frame as one unchanged physical item. Preserve the exact source design, frame colour, material, profile and real physical scale. If selected variant dimensions or glazing are verified, honour them; unknown dimensions, depth, border layers or materials must never be fabricated. The source may be landscape or portrait; preserve its orientation. No painting over lettering, logos, signatures, faces, plaques, badges, livery, printed backgrounds or edition details.
+PREMIUM REFLECTIONS: a verified glazed frame (acrylic/Perspex OR glass) must show subtle but clearly visible transparent-glazing reflections from a credible window or light source, with a gentle highlight falloff across a restrained area of the glazing. Acrylic can look as premium and reflective as glass; do not impose glass material on a verified acrylic product. If the item is known to be unglazed/unframed, do not invent a pane. Never create opaque haze, white streaks, a thick glazing slab or glare that hides the artwork.
+PREMIUM SHADOWS: natural edge lighting on real frame bevels and mitres, a soft narrow contact shadow near the wall, a gentler diffused shadow beneath or beside the product, restrained ambient occlusion and a believable wall separation. Keep shadow direction and softness consistent with actual room lights. No uniform digital black halo, hovering frame, fake spotlit outline or cardboard-thin product.
+REAL RESIDENTIAL PHOTOGRAPHY: plausible floor-to-wall joins, furniture size, hanging height, window orientation and light falloff. Natural timber, plaster, paint, fabric and metal texture; subtle normal imperfections. No warped architecture, empty CGI showrooms, exaggerated luxury props, random sports memorabilia, repeating AI textures, oversaturated orange/gold casts or clutter competing with the product.
+CAMERA AND VISUAL VARIATION: honour the one explicitly resolved room, camera, angle, crop, shot distance, branding, copy, layout and safe areas. For optional new lifestyle compositions use natural front, gentle left/right or slight elevated perspectives, while keeping the artwork large, its four frame edges visible and architectural verticals straight. Never override the required winning-card role, a user-selected camera, an intentional verified detail crop, right/centre/left IE slot identity, or a fixed product-shot contract merely to add randomness. Do not mirror or stretch the design.
+FINAL PHOTOGRAPHIC CHECK: when the actual output is visible, compare it with the supplied high-resolution product reference for artwork integrity, frame thickness, profile, material, surface reflections, plausible scale, mounting and shadows. A missing or distorted feature must be corrected before recommending use. If only text or metadata is available, state that the pixels were NOT inspected; do not claim visual fidelity was automatically verified.
+ORIGINAL ARTWORK MODE: these physical frame and room instructions apply only to a completed product mockup. For creating a new original Sports Cave artwork, retain its own authentic-photograph and design-style rules instead of inventing a framed product.
+END PREMIUM VISUAL QUALITY CONTRACT"""
+
+def _append_before_ending(prompt_text: str, block: str, ending: str = "") -> str:
+    ending = str(ending or "").strip()
+    if ending and prompt_text.endswith(ending):
+        return (prompt_text[:-len(ending)].rstrip()
+                + "\n\n" + block + "\n\n" + ending).strip()
+    return (prompt_text.rstrip() + "\n\n" + block).strip()
+
+
+def _add_premium_visual_upgrade(prompt_text: str, ending: str = "") -> str:
+    """Bring previously saved V1 prompts forward without replacing editable text."""
+    if SPORTS_CAVE_PREMIUM_REALISM_MARKER in prompt_text:
+        return prompt_text
+    return _append_before_ending(prompt_text, SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3, ending)
 
 
 SPORTS_CAVE_GLOBAL_PHOTOGRAPHIC_REALISM_BLOCK = """GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
@@ -104,13 +132,21 @@ Mandatory final product inspection:
 
 
 def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, allow_intentional_detail_crop: bool = False,
-                                         physical_product=None, include_physical_realism: bool = True) -> str:
+                                         physical_product=None, include_physical_realism: bool = True,
+                                         include_premium_realism: bool = True) -> str:
     sections = [
         SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
         "AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES",
         "This shared master block is mandatory and overrides conflicting creative direction.",
         SPORTS_CAVE_GLOBAL_PHOTOGRAPHIC_REALISM_BLOCK,
     ]
+    if include_product_lock and physical_realism.is_unframed(physical_product):
+        sections.append(
+            "UNFRAMED PRODUCT - EXACT SOURCE LOCK\n"
+            "Preserve the supplied unframed artwork, colours, lettering, faces, logos, signatures and proportions exactly. "
+            "Honour the selected dimensions and composition. Do not add a frame, glazing, bevel, mounting gap or framed-product shadows."
+        )
+        return "\n\n".join(sections)
     if include_product_lock:
         lock = SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK
         if allow_intentional_detail_crop:
@@ -122,6 +158,8 @@ def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, 
                                 'only the explicitly supported detail card may crop the source photograph; never alter the artwork pixels or frame geometry')
             lock += '\n\nINTENTIONAL DETAIL CARD ONLY: retain the verified source detail and its advertising function. A photographic detail crop is permitted; never redraw, magnify printed pixels independently, invent details or force a lifestyle-room scene.'
         sections.append(lock)
+        if include_premium_realism:
+            sections.append(SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3)
         if include_physical_realism:
             sections.append(physical_realism.build(physical_product))
     else:
@@ -143,27 +181,34 @@ def append_sports_cave_image_realism_rules(
     required_ending: str = "",
     physical_product=None,
 ) -> str:
+    """Safely enrich new and user-saved prompts; never replace authored variables."""
     prompt_text = str(prompt_text or "").strip()
+    ending = str(required_ending or "").strip()
+    framed_product = include_product_lock and not physical_realism.is_unframed(physical_product)
     if prompt_has_sports_cave_image_realism_rules(prompt_text):
-        # Stored V1 prompts retain their exact rules/creative text; add only the
-        # missing physical contract. Repeated wrapping must remain idempotent.
-        if not include_product_lock:
-            return prompt_text
-        if physical_realism.MARKER in prompt_text:
-            return physical_realism.apply_context(prompt_text, physical_product)
-        block = physical_realism.build(physical_product)
+        if framed_product:
+            if physical_realism.MARKER in prompt_text:
+                result = physical_realism.apply_context(prompt_text, physical_product)
+            else:
+                result = _append_before_ending(prompt_text, physical_realism.build(physical_product), ending)
+        else:
+            result = prompt_text
     else:
         has_physical = physical_realism.MARKER in prompt_text
         if has_physical and include_product_lock:
             prompt_text = physical_realism.apply_context(prompt_text, physical_product)
         block = build_sports_cave_image_realism_rules(
-            include_product_lock=include_product_lock, physical_product=physical_product,
-            include_physical_realism=not has_physical)
-    ending = str(required_ending or "").strip()
-    if ending and prompt_text.rstrip().endswith(ending):
-        body = prompt_text.rstrip()[: -len(ending)].rstrip()
-        return f"{body}\n\n{block}\n\n{ending}" if body else f"{block}\n\n{ending}"
-    return f"{prompt_text}\n\n{block}" if prompt_text else block
+            include_product_lock=include_product_lock,
+            physical_product=physical_product,
+            include_physical_realism=not has_physical,
+            include_premium_realism=SPORTS_CAVE_PREMIUM_REALISM_MARKER not in prompt_text,
+        )
+        if ending and prompt_text.endswith(ending):
+            body = prompt_text[:-len(ending)].rstrip()
+            result = f"{body}\n\n{block}\n\n{ending}" if body else f"{block}\n\n{ending}"
+        else:
+            result = f"{prompt_text}\n\n{block}" if prompt_text else block
+    return _add_premium_visual_upgrade(result, ending) if framed_product else result
 
 
 SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK = """UGC HUMAN REALISM REQUIREMENTS:

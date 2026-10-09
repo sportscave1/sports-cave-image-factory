@@ -1,7 +1,7 @@
 from sports_categories import sport_family
 from pathlib import Path
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
-from contextlib import suppress
+from contextlib import closing, suppress
 import hashlib
 import json
 import logging
@@ -601,9 +601,9 @@ Clean edges.
 Subtle timber texture.
 Believable thickness.
 Natural shadow behind the frame.
-Glass realism:
-add realistic glass over the artwork.
-The glass should show soft natural reflections and subtle premium glare.
+Glazing realism:
+show the verified transparent acrylic/Perspex or glass in front of the artwork; both can exhibit elegant natural reflections.
+The glazing must have soft, subtle yet visible room-based reflections and restrained premium highlights.
 The glare must look real, controlled, and high-end.
 Do not let the glare hide the artwork.
 Do not add fake glow.
@@ -1874,6 +1874,7 @@ def build_lifestyle_prompt_items(
     )
     room_style_guidance = build_room_style_guidance(product_prompt_value, sport_prompt_value)
 
+    used_camera_angles = set()
     for filename, title, prompt_body in LIFESTYLE_PROMPT_SPECS:
         prompt_body = get_lifestyle_prompt_text(
             filename,
@@ -1881,7 +1882,10 @@ def build_lifestyle_prompt_items(
             local_only=local_only,
         )
         from mockup_product_prompts import build as build_product_scene
-        prompt_body = build_product_scene(filename, prompt_body)
+        prompt_body = build_product_scene(filename, prompt_body, avoid_angles=used_camera_angles)
+        selected_angle = re.search(r'^Selected camera angle: (.+)$', prompt_body, flags=re.MULTILINE)
+        if selected_angle:
+            used_camera_angles.add(selected_angle.group(1))
         if (
             is_room_style_guidance_prompt(filename)
             and ROOM_STYLE_GUIDANCE_MARKER not in prompt_body
@@ -2177,7 +2181,9 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("error", Image.DecompressionBombWarning)
-                    with Image.open(temp_source_path) as source_image:
+                    # Conversion releases the decoded source early; Pillow 10.4's
+                    # file-context __exit__ cannot close that source a second time.
+                    with closing(Image.open(temp_source_path)) as source_image:
                         if source_image.format not in {"JPEG", "PNG", "WEBP"}:
                             raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
                         logging.info("MOCKUPS_LIFESTYLE stage=decode dimensions=%sx%s mode=%s upload_bytes=%s",

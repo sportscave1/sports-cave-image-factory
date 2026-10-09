@@ -346,6 +346,7 @@ class AdsPageTests(unittest.TestCase):
             expanders,
             {
                 "How to use": False,
+                "Canonical black-frame product image": False,
                 "Campaign Moment (Optional)": False,
             },
         )
@@ -638,7 +639,13 @@ class AdsPageTests(unittest.TestCase):
             "carousel_final_quality_check = build_carousel_final_quality_check(include_primary_text_variations=True)",
             source,
         )
-        self.assertIn("return compose_final_ads_prompt(", source)
+        self.assertIn("compose_final_ads_prompt(", source)
+        with patch.object(ads_page, 'compose_final_ads_prompt', wraps=ads_page.compose_final_ads_prompt) as compose, patch.object(ads_page, 'build_carousel_card_copy_rules', wraps=ads_page.build_carousel_card_copy_rules) as rules:
+            prompt = ads_page.build_ads_prompt('Collector', 'Cricket', 'Australia', 'Carousel')
+        compose.assert_called_once()
+        rules.assert_called_once()
+        self.assertIn('CAROUSEL CARD CHARACTER LIMIT', prompt)
+        self.assertIn('Maximum 17 characters', prompt)
 
     def test_primary_text_rules_use_stronger_australian_motorsport_block(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
@@ -4768,11 +4775,10 @@ PRIMARY TEXT VARIATIONS
                 "1. Copy this ChatGPT prompt",
                 "Generated Ad Images",
                 "2. Build it in Meta",
-                "3. URL parameters",
             ],
         )
-        self.assertEqual(len(app_test.code), 1)
-        self.assertEqual(app_test.code[0].value, ads_page.META_AD_URL_PARAMETERS)
+        self.assertEqual(len(app_test.code), 0)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]['master_prompt'])
         self.assertFalse(any("Product name: Six Laps Ahead" in code.value for code in app_test.code))
         self.assertFalse(any("Market: Canada" in code.value for code in app_test.code))
         self.assertEqual(len(app_test.exception), 0)
@@ -4789,8 +4795,8 @@ PRIMARY TEXT VARIATIONS
         self.assertNotIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
         self.assertIn("1. Copy this ChatGPT prompt", [subheader.value for subheader in app_test.subheader])
         self.assertFalse(any("Using generic Sports Cave winner pattern" in caption.value for caption in app_test.caption))
-        self.assertEqual(len(app_test.code), 1)
-        self.assertEqual(app_test.code[0].value, ads_page.META_AD_URL_PARAMETERS)
+        self.assertEqual(len(app_test.code), 0)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]['master_prompt'])
         self.assertEqual(len(app_test.exception), 0)
 
     def test_carousel_renders_five_slots_and_upload_state_survives_reruns(self):
@@ -5631,7 +5637,7 @@ PRIMARY TEXT VARIATIONS
             "Retain the uploaded product pixels wherever technically possible",
             "Keep all four outside frame edges visible",
             "one rigid rectangular object",
-            "believable 6-10 mm mounting gap",
+            "subtle source-consistent wall separation; do not invent a precise mounting-gap depth",
             "one physically consistent source of soft daylight",
             "remain confined to the glass surface",
             "generic AI luxury-room formula",

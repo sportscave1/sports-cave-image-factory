@@ -67,7 +67,7 @@ class RefreshSaveRestoreTests(unittest.TestCase):
         self.assertEqual(winner_handoff.product_selector_rows([ROW], state), [ROW])
         self.assertNotIn('product_mapping', state[winner_handoff.ACTIVE])
 
-    def test_carousel_save_restores_all_cards_for_posting(self):
+    def test_carousel_save_restores_all_cards_and_preserves_dynamic_posting_count(self):
         result, workflow = completed_ad('Carousel', 'creative_refresh')
         from ads_refresh_plan import reference_map
         result['creative_refresh_context'] = {'source_winner': {'carousel_cards': [
@@ -81,7 +81,9 @@ class RefreshSaveRestoreTests(unittest.TestCase):
         self.assertEqual(len(ads._result_image_slots(restored_result)), 6)
         self.assertEqual(len(reopened['slots']), 6)
         self.assertEqual([c['position'] for c in reopened['ad_notes']['carousel']['cards']], list(range(1,7)))
-        self.assertEqual(len(reopened[handoff.SAVED_PACKAGE_KEY]['batch']['cards']),6)
+        package=reopened[handoff.SAVED_PACKAGE_KEY]
+        self.assertEqual([a['position'] for a in package['assets']],list(range(1,7)))
+        self.assertEqual([c['card_number'] for c in package['batch']['cards']],list(range(1,7)))
         self.assertNotIn('posting_package_error',reopened)
 
     def test_workspace_save_failure_disables_post_now_and_is_retryable(self):
@@ -92,6 +94,44 @@ class RefreshSaveRestoreTests(unittest.TestCase):
         self.assertNotIn(handoff.SAVED_PACKAGE_KEY, workflow)
         save_locally(result, workflow)
         self.assertTrue(workflow['refresh_workspace_saved'])
+
+    def test_four_five_and_six_cards_reach_posting_with_all_five_copy_variations(self):
+        from tests.fixtures.refresh_ui import ready_carousel
+        for count in (4, 5, 6):
+            with self.subTest(count=count):
+                result, workflow = ready_carousel(count)
+                save_locally(result, workflow)
+                package = workflow[handoff.SAVED_PACKAGE_KEY]
+                state = {posting.CAROUSEL_IMAGE_STATE_KEYS[-1]: {'stale': True}}
+                handoff.queue_saved_package(package, state=state)
+                self.assertTrue(posting.consume_saved_posting_package(ads.build_ads_product_selector_records([ROW]), state=state))
+                self.assertEqual(state[posting.CAROUSEL_COUNT_KEY], count)
+                self.assertEqual([state[key] for key in posting.CAROUSEL_PRIMARY_TEXT_KEYS],
+                                 workflow['ad_notes']['carousel']['primary_texts'])
+                for index, card in enumerate(workflow['ad_notes']['carousel']['cards']):
+                    self.assertEqual(state[posting.CAROUSEL_HEADLINE_KEYS[index]], card['headline'])
+                    self.assertEqual(state[posting.CAROUSEL_DESCRIPTION_KEYS[index]], card['description'])
+                    asset = state[posting.CAROUSEL_IMAGE_STATE_KEYS[index]]['saved_asset']
+                    self.assertEqual(asset['position'], index + 1)
+                self.assertNotIn(posting.CAROUSEL_IMAGE_STATE_KEYS[-1], state)
+                self.assertEqual(state[handoff.LOADED_KEY]['source_provenance'], result['creative_refresh_context'])
+
+    def test_incomplete_ie_draft_saves_and_reopens_without_invented_assets_or_review(self):
+        result, workflow = self.ready_ie()
+        missing = next(iter(workflow['slots']))
+        workflow['slots'].pop(missing)
+        originals = deepcopy(workflow['slots'])
+        save_locally(result, workflow)
+        _, restored = saved.loads(workflow['refresh_workspace_export'])
+        self.assertEqual(set(restored['slots']), set(originals))
+        for slot_id, original in originals.items():
+            self.assertEqual({key: restored['slots'][slot_id][key] for key in original}, original)
+        package = restored[handoff.SAVED_PACKAGE_KEY]
+        self.assertTrue(package['draft_workspace'])
+        self.assertEqual(len(package['assets']), 2)
+        self.assertNotIn(missing, [a['slot_id'] for a in package['assets']])
+        with patch.object(ads.st, 'session_state', {}):
+            self.assertTrue(ads._creative_refresh_visual_review_issues(result, restored))
 
     def test_saved_route_reopens_with_files_authorization(self):
         result, workflow = self.ready_ie()
@@ -138,6 +178,8 @@ with patch.object(ads, '_ads_image_workflow', return_value=workflow), patch.obje
         for obsolete in ('Build it in Meta', 'Final Ad Review', 'Execution notes', 'Refresh checks',
                          'Refresh analysis & standalone briefs', 'Attach WINNER_IE', 'st.iframe'):
             self.assertNotIn(obsolete, visible)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=20)
         next(b for b in app.button if b.label == 'POST NOW').click().run(timeout=20)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state['current_page'], ads.POSTING_ROUTE)

@@ -51,7 +51,10 @@ class DetailTests(unittest.TestCase):
 
     def test_ambiguous_asset_labels_and_multiple_sequences_fail_closed(self):
         raw=dynamic_feed();raw['asset_feed_spec']['images'].append(deepcopy(raw['asset_feed_spec']['images'][0]))
-        self.assertTrue(creative.normalize(raw)['cards'][0]['image_unavailable'])
+        ambiguous = creative.normalize(raw)
+        self.assertEqual(ambiguous['carousel_structure_source'], 'ambiguous_asset_feed_labels')
+        self.assertEqual(ambiguous['creative_format'], 'DYNAMIC')
+        self.assertFalse(ambiguous['cards'])
         raw['asset_feed_spec']['carousels']*=2
         self.assertEqual(creative.normalize(raw)['creative_format'],'DYNAMIC')
         self.assertFalse(creative.normalize(raw)['cards'])

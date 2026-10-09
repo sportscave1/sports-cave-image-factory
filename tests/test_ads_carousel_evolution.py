@@ -248,13 +248,15 @@ class CarouselEvolutionTests(unittest.TestCase):
         self.assertTrue(all(c['destination_url']==self.result['product_url'] for c in parsed['cards']))
         self.assertFalse(ads.creative_refresh_quality_issues(self.result,workflow))
 
-    def test_stale_optional_review_does_not_block_save_and_is_preserved(self):
+    def test_stale_copy_review_is_reported_but_draft_save_preserves_work(self):
         workflow = self.workflow()
         workflow['ad_notes']['carousel']['cards'][1]['headline'] = 'Mount Panorama'
         before = deepcopy(workflow)
+        self.assertTrue(any('review is stale' in issue for issue in ads.creative_refresh_quality_issues(self.result,workflow)))
         save_locally(self.result,workflow)
-        self.assertTrue(workflow['refresh_workspace_saved'])
-        self.assertEqual(set(workflow['slots']),set(before['slots']))
+        _, restored=saved.loads(workflow['refresh_workspace_export'])
+        self.assertEqual(restored['ad_notes']['refresh_executions'],before['ad_notes']['refresh_executions'])
+        self.assertEqual(workflow['slots'],before['slots'])
         self.assertEqual(workflow['ad_notes']['refresh_executions'],before['ad_notes']['refresh_executions'])
         for after, original in zip(workflow['ad_notes']['carousel']['cards'],before['ad_notes']['carousel']['cards']):
             for field in ('headline','description','destination_url'):
@@ -270,14 +272,16 @@ class CarouselEvolutionTests(unittest.TestCase):
         restored['ad_notes']['refresh_executions'][0]['copy_review']['headline']['selection_reason'] = 'Edited'
         self.assertNotEqual(old,ads._ads_saved_source_signature(self.result,restored))
 
-    def test_four_card_save_retains_all_four_for_posting(self):
+    def test_four_card_save_retains_all_four_in_posting_package(self):
         workflow = self.workflow()
         uploaded = save_locally(self.result,workflow)
         exported = next(data for name,data in uploaded.items() if name.endswith(ads.CAROUSEL_COPY_FILENAME))
         self.assertEqual(len(ads.parse_carousel_copy_csv(exported,self.result)['cards']),4)
         self.assertEqual(len(workflow['slots']),4)
+        package=workflow[ads.posting_handoff.SAVED_PACKAGE_KEY]
+        self.assertEqual([a['position'] for a in package['assets']],[1,2,3,4])
+        self.assertEqual([c['card_number'] for c in package['batch']['cards']],[1,2,3,4])
         self.assertNotIn('posting_package_error',workflow)
-        self.assertEqual(len(workflow['saved_posting_package']['batch']['cards']),4)
         self.assertTrue(any(name.endswith(saved.FILENAME) for name in uploaded))
 
     def test_meta_shared_options_survive_complete_winner_handoff(self):
@@ -289,17 +293,29 @@ class CarouselEvolutionTests(unittest.TestCase):
         self.assertEqual(source['shared_headlines'],['Shared headline','Original shared headline'])
         self.assertEqual(source['shared_descriptions'],['Original shared description'])
 
-    def test_active_ui_optional_copy_review_never_blocks_draft_save(self):
+    def test_active_ui_keeps_draft_save_available_when_historical_copy_review_changes(self):
         from tests.test_ads_refresh_repair import app_for, button
         app = app_for()
+        self.assertFalse(button(app,'Save now').disabled)
+        original = deepcopy(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['ad_notes']['carousel'])
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
-        original=deepcopy(workflow['ad_notes']['carousel'])
-        workflow['ad_notes']['refresh_executions'][1]['copy_review']['headline']['checks']['strategy']['passed']=False
+        records = deepcopy(workflow['ad_notes']['refresh_executions'])
+        records[1]['copy_review']['headline']['checks']['strategy']['passed'] = False
+        workflow['ad_notes']['refresh_executions']=records
+        app.run(timeout=30)
+        self.assertFalse(app.exception)
+        self.assertFalse(button(app,'Save now').disabled)
+        self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['ad_notes']['carousel'],original)
+        self.assertNotIn('Card execution notes (JSON)',[t.label for t in app.text_area])
+        self.assertNotIn('POST NOW',[b.label for b in app.button])
+        self.assertFalse(workflow['ad_notes']['refresh_executions'][1]['copy_review']['headline']['checks']['strategy']['passed'])
+        records[1]['copy_review']['headline']['checks']['strategy']['passed'] = True
+        workflow['ad_notes']['refresh_executions']=records
         app.run(timeout=30)
         self.assertFalse(app.exception)
         self.assertFalse(button(app,'Save now').disabled)
         self.assertEqual(workflow['ad_notes']['carousel'],original)
-        self.assertFalse(workflow['ad_notes']['refresh_executions'][1]['copy_review']['headline']['checks']['strategy']['passed'])
+        self.assertTrue(workflow['ad_notes']['refresh_executions'][1]['copy_review']['headline']['checks']['strategy']['passed'])
 
     def test_old_plans_keep_compatibility_but_new_prompts_upgrade(self):
         old = deepcopy(self.context)

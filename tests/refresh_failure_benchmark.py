@@ -9,7 +9,7 @@ import meta_carousel_view as current
 
 def main():
     baseline=types.ModuleType('baseline_carousel_view');baseline.__file__=current.__file__
-    exec(compile(subprocess.check_output(['git','show','HEAD:meta_carousel_view.py']).decode('utf8'),current.__file__,'exec'),baseline.__dict__)
+    exec(compile(subprocess.check_output(['git','show','87b0ea5:meta_carousel_view.py']).decode('utf8'),current.__file__,'exec'),baseline.__dict__)
     source={'carousel_cards':[{'position':i,'image_sha256':str(i),'image_url':'https://example.test/image'} for i in range(1,5)]}
     results={'scenario':'4 archived cards, 20 rerenders during a storage outage; no simulated latency'}
     with patch('meta_review_store.load_media',side_effect=TimeoutError('fixture outage')):

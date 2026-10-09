@@ -23,7 +23,8 @@ class WinnerRefinementTests(unittest.TestCase):
         prompt=ads.build_instant_experience_winner_refinement_prompt('Collector edition','NBA','USA',
             'https://example.test/products/collector',{'winning_primary_text':'Collector release','winning_headline':'Own the moment'})
         contracts=prompt.split('STANDALONE EXECUTION CONTRACTS')[1].split('EXECUTION NOTES')[0]
-        self.assertEqual(contracts.count(generation.ie_refresh_image_rules()),3)
+        # The standalone builder reorders and expands the full rule block per cover.
+        self.assertEqual(contracts.count("IE WINNER REFINEMENT — PREMIUM PRODUCT / REAL CUSTOMER WALL / FOMO FOOTER"),3)
         for phrase in ('Match the canonical black frame thickness and depth exactly.',
                        'The winning ad must NOT override canonical frame proportions.',
                        'Premium real-glass glazing','physically believable highlight falloff',

@@ -1,5 +1,6 @@
 """Own a local mocked Creative Refresh server for browser regression checks."""
 import os
+import json
 from pathlib import Path
 import socket
 import subprocess
@@ -17,12 +18,26 @@ def main():
     (ROOT/'tmp').mkdir(exist_ok=True)
     from PIL import Image
     from tests.fixtures.refresh_ui import ready_carousel
+    from tests.test_ads_refresh_save_restore import RefreshSaveRestoreTests
     import ads_page as ads
     Image.new('RGB',(1024,1024),(42,90,140)).save(ROOT/'tmp/refresh-test-upload.png')
     result,workflow=ready_carousel()
+    # Match the fixture's source digests; they are provenance, not pixel analysis.
+    context = result['creative_refresh_context']
+    for i, card in enumerate(context['source_winner']['carousel_cards'], 1):
+        card['image_sha256'] = f'fixture-card-{i}'
+    result = ads.build_ads_result_record(result['product_name'], result['category'], result['country'], 'Carousel',
+        product_id=result['product_id'], product_url=result['product_url'], variation_token='synthetic-v3', creative_refresh_context=context)
+    ie, _ = RefreshSaveRestoreTests().ready_ie()
+    (ROOT/'tmp/refresh-expected-prompts.json').write_text(json.dumps({
+        'Carousel': ads.creation_instructions(result['master_prompt']),
+        'Instant Experience': ads.creation_instructions(ie['master_prompt']),
+    }), encoding='utf-8')
+    (ROOT/'tmp/refresh-test-copy-valid.csv').write_bytes(ads.build_carousel_copy_csv(result,workflow))
     workflow['ad_notes']['carousel']['cards'][0]['headline']='Local CSV Review'
     (ROOT/'tmp/refresh-test-copy.csv').write_bytes(ads.build_carousel_copy_csv(result,workflow))
     env={**os.environ,'PYTHONUTF8':'1','PYTHONPATH':str(ROOT)}
+    env['NODE_PATH'] = os.environ.get('NODE_PATH') or str(ROOT/'tmp/browser-runtime/node_modules')
     if '--baseline' in sys.argv:
         path=ROOT/'tmp/refresh-baseline'
         path.mkdir(exist_ok=True)

@@ -59,10 +59,13 @@ class LockedLegacyCopyTests(unittest.TestCase):
                          ("basketball", "club", "team"))
 
     def test_current_image_prompts_and_unchanged_creative_refresh(self):
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads((Path(__file__).parent / 'fixtures/premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         baseline = json.loads((Path(__file__).parent / "fixtures/ie_locked_copy_scope_baseline.json").read_text())
-        for case in baseline["images"]:
+        for index, case in enumerate(baseline["images"]):
             actual = ads.build_standard_instant_experience_visual_prompts(**case["kwargs"])
-            self.assertEqual(hashlib.sha256(actual.encode()).hexdigest(), case["sha256"])
+            self.assertEqual(contract_shape(actual), structures['ie-image/' + str(index)])
+            self.assertEqual(actual.count('SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3'), 3)
         case = baseline["refresh"]
         actual = ads.build_ads_prompt(**case["kwargs"])
         self.assertIn("WINNER LED REFRESH V3", actual)

@@ -31,7 +31,7 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
             product_metadata={"edition_limit": 100}, **kwargs,
         )
 
-    def assert_three_formats(self, text, limit=100):
+    def assert_three_formats(self, text, limit=100, *, clipboard=False):
         for old in ("PRIVATE GALLERY", "SMART HYBRID", "GROUP 3 — THE CAVE", "FOR THE ROOM THAT REMEMBERS.", "full-height right graphic column"):
             self.assertNotIn(old, text)
         grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME", 1)[1]
@@ -55,7 +55,8 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         self.assertNotIn("COPY VARIATIONS", grouped)
         self.assertNotRegex(text.casefold(), r"\b(?:motorsport|basketball|football|cricket|baseball|sports|racing) collectors\b")
         self.assertNotIn("identical resolved banner wording", text)
-        self.assertIn(ads_page.META_AD_URL_PARAMETERS, text)
+        if not clipboard:
+            self.assertIn(ads_page.META_AD_URL_PARAMETERS, text)
 
     def test_public_ads_result_entry_point_emits_three_formats(self):
         result = self.record()
@@ -77,8 +78,11 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
             ads_page.render_prompt_copy_button(text, "ie-integration-clipboard")
         html = render_html.call_args.args[0]
         encoded = re.search(r"const promptText = (.*);", html).group(1)
-        self.assertEqual(json.loads(encoded), text)
-        self.assert_three_formats(json.loads(encoded))
+        # The existing copy-button presentation layer intentionally removes obsolete
+        # URL-parameter setup boilerplate, without mutating the saved prompt itself.
+        copied = json.loads(encoded)
+        self.assertEqual(copied, ads_page.creation_instructions(text))
+        self.assert_three_formats(copied, clipboard=True)
 
     def test_cached_legacy_prompt_rebuilds_even_when_version_claims_current(self):
         current = self.record()

@@ -15,12 +15,15 @@ AUTHORITY = ('The canonical black-framed product image supplies the exact artwor
              'Its external background is not a creative reference. Analyse the separately supplied winning '
              'advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.')
 CAROUSEL_CONTRACT = 'COLLECTIVE WINNER CAROUSEL V1'
-CAROUSEL_AUTHORITY = ('The supplied winning Carousel cards collectively supply the immutable product authority. '
-    'Inspect ALL supplied full-resolution winning cards together to establish exact artwork, printed internal background, '
-    'text, faces, logos, plaque, aspect ratio and frame colour/thickness/depth/bevel. Preserve these exactly; '
-    'never invent hidden or illegible details. Each individual card supplies its own creative role and broad room family. '
-    'Only the external environment and execution may change. If product details conflict or cannot be established, '
-    'stop and request complete original winning cards. Do not redraw or reconstruct the product.')
+CAROUSEL_AUTHORITY = ('CANONICAL_PRODUCT, when supplied as the original black-framed Shopify product reference, has FIRST authority '
+    'for the exact printed artwork, internal background, lettering, faces, logos, plaques, aspect ratio, '
+    'frame finish, thickness, bevel and verified glazing/construction. Its external stock room is NOT a creative reference. '
+    'Original WINNER_CARD images, in source order, individually supply the winning advertising strategy, room family, '
+    'mood, composition, functional objects and copy direction, not permission to redraw artwork pixels. '
+    'Inspect ALL winning cards together and select the sharpest genuine close-up as SECONDARY detail evidence only; '
+    'never let a magnified or CGI winner view override the original Shopify product. '
+    'Without an original product image, winner cards are provisional cross-references, not verified product truth. '
+    'If source details conflict or remain unreadable, stop and request the canonical black-frame photograph; Do not redraw or reconstruct the product; never invent or reconstruct details.')
 # Architecture, palette and materials are selection metadata, not inferred winner observations.
 _STYLES = (
  ('Heritage billiards room', 'games', 'burgundy', 'panelling', 'traditional timber', 'heritage enclosed room', 'warm practical light', 'pool table'),
@@ -239,7 +242,7 @@ def asset_issues(slots, source_hashes=()):
         output_digest = hashlib.sha256(slot['data']).hexdigest() if slot.get('data') else ''
         if (digest and digest in hashes) or (output_digest and output_digest in output_hashes):
             issues.append('Identical output image assigned to multiple refresh slots.')
-        if digest and digest in source_hashes:
+        if (digest and digest in source_hashes) or (output_digest and output_digest in source_hashes):
             issues.append('Unchanged winner/canonical source assigned as a refreshed image.')
         hashes.append(digest)
         output_hashes.append(output_digest)
@@ -278,7 +281,8 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
         # Historical saved execution notes remain valid. The new physical block
         # is injected into newly built prompts; do not invalidate completed work.
         full_rules = build_sports_cave_image_realism_rules(include_product_lock=True,
-            allow_intentional_detail_crop=is_detail, include_physical_realism=False)
+            allow_intentional_detail_crop=is_detail, include_physical_realism=False,
+            include_premium_realism=False)
         required = ('camera', 'lighting', 'product_placement') if is_detail else ('architecture', 'layout', 'wall_palette', 'wall_material', 'camera')
         extras = ('furniture', 'lighting', 'flooring', 'background', 'product_placement')
         if not isinstance(dimensions, dict):
@@ -307,7 +311,16 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
             if len(same) >= 4:
                 issues.append(f'Execution {i}: declared scene barely changes the winner; redesign architecture and layout.')
         prompt = str(execution.get('image_prompt') or '')
-        if full_rules not in prompt or (CAROUSEL_AUTHORITY if campaign_type == 'Carousel' else AUTHORITY) not in prompt or product.casefold() not in prompt.casefold() or expected not in prompt:
+        # Existing saved workspaces may contain the previously approved collective-source wording.
+        old_carousel_authority = ('The supplied winning Carousel cards collectively supply the immutable product authority. '
+            'Inspect ALL supplied full-resolution winning cards together to establish exact artwork, printed internal background, '
+            'text, faces, logos, plaque, aspect ratio and frame colour/thickness/depth/bevel. Preserve these exactly; '
+            'never invent hidden or illegible details. Each individual card supplies its own creative role and broad room family. '
+            'Only the external environment and execution may change. If product details conflict or cannot be established, '
+            'stop and request complete original winning cards. Do not redraw or reconstruct the product.')
+        authority_present = ((CAROUSEL_AUTHORITY in prompt or old_carousel_authority in prompt)
+                             if campaign_type == 'Carousel' else AUTHORITY in prompt)
+        if full_rules not in prompt or not authority_present or product.casefold() not in prompt.casefold() or expected not in prompt:
             issues.append(f'Execution {i}: missing full shared rules, product authority or exact reference.')
         if campaign_type == 'Carousel':
             if any(prompt.strip() == str(old.get('image_prompt') or '').strip() for old in executions[:i-1] if isinstance(old, dict)):
@@ -349,9 +362,11 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
 
 def carousel_standalone_brief(product, reference, *, scene='', role='', detail=False, dimensions='1080 x 1080', references=()):
     return f"""PRODUCT: {product}
-REFERENCE: {reference}; inspect this exact attachment AND all other winning cards for collective product fidelity.
+REFERENCE: {reference}; inspect this exact winner attachment AND all other cards for creative direction.
 {CAROUSEL_AUTHORITY}
-If an optional canonical black-frame product photograph is supplied, use it only for exact artwork/frame fidelity, never for its room, wall, furniture, camera or lighting. It is not an additional creative card. Do not duplicate that stock mockup or the original winner; resolve conflicting product details before generation.
+CANONICAL_PRODUCT (when supplied) is a separate product-accuracy attachment, NOT another Carousel card or output slot. Never copy its external wall or lighting.
+After inspecting full-resolution winner cards, identify BEST_WINNER_CLOSEUP for a secondary check of frame thickness, bevel and printed detail; the original black-frame product always takes precedence. If none is sharp enough, report that instead of fabricating detail.
+Keep this card's broad scene family and role but use a genuinely fresh execution. Never copy either the stock room or old ad composition.
 Collective reference attachments: {', '.join(references) or 'Explicitly list every supplied WINNER_CARD label in the final prompt'}.
 Concept anchor: {scene or 'Determine the broad room family from this exact winning card'}.
 Advertising role: {role or 'Determine this card role from the actual attachment'}.

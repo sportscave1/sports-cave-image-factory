@@ -635,8 +635,8 @@ def apply_posting_import_to_state(batch, product_records, *, state=None):
             updates[CAROUSEL_EXPECTED_IMAGE_NAME_KEYS[index]] = str(
                 card.get("image_filename") or ""
             )
-        for key, value in zip(CAROUSEL_PRIMARY_TEXT_KEYS, primary_texts):
-            updates[key] = value
+        for key, text in zip(CAROUSEL_PRIMARY_TEXT_KEYS, primary_texts):
+            updates[key] = text
         state.update(updates)
         state.pop(RESULT_KEY, None)
         canonical_url = str(

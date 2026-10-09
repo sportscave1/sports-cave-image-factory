@@ -19,7 +19,7 @@ from tests.test_posting_import_csv import FakeUpload, png_image_bytes
 
 
 def app_for(kind='Carousel', count=5):
-    app = AppTest.from_file('tests/fixtures/refresh_ui.py')
+    app = AppTest.from_file(str(Path(__file__).resolve().parent / 'fixtures' / 'refresh_ui.py'))
     app.query_params.update({'format':kind,'count':str(count)})
     return app.run(timeout=30)
 
@@ -37,6 +37,8 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save now').click().run(timeout=30)
         button(app,'Save 5 images here').click().run(timeout=30)
         self.assertFalse(app.exception)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
         self.assertFalse(button(app,'POST NOW').disabled)
         workflow = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         package = workflow[posting.SAVED_PACKAGE_KEY]
@@ -59,20 +61,29 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save Instant Experience Package here').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]['master_prompt'],original)
+        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
         button(app,'POST NOW').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.session_state[posting.PENDING_KEY]['package']['assets']),3)
 
-    def test_optional_analysis_is_preserved_without_blocking_save(self):
+    def test_historical_analysis_remains_optional_and_is_preserved_on_save(self):
         app=app_for()
+        self.assertNotIn('Card execution notes (JSON)', [t.label for t in app.text_area])
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         records=deepcopy(workflow['ad_notes']['refresh_executions'])
-        workflow['ad_notes']['refresh_execution_error']='Historical incomplete notes'
+        workflow['ad_notes']['refresh_execution_error']='Historical incomplete analysis'
         app.run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertNotIn('Card execution notes (JSON)',[t.label for t in app.text_area])
         self.assertFalse(button(app,'Save now').disabled)
+        button(app,'Save now').click().run(timeout=30)
+        button(app,'Save 5 images here').click().run(timeout=30)
+        self.assertFalse(app.exception)
+        self.assertNotIn('POST NOW',[b.label for b in app.button])
+        workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         self.assertEqual(workflow['ad_notes']['refresh_executions'],records)
+        _, restored=saved.loads(workflow['refresh_workspace_export'])
+        self.assertEqual(restored['ad_notes']['refresh_executions'],records)
 
     def test_four_and_six_card_editor_uses_source_roles_without_crash(self):
         for count in (4,6):
@@ -101,27 +112,35 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         self.assertEqual(app.session_state['fixture_media_reads'],1)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]['slots'],original)
 
-    def test_duplicate_output_remains_a_diagnostic_but_can_be_saved(self):
+    def test_duplicate_output_can_save_draft_but_blocks_post_even_after_acknowledgement(self):
         value, workflow = ready_carousel()
         workflow['slots']['carousel-02']=deepcopy(workflow['slots']['carousel-01'])
         self.assertIn('Identical output image assigned to multiple refresh slots.',ads.creative_refresh_quality_issues(value,workflow))
         save_locally(value,workflow)
-        self.assertTrue(workflow['refresh_workspace_saved'])
+        state={ads._creative_refresh_visual_review_key(value,workflow):True}
+        with patch.object(ads.st,'session_state',state), patch.object(ads.st,'button') as post, patch.object(ads.st,'caption') as caption:
+            ads._render_saved_ad_post_now(value,workflow,quality_issues=[])
+        post.assert_not_called()
+        self.assertIn('Identical output image',caption.call_args.args[0])
 
-    def test_missing_analysis_can_be_saved_without_fabricating_review(self):
+    def test_missing_analysis_draft_save_preserves_assets_without_fabricating_notes(self):
         value,workflow=ready_carousel()
         workflow['ad_notes'].pop('refresh_executions')
+        originals=deepcopy(workflow['slots'])
         save_locally(value,workflow)
-        self.assertTrue(workflow['refresh_workspace_saved'])
-        self.assertNotIn('refresh_executions',workflow['ad_notes'])
+        _, restored=saved.loads(workflow['refresh_workspace_export'])
+        self.assertEqual(restored['slots'],originals)
+        self.assertNotIn('refresh_executions',restored['ad_notes'])
+        self.assertEqual(restored[posting.SAVED_PACKAGE_KEY]['refresh_executions'],[])
 
     def test_reference_authorities_and_all_required_copy_explicit(self):
         prompt=fixture()['master_prompt']
         self.assertIn('all five shared headline variation rows',prompt)
         self.assertIn('all five shared description variation rows',prompt)
-        self.assertEqual(prompt.count('If an optional canonical black-frame product photograph'),5)
+        self.assertEqual(prompt.count('CANONICAL_PRODUCT (when supplied) is a separate product-accuracy attachment'),5)
         self.assertEqual(len(fixture()['creative_refresh_context']['refresh_plan']['references']),5)
-        self.assertIn('No additional product image is required',prompt)
+        self.assertIn('winner cards are provisional cross-references, not verified product truth',prompt)
+        self.assertIn('If product pixels or frame construction remain unclear, request the full-resolution black-framed original image',prompt)
         self.assertNotIn('ATTACHMENT 6',prompt)
 
     def test_duplicate_original_references_fail_without_fabrication(self):
@@ -184,9 +203,10 @@ class ActiveRefreshRepairTests(unittest.TestCase):
                 'selector_identity':'resolved-catalogue-identity','product_url':'https://www.sportscaveshop.com/products/legends-never-die-messi-vs-ronaldo-wall-art'})
         self.assertEqual(state[ads.ADS_PRODUCT_URL_KEY],value['product_url'])
 
-    def test_existing_prompts_identical_outside_approved_physical_contract(self):
+    def test_existing_prompts_keep_main_output_structure(self):
         from sports_cave_physical_realism import MARKER
-        from tests.test_physical_frame_realism import strip_physical
+        from tests.premium_prompt_contracts import contract_shape
+        structures = json.loads(Path('tests/fixtures/premium_prompt_structure_main.json').read_text(encoding='utf-8'))
         baseline=json.loads(Path('tests/fixtures/refresh_unaffected_prompts.json').read_text())
         for identity,expected in baseline.items():
             mode,category,kind=identity.split('/',2)
@@ -195,7 +215,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
             prompt=ads.build_ads_prompt(value['product_name'],category,'Australia',kind,product_url=value['product_url'],
                 variation_token='baseline',creative_refresh_context=context)
             self.assertIn(MARKER,prompt,identity)
-            self.assertEqual(hashlib.sha256(strip_physical(prompt).encode()).hexdigest(),expected,identity)
+            self.assertEqual(contract_shape(prompt),structures[identity],identity)
 
 
 if __name__=='__main__':unittest.main()
