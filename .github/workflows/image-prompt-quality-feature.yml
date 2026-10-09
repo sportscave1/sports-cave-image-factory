@@ -25,11 +25,14 @@ jobs:
           python -m py_compile sports_cave_prompt_blocks.py sports_cave_physical_realism.py mockup_product_prompts.py image_factory.py ads_refresh_plan.py ads_refresh_generation.py ads_product_catalog.py ads_page.py ads_ie_visual_systems.py
       - name: Run image prompt compatibility suites
         run: |
-          python -m unittest discover -s tests -p 'test_sports_cave_prompt_blocks.py'
-          python -m unittest discover -s tests -p 'test_mockup_product_variations.py'
-          python -m unittest discover -s tests -p 'test_physical_frame_realism.py'
-          python -m unittest discover -s tests -p 'test_ads_refresh_plan.py'
-          python -m unittest discover -s tests -p 'test_ads_refresh_generation.py'
-          python -m unittest discover -s tests -p 'test_carousel_winner_system.py'
-          python -m unittest discover -s tests -p 'test_ads_winner_refinement.py'
-          python -m unittest discover -s tests -p 'test_premium_image_quality_v3.py'
+          failures=0
+          python -m unittest discover -s tests -p 'test_sports_cave_prompt_blocks.py' || failures=1
+          python -m unittest discover -s tests -p 'test_mockup_product_variations.py' || failures=1
+          python -m unittest discover -s tests -p 'test_physical_frame_realism.py' || failures=1
+          python -m unittest discover -s tests -p 'test_ads_refresh_plan.py' || failures=1
+          python -m unittest discover -s tests -p 'test_ads_refresh_generation.py' || failures=1
+          python -m unittest discover -s tests -p 'test_carousel_winner_system.py' || failures=1
+          python -m unittest discover -s tests -p 'test_ads_winner_refinement.py' || failures=1
+          python -m unittest discover -s tests -p 'test_premium_image_quality_v3.py' || failures=1
+          python -m unittest discover -s tests -p 'test_ads_ie_prompt_integration.py' || failures=1
+          exit $failures

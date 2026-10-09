@@ -105,6 +105,7 @@ Require genuine physical frame construction:
 GLASS REALISM:
 Require realistic transparent glazing:
 - acrylic/Perspex or glass as verified for the selected product; a clear premium reflection is required for a verified glazed frame, not a fabricated glass material
+- when glass is verified, render clear transparent glass; when acrylic is verified, render clear reflective acrylic/Perspex instead
 - restrained room-based reflections, subtle natural glare and realistic highlight falloff
 - reflections consistent with the windows, lights and camera angle
 - glass must never obscure, wash out, rewrite, distort or hide faces, typography, logos, artwork, badge, plaque or edition details
