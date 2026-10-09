@@ -73,6 +73,10 @@ def validate(flow):
         if type(step['delay_seconds']) is not int or not 0 <= step['delay_seconds'] <= 365*86400:
             raise ValueError('Email delay must be between immediately and one year.')
         validate_document(step['document'])
+        from crm_recovery_discount import validate as validate_discount
+        validate_discount(step['document'],flow['trigger'])
+        from crm_personalisation import validate as validate_personalisation
+        validate_personalisation(step['document'],flow['trigger'])
     return flow
 
 

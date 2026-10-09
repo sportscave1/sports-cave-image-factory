@@ -191,10 +191,15 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     editor['name']=st.text_input('Automation name' if mode=='automation' else 'Campaign name',editor['name'],max_chars=150,key=key+'name',on_change=commit_editor_field,args=(editor,key,'name'))
                     c['subject']=st.text_input('Subject',c['subject'],max_chars=250,key=key+'subject',on_change=commit_editor_field,args=(editor,key,'subject'))
                     c['preheader']=st.text_input('Preview text',c['preheader'],max_chars=250,key=key+'preheader',on_change=commit_editor_field,args=(editor,key,'preheader'))
+                    if mode=='automation':
+                        from crm_personalisation_ui import controls
+                        controls(key)
                     if mode!='automation':field_feedback()
                     from crm_campaign_controls import market_control,timing_control
                     if mode=='automation':
                         if settings_control:settings_control(editor,key)
+                        from crm_discount_ui import control as discount_control
+                        discount_control(shop,editor,key,getattr(drafts,'preview_trigger','abandoned'))
                     else:
                         market_control(shop,drafts,doc,key)
                         timing_control(doc,key)

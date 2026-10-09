@@ -217,10 +217,23 @@ class AutomationStore(CampaignStore):
                 'document':doc,'archived_at':row['config'].get('archived_at')}
 
     def preview_document(self,doc):
+        from crm_recovery_discount import substitute
+        doc=substitute(doc)
+        from crm_personalisation import present as has_personalisation,render as personalise,values_from_preview
         from crm_abandoned_checkout import preview_context
         from crm_checkout_preview import needs_checkout,document,sample
         self.preview_warning=''
-        if not needs_checkout(doc):return doc,''
+        personalisation_trigger=getattr(self,'preview_trigger',None)
+        if personalisation_trigger is None:
+            personalisation_trigger=self.flow(self.draft_identity)['config']['draft']['trigger'] if has_personalisation(doc) else 'abandoned'
+        if has_personalisation(doc) and personalisation_trigger!='abandoned' and not needs_checkout(doc):
+            return personalise(doc,values_from_preview(None),trigger=personalisation_trigger),'Sample Preview'
+        if not needs_checkout(doc):
+            if not has_personalisation(doc):return doc,''
+            import streamlit as st
+            pin=st.session_state.get('_automation_checkout_pin') or {}
+            data=preview_context(st.session_state,self.preview_shop,auto_refresh=False,slot='_automation_checkout_pin')[0] if pin else None
+            return personalise(doc,values_from_preview(data)),('Selected checkout preview' if data else 'Sample Preview')
         from crm_frame_banner_template import present,resolve
         from crm_lifestyle_images import present as has_lifestyle,resolve as resolve_lifestyle,NO_CONTEXT
         from crm_abandoned_checkout import dynamic
@@ -249,12 +262,24 @@ class AutomationStore(CampaignStore):
         if has_lifestyle(doc) and data.get('preview_only'):
             self.preview_warning+=' '+NO_CONTEXT
         label='Previewing: Sample abandoned checkout' if data.get('preview_only') else 'Previewing: '+data['label']+' · '+('cached latest abandoned checkout' if note else 'latest abandoned checkout')
-        return rendered,label
+        return (personalise(rendered,values_from_preview(data)) if has_personalisation(rendered) else rendered),label
 
     def test_document(self,doc,operation_id):
+        from crm_recovery_discount import substitute,selection as discount_selection
+        if discount_selection(doc):
+            from crm_discount_api import fresh
+            from crm_shopify import Shopify
+            discount=fresh(getattr(self,'preview_shop',None) or Shopify(),discount_selection(doc))
+            if discount['status']!='ACTIVE':raise ValueError('Selected discount is not active. Refresh the offer before sending a test.')
+            doc=substitute(doc,discount)
+        else:doc=substitute(doc)
+        from crm_personalisation import present as has_personalisation,render as personalise,values_from_preview
         from crm_abandoned_checkout import latest
         from crm_checkout_preview import needs_checkout,document,sample
-        if not needs_checkout(doc):return doc
+        if not needs_checkout(doc) and not has_personalisation(doc):return doc
+        if has_personalisation(doc) and not needs_checkout(doc):
+            trigger=self.flow(self.draft_identity)['config']['draft']['trigger']
+            if trigger!='abandoned':return personalise(doc,values_from_preview(None),trigger=trigger)
         from crm_frame_banner_template import present,resolve
         from crm_lifestyle_images import present as has_lifestyle,resolve as resolve_lifestyle
         from crm_abandoned_checkout import dynamic
@@ -267,7 +292,8 @@ class AutomationStore(CampaignStore):
             except Exception:data=None
             if not data:data=sample(doc)
             self._checkout_test_data=data;self._checkout_test_operation=operation_id
-        return document(doc,self._checkout_test_data,test=True,shop=getattr(self,'preview_shop',None))[0]
+        rendered=document(doc,self._checkout_test_data,test=True,shop=getattr(self,'preview_shop',None))[0] if needs_checkout(doc) else doc
+        return personalise(rendered,values_from_preview(self._checkout_test_data)) if has_personalisation(rendered) else rendered
 
     def save(self,user,name,document,identity=None,version=None,**_):
         row=self.flow(identity);flow=deepcopy(row['config']['draft'])

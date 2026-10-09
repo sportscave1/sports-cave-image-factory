@@ -1632,6 +1632,7 @@ def _on_ads_product_url_changed():
 
 
 def _on_ads_product_selector_changed(rows):
+    previous_url = st.session_state.get(ADS_PRODUCT_URL_KEY) or ''
     selection = resolve_ads_product_selector_value(
         st.session_state.get(ADS_PRODUCT_SELECTOR_KEY),
         rows=rows,
@@ -1639,8 +1640,10 @@ def _on_ads_product_selector_changed(rows):
     st.session_state[ADS_PRODUCT_NAME_KEY] = selection.get("selected_label") or ""
     _synchronise_ads_product_url_state(selection)
     if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
-        import meta_review_handoff
-        meta_review_handoff.confirm_selected_product(st.session_state,selection.get('row'))
+        import ads_refresh_product
+        if not ads_refresh_product.correct(st.session_state,selection.get('row'),previous_url):
+            st.session_state[ADS_PRODUCT_URL_KEY]=previous_url
+            st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]=True
 
 
 def prepare_ads_product_selector_state(rows, *, result=None):
@@ -9113,16 +9116,12 @@ def render_product_name_input(*, rows=None, result=None):
         rows=meta_review_handoff.product_selector_rows(rows,st.session_state)
     records = build_ads_product_selector_records(rows)
     records_by_identity = {record["identity"]: record for record in records}
-    prepare_ads_product_selector_state(rows, result=result)
     if _active_ads_workflow_mode() == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         source = st.session_state.get('meta-review-refresh-source') or {}
         mapped = (source.get('product_mapping') or {}).get('canonical_row')
-        if mapped:
-            identity = _edition_ops_product_selector_identity(mapped)
-            selection = resolve_ads_product_selector_value(identity, rows=rows, records=records)
-            st.caption('Product · ' + selection['selected_label'])
-            st.session_state[ADS_PRODUCT_NAME_KEY] = selection['selected_label']
-            return selection['selected_label'], selection
+        if mapped and ADS_PRODUCT_SELECTOR_KEY not in st.session_state:
+            st.session_state[ADS_PRODUCT_SELECTOR_KEY] = _edition_ops_product_selector_identity(mapped)
+    prepare_ads_product_selector_state(rows, result=result)
     if records:
         options=alphabetize_options(records_by_identity,label=lambda identity: records_by_identity.get(identity,{}).get('label') or identity)
         if _active_ads_workflow_mode()==ADS_WORKFLOW_MODE_CREATIVE_REFRESH and st.session_state.get('meta-review-refresh-source'):
@@ -14571,6 +14570,10 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         st.caption(product_url_state["message"])
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
+    if is_creative_refresh and st.session_state.get('meta-review-refresh-source'):
+        import ads_refresh_product
+        st.button('Use product from URL',key='ads-refresh-product-from-url',
+                  on_click=ads_refresh_product.select_from_url,args=(product_rows,))
     if is_creative_refresh and campaign_type != 'Carousel':
         from ads_refresh_reference import render_product_image_link
         render_product_image_link(st)
@@ -14670,7 +14673,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             if is_creative_refresh
             else ""
         )
-        if is_creative_refresh and campaign_type == 'Carousel':
+        if is_creative_refresh and (campaign_type == 'Carousel' or ((creative_refresh_context or {}).get('source_winner') or {}).get('product_mapping')):
             creative_refresh_message = ads_refresh_generation.carousel_identity_issue(
                 product_name, product_url, (creative_refresh_context or {}).get('source_winner') or {}
             ) or creative_refresh_message

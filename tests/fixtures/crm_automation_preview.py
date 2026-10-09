@@ -72,6 +72,19 @@ if st.session_state.get('fixture_new_customer'):
     fixture_checkout['lineItems']['nodes'][0]['title']='New collector product'
 shop.abandoned_preview.return_value={'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}
 shop.query.return_value={'abandonedCheckouts':{'nodes':[fixture_checkout],'pageInfo':{'hasNextPage':False}}}
+if st.query_params.get('fixture_discount'):
+    from tests.test_crm_discounts import DiscountShop,SEARCH
+    if 'fixture_discount_shop' not in st.session_state:
+        st.session_state['fixture_discount_shop']=DiscountShop()
+    discount_shop=st.session_state['fixture_discount_shop']
+    shop.namespace=discount_shop.namespace
+    def discount_query(query,variables,*args,**kwargs):
+        if query==SEARCH:
+            from time import sleep
+            sleep(.6)
+        return discount_shop.query(query,variables,*args,**kwargs)
+    shop.query.side_effect=discount_query
+    st.caption('Fixture discount API calls: '+str(len(discount_shop.calls)))
 shop.checkout.return_value=fixture_checkout
 if st.query_params.get('fixture_lifestyle'):
     shop.campaign_images.return_value={'nodes':[{'url':f'https://cdn.shopify.com/s/files/lifestyle-{i}.jpg'} for i in range(1,5)],'pageInfo':{'hasNextPage':False}}

@@ -250,7 +250,7 @@ def carousel_identity_issue(product, url, source):
               f"{mapping['product_title']} ({mapping['product_handle']})".strip().casefold()}
     if (str(product).strip().casefold() not in labels
             or product_url_handle(url) != mapping['product_handle'].casefold()):
-        return 'Product and URL do not match the confirmed Carousel product. Confirm the correct product before generating.'
+        return 'Product and URL do not match the selected product. Select the correct product, or use “Use product from URL”, before submitting.'
     return ''
 
 

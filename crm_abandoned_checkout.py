@@ -79,6 +79,7 @@ def context(checkout,*,edition_reader=None):
             logging.getLogger(__name__).warning('checkout_editions_unavailable type=%s',type(exc).__name__)
     customer=checkout.get('customer') or {}
     return {'checkout_id':identity,'customer_id':customer.get('id'),'created_at':checkout.get('createdAt'),
+      'personalisation_source':{'customer':{'firstName':customer.get('firstName')},'lineItems':{'nodes':checkout['lineItems']['nodes'][:1]}},
       'label':' '.join(str(customer.get(k) or '').strip() for k in ('firstName','lastName')).strip() or customer.get('email') or 'latest abandoned checkout',
       'recovery_url':url,'items':items}
 
@@ -235,6 +236,8 @@ def hydrate(doc,data,*,test=False,preview=False,preview_warnings=None,shop=None)
 
 def publication_document(doc,trigger):
     """Validate authored HTML offline; enrollment data is resolved at dispatch."""
+    from crm_recovery_discount import substitute
+    doc=substitute(doc)
     from crm_checkout_styles import MARKER,count,compile_document
     total=count(doc)
     from crm_wall_preview_template import present,resolve

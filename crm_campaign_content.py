@@ -56,8 +56,10 @@ def new_document():
 
 
 def validate_document(doc):
-    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections','send_timing','market_audience'}
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections','send_timing','market_audience','recovery_discount'}
     if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
+    from crm_recovery_discount import validate as validate_discount
+    validate_discount(doc)
     if doc.get('content_mode','Blocks') not in ('HTML','Blocks'): raise ValueError('Invalid content mode.')
     if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>95000: raise ValueError('Pasted HTML must be at most 95 KB.')
     if 'html_sections' in doc:

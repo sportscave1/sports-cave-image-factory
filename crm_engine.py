@@ -7,6 +7,7 @@ from datetime import timedelta
 from crm_logic import now,date,email,consent,eligibility,recipient_hash,LiveFacts,matches,safe_url
 from crm_resend import Config,Resend,MarketingDisabled
 from crm_templates import render
+from crm_recovery_discount import DiscountHold
 
 class Engine:
     def __init__(self,store,shop,provider=None,config=None,clock=now):
@@ -47,6 +48,7 @@ class Engine:
         c=self.shop.customer(customer_id,fresh=True)
         ok,reason=eligibility(c,self.store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))
         context={'first_name':(c or {}).get('firstName') or 'there','store_url':'https://www.sportscaveshop.com'}
+        context['_customer']=c
         automation=self.store.get('automations',enrollment['automation_id']) if enrollment else None
         snapshot=(enrollment.get('steps') or [{}])[0] if enrollment else {}
         checkout_flow=bool(automation and snapshot.get('trigger',automation['trigger_type'])=='abandoned')
@@ -115,6 +117,7 @@ class Engine:
                 if not order or order.get('cancelledAt') or (kind=='post_purchase' and not order.get('fullyPaid')) or (order.get('customer') or {}).get('id')!=c['id']:return c,context,'order_ineligible'
                 if kind=='fulfilled' and order.get('displayFulfillmentStatus')!='FULFILLED':return c,context,'order_not_fulfilled'
                 context['order_name']=order['name']
+                context['_order']=order
                 if frozen.get('automation_version'):
                     from crm_automation_rule_facts import order_facts
                     if not qualifies({'rules':frozen['rules']},c,order_facts(self.shop,order,frozen['rules'])):return c,context,'automation_rules_changed'
@@ -160,6 +163,9 @@ class Engine:
                     content=prepare_email(content,row,enrollment,self.shop,ReviewsStore(self.store.connect))
                 from crm_abandoned_checkout import dynamic,complete
                 if dynamic(content['document']):context['_checkout']=complete(self.shop,context.get('_checkout'))
+                from crm_recovery_discount import prepare as prepare_discount,selection as discount_selection
+                if discount_selection(content['document']):
+                    context['_recovery_discount']=prepare_discount(self.shop,content['document'],context.get('_checkout') or {},row['shopify_customer_id'])
                 message=render_automation(content,row,unsubscribe,context)
             elif content.get('format')=='campaign_delivery_v1':
                 from crm_campaign_schedule import overdue_reason
@@ -215,6 +221,8 @@ class Engine:
             if enrollment and enrollment.get('checkout_key'):
                 try:self.store.set_state('checkout-send-attempt:'+str(row['id'])+':'+str(row['attempts']),{'status':'ACCEPTED','at':self.clock().isoformat(),'enrollment_id':str(enrollment['id'])})
                 except Exception:logging.getLogger(__name__).warning('checkout_send_audit_deferred send_id=%s',row['id'])
+        except DiscountHold as exc:
+            self.store.finish_send(row,'BLOCKED',str(exc))
         except MarketingDisabled as exc:
             self.store.defer_send(row)
             if enrollment and enrollment.get('checkout_key'):

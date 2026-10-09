@@ -220,6 +220,18 @@ def render(content,row,unsubscribe,context=None):
     from crm_tracking import send_identity
     from crm_automation_definition import production_document
     doc=production_document(content['document']);doc['campaign_key']='auto_'+str(row['id']).replace('-','')
+    from crm_recovery_discount import selection as discount_selection,substitute,apply_links,DiscountHold
+    discount=(context or {}).get('_recovery_discount')
+    if discount_selection(doc) and not discount:raise DiscountHold('discount_verification_required: Revalidate Shopify before sending.')
+    doc=substitute(doc,discount)
+    from crm_personalisation import present,resolve,render as personalise,TOKEN
+    if present(doc):
+        customer=(context or {}).get('_customer') or {}
+        source=(context or {}).get('_checkout' if content.get('trigger')=='abandoned' else '_order') or {}
+        if customer.get('id')!=row['shopify_customer_id'] or (source and (source.get('customer') or {}).get('id')!=customer.get('id')):
+            raise ValueError('Personalisation recipient context mismatch.')
+        wanted=set(TOKEN.findall(doc['content']['subject'])+TOKEN.findall(doc['content']['preheader']))
+        doc=personalise(doc,resolve(source,customer,trigger=content.get('trigger'),wanted=wanted),trigger=content.get('trigger'))
     from crm_abandoned_checkout import dynamic,hydrate,context as checkout_context,reject_unresolved
     from crm_frame_banner_template import present as has_banner
     from crm_lifestyle_images import present as has_lifestyle
@@ -231,6 +243,7 @@ def render(content,row,unsubscribe,context=None):
     if not all(production_checks(doc,content['render_settings'],reviewed_audience=True).values()):raise ValueError('Automation production readiness failed.')
     message=render_campaign(doc,content['render_settings'],unsubscribe_url=unsubscribe,production=True,
                             campaign_id=str(row['id']),send_id=send_identity(row['id']))
+    message=apply_links(message,discount)
     reject_unresolved(message['html']);reject_unresolved(message['text'])
     validate_rendered_email(message);message['unsubscribe_url']=unsubscribe
     return message

@@ -20,6 +20,8 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
     from crm_html_workspace import _preview_device
     editor=current(st.session_state,{})
     if current_document:doc=editor.get('document',doc)
+    from crm_personalisation import present
+    header_checkout=present(doc) and getattr(store,'preview_trigger','abandoned')=='abandoned'
     with st.container(key='crm-composer-preview' if current_document else 'crm-checkout-master-preview'):
         # Streamlit marks retained elements stale during unrelated app reruns.
         # This iframe holds last-good, digest-checked HTML, not a loading result.
@@ -33,7 +35,7 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                 mode=st.session_state.get(key+'preview_device','Desktop')
                 for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
                     st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',on_click=_preview_device,args=(key,label))
-                if needs_checkout(doc) and st.button('',icon=':material/refresh:',help='Refresh checkout preview',key=key+'checkout_refresh'):
+                if (needs_checkout(doc) or header_checkout) and st.button('',icon=':material/refresh:',help='Refresh checkout preview',key=key+'checkout_refresh'):
                     preview_context(st.session_state,store.preview_shop,refresh=True,auto_refresh=False,slot='_automation_checkout_pin')
                     # Wait only for this explicit refresh, retaining the browser's
                     # last-good iframe. Never fetch on typing or device changes.
@@ -47,7 +49,7 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
         try:
             cache,label,warning=output(st.session_state,store,doc,cfg,editor.get('id'))
             if not cache['message']['html'].strip():raise ValueError('Empty rendered preview')
-            if not last or last[0]['html_hash']!=cache['html_hash'] or last[1:]!=(label,warning):
+            if not last or last[0]['html_hash']!=cache['html_hash'] or last[0].get('personalised_headers')!=cache.get('personalised_headers') or last[1:]!=(label,warning):
                 st.session_state[key+'last_good_visual']=(cache,label,warning)
         except Exception as exc:
             import logging
@@ -59,6 +61,13 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                 return
             cache,label,warning=last
         if label:st.caption(label)
+        if doc.get('recovery_discount'):
+            offer=doc['recovery_discount']
+            st.caption('Discount: '+offer['code']+' — '+offer['value']+' · Shopify validates eligibility at checkout; not yet applied.')
+        if cache.get('personalised_headers'):
+            from html import escape
+            headers=cache['personalised_headers']
+            st.html('<div class="sc-personalised-headers" style="font-size:13px;line-height:1.4"><strong>'+escape(headers['subject'])+'</strong><br><span style="color:#646464">'+escape(headers['preheader'])+'</span></div>')
         if warning:
             from html import escape
             st.html('<small style="color:#96732e">'+escape(warning)+'</small>')

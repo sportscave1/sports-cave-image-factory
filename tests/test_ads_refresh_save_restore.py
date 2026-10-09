@@ -144,7 +144,7 @@ with patch.object(ads, '_ads_image_workflow', return_value=workflow), patch.obje
         package = app.session_state[handoff.PENDING_KEY]['package']
         self.assertEqual(len(package['assets']), 3)
 
-    def test_exact_mapping_renders_read_only_product_without_confirmation(self):
+    def test_exact_mapping_prefills_editable_product_without_confirmation(self):
         from streamlit.testing.v1 import AppTest
         app = AppTest.from_string('''
 import streamlit as st
@@ -156,8 +156,8 @@ st.session_state['meta-review-refresh-source'] = {'product_mapping': canonical(R
 ads.render_product_name_input(rows=[])
 ''').run(timeout=20)
         self.assertFalse(app.exception)
-        self.assertEqual(len(app.selectbox), 0)
-        self.assertIn('Product ·', app.caption[0].value)
+        self.assertEqual(len(app.selectbox), 1)
+        self.assertEqual(app.selectbox[0].value, ads._edition_ops_product_selector_identity(ROW))
 
 
 if __name__ == '__main__':
