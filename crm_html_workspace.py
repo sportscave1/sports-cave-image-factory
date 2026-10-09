@@ -173,6 +173,10 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
                     st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',
                               on_click=_preview_device,args=(key,label))
         from crm_store import StoreUnavailable
+        if store is not None and not live:
+            from crm_local_preview import canvas
+            canvas(doc,cfg,key,store)
+            return
         try:
             # Existing emails own header/footer snapshots. Their preview must
             # neither query nor follow the current master on every tab click.

@@ -24,6 +24,22 @@ st.set_page_config(layout='wide',page_title='Local automation fixture')
 os.environ.update(LIVE)
 requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionError('External network forbidden'))
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
+from crm_local_preview import javascript
+javascript.cache_clear()  # Hot-reload current browser assets in this test app.
+
+# Deliberate persistence faults for the reactive editor browser contract.
+# This fixture uses loopback PostgreSQL and forbids external requests above.
+if not hasattr(AutomationStore,'_fixture_original_save'):
+    AutomationStore._fixture_original_save=AutomationStore.save
+def fixture_save(self,*args,**kwargs):
+    if st.query_params.get('fixture_local_faults'):
+        import time
+        time.sleep(float(st.query_params.get('fixture_save_delay','0')))
+        if 'First draft edit' in str(args[2]):
+            from crm_store import StoreUnavailable
+            raise StoreUnavailable('Synthetic temporary save failure')
+    return self._fixture_original_save(*args,**kwargs)
+AutomationStore.save=fixture_save
 
 if os.getenv('EMAIL_V4_BACKGROUND_PUBLICATION')=='1':
     @st.cache_resource

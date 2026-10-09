@@ -6,7 +6,7 @@ let args={sections:[]},opened={},pending=false,inFlight=null,drag=null,typing=nu
 const root=document.getElementById('sections');
 // Optional same-origin OS hooks must never prevent the Streamlit handshake.
 const withParent=fn=>{try{return fn(parent);}catch{return undefined;}};
-const signalPending=detail=>withParent(p=>p.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail})));
+const signalPending=detail=>withParent(p=>p.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{...detail,local_editor:true}})));
 const pendingCopyInputs=new Map();
 const goToSection=id=>{
  if(!args.sections.some(s=>s.id===id))return false;
@@ -22,7 +22,56 @@ addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignGoToSection===goT
 const areas=new Map(),histories=new Map();let historyScope='',deleted=null,deleteTimer=null;
 
 const height=()=>parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height:document.body.scrollHeight+4},'*');
-const emit=(type,extra={})=>{if(!['html','settings'].includes(type))for(const commit of [...pendingCopyInputs.values()])commit();if(pending){if(type!=='html')queue.push([type,{...extra,edits:{...drafts,...extra.edits}}]);return;}pending=true;inFlight=crypto.randomUUID();parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{event:inFlight,base:args.sections.map(s=>s.id),type,...extra,edits:Object.fromEntries(Object.entries({...extra.edits,...drafts}).filter(([id])=>args.sections.some(s=>s.id===id)))}},'*');};
+let changes=[],sent=[],unpersisted=[],saveTimer,saveError='',saveAttempts=0,external=[],previewTimer;
+const copy=v=>JSON.parse(JSON.stringify(v));
+const localPreview=()=>{clearTimeout(previewTimer);if(args.preview_scope)SCPreview.publish(args.preview_scope,args.sections,!!(pending||changes.length||Object.keys(drafts).length||saveError));};
+const saveStatus=text=>{let n=document.getElementById('local-save-status');if(!n){n=el('div','','local-save-status');n.id='local-save-status';n.setAttribute('role','status');document.body.append(n);}n.textContent=text;withParent(p=>{const status=p.document.getElementById('sc-campaign-save-status');if(status)status.textContent=text;});height();};
+function transmit(type,extra={}){pending=true;inFlight=crypto.randomUUID();saveStatus('Saving…');parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{event:inFlight,base:args.sections.map(s=>s.id),type,...extra}},'*');}
+function sendChanges(){clearTimeout(saveTimer);if(pending)return;if(changes.length){sent=changes.splice(0);transmit('batch',{base:sent[0].base,events:sent});}else if(external.length){const [type,extra]=external.shift();transmit(type,extra);}else if(saveError){transmit('persist');}}
+function rememberDraft(){try{sessionStorage.setItem('sc-local-draft:'+historyScope,JSON.stringify({sections:args.sections,changes:[...unpersisted,...sent,...changes],version:args.draft_version}));}catch{}}
+const dirty=()=>{saveError='';saveAttempts=0;saveStatus('Unsaved · Unpublished changes');withParent(p=>{const size=p.document.querySelector('.st-key-crm-composer-preview .sc-email-size');if(size){size.dataset.lastMeasured??=size.innerHTML;size.textContent='Email size · Recalculates after draft save';}});rememberDraft();clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,650);signalPending({local:true});};
+function emit(type,extra={}){
+ if(!['html','settings'].includes(type))for(const commit of [...pendingCopyInputs.values()])commit();
+ const local=['html','settings','visible','order','rename','duplicate','remove','restore_section','product_order','product_remove'].includes(type)||(type==='add'&&(['html','image','catalogue','visual','flexible_checkout'].includes(extra.kind)||extra.kind==='checkout'&&args.checkout_template||extra.kind==='template'&&args.templates.some(t=>t.id===extra.template_id&&typeof t.html==='string')));
+ if(!local){external.push([type,extra]);sendChanges();return;}
+ const event={type,...copy(extra),base:args.sections.map(s=>s.id),edits:copy(drafts)};
+ for(const s of args.sections)if(Object.hasOwn(drafts,s.id))s.html=drafts[s.id];
+ const s=args.sections.find(v=>v.id===extra.id),index=args.sections.indexOf(s);
+ if(type==='html'&&s)s.html=extra.html;
+ if(type==='settings'&&s)s.settings=copy(extra.settings);
+ if(type==='visible'&&s)s.visible=extra.visible;
+ if(type==='rename'&&s)s.name=extra.reset?'':extra.name;
+ if(type==='order')args.sections=extra.ids.map(id=>args.sections.find(s=>s.id===id));
+ if(type==='remove')args.sections.splice(index,1);
+ if(type==='restore_section')args.sections.splice(Math.min(extra.position,args.sections.length),0,copy(extra.section));
+ if(type==='duplicate'){const duplicated=copy(s);event.new_id=crypto.randomUUID();duplicated.id=event.new_id;if(s.type==='html')duplicated.html_number=Math.max(...args.sections.map(v=>v.html_number||0))+1;args.sections.splice(index+1,0,duplicated);}
+ if(type==='product_remove'&&s)s.products=s.products.filter(v=>v.id!==extra.product_id);
+ if(type==='product_order'&&s)s.products=extra.ids.map(id=>s.products.find(p=>p.id===id));
+ if(type==='add'){
+  event.new_id=crypto.randomUUID();const created={id:event.new_id,type:extra.kind==='visual'?'checkout_element':extra.kind,visible:true};
+  if(extra.kind==='html'){created.html_number=Math.max(extra.reserved_html_number||0,...args.sections.map(s=>s.html_number||0))+1;created.html='';}
+  if(extra.kind==='image')created.html='';
+  if(extra.kind==='catalogue'){created.products=[];created.settings={headline:'',subtext:'',columns:2,display:Object.fromEntries(['image','title','price','limit','next','remaining','cta'].map(k=>[k,k!=='price'])),cta:'Claim Your Edition'};}
+  if(extra.kind==='visual')created.settings=copy(args.element_defaults);
+  if(extra.kind==='template'||extra.kind==='checkout'){
+   const template=extra.kind==='checkout'?{...args.checkout_template,name:'Abandoned Checkout',builtin:true}:args.templates.find(t=>t.id===extra.template_id);
+   created.type='html';created.html=template.html;created.html_number=Math.max(0,...args.sections.map(s=>s.html_number||0))+1;if(template.builtin)created.name=template.name;
+   if(args.sections.length===1&&args.sections[0].type==='html'&&!args.sections[0].html.trim()){
+    if(extra.kind==='template'){created.id=args.sections[0].id;created.html_number=args.sections[0].html_number;}
+    else created.html_number=1;
+    args.sections=[];
+   }
+  }
+  if(extra.kind==='flexible_checkout'){const starter=copy(args.starter_sections);event.new_ids=starter.map(s=>s.id=crypto.randomUUID());args.sections.push(...starter);}
+  else{args.sections.push(created);opened[created.id]=true;}
+ }
+ // Supersede field edits within the same structure. This also lets a corrected
+ // invalid field recover without replaying its obsolete invalid intermediate.
+ const supersedes=['html','settings','visible','rename'].includes(type)?changes.findLastIndex(v=>v.type===type&&v.id===event.id&&JSON.stringify(v.base)===JSON.stringify(event.base)):-1;
+ if(supersedes>=0)changes[supersedes]=event;else changes.push(event);
+ drafts={};settingsDrafts={};localPreview();render();dirty();
+}
+addEventListener('beforeunload',event=>{if(pending||changes.length||Object.keys(drafts).length||saveError){rememberDraft();event.preventDefault();event.returnValue='';}});
 // Send test must wait for the server acknowledgement, not merely textarea blur.
 const flushSections=()=>new Promise((resolve,reject)=>{
  const started=Date.now(),scope=historyScope;
@@ -32,13 +81,28 @@ const flushSections=()=>new Promise((resolve,reject)=>{
   for(const commit of [...pendingCopyInputs.values()])commit();
   for(const area of areas.values())clearTimeout(area.saveTimer);
   const entry=Object.entries(drafts)[0];
-  if(!pending&&entry)emit('html',{id:entry[0],html:entry[1]});
-  if(!pending&&!entry&&!queue.length&&!Object.keys(settingsDrafts).length)return resolve();
+  if(entry)emit('html',{id:entry[0],html:entry[1]});
+  if(saveError&&!pending)return reject(new Error(saveError));
+  sendChanges();
+  if(!pending&&!changes.length&&!entry&&!external.length&&!Object.keys(settingsDrafts).length)return resolve();
   setTimeout(check,30);
  };check();
 });
 withParent(p=>p.scCampaignFlushSections=flushSections);
 addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignFlushSections===flushSections)delete p.scCampaignFlushSections;});});
+// Internal navigation does not fire beforeunload. Flush before unmounting the
+// authoring component; a failed save leaves it open with its local state intact.
+let replayNavigation=false;
+const navigationGuard=async e=>{
+ if(replayNavigation||!(pending||changes.length||Object.keys(drafts).length||saveError))return;
+ const target=e.target.closest('a,button,[role="tab"],[role="option"]');if(!target)return;
+ const text=target.textContent.trim();
+ if(!(target.matches('a')||target.getAttribute('role')==='option'||target.getAttribute('role')==='tab'||['Flow','← Automations'].includes(text)))return;
+ e.preventDefault();e.stopImmediatePropagation();
+ try{await flushSections();replayNavigation=true;target.click();}catch(error){saveStatus(error.message);}finally{replayNavigation=false;}
+};
+withParent(p=>p.document.addEventListener('click',navigationGuard,true));
+addEventListener('pagehide',()=>withParent(p=>p.document.removeEventListener('click',navigationGuard,true)));
 const el=(tag,text='',cls='')=>{let n=document.createElement(tag);n.textContent=text;n.className=cls;return n;};
 function button(text,label,fn,cls=''){let n=el('button',text,cls);n.type='button';n.title=label;n.setAttribute('aria-label',label);n.onclick=fn;return n;}
 function placeCards(ids){ids.forEach((id,index)=>{const card=[...root.children].find(c=>c.dataset.id===id);if(card&&root.children[index]!==card){if(root.moveBefore)root.moveBefore(card,root.children[index]||null);else root.insertBefore(card,root.children[index]||null);}});}
@@ -79,7 +143,7 @@ function deleteControl(s){
 }
 function showDeleted(){
  clearTimeout(deleteTimer);let toast=document.getElementById('section-deleted');if(toast)toast.remove();toast=el('div','','section-toast');toast.id='section-deleted';toast.style.top=Math.max(4,Math.min(deleted.top,visibleBottom()-48,document.body.scrollHeight-44))+'px';toast.setAttribute('role','status');toast.append(el('span','Section deleted'),button('Undo','Undo delete section',()=>{
-  if(!deleted)return;const saved=deleted;deleted=null;clearTimeout(deleteTimer);toast.remove();root.insertBefore(saved.node,root.children[saved.position]||null);emit('restore_section',{section:saved.section,position:saved.position});height();
+  if(!deleted)return;const saved=deleted;deleted=null;clearTimeout(deleteTimer);toast.remove();emit('restore_section',{section:saved.section,position:saved.position});height();
  }));document.body.append(toast);deleteTimer=setTimeout(()=>{toast.remove();deleted=null;},8000);
 }
 function reorder(section,id,target,after=null){if(section){const s=args.sections.find(s=>s.id===section);emit('product_order',{id:section,ids:moveId(s.products.map(p=>p.id),id,target)});}else {const ids=after===null?moveId(args.sections.map(s=>s.id),id,target):insertAt(args.sections.map(s=>s.id),id,target,after);emit('order',{ids});placeCards(ids);}}
@@ -103,7 +167,7 @@ function render(){renderTemplates();renderDiscountPicker(document.getElementById
  const existing=[...root.children].find(c=>c.dataset.id===s.id);
  if(existing?.dataset.signature===signature){syncArea(s);return;}
  let card=el('section','','section');card.dataset.id=s.id;card.dataset.signature=signature;if(s.type==='catalogue')card.classList.add('catalogue');let row=el('div','','row');handle(row,s.id);
- let visibility=button('',s.visible?'Visible section — click to hide':'Hidden section — click to show',()=>{const visible=!s.visible;emit('visible',{id:s.id,visible});s.visible=visible;render();},'visibility');
+ let visibility=button('',s.visible?'Visible section — click to hide':'Hidden section — click to show',()=>{emit('visible',{id:s.id,visible:!s.visible});},'visibility');
  visibility.dataset.action='visibility';visibility.setAttribute('aria-pressed',String(s.visible));visibility.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>'+(s.visible?'':'<path d="m3 3 18 18"/>')+'</svg>';row.append(visibility);
  row.append(renameControl(s,name));
  card.classList.toggle('is-hidden',!s.visible);card.classList.toggle('is-open',!!opened[s.id]);
@@ -120,23 +184,23 @@ function render(){renderTemplates();renderDiscountPicker(document.getElementById
  area.setAttribute('aria-label',name+' HTML');syncArea(s);
  const advice=el('div',s.type==='image'?imageAdvice(area.value):'','warning');advice.setAttribute('aria-live','polite');
  const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}};
- area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,args.preview_debounce||750);};area.onblur=update;
+ area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;SCPreview.channel(args.preview_scope).dirty=true;clearTimeout(previewTimer);previewTimer=setTimeout(()=>{const current=args.sections.map(v=>Object.hasOwn(drafts,v.id)?{...v,html:drafts[v.id]}:v);SCPreview.publish(args.preview_scope,current,true);},80);saveStatus('Unsaved · Unpublished changes');clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,180);};area.onblur=update;
  const historyTools=el('div','','history-tools');historyTools.append(button('↶','Undo last edit',()=>recover(s.id,false),'history-button'),button('↷','Redo last edit',()=>recover(s.id,true),'history-button'));
  if(args.automation&&s.html.includes('<!--SC_ABANDONED_CHECKOUT-->'))content.append(button('Separate checkout elements','Separate checkout into optional visual elements',()=>emit('separate_checkout',{id:s.id})));content.append(historyTools,area);if(s.type==='image')content.append(advice);
  }else if(s.type==='checkout_element'){
  visualControls(s,content,{el,change:patch=>changeSettings(s,patch),debounce:(input,field,commit)=>{
   let timer;const inputKey=s.id+':'+field;const save=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);commit();};
-  input.oninput=()=>{signalPending({id:s.id,[field]:input.value});pendingCopyInputs.set(inputKey,save);clearTimeout(timer);timer=setTimeout(save,350);};input.onchange=save;
+  input.oninput=()=>{signalPending({id:s.id,[field]:input.value});pendingCopyInputs.set(inputKey,save);clearTimeout(timer);timer=setTimeout(save,80);};input.onchange=save;
  }});
  }else if(s.type==='abandoned_checkout_products'){
  if(args.automation)content.append(button('Separate checkout elements','Separate checkout into optional visual elements',()=>emit('separate_checkout',{id:s.id})));content.append(el('div','Products, variants, quantities, prices and recovery link resolve from each customer’s own checkout.','warning'));
  }else{
  const tools=el('div','','tools');tools.append(button('Select products','Select products for '+name,()=>emit('picker',{id:s.id})),button('↻','Refresh current Shopify and Edition Ops facts',()=>emit('refresh',{id:s.id})));content.append(tools);
  s.products.forEach(p=>{let pr=el('div','','product');pr.dataset.product=p.id;pr.dataset.parent=s.id;handle(pr,p.id,s.id);let info=el('div','','product-info');info.append(el('span',p.title));if(!p.edition)info.append(el('div','Edition data not connected','warning'));pr.append(info,button('×','Remove '+p.title,()=>emit('product_remove',{id:s.id,product_id:p.id})));content.append(pr);});
- const copyFields=el('div','','fields');for(const [field,limit] of [['headline',80],['subtext',180]]){const input=document.createElement('input');input.type='text';input.value=s.settings[field]||'';input.maxLength=limit;input.placeholder=field==='headline'?'Headline (optional)':'Subtext (optional)';input.setAttribute('aria-label','Catalogue '+field);let timer;const inputKey=s.id+':'+field;const commit=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);changeSettings(s,{[field]:input.value});};input.oninput=()=>{pendingCopyInputs.set(inputKey,commit);signalPending({id:s.id,[field]:input.value});clearTimeout(timer);timer=setTimeout(commit,750);};input.onchange=commit;copyFields.append(input);}content.append(copyFields);
+ const copyFields=el('div','','fields');for(const [field,limit] of [['headline',80],['subtext',180]]){const input=document.createElement('input');input.type='text';input.value=s.settings[field]||'';input.maxLength=limit;input.placeholder=field==='headline'?'Headline (optional)':'Subtext (optional)';input.setAttribute('aria-label','Catalogue '+field);let timer;const inputKey=s.id+':'+field;const commit=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);changeSettings(s,{[field]:input.value});};input.oninput=()=>{pendingCopyInputs.set(inputKey,commit);signalPending({id:s.id,[field]:input.value});clearTimeout(timer);timer=setTimeout(commit,100);};input.onchange=commit;copyFields.append(input);}content.append(copyFields);
 
  const labels={image:'Product image',title:'Product title',price:'Price',limit:'Limited to',next:'Next available',remaining:'Remaining',cta:'CTA'},fields=el('div','','fields');for(let [key,label] of Object.entries(labels)){let l=el('label'),c=document.createElement('input');c.type='checkbox';c.checked=s.settings.display[key];c.onchange=()=>changeSettings(s,{display:{[key]:c.checked}});l.append(c,el('span',label));fields.append(l);}content.append(fields);
- const cta=document.createElement('input');cta.type='text';cta.value=s.settings.cta;cta.maxLength=60;cta.setAttribute('aria-label','Catalogue CTA');let ctaTimer;const commitCta=()=>{clearTimeout(ctaTimer);if(cta.value.trim())changeSettings(s,{cta:cta.value});};cta.oninput=()=>{signalPending({id:s.id,cta:cta.value});clearTimeout(ctaTimer);ctaTimer=setTimeout(commitCta,750);};cta.onchange=commitCta;content.append(cta);
+ const cta=document.createElement('input');cta.type='text';cta.value=s.settings.cta;cta.maxLength=60;cta.setAttribute('aria-label','Catalogue CTA');let ctaTimer;const commitCta=()=>{clearTimeout(ctaTimer);if(cta.value.trim())changeSettings(s,{cta:cta.value});};cta.oninput=()=>{signalPending({id:s.id,cta:cta.value});clearTimeout(ctaTimer);ctaTimer=setTimeout(commitCta,100);};cta.onchange=commitCta;content.append(cta);
  for(const warning of (args.warnings||{})[s.id]||[])content.append(el('div',warning,'warning'));
  }
  card.append(content);}if(existing)existing.replaceWith(card);else root.append(card);
@@ -165,7 +229,35 @@ root.addEventListener('pointerup',e=>{if(!drag)return;const d=drag;drag=null;cle
 const cancelDrag=()=>{drag=null;clearDrag();};
 root.addEventListener('pointercancel',cancelDrag);addEventListener('blur',cancelDrag);
 document.addEventListener('visibilitychange',()=>{cancelDrag();if(document.hidden){clearTimeout(typing);const entry=Object.entries(drafts)[0];if(entry)emit('html',{id:entry[0],html:entry[1]});}});
-addEventListener('message',e=>{if(e.source!==parent||e.data.type!=='streamlit:render')return;args=e.data.args;if(args.clipboard_script&&!window.scCopyText){const script=document.createElement('script');script.textContent=args.clipboard_script;document.head.appendChild(script);}if(historyScope!==args.history_scope){pendingCopyInputs.clear();historyScope=args.history_scope;for(const area of areas.values())clearTimeout(area.saveTimer);histories.clear();areas.clear();drafts={};queue=[];settingsDrafts={};opened={};pending=false;deleted=null;clearTimeout(deleteTimer);document.getElementById('section-deleted')?.remove();root.replaceChildren();}for(const id of Object.keys(settingsDrafts)){const s=args.sections.find(s=>s.id===id);if(!s||JSON.stringify(s.settings)===JSON.stringify(settingsDrafts[id]))delete settingsDrafts[id];else s.settings=settingsDrafts[id];}if(args.ack===inFlight)pending=false;for(const id of Object.keys(drafts)){const s=args.sections.find(s=>s.id===id);if(!s||s.html===drafts[id])delete drafts[id];}if(!drag&&!pending&&!queue.length&&!Object.keys(drafts).length)render();const entry=Object.entries(drafts)[0];if(entry)emit('html',{id:entry[0],html:entry[1]});else if(queue.length){const [type,extra]=queue.shift();emit(type,extra);}});
+addEventListener('message',e=>{
+ if(e.source!==parent||e.data.type!=='streamlit:render')return;
+ const incoming=e.data.args,changedScope=historyScope!==incoming.history_scope;
+ if(!changedScope&&Number(incoming.draft_version)<Number(args.draft_version))return;
+ if(changedScope){
+  pendingCopyInputs.clear();for(const area of areas.values())clearTimeout(area.saveTimer);
+  histories.clear();areas.clear();drafts={};queue=[];settingsDrafts={};opened={};pending=false;deleted=null;changes=[];sent=[];unpersisted=[];external=[];saveError='';clearTimeout(saveTimer);clearTimeout(deleteTimer);root.replaceChildren();
+  historyScope=incoming.history_scope;args=incoming;
+  let recovery;try{recovery=JSON.parse(sessionStorage.getItem('sc-local-draft:'+historyScope));}catch{}
+  if(recovery?.changes?.length){
+   if(recovery.version===incoming.draft_version){args.sections=recovery.sections;changes=recovery.changes;dirty();}
+   else {saveError='A saved draft changed while this browser was closed. Your recovery copy is retained; review it before replacing saved work.';saveStatus(saveError);}
+  }
+ }else{
+  const localSections=args.sections;
+  if(pending&&incoming.ack===inFlight){
+   pending=false;
+   if(incoming.edit_error){changes=[...sent,...changes];saveError=incoming.edit_error;}
+   else {saveError=incoming.save_status==='Save failed'?(incoming.save_error||'Save failed. Your local edits are retained.'):'';unpersisted=saveError?[...unpersisted,...sent]:[];sent=[];}
+   if(!saveError&&!changes.length&&!Object.keys(drafts).length){try{sessionStorage.removeItem('sc-local-draft:'+historyScope);}catch{}}
+  }
+  args={...incoming,sections:pending||changes.length||Object.keys(drafts).length||saveError?localSections:incoming.sections};
+ }
+ if(args.clipboard_script&&!window.scCopyText){const script=document.createElement('script');script.textContent=args.clipboard_script;document.head.appendChild(script);}
+ if(!drag)render();localPreview();
+ if(saveError){saveStatus('Save failed · '+saveError);rememberDraft();if(!incoming.edit_error&&saveAttempts++<3){clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,Math.min(1000*2**saveAttempts,8000));}}
+ else if(changes.length){saveStatus('Unsaved · Unpublished changes');if(!pending){clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,650);}}
+ else if(!pending){saveStatus('Saved · Draft');withParent(p=>{const size=p.document.querySelector('.st-key-crm-composer-preview .sc-email-size');if(size?.dataset.lastMeasured){size.innerHTML=size.dataset.lastMeasured;delete size.dataset.lastMeasured;}});if(external.length)sendChanges();}
+});
 new ResizeObserver(height).observe(document.body);
 parent.postMessage({isStreamlitMessage:true,type:'streamlit:componentReady',apiVersion:1},'*');
 }

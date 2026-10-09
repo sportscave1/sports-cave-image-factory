@@ -151,7 +151,9 @@ class SectionPersistenceTests(unittest.TestCase):
         self.assertFalse(at.exception)
         saved = self.store.draft(at.session_state['campaign_editor']['id'])['document']
         self.assertEqual(saved['custom_html'], HTML)
-        self.assertNotIn('html_sections', saved)
+        # Defaults are intentionally snapshotted by the current editor. Keep
+        # that exact fixed header/footer while editing the middle content.
+        self.assertEqual(saved['html_sections'],doc['html_sections'])
         at.run(); self.assertEqual(at.session_state['campaign_editor']['document'], saved)
         old = self.store.save(ADMIN, 'Legacy full HTML', document(), env=ENV)
         fresh = AppTest.from_string(SCRIPT); fresh.session_state['route']='CRM Campaigns'

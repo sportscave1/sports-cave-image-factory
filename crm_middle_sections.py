@@ -71,7 +71,7 @@ def commit_middle(doc, sections):
     doc['custom_html'] = next((s['html'] for s in sections if s.get('html_number') == 1), '')
 
 
-def apply_event(doc, event):
+def apply_event(doc, event, *, resolve_insert=None):
     sections = middle_sections(doc)
     if not isinstance(event, dict) or event.get('base') != [s['id'] for s in sections]: raise ValueError('Sections changed. Try again.')
     # Structural actions include unsaved textarea edits in the same transaction.
@@ -82,15 +82,40 @@ def apply_event(doc, event):
         if target is None or not isinstance(html,str): raise ValueError('Invalid pending edit.')
         target['html'] = html
     kind = event.get('type')
+    if kind == 'batch':
+        events=event.get('events')
+        if not isinstance(events,list) or not 1<=len(events)<=500:raise ValueError('Invalid editor batch.')
+        updated=deepcopy(doc)
+        for action in events:
+            if not isinstance(action,dict) or action.get('type') in ('batch','persist'):raise ValueError('Invalid editor action.')
+            apply_event(updated,action,resolve_insert=resolve_insert)
+        doc.clear();doc.update(updated)
+        return
+    if kind == 'persist':return
     selected = next((s for s in sections if s['id'] == event.get('id')), None)
     if kind == 'add':
-        identity = uuid.uuid4().hex
+        identity = event.get('new_id') or uuid.uuid4().hex
         if event.get('kind') == 'visual':
             from crm_checkout_elements import element
-            sections.append(element())
+            created=element();created['id']=identity;sections.append(created)
         elif event.get('kind') == 'flexible_checkout':
             from crm_checkout_elements import starter
-            sections.extend(starter())
+            created=starter()
+            if 'new_ids' in event:
+                if not isinstance(event['new_ids'],list) or len(event['new_ids'])!=len(created):raise ValueError('Invalid new element identities.')
+                for section,identity in zip(created,event['new_ids']):section['id']=identity
+            sections.extend(created)
+        elif event.get('kind') in ('template','checkout') and resolve_insert is not None:
+            source=resolve_insert(event)
+            if event['kind']=='template' and len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():
+                sections[0].update(html=source['html'],visible=True)
+                if source.get('name'):sections[0]['name']=source['name']
+            else:
+                if event['kind']=='checkout' and len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():sections=[]
+                created=dict(id=identity,type='html',visible=True,html_number=max((s.get('html_number',0) for s in sections),default=0)+1,html=source['html'])
+                if source.get('name'):created['name']=source['name']
+                sections.append(created)
+            if source.get('template_ref'):doc['template_ref']=source['template_ref']
         elif event.get('kind') == 'html':
             reserved = event.get('reserved_html_number', 0)
             if type(reserved) is not int or not 0 <= reserved <= 10000: raise ValueError('Invalid reserved section number.')
@@ -119,7 +144,7 @@ def apply_event(doc, event):
         if not name.strip() and not event.get('reset'):raise ValueError('Enter a section name or reset to default.')
         selected['name']='' if event.get('reset') else name.strip()
     elif kind == 'duplicate':
-        copied=deepcopy(selected);copied['id']=uuid.uuid4().hex
+        copied=deepcopy(selected);copied['id']=event.get('new_id') or uuid.uuid4().hex
         if copied['type']=='html':copied['html_number']=max(s.get('html_number',0) for s in sections)+1
         sections.insert(sections.index(selected)+1,copied)
     elif kind == 'visible': selected['visible'] = event.get('visible')

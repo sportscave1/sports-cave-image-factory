@@ -64,8 +64,10 @@ class PreviewStabilityTests(TestCase):
         self.assertNotIn('live_control',Path('crm_automation_ui.py').read_text(encoding='utf-8'))
         self.assertIn("auto_refresh=False",ui)
         section=Path('crm_section_ui.py').read_text(encoding='utf-8')
-        self.assertIn("preview_debounce=350 if getattr(store,'email_mode',None)=='automation' else 750",section)
-        self.assertIn("not any(s['type']==BLOCK",section)
+        self.assertIn('preview_debounce=180',section)
+        client=Path('components/crm_sections/composer.js').read_text(encoding='utf-8')
+        self.assertIn('localPreview();render();dirty()',client)
+        self.assertIn('setTimeout(sendChanges,650)',client)
 
 
     def test_final_html_hash_ignores_nonvisual_input_changes(self):
@@ -176,7 +178,7 @@ class PreviewStabilityTests(TestCase):
             self.assertIn('Black frame / Large',safe['html'])
             with self.assertRaises(RuntimeError):hydrate(doc,data,preview=False)
 
-    def test_failed_render_retains_last_good_native_preview(self):
+    def test_failed_render_never_presents_old_html_as_current_draft(self):
         import streamlit as st
         from crm_abandoned_checkout_ui import _automation_canvas
         from crm_email_size import analyze_rendered_email
@@ -185,7 +187,7 @@ class PreviewStabilityTests(TestCase):
         state={'fixture_last_good_visual':(cache,'Previewing: Fixture','')}
         with patch.object(st,'session_state',state),patch.object(st,'container',return_value=MagicMock()),patch.object(st,'markdown'),patch.object(st,'button',return_value=False),patch.object(st,'caption'),patch.object(st,'html'),patch('crm_automation_preview_cache.output',side_effect=RuntimeError('Synthetic render failure')),patch('crm_abandoned_checkout_ui.components.html') as preview, self.assertLogs('crm_abandoned_checkout_ui',level='ERROR'):
             _automation_canvas({}, {}, 'fixture_',Mock(),current_document=False)
-        preview.assert_called_once_with('<p>Last good design</p>',width=600,height=520,scrolling=True)
+        preview.assert_not_called()
 
 
     def test_first_render_failure_stops_completed_lookup_timer(self):

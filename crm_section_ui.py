@@ -105,7 +105,13 @@ def middle_editor(doc, key, shop, store=None):
     if store is not None:
         from crm_campaign_library import library_rows
         from crm_store import StoreUnavailable
-        try:templates=[{k:r[k] for k in ('id','name','version')} for r in library_rows(store)]
+        try:
+            from crm_campaign_library import template_html
+            for row in library_rows(store):
+                item={k:row[k] for k in ('id','name','version')}
+                try:item.update(html=template_html(store,row),builtin=bool(row.get('builtin')))
+                except (ValueError,StoreUnavailable):pass
+                templates.append(item)
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
     from crm_image_prompt import image_prompt
     from crm_email_editor_context import current
@@ -115,11 +121,25 @@ def middle_editor(doc, key, shop, store=None):
     from crm_prompt_copy import clipboard_script
     verified=handoff(st.session_state,editor) if campaign_name else None
     from crm_discount_ui import view as discount_view,callback as discount_callback
+    from crm_local_preview import scope
+    from crm_checkout_elements import element,starter
+    from crm_checkout_template import load as load_checkout
+    from crm_template_cache import cached
+    checkout=cached(store,('local-checkout-master',),lambda:load_checkout(store)) if store else None
+    def resolve_insert(action):
+        if action['kind']=='checkout':
+            from crm_checkout_template import validate
+            return {'html':validate(checkout['html']),'name':'Abandoned Checkout'}
+        row=next((r for r in library_rows(store) if str(r['id'])==str(action.get('template_id')) and r['version']==action.get('version')),None)
+        if row is None:raise ValueError('Template changed. Reload the template list.')
+        return {'html':template_html(store,row),'name':row['name'] if row.get('builtin') else '',
+                'template_ref':{k:str(row[k]) if k=='id' else row[k] for k in ('id','name','version')}}
     trigger=getattr(store,'preview_trigger',None) if getattr(store,'email_mode',None)=='automation' else None
-    event = render_component(component,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=350 if getattr(store,'email_mode',None)=='automation' else 750,clipboard_script=clipboard_script(),history_scope=doc.get('campaign_key',key),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    event = render_component(component,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=180,clipboard_script=clipboard_script(),history_scope=scope(key),preview_scope=scope(key),element_defaults=element()['settings'],starter_sections=starter(),checkout_template=checkout,draft_version=editor.get('version'),save_status=st.session_state.get('campaign_save_status','Saved'),save_error=st.session_state.get('campaign_save_error',''),edit_error=st.session_state.get(key+'edit_error',''),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')
+        st.session_state.pop(key+'edit_error',None)
         try:
             if event.get('type')=='add' and event.get('kind')=='checkout':
                 if store is None:raise ValueError('Template storage is unavailable.')
@@ -146,9 +166,10 @@ def middle_editor(doc, key, shop, store=None):
                 doc.update(refreshed);doc['copy_reviewed']=False
                 rerun_editor()
             else:
-                apply_event(doc,event);doc['copy_reviewed']=False
+                apply_event(doc,event,resolve_insert=resolve_insert);doc['copy_reviewed']=False
                 rerun_editor()
         except ValueError as exc:
+            st.session_state[key+'edit_error']=str(exc)
             st.session_state[key+'section_error']=str(exc);rerun_editor()
         except Exception as exc:
             logging.getLogger(__name__).warning('crm_catalogue_editor_failed type=%s',type(exc).__name__)

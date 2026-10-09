@@ -16,7 +16,7 @@ COMPOSER_TARGET='crm_campaign_composer' if 'key' in inspect.signature(st.fragmen
 
 def library_rows(store):
     # Flow and legacy delivery templates are not editable campaign-library items.
-    rows=cached(store, ('metadata',), lambda: sorted(store.html_library(metadata=True),key=lambda r:(r['name'].casefold(),str(r['id']))))
+    rows=list(cached(store, ('metadata',), lambda: sorted(store.html_library(metadata=True),key=lambda r:(r['name'].casefold(),str(r['id'])))))
     from crm_lifestyle_images import library_rows as lifestyle_rows
     rows.extend(lifestyle_rows())
     from crm_frame_banner_template import library_row as frame_banner_row

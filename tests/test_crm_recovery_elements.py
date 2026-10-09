@@ -207,7 +207,7 @@ class RecoveryPersistenceTests(unittest.TestCase):
         saved=f.store.save_flow(ADMIN,a['id'],a['name'],flow,1)
         return f.store.publish(ADMIN,a['id'],saved['config']['revision'],env=LIVE)
 
-    def test_frozen_versions_reopen_new_publication_and_provider_once(self):
+    def test_current_live_visibility_and_provider_once_preserve_enrollment_history(self):
         from crm_automation_runtime import enter,advance
         from crm_logic import now
         from datetime import timedelta
@@ -226,8 +226,10 @@ class RecoveryPersistenceTests(unittest.TestCase):
         self.assertEqual(f.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(journey['id'],),True)['steps'],frozen)
         advance(f.engine,f.due(journey));f.engine.send_one();f.engine.send_one();f.provider.send.assert_called_once()
         message=f.provider.send.call_args.args[1]
-        verify(message,self.cart['abandonedCheckoutUrl'],2)
-        self.assertIn('fixture.png',message['html']);self.assertIn('Own The Moment',message['html'])
+        # The latest LIVE publication hides the linked product image. Existing
+        # enrollments retain history but resolve that current content at send.
+        verify(message,self.cart['abandonedCheckoutUrl'],1)
+        self.assertNotIn('fixture.png',message['html']);self.assertIn('Own The Moment',message['html'])
         self.assertNotIn(TOKEN,message['html']);self.assertIn('Unsubscribe',message['html'])
 
     def test_removing_last_action_blocks_publication_without_changing_live_version(self):

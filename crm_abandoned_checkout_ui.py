@@ -46,6 +46,36 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                         try:pin['future'].result(timeout=10)
                         except TimeoutError:st.rerun(scope='app')
                         except Exception:pass # preview_context retains last-good.
+        if current_document:
+            # Hydrate the selected preview context once; local section edits no
+            # longer depend on a successful whole-document production render.
+            try:
+                _,label=store.preview_document(doc)
+                st.caption(label or 'Draft preview')
+            except ValueError:
+                st.caption('Draft preview · section errors appear beside their content.')
+            offer_slot=st.empty();header_slot=st.empty();warning_slot=st.empty()
+            if doc.get('recovery_discount'):
+                offer=doc['recovery_discount']
+                offer_slot.caption('Discount: '+offer['code']+' — '+offer['value']+' · Shopify validates eligibility at checkout; not yet applied.')
+            if getattr(store,'preview_warning',''):warning_slot.caption(store.preview_warning)
+            try:
+                from crm_email_size_ui import automation_size_meter
+                size_cache,_,_=output(st.session_state,store,doc,cfg,editor.get('id'))
+                if size_cache.get('personalised_headers'):
+                    from html import escape
+                    headers=size_cache['personalised_headers']
+                    header_slot.html('<div class="sc-personalised-headers" style="font-size:13px;line-height:1.4"><strong>'+escape(headers['subject'])+'</strong><br><span style="color:#646464">'+escape(headers['preheader'])+'</span></div>')
+                automation_size_meter(size_cache)
+            except Exception:
+                st.html('<div class="sc-email-size" style="height:32px;font-size:11px">Email size · Correct section errors to calculate</div>')
+            from crm_local_preview import canvas
+            canvas(doc,cfg,key,store)
+            pin=st.session_state.get('_automation_checkout_pin')
+            pending=bool(pin and not pin['future'].done())
+            if loading and not pending:st.rerun(scope='app')
+            elif pending and not loading:st.rerun(scope='app')
+            return
         last=st.session_state.get(key+'last_good_visual')
         try:
             cache,label,warning=output(st.session_state,store,doc,cfg,editor.get('id'))
@@ -60,12 +90,12 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
         except Exception as exc:
             import logging
             logging.getLogger(__name__).error('automation_preview_render_failed type=%s',type(exc).__name__)
-            st.caption('Preview could not update. '+('Previous preview retained.' if last else 'Retry after checking the template.'))
+            st.warning('Preview unavailable. Your draft is retained. Check template variables and section settings, then retry.')
             if not last:
                 pin=st.session_state.get('_automation_checkout_pin')
                 if loading and pin and pin['future'].done():st.rerun(scope='app')
                 return
-            cache,label,warning=last
+            return
         if label:st.caption(label)
         if doc.get('recovery_discount'):
             offer=doc['recovery_discount']

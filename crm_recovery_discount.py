@@ -118,17 +118,23 @@ def substitute(doc,discount=None):
             return {k:block_values(v) for k,v in value.items()}
         return value
     if 'blocks' in result:result['blocks']=block_values(result['blocks'])
-    for field in ('custom_html',):
-        if field in result:result[field]=replace(result[field],True)
+    # Once sections exist the legacy mirror is not another authored source.
+    # In particular it may still contain tokens belonging to a hidden section.
+    if 'middle_sections' not in result and 'custom_html' in result:
+        result['custom_html']=replace(result['custom_html'],True)
     if 'html_sections' in result:result['html_sections']={k:replace(v,True) for k,v in result['html_sections'].items()}
     for section in result.get('middle_sections',[]):
         if section.get('type')=='discount':
             # Render-only lowering reuses every existing HTML recovery/link and
             # safety transform. The saved editable offer remains bound to Shopify.
             section['type']='image';section.pop('offer',None)
-        if not section.get('visible',True):continue
+        if not section.get('visible',True):
+            if 'html' in section:section['html']=''
+            continue
         if 'html' in section:section['html']=replace(section['html'],True)
         if section.get('type')=='checkout_element':section['settings']=block_values(section['settings'])
+    if 'middle_sections' in result:
+        result['custom_html']=next((s.get('html','') for s in result['middle_sections'] if s.get('html_number')==1),'')
     return result
 
 

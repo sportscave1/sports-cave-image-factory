@@ -24,6 +24,9 @@
   record.editor.document.copy_reviewed=false;changed();
  };
  const section=e=>{
+  // The reactive section editor owns its acknowledged operation log. Do not
+  // race it with a second writer carrying an older whole-document snapshot.
+  if(e.detail?.local_editor)return;
   if(!args)return;const {id,html,cta}=e.detail||{};
   const source=(args.editor.document.middle_sections||[]).find(s=>s.id===id);if(!source)return;
   ensure();const target=record.editor.document.middle_sections.find(s=>s.id===id);if(!target)return;
