@@ -6,7 +6,9 @@ Authoritative database: `ceyzbfpuwuuxaiqwiltz`. Automation:
 `76784f53-7878-40cc-85e4-ba60c2ea835a`.
 
 - Live publication v7 contains two enabled stages, with delays 600 and 43200 seconds.
-- Email 3 exists only in the draft, enabled with an 86400-second predecessor delay.
+- Email 3 is retained as disabled in v7's published definition and excluded from
+  its executable stages. The newer draft enables it with an 86400-second
+  predecessor delay. The final UI check correctly shows Disabled.
 - Two accepted v3 deliveries occurred after v7 was published. Enrollment snapshots
   and queued template versions, rather than the active publication, selected content.
 - All 40 existing enrollments were terminal: 38 completed the original single stage;
@@ -16,8 +18,9 @@ Authoritative database: `ceyzbfpuwuuxaiqwiltz`. Automation:
   the 38 rows with Email 2 sent and Email 1 blank; no missing delivery is fabricated.
 - A new v8 publish attempt at 21:45 UTC on 9 October failed with `DiscountHold`.
   Its Email 3 document contains discount variables without `recovery_discount`.
-  v7 remains authoritative. Draft copy mentions MYCAVE5; choosing/publishing that
-  offer is a content decision separate from deploying the runtime correction.
+  v7 remains authoritative. The current draft subsequently restored the MYCAVE5
+  selection (A$5 off). Publishing that enabled draft is a separate decision;
+  this repair does not enable the currently disabled live stage.
 
 ## Operational contract
 
@@ -68,7 +71,7 @@ identify the actual publication; discount publication errors are allowlisted.
 
 The isolated release excludes concurrent thumbnail edits. The 395-test CRM safety
 suite passed; one timing-sensitive 4-second concurrency check needed an isolated
-rerun and the full suite then passed. Focused live-stage/publication tests cover
+rerun and the full suite then passed. All 101 focused tests passed, covering
 payload equality, drafts, existing queued recipients, stages 3–6 and 61 stages,
 predecessor timing, restart, disabled/reordered stages, mixed histories, terminal
 history, publication races, transaction rollback, diagnostics and re-entry.
