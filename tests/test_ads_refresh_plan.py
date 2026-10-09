@@ -76,7 +76,7 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertEqual([r['label'] for r in refs], [f'WINNER_CARD_{i}' for i in range(1, 6)])
         self.assertEqual([r['scene'] for r in refs[:5]], list(SCENES))
         prompt = value['master_prompt']
-        self.assertNotIn('CANONICAL_PRODUCT', prompt)
+        self.assertIn('CANONICAL_PRODUCT', prompt)
         self.assertNotIn('ATTACHMENT 2 — CANONICAL', prompt)
         self.assertIn('ONE refreshed 5-CARD', prompt)
 
@@ -98,7 +98,7 @@ class RefreshPlanTests(unittest.TestCase):
         for row in executions(value):
             self.assertIn(plan.CAROUSEL_AUTHORITY, row['image_prompt'])
             self.assertIn('PRINTED', value['master_prompt'])
-            self.assertIn('collectively supply the immutable product authority', row['image_prompt'])
+            self.assertIn('CANONICAL_PRODUCT, when supplied', row['image_prompt'])
             self.assertIn('Do not redraw or reconstruct the product', value['master_prompt'])
 
     def test_full_shared_block_in_all_active_carousel_and_ie_briefs(self):

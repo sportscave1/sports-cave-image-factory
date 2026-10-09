@@ -1,4 +1,6 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
+import hashlib
+
 
 
 VERSION = "IE PREMIUM SCARCITY DISTINCT FAN ROOMS V3"
@@ -57,6 +59,28 @@ def fan_style(context):
 CAMERAS = ("RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
            "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
            "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on")
+# Five carefully limited natural viewpoints. The RIGHT / FRONT / LEFT identity of
+# each image is unchanged; only camera height and subtle distance/offset varies.
+CAMERA_VARIATIONS = (
+    "eye-level, balanced natural perspective",
+    "a little above artwork centre with minimal downward perspective",
+    "just below artwork centre with very subtle upward perspective",
+    "closer medium-close viewpoint showing physically real frame bevel",
+    "slightly farther camera with natural room context but a large, readable frame",
+)
+
+def resolved_camera_variation(visual, index, context, variation_token):
+    """Deterministically choose one of five safe angles; edits and reruns stay stable."""
+    user_choice = str(visual.get("resolved_camera_variation") or "").strip()
+    if user_choice in CAMERA_VARIATIONS:
+        return user_choice
+    identity = "|".join((str(context.get("product_sport") or ""),
+                         str(context.get("product_era") or ""),
+                         str(context.get("artwork_mood") or ""),
+                         str(variation_token or "standard"), str(index)))
+    digest = hashlib.sha256(identity.encode("utf-8")).digest()
+    return CAMERA_VARIATIONS[int.from_bytes(digest[:4], "big") % len(CAMERA_VARIATIONS)]
+
 SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: When writing a limited-edition label use LIMITED TO {verified limit} or LIMITED EDITION '
                  'when approved. Never append worldwide, world wide, globally, or any geographic '
                  'scope to an edition claim, even when source metadata or description copy uses it. '
@@ -70,9 +94,11 @@ def resolve_visual_system(visual, index, context, variation_token):
     wall = walls[index]
     camera = CAMERAS[index]
     support = SUPPORT_LINES[index]
+    camera_variation = resolved_camera_variation(visual, index, context, variation_token)
     if index == 0 and not context.get("edition_limit"):
         support = "A statement for your collection."
     visual.update(visual_family=FAMILIES[index], camera_role=("RIGHT", "FRONT", "LEFT")[index],
+                  resolved_camera_variation=camera_variation,
                   camera_side=camera, camera_instruction=camera + ". Keep verticals straight and complete frame rigid. Never mirror artwork.",
                   creative_variation_token=variation_token or "standard", room_profile_key=room_key,
                   room_profile=f"Room {index + 1}: {room}", room_type=room,
@@ -96,6 +122,7 @@ def camera_wall_rules(visual):
 CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']}
 Use the token only for creative freshness; never display it or internal metadata on the image.
 Selected camera: {visual['camera_side']}.
+Selected one of five subtle photographic viewpoint refinements: {visual['resolved_camera_variation']}. This never changes the assigned RIGHT / FRONT / LEFT role; never mirror, crop or shrink the product.
 Resolve exactly ONE camera: use the selected value above, not a menu of alternatives. Keep the assigned right / centre / left camera role. Never mirror artwork.
 Resolved room: {visual['room_profile']}.
 Framing: {visual['shot_distance']}; product width {visual['product_width']} of canvas; {visual['product_position']}. Leave enough room context to identify this environment while keeping the artwork the largest visual element.

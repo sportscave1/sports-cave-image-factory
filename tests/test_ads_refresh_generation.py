@@ -90,7 +90,7 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
         value = fixture(); prompt = value['master_prompt']
         self.assertEqual([r['label'] for r in value['creative_refresh_context']['refresh_plan']['references']], [f'WINNER_CARD_{i}' for i in range(1,6)])
         for i in range(1,6): self.assertIn(f'Image {i} = Card {i} = WINNER_CARD_{i}', prompt)
-        self.assertNotIn('CANONICAL_PRODUCT', prompt)
+        self.assertIn('CANONICAL_PRODUCT', prompt)
         self.assertNotIn('ATTACHMENT 6', prompt)
         self.assertEqual(prompt.count('PRODUCT: '+TITLE), 5)
         self.assertIn('EXACTLY 5 COMPLETE STANDALONE IMAGE PROMPTS', prompt)
@@ -173,7 +173,7 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
         value['prompt_contract_version']='old'
         value['creative_refresh_context']['refresh_plan']['references'].append({'label':'CANONICAL_PRODUCT'})
         updated=ads.ensure_current_ads_result_prompt(value)
-        self.assertNotIn('CANONICAL_PRODUCT',updated['master_prompt'])
+        self.assertIn('CANONICAL_PRODUCT',updated['master_prompt'])
         self.assertEqual(len(updated['creative_refresh_context']['refresh_plan']['references']),5)
 
     def test_legacy_manual_prompt_still_requests_complete_references(self):

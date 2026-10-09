@@ -1,0 +1,35 @@
+name: Image prompt quality tests (feature branch only)
+
+on:
+  push:
+    branches:
+      - feature/premium-image-prompts-v3-2026-10-09
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prompt-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile changed modules
+        run: |
+          python -m py_compile sports_cave_prompt_blocks.py sports_cave_physical_realism.py mockup_product_prompts.py image_factory.py ads_refresh_plan.py ads_refresh_generation.py ads_product_catalog.py ads_page.py ads_ie_visual_systems.py
+      - name: Run image prompt compatibility suites
+        run: |
+          python -m unittest discover -s tests -p 'test_sports_cave_prompt_blocks.py'
+          python -m unittest discover -s tests -p 'test_mockup_product_variations.py'
+          python -m unittest discover -s tests -p 'test_physical_frame_realism.py'
+          python -m unittest discover -s tests -p 'test_ads_refresh_plan.py'
+          python -m unittest discover -s tests -p 'test_ads_refresh_generation.py'
+          python -m unittest discover -s tests -p 'test_carousel_winner_system.py'
+          python -m unittest discover -s tests -p 'test_ads_winner_refinement.py'
+          python -m unittest discover -s tests -p 'test_premium_image_quality_v3.py'

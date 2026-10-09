@@ -9,7 +9,7 @@ import mockup_product_prompts as prompts
 
 class ProductVariationsTests(unittest.TestCase):
     def test_every_room_and_angle_pair_is_supported_for_each_card(self):
-        self.assertEqual(len(prompts.ROOMS),3);self.assertEqual(len(prompts.ANGLES),3)
+        self.assertEqual(len(prompts.ROOMS),3);self.assertEqual(len(prompts.ANGLES),5)
         for filename,rooms in prompts.ROOMS.items():
             self.assertEqual(len(rooms),5)
             for room in rooms:
@@ -21,6 +21,15 @@ class ProductVariationsTests(unittest.TestCase):
                     self.assertIn('Selected room: '+room,text)
                     self.assertIn('Selected camera angle: '+angle,text)
                     self.assertIn(prompts.ANGLE_GUIDANCE[angle],text)
+
+    def test_three_product_page_images_have_distinct_angles_per_pack(self):
+        with patch.object(prompts.random, 'choice', side_effect=lambda options: options[0]):
+            items = image_factory.build_lifestyle_prompt_items('Collector', 'Tennis', local_only=True)
+        angles = [next(line.split(': ', 1)[1] for line in item['prompt'].splitlines()
+                       if line.startswith('Selected camera angle: ')) for item in items]
+        self.assertEqual(len(angles), 3)
+        self.assertEqual(len(set(angles)), 3)
+        self.assertTrue(set(angles).issubset(set(prompts.ANGLES)))
 
     def test_new_generation_draws_independently_but_saved_pack_does_not_redraw(self):
         with patch.object(prompts.random,'choice',side_effect=lambda options:options[0]):

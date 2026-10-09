@@ -20,12 +20,18 @@ ROOMS = {
     ),
 }
 ANGLES = (
-    'Straight on', 'Slightly angled from the left', 'Slightly angled from the right',
+    'Straight on',
+    'Slightly angled from the left',
+    'Slightly angled from the right',
+    'Gently elevated from the left',
+    'Gently elevated from the right',
 )
 ANGLE_GUIDANCE = {
-    ANGLES[0]: 'View the framed artwork directly front-facing, balanced and clean.',
-    ANGLES[1]: 'Position the camera a little to the left for a subtle perspective view of the room and artwork.',
-    ANGLES[2]: 'Position the camera a little to the right for a subtle perspective view of the room and artwork.',
+    ANGLES[0]: 'Camera level with the centre of the frame, directly front-facing, balanced and clean.',
+    ANGLES[1]: 'Position the camera slightly left, approximately 5–8 degrees off-axis; show subtle physical frame depth.',
+    ANGLES[2]: 'Position the camera slightly right, approximately 5–8 degrees off-axis; show subtle physical frame depth.',
+    ANGLES[3]: 'Position the camera subtly above centre and a little left, within a natural 5–8 degree perspective; keep frame edges complete and readable.',
+    ANGLES[4]: 'Position the camera subtly above centre and a little right, within a natural 5–8 degree perspective; keep frame edges complete and readable.',
 }
 MARKER = 'SPORTS CAVE PRODUCT PAGE SCENE V1'
 END = 'END PRODUCT PAGE SCENE'
@@ -35,14 +41,15 @@ Preserve the supplied artwork and frame exactly: colours, text, badge, layout, c
 Place the frame realistically on a wall at eye level with believable scale, physical mounting, natural contact shadows and restrained glass reflections that do not obscure the artwork.
 Keep the framed artwork the clear focal hero. Use a premium, clean, minimal, polished and uncluttered room that supports rather than competes with the product.
 Use believable natural light, controlled highlights and realistic material texture. Avoid excessive darkness, noisy props, neon signs, distracting memorabilia, extra wall art, people, text overlays and watermarks.
-Use the single selected room and camera direction below. Allow subtle variation in furniture layout, lighting direction, wall material, decor, room proportions and composition within that room style.
+Use the single selected room and camera direction below. Allow subtle variation in furniture layout, lighting direction, wall material, decor, room proportions and composition within that room style. Preserve editable scene instructions; the selected angle must remain stable after generation or editing.
 Keep perspective natural and architectural lines straight. No extreme side angles, awkward perspective, fisheye or independently distorted frame/artwork. The design must remain clearly readable.
 The final scene must look like real professional interior photography, not an AI-generated or over-styled room.'''
 
 
-def build(filename, base=None):
+def build(filename, base=None, *, avoid_angles=()):
     room = random.choice(ROOMS[filename])
-    angle = random.choice(ANGLES)
+    available_angles = tuple(a for a in ANGLES if a not in avoid_angles) or ANGLES
+    angle = random.choice(available_angles)
     body = SCENE.sub('', base or TEMPLATE).strip()
     return (
         f'{body}\n\n{MARKER}\nSelected room: {room}\n'

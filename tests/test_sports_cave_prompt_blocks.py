@@ -3,6 +3,7 @@ import unittest
 import prompt_store
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
+    SPORTS_CAVE_PREMIUM_REALISM_MARKER,
     append_sports_cave_image_realism_rules,
     build_sports_cave_image_realism_rules,
 )
@@ -19,6 +20,18 @@ class SportsCaveImageRealismRulesTests(unittest.TestCase):
         self.assertEqual(once.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
         self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", once)
         self.assertIn("Treat the uploaded full-resolution product as an immutable physical asset.", once)
+
+    def test_new_and_saved_prompts_get_premium_acrylic_glass_reflection_once(self):
+        base = "Editable camera: {camera_angle}; Room: {room_type}"
+        updated = append_sports_cave_image_realism_rules(base)
+        self.assertIn("acrylic/Perspex OR glass", updated)
+        self.assertIn(base, updated)
+        self.assertEqual(updated.count(SPORTS_CAVE_PREMIUM_REALISM_MARKER), 1)
+        old = "Custom scene variable: {room_type}\n\nSPORTS_CAVE_IMAGE_REALISM_RULES_V1"
+        upgraded = append_sports_cave_image_realism_rules(old, physical_product=None)
+        self.assertIn("Custom scene variable: {room_type}", upgraded)
+        self.assertEqual(upgraded.count(SPORTS_CAVE_PREMIUM_REALISM_MARKER), 1)
+        self.assertEqual(append_sports_cave_image_realism_rules(upgraded), upgraded)
 
     def test_original_artwork_rules_exclude_immutable_product_lock(self):
         block = build_sports_cave_image_realism_rules(include_product_lock=False)

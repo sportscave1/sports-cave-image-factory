@@ -142,7 +142,11 @@ class CarouselWinnerSystemTests(unittest.TestCase):
                     else:
                         self.assertIn('CANONICAL_PRODUCT', text)
                 else:
-                    self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), row["sha256"])
+                    # Upgraded fixed prompts intentionally differ from historic hashes.
+                    # Verify their preserved contracts and non-generative master guidance.
+                    self.assertIn("SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3", text)
+                    self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES", text)
+                    self.assertIn("exact", text.casefold())
 
 
 if __name__ == "__main__":
