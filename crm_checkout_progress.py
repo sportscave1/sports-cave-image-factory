@@ -10,7 +10,7 @@ from crm_checkout_identity import display_name, recovered, block_label
 def columns(steps):
     return [{'id':str(s.get('step_id') or 'legacy:'+str(i)),
              'label':'Email '+str(i+1), 'name':s.get('name') or 'Email '+str(i+1),
-             'enabled':s.get('enabled',True)} for i,s in enumerate(steps or [])]
+             'enabled':s.get('enabled',True),'published':s.get('published',True)} for i,s in enumerate(steps or [])]
 
 
 def cell(label, tone='muted', reason='', due=None):
@@ -70,8 +70,10 @@ def progress(row, schema, at=None):
         status=send.get('status')
         if status=='ACCEPTED' and send.get('provider_id'):
             value=cell('Sent ✓','green','Accepted by Resend; inbox delivery is separate. See checkout details.')
-        elif enrollment and index is None:
-            value=cell('—',reason='Not part of this enrollment’s frozen flow version')
+        elif not col.get('published',True):
+            value=cell('Not published',reason='Draft stage; publish successfully before it can join the live sequence')
+        elif not col['enabled']:
+            value=cell('Disabled',reason='Disabled in the published flow; no new delivery is eligible')
         elif recovered(row) or row.get('flow_status')=='RECOVERED':
             value=cell('Purchased',reason='Purchase recorded; future reminders stopped')
         elif not enrollment:
@@ -84,7 +86,11 @@ def progress(row, schema, at=None):
             value=cell('Paused','gold','Flow is not active; persisted schedule retained')
         elif status=='UNCERTAIN':value=cell('Confirming','gold','Provider outcome unknown; automatic replay is held')
         elif status in ('CLAIMED','SUBMITTING'):value=cell('Processing','gold','Worker is processing this step')
-        elif index>current:value=cell('Waiting',reason='Waiting for the preceding step and its persisted schedule')
+        elif row.get('flow_status')=='COMPLETED' and index is None:
+            value=cell('Not applicable',reason='Historical completed enrollment; additional stages are not automatically backfilled')
+        elif index is None:value=cell('Awaiting worker',reason='Live stage awaiting reconciliation into this active enrollment')
+        elif index!=current and not steps[index].get('historical_pass') and not steps[index].get('delivery_complete'):
+            value=cell('Waiting',reason='Waiting for the preceding stage and its configured delay')
         elif index==current and row.get('flow_status')=='ACTIVE':
             # Deferred sends (e.g. smart sending / rate limiting) can have a
             # later persisted deadline than the journey itself.
@@ -92,8 +98,6 @@ def progress(row, schema, at=None):
             due=max(deadlines) if deadlines else None
             value=cell('Countdown','gold','Scheduled by the worker',due) if due else cell('Awaiting worker')
         else:value=cell('Unconfirmed','gold','No provider acceptance receipt recorded for this step')
-        if enrollment and index is not None and not col['enabled']:
-            value['reason']+=' This existing enrollment retains its frozen enabled step; disabled for new enrollments.'
         result.append(value)
     return result
 

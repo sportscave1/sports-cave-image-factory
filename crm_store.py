@@ -151,8 +151,24 @@ class Store:
         with self.db() as conn:
             # Serialize the submission boundary with Pause. A submission already
             # committed before Pause can finish, but no future step can begin.
-            active=conn.execute("SELECT a.status AS automation_status,e.status AS journey_status FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id WHERE e.id=%s FOR UPDATE OF a,e",(row['enrollment_id'],)).fetchone()
-            if not active or active['automation_status']!='ACTIVE' or active['journey_status']!='ACTIVE':return None
+            automation=conn.execute("SELECT a.* FROM crm_automations a JOIN crm_automation_enrollments e ON e.automation_id=a.id WHERE e.id=%s FOR UPDATE OF a",(row['enrollment_id'],)).fetchone()
+            journey=conn.execute('SELECT * FROM crm_automation_enrollments WHERE id=%s FOR UPDATE',(row['enrollment_id'],)).fetchone()
+            if not automation or not journey or automation['status']!='ACTIVE' or journey['status']!='ACTIVE':return None
+            # Publication commit locks this same automation row. Rendering may
+            # happen outside the lock, but a changed pointer cannot reserve an
+            # obsolete payload. Retry renders the new version with the same key.
+            if row.get('_live_step_id'):
+                from crm_automation_live import current_step
+                stage=current_step(automation,row['_live_step_id'])
+                if not stage or str(stage['template_id'])!=str(row['template_id']) or stage['template_version']!=row['template_version']:
+                    return None
+                delivered=conn.execute("SELECT step_index FROM crm_marketing_sends WHERE enrollment_id=%s AND status='ACCEPTED' AND NOT test_send",(row['enrollment_id'],)).fetchall()
+                done={journey['steps'][r['step_index']]['step_id'] for r in delivered}
+                done.update(s['step_id'] for s in journey['steps'] if s.get('historical_pass') or s.get('delivery_complete'))
+                expected=next((s for s in automation['steps'] if s['step_id'] not in done),None)
+                if not expected or expected['step_id']!=row['_live_step_id']:return None
+                conn.execute('UPDATE crm_marketing_sends SET template_id=%s,template_version=%s WHERE id=%s AND status=\'CLAIMED\' AND lease_token=%s',
+                             (row['template_id'],row['template_version'],row['id'],row['lease_token']))
             # Serialize with the signed completion ledger at the irreversible
             # submission boundary; a completed checkout cannot claim transport.
             key=conn.execute('SELECT checkout_key FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],)).fetchone()['checkout_key']

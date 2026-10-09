@@ -36,10 +36,10 @@ class Projection(unittest.TestCase):
         self.accepted();self.row['sends'][0]['enrollment_id']='other';self.assertEqual(self.labels()[0],'Countdown')
     def test_published_reorder_and_added_steps_match_stable_ids(self):
         self.accepted();schema=columns([self.steps[1],self.steps[0],{'step_id':'new'},{'step_id':'fourth'}])
-        self.assertEqual(self.labels(schema=schema),['Waiting','Sent ✓','—','—'])
+        self.assertEqual(self.labels(schema=schema),['Waiting','Sent ✓','Awaiting worker','Awaiting worker'])
     def test_disabled_new_entry_preserves_old_frozen_schedule(self):
         schema=columns([dict(s,enabled=False) for s in self.steps])
-        self.assertEqual(self.labels(schema=schema)[0],'Countdown')
+        self.assertEqual(self.labels(schema=schema)[0],'Disabled')
         self.row['enrollment_id']=None;self.assertEqual(self.labels(schema=schema),['Disabled']*3)
     def test_purchased_preserves_sent_stops_outstanding(self):
         self.accepted();self.row['order_id']='order';self.assertEqual(self.labels(),['Sent ✓','Purchased','Purchased'])
@@ -119,10 +119,12 @@ class PersistedProgress(unittest.TestCase):
         flow=deepcopy(a['config']['draft']);flow['emails'] += [email_step(recovery,3600),email_step(recovery,7200)]
         flow['emails'][1]['enabled']=False
         saved=self.store.save_flow(ADMIN,a['id'],a['name'],flow,a['config']['revision'])
-        # Draft does not affect the two current published columns.
-        self.assertEqual(len(self.read(a,key)['published_steps']),2)
+        # Draft-only stages are visible but explicitly cannot send.
+        draft_columns=self.read(a,key)['published_steps']
+        self.assertEqual([s['published'] for s in draft_columns],[True,True,False,False])
+        self.assertEqual(progress(self.read(a,key),columns(draft_columns))[-1]['label'],'Not published')
         self.store.publish(ADMIN,a['id'],saved['config']['revision'],env=LIVE)
         after=self.read(a,key);schema=columns(after['published_steps'])
         self.assertEqual([s['label'] for s in schema],['Email 1','Email 2','Email 3','Email 4'])
-        self.assertFalse(schema[1]['enabled']);self.assertEqual(progress(after,schema)[-1]['label'],'—')
+        self.assertFalse(schema[1]['enabled']);self.assertEqual(progress(after,schema)[-1]['label'],'Awaiting worker')
         self.assertEqual((after['steps'],after['next_due_at']),(before['steps'],before['next_due_at']))

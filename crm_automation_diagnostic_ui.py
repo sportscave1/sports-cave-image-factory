@@ -49,7 +49,7 @@ def operational_status(store,automation):
         st.caption('Published v'+str(automation['config'].get('published_version',0))+' · '+automation['status'].title())
         st.caption('Published · '+'; '.join(str(step.get('name') or 'Email')+' enabled, '+str(step['delay_seconds'])+' seconds delay' for step in report['steps']))
         st.caption('Draft · '+'; '.join(step['name']+' '+('enabled' if step['enabled'] else 'disabled')+', '+str(step['delay_seconds'])+' seconds delay' for step in report['draft_steps']))
-        st.caption('Draft edits do not change delivery until published. Existing journeys retain their frozen sequence.')
+        st.caption('Draft edits do not change delivery until published. Active journeys discover new live stages; completed history is not reopened.')
         st.caption('Next persisted email due · '+utc(report['next_due'])+' · verification retry · '+utc(report['retry_after']))
         counts=report.get('sends') or {}
         st.caption(str(report['enrolled'])+' journeys · '+str(report['accepted'])+' accepted by Resend · '+str(counts.get('FAILED',0))+' failed · '+str(counts.get('BLOCKED',0))+' blocked · '+str(counts.get('UNCERTAIN',0))+' uncertain')

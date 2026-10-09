@@ -62,8 +62,8 @@ class Engine:
             frozen=enrollment['steps'][0] if enrollment.get('steps') else {}
             if frozen.get('automation_version'):
                 current=enrollment['steps'][enrollment['current_step']] if enrollment['current_step']<len(enrollment['steps']) else None
-                # Existing journeys own immutable sequences, including steps
-                # removed or disabled in a later publication.
+                # Stable enrollment slots retain delivery history. Live enabled
+                # membership and content are rechecked at submission.
                 if not current:return c,context,'automation_sequence_complete'
                 from crm_automation_definition import qualifies
                 kind=frozen['trigger']
@@ -152,7 +152,12 @@ class Engine:
             if self.delivery().suppressed(address):
                 self.store.suppress(recipient_hash(address),row['shopify_customer_id'],'suppressed','resend',address)
                 self.store.finish_send(row,'BLOCKED','provider_suppression');return True
-            content=self.store.template(row['template_id'],row['template_version'])
+            if enrollment and enrollment.get('steps') and enrollment['steps'][0].get('automation_version'):
+                from crm_automation_live import resolve
+                content=resolve(self.store,row,enrollment)
+                if content is None:
+                    self.store.release_paused_send(row);return True
+            else:content=self.store.template(row['template_id'],row['template_version'])
             if content.get('format')=='automation_delivery_v1':
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
@@ -216,6 +221,9 @@ class Engine:
                 if row.get('enrollment_id'):self.store.release_paused_send(row)
                 return True
             submitting=True
+            if row.get('_live_step_id'):
+                logging.getLogger(__name__).info('automation_delivery_reserved automation_id=%s journey_id=%s step_id=%s publication_id=%s publication_version=%s send_id=%s due_at=%s',
+                    enrollment['automation_id'],enrollment['id'],row['_live_step_id'],row['template_id'],row['template_version'],row['id'],row.get('due_at'))
             provider_id=self.delivery().send(address,message,row['idempotency_key'],row['test_send'])
             self.store.finish_send(row,'ACCEPTED',provider_id=provider_id)
             if enrollment and enrollment.get('checkout_key'):

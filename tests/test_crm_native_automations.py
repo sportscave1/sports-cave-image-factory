@@ -102,8 +102,12 @@ class NativeAutomationTests(unittest.TestCase):
         a=self.store.publish(ADMIN,a['id'],a['config']['revision'],env=LIVE)
         self.assertEqual(len(a['steps']),1)
         advance(self.engine,self.due(j));self.engine.send_one()
+        self.provider.send.assert_not_called()  # Removed email cannot send; next email retains its delay.
+        current=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)
+        self.assertEqual(current['current_step'],1)
+        self.assertEqual([s['step_id'] for s in current['steps']],[s['step_id'] for s in old])
+        advance(self.engine,self.due(j));self.engine.send_one()
         self.provider.send.assert_called_once()
-        self.assertEqual(self.store.q('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)['steps'],old)
         self.assertEqual(step_metrics(self.store,a['id'])[0]['sent'],1)
 
     def test_new_checkout_defaults_do_not_change_existing_flow_or_send_history(self):
@@ -283,7 +287,8 @@ class NativeAutomationTests(unittest.TestCase):
         with patch('crm_workspace_store.WorkspaceRecords.frequency_blocked',return_value=False):self.assertTrue(restarted.send_one())
         advance(restarted,self.due(j))
         self.assertEqual(self.provider.send.call_count,2)
-        self.assertEqual(self.store.q('SELECT status FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)['status'],'COMPLETED')
+        state=self.store.q('SELECT status,stop_reason FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)
+        self.assertEqual(state,{'status':'ACTIVE','stop_reason':'awaiting_published_stage'})
     def test_unsubscribe_and_suppression_before_due_step_blocks_transport(self):
         for suppress in (False,True):
             a=self.published();j=self.enroll(a);advance(self.engine,self.due(j))

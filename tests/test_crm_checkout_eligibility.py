@@ -165,6 +165,7 @@ class WorkerTests(unittest.TestCase):
         a,c=self.prepare();reconcile(self.engine,a)
         j=self.store.q('SELECT * FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)
         j['next_due_at']=(self.clock+timedelta(hours=1)).isoformat()
+        self.store.q('UPDATE crm_automation_enrollments SET next_due_at=%s WHERE id=%s',(j['next_due_at'],j['id']))
         advance(self.engine,j)
         self.assertFalse(self.store.q('SELECT id FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],)))
         reconcile(self.engine,a)

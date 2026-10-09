@@ -11,7 +11,7 @@ LOG=logging.getLogger(__name__)
 
 
 def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False,recipient=None,checkout_source=None):
-    """Serialize re-entry with publication/pause and freeze the complete flow."""
+    """Serialize re-entry with publication/pause and retain stable stage slots."""
     started=perf_counter();store=engine.store;at=date(occurred_at)
     if not at: return None
     c=recipient if recipient is not None else engine.shop.customer(customer_id,fresh=True)
@@ -43,8 +43,15 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
         if not qualifies(flow,c,event_facts):return None
         # Duplicate source identities remain blocked across ALL flow versions.
         if conn.execute('SELECT 1 FROM crm_automation_enrollments WHERE automation_id=%s AND trigger_key=%s',(row['id'],event_id)).fetchone():return None
-        prior=conn.execute('SELECT trigger_at,status FROM crm_automation_enrollments WHERE automation_id=%s AND shopify_customer_id=%s ORDER BY trigger_at DESC LIMIT 1',(row['id'],customer_id)).fetchone()
-        if prior and (flow['reentry_days']==0 or prior['status']=='ACTIVE' or at<date(prior['trigger_at'])+timedelta(days=flow['reentry_days'])):return None
+        prior=conn.execute('SELECT id,trigger_at,status,stop_reason FROM crm_automation_enrollments WHERE automation_id=%s AND shopify_customer_id=%s ORDER BY trigger_at DESC LIMIT 1 FOR UPDATE',(row['id'],customer_id)).fetchone()
+        waiting=prior and prior['status']=='ACTIVE' and prior.get('stop_reason')=='awaiting_published_stage'
+        if prior and (flow['reentry_days']==0 or (prior['status']=='ACTIVE' and not waiting) or at<date(prior['trigger_at'])+timedelta(days=flow['reentry_days'])):return None
+        if waiting:
+            # A configured new trigger after the re-entry cooldown supersedes
+            # only a fully exhausted journey, never creates two active memberships.
+            completed={s['step_id'] for s in conn.execute('SELECT steps FROM crm_automation_enrollments WHERE id=%s',(prior['id'],)).fetchone()['steps'] if s.get('delivery_complete') or s.get('historical_pass')}
+            if any(s['step_id'] not in completed for s in row['steps']):return None
+            conn.execute("UPDATE crm_automation_enrollments SET status='COMPLETED',stop_reason='superseded_by_reentry',updated_at=now() WHERE id=%s",(prior['id'],))
         from crm_automation_timing import enrollment_steps,scheduled_at
         steps=enrollment_steps(row)
         if not steps:return None
@@ -185,10 +192,13 @@ def reconcile_inactive(engine,a):
 
 
 def advance(engine,enrollment):
+    from crm_automation_live import reconcile as reconcile_live
+    enrollment=reconcile_live(engine.store,enrollment,engine.clock())
+    if not enrollment:return
     store=engine.store;steps=enrollment['steps'];index=enrollment['current_step']
     if date(enrollment.get('next_due_at')) and date(enrollment['next_due_at'])>engine.clock():return
     if index>=len(steps):
-        store.q("UPDATE crm_automation_enrollments SET status='COMPLETED',updated_at=now() WHERE id=%s",(enrollment['id'],));return
+        return
     step=steps[index]
     c,_,reason=engine.validate(enrollment['shopify_customer_id'],enrollment)
     if reason=='automation_paused':return
@@ -204,13 +214,7 @@ def advance(engine,enrollment):
     if receipt['status']!='ACCEPTED':engine.stop(enrollment,receipt['error_code'] or 'send_held');return
     if enrollment.get('checkout_key'):
         store.q("UPDATE crm_shopify_checkouts SET status='RECOVERY_EMAIL_SENT',updated_at=now() WHERE checkout_key=%s AND status<>'RECOVERED'",(enrollment['checkout_key'],))
-    index+=1
-    at=date(receipt['updated_at']) or engine.clock()
-    due=at+timedelta(seconds=steps[index]['delay_seconds']) if index<len(steps) else at
-    store.q("UPDATE crm_automation_enrollments SET current_step=%s,next_due_at=%s,status=%s,retry_after=NULL,stop_reason='',last_checked_at=now(),updated_at=now() WHERE id=%s AND current_step=%s",
-            (index,due,'ACTIVE' if index<len(steps) else 'COMPLETED',enrollment['id'],index-1))
-    LOG.info('automation_progress automation_id=%s automation_version=%s journey_id=%s step_id=%s journey_status=%s',enrollment['automation_id'],step['automation_version'],enrollment['id'],step['step_id'],'ACTIVE' if index<len(steps) else 'COMPLETED')
-    LOG.info('automation_submission automation_id=%s journey_id=%s step_id=%s provider_message_id=%s sent_at=%s',enrollment['automation_id'],enrollment['id'],step['step_id'],receipt.get('provider_email_id'),receipt.get('first_submitted_at'))
+    reconcile_live(store,enrollment,engine.clock())
 
 
 def render(content,row,unsubscribe,context=None):

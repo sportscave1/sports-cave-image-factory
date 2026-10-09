@@ -111,6 +111,7 @@ def flow_state(checkout, at=None):
     if state=='COMPLETED':return 'Flow complete','—'
     if state=='ACTIVE':
         if ledger.get('automation_status')=='PAUSED':return 'Archived' if ledger.get('archived_at') else 'Paused','Future sends held'
+        if ledger.get('steps') and int(ledger.get('current_step') or 0)>=len(ledger['steps']):return 'All live emails sent','Waiting for a new published stage'
         due=date(ledger.get('next_due_at'));index=int(ledger.get('current_step') or 0)+1
         receipt=next((s for s in ledger.get('sends',[]) if s['step']==index-1),None)
         if receipt and receipt['status']=='ACCEPTED':

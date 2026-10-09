@@ -201,6 +201,9 @@ def publish_direct(store,user,identity,revision,env=None):
 def safe_reason(exc):
     # Persist only allowlisted operator messages; never raw provider/DB errors.
     text=str(exc).lower()
+    if 'discount_not_selected:' in text:return 'Select a Shopify discount for every email using discount variables, or remove those variables, then publish again.'
+    if 'discount_variable_in_url:' in text:return 'Use discount variables in offer text, not links. The recovery button applies the selected code.'
+    if 'discount_' in text:return 'Review the selected Shopify discount and its offer text before publishing. The previous live version remains active.'
     if 'subject' in text:return 'Add a truthful subject before publishing.'
     if 'shopify' in text and 'trigger' in text:return 'Shopify trigger is currently unavailable. Retry after readiness is restored.'
     if 'tracking' in text:return 'Email tracking validation failed. Review the email before publishing.'

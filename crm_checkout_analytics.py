@@ -105,7 +105,7 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  WHERE j.automation_id=%s ORDER BY j.checkout_key,j.trigger_at DESC
 ), messages AS MATERIALIZED (
  SELECT s.id,s.enrollment_id,j.checkout_key,s.step_index,j.steps->s.step_index->>'step_id' AS step_id,
- s.due_at,s.status,s.first_submitted_at,s.updated_at,s.provider_email_id,s.error_code
+ s.due_at,s.status,s.first_submitted_at,s.updated_at,s.provider_email_id,s.error_code,s.template_id,s.template_version
  FROM crm_marketing_sends s JOIN crm_automation_enrollments j ON j.id=s.enrollment_id
  JOIN selected c ON c.checkout_key=j.checkout_key JOIN crm_automations a ON a.id=j.automation_id
  WHERE NOT s.test_send AND a.trigger_type='abandoned'
@@ -115,18 +115,25 @@ LIST_SQL="""WITH selected AS MATERIALIZED (
  max(occurred_at) FILTER(WHERE event_type='email.delivered') AS delivered_at
  FROM crm_delivery_events e JOIN messages s ON s.id=e.send_id GROUP BY e.send_id
 ), receipts AS (
- SELECT s.checkout_key,jsonb_agg(jsonb_build_object('id',s.id,'enrollment_id',s.enrollment_id,'step',step_index,'step_id',step_id,'due_at',due_at,'status',status,'submitted_at',first_submitted_at,'updated_at',updated_at,'provider_id',provider_email_id,'error',error_code,'delivered_at',e.delivered_at) ORDER BY step_index) AS sends,
+ SELECT s.checkout_key,jsonb_agg(jsonb_build_object('id',s.id,'enrollment_id',s.enrollment_id,'step',step_index,'step_id',step_id,'due_at',due_at,'status',status,'submitted_at',first_submitted_at,'updated_at',updated_at,'provider_id',provider_email_id,'error',error_code,'delivered_at',e.delivered_at,'publication_id',template_id,'publication_version',template_version) ORDER BY step_index) AS sends,
  sum(COALESCE(e.opened,0)) AS opened,sum(COALESCE(e.clicked,0)) AS clicked,max(e.last_event) AS last_event
  FROM messages s LEFT JOIN events e ON e.send_id=s.id GROUP BY s.checkout_key
 )
 SELECT c.*,v.value AS evaluation,request.value-'history' AS enrollment_request,a.status AS automation_status,a.config->>'archived_at' AS archived_at,
  statement_timestamp() AS read_at,
  (SELECT COALESCE(jsonb_agg(jsonb_build_object('step_id',step->>'step_id','name',step->>'name',
-   'enabled',COALESCE((step->>'enabled')::boolean,true)) ORDER BY ordinal),'[]')
+   'enabled',COALESCE((step->>'enabled')::boolean,true),'published',true) ORDER BY ordinal),'[]')
   FROM jsonb_array_elements(COALESCE(a.config->'published_flow'->'emails',
     (SELECT snapshot->'flow'->'emails' FROM crm_automation_publish_jobs
       WHERE automation_id=a.id AND publication_version=(a.config->>'published_version')::int AND state='SUCCEEDED'),
-    a.steps)) WITH ORDINALITY AS published(step,ordinal)) AS published_steps,
+    a.steps)) WITH ORDINALITY AS published(step,ordinal)) ||
+ (SELECT COALESCE(jsonb_agg(jsonb_build_object('step_id',d->>'step_id','name',d->>'name',
+   'enabled',COALESCE((d->>'enabled')::boolean,true),'published',false) ORDER BY ordinal),'[]')
+  FROM jsonb_array_elements(a.config->'draft'->'emails') WITH ORDINALITY AS draft(d,ordinal)
+  WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(a.config->'published_flow'->'emails',
+    (SELECT snapshot->'flow'->'emails' FROM crm_automation_publish_jobs
+      WHERE automation_id=a.id AND publication_version=(a.config->>'published_version')::int AND state='SUCCEEDED'),a.steps)) p
+    WHERE p->>'step_id'=d->>'step_id')) AS published_steps,
  (SELECT value FROM crm_runtime_state WHERE key='abandoned-checkout-policy') AS recovery_policy,
  GREATEST(a.activated_at,(SELECT (value->>'started_at')::timestamptz FROM crm_runtime_state WHERE key='checkout-auto-start-v2')) AS auto_start_at,
  a.config->'published'->>'abandonment_seconds' AS abandonment_seconds,
