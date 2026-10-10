@@ -40,14 +40,13 @@ with sync_playwright() as pw:
     page.keyboard.press('Escape');menu();page.get_by_role('button',name='Move down',exact=True).click()
     page.keyboard.press('Escape');page.get_by_role('button',name='+ Add Email',exact=True).click();rows.nth(4).wait_for()
     page.reload();rows.nth(4).wait_for()
-    page.get_by_role('button',name='Refresh analytics',exact=True).click()
-    page.get_by_role('button',name='Diagnostics',exact=True).click()
-    page.get_by_role('button',name='Open operational diagnostics',exact=True).click()
-    page.get_by_text('Operational diagnostics',exact=True).wait_for()
-    page.get_by_role('button',name='← Back to Flow',exact=True).click();rows.nth(4).wait_for()
+    assert page.get_by_role('button',name='Refresh analytics',exact=True).count()==0
+    assert page.get_by_role('button',name='Diagnostics',exact=True).count()==0
+    page.get_by_text('Recipient timelines and scheduled deliveries',exact=True).wait_for()
+    page.get_by_text('Abandoned checkouts',exact=True).wait_for()
     assert page.get_by_test_id('stException').count()==0
     assert not errors,errors
-    result['result']='PASS save/duplicate/reorder/add/reload/analytics/admin route/actual editor transitions; no publication or sending controls activated'
+    result['result']='PASS save/duplicate/reorder/add/reload/analytics/restored panels/actual editor transitions; no publication or sending controls activated'
     for key in list(result):
         if isinstance(result[key],list):result[key+'_summary']={'n':len(result[key]),'p50':statistics.median(result[key]),'p95':max(result[key])}
     browser.close()

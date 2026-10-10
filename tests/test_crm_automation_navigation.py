@@ -6,15 +6,19 @@ from unittest.mock import MagicMock,Mock,patch
 from crm_automation_definition import FORMAT,new_flow
 from crm_automation_store import AutomationStore
 
+from tests.test_crm import ADMIN
+
 ID='00000000-0000-0000-0000-000000000001'
 
 class NavigationTests(TestCase):
     def test_editor_route_does_not_mount_or_read_overview_and_retains_cache(self):
         from crm_automation_ui import workspace
+        from inspect import unwrap
+        workspace=unwrap(workspace)
         cache={'cached':object()}
         state={'automation_selected':ID,'automation_home_state':cache}
         with patch('crm_automation_ui.st',MagicMock(session_state=state,query_params={})),patch('crm_automation_ui.AutomationStore') as factory,patch('crm_automation_ui.home') as home,patch('crm_automation_ui.editor_dialog') as editor:
-            workspace(Mock(),Mock(),SimpleNamespace(user={}))
+            workspace(Mock(),Mock(),SimpleNamespace(user=ADMIN))
         home.assert_not_called();factory.return_value.get.assert_not_called()
         editor.assert_called_once();self.assertIs(state['automation_home_state'],cache)
 

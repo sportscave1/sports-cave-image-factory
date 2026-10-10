@@ -33,6 +33,9 @@ class LeaveTests(unittest.TestCase):
         next(b for b in at.button if b.label=='Save draft and leave').click().run(timeout=20)
         self.assertFalse(at.exception);self.assertEqual(at.session_state['route'],'Orders')
         self.assertEqual(CampaignStore(connect).draft(identity)['name'],'Unsaved revision')
+        # AppTest retains dialog nodes from the interrupted fragment in the
+        # rerun tree; a settled render removes them (browser checks are separate).
+        at.run(timeout=20)
         self.assertFalse(any(b.label=='Discard and leave' for b in at.button))
     def test_discard_preserves_saved_row_then_navigates(self):
         at=self.app();identity=at.session_state['campaign_editor']['id'];before=deepcopy(CampaignStore(connect).draft(identity));at.run(timeout=20)
@@ -40,6 +43,7 @@ class LeaveTests(unittest.TestCase):
         self.assertFalse(at.exception);self.assertEqual(at.session_state['route'],'Orders')
         self.assertEqual(CampaignStore(connect).draft(identity),before)
         self.assertEqual(at.session_state['campaign_editor']['name'],'Saved original')
+        at.run(timeout=20)
         self.assertFalse(any(b.label=='Discard and leave' for b in at.button))
     def test_cancel_keeps_editor_and_clears_target(self):
         at=self.app();at.run(timeout=20)

@@ -145,6 +145,7 @@ class SectionPersistenceTests(unittest.TestCase):
         self.assertEqual(sections, {'Header':False, 'Footer':False})
         from crm_middle_sections import middle_sections, apply_event
         doc = at.session_state['campaign_editor']['document']
+        original_brand_sections=deepcopy(doc.get('html_sections'))
         self.assertEqual(middle_sections(doc)[0]['html'], '')
         apply_event(doc, {'type':'html','base':['html-1'],'id':'html-1','html':HTML})
         self.assertFalse(any(t.label in ('Header HTML','Footer HTML') for t in at.text_area))

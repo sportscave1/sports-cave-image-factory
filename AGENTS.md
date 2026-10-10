@@ -14,3 +14,11 @@ without first checking [docs/RENDER_SERVICE_TOPOLOGY.md](docs/RENDER_SERVICE_TOP
 Always run `python scripts/validate_render_topology.py` and inspect a Blueprint
 preview before syncing. A preview that creates another primary application must
 not be applied.
+
+## Permanent local-only development mode
+
+Development is local-only by default. Do not commit, push, merge, deploy or
+mutate production without explicit user authorization for that action. The
+October 10 consolidated deployment is a one-release exception only. After that
+release, local-only mode remains in force; future releases require fresh explicit
+authorization.

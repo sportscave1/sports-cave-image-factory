@@ -217,10 +217,10 @@ class ProductionSqlTests(unittest.TestCase):
         at.run(timeout=20);self.assertFalse(at.exception)
         self.assertFalse(any(b.label in ('Send now','Save draft') for b in at.button))
         self.assertFalse(any(t.label=='Subject' for t in at.text_input))
-        self.assertTrue(any(b.label=='Back to campaigns' for b in at.button))
+        self.assertTrue(any(b.label=='← Campaigns' for b in at.button))
         fresh=AppTest.from_string(SCRIPT);fresh.session_state['route']='CRM Campaigns'
         fresh.query_params['campaign']=str(self.editor['id']);fresh.run(timeout=20)
-        self.assertFalse(fresh.exception);self.assertTrue(any('Campaign sent' in m.value for m in fresh.markdown))
+        self.assertFalse(fresh.exception);self.assertTrue(any('**Sent**'==m.value for m in fresh.markdown))
         self.assertFalse(any(t.label=='Subject' for t in fresh.text_input))
     def test_scheduled_worker_lifecycle_without_page_and_no_replay(self):
         from crm_engine import Engine
@@ -228,10 +228,15 @@ class ProductionSqlTests(unittest.TestCase):
         self.editor['document']['send_timing']={'mode':'schedule','date':'2099-10-01','time':'07:00'}
         self.editor=self.store.save(ADMIN,self.editor['name'],self.editor['document'],self.editor['id'],self.editor['version'])
         past=now()-timedelta(minutes=1)
-        scheduled={recipient_hash(c['email']):{'timezone':'UTC','reason':'fixture','due_at':(past+timedelta(seconds=30)).isoformat()} for c in self.rows}
+        scheduled={recipient_hash(c['email']):{'timezone':'UTC','reason':'fixture','due_at':(now()+timedelta(minutes=5)).isoformat()} for c in self.rows}
         with patch('crm_campaign_schedule.plan',return_value=scheduled),patch('crm_logic.now',return_value=past),patch('crm_campaign_markets.now',return_value=past):
             self.queue()
         self.assertEqual(self.campaign()['status'],'SCHEDULED')
+        # Admission now checks PostgreSQL's clock too. Advance only this
+        # synthetic queue after admission to exercise the due worker lifecycle.
+        self.store.q('UPDATE crm_marketing_sends SET due_at=%s WHERE campaign_id=%s',(past,self.editor['id']))
+        key='campaign-timing:'+str(self.editor['id'])
+        self.store.set_state(key,{**self.store.state(key),'due_at':past.isoformat()})
         self.assertFalse(self.store.q("SELECT 1 FROM crm_marketing_sends s JOIN crm_campaigns c ON c.id=s.campaign_id WHERE c.id=%s AND c.status='SENDING'",(self.editor['id'],)))
         self.store.set_state('campaign_schedule_health',{'enabled':True,'checked_at':now().isoformat()})
         provider=Mock();provider.suppressed.return_value=False;provider.send.side_effect=lambda *args:str(uuid.uuid4())

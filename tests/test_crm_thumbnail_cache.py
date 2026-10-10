@@ -89,3 +89,5 @@ class ThumbnailTests(TestCase):
         self.assertIsNone(re.search(r'<[/\w!]',body))
         self.assertIn('90000',body)
         self.assertIn('img.complete&&!img.naturalWidth',body)
+        self.assertIn('e.isTrusted',body)
+        self.assertIn("['pointerdown','keydown','focusin']",body)

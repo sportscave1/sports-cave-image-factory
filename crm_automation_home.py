@@ -337,10 +337,11 @@ def table(shop,store,user,script=None):
                     target='?'+urlencode({'page':'CRM Automations','automation':str(row['id'])})
                     glyph,colour={'welcome':(7,'blue'),'post_purchase':(8,'gold'),'fulfilled':(8,'green'),'winback':(4,'rose')}.get(row['trigger_type'],(0,'gold'))
                     from crm_flow_builder import display_name
-                    name='<div class="sc-auto-name">'+icon(glyph,colour)+'<div><a href="'+escape(target,quote=True)+'" target="_self">'+escape(display_name(row['name']))+'</a><small>'+escape(label)+(' · '+str(row['email_count'])+' emails' if row.get('email_count') is not None else '')+'</small></div></div>'
+                    name='<div class="sc-auto-name">'+icon(glyph,colour)+'<div><a data-flow-open="'+str(row['id'])+'" href="'+escape(target,quote=True)+'" target="_self">'+escape(display_name(row['name']))+'</a><small>'+escape(label)+(' · '+str(row['email_count'])+' emails' if row.get('email_count') is not None else '')+'</small></div></div>'
                     values=[name,escape(label),*metric_texts(row),
                       '<span data-auto-status="'+str(row['id'])+'">'+status_html(category,publication)+'</span>']
                     st.html('<div class="sc-auto-row">'+''.join('<div>'+('<span data-auto-metric="'+str(row['id'])+':'+str(i)+'">'+value+'</span>' if 2<=i<=8 else value)+'</div>' for i,value in enumerate(values))+'</div>')
+                    if st.button('Open automation',key='auto-open-'+str(row['id'])):open_flow(row['id'])
                 with st.container(width=40,key='auto-actions-'+str(row['id'])):
                     with st.popover('⋮',help='Automation actions',key='auto_actions_'+str(row['id'])):
                         with st.container(key='auto-context-menu-'+str(row['id']),gap='small'):
@@ -363,13 +364,13 @@ def arm_section(key,seconds,script=None,*,dialog=False):
     from uuid import uuid4
     import json
     st.button('Refresh automation section',key=key)
-    selectors='[data-testid=stPopoverBody],[role=listbox]' if dialog else '[role=dialog],[data-testid=stPopoverBody],[role=listbox]'
+    from pathlib import Path
     st.html('<span id="'+key+'-controller" hidden></span><style>.st-key-'+key+'{display:none}</style>')
-    (script.html if script is not None else st.html)('<script>/* '+uuid4().hex+' */'+
-      '(()=>{window.scAutoTimers??={};const key='+json.dumps(key)+';clearTimeout(window.scAutoTimers[key]);if(window.scAutoRequest?.key===key)window.scAutoRequest=null;let attempts=0;'+
-      'const tick=()=>{if(!document.getElementById(key+"-controller"))return;const b=document.querySelector(".st-key-"+key+" button");'+
-      'if(!b){if(++attempts!==15)window.scAutoTimers[key]=setTimeout(tick,2000);return;}if(document.hidden||[...document.querySelectorAll('+json.dumps(selectors)+')].some(el=>el.getClientRects().length && getComputedStyle(el).visibility!=="hidden")||(key==="auto-list-refresh"&&document.activeElement?.closest("[class*=st-key-auto-actions-]"))||b.disabled){window.scAutoTimers[key]=setTimeout(tick,2000);return;}'+
-      'if(window.scAutoRequest&&!document.getElementById(window.scAutoRequest.key+"-controller"))window.scAutoRequest=null;if(window.scAutoRequest && 10000>=Date.now()-window.scAutoRequest.at){window.scAutoTimers[key]=setTimeout(tick,1000);return;}window.scAutoRequest={key,at:Date.now()};b.click();};window.scAutoTimers[key]=setTimeout(tick,'+str(int(max(1,seconds)*1000))+');})();</script>',unsafe_allow_javascript=True)
+    config=json.dumps(dict(key=key,seconds=seconds,dialog=dialog))
+    source=Path(__file__).with_name('components').joinpath('crm_sections','automation_refresh.js').read_text(encoding='utf8')
+    source=source.replace('CONFIG',config)
+    (script.html if script is not None else st.html)('<script>/* '+uuid4().hex+' */'+source+'</script>',unsafe_allow_javascript=True)
+
 
 
 
@@ -385,20 +386,14 @@ def settling_fragment(function):
             if function.__name__=='status_region':
                 return any(publication_state(r).get('state')=='PUBLISHING' for r in state.get('visible_status_rows',[])) and state.get('activity',{}).get('publication') not in ('ERROR','TIMED_OUT')
             return any(state.get('activity',{}).get(k) in (None,'NOT_STARTED','LOADING','REFRESHING','UNRESOLVED') for k in groups[function.__name__])
-        interval=(3 if function.__name__=='status_region' else 2) if pending() else None
-        @st.fragment(run_every=interval)
+        @st.fragment
         @isolated
         def render():
             function(store,*args)
-            if interval and not pending():
-                # One settlement rerun unregisters this fragment timer; idle has none.
-                from crm_automation_read_cache import lifecycle
-                lifecycle('RERUN_REQUESTED',(function.__name__,))
-                st.rerun(scope='app')
-            if not interval and pending():
-                # A normal interaction can expire a settled cache. Register a
-                # scoped completion refresh for that new read as well.
-                st.rerun(scope='app')
+            if pending():
+                # Native button event reruns only this fragment. Completion
+                # neither tears down controls nor reruns the OS shell.
+                arm_section('auto-settle-'+function.__name__,3 if function.__name__=='status_region' else .25)
         render()
     return section
 
@@ -478,6 +473,9 @@ def home(shop,store,user,*,styles=True):
     state=home_state()
     if styles:st.html(STYLE+STYLE_AUTO)
     st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
+    st.html('<style>.sc-auto-name a[aria-busy="true"]{opacity:.6}</style>')
+    from pathlib import Path
+    st.html('<style>[class*="st-key-auto-open-"]{display:none}</style><script>'+Path(__file__).with_name('components').joinpath('crm_sections','automation_navigation.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
     with st.container(key='crm-campaign-home'):
         title,create=st.columns([4,1],vertical_alignment='center')
         title.html('<h1>Automations</h1><p style="color:#73747c">Track performance across every email flow.</p>')

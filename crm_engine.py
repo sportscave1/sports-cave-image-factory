@@ -33,7 +33,8 @@ class Engine:
         self.hold_lease()
         self._delivery_checkpoint=at
         if self.config.enabled:
-            self.store.q("UPDATE crm_campaigns SET status='SENDING',sending_started_at=now(),updated_at=now() WHERE status='SCHEDULED' AND audience_snapshot_id IS NOT NULL AND scheduled_at<=now()")
+            from crm_campaign_schedule import activate_due
+            activate_due(self.store)
             self.advance_due()
         for _ in range(5):
             self.hold_lease()

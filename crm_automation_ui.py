@@ -25,10 +25,19 @@ def changed():
 
 
 def open_flow(identity):
-    st.session_state['automation_composing']=False
-    st.session_state['automation_selected']=str(identity)
-    st.session_state.pop('automation_editor',None);st.query_params['automation']=str(identity)
+    request_route(identity)
     st.rerun()
+
+
+def request_route(identity):
+    """Apply at the next workspace mount, before the bound widget renders."""
+    st.session_state['_automation_navigation_target']=str(identity or '')
+    st.session_state['_automation_navigation_email']=''
+
+
+def request_email(identity):
+    st.session_state['_automation_navigation_email']=str(identity or '')
+    if identity:st.session_state['automation_step']=str(identity)
 
 
 @st.dialog('Create automation',width='small')
@@ -65,7 +74,7 @@ def flow_email_control(flow,identity,selected):
     selection=st.selectbox('Flow email',list(range(len(flow['emails']))),index=next(i for i,s in enumerate(flow['emails']) if s['step_id']==selected),format_func=lambda i:'Email '+str(i+1)+' · '+(flow['emails'][i]['document']['content']['subject'] or 'Untitled')+' · '+str(flow['emails'][i]['delay_seconds']//60)+' min delay',key='auto_flow_step_'+str(identity)+'_'+str(len(flow['emails'])))
     if flow['emails'][selection]['step_id']!=selected:
         if not flush_current():return
-        st.session_state['automation_step']=flow['emails'][selection]['step_id']
+        request_email(flow['emails'][selection]['step_id'])
         st.session_state.pop('automation_editor',None);st.rerun()
 
 
@@ -78,7 +87,7 @@ def add_email_controls(store,user,editor,key):
         source=definition['emails'][index]
         definition['emails'].insert(index+1,email_step(source['document'],source['delay_seconds']))
         store.save_flow(user,editor['id'],fresh['name'],definition,fresh['config']['revision']);changed()
-        st.session_state['automation_step']=definition['emails'][index+1]['step_id'];st.session_state.pop('automation_editor',None);st.rerun()
+        request_email(definition['emails'][index+1]['step_id']);st.session_state.pop('automation_editor',None);st.rerun()
     add,blank=st.columns(2)
     for column,label,duplicate in ((add,'+ Add email · duplicate previous',True),(blank,'+ Add email · start blank',False)):
         if column.button(label,key=key+str(duplicate)):
@@ -86,7 +95,7 @@ def add_email_controls(store,user,editor,key):
             current=store.flow(editor['id']);new=deepcopy(current['config']['draft'])
             new['emails'].append(email_step(new['emails'][-1]['document'] if duplicate else None,86400))
             saved=store.save_flow(user,editor['id'],editor['name'],new,current['config']['revision'])
-            st.session_state['automation_step']=saved['config']['draft']['emails'][-1]['step_id']
+            request_email(saved['config']['draft']['emails'][-1]['step_id'])
             st.session_state.pop('automation_editor',None);changed();st.rerun()
 
 
@@ -205,11 +214,63 @@ def detail(shop,store,actions,identity,*,row=None):
     st.session_state[key+'editor_emitted']=True
 
 
+@st.fragment
 def workspace(shop,base,actions,navigate=lambda _:None):
+    from crm_navigation import require
+    # A fragment event still passes the active account/permission gate. The
+    # shared OS session is authoritative when present; fixtures supply an actor.
+    account=st.session_state.get('sports_cave_current_user') or actions.user
+    if 'sports_cave_authenticated' in st.session_state and not st.session_state['sports_cave_authenticated']:
+        raise PermissionError('Sign in before opening Automations.')
+    require(account,'crm_automations_manage')
     if st.session_state.get('email_editor_mode')!='automation':
         st.session_state.pop('_automation_preview_open',None)
     st.session_state['email_editor_mode']='automation'
-    store=AutomationStore(base.connect);identity=st.session_state.get('automation_selected') or st.query_params.get('automation')
+    store=AutomationStore(base.connect)
+    if '_automation_route_restore' in st.session_state:
+        restored=st.session_state.pop('_automation_route_restore')
+        st.session_state['automation']=restored[0] or ''
+        st.session_state['automation_email']=restored[1] or ''
+        import json
+        values=json.dumps({'automation':restored[0] or '', 'automation_email':restored[1] or ''}).replace('<',r'\u003c')
+        # A failed save vetoes the client navigation. Restore its URL without
+        # adding history or attempting another save; bound fields restore state.
+        st.html('<script>(()=>{const target=new URL(location.href);for(const [key,value] of Object.entries('+values+')){if(value)target.searchParams.set(key,value);else target.searchParams.delete(key);}history.replaceState({},"",target);})();</script>',unsafe_allow_javascript=True)
+        st.warning('Save failed. Your automation edits are retained; retry before leaving.')
+    if '_automation_navigation_target' in st.session_state:
+        st.session_state['automation']=st.session_state.pop('_automation_navigation_target')
+    if '_automation_navigation_email' in st.session_state:
+        st.session_state['automation_email']=st.session_state.pop('_automation_navigation_email')
+    previous=st.session_state.get('_automation_route_observed')
+    previous_email=st.session_state.get('_automation_email_observed')
+    if '_automation_route_observed' not in st.session_state and not st.query_params.get('automation') and 'automation' not in st.session_state:
+        # Retain the initial legacy in-session entry point. Thereafter the URL
+        # is authoritative, including native Streamlit Back/Forward reruns.
+        if st.session_state.get('automation_selected'):st.session_state['automation']=str(st.session_state['automation_selected'])
+    # Streamlit's supported binding keeps its frontend query snapshot in sync
+    # with native widget events, including the existing browser-history bridge.
+    st.html('<style>.st-key-automation,.st-key-automation_email{display:none}</style>')
+    identity=st.text_input('Automation route',key='automation',bind='query-params') or None
+    email=st.text_input('Automation email route',key='automation_email',bind='query-params') or None
+    from pathlib import Path
+    st.html('<script>'+Path(__file__).with_name('components').joinpath('crm_sections','automation_navigation.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
+    if previous!=identity or previous_email!=email:
+        from crm_campaign_recovery import flush_current
+        if not flush_current(force=True):
+            st.session_state['_automation_route_restore']=(previous,previous_email)
+            st.rerun(scope='app')
+        else:
+            st.session_state['automation_composing']=bool(email)
+            if email:st.session_state.update(automation_step=email,flow_return_step=email)
+            st.session_state.pop('automation_template_view',None)
+            if previous!=identity:st.session_state.pop('flow-operational-diagnostics',None)
+            st.session_state.pop('automation_editor',None)
+            st.session_state['_automation_route_observed']=identity
+            st.session_state['_automation_email_observed']=email
+    if identity:st.session_state['automation_selected']=str(identity)
+    else:st.session_state.pop('automation_selected',None)
+    from html import escape
+    st.html('<span hidden data-automation-route="'+escape(str(identity or ''),quote=True)+'" data-automation-email="'+escape(str(email or ''),quote=True)+'"></span>')
     # Keep critical overview styles at a stable delta position while its old
     # subtree is removed. A route placeholder replaces that subtree before any
     # blocking editor read; it must never be reconciled with editor columns.
@@ -250,13 +311,13 @@ def editor_dialog(shop,store,actions,identity):
         content=st.empty()
         content.html('<div class="sc-auto-editor-loading" role="status">Opening automation…</div>')
         try:
-            existing=store.get('automations',str(uuid.UUID(str(identity))))
+            existing=current_display_row(store,st.session_state,str(uuid.UUID(str(identity))))
             with content.container():
                 from crm_automation_definition import native
                 if existing and not native(existing):
                     st.subheader(existing['name']);st.caption('Legacy '+existing['status'].lower()+' flow · runtime and audit history retained')
                     if st.button('← Automations',key='legacy_auto_back'):
-                        st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')
+                        request_route(None);st.rerun(scope='app')
                     if existing['status']=='DRAFT' and existing['trigger_type'] in TRIGGERS and st.button('Convert draft to shared editor'):
                         store.adopt(actions.user,identity);changed();st.rerun(scope='app')
                     if existing['status']=='ACTIVE' and st.button('Pause legacy flow'):
@@ -269,10 +330,26 @@ def editor_dialog(shop,store,actions,identity):
                     summary(store,identity,period);recent(store,existing,actions.user,period)
                 else:
                     with store.display_read_scope():
+                        requested=st.session_state.get('_automation_email_observed')
+                        if requested and requested not in [s['step_id'] for s in store.flow(identity,row=existing)['config']['draft']['emails']]:raise ValueError('Email step is unavailable. Return to Flow to choose an existing email.')
                         detail(shop,store,actions,identity,row=existing)
         except (StoreUnavailable,ValueError,PermissionError) as exc:
             with content.container():
                 st.error(str(exc))
                 if st.button('Retry opening editor'):st.rerun(scope='fragment')
                 if st.button('← Automations',key='editor-error-back'):
-                    st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')
+                    request_route(None);st.rerun(scope='app')
+
+
+def current_display_row(store,state,identity):
+    """A fresh marker authorizes reuse of this session's full display row.
+
+    Legacy, changed, deleted and uncached records still use the full read.
+    This is never used for mutations or immutable published-source selection.
+    """
+    cached=state.get('_automation_toolbar_definition')
+    from crm_automation_definition import native
+    if cached and cached[0][0]==str(identity) and str(cached[1].get('id'))==str(identity) and native(cached[1]):
+        marker=store.q('SELECT updated_at FROM crm_automations WHERE id=%s',(identity,),True)
+        if marker and cached[0][1]==marker['updated_at']:return cached[1]
+    return store.get('automations',identity)

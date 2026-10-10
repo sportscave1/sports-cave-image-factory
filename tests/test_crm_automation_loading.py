@@ -41,7 +41,8 @@ class LoadingTests(unittest.TestCase):
         self.assertEqual(cache.resolve(state,store,key,f),(None,'ERROR'))
     def test_visible_menu_gate_ignores_hidden_topbar_listbox(self):
         import inspect,crm_automation_home as home
-        source=inspect.getsource(home.arm_section)
+        from pathlib import Path
+        source=Path(home.__file__).with_name('components').joinpath('crm_sections','automation_refresh.js').read_text()
         self.assertIn('getClientRects().length',source)
         self.assertNotIn('document.hidden||document.querySelector(',source)
     def test_publish_handoff_does_not_mutate_wrapped_metrics(self):

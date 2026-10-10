@@ -4,6 +4,14 @@ if(typeof module!=='undefined')module.exports={moveId};
 if(typeof document!=='undefined'){
 let args={sections:[]},opened={},pending=false,inFlight=null,drag=null,typing=null,drafts={},queue=[],settingsDrafts={};
 const root=document.getElementById('sections');
+let pickerFocusEvent=null;
+const restorePickerFocus=()=>{
+ const request=args.picker_focus;if(!request||request.event===pickerFocusEvent)return;
+ const card=[...root.children].find(c=>c.dataset.id===request.section);
+ const trigger=card?.querySelector('.tools button');if(!trigger)return;
+ pickerFocusEvent=request.event;
+ requestAnimationFrame(()=>trigger.focus({preventScroll:true}));
+};
 // Optional same-origin OS hooks must never prevent the Streamlit handshake.
 const withParent=fn=>{try{return fn(parent);}catch{return undefined;}};
 const signalPending=detail=>withParent(p=>p.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{...detail,local_editor:true}})));
@@ -97,17 +105,36 @@ withParent(p=>p.scCampaignFlushSections=flushSections);
 addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignFlushSections===flushSections)delete p.scCampaignFlushSections;});});
 // Internal navigation does not fire beforeunload. Flush before unmounting the
 // authoring component; a failed save leaves it open with its local state intact.
-let replayNavigation=false;
+let replayNavigation=false,navigationPending=false;
 const navigationGuard=async e=>{
  if(replayNavigation||!(pending||changes.length||Object.keys(drafts).length||saveError))return;
  const target=e.target.closest('a,button,[role="tab"],[role="option"]');if(!target)return;
+ if(e.type==='pointerdown'&&target.getAttribute('role')!=='tab')return;
+ if(e.type==='keydown'&&(target.getAttribute('role')!=='tab'||!['Enter',' ','ArrowLeft','ArrowRight','Home','End'].includes(e.key)))return;
  const text=target.textContent.trim();
- if(!(target.matches('a')||target.getAttribute('role')==='option'||target.getAttribute('role')==='tab'||['Flow','← Automations'].includes(text)))return;
+ // Collection/date/filter choices stay in their current view. Only the Flow
+ // email selector unmounts this editor; its listbox may be portalled outside
+ // the widget, so resolve the owning combobox before applying the save guard.
+ let flowEmailOption=false;
+ if(target.getAttribute('role')==='option'){
+  const list=target.closest('[role="listbox"]');
+  const owner=list?.id?parent.document.querySelector('[role="combobox"][aria-controls="'+CSS.escape(list.id)+'"]'):null;
+  flowEmailOption=!!(owner||parent.document.activeElement)?.closest('[class*="st-key-auto_flow_step_"]');
+ }
+ if(!(target.matches('a')||flowEmailOption||target.getAttribute('role')==='tab'||['Flow','← Automations'].includes(text)))return;
  e.preventDefault();e.stopImmediatePropagation();
- try{await flushSections();replayNavigation=true;target.click();}catch(error){saveStatus(error.message);}finally{replayNavigation=false;}
+ if(navigationPending)return;navigationPending=true;
+ try{await flushSections();replayNavigation=true;
+  let destination=target;
+  if(e.type==='keydown'&&['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){
+   const tabs=[...target.closest('[role=tablist]').querySelectorAll('[role=tab]')],i=tabs.indexOf(target);
+   destination=tabs[e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length];
+  }
+  destination.focus();destination.click();}catch(error){saveStatus(error.message);}finally{replayNavigation=false;navigationPending=false;}
 };
-withParent(p=>p.document.addEventListener('click',navigationGuard,true));
-addEventListener('pagehide',()=>withParent(p=>p.document.removeEventListener('click',navigationGuard,true)));
+// React Aria tabs select on pointer-down, before the click event.
+for(const type of ['pointerdown','keydown','click'])withParent(p=>p.document.addEventListener(type,navigationGuard,true));
+addEventListener('pagehide',()=>{for(const type of ['pointerdown','keydown','click'])withParent(p=>p.document.removeEventListener(type,navigationGuard,true));});
 const el=(tag,text='',cls='')=>{let n=document.createElement(tag);n.textContent=text;n.className=cls;return n;};
 function button(text,label,fn,cls=''){let n=el('button',text,cls);n.type='button';n.title=label;n.setAttribute('aria-label',label);n.onclick=fn;return n;}
 function placeCards(ids){ids.forEach((id,index)=>{const card=[...root.children].find(c=>c.dataset.id===id);if(card&&root.children[index]!==card){if(root.moveBefore)root.moveBefore(card,root.children[index]||null);else root.insertBefore(card,root.children[index]||null);}});}
@@ -262,7 +289,7 @@ addEventListener('message',e=>{
   args={...incoming,sections:pending||changes.length||Object.keys(drafts).length||saveError?localSections:incoming.sections};
  }
  if(args.clipboard_script&&!window.scCopyText){const script=document.createElement('script');script.textContent=args.clipboard_script;document.head.appendChild(script);}
- if(!drag)render();localPreview();
+ if(!drag){if(args.picker_focus&&args.picker_focus.event!==pickerFocusEvent)opened[args.picker_focus.section]=true;render();restorePickerFocus();}localPreview();
  if(saveError){saveStatus('Save failed · '+saveError);rememberDraft();if(!incoming.edit_error&&saveAttempts++<3){clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,Math.min(1000*2**saveAttempts,8000));}}
  else if(changes.length){saveStatus('Unsaved · Unpublished changes');if(!pending){clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,650);}}
  else if(!pending){saveStatus('Saved · Draft');withParent(p=>{const size=p.document.querySelector('.st-key-crm-composer-preview .sc-email-size');if(size?.dataset.lastMeasured){size.innerHTML=size.dataset.lastMeasured;delete size.dataset.lastMeasured;}});if(external.length)sendChanges();}

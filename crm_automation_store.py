@@ -56,6 +56,16 @@ class AutomationStore(CampaignStore):
             memo[identity] = deepcopy(row)
         return row
 
+    def display_snapshot(self, identity):
+        """Reuse a validated row only during the parent's current render.
+
+        Independent fragments have no context and must check freshness. Any DB
+        operation clears the scope, so writes cannot reuse an earlier snapshot.
+        """
+        scope=_DISPLAY_READS.get()
+        if scope is None or scope[0] is not self:return None
+        return scope[1].get(str(identity))
+
     def create(self,user,trigger='welcome',name=None):
         require(user,'crm_automations_manage')
         from crm_automation_definition import TRIGGERS

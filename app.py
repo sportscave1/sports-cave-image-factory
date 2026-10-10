@@ -517,8 +517,8 @@ return ContentService
 .setMimeType(ContentService.MimeType.JSON);
 }"""
 
-NEW_SHOPIFY_PRODUCT_PROMPT = """SOP 07B — Sports Cave Shopify Product Creation Using ChatGPT + Shopify Connector
-Direct Draft Product Upload — Current Sports Cave Standard
+NEW_SHOPIFY_PRODUCT_PROMPT = """SOP 07B â€” Sports Cave Shopify Product Creation Using ChatGPT + Shopify Connector
+Direct Draft Product Upload â€” Current Sports Cave Standard
 
 PURPOSE
 Create one complete new Sports Cave product directly in Shopify from final approved WebP assets.
@@ -529,7 +529,7 @@ NON-NEGOTIABLE OUTCOME
 - Published: false.
 - Upload all required final WebP images to Shopify.
 - Apply the exact Sports Cave gallery order.
-- Create the exact 16-variant Frame × Size matrix.
+- Create the exact 16-variant Frame Ã— Size matrix.
 - Apply current selling prices and the existing RRP compare-at prices.
 - Map the correct frame image to every frame variant.
 - Set every variant to continue selling when out of stock.
@@ -641,14 +641,14 @@ Rules:
 Preferred pattern:
 [subject-or-moment]-wall-art
 
-VISIBLE PRODUCT DESCRIPTION — COMPLETE SHOPIFY COPY
+VISIBLE PRODUCT DESCRIPTION â€” COMPLETE SHOPIFY COPY
 The description must be emotionally engaging but must read like a complete Shopify product description, not like a Meta ad.
 
 Length:
-- 90–130 words total.
+- 90â€“130 words total.
 - Never exceed 130 words.
 
-Required structure — exactly four paragraphs:
+Required structure â€” exactly four paragraphs:
 1. One bold hook.
 2. Concise story paragraph one.
 3. Concise story paragraph two.
@@ -676,7 +676,7 @@ Do not:
 - Write a sequence of advertising slogans.
 - Overstate the cultural importance of the subject.
 - Use vague claims such as a nation's memory, sacred, changed everything, defined a generation, or the greatest ever unless objectively supported and appropriate.
-- Use generic clichés such as greatness never fades, more than a game, history on your wall, elevate your space, must-have, the ultimate tribute, or a moment frozen in time.
+- Use generic clichÃ©s such as greatness never fades, more than a game, history on your wall, elevate your space, must-have, the ultimate tribute, or a moment frozen in time.
 - Invent specifications, materials, paper stock, glaze type, frame construction, dimensions, certificates, authentication, hand-numbering, signatures, licensing, shipping details, production methods, or included hardware.
 - Present an inferred detail as fact.
 - Mention a reprint, second run, or sell-out consequence unless that policy is confirmed.
@@ -713,7 +713,7 @@ Use sports posters Australia only for Australian subjects and markets where it i
 
 SEO META TITLE
 Rules:
-- Target 50–60 characters; never exceed 60 characters unless Shopify itself requires otherwise.
+- Target 50â€“60 characters; never exceed 60 characters unless Shopify itself requires otherwise.
 - Put the primary keyword near the beginning.
 - Clearly identify the subject and product type.
 - Include Wall Art.
@@ -727,7 +727,7 @@ Alternative when shorter:
 
 SEO META DESCRIPTION
 Rules:
-- Target 145–160 characters.
+- Target 145â€“160 characters.
 - Mention the subject or moment.
 - Use the primary keyword naturally once.
 - Include limited-edition or collector intent only when confirmed.
@@ -763,10 +763,10 @@ Examples of image-role suffixes:
 - unframed
 Do not rename a file in a way that changes or misstates its content.
 
-IMAGE ALT TEXT — COMMERCIAL SEO STANDARD
+IMAGE ALT TEXT â€” COMMERCIAL SEO STANDARD
 Write unique alt text for every product image.
 Rules:
-- Usually 80–140 characters; aim for clarity rather than forcing a length.
+- Usually 80â€“140 characters; aim for clarity rather than forcing a length.
 - Describe the actual image accurately.
 - Use the primary keyword naturally no more than once.
 - Mention the athlete, team, moment, or sport only when supplied or clearly verified.
@@ -809,7 +809,7 @@ Do not intermix alternative frame images with lifestyle mockups.
 Use Shopify-hosted media only after upload succeeds.
 If any required upload fails, stop and identify the exact failed file.
 
-VARIANT STRUCTURE — EXACTLY 16 VARIANTS
+VARIANT STRUCTURE â€” EXACTLY 16 VARIANTS
 Option 1 name:
 Frame
 Option 1 values in this exact order:
@@ -821,10 +821,10 @@ Option 1 values in this exact order:
 Option 2 name:
 Size
 Option 2 values in this exact order:
-1. XL - 62 × 87 cm (24.4 × 34.3 in)
-2. L - 45 × 62 cm (17.7 × 24.4 in)
-3. M - 30 × 45 cm (11.8 × 17.7 in)
-4. S - 21 × 30 cm (8.3 × 11.8 in)
+1. XL - 62 Ã— 87 cm (24.4 Ã— 34.3 in)
+2. L - 45 Ã— 62 cm (17.7 Ã— 24.4 in)
+3. M - 30 Ã— 45 cm (11.8 Ã— 17.7 in)
+4. S - 21 Ã— 30 cm (8.3 Ã— 11.8 in)
 
 Create the variants in this exact order:
 1. Black / XL
@@ -891,7 +891,7 @@ After mapping, verify each selector visually:
 - Clicking Unframed shows the unframed image.
 
 TAGS AND COLLECTION INTENT
-Use 8–16 clean tags based on confirmed product facts.
+Use 8â€“16 clean tags based on confirmed product facts.
 Core tags when applicable:
 - Collector Series
 - Limited Edition, only when confirmed
@@ -919,12 +919,12 @@ Before creating the draft, confirm internally:
 - Gallery order is planned exactly.
 - The title/H1 is specific and search-led.
 - The handle is clean.
-- The description is 90–130 words.
+- The description is 90â€“130 words.
 - The description has exactly one bold hook, two story paragraphs, and one bold scarcity close.
 - No product specifications were invented.
 - The primary keyword is selected.
 - SEO title is 60 characters or fewer.
-- Meta description is 145–160 characters where possible and never keyword stuffed.
+- Meta description is 145â€“160 characters where possible and never keyword stuffed.
 - Every image has unique, accurate alt text.
 - The exact Shopify category is planned.
 - All 16 variants are planned in the correct order.
@@ -934,11 +934,11 @@ Before creating the draft, confirm internally:
 - All SKUs are unique.
 - Product will remain Draft and unpublished.
 
-CREATION WORKFLOW — USE THIS ORDER
+CREATION WORKFLOW â€” USE THIS ORDER
 1. Identify the product subject, sport, and primary keyword.
 2. Classify all uploaded images by role.
 3. Create the product title/H1 and handle.
-4. Write the four-paragraph 90–130-word description.
+4. Write the four-paragraph 90â€“130-word description.
 5. Create the SEO title and meta description.
 6. Create unique alt text for every image.
 7. Create clean tags.
@@ -963,7 +963,7 @@ Verify all of the following:
 - Published is false.
 - Product title and handle are correct.
 - Category displays Prints in Posters, Prints, & Visual Artwork.
-- Description is clean HTML and 90–130 words.
+- Description is clean HTML and 90â€“130 words.
 - Description structure is correct and not generic ad copy.
 - SEO title and meta description are present and within limits.
 - All required images uploaded.
@@ -1002,7 +1002,7 @@ Use SOP 07B and create the Shopify product directly through the connected Shopif
 Create it as Draft and keep it unpublished.
 Do not make it live, do not set it Active, and do not publish it to the Online Store.
 Use the exact gallery order: Black frame, three lifestyle mockups, Size Guide, Oak frame, White frame, Unframed.
-Write a complete 90–130-word product description with one bold hook, two concise story paragraphs, and one bold scarcity close. Keep it specific and grounded, avoid generic clichés, and invent no specifications.
+Write a complete 90â€“130-word product description with one bold hook, two concise story paragraphs, and one bold scarcity close. Keep it specific and grounded, avoid generic clichÃ©s, and invent no specifications.
 Apply search-intent-led SEO metadata and unique, accurate image alt text.
 Select the exact category Prints in Posters, Prints, & Visual Artwork.
 Create the exact 16 variants with Frame ordered Black, Oak, White, Unframed and Size ordered XL, L, M, S.
@@ -1011,14 +1011,14 @@ Enable Continue selling when out of stock for all variants.
 Map each frame image to its matching variants.
 Do not publish. Return the Shopify draft/admin link and validation results for manual review.
 """
-UPDATE_EXISTING_PRODUCT_PROMPT = """SOP 07C — Sports Cave Existing Shopify Product Update and Standardisation
-Direct Existing-Product Update — No CSV Import Required
+UPDATE_EXISTING_PRODUCT_PROMPT = """SOP 07C â€” Sports Cave Existing Shopify Product Update and Standardisation
+Direct Existing-Product Update â€” No CSV Import Required
 
 PURPOSE
 Update the correct existing Sports Cave Shopify product without creating a duplicate.
 This SOP supports two modes:
-1. Media Update Mode — replace and reorder product images, update image alt text, and repair variant image mapping.
-2. Full Standardisation Mode — apply Media Update Mode plus current Sports Cave category, description, SEO, variant-order, pricing, inventory-policy, and variant-image standards when the user explicitly requests a full refresh or standardisation.
+1. Media Update Mode â€” replace and reorder product images, update image alt text, and repair variant image mapping.
+2. Full Standardisation Mode â€” apply Media Update Mode plus current Sports Cave category, description, SEO, variant-order, pricing, inventory-policy, and variant-image standards when the user explicitly requests a full refresh or standardisation.
 
 BRUTAL EXISTING-PRODUCT RULE
 Never create a new product when the task is to update an existing product.
@@ -1088,9 +1088,9 @@ Use lowercase letters and hyphens only.
 Do not use final, compressed, v2, copy, new, test, or random numbers.
 Do not mislabel image content.
 
-IMAGE ALT TEXT — APPLY TO EVERY REPLACEMENT IMAGE
+IMAGE ALT TEXT â€” APPLY TO EVERY REPLACEMENT IMAGE
 Rules:
-- Usually 80–140 characters.
+- Usually 80â€“140 characters.
 - Accurately describe the actual image.
 - Use the main commercial keyword naturally no more than once.
 - Mention the athlete, event, team, or sport only when verified.
@@ -1102,7 +1102,7 @@ Rules:
 - Do not overdescribe irrelevant furniture.
 - Write for accessibility first and SEO second.
 
-VARIANT IMAGE MAPPING — ALWAYS REPAIR WHEN MEDIA IS UPDATED
+VARIANT IMAGE MAPPING â€” ALWAYS REPAIR WHEN MEDIA IS UPDATED
 - All Black variants use the black frame product image.
 - All Oak variants use the oak frame product image.
 - All White variants use the white frame product image.
@@ -1110,7 +1110,7 @@ VARIANT IMAGE MAPPING — ALWAYS REPAIR WHEN MEDIA IS UPDATED
 Never map lifestyle images or the size guide to variants.
 Visually verify each Frame selector after mapping.
 
-MEDIA UPDATE MODE — DEFAULT SCOPE
+MEDIA UPDATE MODE â€” DEFAULT SCOPE
 Unless the user asks for a full standardisation, change only:
 - Product images
 - Gallery order
@@ -1133,7 +1133,7 @@ Report any visible mismatch against the current Sports Cave standard, but do not
 
 FULL STANDARDISATION MODE
 Use this mode only when the user explicitly asks to standardise, fully refresh, or bring the existing product to the current Sports Cave setup.
-Before applying it, confirm the product is intended to use the standard 16-variant Frame × Size model.
+Before applying it, confirm the product is intended to use the standard 16-variant Frame Ã— Size model.
 In Full Standardisation Mode, apply all rules below.
 
 EXACT SHOPIFY CATEGORY IN FULL STANDARDISATION MODE
@@ -1146,7 +1146,7 @@ Do not invent controlled taxonomy metafields.
 VISIBLE PRODUCT DESCRIPTION IN FULL STANDARDISATION MODE
 Rewrite only when requested.
 Requirements:
-- 90–130 words total.
+- 90â€“130 words total.
 - Exactly four paragraphs.
 - Paragraph 1: one bold, grounded, product-specific hook.
 - Paragraph 2: concise story paragraph identifying the subject or moment and context.
@@ -1155,20 +1155,20 @@ Requirements:
 - Exactly one bold hook and one bold close.
 - Clean Shopify-safe HTML using <p>, <strong>, and <em> only when necessary.
 - Specific and human, not a series of ad slogans.
-- No generic clichés such as greatness never fades, more than a game, history on your wall, elevate your space, must-have, ultimate tribute, or moment frozen in time.
+- No generic clichÃ©s such as greatness never fades, more than a game, history on your wall, elevate your space, must-have, ultimate tribute, or moment frozen in time.
 - No overstated claims such as a nation's memory or sacred unless objectively justified.
 - No invented materials, dimensions, paper, glazing, authentication, signatures, edition facts, shipping details, production methods, or included hardware.
 
 SEO IN FULL STANDARDISATION MODE
 SEO must be search-intent first and premium second.
 SEO title:
-- 50–60 characters preferred; 60 maximum.
+- 50â€“60 characters preferred; 60 maximum.
 - Primary commercial keyword near the beginning.
 - Include subject and Wall Art.
 - Add Limited Edition, Framed Print, sport, or Sports Cave only when it fits naturally.
 - Do not use a poetic campaign title alone.
 Meta description:
-- 145–160 characters preferred.
+- 145â€“160 characters preferred.
 - Mention subject/moment and primary keyword naturally.
 - Include confirmed collector/edition intent and a relevant buyer or room use when space allows.
 - No keyword stuffing, hashtags, emoji, store URL, or elevate your space.
@@ -1188,10 +1188,10 @@ Values in this exact order:
 Option 2:
 Size
 Values in this exact order:
-1. XL - 62 × 87 cm (24.4 × 34.3 in)
-2. L - 45 × 62 cm (17.7 × 24.4 in)
-3. M - 30 × 45 cm (11.8 × 17.7 in)
-4. S - 21 × 30 cm (8.3 × 11.8 in)
+1. XL - 62 Ã— 87 cm (24.4 Ã— 34.3 in)
+2. L - 45 Ã— 62 cm (17.7 Ã— 24.4 in)
+3. M - 30 Ã— 45 cm (11.8 Ã— 17.7 in)
+4. S - 21 Ã— 30 cm (8.3 Ã— 11.8 in)
 
 Exact variant order:
 Black / XL
@@ -1276,7 +1276,7 @@ Always verify:
 - Black, Oak, White, and Unframed variant image mappings work.
 In Full Standardisation Mode also verify:
 - Category is Prints in Posters, Prints, & Visual Artwork.
-- Description is 90–130 words with the required four-paragraph structure.
+- Description is 90â€“130 words with the required four-paragraph structure.
 - SEO fields meet length and search-intent rules.
 - Frame values are Black, Oak, White, Unframed.
 - Size values are XL, L, M, S with exact dimensions.
@@ -1301,14 +1301,14 @@ If the update fails, first check:
 Keep old media until replacement media is safely attached.
 Retry a failed upload once; if it still fails, report the exact file.
 
-FINAL EXECUTION PROMPT — MEDIA UPDATE MODE
+FINAL EXECUTION PROMPT â€” MEDIA UPDATE MODE
 I have uploaded final approved replacement Sports Cave WebP assets.
 Use SOP 07C in Media Update Mode.
 Update the existing Shopify product only; do not create a new product.
 Upload new media first, apply the exact gallery order, write unique accurate SEO alt text, repair Black/Oak/White/Unframed variant image mappings, confirm the result, and only then remove the replaced old media.
 Keep title, handle, description, SEO, category, variants, prices, RRPs, SKUs, inventory, tags, collections, status, and publication state unchanged.
 
-FINAL EXECUTION PROMPT — FULL STANDARDISATION MODE
+FINAL EXECUTION PROMPT â€” FULL STANDARDISATION MODE
 I have uploaded final approved replacement Sports Cave WebP assets.
 Use SOP 07C in Full Standardisation Mode.
 Update the existing Shopify product only; do not create a duplicate.
@@ -5365,7 +5365,7 @@ Canonical gallery order:
 
 Rules:
 - Accurately describe what is visible.
-- Usually 80–140 characters; clarity is more important than forcing length.
+- Usually 80â€“140 characters; clarity is more important than forcing length.
 - Use the primary keyword naturally no more than once per alt text.
 - Mention the verified athlete/moment/sport and visible setting when relevant.
 - Mention frame colour for Black, Oak, and White product images.
@@ -5405,7 +5405,7 @@ Output:
 9. Three natural internal-link anchor text ideas
 
 Rules for SEO title:
-- 50–60 characters preferred; 60 maximum.
+- 50â€“60 characters preferred; 60 maximum.
 - Put the primary keyword near the start.
 - Include the subject and Wall Art.
 - Add Limited Edition, Framed Print, sport, or Sports Cave only when it fits naturally.
@@ -5413,7 +5413,7 @@ Rules for SEO title:
 - No keyword stuffing.
 
 Rules for meta description:
-- 145–160 characters preferred.
+- 145â€“160 characters preferred.
 - Mention the subject or moment and primary keyword naturally once.
 - Mention collector/limited-edition intent only when confirmed.
 - Add a relevant use such as collectors, man caves, offices, bars, or homes when space permits.
@@ -5442,19 +5442,19 @@ PRODUCT IDENTITY AND STATUS
 - Exact category: Prints in Posters, Prints, & Visual Artwork
 
 DESCRIPTION
-- 90–130 words
+- 90â€“130 words
 - Exactly one bold hook
 - Exactly two concise story paragraphs
 - Exactly one bold scarcity close
 - Specific and grounded rather than ad-like or overstated
-- No generic clichés
+- No generic clichÃ©s
 - No invented specifications or unconfirmed edition claims
 - Clean Shopify-safe HTML
 
 SEO
 - Primary keyword is commercially relevant
 - SEO title is 60 characters or fewer and search-intent led
-- Meta description is 145–160 characters where practical
+- Meta description is 145â€“160 characters where practical
 - Metadata is clear rather than poetic-first
 - No keyword stuffing
 - Every image has unique, accurate alt text
@@ -5480,7 +5480,7 @@ VARIANTS
 - White variants show white-frame image
 - Unframed variants show unframed image
 
-PRICING — AUD
+PRICING â€” AUD
 Verify every variant matches the central Sports Cave AUD price ladder appended to this prompt.
 Verify Price and Compare-at/RRP are not reversed.
 
@@ -5518,7 +5518,7 @@ PRODUCT_UPLOAD_PRICE_BLOCK_START = "CENTRAL SPORTS CAVE AUD PRICE LADDER"
 PRODUCT_UPLOAD_PRICE_BLOCK_END = (
     "These rules do not authorise live publishing or live Shopify price updates."
 )
-PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION = """EXISTING PRODUCT — PRICE PROTECTION
+PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION = """EXISTING PRODUCT â€” PRICE PROTECTION
 
 Only when the operator intentionally runs a pricing update for the selected existing product, set the Australian Small Black/Oak/White framed selling price to A$169 and Medium Black/Oak/White framed selling price to A$209. Update only the Price field of those six variants; omit compare-at/RRP from the mutation and preserve its exact existing value, including blank values. Preserve Large, XL, every unframed price, international market prices, savings and discount percentages. This restriction takes precedence over the central ladder, Full Standardisation pricing instructions and pricing QA: read back the six selling prices and verify all other prices/RRPs against the pre-update snapshot. Media-only updates do not authorise price changes. Never update other products or run a mass/startup update."""
 
@@ -5590,7 +5590,7 @@ def apply_product_upload_pricing_update(prompt_text):
     prompt = re.sub(
         r"(Black, Oak,? and White framed variants:\r?\n)(.*?)(?=\r?\nUnframed variants:)",
         lambda match: match[1] + re.sub(
-            r"(?m)^((XL|L|M|S)[ \t]+[—–-][ \t]+Price[ \t]+\$)[\d.]+([ \t]*/[ \t]*Compare-at price[ \t]+\$)[\d.]+",
+            r"(?m)^((XL|L|M|S)[ \t]+[â€”â€“-][ \t]+Price[ \t]+\$)[\d.]+([ \t]*/[ \t]*Compare-at price[ \t]+\$)[\d.]+",
             lambda price: price[1] + framed_prices[price[2]][0] + ".00"
             + price[3] + framed_prices[price[2]][1] + ".00",
             match[2],
@@ -5599,11 +5599,11 @@ def apply_product_upload_pricing_update(prompt_text):
         flags=re.DOTALL,
     )
     prompt = prompt.replace(
-        "EXISTING PRODUCT — ABSOLUTE PRICE PROTECTION",
+        "EXISTING PRODUCT â€” ABSOLUTE PRICE PROTECTION",
         PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
     )
     prompt = re.sub(
-        r"EXISTING PRODUCT — PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian (?:Small )?Black, Oak and White framed variants[^\r\n]*",
+        r"EXISTING PRODUCT â€” PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian (?:Small )?Black, Oak and White framed variants[^\r\n]*",
         lambda match: PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
         prompt,
     )
@@ -6597,7 +6597,7 @@ def current_lifestyle_prompt_text(prompt_filename, default_text):
     return preserve_selection(override, default_text)
 
 
-def render_prompt_edit_button(prompt_id, *, label="✎"):
+def render_prompt_edit_button(prompt_id, *, label="âœŽ"):
     if not prompt_editing_allowed():
         return False
     button_key = f"prompt-edit-button::{prompt_id}"
@@ -6670,7 +6670,7 @@ def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420, defau
                     st.rerun()
 
 
-def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420, label="✎"):
+def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420, label="âœŽ"):
     render_prompt_edit_button(prompt_id, label=label)
     render_prompt_edit_panel(title, prompt_id, prompt_text, height=height)
 
@@ -6919,7 +6919,7 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None
                     st.session_state["mockup_prompt_notice"] = (
                         "Prompt saved to Supabase"
                         if saved.get("persisted")
-                        else (saved.get("warning") or saved.get("source_label") or "Not persisted — Supabase unavailable")
+                        else (saved.get("warning") or saved.get("source_label") or "Not persisted â€” Supabase unavailable")
                     )
                     st.rerun()
         if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
@@ -6950,7 +6950,7 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None
                     st.session_state["mockup_prompt_notice"] = (
                         "Prompt reset to default in Supabase"
                         if saved.get("persisted")
-                        else (saved.get("warning") or saved.get("source_label") or "Not persisted — Supabase unavailable")
+                        else (saved.get("warning") or saved.get("source_label") or "Not persisted â€” Supabase unavailable")
                     )
                     st.rerun()
 
@@ -7160,7 +7160,7 @@ def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
         with action_cols[0]:
             render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
         with action_cols[1]:
-            if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
+            if st.button("âœŽ", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
                 st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
                 st.rerun()
     else:
@@ -9394,7 +9394,7 @@ def render_mockups_page():
         setup = st.columns([1.65, 1], gap="medium")
         with setup[0]:
             st.subheader("1. Artwork Setup")
-            st.caption("JPG, PNG or WEBP · Up to 20MB · Working images up to 2000px; previews up to 900px.")
+            st.caption("JPG, PNG or WEBP Â· Up to 20MB Â· Working images up to 2000px; previews up to 900px.")
             uploaded_file = st.file_uploader(
                 "Upload finished Sports Cave artwork",
                 type=["jpg", "jpeg", "png", "webp"],
@@ -9742,7 +9742,7 @@ def record_product_upload_prompt_generation(user, *, product_name, upload_type):
 def render_product_uploads_page():
     started = time.perf_counter()
     log_app_memory("Page load: Product Uploads")
-    st.subheader("Shopify Prompt Tools")
+    st.title("Shopify Prompt Tools")
     st.caption(
         "Use this lightweight prompt page after selecting the exact Dropbox product folder in Sports Cave Files."
     )
@@ -9795,15 +9795,15 @@ def render_product_uploads_page():
     from product_title_rules import title_state, LIVE_COUNTER_SCRIPT
     proposed_title = st.text_input(
         "Customer-facing Product Title", key="product-upload-customer-title",
-        help="Optional: enter or paste a proposed title. Target 35–55 characters; maximum 60. Leave blank for the connected assistant to generate and validate it. Existing titles stay unchanged unless you request an edit.",
+        help="Optional: enter or paste a proposed title. Target 35â€“55 characters; maximum 60. Leave blank for the connected assistant to generate and validate it. Existing titles stay unchanged unless you request an edit.",
     )
     title_check = title_state(proposed_title)
     counter = f"{title_check['count']} / 60"
     if title_check["severity"] == "error":
         st.session_state.pop("product-upload-submitted-prompt", None)
-        st.error(counter + " — Rewrite the title before creating or publishing. Do not truncate it.")
+        st.error(counter + " â€” Rewrite the title before creating or publishing. Do not truncate it.")
     elif title_check["severity"] == "warning":
-        st.warning(counter + " — Near the title limit.")
+        st.warning(counter + " â€” Near the title limit.")
     st.markdown(f'<div id="sports-cave-product-title-counter" aria-live="polite">{counter}</div>', unsafe_allow_html=True)
     get_components_module().html(LIVE_COUNTER_SCRIPT, height=0)
     config = product_upload_operation_config(upload_type)
@@ -11712,7 +11712,7 @@ def render_passwords_section(user):
         st.info("Password access could not be verified right now.")
         return
     if os_accounts.is_admin(checked_user):
-        st.caption("Shared credentials should be rotated when a staff member’s access is removed.")
+        st.caption("Shared credentials should be rotated when a staff memberâ€™s access is removed.")
     if not specs:
         st.info("No shared password access has been assigned.")
         return
@@ -13354,7 +13354,7 @@ def _render_daily_execution_read_only(sheet):
     for index, task in enumerate((sheet or {}).get("top_tasks") or [], start=1):
         if task.get("task"):
             status = "Done" if task.get("status") == sports_cave_dashboard.DAILY_TASK_STATUS_DONE else "Couldn't finish"
-            st.markdown(f"**MIP Task {index}:** {html.escape(task.get('task') or '')} · {html.escape(status)}")
+            st.markdown(f"**MIP Task {index}:** {html.escape(task.get('task') or '')} Â· {html.escape(status)}")
 
 
 @st.fragment
@@ -13541,7 +13541,7 @@ def _task_csv_section_counts_text(section_counts):
         count = int((section_counts or {}).get(section) or 0)
         if count:
             parts.append(f"{count} {section.casefold()}")
-    return " · ".join(parts) if parts else "No new tasks will be imported."
+    return " Â· ".join(parts) if parts else "No new tasks will be imported."
 
 
 def _render_dashboard_task_csv_preview(preview):
@@ -13760,7 +13760,7 @@ def dashboard_task_card_html(
     safe_title = html.escape(display_title)
     safe_title_attr = html.escape(display_title, quote=True)
     if is_design_group:
-        summary = " · ".join(
+        summary = " Â· ".join(
             str(value).strip()
             for value in (
                 sport,
@@ -14147,7 +14147,7 @@ def render_task_group(group, tasks):
     with toolbar:
         action_columns = st.columns([1, 0.9, 0.75, 0.38], gap="small")
         count_label = "design" if len(rows) == 1 and design_group else "designs" if design_group else "task" if len(rows) == 1 else "tasks"
-        action_columns[0].caption(f"{len(rows)} {count_label} · Select one row for actions")
+        action_columns[0].caption(f"{len(rows)} {count_label} Â· Select one row for actions")
         if action_columns[1].button(
             "View/Edit Details",
             icon=":material/edit:",
@@ -14447,7 +14447,7 @@ def render_activity_log(local_now, *, show_denied=True):
         if record not in page_records:
             continue
         with st.expander(
-            f"{record['Activity']} · {record['Details']}",
+            f"{record['Activity']} Â· {record['Details']}",
             expanded=False,
         ):
             for item in entry.get("mockup_items") or []:
@@ -14478,13 +14478,13 @@ def _render_archived_sheet_detail(sheet):
         if not task.get("task"):
             continue
         status = "Done" if task.get("status") == sports_cave_dashboard.DAILY_TASK_STATUS_DONE else ("Couldn't finish" if sports_cave_dashboard.daily_execution_task_finished(task) else "Open")
-        st.markdown(f"**MIP Task {index}:** {html.escape(task.get('task') or '')} · {html.escape(task.get('why') or '')} · {html.escape(task.get('time_blocked') or '')} · {html.escape(status)}")
+        st.markdown(f"**MIP Task {index}:** {html.escape(task.get('task') or '')} Â· {html.escape(task.get('why') or '')} Â· {html.escape(task.get('time_blocked') or '')} Â· {html.escape(status)}")
     other = [item for item in snapshot.get("additional_items") or [] if sports_cave_dashboard._daily_additional_item_has_content(item)]
     if other:
         st.markdown("**Other tasks**")
         for item in other:
             status = "Done" if item.get("status") == sports_cave_dashboard.DAILY_TASK_STATUS_DONE else ("Couldn't finish" if sports_cave_dashboard.daily_execution_task_finished(item) else "Open")
-            st.markdown(f"- {html.escape(item.get('task') or item.get('details') or '')} · {html.escape(item.get('time_blocked') or '')} · {html.escape(status)}")
+            st.markdown(f"- {html.escape(item.get('task') or item.get('details') or '')} Â· {html.escape(item.get('time_blocked') or '')} Â· {html.escape(status)}")
     review = snapshot.get("review_data") or snapshot.get("no_grey_zone") or {}
     if review:
         st.markdown("**Daily Review**")
@@ -14574,7 +14574,7 @@ def render_daily_execution_archive(local_now, *, show_denied=True):
         metrics[2].metric("MIPs completed", summary["mip_completed"])
         metrics[3].metric("Average rating", summary["average_day_rating"] or "-")
         st.caption(
-            f"MIPs not completed: {summary['mip_not_completed']} · Other tasks completed: {summary['other_completed']} · Planned hours: {summary['planned_hours']}"
+            f"MIPs not completed: {summary['mip_not_completed']} Â· Other tasks completed: {summary['other_completed']} Â· Planned hours: {summary['planned_hours']}"
         )
         st.markdown(f"**Biggest wins:** {html.escape('; '.join(summary['biggest_wins']) or 'No wins recorded yet.')}")
         st.markdown(f"**Main blockers:** {html.escape('; '.join(summary['main_blockers']) or 'No blockers recorded yet.')}")
@@ -15443,7 +15443,7 @@ def _render_files_preview(access_token, user, root_path, preview_path):
     _render_files_navigation(parent_path, root_path, preview_name=name)
     modified = _files_modified_label(metadata.get("server_modified"), user)
     size = dropbox_integration.format_file_size(metadata.get("size"))
-    summary = " · ".join(value for value in (_files_type_label(metadata), modified, size) if value)
+    summary = " Â· ".join(value for value in (_files_type_label(metadata), modified, size) if value)
     st.markdown(
         '<div class="sc-files-preview-header">'
         f'<strong>{html.escape(name)}</strong>'
@@ -16004,6 +16004,24 @@ def _navigation_page_status(current_page):
 
 
 def render_selected_page(current_page):
+    # Opt in only where the local dispatcher survey confirmed oversized native
+    # headings/top spacing. Keep newer module-specific workspaces independent.
+    if current_page in {
+        "Image Protection", "Product Uploads", "Design Studio", "Ads",
+        "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
+        "Developer", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+    }:
+        from page_presentation import inject_compact_page
+        inject_compact_page(st)
+    elif current_page in {
+        "Edition Ops", social_media.SOCIAL_MEDIA_ROUTE,
+        social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE,
+        ads_nav.CREATIVE_REFRESH_ROUTE, ads_nav.POSTING_ROUTE,
+        ads_nav.META_REVIEW_ROUTE, *seo_nav.SEO_ROUTES,
+    }:
+        from page_presentation import inject_page_spacing
+        # Creative Refresh retains its existing negative header margin.
+        inject_page_spacing(st, top_clearance=32 if current_page == ads_nav.CREATIVE_REFRESH_ROUTE else 12)
     if current_page == 'Image Protection':
         import image_protection_ui
         image_protection_ui.render(st, current_os_user())

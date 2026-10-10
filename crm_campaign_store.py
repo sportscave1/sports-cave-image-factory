@@ -13,9 +13,9 @@ class CampaignStore(WorkspaceRecords):
         """One local aggregate for history badges; never reads audience/provider data."""
         return self.q("""SELECT count(*) FILTER(WHERE c.status IS DISTINCT FROM 'SENT') AS active,
           count(*) FILTER(WHERE c.status='SENT') AS sent,
-          COALESCE(bool_or(c.status IN ('BUILDING','SENDING') OR
-            (c.status='SCHEDULED' AND c.scheduled_at<=now()+interval '1 minute')),false) AS polling_active
-          FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id
+          COALESCE(bool_or(p.status='PREPARING' OR c.status IN ('BUILDING','SENDING') OR
+            (c.status='SCHEDULED' AND COALESCE((SELECT (r.value->>'due_at')::timestamptz FROM crm_runtime_state r WHERE r.key='campaign-timing:'||c.id::text),c.scheduled_at)<=now()+interval '1 minute')),false) AS polling_active
+          FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id LEFT JOIN crm_campaign_preparation p ON p.campaign_id=d.id
           WHERE d.archived_at IS NULL AND """+VISIBLE,one=True)
 
     def render_settings(self,env=None):
@@ -123,7 +123,7 @@ class CampaignStore(WorkspaceRecords):
         require(user,'crm_automations_manage' if automation else 'crm_campaigns_manage')
         from crm_resend_marketing import _send_admin_email, single_email, DeliveryError
         row=self.draft(identity)
-        if not automation and self.q('SELECT 1 FROM crm_campaigns WHERE id=%s',(identity,),True):raise ValueError('Queued and sent campaigns are read-only. Duplicate to test.')
+        if not automation and self.q('SELECT 1 FROM crm_campaigns WHERE id=%s UNION ALL SELECT 1 FROM crm_campaign_preparation WHERE campaign_id=%s',(identity,identity),True):raise ValueError('Accepted, queued and sent campaigns are read-only. Duplicate to test.')
         if not single_email(recipient):raise DeliveryError('invalid_recipient')
         if confirmed is not True:raise DeliveryError('confirmation_required')
         if automation:

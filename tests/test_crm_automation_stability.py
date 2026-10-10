@@ -51,6 +51,8 @@ class StabilityTests(unittest.TestCase):
     def test_no_permanent_server_timer_or_fast_retry(self):
         import crm_automation_home as home,crm_automation_analytics_ui as analytics
         source=inspect.getsource(home)+inspect.getsource(analytics)
+        from pathlib import Path
+        source+=Path(home.__file__).with_name('components').joinpath('crm_sections','automation_refresh.js').read_text()
         for term in ('setTimeout(tick,250)','setTimeout(tick,500)',"poll',.1"):
             self.assertNotIn(term,source)
         self.assertIn('window.scAutoRequest',source)

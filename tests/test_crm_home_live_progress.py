@@ -43,7 +43,8 @@ class HomeLiveTests(unittest.TestCase):
         self.assertEqual(store.q.call_args.args[1],([ID],))
         self.assertEqual(self.loads[0][1],{'ttl':2.5})
         sql=store.q.call_args.args[0]
-        for forbidden in ('crm_delivery_events','crm_email_orders','document','recipient_hash','email_for_provider'):
+        self.assertIn("v.content->'document'->'send_timing'",sql)
+        for forbidden in ('crm_delivery_events','crm_email_orders','recipient_hash','email_for_provider'):
             self.assertNotIn(forbidden,sql)
         self.assertTrue(state['campaign_home_dispatch_active'])
         self.assertEqual(result[0]['progress']['total'],4)
@@ -98,7 +99,7 @@ class HomeLiveTests(unittest.TestCase):
         self.assertIn('Stalled',html)
 
     def test_real_terminal_failure_and_partial_failure_labels(self):
-        for status,counts,label in (('FAILED',{'FAILED':4},'Failed'),('SENT',{'ACCEPTED':3,'FAILED':1},'Sent with issues'),('SENDING',{'UNCERTAIN':4},'Needs attention')):
+        for status,counts,label in (('FAILED',{'FAILED':4},'Needs attention'),('SENT',{'ACCEPTED':3,'FAILED':1},'Sent with issues'),('SENDING',{'UNCERTAIN':4},'Needs attention')):
             html=row_html({**record(),'status':status,'progress':summarize(row(status,**counts))})
             self.assertIn(label,html)
 

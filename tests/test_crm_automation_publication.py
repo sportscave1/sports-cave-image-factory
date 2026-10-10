@@ -27,8 +27,12 @@ class PublicationUiTests(unittest.TestCase):
         self.assertIn('store.request_publish(user,identity',editor)
         self.assertNotIn('open_flow(identity)',editor)  # Publishing retains editor/scroll.
         self.assertNotIn('store.publish(',editor)
-        self.assertIn("pop('automation_selected'",editor)
-        self.assertIn("query_params.pop('automation'",editor)
+        self.assertIn('request_route(None)',editor)
+        from crm_automation_ui import request_route
+        state={}
+        with patch('crm_automation_ui.st.session_state',state):request_route(None)
+        self.assertEqual(state['_automation_navigation_target'],'')
+        self.assertEqual(state['_automation_navigation_email'],'')
         self.assertIn("publication.get('state')=='PUBLISHING'",editor)
         from pathlib import Path
         barrier=Path('components/crm_sections/automation_publish.js').read_text()

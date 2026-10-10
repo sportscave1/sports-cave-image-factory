@@ -4,6 +4,9 @@ import inspect
 import streamlit as st
 from crm_automation_publish_state import has_changes,label
 
+def period_changed():
+    st.session_state['flow-period-dirty']=True
+
 
 def definition(store,state,identity):
     """Only the current flow is cached, scoped to this authenticated session.
@@ -11,6 +14,9 @@ def definition(store,state,identity):
     Every rerun checks database updated_at. Mutations still lock and validate a
     fresh row; cached documents are solely for display and dirty comparison.
     """
+    from crm_automation_store import AutomationStore
+    snapshot=store.display_snapshot(identity) if isinstance(store,AutomationStore) else None
+    if snapshot is not None:return snapshot
     marker=store.q('SELECT updated_at FROM crm_automations WHERE id=%s',(identity,),True)
     token=(str(identity),marker and marker['updated_at'])
     cached=state.get('_automation_toolbar_definition')
@@ -60,6 +66,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
     @keyframes automation-publishing-spin{to{transform:rotate(360deg)}}
     @media(prefers-reduced-motion:reduce){.automation-publishing:before{animation:none}}
     .st-key-automation-toolbar [data-testid="stPopover"]{width:auto!important}
+    .st-key-automation-toolbar [data-baseweb="select"]>div{height:32px!important;min-height:32px!important}
     .st-key-toolbar-refresh{display:none!important}
     @media(max-width:1000px){.automation-title{flex-wrap:wrap;height:auto;min-height:38px}.automation-state{white-space:normal}}
     </style>''')
@@ -68,27 +75,32 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         with st.container(horizontal=True,vertical_alignment='center',gap='small',key='automation-toolbar'):
             if st.button('← Automations',key='toolbar-back'):
                 if flush_current(force=True):
-                    st.session_state.pop('automation_selected',None);st.query_params.pop('automation',None);st.rerun(scope='app')
+                    from crm_automation_ui import request_route
+                    request_route(None);st.rerun(scope='app')
             title=display_name(editor['name'] if editor else row['name'])
-            st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong><span class="automation-state">'+escape(label(row,pending)+(' · Unsaved changes' if dirty else ''))+'</span></div>')
+            badge='' if flow_view else '<span class="automation-state">'+escape(label(row,pending)+(' · Unsaved changes' if dirty else ''))+'</span>'
+            st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong>'+badge+'</div>')
+            if flow_view:
+                from crm_checkout_analytics import PERIODS
+                with st.container(width=145):
+                    st.selectbox('Reporting period',list(PERIODS),index=list(PERIODS).index('All time'),key='auto-analytics-period-'+str(identity),label_visibility='collapsed',on_change=period_changed)
             if editor and st.button('Flow',key='toolbar-sequence',help='Return to this flow’s sequence'):
                 if flush_current(force=True):
-                    st.session_state['automation_composing']=False;st.session_state.pop('automation_editor',None);st.rerun(scope='app')
+                    from crm_automation_ui import request_email
+                    request_email(None);st.rerun(scope='app')
             if st.button('Save draft',disabled=not dirty or archived,key='toolbar-save'):
                 if flush_current(force=True):changed();st.toast('Draft saved');st.rerun(scope='fragment')
             if editor:
                 from crm_campaign_send_ui import test_control
                 test_control(store,user,editor,key,cfg=cfg)
             elif flow_view:
-                with st.popover('Test',help='Simulate this flow without sending emails',on_change='rerun',key='flow-test-popover') as simulation:
-                    if simulation.open:
-                        from crm_flow_builder import test_flow
-                        test_flow(row)
+                from crm_flow_test_ui import control
+                control(store,user,row,dirty=dirty)
             elif st.button('Test Flow',key='toolbar-test'):
                 name='flow-top-'+str(identity)+'simulation'
                 st.session_state[name]=not st.session_state.get(name,False);st.rerun(scope='app')
             import os_accounts
-            if os_accounts.is_admin(user):
+            if not flow_view and os_accounts.is_admin(user):
                 with st.popover('Diagnostics',on_change='rerun',key='flow-diagnostics') as diagnostics:
                     if diagnostics.open:
                         if flow_view and st.button('Open operational diagnostics',key='flow-operations-open'):
@@ -112,6 +124,9 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                 action='pause' if row['status']=='ACTIVE' else 'resume'
                 if st.button(action.title(),key='toolbar-lifecycle'):
                     store.lifecycle(user,identity,action);changed();st.rerun(scope='fragment')
+        if flow_view and st.session_state.pop('flow-period-dirty',False):
+            from crm_flow_page import refresh_control
+            refresh_control('flow-analytics-refresh')
         if publication.get('state')=='FAILED':st.html('<span role="status" style="font-size:12px;color:#9c3c36">Publishing failed · '+escape(publication.get('error') or 'Retry publishing.')+'</span>')
         if busy:
             from crm_automation_publication import progress,progress_text

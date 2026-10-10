@@ -17,6 +17,8 @@ await db.exec(`CREATE TABLE edition_orders(id bigserial primary key,shopify_cust
 await db.exec(readFileSync('migrations/20261005061015_crm_automation_publication_jobs.sql','utf8'));
 await db.exec(readFileSync('migrations/20261005064444_crm_checkout_analytics.sql','utf8'));
 await db.exec(readFileSync('migrations/20261006033000_crm_single_delay.sql','utf8'));
+await db.exec(readFileSync('migrations/20261010090000_crm_flow_tests.sql','utf8'));
+await db.exec(readFileSync('migrations/20261010110000_crm_campaign_preparation.sql','utf8'));
 let queue=Promise.resolve();
 const server=http.createServer(async(req,res)=>{
  if(req.method!=='POST'){res.writeHead(405).end();return;}

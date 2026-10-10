@@ -20,8 +20,9 @@ from tests.test_crm_send_flow import LIVE,CFG
 from crm_logic import recipient_hash, date
 
 def profile(i,code='AU',state='NSW',consent='SUBSCRIBED',address=None):
+    postcode={'NSW':'2000','VIC':'3000','QLD':'4000','SA':'5000','WA':'6000','TAS':'7000','NT':'0800','ACT':'2600'}.get(state,'') if code=='AU' else ''
     return {'id':f'gid://shopify/Customer/{i}','email':f'p{i}@example.test','validEmailAddress':True,
-      'emailMarketingConsent':{'marketingState':consent},'defaultAddress':address or {'countryCodeV2':code,'provinceCode':state}}
+      'emailMarketingConsent':{'marketingState':consent},'defaultAddress':address or {'countryCodeV2':code,'provinceCode':state,'zip':postcode}}
 
 def authority(rows):
     from tests.crm_fixtures import native_customer,segment_rows

@@ -63,11 +63,11 @@ def thumbnail(store,step,row):
             st.session_state[key]=True
             phase,data=request(digest,source_loader(store,row,step,live),private_store(store))
         if data:
-            body='<img width="76" height="100" loading="lazy" decoding="async" alt="'+escape(label+' email preview')+'" src="data:image/webp;base64,'+base64.b64encode(data).decode()+'">'
+            body='<img width="76" height="100" loading="lazy" decoding="async" alt="Email preview" src="data:image/webp;base64,'+base64.b64encode(data).decode()+'">'
         else:
             text={'DEFERRED':'Preview','LOADING':'Preparing preview…','BUSY':'Preview queued…','ERROR':'Preview unavailable. Click to open email.'}[phase]
             body='<span role="status">'+text+'</span>'
-        st.html('<div id="'+key+'" class="sc-flow-thumbnail" role="button" tabindex="0" data-phase="'+phase+'" data-key="'+key+'" data-preview="flow-preview-'+step['step_id']+'" aria-label="Open '+escape(label)+' email preview" style="width:76px;height:100px;overflow:hidden;background:#fff;font-size:10px;display:flex;align-items:center;justify-content:center">'+body+'</div><small style="font-size:10px">'+escape(label)+'</small>')
+        st.html('<div id="'+key+'" class="sc-flow-thumbnail" role="button" tabindex="0" data-phase="'+phase+'" data-key="'+key+'" data-preview="flow-preview-'+step['step_id']+'" aria-label="Open email preview" style="width:76px;height:100px;overflow:hidden;background:#fff;font-size:10px;display:flex;align-items:center;justify-content:center">'+body+'</div>')
         if phase=='ERROR':
             info=diagnostic(digest)
             st.caption('Stage preview: '+info.get('category','image_unavailable').replace('_',' ')+'. Retry after one minute.')

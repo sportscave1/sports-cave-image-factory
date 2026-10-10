@@ -329,6 +329,12 @@ def _render_page(route,user,navigate=lambda _:None,*,shop=None,store=None,config
         except (CapabilityUnavailable,StoreUnavailable,MarketingDisabled,DeliveryError,PermissionError,ValueError) as exc: st.warning(str(exc))
         return
     if route=='CRM Automations':
+        # The Automations workspace owns its small identity/definition caches.
+        # A shared Shopify cache-version read is unrelated to these controls.
+        if loading:loading.empty()
+        automation_workspace(shop,store,actions,navigate=navigate)
+        return
+    if route=='CRM Automations':
         automation_workspace(shop,store,actions,navigate=navigate)
         return
     left,right=st.columns([9,1])

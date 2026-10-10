@@ -21,9 +21,40 @@ def rerun_editor():
     except StreamlitAPIException: st.rerun()
 
 
-@st.dialog('Select products', width='medium', on_dismiss='rerun')
+def picker_collection_labels(rows):
+    """Streamlit serializes labels, so identical titles must remain distinct."""
+    from collections import Counter
+    titles = {r['id']:r['title'] for r in rows}
+    counts = Counter(titles.values())
+    labels = {identity:(title+' · '+identity.rsplit('/',1)[-1]
+                        if counts[title]>1 or title=='All collections' else title)
+              for identity,title in titles.items()}
+    # Also protect against a real title matching another collection's suffix.
+    duplicates = Counter(labels.values())
+    return {identity:(label+' ['+identity+']' if duplicates[label]>1 else label)
+            for identity,label in labels.items()}
+
+
+def picker_selection_changed(key, widget_key, product):
+    """Capture the old result's checkbox before a filter/page rerun replaces it."""
+    basket = st.session_state.setdefault(key+'basket', {})
+    if st.session_state.get(widget_key, False):
+        basket[product['id']] = deepcopy(product)
+    else:
+        basket.pop(product['id'], None)
+
+
+def picker_dismissed():
+    target = st.session_state.pop('_crm_picker_focus_target', None)
+    if target:
+        editor_key, section_id = target
+        st.session_state[editor_key+'picker_focus'] = {'section':section_id,'event':uuid.uuid4().hex}
+
+
+@st.dialog('Select products', width='medium', on_dismiss=picker_dismissed)
 @autosaving
 def product_picker(doc, section_id, catalogue, key, editor_key=None):
+    if editor_key: st.session_state['_crm_picker_focus_target'] = (editor_key,section_id)
     section = next(s for s in middle_sections(doc) if s['id']==section_id)
     basket = st.session_state.setdefault(key+'basket', {p['id']:deepcopy(p) for p in section['products']})
     query = st.text_input('Search products…', max_chars=150, key=key+'search_text')
@@ -33,7 +64,7 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
         st.session_state[key+'collections'] = choices['rows']
     except Exception:
         st.caption('Collections temporarily unavailable. Existing selection retained.')
-    options = {r['id']:r['title'] for r in st.session_state.get(key+'collections',[])}
+    options = picker_collection_labels(st.session_state.get(key+'collections',[]))
     old = st.session_state.get(key+'collection','')
     if old and old not in options: options[old] = 'Selected collection (unavailable)'
     collection = st.selectbox('Collection', ['',*options], format_func=lambda i:options.get(i,'All collections'), key=key+'collection')
@@ -56,9 +87,11 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
         if not facts:st.caption('No products found in this collection.' if collection else 'No matching products.')
         for p in facts:
             a,b,c = st.columns([1,7,2], vertical_alignment='center')
-            selected = a.checkbox('Select '+p['title'],p['id'] in basket,label_visibility='collapsed',key=key+st.session_state[key+'generation']+p['id'])
-            if selected: basket[p['id']] = p
-            else: basket.pop(p['id'], None)
+            widget_key = key+st.session_state[key+'generation']+p['id']
+            if widget_key in st.session_state and st.session_state[widget_key] != (p['id'] in basket):
+                st.session_state[widget_key] = p['id'] in basket
+            a.checkbox('Select '+p['title'],False if widget_key in st.session_state else p['id'] in basket,label_visibility='collapsed',
+                                  key=widget_key,on_change=picker_selection_changed,args=(key,widget_key,p))
             with b.container(horizontal=True,vertical_alignment='center'):
                 from crm_campaign_html import email_image_url
                 if email_image_url(p['image']): st.image(email_image_url(p['image']),width=38)
@@ -69,11 +102,19 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
             st.session_state[key+'offset']-=12;st.session_state.pop(key+'page');st.session_state[key+'generation']=uuid.uuid4().hex;st.rerun(scope='fragment')
         if right.button('Next',disabled=not page['more'],key=key+'next'):
             st.session_state[key+'offset']=st.session_state.get(key+'offset',0)+12;st.session_state.pop(key+'page');st.session_state[key+'generation']=uuid.uuid4().hex;st.rerun(scope='fragment')
-        st.caption('Selected: '+str(len(basket))+' / 12')
-        cancel,add=st.columns(2)
-        if cancel.button('Cancel',key=key+'cancel'):
-            st.session_state.pop(key+'basket',None);st.rerun()
-        if add.button('Add selected',type='primary',disabled=len(basket)>12,key=key+'add'):
+    except Exception as exc:
+        logging.getLogger(__name__).warning('crm_catalogue_picker_failed type=%s',type(exc).__name__)
+        st.warning('Product catalogue is temporarily unavailable. Your selections are retained.')
+        if st.button('Retry product loading',key=key+'retry'):
+            st.session_state.pop(key+'page',None);st.rerun(scope='fragment')
+
+    st.caption('Selected: '+str(len(basket))+' / 12')
+    cancel,add=st.columns(2)
+    if cancel.button('Cancel',key=key+'cancel'):
+        picker_dismissed()
+        st.session_state.pop(key+'basket',None);st.rerun()
+    if add.button('Add selected',type='primary',disabled=len(basket)>12,key=key+'add'):
+        try:
             with st.spinner('Checking current product facts…'):
                 selected = catalogue.resolve(list(basket),doc['market'],fresh=True)
             sections=middle_sections(doc)
@@ -86,12 +127,11 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
                 visible=tuple(sorted({p['id'] for s in sections if s['type']=='catalogue' and s['visible'] for p in s['products']}))
                 if set(visible)<=known:
                     st.session_state[editor_key+'catalogue_loaded']=(doc['market'],visible)
+            picker_dismissed()
             st.session_state.pop(key+'basket',None);st.rerun()
-    except Exception as exc:
-        logging.getLogger(__name__).warning('crm_catalogue_picker_failed type=%s',type(exc).__name__)
-        st.warning('Product catalogue is temporarily unavailable. Your selections are retained.')
-        if st.button('Retry product loading',key=key+'retry'):
-            st.session_state.pop(key+'page',None);st.rerun(scope='fragment')
+        except Exception as exc:
+            logging.getLogger(__name__).warning('crm_catalogue_verification_failed type=%s',type(exc).__name__)
+            st.warning('Selected products could not be verified with Shopify. Your selections are retained. Retry Add selected.')
 
 
 def middle_editor(doc, key, shop, store=None):
@@ -137,7 +177,7 @@ def middle_editor(doc, key, shop, store=None):
                 'template_ref':{k:str(row[k]) if k=='id' else row[k] for k in ('id','name','version')}}
     trigger=getattr(store,'preview_trigger',None) if getattr(store,'email_mode',None)=='automation' else None
     component_args={'discount_offer':doc.get('recovery_discount'),'discount_html':discount_html()}
-    event = render_component(component,**component_args,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=180,clipboard_script=clipboard_script(),history_scope=scope(key),preview_scope=scope(key),element_defaults=element()['settings'],starter_sections=starter(),checkout_template=checkout,draft_version=editor.get('version'),save_status=st.session_state.get('campaign_save_status','Saved'),save_error=st.session_state.get('campaign_save_error',''),edit_error=st.session_state.get(key+'edit_error',''),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    event = render_component(component,**component_args,picker_focus=st.session_state.pop(key+'picker_focus',None),on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=180,clipboard_script=clipboard_script(),history_scope=scope(key),preview_scope=scope(key),element_defaults=element()['settings'],starter_sections=starter(),checkout_template=checkout,draft_version=editor.get('version'),save_status=st.session_state.get('campaign_save_status','Saved'),save_error=st.session_state.get('campaign_save_error',''),edit_error=st.session_state.get(key+'edit_error',''),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')

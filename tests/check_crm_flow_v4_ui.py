@@ -36,8 +36,8 @@ with sync_playwright() as pw:
                         assert not page.get_by_test_id('stMain').evaluate('(e)=>e.scrollWidth>e.clientWidth+2'),(channel,width)
                     page.set_viewport_size({'width':1440,'height':1000})
                 if not before and stages==3:
-                    assert page.get_by_text('Recipient timelines and scheduled deliveries',exact=True).count()==0
-                    assert page.get_by_text('Abandoned checkouts',exact=True).count()==0
+                    assert page.get_by_text('Recipient timelines and scheduled deliveries',exact=True).count()==1
+                    assert page.get_by_text('Abandoned checkouts',exact=True).count()==1
                     assert page.locator('.sc-flow-stats dt').all_text_contents()==['Entered','Sent','Delivery','Opens','Clicks','Conversions','Orders','Bounce']
                     assert page.locator('.sc-flow-stats dd').all_text_contents()==['41','43','100.0%','39.5%','9.3%','0','0','0.0%']
                     interactions={}

@@ -1,4 +1,5 @@
 from table_design import TABLE_ROW_HEIGHT
+from page_presentation import inject_compact_page
 from sports_categories import normalize_sport_category, normalize_sport_state
 import csv
 import gc
@@ -4835,9 +4836,11 @@ def _prodigi_prepare_entry_state(*, state=None, finder=None):
 def render_prodigi_page():
     page_started = time.perf_counter()
     _prodigi_log_timing("page start", page_started)
-    st.title("Fulfilment Dispatch Log")
+    inject_compact_page(st)
+    heading, dashboard = st.columns([3.2, 1], vertical_alignment="center")
+    heading.title("Fulfilment Dispatch Log")
+    dashboard.link_button("Open Fulfilment Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=True)
     st.caption("Search an order, confirm the fulfilment checks, then save it to the dispatch log.")
-    st.link_button("Open Fulfilment Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
     print("Prodigi Shopify fetch skipped on initial load")
     print("Prodigi full order snapshot skipped on initial load")
 
@@ -4847,7 +4850,7 @@ def render_prodigi_page():
 
     _prodigi_prepare_entry_state(finder=prodigi_find_order_rows_from_cache)
 
-    search_columns = st.columns([3.2, 1])
+    search_columns = st.columns([3.2, 1], vertical_alignment="bottom")
     search_value = search_columns[0].text_input(
         "Enter Shopify Order #",
         placeholder="#",
@@ -5164,12 +5167,14 @@ def render_prodigi_page():
     st.session_state.setdefault(PRODIGI_DISPATCH_SEARCH_QUERY_KEY, "")
     if hasattr(st, "form") and hasattr(st, "form_submit_button"):
         with st.form("prodigi-dispatch-log-search-form", clear_on_submit=False):
-            log_search = st.text_input(
+            search_field, search_action = st.columns([3.2, 1], vertical_alignment="bottom")
+            log_search = search_field.text_input(
                 "Search dispatch log",
                 placeholder="Order, customer, product, edition, notes",
                 key="prodigi-dispatch-log-search",
             )
-            log_search_submitted = st.form_submit_button("Search", use_container_width=False)
+            with search_action:
+                log_search_submitted = st.form_submit_button("Search", use_container_width=True)
     else:
         log_search = st.text_input(
             "Search dispatch log",
@@ -9348,6 +9353,7 @@ def render_supabase_certificates_page():
 
 
 def render_webhook_events_page():
+    inject_compact_page(st)
     st.title("Webhook Events")
     st.caption("Shopify webhook IDs and processing results. Duplicates are safely ignored.")
     if not supabase_backend.is_configured():
@@ -9363,6 +9369,7 @@ def render_webhook_events_page():
 
 
 def render_sync_runs_page():
+    inject_compact_page(st)
     st.title("Sync Runs")
     st.caption("Product and order sync history.")
     if not supabase_backend.is_configured():
@@ -9378,6 +9385,7 @@ def render_sync_runs_page():
 
 
 def render_app_errors_page():
+    inject_compact_page(st)
     st.title("App Errors")
     st.caption("Production-safe error log. Secrets are never stored here.")
     if not supabase_backend.is_configured():
@@ -9393,13 +9401,14 @@ def render_app_errors_page():
 
 
 def render_persistence_check_page():
+    inject_compact_page(st)
     st.title("Persistence Check")
     st.caption("Manual Supabase persistence check. Nothing runs until this page is opened or you press refresh.")
     if not supabase_backend.is_configured():
         st.warning("DATABASE_URL is missing. Supabase persistence is not connected.")
         return
 
-    if st.button("Refresh Persistence Check", type="primary", use_container_width=True):
+    if st.button("Refresh Persistence Check", type="primary", use_container_width=False):
         st.cache_data.clear()
 
     try:

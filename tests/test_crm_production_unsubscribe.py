@@ -119,6 +119,9 @@ class PersistenceTests(unittest.TestCase):
         self.writer.unsubscribe_only.side_effect=RuntimeError('offline')
         unsubscribe(self.store,self.cfg,self.token,self.writer)
         self.expire();self.writer.unsubscribe_only.side_effect=None
+        # Other suites leave synthetic pending opt-outs. Keep their backoff
+        # active so the bounded five-row worker selects this test's recipient.
+        self.store.q('UPDATE crm_suppressions SET shopify_sync_checked_at=now() WHERE recipient_hash<>%s',(self.hashed,))
         reconcile_pending(self.store,self.writer)
         self.assertFalse(self.cfg.enabled)
         self.assertEqual(self.state()['shopify_sync_state'],'SYNCED')

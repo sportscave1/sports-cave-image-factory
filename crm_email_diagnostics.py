@@ -48,10 +48,12 @@ def campaign_status(store,identity):
     return store.q("""SELECT
       (SELECT value FROM crm_runtime_state WHERE key='worker_health') AS worker,
       (SELECT value FROM crm_runtime_state WHERE key='campaign_schedule_health') AS schedule_health,
-      v.content->'document'->'send_timing' AS timing,
-      (SELECT jsonb_agg(z) FROM (SELECT value->>'timezone' AS timezone,count(*) AS recipients,
-        min((value->>'due_at')::timestamptz) AS due_at
-        FROM jsonb_each(COALESCE(v.content->'schedule','{}'::jsonb)) GROUP BY value->>'timezone') z) AS zones,
+      COALESCE(t.value->'timing',v.content->'document'->'send_timing') AS timing,
+      (SELECT jsonb_agg(z) FROM (SELECT
+        CASE WHEN t.value->'timing'->>'time_basis'='campaign_timezone' THEN t.value->'timing'->>'timezone'
+          ELSE v.content->'schedule'->s.recipient_hash->>'timezone' END AS timezone,
+        count(*) AS recipients,min(s.due_at) AS due_at FROM crm_marketing_sends s
+        WHERE s.campaign_id=c.id AND NOT s.test_send GROUP BY 1) z) AS zones,
       (SELECT count(*) FROM crm_marketing_sends WHERE campaign_id=c.id AND NOT test_send AND status='ACCEPTED'
         AND provider_email_id IS NOT NULL) AS accepted,
       (SELECT count(DISTINCT e.send_id) FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id
@@ -59,4 +61,5 @@ def campaign_status(store,identity):
       (SELECT count(DISTINCT e.send_id) FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id
         WHERE s.campaign_id=c.id AND NOT s.test_send AND e.event_type IN ('email.bounced','email.failed','email.suppressed','email.complained')) AS delivery_problems
       FROM crm_campaigns c JOIN crm_template_versions v ON v.template_id=c.template_id AND v.version=c.template_version
+      LEFT JOIN crm_runtime_state t ON t.key='campaign-timing:'||c.id::text
       WHERE c.id=%s""",(identity,),True)

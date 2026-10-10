@@ -12,6 +12,8 @@ from crm_flow_page import flow_page
 from tests.test_crm import ADMIN
 trigger=st.session_state.get('fixture_trigger','abandoned')
 flow=st.session_state.setdefault('fixture_flow',new_flow(trigger))
+if st.session_state.get('fixture_menu_open'):
+    st.session_state['flow-step-'+flow['emails'][0]['step_id']+'-menu']=True
 flow.update(reentry_days=st.session_state.get('fixture_cooldown',7),exit_on_purchase=True,rules=[{'field':'market','condition':'is','value':'AU'}])
 row={'id':'fixture','name':'Abandoned Checkout - Wall Preview 1','status':'DRAFT','trigger_type':trigger,'config':{'draft':flow}}
 before=deepcopy(row)
@@ -27,6 +29,12 @@ st.session_state['original']=before
 """
 
 class FlowSettingsRemovalTests(unittest.TestCase):
+    def open_menu(self,app):
+        # AppTest does not expose tracked popover state as an input element.
+        # Hold the explicitly opened state through form submission; actual
+        # Chrome/Edge tests exercise the native menu button and close behavior.
+        app.session_state['fixture_menu_open']=True
+        app.run();self.assertFalse(app.exception)
     def app(self,trigger='abandoned',cooldown=7):
         app=AppTest.from_string(SCRIPT)
         app.session_state['fixture_trigger']=trigger
@@ -50,7 +58,10 @@ class FlowSettingsRemovalTests(unittest.TestCase):
                 self.assertNotIn('Flow Settings',[e.value for e in app.subheader])
                 self.assertIn('+ Add Email',labels)
                 self.assertIn('Edit Email',labels)
-                self.assertIn('Enable this email',labels)
+                self.assertNotIn('Enable this email',labels)
+                self.open_menu(app)
+                self.assertIn('Enable this email',[e.label for e in app.checkbox])
+                self.assertEqual(app.session_state['original'],original)
 
     def test_add_email_preserves_flow_configuration_and_existing_sequence(self):
         app=self.app();original=deepcopy(app.session_state['original']['config']['draft'])
@@ -63,6 +74,7 @@ class FlowSettingsRemovalTests(unittest.TestCase):
 
     def test_step_delay_and_enabled_controls_preserve_flow_settings(self):
         app=self.app();original=deepcopy(app.session_state['original']['config']['draft'])
+        self.open_menu(app)
         app.number_input[0].set_value(12)
         next(s for s in app.selectbox if s.label=='Unit').select('Hours')
         next(c for c in app.checkbox if c.label=='Enable this email').uncheck()

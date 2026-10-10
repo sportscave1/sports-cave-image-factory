@@ -348,6 +348,10 @@ def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
     editor=st.session_state['campaign_editor'];doc=editor['document'];c=doc['content']
     with stage('Campaigns','selected_delivery'):
         delivery=drafts.q('SELECT * FROM crm_campaigns WHERE id=%s',(editor['id'],),True) if available and editor.get('id') else None
+        if not delivery and available and editor.get('id'):
+            from crm_campaign_preparation import lookup
+            accepted=lookup(drafts,actions.user,editor['id'])
+            if accepted:delivery={**accepted,'name':editor['name']}
     if delivery:
         # Frozen preview bypasses all authoring/autosave widgets and recovery writes.
         from crm_campaign_progress_ui import operational_view

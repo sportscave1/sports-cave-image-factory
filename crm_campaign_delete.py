@@ -3,7 +3,8 @@ from crm_navigation import require
 
 VISIBLE = "NOT EXISTS(SELECT 1 FROM crm_campaign_history h WHERE h.campaign_id=d.id AND h.action='campaign_deleted')"
 # Used in the bounded listing and rechecked under the same draft/queue locks.
-PROTECTED = """EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=d.id
+PROTECTED = """EXISTS(SELECT 1 FROM crm_campaign_preparation WHERE campaign_id=d.id)
+ OR EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=d.id
  AND (s.status IN ('ACCEPTED','SUBMITTING','UNCERTAIN','CLAIMED') OR s.provider_email_id IS NOT NULL
  OR EXISTS(SELECT 1 FROM crm_delivery_events e WHERE e.send_id=s.id OR e.provider_id=s.provider_email_id)))
  OR EXISTS(SELECT 1 FROM crm_order_attribution a WHERE a.campaign_id=d.id)

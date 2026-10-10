@@ -6,7 +6,7 @@ import logging
 import uuid
 import streamlit as st
 import os_accounts
-from crm_campaign_send import send_test, review, queue_campaign, OFF
+from crm_campaign_send import send_test, review, OFF
 from crm_resend_marketing import DeliveryError, get_resend_marketing_config_status
 from crm_store import StoreUnavailable
 from crm_resend import MarketingDisabled
@@ -98,12 +98,12 @@ def send_control(shop,store,user,editor,key,cfg,available=True):
         review_dialog(shop,store,user,editor,key,cfg)
 
 
-@st.dialog('Review & send',width='large',on_dismiss=dismiss_send_status)
+@st.dialog('Review & send',width='small',on_dismiss=dismiss_send_status)
 def review_dialog(shop,store,user,editor,key,cfg=None):
     # This shell performs no draft/history/audience/provider reads.
     delivery=get_resend_marketing_config_status()
     st.html("""<style>
-    [role="dialog"]:has(.st-key-crm-send-review-summary){max-height:90vh;max-width:1000px;width:calc(100vw - 32px);overflow:auto}
+    [role="dialog"]:has(.st-key-crm-send-review-summary){max-height:90vh;max-width:560px;width:calc(100vw - 32px);overflow:auto}
     .st-key-crm-send-review-summary [data-testid="stVerticalBlock"],
     .st-key-crm-send-review-final [data-testid="stVerticalBlock"]{gap:6px}
     .st-key-crm-send-review-summary p,.st-key-crm-send-review-final p{margin-bottom:2px}
@@ -121,17 +121,15 @@ def review_dialog(shop,store,user,editor,key,cfg=None):
 def _review_summary(editor,key,delivery,cfg):
     doc=editor['document']
     with st.container(key='crm-send-review-summary'):
-        summary,preview=st.columns([42,58],gap='small')
+        show_preview=st.checkbox('Email preview',key=key+'review_show_preview')
+        if show_preview:summary,preview=st.columns([42,58],gap='small')
+        else:summary=st.container();preview=None
         summary.write('**Campaign**  '+editor['name'])
         summary.write('**Subject**  '+(doc['content']['subject'] or 'Missing'))
         summary.caption('From: '+(delivery['sender'] or 'Not configured'))
         summary.caption('Reply-to: '+(delivery['reply_to'] or 'Not configured'))
         from crm_campaign_markets import MARKET_LABELS
         summary.caption('Segment: '+MARKET_LABELS[doc['market']])
-        if (doc.get('counts') or {}).get('eligible') is not None:
-            summary.caption(str(doc['counts']['eligible'])+' recipients · last known',help='The final recipient count is verified below before sending.')
-        from crm_tracking import send_identity
-        if editor.get('id'):summary.caption('Tracking · ON',help='Tracking ID: '+send_identity(editor['id']))
         cached=st.session_state.get(key+'size_cache')
         if cached:
             from crm_email_size import analyze_rendered_email,size_line
@@ -140,11 +138,10 @@ def _review_summary(editor,key,delivery,cfg):
             if cached.get('token')==token:
                 message=cached['message']
                 summary.caption(size_line(analyze_rendered_email(message['html'],message['text'])))
-        with preview:
-            from crm_preview_cache import preview as render_preview
-            if cfg is not None:st.iframe(render_preview(st.session_state,doc,st.session_state.get(key+'review_preview_settings',cfg))['html'],height=240)
-        timing=doc.get('send_timing',{'mode':'now'})
-        summary.caption('Delivery: '+('Scheduled · '+timing['date']+' · '+timing['time']+' recipient local time' if timing['mode']=='schedule' else 'Send now'))
+        if preview is not None:
+            with preview:
+                from crm_preview_cache import preview as render_preview
+                if cfg is not None:st.iframe(render_preview(st.session_state,doc,st.session_state.get(key+'review_preview_settings',cfg))['html'],height=240)
 
 
 
@@ -185,6 +182,16 @@ def _accepted_navigation(receipt,editor):
 
 
 def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cfg,body):
+    retry_requested=st.session_state.pop(key+'acceptance_retry',False)
+    if st.session_state.get(key+'acceptance_uncertain'):
+        from crm_campaign_preparation import lookup
+        try:known=lookup(store,user,editor['id'])
+        except Exception:
+            st.warning('Acceptance status unavailable. No replacement operation will be created.')
+            if st.button('Check acceptance',key=key+'check_acceptance'):st.rerun(scope='fragment')
+            return
+        st.session_state.pop(key+'acceptance_uncertain',None)
+        if known:_accepted_navigation(known,editor);return
     receipt=st.session_state.get(key+'queued_receipt')
     if receipt:
         _accepted_navigation(receipt,editor)
@@ -224,6 +231,8 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
                 st.rerun(scope='fragment')
         elif result:
             counts=result['counts']
+            from crm_campaign_schedule import summary as timing_summary
+            st.caption('Delivery: '+timing_summary(result.get('document',editor['document']).get('send_timing',{'mode':'now'}),result.get('schedule')))
             st.write(str(counts['eligible'])+' recipients · '+str(sum(counts['excluded'].values()))+' excluded')
             if counts['excluded']:
                 st.caption('Exclusions',help=' · '.join(str(n)+' '+reason.replace('_',' ') for reason,n in sorted(counts['excluded'].items())))
@@ -264,17 +273,40 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
     final_count=result['counts']['eligible'] if result else None
     scheduled=editor['document'].get('send_timing',{}).get('mode')=='schedule'
     action=('Schedule for ' if scheduled else 'Send to ')+str(final_count)+' recipients' if final_count is not None else ('Schedule' if scheduled else 'Send now')
-    with b:action_slot=st.empty()
-    if action_slot.button(action,key=key+'confirm_send',disabled=not ready or bool(st.session_state.get(key+'queue_busy')),type='primary') and ready:
+    with b,st.container(key='crm-review-submit'):action_slot=st.empty()
+    clicked=action_slot.button(action,key=key+'confirm_send',disabled=not ready or bool(st.session_state.get(key+'queue_busy')),type='primary')
+    # Immediate native feedback; durable uniqueness remains exclusively server
+    # owned. Preserve the real label and accessibility rather than disguising it.
+    st.html('''<script>/* '''+uuid.uuid4().hex+''' */(()=>{
+      const b=document.querySelector('[role="dialog"] .st-key-crm-review-submit button');
+      if(!b)return;
+      b.disabled='''+('false' if ready and not st.session_state.get(key+'queue_busy') else 'true')+''';
+      b.removeAttribute('aria-busy');b.style.opacity='';
+      if(b.dataset.acceptFeedback)return;b.dataset.acceptFeedback='true';
+      b.addEventListener('click',()=>queueMicrotask(()=>{
+        b.disabled=true;b.setAttribute('aria-busy','true');b.style.opacity='.65';
+      }));
+    })();</script>''',unsafe_allow_javascript=True)
+    if (clicked or retry_requested) and ready:
         operation=st.session_state.setdefault(key+'production_operation',str(uuid.uuid4()))
         st.session_state[key+'queue_busy']=True
-        action_slot.button('Preparing campaign…',disabled=True,key=key+'preparing_send')
+        action_slot.button('Accepting campaign…',disabled=True,key=key+'preparing_send')
         try:
-            sent=queue_campaign(shop,store,user,editor,operation,snapshot_id=result['snapshot_id'])
+            from crm_campaign_preparation import accept,lookup
+            sent=accept(store,user,editor,operation,snapshot_id=result['snapshot_id'],confirmed=True)
         except Exception as exc:
-            st.error(safe_error(exc))
-            if st.button('Retry preparing campaign',key=key+'queue_retry'):st.rerun(scope='fragment')
-            return
+            # A lost commit response must resolve against durable identity first.
+            try:sent=lookup(store,user,editor['id'])
+            except Exception:
+                st.session_state[key+'acceptance_uncertain']=True
+                st.warning('Acceptance status unavailable. Open Campaigns Home to check this campaign before retrying.')
+                return
+            if not sent:
+                st.error('Campaign was not accepted. '+safe_error(exc))
+                if not isinstance(exc,(ValueError,PermissionError)) and st.button('Retry acceptance',key=key+'retry_acceptance'):
+                    st.session_state[key+'acceptance_retry']=True
+                    st.rerun(scope='fragment')
+                return
         finally:st.session_state[key+'queue_busy']=False
         # Nothing below owns delivery; the receipt exists only after commit.
         job.closed=True

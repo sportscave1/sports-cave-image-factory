@@ -28,6 +28,10 @@ STYLE='''<style>
 .st-key-flow-workspace .st-key-automation-toolbar button{min-height:32px!important;height:32px!important;border-radius:4px!important}
 .st-key-flow-workspace .automation-title,.st-key-flow-workspace .automation-current{height:32px}
 .st-key-flow-step-metrics-refresh{display:none!important}
+.st-key-flow-analytics-refresh{display:none!important}
+.st-key-flow-workspace{gap:6px!important}
+[data-testid="stMainBlockContainer"]:has(.st-key-flow-workspace){padding-top:calc(var(--sc-topbar-height,64px) + 8px)!important}
+.st-key-crm-workspace:has(.st-key-flow-workspace),.st-key-automation-flow-route:has(.st-key-flow-workspace){gap:6px!important}
 .st-key-flow-workspace [data-testid="stExpander"] details{border-radius:4px!important}
 .st-key-flow-workspace [data-testid="stExpander"] summary{min-height:32px;padding:4px 8px;font-size:13px}
 .sc-flow-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:0;padding:0!important}
@@ -97,23 +101,25 @@ def refresh_toolbar():
     if st.session_state.pop('flow-toolbar-dirty',False):refresh_control('toolbar-refresh')
 
 
-@st.fragment
+@st.fragment(run_every=180)
 def analytics_controls(store,identity):
+    from time import monotonic
     key='auto-analytics-period-'+str(identity)
     previous=st.session_state.get(key+'-applied','All time')
-    with st.container(horizontal=True,vertical_alignment='center'):
-        with st.container(width=200):period=st.selectbox('Date range',list(PERIODS),index=list(PERIODS).index(previous),key=key,label_visibility='collapsed')
-        refresh=st.button('Refresh analytics',key='flow-analytics-refresh')
+    period=st.session_state.get(key,'All time')
+    refresh=st.button('Revalidate metrics',key='flow-analytics-refresh')
     if refresh:refresh_reads(store,identity,{'flow-summary','analytics-steps'})
     summary(store,identity,period)
     st.session_state[key+'-applied']=period
-    if refresh or previous!=period:refresh_control('flow-step-metrics-refresh')
+    elapsed=monotonic()-st.session_state.get(key+'-fresh-at',monotonic())
+    st.session_state[key+'-fresh-at']=monotonic()
+    if refresh or previous!=period or elapsed>=175:refresh_control('flow-step-metrics-refresh')
 
 def open_email(sid):
     from crm_campaign_recovery import flush_current
     if flush_current(force=True):
-        st.session_state.update(automation_step=sid,automation_composing=True,flow_return_step=sid)
-        st.session_state.pop('automation_editor',None);st.rerun(scope='app')
+        from crm_automation_ui import request_email
+        request_email(sid);st.rerun(scope='app')
 
 def commit(store,user,row,draft):
     from crm_store import StoreUnavailable
@@ -165,7 +171,8 @@ def step_performance(store,identity,slots,detail_slots):
         m=metrics.get(sid,{k:0 for k in ('sent','opened','clicked','orders','delivered','queued','bounced','failed','skipped')})
         fields=[('Sent',m['sent']),('Opens',rate(m['opened'],m['sent'])),('Clicks',rate(m['clicked'],m['sent'])),('Sales',m['orders']),('Orders',m['orders'])]
         slot.html('<div class="sc-flow-metrics" data-period="'+escape(period,quote=True)+'" data-phase="'+escape(phase,quote=True)+'">'+''.join('<span>'+label+' <b>'+escape(str(value) if values is not None else '—')+'</b></span>' for label,value in fields)+'</div>')
-        detail_slots[sid].html('<small>'+escape(' · '.join(label+' '+(str(m[key]) if values is not None else '—') for label,key in [('Delivered','delivered'),('Queued','queued'),('Failed','failed'),('Skipped','skipped'),('Bounced','bounced')]))+'</small>')
+        if sid in detail_slots:
+            detail_slots[sid].html('<small>'+escape(' · '.join(label+' '+(str(m[key]) if values is not None else '—') for label,key in [('Delivered','delivered'),('Queued','queued'),('Failed','failed'),('Skipped','skipped'),('Bounced','bounced')]))+'</small>')
     if phase in ('LOADING','REFRESHING'):arm('flow-steps',1)
     elif phase in ('ERROR','TIMED_OUT'):
         st.caption('Step analytics unavailable.')
@@ -193,18 +200,16 @@ def sequence(shop,store,user,identity,period):
                 name=s.get('name') or 'Email '+str(i+1);subject=content.get('subject') or 'Subject not configured';preheader=content.get('preheader') or ''
                 body=snippet(s['document'])
                 title='Email '+str(i+1)+((' · '+name) if name!='Email '+str(i+1) else '')
-                published=next((p for p in row['config'].get('published_flow',{}).get('emails',[]) if p['step_id']==sid),None)
-                if published and published.get('document')!=s['document']:
-                    title+=' · Draft content (thumbnail: published)'
                 copy=''.join('<p'+(' class="sc-flow-summary"' if n else '')+' title="'+escape(text,quote=True)+'"><small>'+escape(text)+'</small></p>' for n,text in enumerate((preheader,body)) if text)
                 st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+' · '+('Enabled' if s.get('enabled',True) else 'Disabled')+'</small></div>')
                 slots[sid]=st.empty()
             with st.container(width=130):
                 if st.button('Edit Email',key=prefix+'edit'):open_email(sid)
-                with st.popover('⋮',help='Email step settings',key=prefix+'menu'):
-                    if status(row)!='ARCHIVED':step_settings(store,user,row,s,i,prefix)
-                    detail_slots[sid]=st.empty()
-                    st.caption('Per-email unsubscribe attribution is unavailable in the current ledger.')
+                with st.popover('⋮',help='Email step settings',key=prefix+'menu',on_change='rerun') as menu:
+                    if menu.open:
+                        if status(row)!='ARCHIVED':step_settings(store,user,row,s,i,prefix)
+                        detail_slots[sid]=st.empty()
+                        st.caption('Per-email unsubscribe attribution is unavailable in the current ledger.')
     if status(row)!='ARCHIVED' and st.button('+ Add Email',key='flow-add-'+str(identity)):
         draft=deepcopy(flow);draft['emails'].append(email_step(delay_seconds=86400));commit(store,user,row,draft)
     step_performance(store,identity,slots,detail_slots)
@@ -212,7 +217,7 @@ def sequence(shop,store,user,identity,period):
     if preview:
         from crm_thumbnail_cache import selection,source_loader
         _,label,live=selection(row,preview)
-        st.caption(label+' email preview - neutral sample data')
+        st.caption('Email preview · neutral sample data')
         from crm_html_workspace import flow_preview
         try:
             doc,cfg=source_loader(store,row,preview,live)()
@@ -226,7 +231,7 @@ def sequence(shop,store,user,identity,period):
 
 @st.fragment
 def recipient_details(store,user,identity):
-    with st.popover('Recipient timelines and scheduled deliveries',on_change='rerun',key='flow-recipients-'+str(identity)) as panel:
+    with st.expander('Recipient timelines and scheduled deliveries',on_change='rerun',key='flow-recipients-'+str(identity)) as panel:
         if panel.open:
             from crm_flow_builder import activity as recipient_activity
             recipient_activity(store,store.flow(identity),user,rerun_scope='fragment')
@@ -272,7 +277,7 @@ def checkouts(shop,store,user,row):
             and st.session_state.get(slot+'-metrics-receipt')!=signature):
         st.session_state[slot+'-metrics-receipt']=signature
         refresh_control('flow-analytics-refresh')
-    if st.session_state.get('automation-analytics-pending') or st.session_state.get('checkout-enrollment-pending'):arm('flow-checkouts',1)
+    if panel.open and (st.session_state.get('automation-analytics-pending') or st.session_state.get('checkout-enrollment-pending')):arm('flow-checkouts',1)
 
 def flow_page(shop,store,user,row):
     st.html(STYLE)
@@ -294,6 +299,8 @@ def flow_page(shop,store,user,row):
         if error:st.warning(error)
         analytics_controls(store,row['id'])
         sequence(shop,store,user,row['id'],'All time')
+        recipient_details(store,user,row['id'])
+        if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
     from crm_flow_thumbnail import SCRIPT
     st.html('<span hidden data-flow-script="true"></span>'+SCRIPT,unsafe_allow_javascript=True)
     anchor=st.session_state.pop('flow_return_step',None)

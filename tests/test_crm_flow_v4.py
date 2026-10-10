@@ -82,16 +82,17 @@ class FlowV4Tests(TestCase):
                     self.assertEqual(label,'LIVE v10');source_loader(store,row,s,live)()
                     store.render_settings.assert_not_called()
 
-    def test_main_page_has_no_operational_controls_and_admin_route_is_gated(self):
+    def test_main_page_restores_operational_controls_and_admin_route_is_gated(self):
         import crm_flow_page as page
         source=inspect.getsource(page.flow_page)
         main=source[source.index("with st.container(key='flow-workspace'):"):]
-        self.assertNotIn('recipient_details(',main);self.assertNotIn('checkouts(',main)
+        self.assertIn('recipient_details(',main);self.assertIn('checkouts(',main)
+        self.assertLess(main.index('sequence('),main.index('recipient_details('))
         self.assertIn('os_accounts.is_admin(user)',source)
         import crm_automation_toolbar as toolbar
         code=Path(toolbar.__file__).read_text(encoding="utf8")
         self.assertIn('Open operational diagnostics',code)
-        self.assertIn('if os_accounts.is_admin(user):',code)
+        self.assertIn('if not flow_view and os_accounts.is_admin(user):',code)
 
     def test_no_timer_based_dom_scanning(self):
         from crm_flow_thumbnail import SCRIPT

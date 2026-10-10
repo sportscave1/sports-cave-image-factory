@@ -107,7 +107,7 @@ def resolve(state, store, key, future, *, fields=None):
         if victim is None:break
         starts.pop(victim,None)
         state.get('automation_read_terminal',{}).pop(victim,None)
-    if key[0] in HOME_GROUPS and (future is None or not future.done()) and monotonic()-started>=READ_DEADLINE:
+    if (future is None or not future.done()) and monotonic()-started>=READ_DEADLINE:
         state.setdefault('automation_read_terminal',{})[identity]='TIMED_OUT'
         if future is not None:future.cancel()
         lifecycle('READ_TIMEOUT',key,future,elapsed_ms=round((monotonic()-started)*1000))

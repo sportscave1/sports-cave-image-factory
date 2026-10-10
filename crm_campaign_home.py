@@ -54,12 +54,12 @@ def return_home():
 
 STYLE = '''<style>
  [data-testid="stMainBlockContainer"]:has(.st-key-crm-campaign-home){max-width:none;padding:calc(var(--sc-topbar-height,64px) + 20px) 24px 20px!important}
- .st-key-crm-campaign-home{color:#161820;margin-top:-32px;font-family:Arial,sans-serif}
- .st-key-crm-campaign-home h1{font-size:30px;margin:0;line-height:1.2}
+ .st-key-crm-campaign-home{color:#161820;margin-top:-32px;font-family:"Segoe UI",Arial,sans-serif}
+ .st-key-crm-campaign-home h1{font-size:24px;margin:0;line-height:1.2}
  .st-key-crm-campaign-home p{margin-bottom:3px}
  .st-key-crm-campaign-home [data-testid="stVerticalBlock"]{gap:8px}
  .sc-home-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
- .sc-home-kpi{display:flex;align-items:center;gap:10px;border:1px solid #e9e6e0;border-radius:12px;padding:14px 12px;background:#fff;min-width:0;min-height:92px;box-sizing:border-box}
+ .sc-home-kpi{display:flex;align-items:center;gap:10px;border:1px solid #e9e6e0;border-radius:12px;padding:10px 12px;background:#fff;min-width:0;min-height:72px;box-sizing:border-box}
  .sc-home-icon{display:grid;place-items:center;flex:none;border-radius:9px;width:36px;height:36px;color:#947021;background:#faf3df}
  .sc-home-icon img{width:21px;height:21px}
  .sc-home-icon.green{color:#218148;background:#e9f6ee}.sc-home-icon.blue{color:#2380b5;background:#eaf4fd}
@@ -74,9 +74,9 @@ STYLE = '''<style>
  .st-key-crm-home-tabs button:focus-visible{outline:2px solid #b99232!important;outline-offset:2px}
  .st-key-crm-home-controls button p{white-space:nowrap}
  .st-key-crm-home-controls [data-baseweb="input"]:focus-within{border-color:#c7a13f!important;box-shadow:0 0 0 1px #c7a13f!important}
- .sc-home-table-head,.sc-home-row{display:grid;grid-template-columns:minmax(180px,2.8fr) 42px 82px repeat(4,minmax(45px,.65fr)) 40px 75px;gap:7px;align-items:center;min-width:0}
+ .sc-home-table-head,.sc-home-row{display:grid;grid-template-columns:minmax(180px,2.8fr) 42px 82px repeat(4,minmax(45px,.65fr)) 40px minmax(125px,1.3fr);gap:7px;align-items:center;min-width:0}
  .sc-home-table-head{font-size:10px;color:#818178;padding:10px 0;border-bottom:1px solid #eee}
- .sc-home-row{font-size:12px;padding:12px 0;border-bottom:1px solid #eee;font-variant-numeric:tabular-nums}
+ .sc-home-row{font-size:12px;padding:8px 0;border-bottom:1px solid #eee;font-variant-numeric:tabular-nums}
  .sc-home-row:hover{background:#fcfbf7}.sc-home-row>div{min-width:0;overflow-wrap:anywhere}
  .sc-col-recipients,.sc-col-delivered,.sc-col-opened,.sc-col-clicked,.sc-col-orders{text-align:right}
  .sc-home-row small{display:block;color:#777;font-size:11px;margin-top:3px}
@@ -90,26 +90,33 @@ STYLE = '''<style>
  .sc-home-pill.stalled,.sc-home-pill.failed,.sc-home-pill.needs{background:#fff4e7;color:#8a5021}
  .sc-home-send-bar{height:4px;background:#eee9df;margin-top:4px;border-radius:2px;overflow:hidden}.sc-home-send-bar span{display:block;height:100%;background:#bc9639}
  .st-key-crm-home-table [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;gap:8px}
- .st-key-crm-home-table [data-testid="stColumn"]{min-width:0}
+ .st-key-crm-home-table [data-testid="stColumn"]{min-width:0!important}
  .st-key-crm-home-table [data-testid="stColumn"]:last-child{flex:0 0 76px!important;width:76px!important}
  .st-key-crm-home-table [data-testid="stColumn"]:first-child{flex:1 1 0!important}
+ [data-testid="stMainBlockContainer"] .st-key-crm-home-table [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{min-width:0!important}
+ [data-testid="stMainBlockContainer"] .st-key-crm-home-table [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child{max-width:76px!important}
  .st-key-crm-home-list [data-testid="stPopover"] button{font-size:12px;padding:4px 8px;min-height:36px}
- .st-key-crm-home-table [data-testid="stPopover"] button p{font-size:0}
- .st-key-crm-home-table [data-testid="stPopover"] button p::after{content:"⋯";font-size:18px}
+ .st-key-crm-home-table [data-testid="stPopover"] button p{font-size:18px}
  .st-key-crm-home-table [data-testid="stPopover"] button svg{display:none}
  .st-key-crm-home-table [class*="st-key-home_delete_"] button{min-width:36px;min-height:40px;padding:4px!important}
  .st-key-crm-home-table [class*="st-key-home_delete_"] button p{font-size:0}
+ [data-testid="stPopoverBody"]:has([class*="st-key-home-actions-"]){width:220px!important;min-width:180px!important;max-width:calc(100vw - 24px)!important;padding:8px!important;box-sizing:border-box;font-family:"Segoe UI",Arial,sans-serif}
+ [data-testid="stPopoverBody"] [class*="st-key-home-actions-"] button{background:transparent!important;color:#242424!important;border:0!important;min-height:32px!important;justify-content:flex-start!important;padding:4px 10px!important;width:100%}
+ [data-testid="stPopoverBody"] [class*="st-key-home-actions-"] button:hover{background:#f4f1e9!important}
+ [class*="st-key-home-actions-"] [data-testid="stVerticalBlock"]{gap:2px!important}
  .sc-home-actions-label{font-size:8px;color:#818178;padding-top:10px;text-align:center}
  .sc-home-mobile-summary{display:none!important}
- @container(max-width:920px){.sc-home-table-head,.sc-home-row{grid-template-columns:minmax(180px,2.8fr) 42px 82px repeat(3,minmax(45px,.65fr)) 75px}.sc-col-opened,.sc-col-orders{display:none}}
- @container(max-width:720px){.sc-home-table-head,.sc-home-row{grid-template-columns:minmax(160px,2.8fr) 42px repeat(2,minmax(45px,.65fr)) 65px}.sc-col-updated,.sc-col-delivered{display:none}}
- @container(max-width:520px){.sc-home-table-head,.sc-home-row{grid-template-columns:minmax(0,1fr) 32px 58px;gap:5px}.sc-col-recipients,.sc-col-clicked{display:none}.sc-home-mobile-summary{display:block!important}.sc-home-thumb{width:40px;height:40px}.sc-home-identity{gap:6px}}
+ @container(max-width:920px){.sc-home-table-head,.sc-home-row{grid-template-columns:minmax(180px,2.8fr) 42px 82px repeat(3,minmax(45px,.65fr)) 125px}.sc-col-opened,.sc-col-orders{display:none}}
+ @container(max-width:720px){.sc-home-table-head,.sc-home-row{grid-template-columns:minmax(160px,2.8fr) 42px repeat(2,minmax(45px,.65fr)) 105px}.sc-col-updated,.sc-col-delivered{display:none}}
+ @container(max-width:520px){.sc-home-table-head,.sc-home-row{grid-template-columns:minmax(0,1fr) 32px;gap:5px}.sc-col-status{grid-column:1/-1}.sc-home-table-head .sc-col-status{display:none}.sc-col-recipients,.sc-col-clicked{display:none}.sc-home-mobile-summary{display:block!important}.sc-home-thumb{width:40px;height:40px}.sc-home-identity{gap:6px}}
  @media(max-width:1500px){.sc-home-kpi{gap:8px;padding:12px 10px}}
  @media(max-width:1200px){.sc-home-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
- @media(max-width:700px){.sc-home-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sc-home-kpi{padding:10px;gap:8px}
+ @media(max-width:700px){.sc-home-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.sc-home-kpi{padding:6px 8px;gap:6px;min-height:64px;border-radius:7px}
+ .sc-home-kpi>div:last-child{min-width:0}.sc-home-kpi strong{font-size:19px;line-height:1.2;min-height:23px}.sc-home-kpi small{font-size:10px;line-height:1.25}
+ .sc-home-icon{width:26px;height:26px;border-radius:6px}.sc-home-icon img{width:17px;height:17px}
  .st-key-crm-home-controls [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
  .st-key-crm-home-controls [data-testid="stColumn"]:first-child{flex:1 1 100%!important;width:100%!important}
- .st-key-crm-home-controls [data-testid="stColumn"]{flex:1 1 40%!important;min-width:0}
+ [data-testid="stMainBlockContainer"] .st-key-crm-home-controls [data-testid="stColumn"]{flex:1 1 40%!important;min-width:0!important}
  .st-key-crm-campaign-home h1{font-size:25px}
  [data-testid="stMainBlockContainer"]:has(.st-key-crm-campaign-home){padding-left:12px!important;padding-right:12px!important}}
  </style>'''
@@ -158,17 +165,37 @@ def row_html(row):
     progress=row.get('progress')
     if progress:
         detail=' · '.join(str(progress[f])+' '+f for f in ('submitted','skipped','failed','held'))
-        if progress.get('stalled'):status='Stalled'
-        elif progress['held']:status='Needs attention'
+        if row['status']=='FAILED':status='Needs attention'
+        elif progress.get('stalled'):status='Stalled'
+        elif progress['held'] or (progress['attention'] and row['status']=='SCHEDULED'):status='Needs attention'
         elif progress['complete'] and not progress['submitted']:status='Needs attention'
-        elif progress['complete'] and progress['failed']:status='Sent with issues'
-        elif row['status']=='SENDING' and not progress.get('worker_started_at') and not progress['processed']:status='Queued'
+        elif progress['complete'] and (progress['failed'] or progress['skipped']):status='Sent with issues'
+        elif row['status']=='SENDING' and not progress.get('started') and not progress.get('worker_started_at'):status='Queued'
         if row['status'] in ('SENDING','QUEUED','BUILDING'):
             submission='<small title="'+escape(detail,quote=True)+'">'+format(progress['processed'],',')+' / '+format(progress['total'],',')+'</small>'
             submission+='<div class="sc-home-send-bar" role="progressbar" aria-label="Campaign processing" aria-valuenow="'+str(progress['processed'])+'" aria-valuemin="0" aria-valuemax="'+str(progress['total'])+'"><span style="width:'+str(progress['percent']*100)+'%"></span></div>'
         else:submission='<small title="'+escape(detail,quote=True)+'">Needs attention</small>' if progress['attention'] else ''
+        if row['status']=='FAILED' and progress.get('preparation_error'):
+            from crm_campaign_preparation import failure_message
+            submission='<small>'+escape(failure_message(progress['preparation_error']))+'</small>'
+        elif row['status']=='PREPARING' and progress.get('preparation_error'):
+            submission='<small>Verification unavailable · retry pending</small>'
     if row['status']=='SCHEDULED' and (progress or {}).get('scheduled_at'):
-        submission='<small>'+escape(date(progress['scheduled_at']).strftime('%d %b %H:%M UTC'))+'</small>'
+        from crm_campaign_schedule import summary as timing_summary
+        timing=progress.get('timing') or {}
+        label=timing_summary(timing) if timing.get('mode')=='schedule' else date(progress['scheduled_at']).strftime('%d %b %H:%M UTC')
+        submission='<small>'+escape(label)+'</small>'
+        from crm_campaign_countdown import markup
+        submission+=markup(progress.get('next_due_at'),progress.get('server_now'))
+        from crm_campaign_countdown import local_markup
+        submission+=local_markup(progress.get('next_due_at'))
+        if timing.get('time_basis')!='campaign_timezone' and progress.get('latest_due_at'):
+            submission+='<small>Window ends · '+escape(date(progress['latest_due_at']).strftime('%d %b %H:%M UTC'))+'</small>'
+    elif row['status']=='SENDING' and progress and (progress.get('timing') or {}).get('mode')=='schedule' and progress.get('next_due_at'):
+        from crm_logic import now
+        if date(progress['next_due_at'])>now():
+            from crm_campaign_countdown import markup,local_markup
+            submission+='<small>'+format(progress['pending'],',')+' waiting for scheduled time</small>'+markup(progress['next_due_at'],progress.get('server_now'))+local_markup(progress['next_due_at'])
     cells=['<div class="sc-home-identity">'+thumbnail(row)+'<div><a href="'+escape(destination,quote=True)+'" target="_self"><strong>'+escape(row['name'])+'</strong></a><small>'+escape(row.get('subject') or '')+'</small><small class="sc-home-mobile-summary">'+escape(metric('delivered')+' delivered · '+metric('clicks')+' clicked')+'</small></div></div>',
       escape(row.get('market') or '—'),stamp.strftime('%d %b %Y')+'<small>'+stamp.strftime('%H:%M UTC')+'</small>' if stamp else '—',
       metric('recipients'),metric('delivered','delivery_rate'),metric('opens','open_rate'),metric('clicks','click_rate'),metric('orders'),
@@ -181,15 +208,20 @@ def actions(store,user,row):
     identity=str(row['id'])
     if row.get('deletable') and st.button('Delete campaign',icon=':material/delete:',help='Delete campaign',key='home_delete_'+identity):
         st.session_state['campaign_home_delete_id']=identity
-    with st.popover('Actions for '+row['name']):
+    with st.popover('⋯',help='Actions for '+row['name']), st.container(key='home-actions-'+identity):
         if st.button('View campaign' if row.get('delivery_status') else 'Edit',key='home_open_'+identity):request_open(identity)
+        if row.get('delivery_status',row.get('status'))=='SCHEDULED':
+            from crm_campaign_timing_ui import open_edit_schedule,open_send_now
+            locked=not row.get('progress') or row['progress'].get('started') or row['progress'].get('attention')
+            if st.button('Edit schedule',key='home_schedule_'+identity,disabled=bool(locked)):open_edit_schedule(store,user,row)
+            if st.button('Send now',key='home_send_now_'+identity,disabled=bool(locked)):open_send_now(store,user,row)
         if st.button('Duplicate',key='home_duplicate_'+identity):
             invalidate(st.session_state);open_editor(store.duplicate(user,identity));st.rerun()
         if row.get('delivery_status')=='SENT' and st.button('View results',key='home_results_'+identity):
             request_open(identity)
         if st.button('History',key='home_history_'+identity):st.session_state['campaign_revision_history_id']=identity
         if st.session_state.get('campaign_revision_history_id')==identity:st.dataframe(store.history(identity),hide_index=True, row_height=TABLE_ROW_HEIGHT)
-        if not row.get('delivery_status') or row['delivery_status']=='SENT':
+        if not row.get('delivery_status') or row['delivery_status'] in ('SENT','FAILED'):
             if st.button('Restore' if row['archived_at'] else 'Archive',key='home_archive_'+identity):
                 (store.restore if row['archived_at'] else store.archive)(user,identity,row['version']);invalidate(st.session_state);st.rerun(scope='fragment')
 def close_home_delete():
@@ -277,7 +309,7 @@ def campaign_table(store,user):
             with filter_col.popover('Filter',use_container_width=True,icon=':material/filter_list:'):
                 from crm_campaign_content import MARKETS
                 market=st.selectbox('Market',('All',*MARKETS),key='campaign_home_market')
-                status=st.selectbox('Status',('All','DRAFT','NEEDS_REVIEW','TEST_READY','BUILDING','SCHEDULED','SENDING','SENT','PAUSED','CANCELLED'),key='campaign_home_status')
+                status=st.selectbox('Status',('All','DRAFT','NEEDS_REVIEW','TEST_READY','PREPARING','BUILDING','SCHEDULED','SENDING','SENT','PAUSED','CANCELLED','FAILED'),key='campaign_home_status')
             sort=sort_col.selectbox('Sort',('Newest first','Oldest first'),label_visibility='collapsed',key='campaign_home_sort')
         filters=(tab,search,market,status,sort)
         if st.session_state.get('campaign_home_filters')!=filters:
@@ -288,10 +320,13 @@ def campaign_table(store,user):
         future=_job(st.session_state,store,key,lambda:rows(store,tab=tab,search=search,market=market,status=status,oldest=sort=='Oldest first',offset=offset))
         items,state=resolve(st.session_state,store,key,future)
         accepted=st.session_state.get('campaign_home_accepted')
-        if accepted and any(str(r['id'])==str(accepted['id']) for r in (items or [])):
-            st.session_state.pop('campaign_home_accepted',None)
-        elif accepted and filters==('All campaigns','','All','All','Newest first') and offset==0:
-            items=[accepted,*(items or [])]
+        if accepted:
+            authoritative=next((r for r in (items or []) if str(r['id'])==str(accepted['id']) and r.get('delivery_status')),None)
+            if authoritative:st.session_state.pop('campaign_home_accepted',None)
+            elif filters==('All campaigns','','All','All','Newest first') and offset==0:
+                # A last-good Draft row predates acceptance. Keep its durable
+                # receipt visible at the top until a submitted projection arrives.
+                items=[accepted,*(r for r in (items or []) if str(r['id'])!=str(accepted['id']))]
         from crm_campaign_home_progress import live_rows
         if items is not None:items=live_rows(st.session_state,store,items)
         st.session_state.setdefault('campaign_home_activity',{})['table']=state
@@ -307,6 +342,8 @@ def campaign_table(store,user):
                     with st.container(horizontal=True,gap='xxsmall'):
                         actions(store,user,row)
             if items is not None and not page:st.caption('No campaigns match these filters.')
+            from crm_campaign_countdown import arm
+            arm()
             if state=='ERROR':
                 st.caption('Campaign list temporarily unavailable · last resolved rows retained.')
                 if st.button('Retry list',key='home_retry_list'):

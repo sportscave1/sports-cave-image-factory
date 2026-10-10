@@ -50,10 +50,10 @@ if 'campaign_editor' not in st.session_state:
 store=Mock();store.q.return_value=[{'id':ID,'name':'Collector edition','status':'SENDING','counts':{'PENDING':4}}]
 def queue(*args,**kwargs):
  st.session_state['queue_calls']+=1
- st.session_state['operation']=args[4]
+ st.session_state['operation']=args[3]
  if st.session_state.get('queue_fail'):raise ValueError('Review again')
  return {'id':ID,'status':'SENDING','recipients':4,'already_started':False}
-with patch('crm_campaign_review.start_review',return_value=st.session_state['job']), patch('crm_campaign_send_ui.queue_campaign',side_effect=queue), patch('crm_preview_cache.preview',return_value={'html':'<p>Offline preview</p>'}), patch('crm_campaign_send_ui.get_resend_marketing_config_status',return_value={'marketing_enabled':True,'sender':'fixture','reply_to':'fixture'}),patch('requests.sessions.Session.request',side_effect=AssertionError('No HTTP')):
+with patch('crm_campaign_review.start_review',return_value=st.session_state['job']), patch('crm_campaign_preparation.accept',side_effect=queue), patch('crm_campaign_preparation.lookup',return_value=None), patch('crm_preview_cache.preview',return_value={'html':'<p>Offline preview</p>'}), patch('crm_campaign_send_ui.get_resend_marketing_config_status',return_value={'marketing_enabled':True,'sender':'fixture','reply_to':'fixture'}),patch('requests.sessions.Session.request',side_effect=AssertionError('No HTTP')):
  if st.session_state.get('campaign_view')=='CAMPAIGNS_HOME':
   st.caption('Campaigns Home')
  else:review_dialog(None,store,{},st.session_state['campaign_editor'],'fixture_',CFG)
@@ -71,7 +71,7 @@ class ProgressTests(unittest.TestCase):
             p=summarize(row(status,ACCEPTED=4));self.assertEqual(p['percent'],1);self.assertFalse(p['complete'])
         p=summarize(row('SENT',ACCEPTED=3,BLOCKED=1))
         self.assertEqual((p['processed'],p['total'],p['submitted'],p['skipped']),(4,4,3,1))
-        self.assertTrue(p['complete']);self.assertEqual(p['title'],'Campaign sent')
+        self.assertTrue(p['complete']);self.assertTrue(p['attention']);self.assertEqual(p['title'],'Campaign complete · needs attention')
 
     def test_failed_held_unknown_and_zero_are_safe(self):
         for counts in ({'UNCERTAIN':4},{'NEW_STATUS':4},{'FAILED':4}):
@@ -94,7 +94,8 @@ class ProgressTests(unittest.TestCase):
             self.assertEqual(read_progress(store,[ID,uuid.UUID(ID)])[ID]['pending'],4)
         store.q.assert_called_once();sql,args=store.q.call_args.args
         self.assertEqual(args,([ID],));self.assertIn('s.campaign_id=c.id',sql)
-        for field in ('shopify_customer_id','recipient_hash','provider_email_id','document','crm_delivery_events'):
+        self.assertIn("v.content->'document'->'send_timing'",sql)
+        for field in ('shopify_customer_id','recipient_hash','provider_email_id','crm_delivery_events','v.content AS','v.content,'):
             self.assertNotIn(field,sql)
         with self.assertRaises(ValueError):read_progress(store,['not-a-uuid'])
 
@@ -123,11 +124,13 @@ class ProgressTests(unittest.TestCase):
         editor={'name':'Campaign B','document':{'subject':'Unsaved B'}}
         app.session_state['campaign_editor']=deepcopy(editor)
         for status,counts,expected in (
-          ('SENDING',{'PENDING':4},'0 / 4 processed'),
-          ('SENDING',{'PENDING':2,'ACCEPTED':2},'2 / 4 processed'),
-          ('SENT',{'ACCEPTED':3,'BLOCKED':1},'4 / 4 processed')):
+          ('SENDING',{'PENDING':4},'Queued'),
+          ('SENDING',{'PENDING':2,'ACCEPTED':2},'2 / 4 recipients processed'),
+          ('SENT',{'ACCEPTED':3,'BLOCKED':1},'4 / 4 recipients processed')):
             app.session_state['row']=row(status,**counts);app.run();self.assertFalse(app.exception)
-            self.assertIn(expected,[c.value for c in app.caption]);self.assertEqual(app.session_state['query_count'],1)
+            if expected=='Queued':self.assertIn('**Queued**',[m.value for m in app.markdown])
+            else:self.assertIn(expected,[c.value for c in app.caption])
+            self.assertEqual(app.session_state['query_count'],1)
             self.assertEqual(app.session_state['campaign_editor'],editor)
         self.assertNotIn('Minimise',[b.label for b in app.button]);self.assertNotIn('Close',[b.label for b in app.button])
         self.assertTrue(any('3 submitted · 1 skipped · 0 failed · 0 held'==c.value for c in app.caption))
@@ -262,3 +265,16 @@ class SQLProgressTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class ScheduledPollingTests(unittest.TestCase):
+    def test_future_recipient_window_idles_until_due_or_claimed(self):
+        from datetime import timedelta
+        from crm_logic import now
+        from crm_campaign_progress import polling_seconds,IDLE_SECONDS,POLL_SECONDS
+        item=row(PENDING=2);item['next_due_at']=now()+timedelta(hours=2)
+        self.assertEqual(polling_seconds(item),IDLE_SECONDS)
+        item['counts']['CLAIMED']=1
+        self.assertEqual(polling_seconds(item),POLL_SECONDS)
+        item['counts']['CLAIMED']=0;item['next_due_at']=now()
+        self.assertEqual(polling_seconds(item),POLL_SECONDS)

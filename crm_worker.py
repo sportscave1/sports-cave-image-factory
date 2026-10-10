@@ -5,6 +5,13 @@ import signal
 import threading
 import uuid
 
+def _prepare_campaign(store,shop,*,env=None):
+    # General worker storage does not expose draft/render/history operations.
+    # Reuse its connection factory through the existing campaign repository.
+    from crm_campaign_store import CampaignStore
+    from crm_campaign_preparation import tick
+    return tick(CampaignStore(store.connect),shop,env=env)
+
 def main(argv=None):
     logging.basicConfig(level=logging.WARNING,format='%(asctime)s %(levelname)s %(message)s')
     # Enable only the safe batch counters/timings, not third-party debug output.
@@ -33,6 +40,21 @@ def main(argv=None):
     # The existing publication queue must not wait behind external maintenance.
     # --once retains the synchronous Engine tick for administrative/test callers.
     publication_thread=None
+    # External verification is isolated from delivery ticks. The thread owns no
+    # durable state: DB leases and fenced publication recover across processes.
+    def preparation_run():
+        preparation_shop=Shopify()
+        while not stop.is_set():
+            try:worked=_prepare_campaign(store,preparation_shop)
+            except Exception as exc:
+                worked=False
+                logging.getLogger(__name__).warning('campaign_preparation_cycle_failed error_class=%s',type(exc).__name__)
+            stop.wait(0.2 if worked else 2)
+    preparation_thread=None
+    if args.once:_prepare_campaign(store,Shopify())
+    else:
+        preparation_thread=threading.Thread(target=preparation_run,name='campaign-preparation-poll',daemon=True)
+        preparation_thread.start()
     if not args.once:
         from crm_automation_publication import run as publication_run
         from crm_automation_store import AutomationStore
@@ -62,10 +84,15 @@ def main(argv=None):
         except Exception as exc:logging.getLogger(__name__).warning('review_worker_cycle_failed type=%s',type(exc).__name__)
         try:engine.tick(owner)
         except Exception as exc:logging.getLogger(__name__).warning('crm_worker_cycle_failed type=%s',type(exc).__name__)
+        try:
+            from crm_flow_tests import tick as flow_test_tick
+            flow_test_tick(store)
+        except Exception as exc:logging.getLogger(__name__).warning('crm_flow_test_cycle_failed type=%s',type(exc).__name__)
         if args.once:break
         stop.wait(30)
     stop.set();enrollment_thread.join(timeout=6)
     if publication_thread:publication_thread.join(timeout=6)
+    if preparation_thread:preparation_thread.join(timeout=6)
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

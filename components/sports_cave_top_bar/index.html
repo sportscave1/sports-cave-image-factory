@@ -110,7 +110,8 @@
     }
     .sc-loading-only.sc-loading-only--compact { min-height: 44px; }
     @keyframes sc-loading-spin { to { transform: rotate(360deg); } }
-    body.sc-navigation-pending .sc-route-loading {
+    body.sc-navigation-pending .sc-route-loading,
+    button[data-sc-automation-pending="true"] {
       box-shadow: inset 3px 0 0 #b79243 !important;
       color: #8a6720 !important;
     }
@@ -1212,8 +1213,9 @@
       }
       doc.body.classList.remove("sc-navigation-pending", "sc-navigation-slow");
       root.removeAttribute("aria-busy");
-      doc.querySelectorAll(".sc-route-loading").forEach((element) => {
+      doc.querySelectorAll(".sc-route-loading, [data-sc-automation-pending]").forEach((element) => {
         element.classList.remove("sc-route-loading");
+        delete element.dataset.scAutomationPending;
         element.removeAttribute("aria-busy");
       });
       if (clearIntent) {
@@ -1417,8 +1419,15 @@
       root.dataset.lastHistoryRoute = routeKey;
     };
     const handleHistoryNavigation = () => {
-      const visibleRoute = new URL(parentWindow.location.href).searchParams.get("page") || "dashboard";
-      if (visibleRoute === state.config.currentRouteKey) {
+      const historyUrl = new URL(parentWindow.location.href);
+      const visibleRoute = historyUrl.searchParams.get("page") || "dashboard";
+      const automationMarker = doc.querySelector('[data-automation-route]');
+      const automationChanged = visibleRoute === 'crm_automations_manage' && automationMarker
+        && ((historyUrl.searchParams.get('automation') || '') !== automationMarker.dataset.automationRoute
+          || (historyUrl.searchParams.get('automation_email') || '') !== automationMarker.dataset.automationEmail
+          || (historyUrl.searchParams.get('automation') || '') !== doc.querySelector('.st-key-automation input')?.value
+          || (historyUrl.searchParams.get('automation_email') || '') !== doc.querySelector('.st-key-automation_email input')?.value);
+      if (visibleRoute === state.config.currentRouteKey && !automationChanged) {
         state.historyDuplicateSkips = 0;
         root.dataset.historyDuplicateRoute = visibleRoute;
         clearNavigationPending({clearIntent: true});
@@ -1426,16 +1435,21 @@
       }
       if (
         state.historyRoutePending === visibleRoute
+        && !automationChanged
         && doc.body.classList.contains("sc-navigation-pending")
       ) return;
       state.historyDuplicateSkips = 0;
       state.historyRoutePending = visibleRoute;
-      beginNavigation(visibleRoute);
+      // A subview keeps the page epoch. Its native widget event replaces the
+      // CRM workspace; waiting for a new page epoch would trap the overlay.
+      if (automationChanged) clearNavigationPending({clearIntent: true});
+      else beginNavigation(visibleRoute);
       root.dataset.lastHistoryRoute = visibleRoute;
       root.dataset.historyTransactionRoute = visibleRoute;
       later(() => {
         // Rapid Back/Forward can supersede this event before the next task.
-        if (state.historyRoutePending !== visibleRoute) return;
+        if (state.historyRoutePending !== visibleRoute || parentWindow.location.href !== historyUrl.href) return;
+        if (automationChanged && parentWindow.scAutomationCommitRoute?.(historyUrl, false)) return;
         const routeButton = sidebarHistoryRouteButton(visibleRoute);
         root.dataset.historyRouteButtonFound = routeButton ? "true" : "false";
         if (routeButton) {
@@ -2975,6 +2989,10 @@
       const intendedRouteKey = sidebarButtonRouteKey(navigationButton);
       if (!intendedRouteKey) return;
       if (intendedRouteKey === state.config.currentRouteKey) {
+        if (intendedRouteKey === 'crm_automations_manage'
+          && navigationButton.closest('.st-key-sidebar-history-crm_automations_manage')
+          && (new URL(parentWindow.location.href).searchParams.get('automation') || '')
+            !== doc.querySelector('[data-automation-route]')?.dataset.automationRoute) return;
         // A parent on its overview is a disclosure control, not a redundant
         // destination click. Let Streamlit's fragment consume its toggle.
         if (navigationButton.closest('[class*="st-key-sidebar-disclosure-"]')) return;
@@ -2987,6 +3005,11 @@
       // loader mutates button classes/ARIA.  The next browser task still paints
       // pending feedback well inside the 100 ms contract, but cannot interfere
       // with React's accepted widget event or event-flush microtasks.
+      if (intendedRouteKey === 'crm_automations_manage') {
+        // Paint local feedback before the deferred overlay, preserving React's
+        // native event, widget identity and button classes.
+        navigationButton.dataset.scAutomationPending = 'true';
+      }
       const beginAcceptedSidebarNavigation = () => {
         if (!navigationButton.isConnected) return;
         if (sidebarButtonRouteKey(navigationButton) !== intendedRouteKey) return;

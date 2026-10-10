@@ -33,11 +33,11 @@ def invalidate_after_save(state,previous,updated):
 
 def counts(store):
     return store.q("""SELECT count(*) AS all_count,
-      count(*) FILTER(WHERE d.archived_at IS NULL AND c.status IS NULL) AS drafts,
-      count(*) FILTER(WHERE d.archived_at IS NULL AND c.status IS NOT NULL AND c.status<>'SENT') AS active,
+      count(*) FILTER(WHERE d.archived_at IS NULL AND c.status IS NULL AND p.campaign_id IS NULL) AS drafts,
+      count(*) FILTER(WHERE d.archived_at IS NULL AND (c.status IS NOT NULL OR p.campaign_id IS NOT NULL) AND c.status IS DISTINCT FROM 'SENT') AS active,
       count(*) FILTER(WHERE d.archived_at IS NULL AND c.status='SENT') AS sent,
       count(*) FILTER(WHERE d.archived_at IS NOT NULL) AS archived
-      FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id WHERE """+VISIBLE, one=True)
+      FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id LEFT JOIN crm_campaign_preparation p ON p.campaign_id=d.id WHERE """+VISIBLE, one=True)
 
 
 def delivery_summary(store, window):
@@ -107,11 +107,11 @@ def rows(store, *, tab='All campaigns', search='', market='All', status='All', o
     result = store.q("""WITH base AS (
       SELECT d.id,d.name,d.version,d.status AS draft_status,d.archived_at,d.last_tested_at,
         d.document->>'market' AS market,
-        GREATEST(d.updated_at,c.updated_at) AS updated_at,c.sent_at,c.status AS delivery_status,
-        c.template_id,c.template_version,c.final_recipient_count,
+        GREATEST(d.updated_at,c.updated_at,p.updated_at) AS updated_at,c.sent_at,COALESCE(c.status,p.status) AS delivery_status,
+        c.template_id,c.template_version,COALESCE(c.final_recipient_count,p.reviewed_count) AS final_recipient_count,
         CASE WHEN d.archived_at IS NOT NULL THEN 'Archived' WHEN c.status='SENT' THEN 'Sent'
-          WHEN c.status IS NULL THEN 'Drafts' ELSE 'Active' END AS category
-      FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id WHERE """+VISIBLE+"""
+          WHEN c.status IS NULL AND p.campaign_id IS NULL THEN 'Drafts' ELSE 'Active' END AS category
+      FROM crm_campaign_drafts d LEFT JOIN crm_campaigns c ON c.id=d.id LEFT JOIN crm_campaign_preparation p ON p.campaign_id=d.id WHERE """+VISIBLE+"""
     ), page AS (
       SELECT * FROM base WHERE (%s='All campaigns' OR category=%s)
         AND position(lower(%s) in lower(name))>0 AND (%s='All' OR market=%s)

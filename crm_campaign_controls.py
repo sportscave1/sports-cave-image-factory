@@ -32,13 +32,34 @@ def market_control(shop,store,doc,key):
     arm_home_poll(key=poll,seconds=2 if state.get('pending') else 10)
 
 
-def timing_control(doc,key):
+def timing_control(doc,key,*,schedule_only=False):
+    from crm_campaign_schedule import ZONES,DEFAULTS,summary
     value=doc.get('send_timing',{'mode':'now'})
-    with st.container(key='crm-send-timing'):
-        selected=st.radio('Send timing',('Send now','Schedule'),index=int(value['mode']=='schedule'),key=key+'timing',horizontal=True)
+    selected='Schedule'
+    if not schedule_only:
+        with st.container(key='crm-send-timing'):
+            selected=st.radio('Send timing',('Send now','Schedule'),index=int(value['mode']=='schedule'),key=key+'timing',horizontal=True)
     if selected=='Send now':doc['send_timing']={'mode':'now'};return
     a,b=st.columns(2)
     day=a.date_input('Date',date.fromisoformat(value['date']) if value.get('date') else date.today()+timedelta(days=1),key=key+'date')
-    hour=b.time_input('Local send time',local_time.fromisoformat(value.get('time','07:00')),key=key+'time')
-    doc['send_timing']={'mode':'schedule','date':day.isoformat(),'time':hour.strftime('%H:%M')}
-    st.caption('Recipients receive this at approximately '+hour.strftime('%I:%M %p').lstrip('0')+' in their local timezone.')
+    hour=b.time_input('Send time',local_time.fromisoformat(value.get('time','07:00')),key=key+'time')
+    # Existing recipient-local drafts remain explicitly labelled until edited.
+    old_local=value.get('mode')=='schedule' and value.get('time_basis','recipient_local')=='recipient_local'
+    basis=st.selectbox('Time basis',('Campaign timezone','Each recipient’s own timezone'),index=int(old_local),key=key+'basis')
+    timing={'mode':'schedule','policy_version':2,'time_basis':'campaign_timezone' if basis=='Campaign timezone' else 'recipient_local',
+            'date':day.isoformat(),'time':hour.strftime('%H:%M')}
+    if basis=='Campaign timezone':
+        market=doc.get('market','AU');zones=ZONES.get(market)
+        if zones:
+            choices=['Choose timezone']+list(zones);preferred=value.get('timezone')
+            if preferred not in zones:preferred=DEFAULTS.get(market,'')
+            zone=st.selectbox('Timezone',choices,index=choices.index(preferred) if preferred in choices else 0,key=key+'zone-'+market)
+            timing['timezone']=zone if zone!='Choose timezone' else ''
+        else:timing['timezone']=st.text_input('IANA timezone',value=value.get('timezone',''),placeholder='Choose an explicit timezone, e.g. Europe/London',key=key+'zone-global').strip()
+    else:st.caption('Send at this time in each recipient’s own timezone. Delivery can span many hours; review the UTC window before confirming.')
+    policy=st.selectbox('Daylight-saving repeated time',('Reject ambiguous time','Earlier occurrence','Later occurrence'),
+        index={'reject':0,'earlier':1,'later':2}[value.get('ambiguity','reject')],key=key+'ambiguity')
+    timing['ambiguity']={'Reject ambiguous time':'reject','Earlier occurrence':'earlier','Later occurrence':'later'}[policy]
+    doc['send_timing']=timing
+    try:st.caption('Scheduled · '+summary(timing))
+    except ValueError as exc:st.caption(str(exc))
