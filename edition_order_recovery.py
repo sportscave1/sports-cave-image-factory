@@ -1,4 +1,5 @@
 """Explicit late-product recovery; previews never allocate or call Shopify."""
+from table_design import TABLE_ROW_HEIGHT
 import json
 import logging
 import uuid
@@ -154,7 +155,7 @@ def render(backend_module, products):
             try:
                 found = candidates(order_name.strip())
                 if found:
-                    st.dataframe(found, hide_index=True)
+                    st.dataframe(found, hide_index=True, row_height=TABLE_ROW_HEIGHT)
                 else:
                     st.info("No paid unallocated lines found for this order.")
             except Exception as exc:

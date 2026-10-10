@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 import html
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -244,7 +245,7 @@ def _render_team_today(user, store, account_store, plan_date):
             for row in rows
         ],
         use_container_width=True,
-        hide_index=True,
+        hide_index=True, row_height=TABLE_ROW_HEIGHT,
     )
 
 
@@ -780,7 +781,7 @@ def _render_weekly_summary(snapshot):
                 for row in comparisons
             ],
             use_container_width=True,
-            hide_index=True,
+            hide_index=True, row_height=TABLE_ROW_HEIGHT,
         )
 
 
@@ -837,7 +838,7 @@ def _render_weekly(user, target, store, account_store):
                     step=1,
                 ),
             },
-            key=f"social-weekly-metrics::{target['id']}::{week_start}",
+            key=f"social-weekly-metrics::{target['id']}::{week_start}", row_height=TABLE_ROW_HEIGHT,
         )
         question_columns = st.columns(3)
         performed_best = question_columns[0].text_area(
@@ -969,7 +970,7 @@ def _render_history(user, target, store, account_store):
                 for row in plans
             ],
             use_container_width=True,
-            hide_index=True,
+            hide_index=True, row_height=TABLE_ROW_HEIGHT,
         )
         by_date = {str(row["plan_date"]): row for row in plans}
         open_date = st.selectbox(
@@ -1020,7 +1021,7 @@ def _render_history(user, target, store, account_store):
                 for row in weekly
             ],
             use_container_width=True,
-            hide_index=True,
+            hide_index=True, row_height=TABLE_ROW_HEIGHT,
         )
         by_week = {str(row["week_start"]): row for row in weekly}
         open_week = st.selectbox(

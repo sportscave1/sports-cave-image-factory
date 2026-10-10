@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import normalize_sport_category, normalize_sport_state
 import csv
 import gc
@@ -640,7 +641,7 @@ def prodigi_variant_copy_text(row):
 def prodigi_reference_table_html(rows):
     headers = ("Sports Cave Variant", "Sports Cave Frame", "Sports Cave Size", "Fulfilment Product", "Fulfilment Code", "Fulfilment Frame Colour")
     header_html = "".join(
-        f'<th style="background:#ffffff !important;color:#111111 !important;">{html.escape(header)}</th>'
+        f'<th>{html.escape(header)}</th>'
         for header in headers
     )
     body_rows = []
@@ -652,44 +653,6 @@ def prodigi_reference_table_html(rows):
             cells.append(f'<td class="{class_name}">{value}</td>')
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     return f"""
-    <style>
-      .prodigi-reference-table {{
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.84rem;
-      }}
-      .prodigi-reference-table th {{
-        position: sticky;
-        top: 0;
-        background: #ffffff !important;
-        color: #111111 !important;
-        text-align: left;
-        padding: 0.55rem 0.6rem;
-        border-bottom: 1px solid rgba(15, 15, 15, 0.18);
-      }}
-      .prodigi-reference-table thead th,
-      .prodigi-reference-table thead th * {{
-        background: #ffffff !important;
-        color: #111111 !important;
-      }}
-      .prodigi-reference-table td {{
-        color: #efe9dd;
-        padding: 0.52rem 0.6rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        vertical-align: top;
-      }}
-      .prodigi-reference-scroll {{
-        max-height: 470px;
-        overflow: auto;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 8px;
-      }}
-      .prodigi-code-cell {{
-        color: #dab35c !important;
-        font-weight: 800;
-        white-space: nowrap;
-      }}
-    </style>
     <div class="prodigi-reference-scroll">
       <table class="prodigi-reference-table">
         <thead><tr>{header_html}</tr></thead>
@@ -1965,7 +1928,7 @@ def render_shopify_remote_details(remote_product, item_key):
                         "Inventory": variant.get("inventory_quantity"),
                     }
                 )
-            st.dataframe(variant_rows, use_container_width=True, hide_index=True)
+            st.dataframe(variant_rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
         if metafields:
             st.caption(f"{len(metafields)} metafield values cached. Values are not edited from Sports Cave OS in Phase 4.")
 
@@ -4159,7 +4122,7 @@ def _render_prodigi_dispatch_result(table_rows):
     st.caption(f"Dispatch rows saved: {dispatch_summary.get('rows_saved', 0)}")
     st.caption(f"Last tracker save: {dispatch_summary.get('last_saved_at') or 'Not saved yet'}")
     if records:
-        st.dataframe(records, hide_index=True, use_container_width=True)
+        st.dataframe(records, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
     elif dispatch_summary.get("rows_saved"):
         st.info("No dispatch rows in this view.")
     else:
@@ -5497,17 +5460,17 @@ def render_supabase_limited_edition_csv_import(uploaded_csv):
                 for item in preview["changes"]
             ],
             use_container_width=True,
-            hide_index=True,
+            hide_index=True, row_height=TABLE_ROW_HEIGHT,
         )
     else:
         st.info("No counter changes found in the matched CSV rows.")
 
     if preview["createable"]:
         st.markdown("**Products found in Shopify sync but not edition tracking yet**")
-        st.dataframe(preview["createable"], use_container_width=True, hide_index=True)
+        st.dataframe(preview["createable"], use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
     if preview["unmatched"]:
         st.markdown("**Unmatched rows**")
-        st.dataframe(preview["unmatched"], use_container_width=True, hide_index=True)
+        st.dataframe(preview["unmatched"], use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
     create_missing = st.checkbox(
         "Create missing edition products only when they already exist in Shopify sync",
@@ -8912,7 +8875,7 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
                     for row in matched[:200]
                 ],
                 use_container_width=True,
-                hide_index=True,
+                hide_index=True, row_height=TABLE_ROW_HEIGHT,
             )
             if st.button("Import matched PSD links", type="primary", use_container_width=True):
                 run_id = supabase_backend.start_sync_run("psd_csv_import")
@@ -9008,7 +8971,7 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
                     for row in unmatched[:200]
                 ],
                 use_container_width=True,
-                hide_index=True,
+                hide_index=True, row_height=TABLE_ROW_HEIGHT,
             )
             if not product_options:
                 st.warning("No Shopify handles are available for manual linking yet. Sync Shopify products first.")
@@ -9225,7 +9188,7 @@ def render_product_assets_page():
                 for row in rows
             ],
             use_container_width=True,
-            hide_index=True,
+            hide_index=True, row_height=TABLE_ROW_HEIGHT,
         )
     else:
         st.info("No product asset rows match the current filters.")
@@ -9396,7 +9359,7 @@ def render_webhook_events_page():
         st.error("Could not load webhook events.")
         st.exception(error)
         return
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def render_sync_runs_page():
@@ -9411,7 +9374,7 @@ def render_sync_runs_page():
         st.error("Could not load sync runs.")
         st.exception(error)
         return
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def render_app_errors_page():
@@ -9426,7 +9389,7 @@ def render_app_errors_page():
         st.error("Could not load app errors.")
         st.exception(error)
         return
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def render_persistence_check_page():
@@ -9448,7 +9411,7 @@ def render_persistence_check_page():
 
     st.success("Supabase connection works.")
     rows = [{"table": table_name, "rows": count} for table_name, count in counts.items()]
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
     zero_tables = [table_name for table_name, count in counts.items() if int(count or 0) == 0]
     if zero_tables:
@@ -9506,7 +9469,7 @@ def render_edition_integrity_check_page():
     for key, rows in results.items():
         with st.expander(f"{labels.get(key, key)} ({len(rows)})", expanded=bool(rows)):
             if rows:
-                st.dataframe(rows, use_container_width=True, hide_index=True)
+                st.dataframe(rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
                 st.caption("Repair suggestion: inspect the affected product/order records before any protected manual change.")
             else:
                 st.success("No issues.")
@@ -11357,7 +11320,7 @@ def render_developer_widget_status(shopify_config):
                 "Last sync": format_updated_at(product.get("metafields_synced_at")),
             }
         )
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def render_settings_page(app_version, database_path, password_status):
@@ -11592,7 +11555,7 @@ def render_settings_page(app_version, database_path, password_status):
                         }
                     )
                 if rows:
-                    st.dataframe(rows, hide_index=True, use_container_width=True)
+                    st.dataframe(rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
                 for error in definition_status.get("errors") or []:
                     st.error(f"{error.get('namespace')}.{error.get('key')}: {error.get('message')}")
 

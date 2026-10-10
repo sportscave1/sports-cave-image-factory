@@ -1,4 +1,5 @@
 """Reviews: one route, three lightweight areas; shared OS read pool and styling."""
+from table_design import TABLE_ROW_HEIGHT
 from copy import deepcopy
 from datetime import timedelta
 from html import escape
@@ -152,7 +153,7 @@ def importer(store,user):
     if uploaded:
         data=uploaded.getvalue();digest=hashlib.sha256(data).hexdigest();headers,raw=read_csv(data)
         safe_preview=[{k:v for k,v in row.items() if 'email' not in k.lower()} for row in raw[:5]]
-        st.dataframe(safe_preview,hide_index=True,use_container_width=True)
+        st.dataframe(safe_preview,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         source=st.selectbox('Import source',['csv','judgeme'],format_func=lambda v:'Judge.me CSV' if v=='judgeme' else 'CSV')
         suggested=auto_mapping(headers);mapping={}
         with st.expander('Column mapping',expanded=True):
@@ -165,7 +166,7 @@ def importer(store,user):
             result,activity=load(key,lambda:preview(raw,mapping,store,source,__import__('os').getenv('SHOPIFY_STORE_DOMAIN','')))
             if result:
                 st.caption(f"Ready: {result['ready']:,} · Duplicates: {result['duplicates']:,} · Need product match: {result['unresolved']:,} · Invalid: {len(result['invalid']):,}")
-                if result['invalid']:st.dataframe(result['invalid'][:50],hide_index=True)
+                if result['invalid']:st.dataframe(result['invalid'][:50],hide_index=True, row_height=TABLE_ROW_HEIGHT)
                 if st.button('Confirm import',disabled=not result['items']):
                     store.enqueue_import(user,source,uploaded.name,result['items'],len(result['invalid']));state().pop('preview_key',None);changed('imports');st.toast('Import queued');st.rerun(scope='fragment')
             elif activity=='ERROR':st.caption('Import validation failed. Check file format and storage, then retry.')

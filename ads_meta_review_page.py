@@ -1,4 +1,5 @@
 """On-demand live Meta review. Saved decisions are optional Supabase context."""
+from table_design import TABLE_ROW_HEIGHT
 from collections import defaultdict
 from copy import deepcopy
 from contextlib import nullcontext
@@ -114,7 +115,7 @@ def metrics_card(metrics, compact=False):
                       ('Engagement','engagement'),('Reactions','reactions'),('Comments','comments'),('Shares','shares'),('Saves','saves'),
                       ('Video views','video_views'),('IE opens','instant_experience_clicks_to_open'),
                       ('IE starts','instant_experience_clicks_to_start'),('IE outbound','instant_experience_outbound_clicks')]
-            st.dataframe([{'Metric':label,'Value':fmt(metrics.get(key))} for label,key in labels], hide_index=True, use_container_width=True)
+            st.dataframe([{'Metric':label,'Value':fmt(metrics.get(key))} for label,key in labels], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
             st.caption('— means unavailable. Reach is not summed across dates or ads. Revenue is Meta-attributed, not Shopify store totals.')
 
 
@@ -209,7 +210,7 @@ def ad_card(ad, *, resolved=False):
                 if ad['assets']['dynamic'] or ad['assets']['carousel']:
                     st.caption('Multiple original assets/cards. Ad-level results do not prove which served combination won.')
         with st.expander('Advanced metrics',expanded=False):
-            st.dataframe(tables.advanced_rows(ad.get('benchmark_metrics',ad['metrics'])),hide_index=True)
+            st.dataframe(tables.advanced_rows(ad.get('benchmark_metrics',ad['metrics'])),hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def winner_board(ads, history, context, compact=False):
@@ -509,7 +510,7 @@ def render_page():
     if not config.get('configured'):
         render_campaign_list([],config,account_scope,period,today,failed=True)
         st.caption('Meta connection unavailable · Configure the existing account connection.')
-        st.dataframe([],column_order=['Campaign','Status','Started']+[label for label,_ in tables.METRICS],hide_index=True,width='stretch',placeholder='—')
+        st.dataframe([],column_order=['Campaign','Status','Started']+[label for label,_ in tables.METRICS],hide_index=True,width='stretch',placeholder='—', row_height=TABLE_ROW_HEIGHT)
         return
     # Page-scoped only: metadata and one campaign-level Insights edge. Never startup/ad downloads.
     with st.spinner('Reading campaign overview…'):
@@ -586,7 +587,7 @@ def render_campaign_list(campaigns,config,account_scope,period,today,failed=Fals
             'Action':st.column_config.TextColumn(width=150,help='Recommendation only. Never changes Meta status.')})
     with st.expander('Advanced metrics',expanded=False):
         advanced=[{'Campaign':r.get('campaign_name'),**{x['Metric']:x['Value'] for x in tables.advanced_rows(r.get('metrics') or {},campaign=True)}} for r in rows]
-        st.dataframe(advanced,hide_index=True,placeholder='—',width='stretch')
+        st.dataframe(advanced,hide_index=True,placeholder='—',width='stretch', row_height=TABLE_ROW_HEIGHT)
     selected=tables.selected_row(event,rows)
     if selected:
         campaign_popup(config,selected,since,until)

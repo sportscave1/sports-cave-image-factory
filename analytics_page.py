@@ -1,6 +1,7 @@
 """Read-only Analytics workspace backed by canonical saved GA4 reports."""
 
 from __future__ import annotations
+from table_design import TABLE_ROW_HEIGHT
 
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -268,7 +269,7 @@ def _table(report, dimension_labels, metric_labels, *, height=300):
             }
         )
     if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True, height=height)
+        st.dataframe(rows, use_container_width=True, hide_index=True, height=height, row_height=TABLE_ROW_HEIGHT)
     else:
         st.caption("No saved rows are available for this exact date range.")
 

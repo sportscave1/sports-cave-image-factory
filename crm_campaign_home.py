@@ -1,4 +1,5 @@
 """Campaigns Home: presentation and navigation over existing authoring contracts."""
+from table_design import TABLE_ROW_HEIGHT
 from html import escape
 from base64 import b64encode
 from urllib.parse import urlencode
@@ -187,7 +188,7 @@ def actions(store,user,row):
         if row.get('delivery_status')=='SENT' and st.button('View results',key='home_results_'+identity):
             request_open(identity)
         if st.button('History',key='home_history_'+identity):st.session_state['campaign_revision_history_id']=identity
-        if st.session_state.get('campaign_revision_history_id')==identity:st.dataframe(store.history(identity),hide_index=True)
+        if st.session_state.get('campaign_revision_history_id')==identity:st.dataframe(store.history(identity),hide_index=True, row_height=TABLE_ROW_HEIGHT)
         if not row.get('delivery_status') or row['delivery_status']=='SENT':
             if st.button('Restore' if row['archived_at'] else 'Archive',key='home_archive_'+identity):
                 (store.restore if row['archived_at'] else store.archive)(user,identity,row['version']);invalidate(st.session_state);st.rerun(scope='fragment')

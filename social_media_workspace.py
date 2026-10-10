@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import normalize_sport_state
 import hashlib
 import html
@@ -1675,7 +1676,7 @@ def render_plan(user, target, store, account_store=None):
                         for row in jobs
                     ],
                     hide_index=True,
-                    width="stretch",
+                    width="stretch", row_height=TABLE_ROW_HEIGHT,
                 )
                 by_id = {row["id"]: row for row in jobs}
                 with st.form("social-plan-status-form"):

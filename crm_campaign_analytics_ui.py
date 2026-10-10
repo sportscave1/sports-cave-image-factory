@@ -1,4 +1,5 @@
 """Compact Sent rows and on-demand details using existing Streamlit dialogs."""
+from table_design import TABLE_ROW_HEIGHT
 import streamlit as st
 from crm_campaign_analytics import sent_page,details,money
 from crm_campaign_markets import MARKET_LABELS
@@ -20,7 +21,7 @@ def analytics(store,user,row):
     if seconds is not None:st.caption('Average click → purchase: '+format(float(seconds)/3600,'.1f')+' hours')
     if detail['timing']['mirror_unavailable']:st.caption('Shopify attribution marker unavailable for some orders; recorded attribution is retained.')
     if detail['products']:
-        st.dataframe([{'Product':p['product'],'Orders':p['orders'],'Units':p['units'],'Revenue':money({p['currency']:p['revenue']})} for p in detail['products']],hide_index=True,height='content')
+        st.dataframe([{'Product':p['product'],'Orders':p['orders'],'Units':p['units'],'Revenue':money({p['currency']:p['revenue']})} for p in detail['products']],hide_index=True,height='content', row_height=TABLE_ROW_HEIGHT)
     email_orders(store,detail.get('orders',[]))
     if st.button('Email preview',key='sent_preview_'+str(row['id'])):
         st.session_state['sent_preview_id']=row['id']
@@ -29,7 +30,7 @@ def analytics(store,user,row):
         if snapshot.get('document'):
             from crm_html_workspace import composer_canvas
             composer_canvas(snapshot['document'],snapshot['render_settings'],'sent_preview',None)
-    with st.expander('Recipient delivery history (first 100)'):st.dataframe(detail['recipients'],hide_index=True,height='content')
+    with st.expander('Recipient delivery history (first 100)'):st.dataframe(detail['recipients'],hide_index=True,height='content', row_height=TABLE_ROW_HEIGHT)
     a,b=st.columns(2)
     if a.button('Duplicate',key='sent_duplicate_'+str(row['id'])):
         from crm_campaign_page import open_editor
@@ -67,7 +68,7 @@ def email_orders(store,orders):
       'Attribution':'Shopify UTM' if r['method'] in ('SHOPIFY_UTM','SHOPIFY_UTM_EXACT') else 'Resend click',
       'Shopify':{'UPDATED':'✓ Mirrored','FAILED':'Failed','PENDING':'Pending'}.get(r['mirror_status'],r['mirror_status']),
       'Open':link(r)} for r in orders],hide_index=True,height='content',on_select='rerun',selection_mode='single-row',key='email_orders_'+str(orders[0]['campaign_id']),
-      column_config={'Open':st.column_config.LinkColumn('Open',display_text='Open Shopify ↗')})
+      column_config={'Open':st.column_config.LinkColumn('Open',display_text='Open Shopify ↗')}, row_height=TABLE_ROW_HEIGHT)
     picked=selection.selection.rows
     index=picked[0] if picked and 0<=picked[0]<len(orders) else None
     with st.expander('Order evidence',expanded=index is not None):
@@ -100,7 +101,7 @@ def email_orders(store,orders):
               ('Window',str(proof.get('attribution_window_days','—'))+' days'),('Shopify mirror',row['mirror_status'])])
             if row.get('mirror_error'):st.caption(row['mirror_error'].replace('_',' '))
         with purchase:
-            st.dataframe(row['products'],hide_index=True,height='content')
+            st.dataframe(row['products'],hide_index=True,height='content', row_height=TABLE_ROW_HEIGHT)
             facts([('Gross received',money({row['currency']:row.get('gross_revenue')})),
                    ('Refunded',money({row['currency']:row.get('refund_amount')})),('Net attributed revenue',money({row['currency']:row['amount']}))])
 

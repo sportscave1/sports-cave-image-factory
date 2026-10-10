@@ -1,4 +1,5 @@
 """Compact Edition Ops controls; existing table and ledger remain authoritative."""
+from table_design import TABLE_ROW_HEIGHT
 from copy import deepcopy
 import uuid
 import time
@@ -158,7 +159,7 @@ def release_controls():
     if st.session_state.get('edition-review-run')==row.get('edition_run_id') and row.get('edition_run_id'):
         try:
             data=versions.details(row['edition_run_id'])
-            st.dataframe(data['allocations'],hide_index=True,width='stretch')
+            st.dataframe(data['allocations'],hide_index=True,width='stretch', row_height=TABLE_ROW_HEIGHT)
             with st.form('edition-reconcile'):
                 reason=st.text_input('Reconciliation reason')
                 st.caption('Repairs derived boundaries only. Issued numbers and recorded sales are preserved.')
@@ -204,7 +205,7 @@ def archive():
             rows=versions.archive(search,page*25,26)
             if not rows:st.caption('No expired editions.');return
             st.dataframe([{'Product':r['product_title'],'Version':r['edition_name'],'Last Number':r['last_allocated_number'],
-                'Sold':r['sold_count'],'Expired Date':r['archived_at'],'Status':'EXPIRED'} for r in rows[:25]],hide_index=True,width='stretch')
+                'Sold':r['sold_count'],'Expired Date':r['archived_at'],'Status':'EXPIRED'} for r in rows[:25]],hide_index=True,width='stretch', row_height=TABLE_ROW_HEIGHT)
             with st.container(horizontal=True):
                 if st.button('Previous editions',disabled=page==0):st.session_state['edition-expired-page']=page-1;st.rerun(scope='fragment')
                 st.caption('Page '+str(page+1))
@@ -214,7 +215,7 @@ def archive():
                 st.caption(selection['retired_reason']);st.caption('Release '+str(selection['id']))
                 st.link_button('Shopify product','https://www.sportscaveshop.com/products/'+selection['shopify_handle'])
                 data=versions.details(selection['id'])
-                st.dataframe(data['allocations'],hide_index=True);st.dataframe(data['audit'],hide_index=True)
+                st.dataframe(data['allocations'],hide_index=True, row_height=TABLE_ROW_HEIGHT);st.dataframe(data['audit'],hide_index=True, row_height=TABLE_ROW_HEIGHT)
         except Exception as exc:st.warning('Archive unavailable: '+str(exc))
 
 

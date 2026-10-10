@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import normalize_sport_category, normalize_sport_state
 from datetime import datetime, timezone
 import hashlib
@@ -588,7 +589,7 @@ def _render_details_dialog(user=None):
                 if _task_details(task).get(key)
             ]
             if rows:
-                st.dataframe(rows, hide_index=True, width="stretch", height=300)
+                st.dataframe(rows, hide_index=True, width="stretch", height=300, row_height=TABLE_ROW_HEIGHT)
         if st.button("Close", key=f"design-schedule-details-close::{task_id}", use_container_width=True):
             st.session_state.pop(SCHEDULE_DETAILS_TASK_KEY, None)
             st.rerun()
@@ -863,7 +864,7 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
             hide_index=True,
             width="stretch",
             height=420,
-            row_height=34,
+            row_height=TABLE_ROW_HEIGHT,
             key=f"design-schedule-table::{group_key}",
             on_select="rerun",
             selection_mode="single-row",

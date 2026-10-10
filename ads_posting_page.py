@@ -1,4 +1,5 @@
 from __future__ import annotations
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import detect_sport_in_text
 from sports_categories import normalize_sport_category, normalize_sport_state, infer_sport_category
 
@@ -1428,7 +1429,7 @@ def _render_object_result(result, *, title, show_technical_details=True):
                 },
             )
         )
-    st.dataframe(rows, hide_index=True, use_container_width=True)
+    st.dataframe(rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
     if not show_technical_details:
         return
     if carousel_mode:
@@ -1644,7 +1645,7 @@ def _render_collection_template_copy(result):
                     for name, passed in checks.items()
                 ],
                 hide_index=True,
-                use_container_width=True,
+                use_container_width=True, row_height=TABLE_ROW_HEIGHT,
             )
 
 
@@ -1687,7 +1688,7 @@ def _render_recent_posts():
                 }
                 for row in records
             ],
-            hide_index=True, use_container_width=True,
+            hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT,
         )
         selected = st.selectbox(
             'Posting job details', records,

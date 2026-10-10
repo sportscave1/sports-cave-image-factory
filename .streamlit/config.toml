@@ -10,3 +10,8 @@ enableXsrfProtection = false
 
 [browser]
 gatherUsageStats = false
+
+# Dataframe-only theme settings: keep the rest of the Sports Cave theme intact.
+[theme]
+dataframeBorderColor = "#eeece5"
+dataframeHeaderBackgroundColor = "#f3f2ec"

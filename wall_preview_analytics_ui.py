@@ -1,4 +1,5 @@
 """Compact analytics above the unchanged operational inbox."""
+from table_design import TABLE_ROW_HEIGHT
 from datetime import datetime,timedelta
 import streamlit as st
 import social_media
@@ -64,6 +65,6 @@ def details(filters):
         st.caption('Performance uses instrumented viewer visits: one count per stage per visit; unique clickers are anonymous browser-session visitors. Rates match subsequent stages to the same visit. Active time excludes hidden, unfocused and 60-second idle periods; averages use recorded cumulative samples, never open-to-close elapsed time. Historical events without visit IDs remain below, not inferred into the new funnel.')
         st.caption('Unique journeys per stage; sessions span all recorded events. Historical captures may lack opening events. Missing events are not inferred.')
         st.caption('Purchased: '+str(summary['purchased'])+' · Revenue: '+cash(summary['revenue'])+' · Preview → ATC: '+pct(summary['atc_percent'])+' · Preview → Purchase: '+pct(summary['purchase_percent']))
-        st.dataframe(data['funnel'],hide_index=True,use_container_width=True)
-        st.dataframe(data['products'],hide_index=True,use_container_width=True)
-        st.dataframe(data['insights'],hide_index=True,use_container_width=True)
+        st.dataframe(data['funnel'],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
+        st.dataframe(data['products'],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
+        st.dataframe(data['insights'],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)

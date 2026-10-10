@@ -1,4 +1,5 @@
 """Shared analytics reads and checkout controls used by the unified Flow page."""
+from table_design import TABLE_ROW_HEIGHT
 from crm_automation_read_cache import isolated
 from html import escape
 from time import monotonic
@@ -86,7 +87,7 @@ def checkout_details(store,user,row,c):
           'Recovered order':c.get('order_id'),'Recovered timestamp':data.get('completed_at'),
           'Opened':c.get('opened',0),'Clicked':c.get('clicked',0)}
         st.table([{'Detail':k,'Value':str(v) if v is not None else 'None'} for k,v in facts.items()])
-        if sends:st.dataframe(sends,hide_index=True)
+        if sends:st.dataframe(sends,hide_index=True, row_height=TABLE_ROW_HEIGHT)
         for send in sends:
             if send['status']=='FAILED' and send.get('error')=='provider_rejected':
                 if st.button('Retry rejected email',key='checkout-retry-'+str(send['id'])):
@@ -171,7 +172,7 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     if add:
         begin(store,user,str(row['id']),available,slot)
         st.rerun(scope='fragment')
-    if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True)
+    if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True, row_height=TABLE_ROW_HEIGHT)
     if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
     for checkout in visible:
         if checkout['checkout_key'] in enrollment_results:

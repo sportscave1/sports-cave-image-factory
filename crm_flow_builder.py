@@ -1,4 +1,5 @@
 """Sequence controls around the existing automation store and email composer."""
+from table_design import TABLE_ROW_HEIGHT
 from copy import deepcopy
 from datetime import timedelta
 import uuid
@@ -76,7 +77,7 @@ def timing(store,user,row):
     st.caption('Exit · Unsubscribe, suppression or invalid recipient · Always enforced before each email')
     from crm_automation_definition import RULE_FIELDS
     rules=st.data_editor(flow['rules'] or [{'field':'market','condition':'is','value':'AU'}],num_rows='dynamic',key=key+'rules',
-        column_config={'field':st.column_config.SelectboxColumn('Field',options=list(RULE_FIELDS)),'condition':st.column_config.SelectboxColumn('Condition',options=['is','at_least']),'value':st.column_config.TextColumn('Value')})
+        column_config={'field':st.column_config.SelectboxColumn('Field',options=list(RULE_FIELDS)),'condition':st.column_config.SelectboxColumn('Condition',options=['is','at_least']),'value':st.column_config.TextColumn('Value')}, row_height=TABLE_ROW_HEIGHT)
     use_rules=st.checkbox('Apply these entry rules (AND)',bool(flow['rules']),key=key+'use-rules')
     flow['rules']=rules if use_rules else []
     st.warning('Check that Shopify or another marketing platform is not sending the same recovery sequence. External sends are not visible to this send ledger.')
@@ -96,7 +97,7 @@ def test_flow(row):
     currency=st.text_input('Simulated order currency','AUD',max_chars=3,key=key+'currency').upper()
     amount=st.number_input('Simulated order value',min_value=0.,value=0.,key=key+'amount')
     facts={'checkout_country':country,'product_purchased':{product},'order_value':{'currencyCode':currency,'amount':str(amount)}}
-    st.dataframe(simulate(row['config']['draft'],subscribed=subscribed,purchased=purchased,customer={'defaultAddress':{'countryCodeV2':country}},event_facts=facts,exit_after=exit_after),hide_index=True,width='stretch')
+    st.dataframe(simulate(row['config']['draft'],subscribed=subscribed,purchased=purchased,customer={'defaultAddress':{'countryCodeV2':country}},event_facts=facts,exit_after=exit_after),hide_index=True,width='stretch', row_height=TABLE_ROW_HEIGHT)
     from crm_automation_publication import preflight
     try:preflight(row,row['config']['revision']);st.success('Sequence validation passed. Publication also checks delivery settings and trigger readiness.')
     except ValueError as exc:st.warning(str(exc))
@@ -111,14 +112,14 @@ def activity(store,row,user=None,*,rerun_scope='app'):
         CASE WHEN j.status='ACTIVE' THEN COALESCE((SELECT s.due_at FROM crm_marketing_sends s WHERE s.enrollment_id=j.id AND s.step_index=j.current_step AND s.status IN ('PENDING','CLAIMED','SUBMITTING') AND NOT s.test_send LIMIT 1),j.next_due_at) END AS next_due_at,j.status,j.stop_reason,
         (SELECT s.status FROM crm_marketing_sends s WHERE s.enrollment_id=j.id AND NOT s.test_send ORDER BY s.created_at DESC LIMIT 1) AS latest_send
         FROM crm_automation_enrollments j WHERE j.automation_id=%s ORDER BY j.updated_at DESC LIMIT 50''',(row['id'],))
-    st.dataframe(journeys,hide_index=True,width='stretch')
+    st.dataframe(journeys,hide_index=True,width='stretch', row_height=TABLE_ROW_HEIGHT)
     if journeys:
         chosen=st.selectbox('View recipient timeline',journeys,format_func=lambda j:str(j['customer'])+' · '+str(j['reference']),key='journey-'+str(row['id']))
         sends=store.q('''SELECT s.id,s.step_index+1 AS email,s.status,s.error_code,s.provider_email_id,s.due_at,s.first_submitted_at,e.event_type,e.occurred_at,
           (SELECT value->>'message' FROM crm_runtime_state WHERE key='checkout-send-error:'||s.id::text) AS error_detail
           FROM crm_marketing_sends s LEFT JOIN crm_delivery_events e ON e.send_id=s.id
           WHERE s.enrollment_id=%s AND NOT s.test_send ORDER BY s.created_at,e.occurred_at''',(chosen['id'],))
-        st.dataframe(sends,hide_index=True,width='stretch')
+        st.dataframe(sends,hide_index=True,width='stretch', row_height=TABLE_ROW_HEIGHT)
         retryable={s['id']:s for s in sends if s['status']=='FAILED' and s['error_code'] in ('provider_rejected','revalidation_unavailable') and not s['provider_email_id']}
         for send_id,send in retryable.items():
             if st.button('Retry rejected email '+str(send['email']),key='flow-retry-'+str(send_id),disabled=user is None):

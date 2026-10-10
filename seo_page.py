@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from datetime import date, datetime, timedelta, timezone
 import hashlib
 import html
@@ -216,7 +217,7 @@ def _table(rows, *, empty, height=360):
         st.info(empty)
         return
     started = time.perf_counter()
-    st.dataframe(rows, use_container_width=True, hide_index=True, height=height)
+    st.dataframe(rows, use_container_width=True, hide_index=True, height=height, row_height=TABLE_ROW_HEIGHT)
     logging.info(
         "SEO_PERF operation=table_construction duration_ms=%.2f rows=%s",
         (time.perf_counter() - started) * 1000,
@@ -2759,7 +2760,7 @@ def _render_gsc_import(store, state, user, keywords):
     _table([{"Query": row.get("keyword"), "Clicks": row.get("clicks"), "Impressions": row.get("impressions"), "CTR": row.get("ctr"), "Position": row.get("average_position"), "Suggested Intent": row.get("buyer_intent"), "Suggested Type": row.get("page_type")} for row in preview.get("rows", [])], empty="No valid rows are ready to import.", height=280)
     if preview.get("invalid"):
         with st.expander("Invalid rows", expanded=False):
-            st.dataframe(preview["invalid"], use_container_width=True, hide_index=True)
+            st.dataframe(preview["invalid"], use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
     action_columns = st.columns(2)
     if action_columns[0].button("Commit import", type="primary", disabled=not preview.get("rows"), use_container_width=True):
         result = seo.commit_gsc_import(state, preview, actor=user)

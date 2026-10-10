@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import normalize_sport_category, infer_sport_category, detect_sport_in_text
 import csv
 import html
@@ -998,7 +999,7 @@ def _render_meta_signal_panel(product, meta_summary):
             }
             for row in top_rows
         ]
-        st.dataframe(table, hide_index=True, use_container_width=True, height=180)
+        st.dataframe(table, hide_index=True, use_container_width=True, height=180, row_height=TABLE_ROW_HEIGHT)
         button_cols = st.columns(2)
         if button_cols[0].button("Use winning hook", use_container_width=True, key="mf-use-winning-hook"):
             st.session_state["mf_story_context"] = _meta_signal_summary(rows)
@@ -1367,7 +1368,7 @@ def _render_meta_intelligence_tab():
         and (not product_query or product_query.lower() in " ".join(_plain_text(row.get(k)).lower() for k in ("product_title", "product_handle", "suggested_product_title", "ad_name")))
     ]
     with _card("Daily War Room", "Use these labels to decide what to write next."):
-        st.dataframe(summary_rows[:100], hide_index=True, use_container_width=True, height=260)
+        st.dataframe(summary_rows[:100], hide_index=True, use_container_width=True, height=260, row_height=TABLE_ROW_HEIGHT)
     with _card("Creative Winner Board", "Top stored ads by purchases and ROAS."):
         winner_rows = sorted(mapping, key=lambda row: (_num(row.get("purchases")), _num(row.get("roas"))), reverse=True)[:12]
         st.dataframe(
@@ -1383,7 +1384,7 @@ def _render_meta_intelligence_tab():
                 for row in winner_rows
             ],
             hide_index=True,
-            use_container_width=True,
+            use_container_width=True, row_height=TABLE_ROW_HEIGHT,
         )
         for row in winner_rows[:5]:
             button_label = f"Send To Ad Builder: {row.get('ad_name') or row.get('campaign_name') or 'Stored ad'}"
@@ -1415,7 +1416,7 @@ def _render_meta_intelligence_tab():
             ],
             hide_index=True,
             use_container_width=True,
-            height=280,
+            height=280, row_height=TABLE_ROW_HEIGHT,
         )
     with _card("Recent Signal Updates", "Recent stored updates for ad signal data."):
         st.dataframe(
@@ -1429,7 +1430,7 @@ def _render_meta_intelligence_tab():
                 for row in actions[:40]
             ],
             hide_index=True,
-            use_container_width=True,
+            use_container_width=True, row_height=TABLE_ROW_HEIGHT,
         )
 
 
@@ -1531,7 +1532,7 @@ def _render_saved_packs_tab():
         }
         for row in packs
     ]
-    st.dataframe(table, hide_index=True, use_container_width=True, height=300)
+    st.dataframe(table, hide_index=True, use_container_width=True, height=300, row_height=TABLE_ROW_HEIGHT)
     for row in packs[:20]:
         label = f"{_format_time(row.get('created_at'))} - {row.get('product_title') or 'Untitled'} - {row.get('status') or 'Draft'}"
         with st.expander(label):

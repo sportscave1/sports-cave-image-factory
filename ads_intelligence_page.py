@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 import csv
 import io
 import time
@@ -360,7 +361,7 @@ def _compact_table(rows, height=380, empty_message="No stored rows for this view
     for row in rows or []:
         clean_rows.append({key: value for key, value in row.items() if not str(key).startswith("_")})
     if clean_rows:
-        st.dataframe(clean_rows[:500], hide_index=True, use_container_width=True, height=height)
+        st.dataframe(clean_rows[:500], hide_index=True, use_container_width=True, height=height, row_height=TABLE_ROW_HEIGHT)
     else:
         ui_styles.empty_state(empty_message)
 
@@ -1219,7 +1220,7 @@ def render_page():
         if not ad_rows:
             ui_styles.empty_state(_empty_performance_message(counts))
         else:
-            st.dataframe(_decision_summary(ad_rows), hide_index=True, use_container_width=True)
+            st.dataframe(_decision_summary(ad_rows), hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
             winners, losers = _top_and_losing_rows(ad_rows)
             left, right = st.columns(2)
             with left:
@@ -1236,7 +1237,7 @@ def render_page():
                     for row in winners[:8]
                 ]
                 if winner_rows:
-                    st.dataframe(winner_rows, hide_index=True, use_container_width=True)
+                    st.dataframe(winner_rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
                 else:
                     ui_styles.empty_state("No scale candidates yet.")
             with right:
@@ -1253,7 +1254,7 @@ def render_page():
                     for row in losers[:8]
                 ]
                 if loser_rows:
-                    st.dataframe(loser_rows, hide_index=True, use_container_width=True)
+                    st.dataframe(loser_rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
                 else:
                     ui_styles.empty_state("No weak ads flagged yet.")
             _section("Product Opportunities")
@@ -1262,7 +1263,7 @@ def render_page():
             )
             product_rows = _opportunity_table_rows(product_opportunities)
             if product_rows:
-                st.dataframe(product_rows[:500], hide_index=True, use_container_width=True, height=420)
+                st.dataframe(product_rows[:500], hide_index=True, use_container_width=True, height=420, row_height=TABLE_ROW_HEIGHT)
             else:
                 ui_styles.empty_state("Map ads to products to unlock product-level opportunities.")
 
@@ -1280,7 +1281,7 @@ def render_page():
         if table_rows:
             display_rows = table_rows[:500]
             st.caption(f"Showing {len(display_rows)} of {len(table_rows)} matching ads.")
-            st.dataframe(display_rows, hide_index=True, use_container_width=True, height=520)
+            st.dataframe(display_rows, hide_index=True, use_container_width=True, height=520, row_height=TABLE_ROW_HEIGHT)
             st.download_button(
                 "Download CSV",
                 data=_csv_bytes(table_rows),
@@ -1374,7 +1375,7 @@ def render_page():
                 creative_action,
                 creative_min_spend,
             )
-            st.dataframe(_creative_intelligence_table(creative_rows)[:500], hide_index=True, use_container_width=True, height=500)
+            st.dataframe(_creative_intelligence_table(creative_rows)[:500], hide_index=True, use_container_width=True, height=500, row_height=TABLE_ROW_HEIGHT)
             report_left, report_right = st.columns(2)
             with report_left:
                 _section("Best Primary Text")
@@ -1444,7 +1445,7 @@ def render_page():
                 [{key: value for key, value in row.items() if not key.startswith("_")} for row in table_rows[:500]],
                 hide_index=True,
                 use_container_width=True,
-                height=420,
+                height=420, row_height=TABLE_ROW_HEIGHT,
             )
 
             with st.expander("Manual mapping editor", expanded=False):

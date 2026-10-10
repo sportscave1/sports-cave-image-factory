@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -749,7 +750,7 @@ def _render_sent_reports(user, storage_ready):
                 "Attention": "Yes" if int(summary.get("attention_count") or 0) else "No",
             }
         )
-    st.dataframe(table_rows, use_container_width=True, hide_index=True)
+    st.dataframe(table_rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
     row_by_id = {row["id"]: row for row in rows}
     selected_id = st.selectbox(
         "Open report",
@@ -801,7 +802,7 @@ def _render_delivery_health(user, digest_config, mail_config, storage_ready, now
     st.dataframe(
         [{"Setting": label, "Value": value} for label, value in rows],
         use_container_width=True,
-        hide_index=True,
+        hide_index=True, row_height=TABLE_ROW_HEIGHT,
     )
     if not public["configured"]:
         st.warning(" ".join(public["configuration_errors"]))
@@ -836,7 +837,7 @@ def _render_delivery_health(user, digest_config, mail_config, storage_ready, now
                 for row in history
             ],
             use_container_width=True,
-            hide_index=True,
+            hide_index=True, row_height=TABLE_ROW_HEIGHT,
         )
 
 

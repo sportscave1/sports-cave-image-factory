@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import sport_category_options, normalize_sport_category, normalize_sport_state
 from contextlib import suppress
 import base64
@@ -3493,35 +3494,18 @@ def inject_styles():
             width: 100%;
         }
 
-        table.sc-activity-table th {
-            background: #F4F1EA;
-            border-bottom: 1px solid #D8D1C4;
-            color: #29251F !important;
-            font-size: 0.7rem;
-            font-weight: 780;
-            padding: 0.44rem 0.52rem;
-            text-align: left;
-            text-transform: uppercase;
-        }
+
 
         table.sc-activity-table td {
-            border-bottom: 1px solid #ECE7DE;
-            color: #171717 !important;
-            font-size: 0.78rem;
-            line-height: 1.25;
             max-width: 0;
             overflow: hidden;
-            padding: 0.45rem 0.52rem;
-            vertical-align: top;
         }
 
         table.sc-activity-table tbody tr:last-child td {
             border-bottom: 0;
         }
 
-        table.sc-activity-table tbody tr:hover td {
-            background: #FFF9EA;
-        }
+
 
         .sc-activity-time .sc-activity-cell-text,
         .sc-activity-user .sc-activity-cell-text {
@@ -3769,6 +3753,8 @@ def inject_styles():
         """,
         unsafe_allow_html=True,
     )
+    from table_design import inject_table_styles
+    inject_table_styles(st)
     from sidebar_theme import SIDEBAR_CSS
     st.markdown("<style>" + SIDEBAR_CSS + "</style>", unsafe_allow_html=True)
 
@@ -10619,7 +10605,7 @@ def _render_developer_allocation_tools():
         )
         groups = duplicate_diagnostics.get("groups") or []
         if groups:
-            st.dataframe(groups, hide_index=True, use_container_width=True)
+            st.dataframe(groups, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
 
     view_cols = st.columns(2)
     if view_cols[0].button("View allocation settings", key="developer-view-allocation-settings", use_container_width=True):
@@ -10764,15 +10750,15 @@ def _render_developer_allocation_tools():
         st.json(summary)
         rows = known_result.get("preview_rows") or known_result.get("applied") or []
         if rows:
-            st.dataframe(rows, hide_index=True, use_container_width=True)
+            st.dataframe(rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         skipped = known_result.get("skipped") or []
         if skipped:
             with st.expander("Skipped known repair rows", expanded=False):
-                st.dataframe(skipped, hide_index=True, use_container_width=True)
+                st.dataframe(skipped, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         counters = known_result.get("counter_updates") or []
         if counters:
             with st.expander("Counter updates", expanded=False):
-                st.dataframe(counters, hide_index=True, use_container_width=True)
+                st.dataframe(counters, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
 
     st.divider()
     st.subheader("Shopify truth duplicate repair")
@@ -10847,19 +10833,19 @@ def _render_developer_allocation_tools():
         )
         if truth_result.get("matching_rows_before"):
             with st.expander("Matching rows before repair", expanded=False):
-                st.dataframe(truth_result["matching_rows_before"], hide_index=True, use_container_width=True)
+                st.dataframe(truth_result["matching_rows_before"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if truth_result.get("rows_to_delete"):
             st.write("Rows to delete")
-            st.dataframe(truth_result["rows_to_delete"], hide_index=True, use_container_width=True)
+            st.dataframe(truth_result["rows_to_delete"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if truth_result.get("renumber_rows"):
             st.write("Rows to renumber")
-            st.dataframe(truth_result["renumber_rows"], hide_index=True, use_container_width=True)
+            st.dataframe(truth_result["renumber_rows"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if truth_result.get("manual_review"):
             st.write("Manual review required")
-            st.dataframe(truth_result["manual_review"], hide_index=True, use_container_width=True)
+            st.dataframe(truth_result["manual_review"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if truth_result.get("proposed_counter_changes"):
             st.write("Affected product counter changes")
-            st.dataframe(truth_result["proposed_counter_changes"], hide_index=True, use_container_width=True)
+            st.dataframe(truth_result["proposed_counter_changes"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
 
     st.divider()
     st.subheader("Repair duplicate order allocations")
@@ -10951,13 +10937,13 @@ def _render_developer_allocation_tools():
         )
         if sc2880_result.get("rows_to_keep"):
             st.write("Rows to keep")
-            st.dataframe(sc2880_result["rows_to_keep"], hide_index=True, use_container_width=True)
+            st.dataframe(sc2880_result["rows_to_keep"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if sc2880_result.get("rows_to_delete"):
             st.write("Rows to delete")
-            st.dataframe(sc2880_result["rows_to_delete"], hide_index=True, use_container_width=True)
+            st.dataframe(sc2880_result["rows_to_delete"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if sc2880_result.get("proposed_counter_changes"):
             st.write("Affected product counter changes")
-            st.dataframe(sc2880_result["proposed_counter_changes"], hide_index=True, use_container_width=True)
+            st.dataframe(sc2880_result["proposed_counter_changes"], hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         st.caption(
             "After apply, push Shopify product metafields from Supabase for affected handles in Edition Ops or Developer tools."
         )
@@ -11940,7 +11926,7 @@ def render_accounts_access_page():
                 else "Never",
             }
         )
-    st.dataframe(account_rows, use_container_width=True, hide_index=True)
+    st.dataframe(account_rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
     with st.expander(
         "Create worker account",
@@ -12213,13 +12199,13 @@ def render_settings_page():
                 st.dataframe(
                     [{"Table": table, "Rows": count} for table, count in counts.items()],
                     hide_index=True,
-                    use_container_width=True,
+                    use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                 )
                 st.write("**Product mapping diagnostics**")
                 st.dataframe(
                     [{"Metric": key, "Value": value} for key, value in product_mapping_diagnostics.items()],
                     hide_index=True,
-                    use_container_width=True,
+                    use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                 )
                 st.write("**Latest sync logs**")
                 if sync_logs:
@@ -12244,7 +12230,7 @@ def render_settings_page():
                             if sync_type in {"performance", "demographics", "platform", "manual"}
                         ],
                         hide_index=True,
-                        use_container_width=True,
+                        use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                     )
                     st.dataframe(
                         [
@@ -12262,7 +12248,7 @@ def render_settings_page():
                             for row in sync_logs
                         ],
                         hide_index=True,
-                        use_container_width=True,
+                        use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                     )
                 else:
                     st.caption("No ads sync logs found.")
@@ -12279,7 +12265,7 @@ def render_settings_page():
                             for row in action_logs
                         ],
                         hide_index=True,
-                        use_container_width=True,
+                        use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                     )
                 else:
                     st.caption("No meta_sync action rows found.")
@@ -12296,7 +12282,7 @@ def render_settings_page():
                             for row in mapping_action_logs
                         ],
                         hide_index=True,
-                        use_container_width=True,
+                        use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                     )
                 else:
                     st.caption("No product_mapping action rows found.")
@@ -12352,7 +12338,7 @@ def render_settings_page():
                             for item in definitions
                         ],
                         hide_index=True,
-                        use_container_width=True,
+                        use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                     )
         except Exception as error:
             _developer_section_error("Shopify Limited Edition Setup", error)
@@ -12486,7 +12472,7 @@ def render_settings_page():
                             for item in definitions
                         ],
                         hide_index=True,
-                        use_container_width=True,
+                        use_container_width=True, row_height=TABLE_ROW_HEIGHT,
                     )
         except Exception as error:
             _developer_section_error("Order Metafield Setup", error)
@@ -12795,7 +12781,7 @@ def render_active_upcoming_events(events, today):
         hide_index=True,
         width="stretch",
         height=min(318, 42 + len(records) * 34),
-        row_height=34,
+        row_height=TABLE_ROW_HEIGHT,
         key="home-active-upcoming-events",
     )
     safe_startup_print(f"PERF Dashboard events={(time.perf_counter() - started):.3f}s")
@@ -12869,7 +12855,7 @@ def render_home_weekly_work(user, local_now):
                 hide_index=True,
                 width="stretch",
                 height=min(286, 42 + len(team_rows) * 34),
-                row_height=34,
+                row_height=TABLE_ROW_HEIGHT,
                 key="home-weekly-team-summary",
             )
 
@@ -12891,7 +12877,7 @@ def render_home_weekly_work(user, local_now):
             hide_index=True,
             width="stretch",
             height=min(360, max(190, 42 + len(work_rows) * 34)),
-            row_height=34,
+            row_height=TABLE_ROW_HEIGHT,
             key="home-completed-work-week",
         )
     else:
@@ -14131,7 +14117,7 @@ def render_task_group(group, tasks):
             hide_index=True,
             width="stretch",
             height=360,
-            row_height=34,
+            row_height=TABLE_ROW_HEIGHT,
             key=f"dashboard-task-table::{group_key}",
             on_select="rerun",
             selection_mode="single-row",

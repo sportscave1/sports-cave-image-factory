@@ -1,4 +1,5 @@
 from __future__ import annotations
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import normalize_sport_category, normalize_sport_state
 
 import csv
@@ -2533,7 +2534,7 @@ def _render_diagnosis(diagnosis):
             }
         )
     if rows:
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        st.dataframe(rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def _render_performance_section():

@@ -1,4 +1,5 @@
 """Compact CRM settings host; old customer/segment routes and permissions survive."""
+from table_design import TABLE_ROW_HEIGHT
 from copy import deepcopy
 from datetime import timedelta
 import os
@@ -143,7 +144,7 @@ def prompts_page(store,user):
     st.caption('Guidance is subordinate to the locked facts and compliance rules. No AI API is connected; responses must pass the versioned JSON validator before selected fields can be applied.')
     if st.button('Save prompt guidance'):values[purpose]=text;store.save_setting(user,'prompts',values,row['version']);st.success('Prompt revision saved.');st.rerun()
     with st.expander('Prompt versions'):
-        st.dataframe(store.q("SELECT version,actor,created_at FROM crm_settings_history WHERE key='prompts' ORDER BY version DESC LIMIT 30"),hide_index=True)
+        st.dataframe(store.q("SELECT version,actor,created_at FROM crm_settings_history WHERE key='prompts' ORDER BY version DESC LIMIT 30"),hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def compliance_page(store,user):
@@ -197,7 +198,7 @@ def connections_page(store,shop):
         {'Connection':'CRM webhook signature','Configured':'Yes' if os.getenv('CRM_RESEND_WEBHOOK_SECRET') else 'Missing','Evidence':'Latest mapped verified event: '+str(latest or 'Not receiving verified events')},
         {'Connection':'Campaign URL tracking','Configured':'Deterministic UTMs','Evidence':'Internal test context excluded from revenue'},
         {'Connection':'VentraIP support mailbox','Configured':'Existing Email page','Evidence':'Reference only — unchanged'},
-    ],hide_index=True,use_container_width=True)
+    ],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
     if proof.get('connected'):
         scopes=set(proof['scopes'])
         st.caption('Reported scopes: '+(', '.join(sorted(scopes)) or 'None reported'))
@@ -218,7 +219,7 @@ def connections_page(store,shop):
             source=pixel_code(cfg);copy_prompt(source);st.code(source,language='javascript')
         else:st.caption('Setup required before code generation: public pixel ID, allowed origins and HTTPS webhook base.')
     if last:
-        with st.expander('Event debug (no personal data)'):st.dataframe(last,hide_index=True)
+        with st.expander('Event debug (no personal data)'):st.dataframe(last,hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 def campaign_report(store,shop,user,identity=None):
@@ -229,14 +230,14 @@ def campaign_report(store,shop,user,identity=None):
     cols=st.columns(4)
     for col,label,value in zip(cols,('Attempted','Accepted','Delivered','Failed / bounced'),(totals['total'],totals['accepted'],events.get('email.delivered','Awaiting events'),str(totals['failed'])+' / '+str(events.get('email.bounced','—')))):col.metric(label,value)
     st.caption('Unique clicked messages: '+str(events.get('email.clicked','—'))+' · Opened: '+str(events.get('email.opened','—'))+' · Complaints: '+str(events.get('email.complained','—'))+' · Unsubscribe: inactive for internal tests')
-    if report['tests']:st.dataframe([{k:r[k] for k in ('campaign_version','status','provider_id','created_at','delivered')} for r in report['tests']],hide_index=True,height=180)
+    if report['tests']:st.dataframe([{k:r[k] for k in ('campaign_version','status','provider_id','created_at','delivered')} for r in report['tests']],hide_index=True,height=180, row_height=TABLE_ROW_HEIGHT)
     st.caption('PRODUCTION DATA · Live campaigns are not activated. Internal tests and website test events are excluded.')
     with st.expander('Existing campaign / flow history'):
         summary,campaigns,flows=store.reports()
-        st.dataframe([summary],hide_index=True)
+        st.dataframe([summary],hide_index=True, row_height=TABLE_ROW_HEIGHT)
         st.caption('Historical OS marketing receipts and verified events only. Counts do not prove current provider connectivity. Opens are a secondary signal; clicks can include scanners.')
-        if campaigns:st.dataframe(campaigns,hide_index=True)
-        if flows:st.dataframe(flows,hide_index=True)
+        if campaigns:st.dataframe(campaigns,hide_index=True, row_height=TABLE_ROW_HEIGHT)
+        if flows:st.dataframe(flows,hide_index=True, row_height=TABLE_ROW_HEIGHT)
     if not identity:
         candidates=store.list_drafts()
         if candidates:
@@ -266,5 +267,5 @@ def campaign_report(store,shop,user,identity=None):
         elif state['reasons'].get('journey_unavailable') or state['reasons'].get('revenue_unavailable'):st.warning('Attribution data incomplete: some Shopify journeys or revenue fields are unavailable. Totals withheld.');st.json(state)
         else:
             totals=store.q('SELECT currency,count(*) AS associated_orders,sum(amount) AS net_payments FROM crm_order_attribution WHERE campaign_id=%s AND eligible=true AND order_created_at>=%s AND order_created_at<%s GROUP BY currency',(identity,start.isoformat(),(end+timedelta(days=1)).isoformat()))
-            st.dataframe(totals,hide_index=True)
+            st.dataframe(totals,hide_index=True, row_height=TABLE_ROW_HEIGHT)
             st.caption('Shopify netPaymentSet.shopMoney: received payments minus refunds, grouped by currency; paid, non-test, non-canceled orders only. Refresh to reflect later refunds and cancellations. No currency conversion. Last checked: '+state['checked_at'])

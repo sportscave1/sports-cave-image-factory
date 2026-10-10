@@ -1,3 +1,4 @@
+from table_design import TABLE_ROW_HEIGHT
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta, timezone
 import importlib
@@ -2670,7 +2671,7 @@ def _render_admin_panel(rows):
             _render_admin_result("Latest paid fetch preview", preview)
             preview_rows = preview.get("preview_rows") or []
             if preview_rows:
-                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         _render_admin_result("Latest sync summary", st.session_state.get(SYNC_RESULT_KEY) or {})
         _render_admin_result("Latest backfill summary", st.session_state.get(BACKFILL_RESULT_KEY) or {})
         repair = st.session_state.get(REPAIR_RESULT_KEY) or {}
@@ -2678,7 +2679,7 @@ def _render_admin_panel(rows):
             _render_admin_result("Missing-edition repair summary", repair)
             preview_rows = repair.get("preview_rows") or []
             if preview_rows:
-                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         st.markdown("**Supabase diagnostics**")
         _render_ledger_diagnostics()
         st.markdown("**Orders read completeness diagnostics**")

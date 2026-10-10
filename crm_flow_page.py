@@ -1,4 +1,5 @@
 """One Flow page: existing analytics, sequence operations and shared editor."""
+from table_design import TABLE_ROW_HEIGHT
 from copy import deepcopy
 from html import escape,unescape
 import re
@@ -159,7 +160,7 @@ def step_performance(store,identity,slots,detail_slots):
             refresh_reads(store,identity,{'analytics-steps'});st.rerun(scope='fragment')
     historical=[m for m in values or [] if m['step_id'] not in slots]
     if historical:
-        with st.expander('Previous / removed email history'):st.dataframe([{k:v for k,v in m.items() if k!='revenue'} for m in historical],hide_index=True)
+        with st.expander('Previous / removed email history'):st.dataframe([{k:v for k,v in m.items() if k!='revenue'} for m in historical],hide_index=True, row_height=TABLE_ROW_HEIGHT)
 
 
 @st.fragment

@@ -1,4 +1,5 @@
 """Lazy CRM pages. Shopify owns all customer data; only configuration is editable."""
+from table_design import TABLE_ROW_HEIGHT
 import json
 import uuid
 from datetime import timedelta
@@ -32,7 +33,7 @@ def paging(page,key):
 
 def table(customers,key='crm_customers_table'):
     if not customers:st.caption('No customers in this page.');return None
-    event=st.dataframe(records(customers),hide_index=True,use_container_width=True,on_select='rerun',selection_mode='single-row',key=key,height=440)
+    event=st.dataframe(records(customers),hide_index=True,use_container_width=True,on_select='rerun',selection_mode='single-row',key=key,height=440, row_height=TABLE_ROW_HEIGHT)
     rows=event.selection.rows
     return customers[rows[0]]['id'] if rows and rows[0]<len(customers) else None
 
@@ -56,14 +57,14 @@ def profile(shop,store,customer_id,navigate,user):
     with st.expander('Purchase history',expanded=True):
         key='crm_orders_'+customer_id;page=shop.orders(customer_id,st.session_state.get(key))
         st.dataframe([{'Order':o['name'],'Date':o['createdAt'][:10],'Payment':o['displayFinancialStatus'],'Value':o['totalPriceSet']['shopMoney']['amount'],
-          'Products':', '.join(n['title']+(' · '+n['variantTitle'] if n.get('variantTitle') else '')+' × '+str(n['quantity']) for n in o['lineItems']['nodes'])} for o in page['nodes']],hide_index=True,use_container_width=True)
+          'Products':', '.join(n['title']+(' · '+n['variantTitle'] if n.get('variantTitle') else '')+' × '+str(n['quantity']) for n in o['lineItems']['nodes'])} for o in page['nodes']],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         paging(page,key)
         detailed=[o for o in page['nodes'] if o['lineItems']['pageInfo'].get('hasNextPage')]
         if detailed:
             order=st.selectbox('More line items',detailed,format_func=lambda o:o['name'],key=key+'_line_order')
             line_key='crm_lines_'+order['id']
             lines=shop.line_page('order',order['id'],st.session_state.get(line_key))
-            st.dataframe([{'Product':n['title'],'Variant':n.get('variantTitle'),'Quantity':n['quantity']} for n in lines['nodes']],hide_index=True,use_container_width=True)
+            st.dataframe([{'Product':n['title'],'Variant':n.get('variantTitle'),'Quantity':n['quantity']} for n in lines['nodes']],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
             paging(lines,line_key)
     with st.expander('Interests & owned editions'):
         st.caption('Derived from actual product tags, categories and collections in live purchase history.')
@@ -71,7 +72,7 @@ def profile(shop,store,customer_id,navigate,user):
             facts=available(lambda:LiveFacts(shop,c,store.editions).purchases())
             if facts:st.write(' · '.join(sorted(facts['interest'])) or 'No supported sport categories found.')
             editions=available(lambda:store.editions(customer_id,c.get('email','')))
-            if editions is not None:st.dataframe(editions,hide_index=True,use_container_width=True)
+            if editions is not None:st.dataframe(editions,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
     with st.expander('Segments'):
         if st.button('Check segment membership',key='membership_'+customer_id):
             # Native membership query, one batch; no persisted customer memberships.
@@ -81,7 +82,7 @@ def profile(shop,store,customer_id,navigate,user):
             st.caption('First 50 Shopify segments. Open Segments for the remaining pages.')
     with st.expander('Automation history & campaign activity'):
         history=available(lambda:store.history(customer_id))
-        if history is not None:st.dataframe(history,hide_index=True,use_container_width=True)
+        if history is not None:st.dataframe(history,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
     import os_accounts
     if os_accounts.can_access_page(user,'Email') and st.button('Open in Email',key='support_'+customer_id):navigate('Email')
 
@@ -159,7 +160,7 @@ def segments_page(shop,store,actions):
     st.caption('Shopify owns segment membership. Sports Cave stores rule definitions only.')
     native=available(lambda:shop.segments(st.session_state.get('crm_segment_cursor')))
     if native:
-        st.dataframe([{'Segment':s['name'],'Source':'Shopify','Updated':s['lastEditDate'],'Customers':'Open segment','Eligible':'Preview'} for s in native['nodes']],hide_index=True,use_container_width=True)
+        st.dataframe([{'Segment':s['name'],'Source':'Shopify','Updated':s['lastEditDate'],'Customers':'Open segment','Eligible':'Preview'} for s in native['nodes']],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         if native['nodes']:
             chosen=st.selectbox('Shopify segment',native['nodes'],format_func=lambda s:s['name'])
             preview_key='crm_native_preview_'+chosen['id']
@@ -286,7 +287,7 @@ def campaigns_page(shop,store,actions):
         actions.test(template,address,st.session_state['crm_test_operation']);st.success('Test queued once.');st.session_state['crm_test_operation']=str(uuid.uuid4())
     rows=store.list('campaigns')
     if rows:
-        st.dataframe([{'Campaign':r['name'],'Status':r['status'],'Scheduled':str(r.get('scheduled_at') or '—')} for r in rows],hide_index=True,use_container_width=True)
+        st.dataframe([{'Campaign':r['name'],'Status':r['status'],'Scheduled':str(r.get('scheduled_at') or '—')} for r in rows],hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
         row=st.selectbox('Saved campaign',rows,format_func=lambda r:r['name'])
         with st.expander('Saved campaign content'):
             st.caption('Pinned template version '+str(row['template_version'])+'. Later library edits do not change this campaign.')
@@ -308,13 +309,13 @@ def reports_page(store):
     metrics=[('Sends',summary['sends']),('Delivered',summary['delivered']),('Open rate',f"{summary['opened']/summary['delivered']:.1%}" if summary['delivered'] else '—'),('Click rate',f"{summary['clicked']/summary['delivered']:.1%}" if summary['delivered'] else '—'),('Bounces',summary['bounces']),('Complaints',summary['complaints']),('Unsubscribes',summary['unsubscribes'])]
     for col,(label,value) in zip(cols,metrics):col.metric(label,value)
     st.caption('Opens/clicks reflect Resend events and can include email-client privacy activity. Attributed revenue: —. Recovery is not proof of causation.')
-    st.subheader('Automations');st.dataframe(automations,hide_index=True,use_container_width=True)
-    st.subheader('Campaigns');st.dataframe(campaigns,hide_index=True,use_container_width=True)
+    st.subheader('Automations');st.dataframe(automations,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
+    st.subheader('Campaigns');st.dataframe(campaigns,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
     st.caption('Worker: '+str(store.state('worker_health').get('checked_at') or 'Not started'))
     held=store.q("SELECT status,error_code,created_at FROM crm_marketing_sends WHERE status IN ('FAILED','UNCERTAIN','BLOCKED') ORDER BY created_at DESC LIMIT 50")
     if held:
         with st.expander('Held or excluded deliveries'):
-            st.dataframe(held,hide_index=True,use_container_width=True)
+            st.dataframe(held,hide_index=True,use_container_width=True, row_height=TABLE_ROW_HEIGHT)
             st.caption('Uncertain submissions are never retried automatically. Check the provider receipt before any manual follow-up.')
 
 

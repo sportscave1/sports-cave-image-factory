@@ -1,4 +1,5 @@
 """Spreadsheet-style design tracker with autosave and retained failed-save drafts."""
+from table_design import TABLE_ROW_HEIGHT
 from copy import deepcopy
 from datetime import datetime
 import logging
@@ -196,5 +197,5 @@ def _render_table(actor):
             "designed_by": st.column_config.TextColumn("Designed by", max_chars=120),
             "bonus_paid_on": st.column_config.DateColumn("Bonus", format="DD/MM/YYYY",
                 help="Admin only: enter the date the bonus was paid. Leave blank until paid."),
-        },
+        }, row_height=TABLE_ROW_HEIGHT,
     )

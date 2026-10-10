@@ -1,4 +1,5 @@
 """Compact Campaigns V1 workspace. Explicit buttons are the only external-I/O triggers."""
+from table_design import TABLE_ROW_HEIGHT
 from sports_categories import sport_category_options, normalize_sport_state
 from copy import deepcopy
 import json
@@ -515,7 +516,7 @@ def message_editor(shop,store,user,editor,key,cfg):
             if proposal:
                 with st.expander('Generated copy brief + options'):
                     st.json({k:proposal[k] for k in ('subject_options','preheader_options','copy')})
-                changes=proposals(proposal,doc);st.dataframe([{'Field':k,**v} for k,v in changes.items()],hide_index=True)
+                changes=proposals(proposal,doc);st.dataframe([{'Field':k,**v} for k,v in changes.items()],hide_index=True, row_height=TABLE_ROW_HEIGHT)
                 selected_fields=st.multiselect('Apply selected fields',list(changes),key=key+'copyselection')
                 if st.button('Apply selected copy',disabled=not selected_fields):editor['document']=apply(doc,proposal,selected_fields);reset_widgets();st.rerun()
 
@@ -638,8 +639,8 @@ def review_editor(store,user,editor,key,cfg):
                 st.session_state[key+'test_operation']=str(uuid.uuid4());st.caption('New explicit test attempt prepared. Type and confirm the recipient before sending.')
         else:st.caption('Only an administrator can send a single-recipient test.')
         with st.expander('Test history'):
-            st.dataframe([{k:r[k] for k in ('campaign_version','status','provider_id','created_at','delivered')} for r in store.test_history(editor['id'])],hide_index=True)
-        with st.expander('Revision history'):st.dataframe(store.history(editor['id']),hide_index=True)
+            st.dataframe([{k:r[k] for k in ('campaign_version','status','provider_id','created_at','delivered')} for r in store.test_history(editor['id'])],hide_index=True, row_height=TABLE_ROW_HEIGHT)
+        with st.expander('Revision history'):st.dataframe(store.history(editor['id']),hide_index=True, row_height=TABLE_ROW_HEIGHT)
     with right:layout_preview(doc,cfg,key)
 
 
