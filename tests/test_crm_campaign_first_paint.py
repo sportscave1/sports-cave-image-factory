@@ -128,7 +128,7 @@ class FirstPaintTests(unittest.TestCase):
         next(b for b in app.button if b.label=='Cancel').click().run()
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state['campaign_editor']['name'],'Unsaved changes')
-        self.assertEqual(app.query_params['campaign'],['00000000-0000-0000-0000-000000000456'])
+        self.assertEqual(app.query_params['campaign'] if isinstance(app.query_params['campaign'],list) else [app.query_params['campaign']],['00000000-0000-0000-0000-000000000456'])
 
     def test_dirty_switch_save_and_leave_uses_existing_flow(self):
         app=AppTest.from_string(SELECTION_SCRIPT)

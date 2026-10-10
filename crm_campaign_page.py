@@ -243,6 +243,17 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
 
 
 
+def operational_record(drafts,identity):
+    """Bounded routing metadata; never fetch or transform the frozen HTML."""
+    return drafts.q('''SELECT c.id,c.name,c.status,c.template_id,c.template_version
+      FROM crm_campaigns c WHERE c.id=%s
+      UNION ALL
+      SELECT p.campaign_id,d.name,p.status,NULL,NULL
+      FROM crm_campaign_preparation p JOIN crm_campaign_drafts d ON d.id=p.campaign_id
+      WHERE p.campaign_id=%s AND NOT EXISTS (SELECT 1 FROM crm_campaigns c WHERE c.id=p.campaign_id)
+      LIMIT 1''',(identity,identity),True)
+
+
 def continue_campaign_leave(drafts,navigate,*,rerun=True):
     target=st.session_state.pop('crm_requested_route',None)
     pending=st.session_state.pop('campaign_pending_open',None)
@@ -255,7 +266,22 @@ def continue_campaign_leave(drafts,navigate,*,rerun=True):
         new_compose(drafts.setting('sending')['value']['smart_hours'],cfg,drafts.default_sections(cfg))
         if st.session_state.pop('campaign_open_templates',False):
             st.session_state[st.session_state['campaign_edit_key']+'panel']='Templates'
-    elif pending:open_editor(drafts.draft(pending))
+    elif pending:
+        # Resolve the target before loading an editable payload. Published and
+        # accepted campaigns have no authoring/recovery work to perform.
+        identity=str(uuid.UUID(str(pending)))
+        from crm_navigation import require
+        context=st.session_state.get('campaign_recovery_context')
+        if context:require(context[1],'crm_campaigns_manage')
+        delivery=operational_record(drafts,identity)
+        if delivery:
+            st.session_state.pop('campaign_editor',None)
+            st.session_state.pop('campaign_saved',None)
+            st.session_state.pop('campaign_recovery_context',None)
+            st.session_state['_campaign_operational_route']=delivery
+            st.query_params['campaign']=identity
+            st.session_state['campaign_view']='CAMPAIGN_EDITOR'
+        else:open_editor(drafts.draft(identity))
     if rerun or target:st.rerun()
 
 
@@ -266,7 +292,6 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
     from crm_html_workspace import composer_styles
     from crm_campaign_home import STYLE
     st.html(STYLE)
-    composer_styles()
     overview_route=st.empty();editor_route=st.empty()
     drafts=CampaignStore(store.connect)
     editor=st.session_state.get('campaign_editor')
@@ -316,6 +341,25 @@ def campaign_workspace(shop,store,actions,navigate=lambda _:None):
 def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
     from crm_html_workspace import composer_styles
     from email_loading import stage
+    explicit=st.query_params.get('campaign')
+    editor=st.session_state.get('campaign_editor')
+    if explicit and (not editor or editor.get('recovery_readonly')) and not (editor and dirty(editor)):
+        from crm_navigation import require
+        require(actions.user,'crm_campaigns_manage')
+        try:
+            identity=str(uuid.UUID(str(explicit)))
+            with stage('Campaigns','operational_route'):
+                routed=st.session_state.pop('_campaign_operational_route',None)
+                delivery=routed if routed and str(routed['id'])==identity else operational_record(drafts,identity)
+            if delivery:
+                st.session_state.pop('campaign_recovery_context',None)
+                from crm_campaign_progress_ui import operational_view
+                operational_view(drafts,actions.user,delivery,show_back=False)
+                return
+        except ValueError:
+            st.warning('Invalid campaign identity.');return
+        except StoreUnavailable:
+            st.error('Campaign temporarily unavailable. Your saved content is unchanged.');return
     available=True
     try:
         with stage('Campaigns','selected_config'):
@@ -358,7 +402,7 @@ def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
         composer_styles()
         editor['recovery_readonly']=True
         st.session_state['campaign_saved']=deepcopy(editor)
-        operational_view(drafts,actions.user,delivery)
+        operational_view(drafts,actions.user,delivery,show_back=False)
         if st.session_state.get('crm_requested_route') or st.session_state.get('campaign_pending_open'):
             continue_campaign_leave(drafts,navigate)
         return

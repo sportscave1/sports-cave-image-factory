@@ -267,6 +267,6 @@ class SendFlowUiTests(unittest.TestCase):
             self.assertTrue(any(OFF in s.value for s in at.caption))
             self.assertEqual(sum((b.key or '').endswith('confirm_send') for b in at.button),1)
             self.assertTrue(next(b for b in at.button if (b.key or '').endswith('confirm_send')).disabled)
-            job=next(v for k,v in at.session_state.filtered_state.items() if k.endswith('review_job'))
+            job=next(v for k,v in (at.session_state.items() if hasattr(type(at.session_state),'items') else at.session_state.filtered_state.items()) if k.endswith('review_job'))
             job.future.result(timeout=20)
         self.assertEqual(store.q('SELECT count(*) n FROM crm_marketing_sends',one=True)['n'],before)

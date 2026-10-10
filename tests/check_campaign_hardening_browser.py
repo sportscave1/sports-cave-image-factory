@@ -22,6 +22,8 @@ with sync_playwright() as p:
             for width,height in ((1440,900),(820,1180),(390,844),(320,740)):
                 if args.width and width!=args.width:continue
                 page=context.new_page()
+                sent_frames=[]
+                page.on('websocket',lambda ws:ws.on('framesent',lambda payload:sent_frames.append(str(payload))))
                 page.set_viewport_size({'width':width,'height':height})
                 navigations=[];page.on('framenavigated',lambda f:navigations.append(f.url) if f==page.main_frame else None)
                 page.goto('http://127.0.0.1:8597/?view='+view+'&countdown_probe=1')
@@ -46,6 +48,25 @@ with sync_playwright() as p:
                     assert box['x']>=-1 and box['x']+box['width']<=width+1
                     page.get_by_role('button',name='Edit schedule',exact=True).focus()
                     page.keyboard.press('Escape');menu.wait_for(state='hidden')
+                    # Repeat Escape from the trigger and multiple menu controls.
+                    # Native overlay Escape used to miss focus on the trigger.
+                    frame_count=len(sent_frames)
+                    for attempt in range(12):
+                        button.click();menu.wait_for(state='visible')
+                        assert page.get_by_test_id('stPopoverBody').count()==1
+                        focus=button if attempt%3==0 else page.get_by_role('button',name='Edit schedule' if attempt%3==1 else 'History',exact=True)
+                        focus.focus()
+                        if attempt%3==1:
+                            page.keyboard.press('Tab')
+                            assert page.get_by_role('button',name='Send now',exact=True).evaluate('(el)=>el===document.activeElement')
+                            page.keyboard.press('Shift+Tab')
+                            assert focus.evaluate('(el)=>el===document.activeElement')
+                        page.keyboard.press('Escape');menu.wait_for(state='hidden')
+                        page.wait_for_function("document.activeElement?.textContent.includes('⋯')")
+                    assert len(sent_frames)==frame_count, 'Menu interaction caused a server request'
+                    button.click();menu.wait_for(state='visible')
+                    page.get_by_role('heading',name='Campaigns',exact=True).click()
+                    menu.wait_for(state='hidden')
                     button.click()
                 page.get_by_role('button',name='Edit schedule',exact=True).click()
                 dialog=page.get_by_test_id('stDialog').get_by_role('dialog');dialog.wait_for()

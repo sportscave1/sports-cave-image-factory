@@ -15,7 +15,7 @@ def poll(key, seconds):
         'clearTimeout(window.scCampaignTimers[key]);const tick=()=>{'+
         'const b=document.querySelector(".st-key-"+key+" button");if(!b||!b.isConnected)return;'+
         'const dialog=document.querySelector("[role=dialog]");'+
-        'if(document.hidden||(dialog&&key==="crm-history-poll")){'+
+        'if(document.hidden||dialog||document.querySelector("[data-testid=stPopoverBody]")){'+
         'window.scCampaignTimers[key]=setTimeout(tick,3000);return;}'+
         'b.click();'+
         '};window.scCampaignTimers[key]=setTimeout(tick,'+str(int(seconds*1000))+');})();</script>', unsafe_allow_javascript=True)
@@ -59,7 +59,7 @@ def status_content(store, identity, row=_UNREAD):
                 st.caption(f"Scheduled · {row['total']:,} recipients")
             else:
                 st.markdown('**'+('Sent with issues' if row['complete'] and row['attention'] else 'Sent' if row['complete'] else 'Queued' if not row.get('started') and not row.get('worker_started_at') else row['title'])+'**')
-                if row.get('started') or row.get('worker_started_at') or row['complete']:
+                if row['total'] and (row.get('started') or row.get('worker_started_at') or row['complete']):
                     st.progress(row['percent'])
                     st.caption(f"{row['processed']:,} / {row['total']:,} recipients processed")
                     st.caption(f"{row['submitted']:,} submitted · {row['skipped']:,} skipped · {row['failed']:,} failed · {row['held']:,} held")
@@ -106,7 +106,7 @@ def status_content(store, identity, row=_UNREAD):
 
 
 @st.fragment
-def operational_view(store,user,delivery):
+def operational_view(store,user,delivery,*,show_back=True):
     from crm_navigation import require
     require(user,'crm_campaigns_manage')
     from page_presentation import inject_compact_page
@@ -119,7 +119,7 @@ def operational_view(store,user,delivery):
     with st.container(key='crm-campaign-operational'):
         st.html('<style>.st-key-crm-operational-header [data-testid="stElementContainer"]:has([data-testid="stHtml"]){flex:1 1 180px!important;min-width:0!important}.st-key-crm-operational-header button{white-space:nowrap;word-break:normal!important}.st-key-crm-operational-header [data-testid="stHorizontalBlock"]{flex-wrap:wrap!important}</style>')
         with st.container(horizontal=True,vertical_alignment='center',key='crm-operational-header'):
-            if st.button('← Campaigns',key='operational_back'):
+            if show_back and st.button('← Campaigns',key='operational_back'):
                 from crm_campaign_home import return_home
                 return_home();st.rerun()
             from html import escape

@@ -173,7 +173,8 @@ def row_html(row):
         elif row['status']=='SENDING' and not progress.get('started') and not progress.get('worker_started_at'):status='Queued'
         if row['status'] in ('SENDING','QUEUED','BUILDING'):
             submission='<small title="'+escape(detail,quote=True)+'">'+format(progress['processed'],',')+' / '+format(progress['total'],',')+'</small>'
-            submission+='<div class="sc-home-send-bar" role="progressbar" aria-label="Campaign processing" aria-valuenow="'+str(progress['processed'])+'" aria-valuemin="0" aria-valuemax="'+str(progress['total'])+'"><span style="width:'+str(progress['percent']*100)+'%"></span></div>'
+            if progress['total'] and (progress.get('started') or progress.get('worker_started_at')):
+                submission+='<div class="sc-home-send-bar" role="progressbar" aria-label="Campaign processing" aria-valuenow="'+str(progress['processed'])+'" aria-valuemin="0" aria-valuemax="'+str(progress['total'])+'"><span style="width:'+str(progress['percent']*100)+'%"></span></div>'
         else:submission='<small title="'+escape(detail,quote=True)+'">Needs attention</small>' if progress['attention'] else ''
         if row['status']=='FAILED' and progress.get('preparation_error'):
             from crm_campaign_preparation import failure_message
@@ -365,6 +366,8 @@ def campaign_table(store,user):
 
 @st.fragment
 def home(store,user):
+    from crm_campaign_menu import install
+    install()
     # Each region owns its containers; only the completed parent render arms the
     # shared controller. Child interactions re-arm it when the parent is idle.
     st.session_state['campaign_home_rendering']=True

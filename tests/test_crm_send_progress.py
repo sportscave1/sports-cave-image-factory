@@ -188,7 +188,7 @@ class ProgressTests(unittest.TestCase):
         app=AppTest.from_string(QUEUE_SCRIPT);app.session_state['queue_fail']=True;app.run()
         next(b for b in app.button if b.label=='Send to 4 recipients').click().run()
         self.assertFalse(app.exception);self.assertEqual(app.session_state['campaign_editor']['id'],ID)
-        self.assertEqual(app.query_params['campaign'],[ID]);self.assertNotIn('campaign_send_progress',app.session_state)
+        self.assertEqual(app.query_params['campaign'] if isinstance(app.query_params['campaign'],list) else [app.query_params['campaign']],[ID]);self.assertNotIn('campaign_send_progress',app.session_state)
         self.assertEqual(app.session_state['fixture_production_operation'],app.session_state['operation'])
 
     def test_polling_modules_cannot_queue_or_own_delivery(self):

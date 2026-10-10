@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from datetime import time
 from crm_campaign_schedule import recipient_zone,resolve
 
@@ -50,7 +51,7 @@ class DetailReadTests(unittest.TestCase):
 
     def test_detail_reads_progress_once_and_defers_dialog_context(self):
         from streamlit.testing.v1 import AppTest
-        app=AppTest.from_file('tests/fixtures/campaign_hardening_preview.py',default_timeout=30).run()
+        app=AppTest.from_file(str(Path(__file__).resolve().parent/'fixtures/campaign_hardening_preview.py'),default_timeout=30).run()
         self.assertFalse(app.exception)
         counts=app.session_state['fixture-counts']
         self.assertEqual(counts['queries'],1)
@@ -59,7 +60,7 @@ class DetailReadTests(unittest.TestCase):
 
     def test_dialog_field_changes_reuse_opening_revision_context(self):
         from streamlit.testing.v1 import AppTest
-        app=AppTest.from_file('tests/fixtures/campaign_hardening_preview.py',default_timeout=30).run()
+        app=AppTest.from_file(str(Path(__file__).resolve().parent/'fixtures/campaign_hardening_preview.py'),default_timeout=30).run()
         next(b for b in app.button if b.label=='Edit schedule').click().run()
         self.assertFalse(app.exception)
         reads=app.session_state['fixture-counts']['states']
