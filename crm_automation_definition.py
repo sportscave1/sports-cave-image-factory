@@ -27,8 +27,14 @@ def new_flow(trigger='welcome'):
 
 
 def validate(flow, *, draft=False):
-    if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request','timing_version','inactive_days','exit_on_purchase'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
+    if not isinstance(flow, dict) or set(flow)-{'trigger','rules','reentry_days','emails','abandonment_seconds','review_request','timing_version','inactive_days','exit_on_purchase','lifecycle_version','fulfilment_fallback_days'} or not {'trigger','rules','reentry_days','emails'}.issubset(flow):
         raise ValueError('Invalid automation definition.')
+    if 'lifecycle_version' in flow:
+        if flow['lifecycle_version'] != 1 or flow.get('trigger') not in ('welcome','post_purchase','win_back'):
+            raise ValueError('Invalid lifecycle definition.')
+        fallback=flow.get('fulfilment_fallback_days')
+        if fallback is not None and (type(fallback) is not int or not 14<=fallback<=90):
+            raise ValueError('Fulfilment fallback must be disabled or 14–90 days.')
     if flow.get('timing_version',1) not in (1,2) or (flow.get('timing_version')==2 and 'abandonment_seconds' in flow):
         raise ValueError('Use the single Delay setting for this flow.')
     if 'review_request' in flow:
@@ -63,7 +69,13 @@ def validate(flow, *, draft=False):
     if not isinstance(flow['emails'],list) or not flow['emails']: raise ValueError('Add an email.')
     seen=set()
     for step in flow['emails']:
-        if not isinstance(step,dict) or set(step)-{'step_id','delay_seconds','document','name','enabled'} or not {'step_id','delay_seconds','document'}.issubset(step): raise ValueError('Invalid email step.')
+        if not isinstance(step,dict) or set(step)-{'step_id','delay_seconds','document','name','enabled','anchor','requires_fulfilment'} or not {'step_id','delay_seconds','document'}.issubset(step): raise ValueError('Invalid email step.')
+        if 'requires_fulfilment' in step and (not flow.get('lifecycle_version') or flow['trigger']!='post_purchase' or type(step['requires_fulfilment']) is not bool):
+            raise ValueError('Fulfilment eligibility requires a Post Purchase lifecycle step.')
+        if flow.get('lifecycle_version'):
+            allowed={'welcome':('subscription',),'post_purchase':('payment','delivery'),'win_back':('last_purchase',)}[flow['trigger']]
+            if step.get('anchor') not in allowed:raise ValueError('Choose a verified timing event for this flow.')
+        elif 'anchor' in step:raise ValueError('Event anchors require a lifecycle flow.')
         if type(step.get('enabled',True)) is not bool:raise ValueError('Invalid email enabled state.')
         if not isinstance(step.get('name',''),str) or len(step.get('name',''))>150:raise ValueError('Email names must be at most 150 characters.')
         try:identity=str(uuid.UUID(step['step_id']))

@@ -8,19 +8,27 @@ import streamlit as st
 from crm_automation_definition import TRIGGERS, native
 from crm_automation_home_data import counts, rows, identities, PAGE_SIZE, reporting_window, step_metrics
 from crm_automation_analytics import summary, activity, performance, revenue, conversions, checkout_page, flow_state, add_to_flow
-from crm_campaign_home import STYLE, ICON_PATHS
+from crm_campaign_home import STYLE as CAMPAIGN_STYLE, ICON_PATHS
+STYLE=CAMPAIGN_STYLE.replace("st-key-crm-campaign-home","st-key-crm-automation-home")
 from crm_automation_read_cache import resolve
 from crm_logic import now, date
 
 STYLE_AUTO='''<style>
+.st-key-auto-home-assets,.st-key-auto-route-controls{display:none}
+[data-testid="stMainBlockContainer"]:has(.st-key-crm-automation-home){padding-top:calc(var(--sc-topbar-height,64px) + 20px)!important}
+.st-key-crm-automation-home{margin-top:0!important}
+[data-testid="stMainBlockContainer"]:has(.st-key-crm-automation-home) [data-testid="stVerticalBlock"]{gap:8px}
+[data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"]:has(.st-key-crm-automation-home){gap:0}
+.st-key-crm-automation-home h1{padding:0!important;margin:0!important;font-size:24px}
+.st-key-crm-automation-home h1+p{margin:3px 0 4px!important;font-size:14px}
+
 .sc-auto-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:4px 0 8px}
-.sc-auto-kpi{display:flex;gap:10px;padding:16px 12px;border:1px solid #e8e6e1;border-radius:12px;background:#fff;min-width:0;align-items:flex-start;min-height:116px}
-.sc-auto-kpi small{color:#73747c;font-size:11px;display:block}.sc-auto-kpi strong{display:block;font-size:24px;margin:6px 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.sc-auto-trend{font-size:11px;color:#328555;min-height:16px}
+.sc-auto-kpi{display:flex;gap:10px;padding:10px 12px;border:1px solid #e8e6e1;border-radius:12px;background:#fff;min-width:0;align-items:flex-start;min-height:88px}
+.sc-auto-kpi small{color:#73747c;font-size:11px;display:block}.sc-auto-kpi strong{display:block;font-size:22px;margin:3px 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.sc-auto-trend{font-size:11px;color:#328555;min-height:16px}
 .sc-auto-kpi .sc-home-icon{width:38px;height:38px}
-.st-key-crm-campaign-home button[kind='primary']{background:#d1a638!important;border-color:#d1a638!important;color:#161820!important;font-weight:600}
-.st-key-crm-campaign-home h1+p{margin-top:2px;margin-bottom:10px}
+.st-key-crm-automation-home button[kind='primary']{background:#d1a638!important;border-color:#d1a638!important;color:#161820!important;font-weight:600}
 .st-key-auto-create button{max-width:280px;float:right}
-.sc-auto-trend{color:#71747c}.sc-auto-kpi strong{line-height:1.25}.sc-auto-kpi{min-height:110px}
+.sc-auto-trend{color:#71747c}.sc-auto-kpi strong{line-height:1.25}
 .sc-auto-head,.sc-auto-row{font-size:13px}.sc-auto-head{font-size:12px}.sc-auto-row small{font-size:12px}
 .sc-auto-head,.sc-auto-row{display:grid;grid-template-columns:minmax(160px,2.6fr) minmax(110px,1.4fr) repeat(3,minmax(50px,.7fr)) minmax(88px,.9fr) repeat(3,minmax(60px,.7fr)) 80px;gap:8px;align-items:center;font-size:12px;padding:10px 0;min-width:0;border-bottom:1px solid #eee}
 .sc-auto-head{background:#f8f8f8;border-radius:7px;padding:9px 0;position:relative;color:#646770;font-size:11px}.sc-auto-actions-heading{width:40px;text-align:center;font-size:11px;color:#646770}
@@ -45,7 +53,7 @@ STYLE_AUTO='''<style>
 [class*='st-key-auto-context-menu-'] [class*='st-key-auto_delete_'] button:not(:disabled){color:#a43838!important}
 [class*='st-key-auto-context-menu-'] [class*='st-key-auto_delete_'] button:hover:not(:disabled){background:#f9ecea!important}
 .st-key-auto-overview{border:1px solid #e8e6e1;border-radius:12px;padding:14px;background:#fff;container-type:inline-size}
-.sc-auto-activity{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.sc-auto-event{padding:14px;border:1px solid #e8e6e1;border-radius:10px;background:#fff;min-width:0;font-size:12px}.sc-auto-event small{display:block;color:#797c86;margin:6px 0}.sc-auto-event strong{overflow-wrap:anywhere}
+.sc-auto-activity{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.sc-auto-event{padding:14px;border:1px solid #e8e6e1;border-radius:10px;background:#fff;min-width:0;font-size:12px}.sc-auto-event{overflow-wrap:anywhere}.sc-auto-event small{display:block;color:#797c86;margin:6px 0}.sc-auto-event strong{overflow-wrap:anywhere}
 .st-key-auto-home-tabs button[aria-pressed='true']{border-bottom:2px solid #c7a13f!important;font-weight:600!important}
 .st-key-auto-home-tabs button{border-radius:0!important;border:0!important;background:transparent!important;min-height:38px}
 .st-key-auto-home-tabs button[kind='segmented_controlActive']{border-bottom:2px solid #c7a13f!important;color:#161820!important;font-weight:600!important}
@@ -53,12 +61,14 @@ STYLE_AUTO='''<style>
 [class*='st-key-auto-actions-'] [data-testid='stPopoverButton'] [data-testid='stIconMaterial']{display:none}
 .sc-auto-head,.sc-auto-row{font-size:13px}.sc-auto-head{font-size:12px}.sc-auto-row small{font-size:12px}
 .sc-auto-person{display:flex;align-items:center;gap:10px}.sc-auto-avatar{display:grid;place-items:center;width:36px;height:36px;flex:none;border-radius:50%;background:#edf3fb;color:#315898;font-weight:600}
-.st-key-auto-activity{border:1px solid #e8e6e1;border-radius:12px;background:#fff;padding:14px;margin-top:6px}.st-key-auto-activity h3{font-size:20px;padding-top:0;padding-bottom:0}
+.st-key-auto-activity{container-type:inline-size;border:1px solid #e8e6e1;border-radius:12px;background:#fff;padding:14px;margin-top:6px}.st-key-auto-activity h3{font-size:20px;padding-top:0;padding-bottom:0}
 .st-key-auto-overview input{background:#fff;border:1px solid #e6e9ef;border-radius:7px}
 @media(max-width:1400px){.sc-auto-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @container(max-width:900px){.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(170px,2fr) minmax(95px,1fr) repeat(4,minmax(45px,.7fr)) 70px}.sc-auto-head>div:nth-child(5),.sc-auto-row>div:nth-child(5),.sc-auto-head>div:nth-child(6),.sc-auto-row>div:nth-child(6),.sc-auto-head>div:nth-child(9),.sc-auto-row>div:nth-child(9){display:none}}
 @container(max-width:710px){.sc-auto-head,.sc-auto-row{grid-template-columns:minmax(100px,2fr) 48px 60px;gap:8px}.sc-auto-head>div:nth-child(2),.sc-auto-row>div:nth-child(2),.sc-auto-head>div:nth-child(3),.sc-auto-row>div:nth-child(3),.sc-auto-head>div:nth-child(7),.sc-auto-row>div:nth-child(7),.sc-auto-head>div:nth-child(8),.sc-auto-row>div:nth-child(8){display:none}}
 @media(max-width:750px){.sc-auto-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.sc-auto-kpi{padding:12px 8px;gap:7px}.sc-auto-kpi strong{font-size:21px}.sc-auto-activity{grid-template-columns:repeat(2,minmax(0,1fr))}.st-key-auto-overview{padding:8px}}
+@container(max-width:700px){.sc-auto-activity{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container(max-width:350px){.sc-auto-activity{grid-template-columns:1fr}}
 @media(max-width:390px){.sc-auto-kpi .sc-home-icon{width:26px;height:28px}.sc-auto-kpi small{font-size:10px}.sc-auto-name .sc-home-icon{display:none}.sc-auto-activity{grid-template-columns:1fr}}
 </style>'''
 
@@ -67,6 +77,13 @@ STYLE_AUTO='''<style>
 MENU_SCRIPT='''<script>(()=>{
 if(window.scAutomationMenuKeys)return;
 window.scAutomationMenuKeys=true;
+// At narrow widths the native button focuses its input before pointer-up.
+// Prevent that focus from scrolling the button out from under the pointer;
+// preserve the native dropdown event and ordinary keyboard scrolling.
+document.addEventListener('pointerdown',e=>{
+ const control=e.target.closest?.('.st-key-auto_filter,.st-key-auto_sort');
+ if(control&&e.target.closest?.('button'))control.querySelector('input[role="combobox"]')?.focus({preventScroll:true});
+},true);
 const decorate=root=>{
  const menus=[...(root.querySelectorAll?.("[class*='st-key-auto-context-menu-']")||[])];
  if(root.matches?.("[class*='st-key-auto-context-menu-']"))menus.push(root);
@@ -230,6 +247,10 @@ def payload(key,load):
     if key[0]=='counts' and any(value[k] is None for k in fields):raise ValueError('Incomplete automation counts')
     if key[0]=='delivery' and (value['sent_emails'] is None or not isinstance(value['revenue'],dict) or not isinstance(value['previous'],dict)):
         raise ValueError('Incomplete automation metrics')
+    if key[0]=='delivery':
+        prior=value['previous']
+        if not all(k in prior for k in fields if k!='previous') or prior.get('sent_emails') is None or not isinstance(prior.get('revenue'),dict):
+            raise ValueError('Incomplete previous-period metrics')
     if key[0]=='profiles':
         if not isinstance(value,dict):raise ValueError('Incomplete customer labels')
     elif not fields and not isinstance(value,list):raise ValueError('Incomplete automation list')
@@ -239,9 +260,31 @@ def payload(key,load):
 def read(store,key,load):
     from crm_automation_ui import home_state,job
     state=home_state()
+    ttl=180 if key[0] in ('counts','delivery','activity') else 60
+    aggregate=key[0] in ('counts','delivery')
+    if aggregate:
+        from crm_automation_aggregate_cache import get,token,put,FRESH_SECONDS
+        scope=state.get('analytics_scope')
+        cached=get(scope,key[0])
+        if cached:
+            state.setdefault('campaign_home_resolved',{}).setdefault((store.connect,key),cached['value'])
+            ttl=0
+            if not cached.get('expired') and monotonic()-cached['at']<FRESH_SECONDS:
+                state['campaign_home_resolved'][(store.connect,key)]=cached['value']
+                state.setdefault('activity',{})[key[0]]='READY'
+                return cached['value'][0]
+        started=token(scope,key[0])
+        def calculation():
+            value=payload(key,load)  # Validate before admitting a successful aggregate.
+            put(scope,key[0],value,started)
+            return value
+    else:calculation=lambda:payload(key,load)
     # Reuse stable session cache without changing Campaigns' validation contract.
-    future=job(state,store,key,lambda:payload(key,load),ttl=180 if key[0] in ('counts','delivery','activity') else 60)
+    future=job(state,store,key,calculation,ttl=ttl)
     value,status=resolve(state,store,key,future)
+    if aggregate and status=='READY':
+        stamps=state.setdefault('analytics_local_updated',{})
+        if stamps.get(key[0],(None,None))[0] is not future:stamps[key[0]]=(future,now().isoformat())
     state.setdefault('activity',{})[key[0]]=status
     if status in ('ERROR','TIMED_OUT'):
         st.caption('This section is unavailable. Last verified data remains visible.')
@@ -320,6 +363,12 @@ def table(shop,store,user,script=None):
                 row[field]=by_id.get(str(row['id']),{}).get(field)
         state['visible_status_rows']=records
         if st.button('Refresh automations',key='auto-list-refresh'):
+            from crm_automation_aggregate_cache import invalidate
+            invalidate(state.get('analytics_scope'),('counts','delivery'))
+            for identity in list(state.get('campaign_home_cache',{})):
+                if identity[1][0] in ('counts','delivery','table'):
+                    for cache in ('campaign_home_cache','automation_read_terminal','automation_read_started'):
+                        state.get(cache,{}).pop(identity,None)
             state.get('automation_identity_cache',{}).clear();st.rerun()
         labels=('Automation','Trigger','Entered','Sent','Delivery %','Opens','Click %','Conversions','Bounce rate','Status')
         # Actions occupy a native Streamlit popover next to the grid.
@@ -441,6 +490,14 @@ def table_metrics_region(store):
 
 @settling_fragment
 def kpis(store):
+    from crm_automation_ui import home_state
+    state=home_state()
+    account=st.session_state.get('sports_cave_current_user') or state.get('analytics_actor')
+    if account:
+        from crm_navigation import require
+        require(account,'crm_automations_manage')
+        if st.session_state.get('sports_cave_authenticated') is False:return
+        if str(account.get('id') or account.get('username'))!=state.get('analytics_actor_id'):return
     count=read(store,('counts',None),lambda:counts(store)) or {}
     stats=read(store,('delivery',None),lambda:summary(store,reporting_window())) or {}
     from crm_automation_ui import home_state
@@ -450,6 +507,15 @@ def kpis(store):
     if all(phases.get(k) in ('READY','ERROR','TIMED_OUT') for k in ('counts','delivery')):
         data={**dict.fromkeys(('active','sent_emails','delivery_rate','open_rate','click_rate','revenue')),**data}
     st.html(kpi_html(data))
+    from crm_automation_aggregate_cache import get
+    stamps=[get(state.get('analytics_scope'),group) for group in ('counts','delivery')]
+    stamps=[s for s in stamps if s]
+    if not stamps:stamps=[{'updated_at':s[1]} for s in state.get('analytics_local_updated',{}).values()]
+    if stamps:
+        stamp=(get(state.get('analytics_scope'),'delivery') or min(stamps,key=lambda s:s['updated_at']))['updated_at']
+        label='Refreshing cached analytics' if any(phases.get(k)=='REFRESHING' for k in ('counts','delivery')) else 'Cached analytics'
+        if any(phases.get(k) in ('ERROR','TIMED_OUT') for k in ('counts','delivery')):label='Cached analytics · refresh unavailable'
+        st.caption(label+' · last successful update '+date(stamp).strftime('%d %b %Y %H:%M:%S UTC')+' · rolling 30-day report at that update')
 
 
 
@@ -471,12 +537,19 @@ def recent(store,overview):
 def home(shop,store,user,*,styles=True):
     from crm_automation_ui import home_state,chooser
     state=home_state()
+    from crm_automation_aggregate_cache import scope
+    identity=scope(store.connect,user,getattr(shop,'namespace',None))
+    if state.get('analytics_scope')!=identity or state.get('analytics_actor_id')!=str(user.get('id') or user.get('username')):
+        from crm_automation_read_cache import dispose
+        dispose(state);state.pop('automation_identity_cache',None);state.pop('analytics_local_updated',None)
+    state.update(analytics_scope=identity,analytics_actor=dict(user),analytics_actor_id=str(user.get('id') or user.get('username')))
     if styles:st.html(STYLE+STYLE_AUTO)
-    st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
-    st.html('<style>.sc-auto-name a[aria-busy="true"]{opacity:.6}</style>')
-    from pathlib import Path
-    st.html('<style>[class*="st-key-auto-open-"]{display:none}</style><script>'+Path(__file__).with_name('components').joinpath('crm_sections','automation_navigation.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
-    with st.container(key='crm-campaign-home'):
+    with st.container(key='auto-home-assets'):
+        st.html(MENU_SCRIPT,unsafe_allow_javascript=True)
+        st.html('<style>.sc-auto-name a[aria-busy="true"]{opacity:.6}</style>')
+        from pathlib import Path
+        st.html('<style>[class*="st-key-auto-open-"]{display:none}</style><script>'+Path(__file__).with_name('components').joinpath('crm_sections','automation_navigation.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
+    with st.container(key='crm-automation-home'):
         title,create=st.columns([4,1],vertical_alignment='center')
         title.html('<h1>Automations</h1><p style="color:#73747c">Track performance across every email flow.</p>')
         with create.container(key='auto-create'):
@@ -489,6 +562,6 @@ def home(shop,store,user,*,styles=True):
         tab=st.segmented_control('Automation view',['Overview','Recent Activity'],default='Overview',label_visibility='collapsed',key='auto-home-tabs') or 'Overview'
         if tab=='Overview':table(shop,store,user,list_script)
         with statuses:status_region(store)
-        with metric_region:table_metrics_region(store)
         with cards:kpis(store)
+        with metric_region:table_metrics_region(store)
         recent(store,tab=='Overview')

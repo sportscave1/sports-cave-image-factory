@@ -58,6 +58,12 @@ class Engine:
         if enrollment:
             a=automation
             if not a:return c,context,'automation_unavailable'
+            if a.get('config',{}).get('draft',{}).get('lifecycle_version'):
+                from crm_lifecycle_runtime import validate_send
+                if a['status']!='ACTIVE':return c,context,'automation_paused'
+                extra,reason=validate_send(self,a,enrollment,c)
+                context.update(extra)
+                return c,context,reason
             kind=a['trigger_type'];trigger=enrollment['trigger_shopify_id']
             if a['status']!='ACTIVE':return c,context,'automation_paused'
             frozen=enrollment['steps'][0] if enrollment.get('steps') else {}
@@ -135,6 +141,7 @@ class Engine:
         try:
             self.config.require_send(row['test_send'])
             enrollment=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],),True) if row['enrollment_id'] else None
+            if enrollment and (enrollment.get('steps') or [{}])[0].get('lifecycle_version'):row['_lifecycle']=True
             if row['test_send']:
                 address=email(row['test_recipient']);context={'first_name':'Collector','store_url':'https://www.sportscaveshop.com','checkout_url':'https://www.sportscaveshop.com','order_name':'Preview'};reason=''
                 if self.store.suppressed(None,recipient_hash(address)):reason='local_suppression'
@@ -163,6 +170,11 @@ class Engine:
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 from crm_automation_runtime import render as render_automation
+                if content.get('lifecycle_version'):
+                    from crm_lifecycle_products import selected,recommend
+                    if selected(content['document']):
+                        context['_lifecycle_products']=recommend(self.store,self.shop,content['document'],context.get('_lifecycle_orders',[]),self.clock(),
+                            new_since=context.get('_lifecycle_last_purchase') if content['trigger']=='win_back' and 'lifecycle-new-editions' in content['document'].get('tags',[]) else None)
                 if content.get('review_request'):
                     from reviews_submission import prepare_email
                     from reviews_store import ReviewsStore

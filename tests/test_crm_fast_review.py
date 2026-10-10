@@ -143,12 +143,13 @@ class FastReviewTests(unittest.TestCase):
         editor={'id':'47bb53bc-9a37-4f99-a840-e775073dbce5','version':1,'name':'Fixture','document':doc,'archived_at':None}
         recipients=[{'id':c['id'],'hash':recipient_hash(c['email'])} for c in rows[:2]]
         snapshot={'campaign_version':1,'document':doc,'recipients':recipients,'render_settings':CFG,'schedule':{},'created_at':now()}
-        db=store();db.q.return_value=None;db.draft.return_value=editor;db.render_settings.return_value=CFG;db.suppressed.return_value=False
+        db=store();db.q.side_effect=lambda sql,*args,**kwargs: {'at':now()} if 'clock_timestamp() AS at' in sql else None
+        db.draft.return_value=editor;db.render_settings.return_value=CFG;db.suppressed.return_value=False
         conn=MagicMock();db.db.return_value=MagicMock();db.db.return_value.__enter__.return_value=conn
         writes=[]
         def execute(sql,args):
             result=Mock();result.fetchall.return_value=[]
-            result.fetchone.return_value=editor if 'FOR UPDATE' in sql else ({'id':'segment'} if 'INSERT INTO crm_segment_definitions' in sql else None)
+            result.fetchone.return_value=editor if 'FROM crm_campaign_drafts' in sql and 'FOR UPDATE' in sql else ({'id':'segment'} if 'INSERT INTO crm_segment_definitions' in sql else None)
             if 'INSERT INTO crm_marketing_sends' in sql:writes.extend(__import__('json').loads(args[2]))
             return result
         conn.execute.side_effect=execute
@@ -197,7 +198,7 @@ if st.button('Open'):
         app=AppTest.from_string(self.SCRIPT)
         with patch('crm_campaign_review.review',side_effect=finish), \
              patch('crm_campaign_send_ui.get_resend_marketing_config_status',return_value={'marketing_enabled':True,'sender':'Fixture','reply_to':'Fixture'}), \
-             patch('crm_campaign_send_ui.queue_campaign',side_effect=AssertionError('Never send')) as send:
+             patch('crm_campaign_preparation.accept',side_effect=AssertionError('Never send')) as send:
             try:
                 app.run();next(b for b in app.button if b.label=='Open').click().run()
                 self.assertTrue(entered.wait(1));self.assertFalse(app.exception)
@@ -217,7 +218,7 @@ if st.button('Open'):
         result={'counts':{'eligible':4,'excluded':{}},'blockers':[],'snapshot_id':'one','tracking_ok':True}
         with patch('crm_campaign_review.review',return_value=result), \
              patch('crm_campaign_review.save_checkpoint',side_effect=lambda db,user,editor:deepcopy(editor)), \
-             patch('crm_campaign_send_ui.queue_campaign') as send:
+             patch('crm_campaign_preparation.accept') as send:
             app.run();next(b for b in app.button if b.label=='Open').click().run()
             previous=app.session_state['compact_review_job'];previous.future.result(3)
             changed=deepcopy(app.session_state['campaign_editor']);changed['document']['content']['subject']='Changed'

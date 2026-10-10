@@ -49,6 +49,11 @@ def main(argv=None):
             except Exception as exc:
                 worked=False
                 logging.getLogger(__name__).warning('campaign_preparation_cycle_failed error_class=%s',type(exc).__name__)
+            try:
+                from crm_lifecycle_sync import tick as lifecycle_sync
+                lifecycle_sync(store,preparation_shop)
+            except Exception as exc:
+                logging.getLogger(__name__).warning('lifecycle_audience_sync_failed error_class=%s',type(exc).__name__)
             stop.wait(0.2 if worked else 2)
     preparation_thread=None
     if args.once:_prepare_campaign(store,Shopify())

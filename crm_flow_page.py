@@ -136,9 +136,15 @@ def step_settings(store,user,row,s,index,prefix):
         delay=st.number_input('Delay',0,525600,amount)
         units=st.selectbox('Unit',['Minutes','Hours','Days'],index=['Minutes','Hours','Days'].index(unit))
         enabled=st.checkbox('Enable this email',s.get('enabled',True))
+        anchor=s.get('anchor')
+        if flow.get('lifecycle_version') and flow['trigger']=='post_purchase':
+            anchor=st.selectbox('Timing event',['payment','delivery'],index=['payment','delivery'].index(anchor))
+            fulfilment=st.checkbox('Require successful fulfilment',value=s.get('requires_fulfilment',False),disabled=s.get('requires_fulfilment',False))
         if st.form_submit_button('Save step'):
             draft=deepcopy(flow);step=draft['emails'][index]
             step.update(name=name,enabled=enabled,delay_seconds=s['delay_seconds'] if (delay,units)==(amount,unit) else int(delay)*{'Minutes':60,'Hours':3600,'Days':86400}[units])
+            if anchor:step['anchor']=anchor
+            if flow.get('lifecycle_version') and flow['trigger']=='post_purchase':step['requires_fulfilment']=fulfilment
             commit(store,user,row,draft)
     for label,action,disabled in [('Duplicate','duplicate',False),('Move up','up',index==0),('Move down','down',index==len(flow['emails'])-1)]:
         if st.button(label,key=prefix+action,disabled=disabled):commit(store,user,row,edit_sequence(flow,s['step_id'],action))
@@ -192,6 +198,9 @@ def sequence(shop,store,user,identity,period):
     for i,s in enumerate(flow['emails']):
         sid=s['step_id'];prefix='flow-step-'+sid+'-';content=s['document']['content']
         amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+delay_origin(flow['emails'],i)
+        if flow.get('lifecycle_version'):
+            from crm_lifecycle_definition import timing_label
+            delay=f'{amount} {unit.lower()}'+timing_label(s)+' · Draft'
         with st.container(horizontal=True,key='flow-row-'+sid):
             with st.container(width=78):
                 thumbnail(store,s,row)
@@ -211,7 +220,9 @@ def sequence(shop,store,user,identity,period):
                         detail_slots[sid]=st.empty()
                         st.caption('Per-email unsubscribe attribution is unavailable in the current ledger.')
     if status(row)!='ARCHIVED' and st.button('+ Add Email',key='flow-add-'+str(identity)):
-        draft=deepcopy(flow);draft['emails'].append(email_step(delay_seconds=86400));commit(store,user,row,draft)
+        draft=deepcopy(flow);step=email_step(delay_seconds=86400)
+        if flow.get('lifecycle_version'):step['anchor']=flow['emails'][0]['anchor']
+        draft['emails'].append(step);commit(store,user,row,draft)
     step_performance(store,identity,slots,detail_slots)
     preview=next((s for s in flow['emails'] if s['step_id']==st.session_state.get('flow_preview_step')),None)
     if preview:
@@ -291,6 +302,9 @@ def flow_page(shop,store,user,row):
         st.subheader('Operational diagnostics')
         recipient_details(store,user,row['id'])
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
+        elif row['config']['draft'].get('lifecycle_version'):
+            from crm_lifecycle_ui import audience
+            audience(store,user,row)
         return
     from crm_automation_toolbar import toolbar
     with st.container(key='flow-workspace'):
@@ -301,6 +315,9 @@ def flow_page(shop,store,user,row):
         sequence(shop,store,user,row['id'],'All time')
         recipient_details(store,user,row['id'])
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
+        elif row['config']['draft'].get('lifecycle_version'):
+            from crm_lifecycle_ui import audience
+            audience(store,user,row)
     from crm_flow_thumbnail import SCRIPT
     st.html('<span hidden data-flow-script="true"></span>'+SCRIPT,unsafe_allow_javascript=True)
     anchor=st.session_state.pop('flow_return_step',None)

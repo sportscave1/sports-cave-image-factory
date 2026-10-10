@@ -321,9 +321,17 @@ class PublicationTests(unittest.TestCase):
         class Raw:
             closed=False
             def __init__(self):self.fixture=connect()
-            def transaction(self):return self.fixture
+            def transaction(self):
+                # Native PostgreSQL closes a connection context on exit; use its
+                # transaction context to exercise the same reused-connection
+                # contract as the PGlite fixture without changing assertions.
+                raw=getattr(self.fixture,'conn',None)
+                return raw.transaction() if raw is not None else self.fixture
             def execute(self,*args,**kwargs):return self.fixture.execute(*args,**kwargs)
-            def close(self):self.closed=True
+            def close(self):
+                self.closed=True
+                raw=getattr(self.fixture,'conn',None)
+                if raw is not None:raw.close()
         from unittest.mock import Mock
         factory=Mock(side_effect=Raw);connection=Connection(factory)
         store=AutomationStore(connection);key='v4-connection-'+uuid.uuid4().hex

@@ -172,6 +172,22 @@ class AnalyticsTests(unittest.TestCase):
         self.store.q("UPDATE crm_shopify_checkouts SET status='RECOVERED' WHERE checkout_key=%s",(self.key,))
         self.assertEqual(flow_state(checkout_page(self.shop,self.store,a['id'])['nodes'][0])[0],'Recovered')
         data=summary(self.store,window)
+        from crm_automation_home_data import delivery_summary
+        prior=(window[0]-timedelta(days=30),window[0])
+        expected={**delivery_summary(self.store,window),**revenue(self.store,window),
+                  'previous':{**delivery_summary(self.store,prior),**revenue(self.store,prior)}}
+        self.assertEqual(data,expected)
+        # Half-open boundaries, excluded tests and uncertain receipts must keep
+        # exactly the established denominators and previous-period semantics.
+        for stamp,test_send,status in ((window[0],False,'ACCEPTED'),
+                (window[1],False,'ACCEPTED'),(prior[0],False,'ACCEPTED'),
+                (sent_at,True,'ACCEPTED'),(sent_at,False,'UNCERTAIN')):
+            self.store.q("UPDATE crm_marketing_sends SET first_submitted_at=%s,test_send=%s,status=%s WHERE id=%s",
+                         (stamp,test_send,status,send['id']))
+            expected={**delivery_summary(self.store,window),**revenue(self.store,window),
+                      'previous':{**delivery_summary(self.store,prior),**revenue(self.store,prior)}}
+            self.assertEqual(summary(self.store,window),expected)
+        self.store.q("UPDATE crm_marketing_sends SET first_submitted_at=%s,test_send=false,status='ACCEPTED' WHERE id=%s",(sent_at,send['id']))
         self.assertIn('previous',data);self.assertGreater(data['sent_emails'],0)
         self.provider.send.assert_not_called()
 

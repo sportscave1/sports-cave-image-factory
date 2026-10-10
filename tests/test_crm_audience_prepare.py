@@ -182,7 +182,7 @@ if st.button('Review'):
         app.session_state['shop']=self.shop;app.session_state['store']=self.store
         app.session_state['campaign_editor']=editor;app.session_state['campaign_saved']=deepcopy(editor)
         with patch.dict(os.environ,LIVE),patch('crm_campaign_snapshot.create',return_value='snapshot'), \
-             patch('crm_campaign_send_ui.queue_campaign',side_effect=AssertionError('No sends')):
+             patch('crm_campaign_preparation.accept',side_effect=AssertionError('No sends')):
             app.run();app.session_state['warm_audience_job'].future.result(3)
             calls=self.shop.customer_batch.call_count
             started=time.perf_counter();next(b for b in app.button if b.label=='Review').click().run()
@@ -276,7 +276,9 @@ class LocalSendAcceptanceTests(unittest.TestCase):
             old=baseline['queue_campaign'](shop,db,ADMIN,old_editor,str(uuid.uuid4()),env=LIVE,snapshot_id=old_review['snapshot_id'])
             old_ms=(time.perf_counter()-started)*1000;old_sql=len(sql_calls)
             self.assertEqual(old['recipients'],count)
-            self.assertEqual(old_sql-new_sql,2184)
+            # Four added bounded queries fence accepted work and cover consent
+            # changes during verification; the per-recipient reduction remains.
+            self.assertEqual(old_sql-new_sql,2180)
             print(f'LOCAL SQL recipients=1093 simulated_graph_latency=5ms cold_prepare_ms={cold_ms:.1f} warm_review_ms={warm_review_ms:.1f} warm_review_graph_calls=0 queue_before_ms={old_ms:.1f} queue_after_ms={acceptance_ms:.1f} queue_sql_before={old_sql} queue_sql_after={new_sql} queue_graph_calls={queue_calls} transport_calls=0 durable_jobs={count}')
 
 

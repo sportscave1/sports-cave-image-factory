@@ -85,6 +85,9 @@ def approved(flow):
 
 
 def preflight(row,revision):
+    from crm_lifecycle_runtime import locked
+    if row and locked(row):
+        raise ValueError('Lifecycle expansion is draft-only. Publication and live sending are disabled.')
     if not row or not native(row) or row['config'].get('deleted_at') or status(row)=='ARCHIVED':
         raise ValueError('Automation is not publishable.')
     if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
@@ -144,6 +147,7 @@ def prepare(store,identity,flow,version,name,env=None):
         content={'format':'automation_delivery_v1','document':doc,'render_settings':cfg,
                  'automation_id':str(identity),'automation_version':version,'step_id':step['step_id'],
                  'trigger':flow['trigger'],'rules':flow['rules']}
+        if flow.get('lifecycle_version'):content['lifecycle_version']=1
         if flow.get('review_request'):
             from reviews_submission import MARKER
             if MARKER not in json.dumps(doc):raise ValueError('Add the review request link before publishing.')
@@ -153,6 +157,8 @@ def prepare(store,identity,flow,version,name,env=None):
                       'template_id':template_id,'template_version':version,'automation_version':version,
                       'trigger':flow['trigger'],'rules':flow['rules'],'name':step.get('name') or 'Email '+str(index+1),
                       'inactive_days':flow.get('inactive_days',180),'exit_on_purchase':flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back'))})
+        if flow.get('lifecycle_version'):
+            steps[-1].update(lifecycle_version=1,anchor=step['anchor'])
     return flow,bundles,steps
 
 
@@ -171,6 +177,8 @@ def commit(store,conn,row,flow,bundles,steps,version,publication=None):
       AS b(id uuid,name text,content jsonb)""",(version,payload))
     config.update(published_version=version,published={k:deepcopy(flow[k]) for k in ('trigger','rules','reentry_days')},published_at=now().isoformat())
     config['published']['timing_version']=flow.get('timing_version',1)
+    if flow.get('lifecycle_version'):
+        config['published'].update(lifecycle_version=1,fulfilment_fallback_days=flow.get('fulfilment_fallback_days'))
     config['published'].update(inactive_days=flow.get('inactive_days',180),exit_on_purchase=flow.get('exit_on_purchase',flow['trigger'] in ('abandoned','win_back')))
     config['published_flow']=deepcopy(flow)
     documents={content['step_id']:content['document'] for _,_,content in bundles}

@@ -13,6 +13,9 @@ LOG=logging.getLogger(__name__)
 def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False,recipient=None,checkout_source=None):
     """Serialize re-entry with publication/pause and retain stable stage slots."""
     started=perf_counter();store=engine.store;at=date(occurred_at)
+    if automation.get('config',{}).get('draft',{}).get('lifecycle_version'):
+        from crm_lifecycle_runtime import enter as lifecycle_enter
+        return lifecycle_enter(engine,automation,customer_id,trigger_id,event_id,at,source_event_id)
     if not at: return None
     c=recipient if recipient is not None else engine.shop.customer(customer_id,fresh=True)
     if automation['trigger_type']=='abandoned':
@@ -92,6 +95,9 @@ def process_event(engine,event,automations):
         order=engine.shop.order(event['object_id'],fresh=True)
         if not order or order.get('cancelledAt') or not order.get('customer'):return
         if topic=='orders/paid' and not order.get('fullyPaid'):return
+        if topic=='orders/paid' and any(a.get('config',{}).get('draft',{}).get('lifecycle_version') for a in candidates):
+            from crm_lifecycle_runtime import paid_exit
+            paid_exit(engine,engine.shop.customer(order['customer']['id'],fresh=True),at)
         created=date(order.get('createdAt'))
         from crm_automation_rule_facts import order_facts
         relevant=[r for a in candidates if a['trigger_type'] in ('post_purchase','fulfilled') for r in a['config']['published']['rules']]
@@ -104,6 +110,9 @@ def process_event(engine,event,automations):
 
 
 def reconcile(engine,a):
+    if a.get('config',{}).get('draft',{}).get('lifecycle_version'):
+        from crm_lifecycle_runtime import reconcile as lifecycle_reconcile
+        return lifecycle_reconcile(engine,a)
     if a['trigger_type']=='win_back':
         return reconcile_inactive(engine,a)
     if a['trigger_type']!='abandoned':return
@@ -192,6 +201,9 @@ def reconcile_inactive(engine,a):
 
 
 def advance(engine,enrollment):
+    if (enrollment.get('steps') or [{}])[0].get('lifecycle_version'):
+        from crm_lifecycle_runtime import advance as lifecycle_advance
+        return lifecycle_advance(engine,enrollment)
     from crm_automation_live import reconcile as reconcile_live
     enrollment=reconcile_live(engine.store,enrollment,engine.clock())
     if not enrollment:return
@@ -224,6 +236,9 @@ def render(content,row,unsubscribe,context=None):
     from crm_tracking import send_identity
     from crm_automation_definition import production_document
     doc=production_document(content['document']);doc['campaign_key']='auto_'+str(row['id']).replace('-','')
+    if content.get('lifecycle_version'):
+        from crm_lifecycle_products import hydrate
+        doc=hydrate(doc,(context or {}).get('_lifecycle_products',[]))
     from crm_recovery_discount import selection as discount_selection,substitute,apply_links,DiscountHold
     discount=(context or {}).get('_recovery_discount')
     if discount_selection(doc) and not discount:raise DiscountHold('discount_verification_required: Revalidate Shopify before sending.')

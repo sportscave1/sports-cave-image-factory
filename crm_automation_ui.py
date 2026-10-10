@@ -13,6 +13,8 @@ def home_state():return st.session_state.setdefault('automation_home_state',{})
 def changed():
     # Definitions/counts/table change; delivery/order summaries retain last-good values.
     state=home_state();cache=state.get('campaign_home_cache',{})
+    from crm_automation_aggregate_cache import invalidate
+    invalidate(state.get('analytics_scope'))
     state.pop('automation_identity_cache',None)
     state['publication_checked']=0
     for group in ('counts','table','identities','publication'):
@@ -46,11 +48,11 @@ def chooser(store,user):
     st.caption('Win Back uses a scheduled customer inactivity scan. Identifiable abandoned-cart events are not available; checkout recovery uses verified Shopify checkouts.')
     for kind,(name,label,_) in TRIGGERS.items():
         if st.button(name+' · '+label,key='auto_create_'+kind,use_container_width=True):
-            row=store.create(user,kind);changed();open_flow(row['id'])
+            row=store.create(user,kind,**({'lifecycle':True} if kind in ('welcome','post_purchase','win_back') else {}));changed();open_flow(row['id'])
     with st.expander('Start from scratch'):
         kind=st.selectbox('Choose trigger',list(TRIGGERS),format_func=lambda t:TRIGGERS[t][1],key='auto_scratch_trigger')
         if st.button('Create blank flow',key='auto_scratch_create'):
-            row=store.create(user,kind,'New automation');changed();open_flow(row['id'])
+            row=store.create(user,kind,'New automation',**({'lifecycle':True} if kind in ('welcome','post_purchase','win_back') else {}));changed();open_flow(row['id'])
     st.caption('Product viewed · Product added to cart · Cart viewed · Checkout started: coming / secure identity-dependent. Anonymous activity never sends email.')
 
 
@@ -103,7 +105,7 @@ def settings_control(editor,key):
     context=st.session_state['automation_editor_context'];store,user=context
     row=store.flow(editor['id']);flow=deepcopy(row['config']['draft']);step=next(s for s in flow['emails'] if s['step_id']==store.step_id)
     flow_email_control(flow,editor['id'],store.step_id)
-    kind=st.selectbox('Trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda t:TRIGGERS[t][1],key=key+'trigger')
+    kind=st.selectbox('Trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda t:TRIGGERS[t][1],key=key+'trigger',disabled=bool(flow.get('lifecycle_version')))
     rules=[]
     from crm_automation_definition import RULE_FIELDS
     for index,rule in enumerate(flow['rules']):
@@ -122,7 +124,15 @@ def settings_control(editor,key):
     if len(rules)<12 and st.button('+ Add rule',key=key+'add_rule'):
         rules.append({'field':'market','condition':'is','value':'AU'})
     st.caption('Rules use AND. Consent and trigger exit checks are always required.')
-    days=st.selectbox('Re-entry',[0,7,30,90],index=[0,7,30,90].index(flow['reentry_days']),format_func=lambda d:'Once ever' if d==0 else 'After '+str(d)+' days',key=key+'reentry')
+    if flow.get('lifecycle_version') and kind!='win_back':
+        days=0
+        st.caption('Re-entry · once per subscriber identity' if kind=='welcome' else 'Re-entry · latest qualifying paid order replaces the previous sequence')
+    else:
+        choices=[0,90] if flow.get('lifecycle_version') else [0,7,30,90]
+        days=st.selectbox('Re-entry',choices,index=choices.index(flow['reentry_days']) if flow['reentry_days'] in choices else 1,format_func=lambda d:'Once ever' if d==0 else 'After '+str(d)+' days',key=key+'reentry')
+    if flow.get('lifecycle_version'):
+        from crm_lifecycle_definition import timing_label
+        st.caption('Timing'+timing_label(step))
     from crm_automation_timing import delay_controls
     initial,unit=delay_controls(step['delay_seconds'])
     amount_slot,unit_slot=st.columns([2,1])
@@ -249,11 +259,13 @@ def workspace(shop,base,actions,navigate=lambda _:None):
         if st.session_state.get('automation_selected'):st.session_state['automation']=str(st.session_state['automation_selected'])
     # Streamlit's supported binding keeps its frontend query snapshot in sync
     # with native widget events, including the existing browser-history bridge.
-    st.html('<style>.st-key-automation,.st-key-automation_email{display:none}</style>')
-    identity=st.text_input('Automation route',key='automation',bind='query-params') or None
-    email=st.text_input('Automation email route',key='automation_email',bind='query-params') or None
-    from pathlib import Path
-    st.html('<script>'+Path(__file__).with_name('components').joinpath('crm_sections','automation_navigation.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
+    route_controls=st.container(key='auto-route-controls')
+    with route_controls:
+        st.html('<style>.st-key-automation,.st-key-automation_email{display:none}</style>')
+        identity=st.text_input('Automation route',key='automation',bind='query-params') or None
+        email=st.text_input('Automation email route',key='automation_email',bind='query-params') or None
+        from pathlib import Path
+        st.html('<script>'+Path(__file__).with_name('components').joinpath('crm_sections','automation_navigation.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
     if previous!=identity or previous_email!=email:
         from crm_campaign_recovery import flush_current
         if not flush_current(force=True):
@@ -270,7 +282,7 @@ def workspace(shop,base,actions,navigate=lambda _:None):
     if identity:st.session_state['automation_selected']=str(identity)
     else:st.session_state.pop('automation_selected',None)
     from html import escape
-    st.html('<span hidden data-automation-route="'+escape(str(identity or ''),quote=True)+'" data-automation-email="'+escape(str(email or ''),quote=True)+'"></span>')
+    route_controls.html('<span hidden data-automation-route="'+escape(str(identity or ''),quote=True)+'" data-automation-email="'+escape(str(email or ''),quote=True)+'"></span>')
     # Keep critical overview styles at a stable delta position while its old
     # subtree is removed. A route placeholder replaces that subtree before any
     # blocking editor read; it must never be reconciled with editor columns.
@@ -312,6 +324,17 @@ def editor_dialog(shop,store,actions,identity):
         content.html('<div class="sc-auto-editor-loading" role="status">Opening automation…</div>')
         try:
             existing=current_display_row(store,st.session_state,str(uuid.UUID(str(identity))))
+            if (existing and existing['status']=='DRAFT' and existing['trigger_type'] in ('welcome','post_purchase','win_back')
+                and not existing.get('config',{}).get('draft',{}).get('lifecycle_version')):
+                # Explicit conversion keeps the exact previous config and steps for rollback.
+                with content.container():
+                    st.subheader(existing['name'])
+                    st.caption('Prepare the shared flow experience and starter emails. Existing draft content and history will be preserved in the audit snapshot.')
+                    if st.button('Prepare draft flow',key='lifecycle-prepare'):
+                        store.prepare_lifecycle(actions.user,identity);changed();st.rerun(scope='app')
+                    if st.button('← Automations',key='lifecycle-prepare-back'):
+                        request_route(None);st.rerun(scope='app')
+                return
             with content.container():
                 from crm_automation_definition import native
                 if existing and not native(existing):

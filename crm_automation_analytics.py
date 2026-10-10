@@ -21,8 +21,32 @@ def conversions(store, identity, window):
 def summary(store, window):
     # Both periods use the same rolling UTC boundary; never mix currencies.
     prior=(window[0]-timedelta(days=30),window[0])
-    current=delivery_summary(store,window);previous=delivery_summary(store,prior)
-    current.update(revenue(store,window));previous.update(revenue(store,prior))
+    records=store.q('''WITH periods(period,start_at,end_at) AS (
+      VALUES (0,%s::timestamptz,%s::timestamptz),(1,%s::timestamptz,%s::timestamptz)),
+      recipients AS (
+        SELECT p.period,j.automation_id,s.id,
+          bool_or(e.event_type='email.delivered') AS delivered,
+          bool_or(e.event_type='email.clicked') AS clicked,
+          bool_or(e.event_type='email.opened') AS opened,
+          bool_or(e.event_type='email.bounced' AND e.occurred_at>=p.start_at AND e.occurred_at<p.end_at) AS bounced
+        FROM periods p JOIN crm_marketing_sends s ON s.first_submitted_at>=p.start_at AND s.first_submitted_at<p.end_at
+        JOIN crm_automation_enrollments j ON j.id=s.enrollment_id
+        LEFT JOIN crm_delivery_events e ON e.send_id=s.id
+        WHERE NOT s.test_send AND s.status='ACCEPTED' GROUP BY p.period,j.automation_id,s.id),
+      rates AS (SELECT period,automation_id,
+        100.0*count(*) FILTER(WHERE delivered AND clicked)/NULLIF(count(*) FILTER(WHERE delivered),0) AS rate
+        FROM recipients GROUP BY period,automation_id),
+      orders AS (SELECT p.period,o.currency,sum(o.amount) AS amount FROM periods p
+        JOIN crm_order_attribution o ON o.order_created_at>=p.start_at AND o.order_created_at<p.end_at
+        WHERE o.eligible AND o.evidence->>'automation_id' IS NOT NULL GROUP BY p.period,o.currency)
+      SELECT p.period,count(r.id) AS sent_emails,
+        100.0*count(r.id) FILTER(WHERE bounced)/NULLIF(count(r.id),0) AS bounce_rate,
+        (SELECT avg(rate) FROM rates WHERE period=p.period) AS click_rate,
+        100.0*count(r.id) FILTER(WHERE delivered)/NULLIF(count(r.id),0) AS delivery_rate,
+        100.0*count(r.id) FILTER(WHERE delivered AND opened)/NULLIF(count(r.id) FILTER(WHERE delivered),0) AS open_rate,
+        COALESCE((SELECT jsonb_object_agg(currency,amount) FROM orders WHERE period=p.period),'{}'::jsonb) AS revenue
+      FROM periods p LEFT JOIN recipients r ON r.period=p.period GROUP BY p.period ORDER BY p.period''',(*window,*prior))
+    current,previous=({k:v for k,v in row.items() if k!='period'} for row in records)
     current['previous']=previous
     return current
 

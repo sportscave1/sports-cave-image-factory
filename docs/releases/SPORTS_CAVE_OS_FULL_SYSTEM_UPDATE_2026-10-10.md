@@ -1,6 +1,53 @@
 # Sports Cave OS — Full System Update | October 2026
 
-Date: 2026-10-10. **Status: RELEASE GATES PASSED; MIGRATIONS APPLIED; awaiting this commit's push and live verification.**
+## October 11 consolidated follow-up release
+
+**Pre-deployment verification passed; one release commit and its Render rollout are the final gates.** This section supersedes the historical statuses below. Deployment is not claimed before the exact commit is verified live.
+
+### Audit and included work
+
+GitHub main and all four canonical Render services were verified on `584931b157534985deb8482a4ea4aeba307070fd`. The release checkout starts from that revision. The original `b526c1d0` checkout remains divergent and dirty, intact. Five additional worktrees were inspected read-only: their committed heads are ancestors of current main, and their editor differences are older copies of the deployed navigation, picker and display-cache fixes.
+
+The previous 233-file audit and 109-file release inventory were compared with the original source snapshot. Of those source paths, 210 were unchanged since the audit and 23 had changed; already-deployed Campaigns changes were retained. The new-file inventory found the lifecycle expansion plus historical reports, evidence and deployment helpers. Eleven lifecycle shared-file patches were merged from their recorded pre-task baseline, preserving newer main and Automations V6 changes. All ten lifecycle Python source hashes match their prior verification manifest. Original eligible source hashes were rechecked unchanged before release.
+
+Newly included:
+
+- **Automations V6:** compact Windows-style Home; reduced top spacing and KPI height; bounded account/store-scoped aggregate reuse; equivalent four-query-to-one analytics; last-good/error handling; tablet wrapping and 320px dropdown focus fixes. No analytics definitions or existing sending rules changed.
+- **Lifecycle draft workspace:** Welcome, Post Purchase and Win Back in the existing Flow/editor, ten editable starter messages, bounded local audience projections, event-based timing previews, revision-preserving explicit draft conversion, catalogue-backed recommendations and supporting guarded runtime. The server-side **draft-only lock remains enabled**. No existing draft is converted automatically, no flow is activated, no historical cohort is enrolled and no customer email is sent by this release.
+- **Regression maintenance:** preserve the two original durable-acceptance test updates; correct a native PostgreSQL test connection adapter to use a transaction context without weakening assertions.
+
+Email Editor V6, Campaigns V7/V7.1/V8 and durable preparation, CRM, Flow, catalogue picker, navigation/performance, Meta Review, Mockups/premium image workflows, Design Studio, Orders, Editions, Social Media, Wall Preview, reporting and app-wide table/UI changes were already on main/live. They remain in the release tree; they are not counted again as newly changed files. Their historical inventories and reports remain below/in this repository.
+
+### Verification
+
+- The merged targeted run executed 213 checks: 212 passed; one test adapter failed because a native connection context closes on exit. Its transaction-context correction passed in the subsequent 77-check run. Those checks also cover durable acceptance, lost responses, consent changes, worker restart, schedule editing, Send Now, V8 timezone/DST guards and stale revisions. Counts overlap and are not presented as unique tests.
+- All **12 explicit independent-connection PostgreSQL concurrency tests passed** after enabling their local-only gate. The preceding runner's 12 skips were not counted as passes.
+- **Chrome and Edge: 8/8 Automations Home viewport cases** at 1440/820/390/320px passed: search, filters, tabs, create dialog cancel, Flow/back, no exceptions or horizontal overflow.
+- **Chrome and Edge: 4/4 shared Flow/editor journeys each** passed (Abandoned Cart plus three expanded draft types), including lifecycle audience detail/search, locked activation, subject save/reopen, 620px audience and 390px editor checks. All records are fabricated; browser external requests are blocked.
+- Prior unchanged Campaigns, editor HTML-preservation, catalogue, navigation, menu and benchmark evidence is reused. No lengthy performance suite or 233-file test audit was repeated. Candidate Python files compile, conflict-marker scan and `git diff --check` pass, and canonical Render topology validation passes.
+- The native test harness denies external HTTP. Optional thumbnail subprocess installation produced local diagnostic warnings in the first run; the follow-up isolates that unrelated prewarming. No production recipient tests, live send, campaign amendment, Shopify mutation or cron invocation occurred.
+
+Automations V6's retained paired local measurements support reusable-cache analytics first paint p50/p95 **1086.5/1173.0 → 651.7/762.0 ms**, and aggregate query/connection cost **134.5/159.7 → 40.8/50.2 ms**. They do not establish a cold-page or warm-navigation speedup and are not production timings. See `docs/AUTOMATIONS_V6_COMPACT_ANALYTICS_2026-10-10.md`.
+
+### Supabase and deployment
+
+The reviewed additive `20261010112655_crm_lifecycle_draft_expansion.sql` was applied as Supabase migration **20261010215058 / crm_lifecycle_draft_expansion**, with 5-second lock and 30-second statement limits. Three new server-only tables and supporting indexes; no existing-record update, backfill, deletion, trigger activation or queue publication. All three tables have RLS and deny `anon`/`authenticated` table access. The advisor's informational [RLS without policy notice](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy) is intentional for these server-only tables; no browser policy is added. Existing October 10 Flow-test/preparation migrations are retained, not reapplied.
+
+The four existing services auto-deploy `main`: primary `sports-cave-os` (`srv-d8kl4on7f7vs73dvavv0`), webhooks (`srv-d9146onlk1mc739nrm7g`), worker (`srv-d9ujm9navr4c73amurgg`), daily-sync cron (`crn-d9ujqvvqj5pc73fpe0ag`). No Blueprint sync, new service, rename, manual cron execution or duplicate deployment is required. Post-push SHA, health and read-only authenticated page checks will be appended locally after verification.
+
+### Exclusions and limits
+
+Temporary images, caches, database clusters, secrets, one-off deployment scripts, benchmark baselines and redundant historical evidence bundles are excluded. Existing uncommitted work is not discarded. Historical Bathurst geography, frozen schedules, queue records and blocked/uncertain deliveries remain untouched. Lifecycle **activation** remains excluded pending its separately documented scope, product/copy, audience and staging checks; the deployed feature is a draft workspace only.
+
+The explicit changed-file list and SHA256 values are in `SPORTS_CAVE_OS_FULL_SYSTEM_UPDATE_2026-10-10_MANIFEST.json`; selected machine-readable results are in the adjacent verification JSON. Detailed raw local evidence remains under `.tmp-october-release-audit`. Permanent local-only mode remains in AGENTS.md and resumes immediately after this one authorized rollout. No later release is authorized.
+
+---
+
+## Historical October 10 releases and retained evidence
+
+# Sports Cave OS — Full System Update | October 2026
+
+Date: 2026-10-10. **Status: DEPLOYED — all four existing services verified LIVE.**
 
 ## Final resumed release
 
@@ -18,7 +65,7 @@ Two reviewed additive migrations were applied to the authoritative Supabase proj
 
 The release includes the approved 107 paths plus this report, AGENTS.md and the new draft-navigation regression (109 changed files; the existing thumbnail UI check is byte-identical to main). Only these explicit paths are staged. Temporary results, database clusters, caches and secrets remain excluded. The original workspace and unfinished work remain preserved.
 
-All four canonical services auto-deploy main. No Blueprint sync, new service or deployment duplication is needed. Post-push live SHA, health and startup results will be recorded in the local report after deployment. Authenticated production workflow verification requires an existing signed-in browser; current browser inventory has none. Local Chrome/Edge functional acceptance is complete; public live route/login checks do not prove authenticated data accuracy.
+All four canonical services auto-deploy main. No Blueprint sync, new service or deployment duplication is needed. Post-push live SHA, health and startup results will be recorded in the local report after deployment. An authenticated session was restored when the production browser opened. Read-only page checks are recorded below; synthetic Chrome/Edge tests cover mutations without acting on live campaigns.
 
 Local-only development remains the permanent default; this authorization is for this release alone.
 
@@ -225,3 +272,22 @@ No new service, deployment trigger, Blueprint sync or cron invocation occurred. 
 - `tests/test_crm_production_v2.py`
 - `tests/test_crm_send_progress.py`
 - `tests/test_crm_thumbnail_cache.py`
+
+## Final live verification — 10 October 2026
+
+One commit pushed normally to origin/main: `7391a7206048cc5d7006691b0e944bf06e6b03c9`. GitHub main SHA matched. 109 changed files deployed. No force push, additional commit, Blueprint sync or duplicate service.
+
+| Existing service | Deployment | Result |
+|---|---|---|
+| sports-cave-os | dep-db5051ivcj2c73e6aqlg | LIVE at 09:19:55 UTC |
+| sports-cave-os-webhooks | dep-db5051ivcj2c73e6artg | LIVE at 09:18:54 UTC |
+| sports-cave-seo-worker | dep-db5051ivcj2c73e6as50 | LIVE at 09:18:23 UTC |
+| sports-cave-seo-daily-sync | dep-db5051qvcj2c73e6atug | LIVE at 09:17:59 UTC; cron not invoked |
+
+Every deployment reports the exact release SHA. OS /_stcore/health returns 200/ok; webhook /healthz returns 200 and the release SHA. Worker logs confirm SEO and CRM subprocess startup. No error-level startup entries were returned in the checked post-startup interval.
+
+Authenticated production browser verified Home, Campaigns Home, existing campaign detail, Automations, existing Flow, Orders, Edition Ops and Fulfilment Dispatch Log. These were read-only checks; no editor, send, schedule, publish, pause or order mutation was performed. The existing campaign still showed 1,041 submitted and 44 waiting for their existing scheduled times. Its historical timezone data was not changed.
+
+Limits: the campaign detail needed a direct deep-link load after the first title-link attempt returned to Home, and cold loading was visibly slow; no new production performance claim is made. A MutationObserver browser console error was observed before and after deployment without preventing these pages from rendering. The new worker logged a GSC reporting_snapshot_failed warning for a reporting backfill, outside this release's fixes; no retry or data action was triggered. These observations remain documented rather than described as fully clean end-to-end production validation.
+
+Permanent local-only mode is recorded in original and release AGENTS.md. The isolated PostgreSQL cluster and owned test servers are stopped. Original uncommitted application changes and unfinished work remain intact. This final post-deployment addendum is local-only, preserving the requested single release commit.

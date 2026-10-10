@@ -1,0 +1,179 @@
+{
+  "baseline": "584931b157534985deb8482a4ea4aeba307070fd",
+  "changed_file_count_including_manifest": 44,
+  "hash_format": "SHA256, UTF-8 source normalized to LF; manifest excludes its own hash",
+  "files": [
+    {
+      "path": "components/crm_checkout_table/index.html",
+      "sha256": "767c5b04958ae98397c2b018c40dc844ad904931298cf4790065833c0a2fbc28"
+    },
+    {
+      "path": "crm_automation_aggregate_cache.py",
+      "sha256": "c1266989fa1f698d8bf0d0e1b9aed1cea0f7bd1d482cd075d2c075e4e8d5b359"
+    },
+    {
+      "path": "crm_automation_analytics.py",
+      "sha256": "7d687e4fb110ffac12d0d97ad8d1dc18b3523378f1402d59440b2b2b09d3c198"
+    },
+    {
+      "path": "crm_automation_definition.py",
+      "sha256": "9e300dfa0854c62e3c96f9e72195029f18cd0b568469f1ba7f6585bac31bb88f"
+    },
+    {
+      "path": "crm_automation_home.py",
+      "sha256": "d3cdb1492af4bd8d2552c62a644ce605c0cfb30d5d235c04c5984296af49b6bf"
+    },
+    {
+      "path": "crm_automation_publication.py",
+      "sha256": "467aa33445c0eaec7802c4d088932552ea9254827d2cf38ea121dc85e8599240"
+    },
+    {
+      "path": "crm_automation_runtime.py",
+      "sha256": "3a9ff4442ba096e306a7e0d40408d8a649c197c9dcf213e2db83250eed4bf235"
+    },
+    {
+      "path": "crm_automation_store.py",
+      "sha256": "4931c826da2a9f63be7aafc1cd67c190d49f339ff332815bdcd511ce669cd6e9"
+    },
+    {
+      "path": "crm_automation_toolbar.py",
+      "sha256": "375d0782f6c6bebdb16f6273366bc0d632624730525c6a9adfcad5eb2e058811"
+    },
+    {
+      "path": "crm_automation_ui.py",
+      "sha256": "05b0ac3a4a084dfe9eb73b452f3b33bee5e97a65266d1da6a65b3b7e0163e362"
+    },
+    {
+      "path": "crm_engine.py",
+      "sha256": "ba3e1c15429522e8cbba3522455fddb3c282a8c3284980ecbb3b27dd53644b77"
+    },
+    {
+      "path": "crm_flow_page.py",
+      "sha256": "2a6ccbaa9561bcdf3cb33eedea8f5818e4f3f7b2051a002c3857f061a5189581"
+    },
+    {
+      "path": "crm_lifecycle_audience.py",
+      "sha256": "a22145db073b693c4d43471baa7a8c22365d4a9e3ed7e90e422a2b0eb9c5deaa"
+    },
+    {
+      "path": "crm_lifecycle_definition.py",
+      "sha256": "0b6edd1f15e1f35bf1b3b09e904b9c62b6797b18c6f2cb567c53729a2224f906"
+    },
+    {
+      "path": "crm_lifecycle_policy.py",
+      "sha256": "21cc27edf3e156b9aff2113d4c20858c8dbb5875c8cb7c2570b5e5f023cef885"
+    },
+    {
+      "path": "crm_lifecycle_products.py",
+      "sha256": "d34b8edb847b91b06499b8aa76b05c735c4a581920a102858a7c6bcdc1395fcc"
+    },
+    {
+      "path": "crm_lifecycle_runtime.py",
+      "sha256": "b1165b9cfd055fc7fe668ada521649a4635466af95d658bb5267e16d5c98c756"
+    },
+    {
+      "path": "crm_lifecycle_shopify.py",
+      "sha256": "8dfd0c624955b703bce08699ec8f3d43dc724a5a3839f6bb418a8c8581214624"
+    },
+    {
+      "path": "crm_lifecycle_sync.py",
+      "sha256": "fb25e0ec79e12e755625d417c02ce8397caf67fb2a105807b2e472dfe506284a"
+    },
+    {
+      "path": "crm_lifecycle_ui.py",
+      "sha256": "4c13dad57dcb6eec4a1fc4e844941659aa54cea630538f00d90712cc05140b17"
+    },
+    {
+      "path": "crm_store.py",
+      "sha256": "939f03b33f9b259f027b25a39b8756379610f9e67ff0b3df17a5251b4cfacd91"
+    },
+    {
+      "path": "crm_worker.py",
+      "sha256": "68e1c9e1788d613f7ba1162ad89e861fe87c4697917c339dd8fa8296ef024750"
+    },
+    {
+      "path": "docs/AUTOMATIONS_V6_COMPACT_ANALYTICS_2026-10-10.md",
+      "sha256": "fc9b3304f4f24f47a2f97975d143365ee418c8f9b4a8672c47e275aefcdcf117"
+    },
+    {
+      "path": "docs/EMAIL_AUTOMATION_FLOW_EXPANSION.md",
+      "sha256": "a62a5fbd0e0da9699dc43a389a85cedcca2c5b249d79f2bd1b9c181176f4fd54"
+    },
+    {
+      "path": "docs/lifecycle-expansion-rollback.sql",
+      "sha256": "33b0ed50f85b4be51ee8aa0aaec47eab4b21b5299408d27798a69194d6b6c55c"
+    },
+    {
+      "path": "docs/lifecycle-order-facts.graphql",
+      "sha256": "ef16d46a2ea7e870b20ba91086e9c0ab55e016a48bc72a64bb4aecd16441c096"
+    },
+    {
+      "path": "docs/lifecycle-product-availability.graphql",
+      "sha256": "e2ee61f6e7462b0632da5cef8fbb2bdff7246db4e86bee0d82015daab8ea2b30"
+    },
+    {
+      "path": "docs/releases/SPORTS_CAVE_OS_FULL_SYSTEM_UPDATE_2026-10-10.md",
+      "sha256": "814157c4685be4904f8200347cb62f958e66dfa20d0c32ab8361c78b6cc55657"
+    },
+    {
+      "path": "docs/releases/SPORTS_CAVE_OS_FULL_SYSTEM_UPDATE_2026-10-10_VERIFICATION.json",
+      "sha256": "094fc9e3b31308fc9846dc5564342108522062328c429056c94a172c4e414e85"
+    },
+    {
+      "path": "migrations/20261010112655_crm_lifecycle_draft_expansion.sql",
+      "sha256": "9944195b103471b9fae89c889e3080727e5ae61c726cc8b7cdb996c1f14830ff"
+    },
+    {
+      "path": "tests/benchmark_lifecycle_audience.py",
+      "sha256": "39f1dfe14233248c3c27db715bbf7c55041a4b249d889e5cf8fdeae33047bc1c"
+    },
+    {
+      "path": "tests/check_lifecycle_browser.py",
+      "sha256": "15e59bae2a00f2c9015d5759da69b4f7d5ced597a48998f9bc2d3378eeaf19d2"
+    },
+    {
+      "path": "tests/check_lifecycle_table_regression.py",
+      "sha256": "6c7c41c41791358a93149db26ca5cdf9493396024f035dd59571b0adac129702"
+    },
+    {
+      "path": "tests/fixtures/crm_lifecycle_preview.py",
+      "sha256": "1c41755dedff2e2087f1aacd4095a668ef9b287797135415a285da6e65ff8530"
+    },
+    {
+      "path": "tests/lifecycle_baseline.py",
+      "sha256": "63f4533edec8309e4ec4e312c63121d109e96b6d76e7fbc59f62023be8b04161"
+    },
+    {
+      "path": "tests/lifecycle_review_evidence.py",
+      "sha256": "6853b5eb47d8a6f20d23dd3266aa6e06fd5fddf4693e8f0b10ff63e09cde5344"
+    },
+    {
+      "path": "tests/run_lifecycle_checks.py",
+      "sha256": "8dc5cf523dc178ec81912b72a8ecde1d2ec2e85ce844e78bd81856bf4e57bf07"
+    },
+    {
+      "path": "tests/test_automation_v6_cache.py",
+      "sha256": "84053b588bd31d1ae0891dfd8b7911222dbdaa36b99527c6fff0d782303fddd4"
+    },
+    {
+      "path": "tests/test_crm_audience_prepare.py",
+      "sha256": "c099e17d483c68b89fed8b2e0f948b863870ffaf89940c88d32833aa2d636942"
+    },
+    {
+      "path": "tests/test_crm_automation_analytics.py",
+      "sha256": "ff8e890d76aa24eeae31e4d6124001aa2e30fb9fee107197d8c7b8b1c3ff8aae"
+    },
+    {
+      "path": "tests/test_crm_automation_publication.py",
+      "sha256": "0e680532a75202c9b7160469a77de33b421094c448cbaa6ba1f51e42d79526c2"
+    },
+    {
+      "path": "tests/test_crm_fast_review.py",
+      "sha256": "8714354e02faa00a605b07f79c81cc8a52e26f349f02821e797b4cd7db745f9e"
+    },
+    {
+      "path": "tests/test_crm_lifecycle_expansion.py",
+      "sha256": "a00abd96404eaef205411f56fdc4ba3e0ce9aee571bad65d8dc5304344d09838"
+    }
+  ]
+}

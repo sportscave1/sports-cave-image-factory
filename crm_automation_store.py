@@ -66,7 +66,7 @@ class AutomationStore(CampaignStore):
         if scope is None or scope[0] is not self:return None
         return scope[1].get(str(identity))
 
-    def create(self,user,trigger='welcome',name=None):
+    def create(self,user,trigger='welcome',name=None,*,lifecycle=False):
         require(user,'crm_automations_manage')
         from crm_automation_definition import TRIGGERS
         identity=str(uuid.uuid4())
@@ -78,6 +78,9 @@ class AutomationStore(CampaignStore):
         doc['html_sections']=self.default_sections(rendering)
         commit_middle(doc,middle_sections(doc))
         cfg['draft']['emails'][0]['document']=doc
+        if lifecycle and trigger in ('welcome','post_purchase','win_back'):
+            from crm_lifecycle_definition import expanded_flow
+            cfg['draft']=expanded_flow(trigger,self.default_sections(rendering))
         if trigger=='abandoned':
             from crm_automation_definition import email_step
             from crm_abandoned_checkout import apply_template
@@ -101,14 +104,50 @@ class AutomationStore(CampaignStore):
             old=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
             if not old or not native(old) or old['config'].get('deleted_at') or status(old)=='ARCHIVED': raise ValueError('Automation is not editable.')
             cfg=deepcopy(old['config'])
+            if cfg.get('draft',{}).get('lifecycle_version') and (flow.get('lifecycle_version')!=1 or flow['trigger']!=cfg['draft']['trigger']):
+                raise ValueError('The lifecycle draft safety lock and trigger cannot be removed by editing.')
+            if cfg.get('draft',{}).get('lifecycle_version') and flow['trigger']=='post_purchase':
+                required={s['step_id'] for s in cfg['draft']['emails'] if s.get('requires_fulfilment')}
+                if any(s['step_id'] in required and not s.get('requires_fulfilment') for s in flow['emails']):
+                    raise ValueError('Successful fulfilment is required for these post-purchase follow-ups.')
             if cfg['draft']==flow and old['name']==name: return old
             if cfg['revision']!=revision: raise ValueError('A newer draft exists. Your local edits are retained; reload before saving.')
+            if cfg.get('draft',{}).get('lifecycle_version'):
+                conn.execute('''INSERT INTO crm_lifecycle_revisions(automation_id,revision,definition,actor)
+                  VALUES(%s,%s,%s::jsonb,%s) ON CONFLICT DO NOTHING''',
+                  (identity,cfg['revision'],json.dumps(cfg['draft']),str(user.get('id',''))))
             cfg.update(draft=deepcopy(flow),revision=revision+1)
             return conn.execute('UPDATE crm_automations SET name=%s,config=%s::jsonb,updated_at=now() WHERE id=%s RETURNING *',(name,json.dumps(cfg),identity)).fetchone()
 
     def request_publish(self,user,identity,revision):
         from crm_automation_publication import request
         return request(self,user,identity,revision)
+
+    def prepare_lifecycle(self,user,identity):
+        """One reversible draft upgrade; no publication, enrollment or history deletion."""
+        require(user,'crm_automations_manage')
+        from crm_lifecycle_definition import TRIGGERS,expanded_flow,locked
+        with self.db() as conn:
+            row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
+            if not row or row['trigger_type'] not in TRIGGERS or row['status']!='DRAFT':
+                raise ValueError('Only draft lifecycle flows can be prepared.')
+            if locked(row):return row
+            old=deepcopy(row['config']);cfg=deepcopy(old)
+            # Preserve exact previous definitions, source steps, versions and IDs.
+            cfg['lifecycle_previous']={'config':old,'steps':deepcopy(row['steps']), 'at':now().isoformat(),'actor':str(user.get('id',''))}
+            preserved=deepcopy(old.get('draft',{}).get('emails',[]))
+            if not preserved:
+                from crm_html_workspace import html_document
+                for step in row['steps']:
+                    if step.get('type')!='send':continue
+                    template=conn.execute('SELECT * FROM crm_templates WHERE template_key=%s',(step['template'],)).fetchone()
+                    if not template:raise ValueError('Legacy template is unavailable; draft has not been changed.')
+                    preserved.append(dict(name=step['template'],document=html_document(self.template_document(template)),template_id=str(template['id'])))
+            cfg['lifecycle_previous']['emails']=preserved
+            flow=expanded_flow(row['trigger_type'],self.default_sections(self.render_settings()))
+            cfg.update(format=FORMAT,revision=int(old.get('revision',0))+1,published_version=0,draft=flow)
+            validate(flow,draft=True)
+            return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps='[]'::jsonb,updated_at=now() WHERE id=%s RETURNING *",(json.dumps(cfg,default=str),identity)).fetchone()
 
     def retry_delivery(self,user,identity,send_id):
         """Explicit retry of a known rejection, using the same immutable receipt."""
@@ -144,6 +183,8 @@ class AutomationStore(CampaignStore):
             # Claims and due timestamps use the same database clock. Host clock
             # skew must not push already-due work into the future on resume.
             cfg=deepcopy(row['config']);current=status(row);target=row['status'];at=date(row['transition_at'])
+            if action=='resume' and cfg.get('draft',{}).get('lifecycle_version'):
+                raise ValueError('Lifecycle expansion is draft-only. Activation requires a separately reviewed release.')
             if action=='pause' and current=='ACTIVE': target='PAUSED';cfg['paused_at']=at.isoformat()
             elif action=='resume' and current=='PAUSED' and cfg.get('published_version'):
                 target='ACTIVE'

@@ -149,11 +149,16 @@ class Store:
         args=(request_hash,hashed,row['id'],row['lease_token'])
         if not row.get('enrollment_id'):return self.q(sql,args,True)
         with self.db() as conn:
+            if row.get('_lifecycle'):
+                conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('lifecycle:'+hashed,))
             # Serialize the submission boundary with Pause. A submission already
             # committed before Pause can finish, but no future step can begin.
             automation=conn.execute("SELECT a.* FROM crm_automations a JOIN crm_automation_enrollments e ON e.automation_id=a.id WHERE e.id=%s FOR UPDATE OF a",(row['enrollment_id'],)).fetchone()
             journey=conn.execute('SELECT * FROM crm_automation_enrollments WHERE id=%s FOR UPDATE',(row['enrollment_id'],)).fetchone()
             if not automation or not journey or automation['status']!='ACTIVE' or journey['status']!='ACTIVE':return None
+            if automation.get('config',{}).get('draft',{}).get('lifecycle_version'):
+                from crm_lifecycle_runtime import reserve
+                if not reserve(conn,automation,journey,row,hashed):return None
             # Publication commit locks this same automation row. Rendering may
             # happen outside the lock, but a changed pointer cannot reserve an
             # obsolete payload. Retry renders the new version with the same key.
