@@ -64,12 +64,26 @@ def progress(row, schema, at=None):
         sid=str(steps[index].get('step_id') or 'legacy:'+str(index))
         if send.get('step_id') and str(send['step_id'])!=sid:continue
         receipts[sid]=send
+    # Checkout recovery is a journey outcome, not email/order attribution.
+    # Only an accepted receipt in this journey and visible schema can carry it.
+    applicable={col['id'] for col in schema}
+    sent=[sid for sid,s in receipts.items() if sid in applicable
+          and s.get('status')=='ACCEPTED' and s.get('provider_id')]
+    latest=max(sent,key=lambda sid:(
+        (date(receipts[sid].get('submitted_at')).timestamp()
+         if date(receipts[sid].get('submitted_at')) else float('-inf')),
+        positions[sid]),default=None) if recovered(row) else None
     result=[];current=int(row.get('current_step') or 0)
     for col in schema:
         sid=col['id'];index=positions.get(sid);send=receipts.get(sid,{})
         status=send.get('status')
         if status=='ACCEPTED' and send.get('provider_id'):
-            value=cell('Sent ✓','green','Accepted by Resend; inbox delivery is separate. See checkout details.')
+            # Provider opens are pixel observations, not proof of a human read
+            # (privacy proxies can preload them). Never infer opens from delivery
+            # or clicks, or use them as evidence of purchase/attributed revenue.
+            label=('Recovered' if sid==latest else 'Clicked' if send.get('clicked')
+                   else 'Opened' if send.get('opened') else 'Sent')
+            value=cell(label+' ✓','green')
         elif not col.get('published',True):
             value=cell('Not published',reason='Draft stage; publish successfully before it can join the live sequence')
         elif not col['enabled']:

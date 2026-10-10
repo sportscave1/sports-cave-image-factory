@@ -23,14 +23,13 @@ class FlowV5UIContracts(unittest.TestCase):
         store=Mock();shop=Mock()
         with patch.object(page,'st',ui),patch.object(page,'checkout_panel') as load,patch.object(page,'arm') as refresh:
             inspect.unwrap(page.checkouts)(shop,store,ADMIN,{'id':'fixture'})
-            inspect.unwrap(page.recipient_details)(store,ADMIN,'fixture')
             load.assert_not_called();store.flow.assert_not_called();store.q.assert_not_called();refresh.assert_not_called()
         shop.assert_not_called()
 
     def test_lazy_panels_and_no_visible_technical_labels(self):
         import crm_flow_page as page
         self.assertIn('if panel.open:checkout_panel',inspect.getsource(page.checkouts))
-        self.assertIn('if panel.open:',inspect.getsource(page.recipient_details))
+        self.assertNotIn('Recipient timelines and scheduled deliveries',inspect.getsource(page))
         self.assertIn('paginated=True',inspect.getsource(page.checkouts))
         self.assertNotIn('Draft content (thumbnail: published)',inspect.getsource(page.sequence))
         import crm_flow_thumbnail as thumbs

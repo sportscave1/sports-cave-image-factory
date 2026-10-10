@@ -1,7 +1,7 @@
-"""Guarded Git deployment. No Render API, app imports, migrations or credentials.
+"""Historical deployment library retained for regression compatibility.
 
-Run through deploy.ps1 from the repository. Tests use disposable local origins;
-the CLI always requires the real Sports Cave origin and the main branch.
+The CLI now delegates to sports_cave_deploy.py. Do not call this legacy library
+to deploy new work. Its tests use disposable local origins.
 """
 from __future__ import annotations
 
@@ -264,4 +264,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # The old library remains for historical tests; its CLI must not auto-select dirty work.
+    from sports_cave_deploy import main as guarded_main
+    raise SystemExit(guarded_main())

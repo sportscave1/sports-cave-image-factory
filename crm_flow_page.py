@@ -241,13 +241,6 @@ def sequence(shop,store,user,identity,period):
 
 
 @st.fragment
-def recipient_details(store,user,identity):
-    with st.expander('Recipient timelines and scheduled deliveries',on_change='rerun',key='flow-recipients-'+str(identity)) as panel:
-        if panel.open:
-            from crm_flow_builder import activity as recipient_activity
-            recipient_activity(store,store.flow(identity),user,rerun_scope='fragment')
-
-@st.fragment
 def recent(store,row,user,period):
     from crm_automation_analytics import activity
     from crm_automation_home import activity_html
@@ -261,10 +254,6 @@ def recent(store,row,user,period):
     if phase in ('LOADING','REFRESHING'):arm('flow-activity',1)
     elif phase in ('ERROR','TIMED_OUT') and st.button('Retry activity'):
         refresh_reads(store,row['id']);st.rerun(scope='fragment')
-    with st.expander('Recipient timelines and scheduled deliveries',on_change='rerun',key='flow-recipients-'+str(row['id'])) as details:
-        if details.open:
-            from crm_flow_builder import activity as recipient_activity
-            recipient_activity(store,row,user)
 
 @st.fragment
 def checkouts(shop,store,user,row):
@@ -300,7 +289,6 @@ def flow_page(shop,store,user,row):
         if st.button('← Back to Flow',key='flow-operations-back'):
             st.session_state.pop('flow-operational-diagnostics',None);st.rerun(scope='app')
         st.subheader('Operational diagnostics')
-        recipient_details(store,user,row['id'])
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
         elif row['config']['draft'].get('lifecycle_version'):
             from crm_lifecycle_ui import audience
@@ -313,7 +301,6 @@ def flow_page(shop,store,user,row):
         if error:st.warning(error)
         analytics_controls(store,row['id'])
         sequence(shop,store,user,row['id'],'All time')
-        recipient_details(store,user,row['id'])
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
         elif row['config']['draft'].get('lifecycle_version'):
             from crm_lifecycle_ui import audience

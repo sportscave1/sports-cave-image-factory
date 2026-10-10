@@ -54,8 +54,7 @@ with sync_playwright() as pw:
                 recipient=page.get_by_text('Recipient timelines and scheduled deliveries',exact=True)
                 checkout=page.get_by_text('Abandoned checkouts',exact=True)
                 values={'channel':channel,'before':False,'operations':True}
-                values['timeline_expand_ms']=ms(lambda:(recipient.click(),page.get_by_text('Synthetic recipient journey',exact=True).wait_for()))
-                recipient.click()
+                assert recipient.count()==0
                 values['checkout_expand_ms']=ms(lambda:(checkout.click(),page.get_by_text('Synthetic paginated checkout table',exact=True).wait_for()))
                 checkout.click();page.get_by_role('button',name='Test',exact=True).click()
                 page.get_by_role('textbox',name='Email address',exact=True).fill('operator@example.test')

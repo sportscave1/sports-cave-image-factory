@@ -39,6 +39,15 @@ async function benchmark(page,source,p){const frame=await mount(page,source,p);r
  assert.equal(await frame.locator('.wrap').evaluate(e=>e.scrollTop),210);
  assert.equal(await frame.locator('body').evaluate(()=>window.keep===document.querySelector('tbody tr')&&window.initialNode===document.querySelector('tbody tr .customer')),true);
  assert.equal(await countdown.textContent(),'Sent ✓');assert.equal(await frame.locator('tbody tr').first().locator('td').nth(5).textContent(),'12h 0m');
+ // Existing refresh patches engagement labels in place, keeping selection/scroll.
+ for(const label of ['Opened ✓','Clicked ✓','Recovered ✓']){
+  selected.rows[0].cells[0]={label,tone:'green',reason:label};
+  await update(page,selected);await page.waitForTimeout(100);
+  assert.equal(await frame.locator('tbody tr').first().locator('td').nth(3).textContent(),label);
+  assert.equal(await frame.locator('tbody tr').first().locator('td').nth(3).getAttribute('class'),'email green');
+  assert.equal(await frame.getByRole('checkbox',{name:'Select Roslyn Williamson',exact:true}).isChecked(),true);
+  assert.equal(await frame.locator('.wrap').evaluate(e=>e.scrollTop),210);
+ }
  // A wild browser wall-clock change must not change the countdown.
  await frame.locator('body').evaluate(()=>Date.now=()=>1);const drift=await frame.locator('tbody tr').first().locator('td').nth(5).textContent();await page.waitForTimeout(1100);
  assert.equal(await frame.locator('body').evaluate(()=>remaining(args.rows[0].cells[2].due_at)), '11h 59m');
@@ -57,6 +66,7 @@ async function benchmark(page,source,p){const frame=await mount(page,source,p);r
  const reloaded={...selected,server_now:iso(10),read_at:iso(10),columns:[...columns,{id:'new',label:'Email 6',name:'New published email',enabled:true}]};
  reloaded.rows=selected.rows.map(r=>({...r,cells:[...r.cells,{label:'—',tone:'muted',reason:'Older frozen version'}]}));
  const resumed=await mount(page,html,reloaded);assert.equal(await resumed.locator('th').last().textContent(),'Email 6');
+ assert.equal(await resumed.locator('tbody tr').first().locator('td').nth(3).textContent(),'Recovered ✓');
  assert.equal(await resumed.locator('tbody tr').first().locator('td').last().textContent(),'—');
  assert.equal(await resumed.locator('tbody tr').first().locator('td').nth(5).textContent(),'11h 59m');
  await resumed.locator('body').evaluate(()=>{inView=false;stop();lastPoll=-999999;tick()});const messages=await page.evaluate(()=>window.messages.length);await page.waitForTimeout(1200);assert.equal(await page.evaluate(()=>window.messages.length),messages);

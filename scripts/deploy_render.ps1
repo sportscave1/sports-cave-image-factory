@@ -11,11 +11,11 @@ param(
 )
 
 if ($AllowDirty) {
-    Write-Error "-AllowDirty is retired. Select intended changes with scripts/deploy.ps1 -Paths instead."
+    Write-Error "-AllowDirty is retired. Prepare reviewed paths/tests with scripts/deploy-sports-cave.ps1 -Prepare, then run that helper."
     exit 1
 }
 if ($ValidateOnly) {
-    Write-Host "Validation now safely normalizes and stages selected files, without committing or pushing."
+    Write-Host "Dry-run validates the selected candidate without changing the real index or working files."
 }
 & (Join-Path $PSScriptRoot "deploy.ps1") -Message $Message -Paths $Paths -CheckOnly:($CheckOnly -or $ValidateOnly) -PushExisting:$PushExisting
 exit $LASTEXITCODE

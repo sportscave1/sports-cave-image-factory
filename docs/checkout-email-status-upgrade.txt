@@ -1,0 +1,64 @@
+SPORTS CAVE OS - ABANDONED CHECKOUT STATUS UPGRADE
+Local implementation verification - 11 October 2026 (Australia/Sydney)
+
+Implementation
+- Read existing persisted Resend open/click facts per send in the bounded checkout query.
+- Display one green status: Recovered > Clicked > Opened > Sent.
+- Recovery uses verified checkout evidence and the latest applicable accepted send in the selected journey; it does not write email attribution or revenue.
+- No recovery status on an unsent email. Delivery does not imply an open.
+- Existing Waiting/countdown/Not applicable and other unsent states preserved.
+- Existing 12-second read cache and 15-second component refresh retained.
+- Removed recipient timeline expanders and their mount calls. Backend timeline, schedule and processing functions retained.
+- No schema migration, scheduling, sending, content, flow activation, production writes, commit, push or deployment.
+
+Application files changed for this request
+crm_checkout_analytics.py
+crm_checkout_progress.py
+crm_flow_page.py
+
+Tests changed or added for this request
+ tests/test_crm_checkout_engagement.py (new)
+ tests/test_crm_checkout_progress.py
+ tests/test_crm_checkout_progress_ui.cjs
+ tests/test_crm_flow_v5.py
+ tests/check_crm_flow_v4_operations.py
+ tests/check_crm_flow_v4_ui.py
+ tests/check_crm_flow_v5_ui.py
+The workspace contained substantial pre-existing changes; those were retained.
+
+Generated/updated evidence
+ docs/checkout-flow-evidence/component-benchmark.json
+ docs/checkout-flow-evidence/table-1440.png
+ docs/checkout-flow-evidence/table-390.png
+ docs/checkout-email-status-upgrade.txt (this report)
+ tmp/check-checkout-engagement-page.cjs (local-only page smoke test)
+ tmp/checkout-engagement-tests.log (initial sandbox connection failures)
+ tmp/checkout-engagement-tests-local.log (initial test-token fixture failure, corrected)
+ tmp/checkout-engagement-regression.log (138 tests passing)
+ tmp/checkout-engagement-lifecycle.log (28 tests passing)
+
+Verification
+PASS: 138 unittest cases against disposable PGlite/PostgreSQL with fake Shopify/Resend providers:
+ tests.test_crm_checkout_engagement
+ tests.test_crm_checkout_progress
+ tests.test_crm_flow_v5
+ tests.test_crm_checkout_analytics
+ tests.test_crm_native_automations
+ tests.test_crm_production_v2
+ tests.test_crm_checkout_timing_ui
+Includes status progression, click without open, recovery with/without engagement, Email 1/2/3, verified send/step/journey isolation, historical recovery, signed checkout-token order matching, duplicate and delayed events, persisted reads, countdowns and historical Not applicable.
+PASS: 28 tests in tests.test_crm_lifecycle_expansion.
+PASS: headless Chrome production table component: label refresh/reload, green styling, selection/details, DOM retention, scrolling, timers, bounded polling, dynamic columns; 1440/1024/750/390/320px.
+PASS: offline mocked full flow page: dropdown absent, checkout panel opens, no Streamlit exceptions or overflow at 1440/390/320px.
+PASS: git diff --check for tracked implementation/test edits.
+Older full v4/v5 browser suites were updated for the intentionally removed dropdown but not rerun in full; focused current-page and component browser checks were run.
+
+Tracking limitations
+- Opened means a recorded provider open event. Privacy prefetching/scanners can produce opens without a human reading; blocked images can hide actual opens. Resend's documented opened payload has no human-versus-proxy discriminator, so this change does not invent one or delete historical events.
+  https://resend.com/docs/webhooks/emails/opened
+  https://resend.com/docs/knowledge-base/why-are-my-open-rates-not-accurate
+- Clicked means a recorded Resend tracked-link event; the existing ledger does not prove that the actor was human rather than a link scanner.
+- Existing tracking must be enabled at the provider and signed webhooks must arrive and reconcile to the stored provider receipt. Production configuration was not modified or exercised with real sends.
+- Historical unrecorded opens/clicks cannot be reconstructed. Existing persisted events are reused on reload.
+- Recovery requires exact shop-scoped checkout-token/order evidence, signed completion, or Admin completedAt data. Customer email alone is not recovery evidence. Unmatched orders remain unconfirmed until existing reconciliation supplies evidence.
+- Recovered on the latest applicable sent email is a checkout outcome display convention, not causal attribution to that email.

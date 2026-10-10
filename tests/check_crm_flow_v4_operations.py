@@ -42,7 +42,7 @@ with sync_playwright() as pw:
     page.reload();rows.nth(4).wait_for()
     assert page.get_by_role('button',name='Refresh analytics',exact=True).count()==0
     assert page.get_by_role('button',name='Diagnostics',exact=True).count()==0
-    page.get_by_text('Recipient timelines and scheduled deliveries',exact=True).wait_for()
+    assert page.get_by_text('Recipient timelines and scheduled deliveries',exact=True).count()==0
     page.get_by_text('Abandoned checkouts',exact=True).wait_for()
     assert page.get_by_test_id('stException').count()==0
     assert not errors,errors

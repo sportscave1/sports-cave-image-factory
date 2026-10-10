@@ -42,7 +42,7 @@ class Projection(unittest.TestCase):
         self.assertEqual(self.labels(schema=schema)[0],'Disabled')
         self.row['enrollment_id']=None;self.assertEqual(self.labels(schema=schema),['Disabled']*3)
     def test_purchased_preserves_sent_stops_outstanding(self):
-        self.accepted();self.row['order_id']='order';self.assertEqual(self.labels(),['Sent ✓','Purchased','Purchased'])
+        self.accepted();self.row['order_id']='order';self.assertEqual(self.labels(),['Recovered ✓','Purchased','Purchased'])
     def test_paused_preserves_receipts(self):
         self.accepted();self.row['automation_status']='PAUSED';self.assertEqual(self.labels(),['Sent ✓','Paused','Paused'])
     def test_pending_states_and_evaluated_ineligibility(self):
@@ -96,7 +96,7 @@ class PersistedProgress(unittest.TestCase):
         c['completedAt']=now().isoformat();details(self.store,c)
         from crm_shopify_automation_events import recover
         recover(self.store,key);row=self.read(a,key)
-        self.assertEqual([c['label'] for c in progress(row,schema)],['Sent ✓','Purchased'])
+        self.assertEqual([c['label'] for c in progress(row,schema)],['Recovered ✓','Purchased'])
         self.engine.send_one();self.provider.send.assert_called_once()
     def test_single_paged_read_search_and_published_snapshot_no_documents(self):
         a,keys,_,_=self.candidates(6)
