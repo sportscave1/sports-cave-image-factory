@@ -218,7 +218,7 @@ class AutomationStore(CampaignStore):
 
     def preview_document(self,doc):
         from crm_recovery_discount import substitute
-        doc=substitute(doc)
+        doc=substitute(doc,preview=True)
         from crm_personalisation import present as has_personalisation,render as personalise,values_from_preview
         from crm_abandoned_checkout import preview_context
         from crm_checkout_preview import needs_checkout,document,sample

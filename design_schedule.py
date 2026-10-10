@@ -392,10 +392,15 @@ def _initialise_idea_controls():
 
 
 def _suggest_best_mix():
+    import design_studio_sales_intelligence as intelligence
     mix = sports_cave_dashboard.suggest_design_idea_style_mix(
         st.session_state["design-schedule-idea-sport"],
         st.session_state["design-schedule-idea-total"],
     )
+    snapshot = intelligence.get_snapshot(st.session_state["design-schedule-idea-sport"])
+    mix, reason = intelligence.suggest_evidence_mix(mix, snapshot)
+    st.session_state["design-schedule-idea-intelligence"] = snapshot
+    st.session_state["design-schedule-idea-mix-reason"] = reason
     for style_slug, count in mix.items():
         st.session_state[_style_mix_key(style_slug)] = count
     st.session_state.pop("design-schedule-idea-prompt", None)
@@ -441,6 +446,9 @@ def _render_idea_generator(copy_prompt_renderer=None):
         )
         if not valid:
             st.caption("Adjust the style counts so the allocation matches the requested total.")
+        if (st.session_state.get("design-schedule-idea-mix-reason")
+                and (st.session_state.get("design-schedule-idea-intelligence") or {}).get("sport") == sport):
+            st.caption(st.session_state["design-schedule-idea-mix-reason"])
         options = st.columns(2)
         exclude_existing = options[0].checkbox(
             "Exclude ideas already sold by Sports Cave",
@@ -452,6 +460,9 @@ def _render_idea_generator(copy_prompt_renderer=None):
             value=True,
             key="design-schedule-idea-calendar-relevance",
         )
+        brief_scope = (sport, int(total), tuple(sorted(mix.items())), exclude_existing, calendar_relevance)
+        if st.session_state.get("design-schedule-idea-prepared-scope") != brief_scope:
+            st.session_state.pop("design-schedule-idea-prompt", None)
         actions = st.columns([1, 1.25, 2.5], gap="small")
         actions[0].button(
             "Suggest Best Mix",
@@ -467,6 +478,9 @@ def _render_idea_generator(copy_prompt_renderer=None):
             use_container_width=True,
         ):
             try:
+                import design_studio_sales_intelligence as intelligence
+                snapshot = intelligence.get_snapshot(sport)
+                st.session_state["design-schedule-idea-intelligence"] = snapshot
                 st.session_state["design-schedule-idea-prompt"] = (
                     sports_cave_dashboard.build_new_design_ideas_prompt(
                         sport,
@@ -474,10 +488,16 @@ def _render_idea_generator(copy_prompt_renderer=None):
                         mix,
                         exclude_existing=exclude_existing,
                         calendar_relevance=calendar_relevance,
+                        intelligence_snapshot=snapshot,
                     )
                 )
+                st.session_state["design-schedule-idea-prepared-scope"] = brief_scope
             except ValueError as error:
                 st.warning(str(error))
+        import design_studio_intelligence_ui
+        snapshot = st.session_state.get("design-schedule-idea-intelligence")
+        if snapshot and snapshot.get("sport") == sport:
+            design_studio_intelligence_ui.render_summary(snapshot, key="schedule-v3", sport=sport)
         prompt = str(st.session_state.get("design-schedule-idea-prompt") or "")
         if prompt:
             st.text_area(

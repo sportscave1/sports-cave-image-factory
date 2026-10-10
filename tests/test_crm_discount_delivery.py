@@ -121,10 +121,13 @@ class DiscountDeliveryTests(unittest.TestCase):
         self.assertIn('discount=FIXTURE5',message['html']);self.assertNotIn('Recovery action disabled',message['html'])
         self.assertNotIn('{{',message['html']);self.assertIn('A$5 off',message['html'])
 
-    def test_removed_offer_with_dependent_subject_is_saved_but_publication_held(self):
+    def test_disconnected_offer_with_dependent_subject_is_saved_but_publication_held(self):
         f=self.f;flow=deepcopy(self.flow);third=flow['emails'][2]['document']
         from crm_middle_sections import commit_middle,middle_sections
         commit_middle(third,[s for s in middle_sections(third) if s['type']!='discount'])
+        self.assertEqual(third['recovery_discount']['code'],'FIXTURE5')
+        from crm_discount_section import disconnect
+        disconnect(third)
         saved=f.store.save_flow(ADMIN,self.a['id'],self.a['name'],flow,self.a['config']['revision'])
         self.assertNotIn('recovery_discount',saved['config']['draft']['emails'][2]['document'])
         with self.assertRaises(ValueError):f.store.publish(ADMIN,saved['id'],saved['config']['revision'],env=LIVE)

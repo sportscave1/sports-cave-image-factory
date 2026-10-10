@@ -901,25 +901,26 @@ def render_page(user):
         storage = {"configured": True, "ready": False, "reason": "unavailable"}
     storage_ready = bool(storage.get("ready"))
 
-    st.title("Reporting")
-    snapshot = _render_today(
-        user,
-        now_utc,
-        digest_config,
-        mail_config,
-        storage_ready,
-    )
-    _render_staff_summary(snapshot)
-    _render_reporting_tables(user, now_utc)
-    _render_sent_reports(user, storage_ready)
-    _render_delivery_health(
-        user,
-        digest_config,
-        mail_config,
-        storage_ready,
-        now_utc,
-    )
-    _render_test_email(user, storage_ready)
+    with reporting_store.page_read_schema(storage):
+        st.title("Reporting")
+        snapshot = _render_today(
+            user,
+            now_utc,
+            digest_config,
+            mail_config,
+            storage_ready,
+        )
+        _render_staff_summary(snapshot)
+        _render_reporting_tables(user, now_utc)
+        _render_sent_reports(user, storage_ready)
+        _render_delivery_health(
+            user,
+            digest_config,
+            mail_config,
+            storage_ready,
+            now_utc,
+        )
+        _render_test_email(user, storage_ready)
 
 
 def render_weekly_review_page(user):

@@ -1,5 +1,6 @@
 """Private, version-addressed WebP cache. No delivery or recipient operations."""
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 from copy import deepcopy
 from pathlib import Path
 from threading import Lock
@@ -13,12 +14,15 @@ import sys
 import tempfile
 
 LOG = logging.getLogger(__name__)
-POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix='email-thumbnail')
+# At most two isolated Chromium subprocesses, including publication prewarming.
+WORKERS = max(1, min(2, int(os.getenv('CRM_THUMBNAIL_WORKERS', '2'))))
+POOL = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix='email-thumbnail')
 LOCK = Lock()
 PENDING = {}
 FAILURES = {}
 RECHECK = {}
-REVISION = 'webp-1'
+DIAGNOSTICS = {}
+REVISION = 'webp-2'
 
 
 def cache_dir():
@@ -36,26 +40,38 @@ def selection(row, step):
     if live:
         identity = [str(row['id']), str(live['template_id']), live['template_version']]
         return token(identity), 'LIVE v' + str(live['template_version']), live
-    return token([str(row['id']), 'draft', row['config'].get('revision'), step['document']]), 'DRAFT', None
+    return token([str(row['id']), 'draft', step['step_id'], step['document']]), 'DRAFT', None
+
+
+@lru_cache(maxsize=128)
+def _asset(path, modified, size):
+    """Bounded decoded-asset validation, invalidated by atomic file replacement."""
+    path=Path(path)
+    data=path.read_bytes()
+    from crm_thumbnail_store import valid
+    if not valid(data):
+        path.unlink(missing_ok=True)
+        return None
+    return data
 
 
 def cached(key):
     path = cache_dir() / (key + '.webp')
     try:
-        if path.stat().st_size>80000:
+        info=path.stat()
+        if info.st_size>80000:
             path.unlink(missing_ok=True)
             return None
-        data = path.read_bytes()
-        if not (len(data) <= 80000 and data[:4] == b'RIFF' and data[8:12] == b'WEBP'):
-            path.unlink(missing_ok=True)
-            return None
-        return data
+        return _asset(str(path),info.st_mtime_ns,info.st_size)
     except FileNotFoundError:
         return None
 
 
 def generate(key, load, store=None):
     owner=None
+    started=monotonic()
+    with LOCK:
+        DIAGNOSTICS[key]={'queue_ms':round(1000*(started-PENDING.get(key,started)),2)}
     # Cross-process claim prevents publication/UI overlap; stale claims recover.
     path = cache_dir() / (key + '.lock')
     try:
@@ -80,6 +96,7 @@ def generate(key, load, store=None):
                     with LOCK:RECHECK[key]=monotonic()+5
                     return
             doc, cfg = load()
+            render_started=monotonic()
             with tempfile.TemporaryDirectory(prefix='email-thumb-') as folder:
                 source = Path(folder) / 'input.json'
                 output = Path(folder) / 'output.webp'
@@ -92,7 +109,8 @@ def generate(key, load, store=None):
                     allowed = {'browser_runtime_unavailable','browser_install_failed','email_render_failed'}
                     raise RuntimeError('renderer_exit_' + (reason if reason in allowed else str(result.returncode)))
                 data = output.read_bytes()
-                if len(data)>80000 or data[:4]!=b'RIFF' or data[8:12]!=b'WEBP':raise ValueError('Invalid thumbnail')
+                from crm_thumbnail_store import valid
+                if not valid(data):raise ValueError('Invalid thumbnail')
                 if store:
                     from crm_thumbnail_store import finish
                     finish(store,key,owner,data)
@@ -101,6 +119,7 @@ def generate(key, load, store=None):
                 temporary.write_bytes(data)
                 os.chmod(temporary, 0o600)
                 temporary.replace(target)
+            with LOCK:DIAGNOSTICS[key].update(renderer_ms=round(1000*(monotonic()-render_started),2),category='ready')
             files = sorted(cache_dir().glob('*.webp'), key=lambda p:p.stat().st_mtime)
             for old in files[:-4096]:old.unlink(missing_ok=True)
             LOG.warning('email_thumbnail_ready key=%s bytes=%s', key[:12], len(data))
@@ -113,6 +132,9 @@ def generate(key, load, store=None):
                 finish(store,key,owner)
             except Exception:pass
         with LOCK:FAILURES[key] = monotonic()
+        category=(str(exc).removeprefix('renderer_exit_') if isinstance(exc,RuntimeError) and str(exc).startswith('renderer_exit_') else
+                  'source_unavailable' if isinstance(exc,(ValueError,KeyError)) else 'render_timeout' if isinstance(exc,subprocess.TimeoutExpired) else 'storage_unavailable')
+        with LOCK:DIAGNOSTICS[key]['category']=category
         LOG.warning('email_thumbnail_failed key=%s reason=%s', key[:12], str(exc) if isinstance(exc,RuntimeError) and str(exc).startswith('renderer_exit_') else type(exc).__name__)
     finally:
         with LOCK:PENDING.pop(key, None)
@@ -131,7 +153,7 @@ def request(key, load, store=None):
         if failure is not None and monotonic() - failure < 60:return 'ERROR', None
         if key not in PENDING:
             if len(PENDING) >= 24:return 'BUSY', None
-            PENDING[key] = True
+            PENDING[key] = monotonic()
             try:POOL.submit(generate, key, load, store)
             except RuntimeError:
                 PENDING.pop(key, None)
@@ -139,7 +161,15 @@ def request(key, load, store=None):
         # Bounded error metadata; completed assets reside on disk, not in RAM.
         for old in list(FAILURES):
             if monotonic() - FAILURES[old] >= 60:FAILURES.pop(old, None)
+        for old in list(DIAGNOSTICS)[:-128]:
+            if old not in PENDING:DIAGNOSTICS.pop(old,None)
     return 'LOADING', None
+
+
+def diagnostic(key):
+    """Safe process-local timings/categories; never retain source documents."""
+    with LOCK:
+        return {**DIAGNOSTICS.get(key,{}),'retry_after':max(0,60-(monotonic()-FAILURES.get(key,-60)))}
 
 
 def source_loader(store, row, step, live):

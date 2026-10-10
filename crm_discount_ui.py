@@ -70,8 +70,7 @@ def view(key,*,trigger):
 
 
 def is_event(event):
-    return isinstance(event,dict) and (str(event.get('type','')).startswith('discount_') or
-        (event.get('type')=='add' and event.get('kind')=='discount'))
+    return isinstance(event,dict) and str(event.get('type','')).startswith('discount_')
 
 
 def handle(shop,doc,key,event,*,trigger):
@@ -90,6 +89,9 @@ def handle(shop,doc,key,event,*,trigger):
         if (not value['loaded'] or monotonic()-value['loaded_at']>=60) and not value.get('job'):
             term=value['term'];group=value['group']
             launch(value,lambda:code_page(shop,group['id'],None,term=term) if group else search(shop,term))
+    elif kind=='discount_disconnect':
+        from crm_discount_section import disconnect
+        disconnect(doc);value['open']=False
     elif kind=='discount_close':value['open']=False
     elif kind in ('discount_search','discount_refresh'):
         if trigger!='abandoned':return before!=doc

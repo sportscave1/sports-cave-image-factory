@@ -91,6 +91,9 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             if os_accounts.is_admin(user):
                 with st.popover('Diagnostics',on_change='rerun',key='flow-diagnostics') as diagnostics:
                     if diagnostics.open:
+                        if flow_view and st.button('Open operational diagnostics',key='flow-operations-open'):
+                            st.session_state['flow-operational-diagnostics']=str(identity)
+                            st.rerun(scope='app')
                         from crm_automation_diagnostic_ui import control
                         from crm_shopify import Shopify
                         control(Shopify(),store,user,row['trigger_type'],key+'flow_',automation=row)

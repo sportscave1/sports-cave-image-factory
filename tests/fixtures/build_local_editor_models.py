@@ -33,6 +33,7 @@ def build():
     for index,section in enumerate(sections):
         section['id']='fixture-'+str(index)
         doc=sectioned();commit_middle(doc,[section])
+        if section['type']=='discount':doc['recovery_discount']=deepcopy(section['offer'])
         with patch('streamlit.session_state',{'_automation_checkout_pin':{'last_good':data}}),patch('requests.sessions.Session.request',side_effect=AssertionError('Network forbidden')),patch('crm_lifestyle_images.gallery',return_value=images),patch('crm_frame_banner_assets.prepare',return_value='https://cdn.shopify.com/frame.png'):
             seed=model(doc,CFG,Mock(email_mode='automation'))
             expected=render_middle(hydrate(substitute(doc),data,test=True)[0])[0]

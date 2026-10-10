@@ -155,8 +155,8 @@ class PremiumImageQualityV3Tests(unittest.TestCase):
             'frame_specs': {'verified': True, 'source': 'Sports Cave verified', 'glazing': 'clear acrylic'},
             'selected_size': 'M',
         })
-        self.assertIn('acrylic/Perspex OR glass', prompt)
-        self.assertIn('premium reflections', prompt.lower())
+        self.assertIn('PREMIUM CLEAR GLASS REFLECTION LOOK', prompt)
+        self.assertIn('glass-like reflections', prompt.lower())
         self.assertIn('soft contact shadows', prompt)
         self.assertIn('source-consistent wall separation', prompt)
         self.assertEqual(prompt.count(blocks.SPORTS_CAVE_PREMIUM_REALISM_MARKER), 1)

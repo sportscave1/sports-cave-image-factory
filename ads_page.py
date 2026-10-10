@@ -5569,7 +5569,7 @@ Mounting:
 - no black halo, uniform digital drop shadow or floating product
 
 Glass:
-- clear transparent acrylic/Perspex or glass, matching the verified product
+- premium clear glass reflections on existing glazing, preserving verified construction
 - a restrained yet clearly visible window/room reflection across part of the correct glazing
 - gentle photographic reflection strength matched to the room lighting
 - one believable room or window reflection

@@ -22,7 +22,7 @@ def default_html():
 </td></tr></table>'''
 
 
-def section(offer, *, identity=None):
+def section(offer=None, *, identity=None):
     return {'id':identity or uuid.uuid4().hex,'type':'discount','visible':True,
             'offer':deepcopy(offer),'html':default_html()}
 
@@ -30,18 +30,25 @@ def section(offer, *, identity=None):
 def migrate_editor(doc):
     """Editor copy only; callers establish their clean baseline afterwards."""
     result=deepcopy(doc)
-    if result.get('recovery_discount') and not offer_sections(result):
+    if result.get('recovery_discount') and not offer_sections(result) and result.get('discount_association_version')!=1:
         from crm_middle_sections import middle_sections
         result['middle_sections']=middle_sections(result)+[section(result['recovery_discount'],identity='legacy-recovery-discount')]
     return result
 
 
 def sync(doc, sections, *, managed=False):
-    offers=[s['offer'] for s in sections if s.get('type')=='discount' and s['visible']]
+    # Presentation changes never attach or detach a checkout offer. Existing
+    # snapshots retain their original selection; explicit picker actions own it.
+    offers=[s['offer'] for s in sections if s.get('type')=='discount' and s.get('offer')]
     if any(o!=offers[0] for o in offers[1:]):
         raise ValueError('Use one Shopify offer per email. Change the discount on all appearances before showing this section.')
-    if offers:doc['recovery_discount']=deepcopy(offers[0])
-    elif managed or any(s.get('type')=='discount' for s in sections):doc.pop('recovery_discount',None)
+    if managed or offers or doc.get('recovery_discount'):doc['discount_association_version']=1
+
+
+def disconnect(doc):
+    doc.pop('recovery_discount',None)
+    doc['discount_association_version']=1
+    for s in offer_sections(doc):s['offer']=None
 
 
 def insert(doc, row, event, *, trigger):
@@ -64,6 +71,7 @@ def insert(doc, row, event, *, trigger):
         target=next((s for s in existing if s['id']==event.get('section_id')),existing[0])
         target['visible']=True
     else:sections.append(section(offer))
+    updated['recovery_discount']=deepcopy(offer)
     commit_middle(updated,sections)
     doc.clear();doc.update(updated)
 
@@ -73,7 +81,7 @@ def validate_presentation(doc):
     selected=doc.get('recovery_discount')
     for s in offer_sections(doc):
         if not s['visible']:continue
-        if s['offer']!=selected:raise DiscountPresentationError('Discount section does not match this email’s selected Shopify offer.')
+        if s.get('offer') and s['offer']!=selected:raise DiscountPresentationError('Discount section does not match this email’s selected Shopify offer.')
         source=s['html']
         # Check customer-visible text, not CSS dimensions or colours.
         from html.parser import HTMLParser
@@ -88,9 +96,14 @@ def validate_presentation(doc):
         parser=Text();parser.feed(source);text=' '.join(parser.parts)
         # Presentation may omit the amount; the verified offer remains in offer /
         # recovery_discount, independently of layout and token placement.
-        if not re.search(r'{{\s*discount_code\s*}}',text):
-            raise DiscountPresentationError('Keep {{discount_code}} in the visible discount section. {{discount_value}} is optional.')
-        plain=re.sub(r'{{\s*discount_(?:code|value)\s*}}','',unescape(text))
+        plain=re.sub(r'{{\s*discount_(?:code|value)\s*}}','[verified]',unescape(text))
+        # Code/amount placeholders are optional. A literal promotional claim
+        # must still be tied to a verified selection at publication/delivery.
+        for code in re.findall(r'\b(?:use\s+code|promo\s+code|coupon\s+code|code\s*:)\s*([A-Za-z0-9_-]+)',plain,re.I):
+            if not selected or code.casefold()!=selected['code'].casefold():
+                raise DiscountPresentationError('The written discount code does not match the selected Shopify offer.')
+        if not selected and re.search(r'\b(?:discount|offer|coupon|courtesy code|save|free shipping|free gift)\b',plain,re.I):
+            raise DiscountPresentationError('Connect a verified Shopify offer or remove unverified promotional claims before publishing.')
         if re.search(r'(?:[$£€]\s*\d|\d[\d.,]*\s*(?:%|percent|dollars?|pounds?|euros?)|\b(?:one|two|five|ten|twenty|fifty|hundred)\s+(?:percent|dollars?|pounds?)|\bhalf[ -]price\b)',plain,re.I):
             raise DiscountPresentationError('Use {{discount_value}} for the offer amount. Manually entered amounts or percentages cannot be verified against Shopify.')
         if re.search(r'\b(?:free shipping|buy\s+\d+\s+get\s+\d+)\b',plain,re.I):

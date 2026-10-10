@@ -24,7 +24,7 @@ class SportsCaveImageRealismRulesTests(unittest.TestCase):
     def test_new_and_saved_prompts_get_premium_acrylic_glass_reflection_once(self):
         base = "Editable camera: {camera_angle}; Room: {room_type}"
         updated = append_sports_cave_image_realism_rules(base)
-        self.assertIn("acrylic/Perspex OR glass", updated)
+        self.assertIn("PREMIUM CLEAR GLASS REFLECTION LOOK", updated)
         self.assertIn(base, updated)
         self.assertEqual(updated.count(SPORTS_CAVE_PREMIUM_REALISM_MARKER), 1)
         old = "Custom scene variable: {room_type}\n\nSPORTS_CAVE_IMAGE_REALISM_RULES_V1"

@@ -273,7 +273,8 @@ class RouteReliabilityTests(unittest.TestCase):
         self.assertIn("force=force", set_source)
         self.assertIn('retry_col.button("Retry"', source)
         self.assertIn('back_col.button("Back"', source)
-        self.assertIn("_finish_navigation_transition(current_page, status=\"ready\")", source)
+        self.assertIn("page_status = _navigation_page_status(current_page)", source)
+        self.assertIn("_finish_navigation_transition(current_page, status=page_status)", source)
 
     def test_top_bar_navigation_feedback_and_lifecycle_are_idempotent(self):
         source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(

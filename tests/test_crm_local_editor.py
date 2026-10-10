@@ -51,7 +51,8 @@ class LocalEditorTests(TestCase):
         self.assertEqual(doc,prior)
         sections[-1]['visible']=False;commit_middle(doc,sections)
         with patch('streamlit.session_state',{}):hidden=model(doc,CFG)
-        self.assertIn(sections[0]['id'],hidden['errors'])
+        self.assertNotIn(sections[0]['id'],hidden['errors'])
+        self.assertIn('A$5 off',hidden['resolved'][sections[0]['id']]['html'])
 
     def test_batch_failure_is_atomic_and_rejects_duplicate_identity(self):
         doc=sectioned();prior=deepcopy(doc);base=[s['id'] for s in middle_sections(doc)]
@@ -61,7 +62,7 @@ class LocalEditorTests(TestCase):
 
     def test_preview_is_section_isolated_and_never_changes_draft(self):
         from crm_local_preview import model
-        doc=sectioned();sections=middle_sections(doc);sections[0]['html']='<p>{{discount_code}}</p>'
+        doc=sectioned();sections=middle_sections(doc);sections[0]['html']='<a href="https://example.com/{{discount_code}}">Invalid discount link</a>'
         sections.append(dict(id='valid',type='html',html_number=2,visible=True,html='<p>Valid neighbour</p>'))
         commit_middle(doc,sections);prior=deepcopy(doc)
         with patch('streamlit.session_state',{}):result=model(doc,CFG)

@@ -8969,6 +8969,13 @@ SIDEBAR_ICON_BY_ROUTE = {
 }
 
 
+def _sidebar_route_clicked(route):
+    # Full-app widget callbacks run before main(), so its top bar and page
+    # dispatcher see the accepted route without throwing away an initial rerun.
+    if os_accounts.can_access_page(current_os_user(), route):
+        set_current_page(route, source="sidebar")
+
+
 def _sidebar_route_button(
     route,
     current_page,
@@ -8990,8 +8997,10 @@ def _sidebar_route_button(
         use_container_width=True,
         type="primary" if current_page == route else "secondary",
         icon=icon or SIDEBAR_ICON_BY_ROUTE.get(route),
+        on_click=_sidebar_route_clicked if root is None else None,
+        args=(route,) if root is None else None,
     )
-    if clicked and current_page != route:
+    if clicked and current_page != route and root is not None:
         set_current_page(route, source="sidebar")
         st.rerun()
     return clicked
@@ -9039,7 +9048,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             analytics_routes=analytics_nav.ANALYTICS_ROUTES,
         )
     active_group = _active_sidebar_group(current_page)
-    if active_group and (current_page != "Email" or st.session_state.get("sidebar-email-last-route") != current_page):
+    if active_group and st.session_state.get("sidebar-email-last-route") != current_page:
         # The selected route owns disclosure state.  A stale fragment value
         # must not collapse a parent or resurrect the previously open family.
         st.session_state[SIDEBAR_OPEN_GROUP_KEY] = active_group
@@ -9084,9 +9093,14 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             if can_open_overview and current_page != overview_route:
                 st.session_state[SIDEBAR_OPEN_GROUP_KEY] = group
                 set_current_page(overview_route, source="sidebar")
+                st.rerun(scope="app")
             else:
                 _toggle_sidebar_group(group)
-            st.rerun(scope="app")
+                try:
+                    st.rerun(scope="fragment")
+                except st.errors.StreamlitAPIException:
+                    # AppTest and full-app runs have no active fragment scope.
+                    st.rerun(scope="app")
         container.markdown(
             f'<span class="sc-sidebar-a11y" role="status" aria-expanded="{str(expanded).lower()}" '
             f'aria-controls="sidebar-{group}-children">{html.escape(label)} navigation</span>',
@@ -15973,6 +15987,22 @@ def render_files_page():
     _render_files_browser(access_token, user, root_path)
 
 
+def _navigation_page_status(current_page):
+    """A rendered shell can still be waiting for essential asynchronous data."""
+    if current_page == "Orders":
+        if st.session_state.get("orders_load_error"):
+            return "error"
+        if st.session_state.get("orders_load_future") is not None or not st.session_state.get("orders_allocation_snapshot_loaded"):
+            return "loading"
+    if current_page == "Email":
+        state = st.session_state.get("support_email_workspace", {})
+        if state.get("error"):
+            return "error"
+        if not state.get("loaded") or state.get("initial_load_pending") or state.get("body_pending"):
+            return "loading"
+    return "ready"
+
+
 def render_selected_page(current_page):
     if current_page == 'Image Protection':
         import image_protection_ui
@@ -16185,12 +16215,13 @@ def main():
             status="error",
         )
     else:
-        _finish_navigation_transition(current_page, status="ready")
+        page_status = _navigation_page_status(current_page)
+        _finish_navigation_transition(current_page, status=page_status)
         top_bar.render_navigation_complete(
             get_components_module(),
             current_route=current_page,
             navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
-            status="ready",
+            status=page_status,
         )
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")

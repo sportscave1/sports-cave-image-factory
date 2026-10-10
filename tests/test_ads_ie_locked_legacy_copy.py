@@ -65,7 +65,7 @@ class LockedLegacyCopyTests(unittest.TestCase):
         for index, case in enumerate(baseline["images"]):
             actual = ads.build_standard_instant_experience_visual_prompts(**case["kwargs"])
             self.assertEqual(contract_shape(actual), structures['ie-image/' + str(index)])
-            self.assertEqual(actual.count('SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3'), 3)
+            self.assertEqual(actual.count('SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4'), 3)
         case = baseline["refresh"]
         actual = ads.build_ads_prompt(**case["kwargs"])
         self.assertIn("WINNER LED REFRESH V3", actual)

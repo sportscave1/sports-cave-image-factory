@@ -74,6 +74,19 @@ def rerun_email():
         st.rerun()
 
 
+def _complete_loaded_navigation(state, epoch):
+    if not state.get("loaded") or state.get("error") or state.get("initial_load_pending") or state.get("body_pending"):
+        return
+    transition = dict(st.session_state.get("navigation_transition") or {})
+    if (st.session_state.get("current_page") != "Email" or transition.get("to") != "Email"
+            or transition.get("epoch") != epoch or transition.get("status") != "loading"):
+        return
+    transition.update(status="ready", error_type="", duration_ms=max(0, int(
+        (time.monotonic() - float(transition.get("started_at") or time.monotonic())) * 1000)))
+    st.session_state["navigation_transition"] = transition
+    st.session_state["navigation_last_ready_page"] = "Email"
+
+
 @st.fragment
 def _render_workspace(user):
     started = time.monotonic()
@@ -90,7 +103,9 @@ def _render_workspace(user):
             state["initial_load_pending"] = True
         elif state.get("navigation_epoch") != epoch:
             with st.spinner("Refreshing inbox…"):
-                workspace.load(force=bool(state.get("loaded")), defer_body=not state.get("loaded"))
+                # Returning to Email honors the existing header TTL and recovery backoff.
+                # Explicit Refresh still forces an authoritative provider read.
+                workspace.load(defer_body=not state.get("loaded"))
             state["navigation_epoch"] = epoch
         target = {key: str(st.query_params.get("email_" + key, ""))[:998]
                   for key in ("uid", "uidvalidity", "message_id")}
@@ -100,10 +115,13 @@ def _render_workspace(user):
             with st.spinner("Loading message…"):
                 workspace.open_notification(target)
         LOGGER.info("Email shell/list ready duration_ms=%.1f", (time.monotonic()-started)*1000)
-        event = get_component()(model=workspace.model(), key="support-email-desktop", default=None)
+        model = workspace.model()
+        model["navigation_epoch"] = epoch
+        event = get_component()(model=model, key="support-email-desktop", default=None)
         if event and workspace.handle(event):
             state["navigation_epoch"] = epoch
             rerun_email()
+        _complete_loaded_navigation(state, epoch)
     except Exception as error:
         LOGGER.warning("Email workspace unavailable (%s)", type(error).__name__)
         st.warning("Email is temporarily unavailable. Refresh Email to reconnect.")

@@ -4,7 +4,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  try{
   const page=await browser.newPage({viewport:{width:1440,height:950}});
   await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
-  await page.goto('http://127.0.0.1:8544/?fixture_checkout=1&fixture_local_faults=1&fixture_save_delay=1.5&fixture_run='+Date.now());
+  await page.goto('http://127.0.0.1:'+(process.env.EMAIL_V6_UI_PORT||8544)+'/?fixture_checkout=1&fixture_local_faults=1&fixture_save_delay=1.5&fixture_run='+Date.now());
   await page.getByRole('button',{name:'Edit Email',exact:true}).first().click();await page.getByRole('tab',{name:'Editor',exact:true}).click();
   const controls=page.frameLocator('iframe[title="crm_section_ui.crm_middle_sections_v2"]'),preview=page.locator('.st-key-crm-composer-preview iframe').last().contentFrame();
   await controls.locator('textarea').first().waitFor();

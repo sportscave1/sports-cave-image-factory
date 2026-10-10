@@ -38,10 +38,23 @@ STYLE='''<style>
 .sc-flow-copy{min-width:0;font-size:13px;line-height:1.5}.sc-flow-copy strong{font-size:13px}
 .sc-flow-copy p{margin:0!important;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .sc-flow-copy small{color:#73747c;font-size:11px}.sc-flow-metrics{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;margin-top:4px}
-[class*='st-key-flow-thumb-'] [data-testid='stButton'],[class*='st-key-flow-preview-']{display:none!important}
+.st-key-flow-workspace{font-family:Segoe UI,Arial,sans-serif}
+.st-key-flow-workspace .automation-title strong{font-weight:600;font-size:16px}
+.st-key-flow-workspace .automation-state{background:#f2f1eb;border:1px solid #e5e3db;border-radius:12px;padding:2px 7px}
+.st-key-flow-workspace button:focus-visible{outline:2px solid #b99436;outline-offset:2px}
+.sc-flow-stats>div{background:#fff;padding:8px 10px;border-color:#e5e5e5;border-radius:6px}
+.sc-flow-stats dt{font-size:11px;line-height:1.4}.sc-flow-stats dd{font-variant-numeric:tabular-nums;font-size:21px;color:#242424}
+.sc-flow-copy>strong{font-size:12px;color:#505050;font-weight:600}
+.sc-flow-copy>p:first-of-type{font-size:15px;font-weight:500;color:#242424}
+.sc-flow-copy p.sc-flow-summary{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.45;overflow:hidden;margin-top:3px!important}
+.sc-flow-metrics{color:#626262;font-variant-numeric:tabular-nums;gap:12px}.sc-flow-metrics b{color:#242424;font-weight:600}
+[class*='st-key-flow-row-']{padding:12px 0;gap:16px!important}
+[class*='st-key-flow-row-']>div{min-width:0}
+[class*='st-key-flow-thumb-'][class*='load'],[class*='st-key-flow-preview-']{display:none!important}
 .sc-flow-thumbnail{cursor:pointer;border:1px solid #eee;border-radius:4px}.sc-flow-thumbnail:focus-visible{outline:2px solid #b99436}
 .sc-flow-trigger{font-size:12px;color:#686b65;padding:4px 0}
 @media(max-width:1100px){.sc-flow-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-width:1000px){.st-key-flow-workspace .automation-title{height:auto!important;min-height:32px;gap:4px;flex-wrap:nowrap!important}.st-key-flow-workspace .automation-title strong{min-width:0!important}}
 @media(max-width:700px){[class*='st-key-flow-row-']{flex-wrap:wrap!important}[class*='st-key-flow-row-']>div:nth-child(2){flex:1 1 calc(100% - 100px)!important;min-width:0!important}[class*='st-key-flow-row-']>div:last-child{margin-left:88px}.sc-flow-metrics{gap:8px}.sc-flow-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>'''
 
@@ -165,7 +178,8 @@ def step_performance(store,identity,slots,detail_slots):
 
 @st.fragment
 def sequence(shop,store,user,identity,period):
-    row=store.flow(identity);flow=row['config']['draft']
+    from crm_automation_toolbar import definition
+    row=definition(store,st.session_state,identity);flow=row['config']['draft']
     slots={};detail_slots={}
     from crm_flow_thumbnail import thumbnail
     for i,s in enumerate(flow['emails']):
@@ -179,7 +193,10 @@ def sequence(shop,store,user,identity,period):
                 name=s.get('name') or 'Email '+str(i+1);subject=content.get('subject') or 'Subject not configured';preheader=content.get('preheader') or ''
                 body=snippet(s['document'])
                 title='Email '+str(i+1)+((' · '+name) if name!='Email '+str(i+1) else '')
-                copy=''.join('<p title="'+escape(text,quote=True)+'"><small>'+escape(text)+'</small></p>' for text in (preheader,body) if text)
+                published=next((p for p in row['config'].get('published_flow',{}).get('emails',[]) if p['step_id']==sid),None)
+                if published and published.get('document')!=s['document']:
+                    title+=' · Draft content (thumbnail: published)'
+                copy=''.join('<p'+(' class="sc-flow-summary"' if n else '')+' title="'+escape(text,quote=True)+'"><small>'+escape(text)+'</small></p>' for n,text in enumerate((preheader,body)) if text)
                 st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+' · '+('Enabled' if s.get('enabled',True) else 'Disabled')+'</small></div>')
                 slots[sid]=st.empty()
             with st.container(width=130):
@@ -197,10 +214,12 @@ def sequence(shop,store,user,identity,period):
         _,label,live=selection(row,preview)
         st.caption(label+' email preview - neutral sample data')
         from crm_html_workspace import flow_preview
-        from crm_checkout_preview import needs_checkout,document,sample
-        doc,cfg=source_loader(store,row,preview,live)()
-        if needs_checkout(doc):doc,_=document(doc,sample(doc))
-        flow_preview(doc,cfg,'flow-readonly-'+preview['step_id'])
+        try:
+            doc,cfg=source_loader(store,row,preview,live)()
+            from crm_thumbnail_render import preview_document
+            flow_preview(preview_document(doc),cfg,'flow-readonly-'+preview['step_id'])
+        except (ValueError,RuntimeError,KeyError,TypeError,AttributeError):
+            st.warning('This stage preview could not render. Check its saved content in Edit Email. Sending and publication are unchanged.')
         if st.button('Close preview'):st.session_state.pop('flow_preview_step',None);st.rerun(scope='fragment')
     refresh_toolbar()
 
@@ -257,6 +276,17 @@ def checkouts(shop,store,user,row):
 
 def flow_page(shop,store,user,row):
     st.html(STYLE)
+    # The parent route already loaded this authenticated, current definition.
+    # Sibling fragments still check updated_at before reusing the document.
+    st.session_state['_automation_toolbar_definition']=((str(row['id']),row.get('updated_at')),row)
+    import os_accounts
+    if st.session_state.get('flow-operational-diagnostics')==str(row['id']) and os_accounts.is_admin(user):
+        if st.button('← Back to Flow',key='flow-operations-back'):
+            st.session_state.pop('flow-operational-diagnostics',None);st.rerun(scope='app')
+        st.subheader('Operational diagnostics')
+        recipient_details(store,user,row['id'])
+        if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
+        return
     from crm_automation_toolbar import toolbar
     with st.container(key='flow-workspace'):
         toolbar(store,user,row['id'],flow_view=True)
@@ -264,8 +294,6 @@ def flow_page(shop,store,user,row):
         if error:st.warning(error)
         analytics_controls(store,row['id'])
         sequence(shop,store,user,row['id'],'All time')
-        recipient_details(store,user,row['id'])
-        if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
     from crm_flow_thumbnail import SCRIPT
     st.html('<span hidden data-flow-script="true"></span>'+SCRIPT,unsafe_allow_javascript=True)
     anchor=st.session_state.pop('flow_return_step',None)

@@ -4180,7 +4180,6 @@ def _render_design_details(defaults, identity, *, can_save=False):
 
 
 def render_design_studio_v2(can_edit_prompts=False, user=None):
-    del can_edit_prompts
     st.markdown(
         """
         <style>
@@ -4291,6 +4290,17 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
         task_text,
         details,
         selected_assets,
+    )
+    # Add one shared preflight around the intact style prompt. No sales
+    # I/O on page entry, Find Images, generation, signature placement or review.
+    import design_studio_intelligence_ui
+    import design_studio_sales_intelligence
+    intelligence_snapshot = design_studio_intelligence_ui.prepare_research(
+        details.get("sport", ""), key=f"design-v3::{task_identity}",
+        can_refresh=can_edit_prompts,
+    )
+    prompts["research"] = design_studio_sales_intelligence.prepend_context(
+        prompts["research"], intelligence_snapshot,
     )
     _render_v2_prompt_card(
         "Research Prompt",

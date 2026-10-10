@@ -25,6 +25,9 @@ def validate_middle(sections):
         ids.add(s['id'])
         if type(s.get('visible')) is not bool: raise ValueError('Invalid section visibility.')
         common = {'id', 'type', 'visible'}
+        if 'css_version' in s:
+            if type(s['css_version']) is not int or s['css_version'] != 1 or s.get('type') not in ('html','image','discount'):raise ValueError('Unsupported section CSS version.')
+            common.add('css_version')
         if 'name' in s:
             if not isinstance(s['name'],str) or len(s['name'])>80:raise ValueError('Use a section name of up to 80 characters.')
             common.add('name')
@@ -81,6 +84,7 @@ def apply_event(doc, event, *, resolve_insert=None):
         target = next((s for s in sections if s['id'] == identity and s['type'] in ('html','image','discount')), None)
         if target is None or not isinstance(html,str): raise ValueError('Invalid pending edit.')
         target['html'] = html
+        target['css_version'] = 1
     kind = event.get('type')
     if kind == 'batch':
         events=event.get('events')
@@ -107,7 +111,17 @@ def apply_event(doc, event, *, resolve_insert=None):
             sections.extend(created)
         elif event.get('kind') in ('template','checkout') and resolve_insert is not None:
             source=resolve_insert(event)
-            if event['kind']=='template' and len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():
+            if source.get('sections') is not None:
+                incoming=deepcopy(source['sections']);identities=event.get('new_ids') or [uuid.uuid4().hex for _ in incoming]
+                if not isinstance(identities,list) or len(identities)!=len(incoming):raise ValueError('Invalid template section identities.')
+                if len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():sections=[]
+                number=max((s.get('html_number',0) for s in sections),default=0)
+                for part,identity in zip(incoming,identities):
+                    part['id']=identity
+                    if part['type']=='html':number+=1;part['html_number']=number
+                    if part['type']=='discount':part['offer']=deepcopy(doc.get('recovery_discount'))
+                sections.extend(incoming)
+            elif event['kind']=='template' and len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():
                 sections[0].update(html=source['html'],visible=True)
                 if source.get('name'):sections[0]['name']=source['name']
             else:
@@ -123,6 +137,9 @@ def apply_event(doc, event, *, resolve_insert=None):
                 html_number=max(reserved,max((s.get('html_number', 0) for s in sections), default=0))+1, html=''))
         elif event.get('kind') == 'image':
             sections.append(dict(id=identity, type='image', visible=True, html=''))
+        elif event.get('kind') == 'discount':
+            from crm_discount_section import section
+            sections.append(section(doc.get('recovery_discount'),identity=identity))
         elif event.get('kind') == 'catalogue':
             sections.append(dict(id=identity, type='catalogue', visible=True, products=[],
                 settings={'headline':'','subtext':'','columns':2, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
@@ -148,7 +165,8 @@ def apply_event(doc, event, *, resolve_insert=None):
         if copied['type']=='html':copied['html_number']=max(s.get('html_number',0) for s in sections)+1
         sections.insert(sections.index(selected)+1,copied)
     elif kind == 'visible': selected['visible'] = event.get('visible')
-    elif kind == 'html' and selected['type'] in ('html', 'image', 'discount'): selected['html'] = event.get('html')
+    elif kind == 'html' and selected['type'] in ('html', 'image', 'discount'):
+        selected['html'] = event.get('html');selected['css_version'] = 1
     elif kind == 'settings' and selected['type'] in ('catalogue','checkout_element'): selected['settings'] = deepcopy(event.get('settings'))
     elif kind == 'separate_checkout':
         from crm_checkout_elements import separate
@@ -164,6 +182,10 @@ def apply_event(doc, event, *, resolve_insert=None):
             by_id = {p['id']:p for p in products}; selected['products'] = [by_id[i] for i in ids]
         else: raise ValueError('Invalid product order.')
     else: raise ValueError('Unknown section action.')
+    if kind == 'add':
+        for added in sections:
+            if 'html' in added and added['id'] not in event['base']:added['css_version']=1
+        if event.get('kind')=='template' and len(sections)==1 and 'html' in sections[0]:sections[0]['css_version']=1
     commit_middle(doc, sections)
 
 
@@ -188,7 +210,7 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
         source = s['html'] if s['type'] in ('html', 'image', 'discount') else catalogue_html(s, campaign_key=campaign_key)
         # Generated catalogue links already share one tracked product destination.
         markup, plain, result = import_html(source, images_off=images_off,
-            campaign_key=campaign_key if s['type'] in ('html', 'image', 'discount') else '',trusted_catalogue=s['type']=='catalogue')
+            campaign_key=campaign_key if s['type'] in ('html', 'image', 'discount') else '',trusted_catalogue=s['type']=='catalogue',inline_styles=s.get('css_version')==1)
         if s['type'] == 'image':
             from crm_image_prompt import has_image
             result['HTML content present'] |= has_image(markup)

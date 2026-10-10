@@ -819,6 +819,24 @@
       .sc-os-theme-option { min-height: 44px; }
       .sc-os-mobile-only { display: flex; }
     }
+    @media (max-width: 620px) {
+      /* One row cannot fit every 44px utility beside the menu. Keep controls
+         separate so the navigation buttons never cover the drawer trigger. */
+      :root { --sc-topbar-height: 100px !important; }
+      #${ROOT_ID} {
+        grid-template-columns: minmax(76px, 1fr) auto;
+        grid-template-rows: 56px 44px;
+      }
+      .sc-os-topbar-brand { grid-column: 1; grid-row: 1; }
+      .sc-os-topbar-brand-copy { display: none; }
+      .sc-os-topbar-actions { grid-column: 2; grid-row: 1; }
+      .sc-os-navigation { grid-column: 1; grid-row: 2; }
+      #${ROOT_ID} .sc-os-navigation button {
+        flex-basis: 44px; width: 44px; height: 44px;
+        min-width: 44px; min-height: 44px;
+      }
+      #sc-os-files { grid-column: 2; grid-row: 2; justify-self: end; }
+    }
     @media (max-width: 430px) {
       #sc-os-profile { display: none; }
     }
@@ -1311,6 +1329,40 @@
           button.removeAttribute("aria-current");
         }
       });
+    };
+    let sidebarPresentationObserver = null;
+    let sidebarPresentationTimer = null;
+    const restoreSidebarPresentation = () => {
+      bindPersistentSidebarRoutes();
+      const orders = readStatusCache("orders").payload;
+      if (Number.isInteger(orders?.action_required_count)) {
+        updateSidebarBadge("orders", orders.action_required_count, orders.badge_label || "");
+      }
+      const email = readStatusCache("email").payload;
+      if (Number.isInteger(email?.unread_count)) updateSidebarBadge("email", email.unread_count, "");
+      const wall = readStatusCache("wall").payload;
+      if (Number.isInteger(wall?.wall_unread_count)) {
+        updateSidebarBadge("social_media_wall_previews", wall.wall_unread_count, "");
+      }
+    };
+    const watchSidebarPresentation = () => {
+      if (sidebarPresentationObserver || !parentWindow.MutationObserver) return;
+      const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+      if (!sidebar) return;
+      sidebarPresentationObserver = new parentWindow.MutationObserver((records) => {
+        // Ignore our own badge/text changes, avoiding observer feedback loops.
+        const rowsChanged = records.some((record) =>
+          [...record.addedNodes, ...record.removedNodes].some((node) =>
+            node.nodeType === 1 && (node.matches?.("button") || node.querySelector?.("button"))
+          )
+        );
+        if (!rowsChanged || sidebarPresentationTimer || state.destroyed) return;
+        sidebarPresentationTimer = later(() => {
+          sidebarPresentationTimer = null;
+          restoreSidebarPresentation();
+        }, 0);
+      });
+      sidebarPresentationObserver.observe(sidebar, {childList: true, subtree: true});
     };
     const reconcileAcceptedNavigation = () => {
       const pending = readPendingNavigation();
@@ -2753,13 +2805,30 @@
       settingsPanel.querySelector('[data-action="print"]').addEventListener("click", () => parentWindow.print());
       settingsPanel.querySelector('[data-action="record"]').addEventListener("click", startRecording);
     };
-    const updateSidebarWidth = () => {
-      const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
-      if (sidebar) sidebar.id = "sports-cave-mobile-sidebar";
-      const width = sidebar ? Math.round(sidebar.getBoundingClientRect().width) : 244;
-      const value = `${width > 0 ? width : 244}px`;
+    let measuredSidebar = null;
+    let sidebarResizeObserver = null;
+    const applySidebarWidth = (width) => {
+      const value = `${width > 0 ? Math.round(width) : 244}px`;
       if (doc.documentElement.style.getPropertyValue("--sc-sidebar-width") !== value) {
         doc.documentElement.style.setProperty("--sc-sidebar-width", value);
+      }
+    };
+    const updateSidebarWidth = () => {
+      const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+      if (sidebar === measuredSidebar && sidebarResizeObserver) return;
+      sidebarResizeObserver?.disconnect();
+      measuredSidebar = sidebar;
+      if (sidebar) sidebar.id = "sports-cave-mobile-sidebar";
+      applySidebarWidth(sidebar ? sidebar.getBoundingClientRect().width : 244);
+      if (sidebar && parentWindow.ResizeObserver) {
+        sidebarResizeObserver = new parentWindow.ResizeObserver((entries) => {
+          const entry = entries.find((entry) => entry.target === measuredSidebar);
+          if (!entry || state.destroyed) return;
+          const box = entry.borderBoxSize;
+          applySidebarWidth((Array.isArray(box) ? box[0] : box)?.inlineSize
+            || measuredSidebar.getBoundingClientRect().width);
+        });
+        sidebarResizeObserver.observe(sidebar);
       }
     };
     const handleViewportChange = () => {
@@ -2906,6 +2975,9 @@
       const intendedRouteKey = sidebarButtonRouteKey(navigationButton);
       if (!intendedRouteKey) return;
       if (intendedRouteKey === state.config.currentRouteKey) {
+        // A parent on its overview is a disclosure control, not a redundant
+        // destination click. Let Streamlit's fragment consume its toggle.
+        if (navigationButton.closest('[class*="st-key-sidebar-disclosure-"]')) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         clearNavigationPending({clearIntent: true});
@@ -2973,8 +3045,10 @@
     searchPanel.hidden = true;
     setExpanded(searchInput, false);
     updateSidebarWidth();
-    later(updateSidebarWidth, 250);
-    later(updateSidebarWidth, 1000);
+    if (!parentWindow.ResizeObserver) {
+      later(updateSidebarWidth, 250);
+      later(updateSidebarWidth, 1000);
+    }
     [0, 180, 500, 1100, 2200].forEach((delay) => later(bindReportingPlannerButton, delay));
     return {
       version: CONTROLLER_VERSION,
@@ -3040,10 +3114,11 @@
         }
         updatePlannerMirror();
         updateSidebarWidth();
-        [0, 20, 60, 120, 420].forEach((delay) => {
-          if (delay) later(bindPersistentSidebarRoutes, delay);
-          else bindPersistentSidebarRoutes();
-        });
+        watchSidebarPresentation();
+        bindPersistentSidebarRoutes();
+        if (!sidebarPresentationObserver) {
+          [20, 60, 120, 420].forEach((delay) => later(bindPersistentSidebarRoutes, delay));
+        }
         bindReportingPlannerButton();
         if (state.reportingBindTimer) {
           parentWindow.clearTimeout(state.reportingBindTimer);
@@ -3112,7 +3187,7 @@
         ) return false;
         const wasPending = doc.body.classList.contains("sc-navigation-pending")
           || Boolean(root.dataset.pendingRouteKey);
-        if (wasPending || !root.dataset.lastNavigationStatus) {
+        if (wasPending || !root.dataset.lastNavigationStatus || root.dataset.lastNavigationStatus === "loading") {
           root.dataset.lastNavigationStatus = String(status || "ready");
           root.dataset.lastNavigationCompletedAt = String(Date.now());
         }
@@ -3134,6 +3209,8 @@
         emailEventsController?.abort();
         state.plannerDataRefreshPending = false;
         listenerController.abort();
+        sidebarResizeObserver?.disconnect();
+        sidebarPresentationObserver?.disconnect();
         if (state.plannerStatusTimer) parentWindow.clearTimeout(state.plannerStatusTimer);
         timers.forEach((timer) => {
           parentWindow.clearTimeout(timer);

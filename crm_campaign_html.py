@@ -123,7 +123,10 @@ class EmailHTML(HTMLParser):
             self.checks['HTML content present'] |= bool(data.strip())
 
 
-def import_html(source, *, images_off=False, campaign_key="", template_links=(), trusted_catalogue=False):
+def import_html(source, *, images_off=False, campaign_key="", template_links=(), trusted_catalogue=False, inline_styles=False):
+    if inline_styles:
+        from crm_email_css import inline
+        source=inline(source)
     parser=EmailHTML(images_off,campaign_key,template_links,trusted_catalogue);parser.feed(source)
     # Incomplete image tags remain buffered until close() treats them as text.
     if re.match(r'<\s*img(?:\s|$)', parser.rawdata, re.I):

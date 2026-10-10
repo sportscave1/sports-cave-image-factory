@@ -138,7 +138,13 @@ class CarouselDetailPromptTests(unittest.TestCase):
                     else:
                         self.assertIn('CANONICAL_PRODUCT', prompt)
                 if kind.startswith('card_'):
-                    self.assertEqual(hashlib.sha256(prompt.encode()).hexdigest(), row["sha256"])
+                    # Only the reviewed visual glazing instruction changed in these cards.
+                    baseline_prompt = prompt.replace(
+                        'premium clear glass reflections on existing glazing, preserving verified construction',
+                        'clear transparent acrylic/Perspex or glass, matching the verified product').replace(
+                        'a premium clear glass reflection look, visible restrained reflections',
+                        'clear acrylic/glass, restrained reflections')
+                    self.assertEqual(hashlib.sha256(baseline_prompt.encode()).hexdigest(), row["sha256"])
                 else:
                     self.assertEqual(contract_shape(prompt), structures['detail/'+row['category']+'/'+kind])
 

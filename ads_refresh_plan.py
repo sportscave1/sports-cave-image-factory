@@ -320,7 +320,12 @@ def execution_issues(executions, refresh_plan, product, campaign_type):
             'stop and request complete original winning cards. Do not redraw or reconstruct the product.')
         authority_present = ((CAROUSEL_AUTHORITY in prompt or old_carousel_authority in prompt)
                              if campaign_type == 'Carousel' else AUTHORITY in prompt)
-        if full_rules not in prompt or not authority_present or product.casefold() not in prompt.casefold() or expected not in prompt:
+        legacy_rules = full_rules.replace(
+            'Require a premium clear glass reflection look for supplied glazed products:\n- preserve actual construction; do not add a pane to known unglazed products',
+            'Require realistic transparent glass:\n- genuine clear glass over the artwork, not fake shine or missing glazing'
+        ).replace('realistically lit, with source-consistent glazing and free',
+                  'realistically lit, protected by transparent glass and free')
+        if (full_rules not in prompt and legacy_rules not in prompt) or not authority_present or product.casefold() not in prompt.casefold() or expected not in prompt:
             issues.append(f'Execution {i}: missing full shared rules, product authority or exact reference.')
         if campaign_type == 'Carousel':
             if any(prompt.strip() == str(old.get('image_prompt') or '').strip() for old in executions[:i-1] if isinstance(old, dict)):

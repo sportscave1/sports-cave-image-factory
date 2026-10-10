@@ -1,0 +1,421 @@
+{
+  "base": "02c81f1d4dcb2c572e63d8aa4004766d458b634d",
+  "files": [
+    {
+      "path": "ads_carousel_winner.py",
+      "sha256": "19fd5deb8a61d62329c1ef2db46719a752f97215766343039908efc9f9759eac"
+    },
+    {
+      "path": "ads_page.py",
+      "sha256": "9be9f44d48d8626fed3f07ad9f6bb9da7c7e7230eb4d6cd8d49c318a0f2a215c"
+    },
+    {
+      "path": "ads_refresh_generation.py",
+      "sha256": "523539088bdb18a42397917d074e24a64b92380e76c56f1b772095addaaa7998"
+    },
+    {
+      "path": "ads_refresh_plan.py",
+      "sha256": "02e1b7e4bd2e06969a7ae9c56cf2b0da1c12a732aff6bf3e2673003d8f300398"
+    },
+    {
+      "path": "app.py",
+      "sha256": "e5d335df421906dbb95880ff72a801a79cec8eaf2c67e77054bacc136261917a"
+    },
+    {
+      "path": "components/crm_sections/composer.js",
+      "sha256": "3f617ad8cd3aa77b71caf319bbae3f75077984e5aadbc3cb3af3ae76c7625b1b"
+    },
+    {
+      "path": "components/crm_sections/preview.js",
+      "sha256": "08d2ed1282759cc648003312b119684a9960c7c94d79f7f71053b858679457c9"
+    },
+    {
+      "path": "components/sports_cave_top_bar/index.html",
+      "sha256": "9a051e994577fc986679a6d3224ecc9d0a51e532074559b6b55f67b9f816822a"
+    },
+    {
+      "path": "components/support_email/mail.js",
+      "sha256": "0069036d576c969b5cc7dec2c54556bae6a75c5fc9c16a5349b5bbb7d8f7aff9"
+    },
+    {
+      "path": "crm_automation_store.py",
+      "sha256": "c583e9dc6fd61ba7194d38818fcc20f6c0d630a4b14e060471505a8c9a5144a3"
+    },
+    {
+      "path": "crm_automation_toolbar.py",
+      "sha256": "b10aaad6d178ce6a0d7847897e36c11ffecc2758cd074ccde3f59ad48e0322ad"
+    },
+    {
+      "path": "crm_campaign_content.py",
+      "sha256": "a4fb750e86aa53a6c6935cb6b11014b940f648c2fc9d3e2b45befe3e9a53435f"
+    },
+    {
+      "path": "crm_campaign_html.py",
+      "sha256": "17a12f007fceeb9c52383663a29482304cb28b19361707e628c5facfd482b430"
+    },
+    {
+      "path": "crm_campaign_library.py",
+      "sha256": "02663f9dc39700d34874b77a1afff76a254daa6387e92fc36cafd31b570be3ba"
+    },
+    {
+      "path": "crm_discount_section.py",
+      "sha256": "686feb8896decf534a60c8d02e8295d579731dffb89f7b35497b97759307dda9"
+    },
+    {
+      "path": "crm_discount_ui.py",
+      "sha256": "e03adf5aa8b4886a268550b8fea0dead5a1e5f04e9a8677a760eef71142a3216"
+    },
+    {
+      "path": "crm_email_css.py",
+      "sha256": "3b6a3c6c8dcb032255db6cad5b79204c7f9b829e65db4f4d3a90a9cd54d31a36"
+    },
+    {
+      "path": "crm_flow_page.py",
+      "sha256": "9dc80c0b2b9e71b137f5e4b4ba7ae224797f05085ee955ca4a62559a18bbfdfe"
+    },
+    {
+      "path": "crm_flow_thumbnail.py",
+      "sha256": "e643e2ce9d60d177e058a951706710d89841347906a9ab995fa9e3d35897cbfb"
+    },
+    {
+      "path": "crm_local_preview.py",
+      "sha256": "17a39f36a6ad1cadb2bfba7a9b6b24080a8db1409ade09ec2babe779312648e0"
+    },
+    {
+      "path": "crm_middle_sections.py",
+      "sha256": "10ce138ad4be54720b06409b290b9a3f33e095f17ca4667f10817b364766bad2"
+    },
+    {
+      "path": "crm_recovery_discount.py",
+      "sha256": "b7e73c6020d63d002a14d317b2e6427565a9eb4b7921c6cb4ddd1e736dd3de44"
+    },
+    {
+      "path": "crm_section_ui.py",
+      "sha256": "658c955072ee7fb75b37064bab26c66b8319e549ace7a1a064ee1c566f023f33"
+    },
+    {
+      "path": "crm_thumbnail_cache.py",
+      "sha256": "a7bf70a1f8d999e303f20dd5b1da682e9bd0a1f5368812c811bd7ce42617eafb"
+    },
+    {
+      "path": "crm_thumbnail_render.py",
+      "sha256": "18b7637e14c5652edd859bc014a95e02261e27d8fcfd8479b48fd87cfa50bc90"
+    },
+    {
+      "path": "crm_thumbnail_store.py",
+      "sha256": "e725d8a18779910ccc56d44714c591b18ea9f79e81a3c8f73efdc8100bc4c4ac"
+    },
+    {
+      "path": "design_schedule.py",
+      "sha256": "d0d56bf49669af58790d8ce586d1aa72643c43907e014cc066a3faa26161fcea"
+    },
+    {
+      "path": "design_studio_intelligence_store.py",
+      "sha256": "d7e7c0700871e6646eb6221948510f90285d9c0c11ce21391ff9da8ee2828072"
+    },
+    {
+      "path": "design_studio_intelligence_ui.py",
+      "sha256": "ee421b82966504ee121aab7176c347f2620c3e296ca55d205d2dc65b77891c68"
+    },
+    {
+      "path": "design_studio_page.py",
+      "sha256": "d13b56012f740d16a21aec27877365a1d82b19f1a5bcadb06bdd4ea4ac23b22f"
+    },
+    {
+      "path": "design_studio_sales_intelligence.py",
+      "sha256": "62f659a5aec8f51e7f46931fcd07c0faf29cfa8443838c24ac36b7da27cf1536"
+    },
+    {
+      "path": "docs/AUTOMATIONS_FLOW_V4_UI_SPEED_THUMBNAILS.md",
+      "sha256": "103a41ee8b02c1576a71915344fb8d35b46b40a50c7fa784a9f9cfd49ef0a9e3"
+    },
+    {
+      "path": "docs/CONSOLIDATED_RELEASE_20261010.md",
+      "sha256": "e54562d5761c4cb22ad3b66fec27f7478f1a9be60dce11740c35634abe488810"
+    },
+    {
+      "path": "docs/DESIGN_STUDIO_V3_SALES_DESIGN_INTELLIGENCE.md",
+      "sha256": "022e764e65c50bd6962a55e80f57ddfb859c396c9822651e1d2d38408a1fe747"
+    },
+    {
+      "path": "docs/EMAIL_EDITOR_V6_PERFORMANCE_AND_CUSTOMISATION.md",
+      "sha256": "63fbd71286acd16f6142fc31677408661f1b397f61cb4aec86b98ab58b379275"
+    },
+    {
+      "path": "docs/SPORTS_CAVE_OS_NAVIGATION_PERFORMANCE_V5.md",
+      "sha256": "740911a80177afc8c1db5fb18572ce9626512819499964423ae3e30595d97976"
+    },
+    {
+      "path": "docs/SPORTS_CAVE_OS_NAVIGATION_V4_SHOPIFY_STYLE.md",
+      "sha256": "9c51a072b4f5f9514d90dba75d6402d090202d7e56066e0d4da376056c67bf59"
+    },
+    {
+      "path": "docs/SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4.md",
+      "sha256": "8b88a2831134973cbf56314bea293ef6739db88b4993ac4a25ece3d0f8ac6bb7"
+    },
+    {
+      "path": "image_factory.py",
+      "sha256": "ce0c1ff0b6eab68bd1101d0da290599196ca0a0d86e6e32cbd7731bda638e66a"
+    },
+    {
+      "path": "prompts/sports_cave_email_visual_v1.txt",
+      "sha256": "68cae93f764aa4983b792acb6d0bc98d37d0c71f68b098a0c609a723b29209fd"
+    },
+    {
+      "path": "reporting_page.py",
+      "sha256": "0179b224affe7b6dd6188b286a56d3c3a57d859f4ecbd8a4b43771ea74bda74a"
+    },
+    {
+      "path": "reporting_store.py",
+      "sha256": "00b09fde7afae3cc5ed2fc93543bf6bb1ac8dd07858fd938b37ea0e50da7fb6c"
+    },
+    {
+      "path": "scripts/benchmark_design_v3.py",
+      "sha256": "d4c033e2f6baae58aa0575a28c1b79e43fdb01104bfb82cbb6834759093db980"
+    },
+    {
+      "path": "scripts/benchmark_flow_v4.py",
+      "sha256": "176b1204a3b8e6d67d64725ea420cdfa165367d018e16e7832cf88825d79f6f8"
+    },
+    {
+      "path": "scripts/benchmark_navigation_v4.py",
+      "sha256": "f3f56d5a19e1e7bfab2601de37380bbf2ed88db69e3b71ed2c337098853ff6d6"
+    },
+    {
+      "path": "scripts/run_email_v6_browser.py",
+      "sha256": "fea3eadc049cd605526919e39a629ae257c141eedef67e231cb7cd789269251e"
+    },
+    {
+      "path": "scripts/run_flow_v4_browser.py",
+      "sha256": "04e0ee0487a8428c20c3099ad4ca7f666e8cd8d12afeb1ea692bcd3eb4eda762"
+    },
+    {
+      "path": "scripts/test_design_v3.py",
+      "sha256": "69e77014b69dd03ed6450badf9ab4e7889f7eeb2afd85d3652740a148dd86f86"
+    },
+    {
+      "path": "scripts/test_flow_v4.py",
+      "sha256": "82f3afcedf1e6fe9f2367ada709d06b42990f8aed0a5b0b32eab95e9c3b61c42"
+    },
+    {
+      "path": "sports_cave_dashboard.py",
+      "sha256": "6ca4ee4428d9df5c3e25cac1ccd049e4723c9efce24a51a83ed4b8fe854d3fca"
+    },
+    {
+      "path": "sports_cave_physical_realism.py",
+      "sha256": "561f51c8a00c730e807d5f05b0d44f24a97f787763cd384f751ebb39c11f55b9"
+    },
+    {
+      "path": "sports_cave_prompt_blocks.py",
+      "sha256": "29db11e5f39001b3ec6b7b5b5669fe9b6ed317c8292a10b05c7ac376e1414c26"
+    },
+    {
+      "path": "support_email_page.py",
+      "sha256": "8f219b4b9d2e4964264afde82c65921701daf025cc2a8a4cd8999433e6f5f2b3"
+    },
+    {
+      "path": "tests/benchmark_email_v6_local.cjs",
+      "sha256": "fe9bc043792cce30002f573a6db2f3d1edcd3866566b46eaea8d77f8a01f2d89"
+    },
+    {
+      "path": "tests/check_crm_editor_composition.cjs",
+      "sha256": "c09cff84d38c81f5452609a79f69b483640aee744e63db72f4c303c88d327b8d"
+    },
+    {
+      "path": "tests/check_crm_editor_faults.cjs",
+      "sha256": "f06b1c3f6441f3a7ead9a9ee1e0b9e52f7ceaa9908d69af9217780799558c2b9"
+    },
+    {
+      "path": "tests/check_crm_email_v6_contract.cjs",
+      "sha256": "b0f9d0f86f6517a07d8c229699bb3841f3b9ad8942fe9c38f450fd7354b0a9ad"
+    },
+    {
+      "path": "tests/check_crm_flow_v4_operations.py",
+      "sha256": "69d8f47d76637b59d75d9137a809c2e47a5ecef3338d93feaff49f02a12b4759"
+    },
+    {
+      "path": "tests/check_crm_flow_v4_ui.py",
+      "sha256": "47401b9e4556646085136178db4d9e8707ea33025b1df635a1e23a05d10fb1bb"
+    },
+    {
+      "path": "tests/check_design_v3_ui.py",
+      "sha256": "132374ae9cf6b70b910e46755f8c4e43b48f5d964e1f1e64a0c2e66922e64eec"
+    },
+    {
+      "path": "tests/email_v6_audit.py",
+      "sha256": "36447862e4a40eed280730996418975b2e6dd310651d3e2d4e9828823e762096"
+    },
+    {
+      "path": "tests/email_v6_journey.py",
+      "sha256": "f280695e2fe31340b0f548b0e65034070a48564dbf00ac6efafed17a9d1621c6"
+    },
+    {
+      "path": "tests/email_v6_picker_audit.py",
+      "sha256": "c99b805f1c2c139ceccde888450cd55f7bb1a950c02e78302b72e0b6dba35e4a"
+    },
+    {
+      "path": "tests/fixtures/build_local_editor_models.py",
+      "sha256": "1ecb39eb9e0c7a89f6407216f2495ad4fa30cdc17e76665ec217d8423622c955"
+    },
+    {
+      "path": "tests/fixtures/crm_flow_v4_preview.py",
+      "sha256": "240888a80970c57d3ff9a4b508807bf23e8470dcebe62ad9a9fc6cf6feb5e9a8"
+    },
+    {
+      "path": "tests/fixtures/design_v3_preview.py",
+      "sha256": "bb4ccc3953021001d7d658a8952fa802ae7791cde530516b86c0d2a546bc1046"
+    },
+    {
+      "path": "tests/fixtures/email_v6_final_checks.py",
+      "sha256": "9820fd3954c12139c4ad568b109217e648c90755638f43f95a03bbab2a6ca110"
+    },
+    {
+      "path": "tests/fixtures/email_v6_regression.py",
+      "sha256": "9767a3c9ff6dd15c88dae85e8c2c6069dcb3f6ccdd2c7bf6bce7743ad8bea03a"
+    },
+    {
+      "path": "tests/fixtures/email_v6_server.py",
+      "sha256": "4785440e8f24519ce284cca0a3da2c37aa843249af953f80e78956bef8f597e1"
+    },
+    {
+      "path": "tests/fixtures/flow_v4_verified_regression.py",
+      "sha256": "3f8d914d4eb8042d8ee2ccfda0eca93bdf6c0b6e8a0662e7220e2d89f5e3ee8e"
+    },
+    {
+      "path": "tests/fixtures/navigation_v4_instrument.js",
+      "sha256": "c65f7ecd2a9cdd6df3d97978c513ea7b109249b5a996f9a931fb32f859bf502a"
+    },
+    {
+      "path": "tests/fixtures/navigation_v4_preview.py",
+      "sha256": "c72b2f0ef58a6711df560b3ecc85e03e44c9d9561dbb02cffb6c7e6abbe55f58"
+    },
+    {
+      "path": "tests/fixtures/navigation_v4_support.py",
+      "sha256": "2bc7daefb765d4ce86a131bb9236e6417f602245095e7d734c79aa177594e3aa"
+    },
+    {
+      "path": "tests/fixtures/navigation_v5_preview.py",
+      "sha256": "50439c59eb51ee10b9595012a94e49a5e564b04ad954ada17882aefca3024046"
+    },
+    {
+      "path": "tests/fixtures/navigation_v5_sources.py",
+      "sha256": "eaee33f7afc2cdd8cf4d6f4f269c283c64f02901d1cf984540beb6784be99b98"
+    },
+    {
+      "path": "tests/sidebar_preview_app.py",
+      "sha256": "5a9d27d3753d379aa186ff0a76fdad98ed54f8529ffc078618e8b80bda2c753f"
+    },
+    {
+      "path": "tests/test_ads_ie_locked_legacy_copy.py",
+      "sha256": "929c5e66fb198596361e67dc60bc37ee86315702acb700b329d15280c48458ab"
+    },
+    {
+      "path": "tests/test_ads_refresh_plan.py",
+      "sha256": "c7ade2a833b9272fdcefbb274b61cede82ca97cb8fa526ad633553cef46e00f5"
+    },
+    {
+      "path": "tests/test_carousel_detail_prompts.py",
+      "sha256": "f5bf451d473d907e66b92ed1f0279efdc4337414812b1be4d945753158f799ef"
+    },
+    {
+      "path": "tests/test_carousel_winner_system.py",
+      "sha256": "b8ba15262c2bdb969a86d868d2e3548033b3de670d02e80e0dfa8de8c3a4c0fa"
+    },
+    {
+      "path": "tests/test_crm_campaign_sections.py",
+      "sha256": "7e229b7f9e880104b7fcf4045a7b020aae65dcd1abbf19638539592e9b0f84cf"
+    },
+    {
+      "path": "tests/test_crm_discount_delivery.py",
+      "sha256": "cf8ec83d1faa6a5a108b675bca5c44fe6d4a51166b56bbf2a8eaab4461206d64"
+    },
+    {
+      "path": "tests/test_crm_discount_editor_v2.py",
+      "sha256": "da555298a24df80b6e8040ccd272a3d9ffd5c287cdac7425b29b45826e398270"
+    },
+    {
+      "path": "tests/test_crm_editor_shell.cjs",
+      "sha256": "6a1228c8d43b80cf6aa44da4f054746c9d931354decca9b5dd004685032eb255"
+    },
+    {
+      "path": "tests/test_crm_email_v6.py",
+      "sha256": "f9d3c85fb97031ec95eee1ae80f4f01f36e5dd3e1d0122bf96cf91d71779e92d"
+    },
+    {
+      "path": "tests/test_crm_email_v6_controls_audit.cjs",
+      "sha256": "0513772777ee81bc8fc165b91d6dfc5c15a683667b386b2ae990f1d89062d2b8"
+    },
+    {
+      "path": "tests/test_crm_email_v6_opening.cjs",
+      "sha256": "00ef75c5da2c1805bc77b1d548d2bd604cd981a091c32837d04b8c4423cf0a5d"
+    },
+    {
+      "path": "tests/test_crm_email_v6_publication.py",
+      "sha256": "5f43649c42fb7a03b54510dcc8f384d130949c9b5430123ee568741e48d7338d"
+    },
+    {
+      "path": "tests/test_crm_email_v6_ui.cjs",
+      "sha256": "beed884c703cb5a138ec452df7bbc46f15bfbe671245bf1106d89874012ede2f"
+    },
+    {
+      "path": "tests/test_crm_flow_v4.py",
+      "sha256": "ef995e328dce159e961dc91d55cc0b658045692d8e9000387b1ff1237b56c154"
+    },
+    {
+      "path": "tests/test_crm_local_editor.py",
+      "sha256": "a219c401bd408b4c3d19ffca97d08d6275d89ccfe14e0858c0bfecd79ef427f4"
+    },
+    {
+      "path": "tests/test_crm_thumbnail_cache.py",
+      "sha256": "d547ec5d28558351f9bb7599e0ce317a2bef49a7cb54e67ce0c732617eed97a7"
+    },
+    {
+      "path": "tests/test_crm_thumbnail_store.py",
+      "sha256": "642c0ce417a62fa103b5734e296122ffe382abcb439c57323c0cd063d6e17cb9"
+    },
+    {
+      "path": "tests/test_design_intelligence_postgres.py",
+      "sha256": "7cc54f584e2a6836cb91cb6f8f2ca3c019465622fa7b5540eeb5d2786e3fa66a"
+    },
+    {
+      "path": "tests/test_design_studio_sales_intelligence.py",
+      "sha256": "a0753479184162b5dcbabf7e22daf1e379762b709b6cfa40b975ff0c8a20b7a8"
+    },
+    {
+      "path": "tests/test_navigation_performance.py",
+      "sha256": "7d9f2ff96cd2f12b90311401807342e84bb8be2f9494f6a53b23548f5e06f3c1"
+    },
+    {
+      "path": "tests/test_navigation_v4.py",
+      "sha256": "7aa575f8ecbbe3e07fab2c5d1f9f9cd2365d3bce39f8befbf60e2347ed9f7f92"
+    },
+    {
+      "path": "tests/test_navigation_v4_width.cjs",
+      "sha256": "e717c0837ed813e5f98c24389102791c655972dc36e4c67744d001a419bdf984"
+    },
+    {
+      "path": "tests/test_navigation_v5.py",
+      "sha256": "424977dc67e880e165285fb7b90768c58ad915fb41a4899ab5a3b6d1cc7ac467"
+    },
+    {
+      "path": "tests/test_navigation_v5_ready.cjs",
+      "sha256": "d226e8a760761a7da4709be283a6282eb1204e87b5eae8d5a902af5e7d4cede4"
+    },
+    {
+      "path": "tests/test_physical_frame_realism.py",
+      "sha256": "8a43716c14ac246db14190ec169201314450c6fa5f7e0c3a0faf1d7701b1c6c2"
+    },
+    {
+      "path": "tests/test_premium_glass_lighting_v4.py",
+      "sha256": "66260f1e72dbfe1b4d1b2f89593ac594131561abf77c7fede33444a5bcd1e258"
+    },
+    {
+      "path": "tests/test_premium_image_quality_v3.py",
+      "sha256": "0b2719b2ada83a43bba4326fd4a512e0cc27177f6d8103bb09b6ed2475f69221"
+    },
+    {
+      "path": "tests/test_sports_cave_prompt_blocks.py",
+      "sha256": "7d7a3f6ef6ffd6f7166d2def4fc278bd20dc3fb1343d663f648940a3cfdf3cc2"
+    }
+  ]
+}

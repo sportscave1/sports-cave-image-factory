@@ -26,11 +26,37 @@ def image_url(value):
     return None
 
 
-def render(doc, cfg):
+def preview_document(doc):
+    """One read-only lowering path for miniatures and full Flow previews.
+
+    Discount substitution must precede checkout lowering: personalisation.render
+    calls substitute again, whose authored-offer validation expects tokens.
+    Already lowered offer text is not an authored discount section.
+    """
+    from crm_recovery_discount import substitute
+    if not doc.get('recovery_discount'):
+        # Incomplete drafts remain inspectable without inventing a promotion.
+        # Authored URL tokens still fail through the normal safety validator.
+        from copy import deepcopy
+        import re
+        def neutral(value):
+            if isinstance(value,str):
+                if re.search(r'(?:href|src)\s*=\s*["\'][^"\']*{{\s*discount_',value,re.I):return value
+                return re.sub(r'{{\s*discount_(code|value)\s*}}',lambda m:'Discount code unavailable in sample preview' if m[1]=='code' else 'Offer unavailable in sample preview',value)
+            if isinstance(value,list):return [neutral(v) for v in value]
+            if isinstance(value,dict):return {k:(v if 'url' in k or 'link' in k else neutral(v)) for k,v in value.items()}
+            return value
+        doc=neutral(deepcopy(doc))
+    doc = substitute(doc)
     from crm_checkout_preview import needs_checkout, document, sample
     if needs_checkout(doc):doc, _ = document(doc, sample(doc))
     from crm_personalisation import present, render as personalise
-    if present(doc):doc = personalise(doc, {'first_name':'Alex','product_name':'Your selected edition','short_product_name':'Your selected edition','sport_category':'Sport','edition_number':'#001/100'}, trigger='post_purchase')
+    if present(doc):doc = personalise(doc, {'first_name':'Alex','product_name':'Your selected edition','short_product_name':'Your selected edition','sport_category':'Sport'}, trigger='post_purchase')
+    return doc
+
+
+def render(doc, cfg):
+    doc = preview_document(doc)
     from crm_campaign_content import render_campaign
     # production=False never creates open/click tracking URLs.
     html = render_campaign(doc, cfg, production=False)['html']

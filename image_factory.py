@@ -602,7 +602,7 @@ Subtle timber texture.
 Believable thickness.
 Natural shadow behind the frame.
 Glazing realism:
-show the verified transparent acrylic/Perspex or glass in front of the artwork; both can exhibit elegant natural reflections.
+show premium clear glass reflections on the existing transparent front surface, preserving verified source construction; never add a pane to known unglazed products.
 The glazing must have soft, subtle yet visible room-based reflections and restrained premium highlights.
 The glare must look real, controlled, and high-end.
 Do not let the glare hide the artwork.

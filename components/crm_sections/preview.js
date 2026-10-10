@@ -6,8 +6,16 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 function channel(scope){const host=parent;host.scEmailDrafts??=new Map();if(!host.scEmailDrafts.has(scope))host.scEmailDrafts.set(scope,{sections:null,revision:0,listeners:new Set()});return host.scEmailDrafts.get(scope);}
 function publish(scope,sections,dirty=false){const state=channel(scope);state.sections=clone(sections);state.dirty=dirty;state.revision++;for(const fn of state.listeners)fn(state.sections);}
 function imageUrl(value){try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443'||!u.hostname.includes('.')||/^(localhost|127\.|10\.|192\.168\.|169\.254\.)/.test(u.hostname)||/\.(local|internal)$/.test(u.hostname))return '';if([...u.searchParams.keys()].some(k=>/^(token|signature|expires|x-amz-signature|x-goog-signature|se|sig)$/i.test(k)))return '';if(/\.(png|jpe?g)$/i.test(u.pathname)||u.hostname==='cdn.shopify.com'&&u.searchParams.get('format')==='jpg')return value;if(u.hostname==='cdn.shopify.com'&&/\.webp$/i.test(u.pathname)){u.searchParams.set('format','png');return u.href;}}catch{}return '';}
-function sanitize(source,model){
+function sanitize(source,model,inlineStyles=false){
  const template=document.createElement('template');template.innerHTML=source;const parsed=template.content;
+ const rules=[];
+ for(const style of [...parsed.querySelectorAll('style')].filter(n=>inlineStyles&&!n.textContent.includes('@')))for(const match of style.textContent.replace(/\/\*[\s\S]*?\*\//g,'').matchAll(/([^{}]+)\{([^{}]*)\}/g))for(const raw of match[1].split(',')){
+  const selector=raw.trim(),m=selector.match(/^(?:([a-zA-Z][\w-]*))?([.#][a-zA-Z_][\w-]*)?$/);if(!m||!m[1]&&!m[2])continue;
+  rules.push({selector,body:match[2],weight:(m[2]?.startsWith('#')?100:m[2]?10:0)+(m[1]?1:0)});
+ }
+ rules.sort((a,b)=>a.weight-b.weight);
+ const styles=new Map();for(const rule of rules)for(const n of parsed.querySelectorAll(rule.selector)){if(!styles.has(n))styles.set(n,[]);styles.get(n).push(rule.body);}
+ for(const [n,values]of styles)n.setAttribute('style',[...values,n.getAttribute('style')||''].join(';'));
  parsed.querySelectorAll('script,style,head,iframe,object,embed,svg,math,form,template,link,meta,base').forEach(n=>n.remove());
  const tags=new Set(model.tags),css=new Set(model.css);
  for(const n of [...parsed.querySelectorAll('*')]){
@@ -61,7 +69,7 @@ function catalogue(s){
 }
 function sectionHtml(s,model,sections=[]){
  const signature=v=>JSON.stringify([v.type,v.html??null,v.settings??null,v.products??null,v.offer??null]);
- const offer=sections.find(v=>v.type==='discount'&&v.visible)?.offer||(!model.managed_offer?model.offer:null);
+ const offer=model.association_independent?model.offer:sections.find(v=>v.type==='discount'&&v.visible)?.offer||(!model.managed_offer?model.offer:null);
  const seedValid=!/{{\s*discount_(code|value)\s*}}/.test(s.html||'')||JSON.stringify(offer)===JSON.stringify(model.offer||null);
  if(seedValid&&model.error_sections?.[s.id]&&signature(model.error_sections[s.id])===signature(s))throw Error(model.errors[s.id]);
  const known=seedValid&&Object.values(model.resolved).find(r=>signature(r.section)===signature(s));
@@ -71,17 +79,16 @@ function sectionHtml(s,model,sections=[]){
  if(s.type==='abandoned_checkout_products')return sanitize(model.replacements['<!--SC_ABANDONED_CHECKOUT-->']||'',model);
  let source=s.html||'';
  if(s.type==='discount'){
-  if(!/{{\s*discount_code\s*}}/.test(source))throw Error('Keep {{discount_code}} in this offer section.');
-  source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>esc(s.offer[k]));
+  source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>esc(offer?.[k]||('[Discount '+k+']')));
  }
- source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>{if(!offer)throw Error('Select a verified discount before using discount variables.');return esc(offer[k]);});
+ source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>esc(offer?.[k]||('[Discount '+k+']')));
  for(const [token,value]of Object.entries(model.replacements))source=source.split(token).join(value);
  if(/{{|{%|SC_FRAME_BANNER_/.test(source))throw Error('Unresolved template variable. Correct this section; the draft is retained.');
  const template=document.createElement('template');template.innerHTML=source;const parsed=template.content;
  const theme=clone(model.theme||{});
  for(const style of parsed.querySelectorAll('style'))for(const m of style.textContent.matchAll(/\.([\w-]+)\s*\{([^}]+)\}/g)){if(!m[1].startsWith('sc-cart-'))continue;theme[m[1]]??={};for(const d of m[2].split(';')){const i=d.indexOf(':');if(i>0)theme[m[1]][d.slice(0,i).trim()]=[d.slice(i+1).trim().replace(/!important/g,''),false];}}
  for(const n of parsed.querySelectorAll('[class]'))for(const cls of n.classList)for(const [key,v]of Object.entries(theme[cls]||{}))if(!n.style.getPropertyValue(key)||v[1])n.style.setProperty(key,v[0]);
- return sanitize(template.innerHTML,model);
+ return sanitize(template.innerHTML,model,s.css_version===1);
 }
 function mount(payload){
  const {scope}=payload,state=channel(scope);if(!state.model){setTimeout(()=>mount(payload),25);return;}let model=state.model;
@@ -95,7 +102,7 @@ function mount(payload){
   const keep=new Set(sections.filter(s=>s.visible).map(s=>s.id));
   for(const child of [...root.children])if(!keep.has(child.dataset.sectionId))child.remove();
   const nodes=new Map([...root.children].map(n=>[n.dataset.sectionId,n]));let position=0;
-  const offer=sections.find(s=>s.type==='discount'&&s.visible)?.offer||(!model.managed_offer?model.offer:null);
+  const offer=model.association_independent?model.offer:sections.find(s=>s.type==='discount'&&s.visible)?.offer||(!model.managed_offer?model.offer:null);
   for(const s of sections){if(!s.visible)continue;let node=nodes.get(s.id);if(!node){node=document.createElement('div');node.dataset.sectionId=s.id;root.append(node);}
    const signature=JSON.stringify([s,model.context_token,offer,model.errors?.[s.id]]);
    if(node._signature!==signature){let html;try{html=sectionHtml(s,model,sections);node.removeAttribute('role');}catch(error){html='<div style="padding:14px;border:1px solid #b94a32;color:#8d2918">'+esc(s.name||'Section')+': '+esc(error.message)+'</div>';node.setAttribute('role','alert');}

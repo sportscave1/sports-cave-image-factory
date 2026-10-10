@@ -32,12 +32,12 @@ function rememberDraft(){try{sessionStorage.setItem('sc-local-draft:'+historySco
 const dirty=()=>{saveError='';saveAttempts=0;saveStatus('Unsaved · Unpublished changes');withParent(p=>{const size=p.document.querySelector('.st-key-crm-composer-preview .sc-email-size');if(size){size.dataset.lastMeasured??=size.innerHTML;size.textContent='Email size · Recalculates after draft save';}});rememberDraft();clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,650);signalPending({local:true});};
 function emit(type,extra={}){
  if(!['html','settings'].includes(type))for(const commit of [...pendingCopyInputs.values()])commit();
- const local=['html','settings','visible','order','rename','duplicate','remove','restore_section','product_order','product_remove'].includes(type)||(type==='add'&&(['html','image','catalogue','visual','flexible_checkout'].includes(extra.kind)||extra.kind==='checkout'&&args.checkout_template||extra.kind==='template'&&args.templates.some(t=>t.id===extra.template_id&&typeof t.html==='string')));
+ const local=['html','settings','visible','order','rename','duplicate','remove','restore_section','product_order','product_remove'].includes(type)||(type==='add'&&(['html','image','discount','catalogue','visual','flexible_checkout'].includes(extra.kind)||extra.kind==='checkout'&&args.checkout_template||extra.kind==='template'&&args.templates.some(t=>t.id===extra.template_id&&typeof t.html==='string')));
  if(!local){external.push([type,extra]);sendChanges();return;}
  const event={type,...copy(extra),base:args.sections.map(s=>s.id),edits:copy(drafts)};
- for(const s of args.sections)if(Object.hasOwn(drafts,s.id))s.html=drafts[s.id];
+ for(const s of args.sections)if(Object.hasOwn(drafts,s.id)){s.html=drafts[s.id];s.css_version=1;}
  const s=args.sections.find(v=>v.id===extra.id),index=args.sections.indexOf(s);
- if(type==='html'&&s)s.html=extra.html;
+ if(type==='html'&&s){s.html=extra.html;s.css_version=1;}
  if(type==='settings'&&s)s.settings=copy(extra.settings);
  if(type==='visible'&&s)s.visible=extra.visible;
  if(type==='rename'&&s)s.name=extra.reset?'':extra.name;
@@ -51,6 +51,7 @@ function emit(type,extra={}){
   event.new_id=crypto.randomUUID();const created={id:event.new_id,type:extra.kind==='visual'?'checkout_element':extra.kind,visible:true};
   if(extra.kind==='html'){created.html_number=Math.max(extra.reserved_html_number||0,...args.sections.map(s=>s.html_number||0))+1;created.html='';}
   if(extra.kind==='image')created.html='';
+  if(extra.kind==='discount'){created.html=args.discount_html;created.offer=copy(args.discount_offer||null);}
   if(extra.kind==='catalogue'){created.products=[];created.settings={headline:'',subtext:'',columns:2,display:Object.fromEntries(['image','title','price','limit','next','remaining','cta'].map(k=>[k,k!=='price'])),cta:'Claim Your Edition'};}
   if(extra.kind==='visual')created.settings=copy(args.element_defaults);
   if(extra.kind==='template'||extra.kind==='checkout'){
@@ -63,7 +64,11 @@ function emit(type,extra={}){
    }
   }
   if(extra.kind==='flexible_checkout'){const starter=copy(args.starter_sections);event.new_ids=starter.map(s=>s.id=crypto.randomUUID());args.sections.push(...starter);}
-  else{args.sections.push(created);opened[created.id]=true;}
+  else if(extra.kind==='template'&&Array.isArray(args.templates.find(t=>t.id===extra.template_id)?.sections)){
+   const incoming=copy(args.templates.find(t=>t.id===extra.template_id).sections);let number=Math.max(0,...args.sections.map(s=>s.html_number||0));
+   event.new_ids=incoming.map(part=>{part.id=crypto.randomUUID();if(part.type==='html')part.html_number=++number;if(part.type==='discount')part.offer=copy(args.discount_offer||null);if(Object.hasOwn(part,'html'))part.css_version=1;return part.id;});args.sections.push(...incoming);
+  }
+  else{if(Object.hasOwn(created,'html'))created.css_version=1;args.sections.push(created);opened[created.id]=true;}
  }
  // Supersede field edits within the same structure. This also lets a corrected
  // invalid field recover without replaying its obsolete invalid intermediate.
@@ -132,7 +137,7 @@ function deleteControl(s){
  const trash=button('','Delete section',()=>{const r=trash.getBoundingClientRect();popup.style.top=Math.max(8,Math.min(r.bottom+4,visibleBottom()-100))+'px';popup.style.left=Math.max(8,r.right-200)+'px';popup.showPopover();cancel.focus({preventScroll:true});},'section-delete');
  trash.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7M14 10v7"/></svg>';
  const popup=el('div','','section-confirm');popup.setAttribute('popover','auto');popup.setAttribute('role','dialog');popup.setAttribute('aria-label','Delete this section?');popup.append(el('div','Delete this section?'));
- if(s.type==='discount')popup.append(el('div','Deleting the last visible offer also removes its checkout discount from this draft.'));
+ if(s.type==='discount')popup.append(el('div','Deletes this presentation. Use Disconnect checkout discount to remove the associated offer.'));
  const cancel=button('Cancel','Cancel delete',()=>{popup.hidePopover();trash.focus({preventScroll:true});});
  popup.append(cancel,button('Delete','Confirm delete section',()=>{
   popup.hidePopover();const snapshot=JSON.parse(JSON.stringify(args.sections.find(v=>v.id===s.id)||s));if(areas.has(s.id))snapshot.html=areas.get(s.id).value;
@@ -151,6 +156,10 @@ function handle(row,id,section=null){let h=button('⋮⋮','Drag to reorder sect
  h.onkeydown=e=>{if(e.altKey&&['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();const ids=section?args.sections.find(s=>s.id===section).products.map(p=>p.id):args.sections.map(s=>s.id),i=ids.indexOf(id),j=i+(e.key==='ArrowUp'?-1:1);if(j>=0&&j<ids.length)reorder(section,id,ids[j]);}};row.append(h);}
 function changeSettings(s,patch){const current=settingsDrafts[s.id]||s.settings;const next={...current,...patch};if(s.type==='catalogue')next.display={...current.display,...(patch.display||{})};if(JSON.stringify(current)===JSON.stringify(next))return;settingsDrafts[s.id]=next;emit('settings',{id:s.id,settings:next});}
 function renderTemplates(){
+ let association=document.getElementById('checkout-discount-association');
+ if(!association){association=el('div','','discount-summary');association.id='checkout-discount-association';root.after(association);}
+ association.replaceChildren();association.hidden=!args.discount_offer;
+ if(args.discount_offer){association.append(el('span','Checkout offer: '+args.discount_offer.code+' · '+args.discount_offer.value+' · independent of visible content'),button('Disconnect','Disconnect checkout discount',()=>emit('discount_disconnect')));}
  const container=document.getElementById('saved-templates');container.replaceChildren();
  if((args.templates||[]).length)container.append(el('hr'));
  for(const template of args.templates||[]){
@@ -173,18 +182,18 @@ function render(){renderTemplates();renderDiscountPicker(document.getElementById
  card.classList.toggle('is-hidden',!s.visible);card.classList.toggle('is-open',!!opened[s.id]);
  let title=button(name,'Edit '+name,()=>{opened[s.id]=!opened[s.id];render();},'title');title.setAttribute('aria-expanded',!!opened[s.id]);row.append(title);
  if(s.type==='image')imageControls(row,args.image_prompt||'');
- if(s.type==='discount')row.append(button('Change','Change Shopify discount',()=>emit('discount_open',{id:s.id})));
+ if(s.type==='discount')row.append(button(args.discount_offer?'Change':'Connect',args.discount_offer?'Change Shopify discount':'Connect Shopify discount',()=>emit('discount_open',{id:s.id})));
  row.append(button('⧉','Duplicate section',()=>emit('duplicate',{id:s.id})));
  row.append(deleteControl(s),el('span',opened[s.id]?'⌃':'⌄','chevron'));card.append(row);
  if(opened[s.id]){let content=el('div','','content');if(s.type==='html'||s.type==='image'||s.type==='discount'){
- if(s.type==='discount')content.append(el('div',s.offer.code+' · '+s.offer.value+(s.visible?'':' · Presentation hidden'),'discount-summary'));
- if(s.type==='discount')content.append(el('small','Hiding or deleting the last visible offer also removes its checkout discount from this draft.'));
+ if(s.type==='discount')content.append(el('div',args.discount_offer?args.discount_offer.code+' · '+args.discount_offer.value:'Presentation only · no checkout discount connected','discount-summary'));
+ if(s.type==='discount')content.append(el('small','Write any supported HTML. Code and amount placeholders are optional. Checkout offer changes use Connect, Change or Disconnect.'));
  let area=areas.get(s.id);
  if(!area){area=document.createElement('textarea');area.value=drafts[s.id]??s.html;area.placeholder='Paste campaign HTML here…';area.setAttribute('aria-label',name+' HTML');areas.set(s.id,area);}
  area.setAttribute('aria-label',name+' HTML');syncArea(s);
  const advice=el('div',s.type==='image'?imageAdvice(area.value):'','warning');advice.setAttribute('aria-live','polite');
- const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}};
- area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;SCPreview.channel(args.preview_scope).dirty=true;clearTimeout(previewTimer);previewTimer=setTimeout(()=>{const current=args.sections.map(v=>Object.hasOwn(drafts,v.id)?{...v,html:drafts[v.id]}:v);SCPreview.publish(args.preview_scope,current,true);},80);saveStatus('Unsaved · Unpublished changes');clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,180);};area.onblur=update;
+ const update=()=>{clearTimeout(area.saveTimer);remember(s.id,area.value);const current=args.sections.find(v=>v.id===s.id);if(current&&area.value!==current.html){drafts[s.id]=area.value;emit('html',{id:s.id,html:area.value});}else if(current){delete drafts[s.id];localPreview();if(!pending&&!changes.length&&!Object.keys(drafts).length&&!saveError){saveStatus('Saved · Draft');try{sessionStorage.removeItem('sc-local-draft:'+historyScope);}catch{}}}};
+ area.oninput=()=>{if(s.type==='image')advice.textContent=imageAdvice(area.value);signalPending({id:s.id,html:area.value});drafts[s.id]=area.value;SCPreview.channel(args.preview_scope).dirty=true;clearTimeout(previewTimer);previewTimer=setTimeout(()=>{const current=args.sections.map(v=>Object.hasOwn(drafts,v.id)?{...v,html:drafts[v.id],css_version:1}:v);SCPreview.publish(args.preview_scope,current,true);},80);saveStatus('Unsaved · Unpublished changes');clearTimeout(area.saveTimer);area.saveTimer=setTimeout(update,180);};area.onblur=update;
  const historyTools=el('div','','history-tools');historyTools.append(button('↶','Undo last edit',()=>recover(s.id,false),'history-button'),button('↷','Redo last edit',()=>recover(s.id,true),'history-button'));
  if(args.automation&&s.html.includes('<!--SC_ABANDONED_CHECKOUT-->'))content.append(button('Separate checkout elements','Separate checkout into optional visual elements',()=>emit('separate_checkout',{id:s.id})));content.append(historyTools,area);if(s.type==='image')content.append(advice);
  }else if(s.type==='checkout_element'){

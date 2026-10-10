@@ -1,22 +1,30 @@
 from __future__ import annotations
+import re
 import sports_cave_physical_realism as physical_realism
 
 
 SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER = "SPORTS_CAVE_IMAGE_REALISM_RULES_V1"
-SPORTS_CAVE_PREMIUM_REALISM_MARKER = "SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3"
+SPORTS_CAVE_PREMIUM_REALISM_MARKER = "SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4"
 
 # Additive visual quality contract: editable prompt text and scene variables retain authority.
 # Apply only to generation prompts; this is not a data migration or a runtime image inspector.
-SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3 = """SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3
+SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4 = """SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4
 PHOTOGRAPHIC PRODUCT QUALITY — APPLIES WHEN AN EXISTING FRAMED PRODUCT IS SHOWN
 Treat the artwork and frame as one unchanged physical item. Preserve the exact source design, frame colour, material, profile and real physical scale. If selected variant dimensions or glazing are verified, honour them; unknown dimensions, depth, border layers or materials must never be fabricated. The source may be landscape or portrait; preserve its orientation. No painting over lettering, logos, signatures, faces, plaques, badges, livery, printed backgrounds or edition details.
-PREMIUM REFLECTIONS: a verified glazed frame (acrylic/Perspex OR glass) must show subtle but clearly visible transparent-glazing reflections from a credible window or light source, with a gentle highlight falloff across a restrained area of the glazing. Acrylic can look as premium and reflective as glass; do not impose glass material on a verified acrylic product. If the item is known to be unglazed/unframed, do not invent a pane. Never create opaque haze, white streaks, a thick glazing slab or glare that hides the artwork.
-PREMIUM SHADOWS: natural edge lighting on real frame bevels and mitres, a soft narrow contact shadow near the wall, a gentler diffused shadow beneath or beside the product, restrained ambient occlusion and a believable wall separation. Keep shadow direction and softness consistent with actual room lights. No uniform digital black halo, hovering frame, fake spotlit outline or cardboard-thin product.
+PREMIUM CLEAR GLASS REFLECTION LOOK — MANDATORY: for the supplied glazed framed product, require convincing, clearly visible glass-like reflections on its transparent front surface. At least one natural reflected window or room-light highlight where the scene supports it, gentle photographic highlight falloff, subtle reflected shapes and luminance variation, realistic viewing-angle interaction and a slightly stronger reflection toward an edge or upper area where physically appropriate. Reflections must actually be visible, including at advertising-thumbnail size; subtle must not mean almost invisible. Integrate reflections with plausible room light sources, never paint them onto the print. Preserve verified source construction and materials: this is visual styling, never a claim of manufactured glass. Known unframed or unglazed products must not acquire an invented reflective pane.
+PROTECT THE ARTWORK: reflections never overpower or obscure faces, vehicles, sporting moments, logos, names, signatures, titles, edition numbers or important lettering. No completely matte-looking glazing, invisible highlights, flat pasted-on artwork, opaque white patches, artificial white streaks, mirror-like glare hiding the design, CGI glow, random light beams, plastic surface effects or reflections disconnected from the scene.
+PREMIUM SHADOWS: narrow realistic frame contact shadows following actual geometry and room lighting; softer diffused secondary shadows beneath or beside the frame when appropriate. Subtle ambient occlusion around actual bevels, mitred corners, inner moulding, side profile and mounting area. Properly mounted, three-dimensional, substantial but not bulky, accurately proportioned and naturally separated from the wall. No floating frames, fake halos, excessively deep shadows or exaggerated shadow-box construction; never invent frame dimensions.
+PREMIUM PHOTOGRAPHIC LIGHTING: genuine professional real-estate or premium lifestyle photography. Believable window lighting, natural directional light, realistic brightness falloff, soft environmental fill, accurate shadow direction and authentic colour temperature. Realistic material highlights and subtle light interaction with frame edges; natural furniture and wall texture. Window reflections correspond to plausible light sources; left-side lighting implies coherent glazing highlights and wall shadows. Preserve the existing atmosphere: dark collector rooms remain cinematic and premium while the product retains visible reflections. Avoid overexposure, fake HDR, artificial golden haze and excessive glare.
 REAL RESIDENTIAL PHOTOGRAPHY: plausible floor-to-wall joins, furniture size, hanging height, window orientation and light falloff. Natural timber, plaster, paint, fabric and metal texture; subtle normal imperfections. No warped architecture, empty CGI showrooms, exaggerated luxury props, random sports memorabilia, repeating AI textures, oversaturated orange/gold casts or clutter competing with the product.
 CAMERA AND VISUAL VARIATION: honour the one explicitly resolved room, camera, angle, crop, shot distance, branding, copy, layout and safe areas. For optional new lifestyle compositions use natural front, gentle left/right or slight elevated perspectives, while keeping the artwork large, its four frame edges visible and architectural verticals straight. Never override the required winning-card role, a user-selected camera, an intentional verified detail crop, right/centre/left IE slot identity, or a fixed product-shot contract merely to add randomness. Do not mirror or stretch the design.
 FINAL PHOTOGRAPHIC CHECK: when the actual output is visible, compare it with the supplied high-resolution product reference for artwork integrity, frame thickness, profile, material, surface reflections, plausible scale, mounting and shadows. A missing or distorted feature must be corrected before recommending use. If only text or metadata is available, state that the pixels were NOT inspected; do not claim visual fidelity was automatically verified.
 ORIGINAL ARTWORK MODE: these physical frame and room instructions apply only to a completed product mockup. For creating a new original Sports Cave artwork, retain its own authentic-photograph and design-style rules instead of inventing a framed product.
 END PREMIUM VISUAL QUALITY CONTRACT"""
+
+# Compatibility import for existing callers; emits the current contract.
+SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3 = SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4
+
+_LEGACY_PREMIUM_BLOCK = re.compile(r"SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3.*?END PREMIUM VISUAL QUALITY CONTRACT", re.S)
 
 def _append_before_ending(prompt_text: str, block: str, ending: str = "") -> str:
     ending = str(ending or "").strip()
@@ -28,6 +36,7 @@ def _append_before_ending(prompt_text: str, block: str, ending: str = "") -> str
 
 def _add_premium_visual_upgrade(prompt_text: str, ending: str = "") -> str:
     """Bring previously saved V1 prompts forward without replacing editable text."""
+    prompt_text = _LEGACY_PREMIUM_BLOCK.sub(lambda _: SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4, prompt_text)
     if SPORTS_CAVE_PREMIUM_REALISM_MARKER in prompt_text:
         return prompt_text
     return _append_before_ending(prompt_text, SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3, ending)
@@ -107,8 +116,8 @@ Require genuine physical frame construction:
 - physical mounting, contact shadows, ambient occlusion and light direction that match the room
 
 GLASS REALISM:
-Require realistic transparent glass:
-- genuine clear glass over the artwork, not fake shine or missing glazing
+Require a premium clear glass reflection look for supplied glazed products:
+- preserve actual construction; do not add a pane to known unglazed products
 - restrained room-based reflections, subtle natural glare and realistic highlight falloff
 - reflections consistent with the windows, lights and camera angle
 - glass must never obscure, wash out, rewrite, distort or hide faces, typography, logos, artwork, badge, plaque or edition details
@@ -128,7 +137,7 @@ Keep the Sports Cave product as the visual hero:
 Mandatory final product inspection:
 - confirm the uploaded artwork and frame remain unchanged
 - confirm every face, word, number, colour, logo, signature, badge, plaque and edition plate is preserved
-- confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts"""
+- confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, with source-consistent glazing and free from obvious AI artifacts"""
 
 
 def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True, allow_intentional_detail_crop: bool = False,
@@ -185,6 +194,8 @@ def append_sports_cave_image_realism_rules(
     prompt_text = str(prompt_text or "").strip()
     ending = str(required_ending or "").strip()
     framed_product = include_product_lock and not physical_realism.is_unframed(physical_product)
+    if framed_product:
+        prompt_text = _LEGACY_PREMIUM_BLOCK.sub(lambda _: SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4, prompt_text)
     if prompt_has_sports_cave_image_realism_rules(prompt_text):
         if framed_product:
             if physical_realism.MARKER in prompt_text:

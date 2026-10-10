@@ -124,7 +124,7 @@ class PhysicalContractTests(unittest.TestCase):
         for phrase in ('slim front moulding','side profile','clean mitred joins','invent exact frame-depth',
                        'No thick museum surround','invented matboard','minimal source-consistent wall separation',
                        'soft contact shadows','ambient occlusion','natural residential height',
-                       'acrylic/Perspex','glass only when verified','without inventing composition',
+                       'PREMIUM CLEAR GLASS REFLECTION LOOK','Preserve verified source construction','no manufactured-material claim',
                        'No thick protruding slab','signatures and existing edition numbers',
                        'source-preserving compositing','rigid product geometry','rendered pixels when available'):
             self.assertIn(phrase,text)
@@ -220,7 +220,7 @@ class PhysicalWorkflowTests(unittest.TestCase):
                 self.assertEqual(contract_shape(prompt), structures[identity])
                 self.assertIn(physical.MARKER,prompt)
                 self.assertIn('GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY',prompt)
-                self.assertIn('SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3',prompt)
+                self.assertIn('SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4',prompt)
                 self.assertIn(value['product_name'],prompt)
                 if context and kind == 'Carousel':
                     self.assertIn('COLLECTIVE WINNER CAROUSEL V1',prompt)

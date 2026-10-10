@@ -39,22 +39,42 @@ def template_html(store,row):
 
 def _template_html(store,row):
     from crm_html_workspace import html_document
-    from crm_middle_sections import render_middle
-    if 'document' not in row['content']:
-        loaded=store.get('templates',row['id'])
+    doc=html_document(template_document(store,row))
+    # Reopening an editable template must not run the send sanitizer or resolve
+    # sample product/discount data into the author's source.
+    if doc.get('middle_sections'):
+        from crm_catalogue import catalogue_html
+        return '\n'.join(s['html'] if 'html' in s else catalogue_html(s) for s in doc['middle_sections'] if s['visible'] and ('html' in s or s['type']=='catalogue'))
+    return doc.get('custom_html','')
+
+
+def template_document(store,row):
+    def load():
+        loaded=row if 'document' in row['content'] else store.get('templates',row['id'])
         if not loaded or loaded['version']!=row['version'] or loaded.get('archived_at'):raise ValueError('Template changed. Reload the template list.')
-        row=loaded
-    doc=html_document(store.template_document(row))
-    return render_middle(doc)[0] if doc.get('middle_sections') else doc.get('custom_html','')
+        return store.template_document(loaded)
+    return cached(store,('source-document',str(row['id']),row['version']),load)
+
+
+def template_sections(store,row):
+    if row.get('builtin'):return None
+    return deepcopy(template_document(store,row).get('middle_sections'))
 
 
 def insert_saved_template(store,doc,identity,version):
     row=next((r for r in library_rows(store) if str(r['id'])==str(identity) and r['version']==version),None)
     if row is None:raise ValueError('Template could not be loaded.')
-    insert_template(doc,template_html(store,row),row)
+    source=template_sections(store,row)
+    if source is not None:
+        proposed=deepcopy(doc)
+        from crm_middle_sections import apply_event
+        apply_event(proposed,{'type':'add','kind':'template','base':[s['id'] for s in middle_sections(doc)]},
+            resolve_insert=lambda _:dict(html='',sections=source,template_ref={k:str(row[k]) if k=='id' else row[k] for k in ('id','version','name')}))
+        proposed['copy_reviewed']=False;validate_document(proposed);doc.update(proposed)
+    else:insert_template(doc,template_html(store,row),row)
 
 def save_template(store,user,name,html,row=None):
-    if not isinstance(html,str) or not html.strip():raise ValueError('Enter HTML for this template.')
+    if not isinstance(html,str):raise ValueError('Enter HTML for this template.')
     if row and (row.get('kind')!='Campaign' or row['content'].get('format')!='campaign_blocks_v1'):raise ValueError('Choose a campaign HTML template.')
     doc=new_document();doc.update(content_mode='HTML',custom_html=html)
     return store.save_design(user,name,doc,row['id'] if row else None,row['version'] if row else None)
@@ -62,10 +82,10 @@ def save_template(store,user,name,html,row=None):
 def insert_template(doc,html,row):
     proposed=deepcopy(doc);sections=middle_sections(proposed)
     if len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():
-        sections[0].update(html=html,visible=True)
+        sections[0].update(html=html,visible=True,css_version=1)
     else:
         sections.append({'id':uuid.uuid4().hex,'type':'html','visible':True,
-            'html_number':max((s.get('html_number',0) for s in sections),default=0)+1,'html':html})
+            'html_number':max((s.get('html_number',0) for s in sections),default=0)+1,'html':html,'css_version':1})
     if row.get('builtin'):sections[-1]['name']=row['name']
     commit_middle(proposed,sections)
     proposed['template_ref']={'id':str(row['id']),'version':row['version'],'name':row['name']}
@@ -113,14 +133,29 @@ def edit_template(store,user,row=None,target=None):
     except (ValueError,StoreUnavailable):st.error('Template could not be loaded.');return
     identity=str(row['id'])+'_'+str(row['version']) if row else 'new'
     name_key='library_name_'+identity;html_key='library_html_'+identity
+    structured=template_document(store,row) if row and template_sections(store,row) is not None else None
+    fields=[(s['id'],html_key+'_'+s['id']) for s in structured['middle_sections'] if 'html' in s] if structured else []
     def save():
-        save_template(store,user,st.session_state[name_key],st.session_state[html_key],row)
+        if structured is None:save_template(store,user,st.session_state[name_key],st.session_state[html_key],row)
+        else:
+            updated=deepcopy(structured);sections=middle_sections(updated)
+            for part in sections:
+                field=next((key for identity,key in fields if identity==part['id']),None)
+                if field and part['html']!=st.session_state[field]:part.update(html=st.session_state[field],css_version=1)
+            commit_middle(updated,sections)
+            store.save_design(user,st.session_state[name_key],updated,row['id'],row['version'])
+    clear_keys=(name_key,html_key,*(key for _,key in fields))
     with st.form('library_edit'):
         st.text_input('Template name',row['name'] if row else '',max_chars=150,key=name_key)
-        st.text_area('HTML',source,height=260,key=html_key)
+        if structured is None:st.text_area('HTML',source,height=260,key=html_key)
+        else:
+            st.caption('Section order, hidden content and product settings are preserved. Insert into an email to edit the complete layout.')
+            for part in structured['middle_sections']:
+                field=next((key for identity,key in fields if identity==part['id']),None)
+                if field:st.text_area((part.get('name') or part['type'].title())+(' · hidden' if not part['visible'] else '')+' HTML',part['html'],height=180,key=field)
         a,b=st.columns(2)
-        a.form_submit_button('Cancel',on_click=finish_action,args=(target,None,dialog,(name_key,html_key)))
-        b.form_submit_button('Save template',type='primary',on_click=finish_action,args=(target,save,dialog,(name_key,html_key)))
+        a.form_submit_button('Cancel',on_click=finish_action,args=(target,None,dialog,clear_keys))
+        b.form_submit_button('Save template',type='primary',on_click=finish_action,args=(target,save,dialog,clear_keys))
     action_error()
 
 

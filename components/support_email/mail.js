@@ -362,6 +362,12 @@
     if(selectionControlsDisabled&&!locked(model)&&model.view==='mail')paintReading(true);
     if($('draft-save-status'))$('draft-save-status').textContent=autosaveTimer?'Saving…':model.draft_save_status||'';
     wire();renderDeleteConfirmation();fit();
+    // A fragment can finish essential mailbox loading without another app run.
+    // Acknowledge only after the actual list and reading controls are painted.
+    if (model.navigation_epoch !== undefined) {
+      const status = model.error ? 'error' : model.initial_load_pending || model.body_pending ? 'loading' : 'ready';
+      try { window.parent.SportsCaveTopBar?.completeNavigation?.({routeKey:'email', epoch:model.navigation_epoch, status}); } catch (_) {}
+    }
     if(pendingSignal&&!busy)setTimeout(()=>signalTick(pendingSignal),0);
     clearTimeout(signalRetryTimer);
     if(seenSignal&&model.idle_version!==seenSignal&&signalAttempts<3&&!busy){

@@ -18,22 +18,25 @@ def scope(key):
     return 'sc-local-email:'+str(key)
 
 
-def preview_assets(data,store,state):
+def preview_assets(data,store,state,doc):
     from crm_automation_preview_cache import digest
     from crm_lifestyle_images import gallery
     from crm_frame_banner_template import resolve
     from types import SimpleNamespace
-    token=digest(data)
+    source=json.dumps(doc.get('middle_sections',[]))
+    need_gallery='SC_LIFESTYLE_IMAGE_' in source or '"lifestyle"' in source
+    need_banner='SC_FRAME_BANNER_' in source
+    token=digest([data,need_gallery,need_banner])
     entries=state.setdefault('_local_preview_assets',{})
     if token not in entries:
         galleries={}
-        for item in data.get('items',[]):
+        for item in data.get('items',[]) if need_gallery else []:
             galleries[item.get('product_id')]=gallery({**data,'items':[item]},shop=getattr(store,'preview_shop',None))
         markers=('<!--SC_FRAME_BANNER_IMAGE-->','<!--SC_FRAME_BANNER_PRODUCT-->')
         try:
             # One immutable context asset set for the editor session. Editing
             # text, visibility or order never refreshes product media.
-            fragments=resolve({'custom_html':markers[0]+'SC_SPLIT_MARKER'+markers[1]},data)['custom_html'].split('SC_SPLIT_MARKER')
+            fragments=resolve({'custom_html':markers[0]+'SC_SPLIT_MARKER'+markers[1]},data)['custom_html'].split('SC_SPLIT_MARKER') if need_banner else ['','']
             banner=dict(zip(markers,fragments))
         except Exception:banner=dict.fromkeys(markers,'')
         entries[token]=(galleries,banner)
@@ -54,7 +57,7 @@ def model(doc,cfg,store=None):
     # Never expose recovery credentials to the reactive renderer. Preview links
     # are inert and all checkout data remains the already selected visual sample.
     data={**deepcopy(data),'recovery_url':''}
-    galleries,banner_fragments,asset_shop=preview_assets(data,store,st.session_state)
+    galleries,banner_fragments,asset_shop=preview_assets(data,store,st.session_state,doc)
     sections=middle_sections(doc)
     base=deepcopy(doc);base.pop('recovery_discount',None)
     base['content']={**base['content'],'subject':'Email preview','preheader':''}
@@ -67,15 +70,14 @@ def model(doc,cfg,store=None):
     entries=st.session_state.setdefault('_local_section_outputs',{})
     for s in sections:
         try:
-            isolated=deepcopy(doc);isolated['content']=deepcopy(base['content']);isolated['blocks']=[]
+            isolated=deepcopy({k:v for k,v in doc.items() if k not in ('middle_sections','custom_html','blocks')});isolated['content']=deepcopy(base['content']);isolated['blocks']=[]
             current={**deepcopy(s),'visible':True}
             if 'html' in current:
                 for marker,value in banner_fragments.items():current['html']=current['html'].replace(marker,value)
                 current['html']=current['html'].replace('SC_FRAME_BANNER_URL','')
             commit_middle(isolated,[current])
-            # Isolation must retain the email-level offer used by tokens in
-            # ordinary HTML. commit_middle normally removes it when deleting
-            # the last managed discount, but this is only a rendering slice.
+            # An isolated section keeps the authoritative email-level offer,
+            # including tokens in ordinary HTML and hidden sibling creative.
             if doc.get('recovery_discount'):
                 isolated['recovery_discount']=deepcopy(doc['recovery_discount'])
             token=digest([isolated,data])
@@ -83,7 +85,7 @@ def model(doc,cfg,store=None):
                 resolved[s['id']]={'section':s,'html':entries[token]}
                 continue
             from crm_recovery_discount import substitute
-            hydrated=document(substitute(isolated),data,test=True,shop=asset_shop)[0]
+            hydrated=document(substitute(isolated,preview=True),data,test=True,shop=asset_shop)[0]
             resolved[s['id']]={'section':s,'html':render_middle(hydrated)[0]}
             entries[token]=resolved[s['id']]['html']
             while len(entries)>128:entries.pop(next(iter(entries)))
@@ -114,7 +116,7 @@ def model(doc,cfg,store=None):
     replacements['SC_CHECKOUT_RECOVERY_URL']=''
     replacements.update(banner_fragments)
     replacements['SC_FRAME_BANNER_URL']=''
-    return dict(context_token=digest([data,cfg]),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,offer=doc.get('recovery_discount'),managed_offer=any(s['type']=='discount' for s in sections),
+    return dict(context_token=digest([data,cfg]),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,offer=doc.get('recovery_discount'),association_independent=True,
                 tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
 
 
@@ -130,6 +132,17 @@ def canvas(doc,cfg,key,store=None):
     cached=st.session_state.get(key+'local_preview_model')
     if not cached or cached[0]!=token:
         cached=(token,model(doc,cfg,store));st.session_state[key+'local_preview_model']=cached
+    if any(s['type']=='discount' for s in middle_sections(doc)) and not doc.get('recovery_discount'):
+        st.caption('Presentation preview · no checkout discount connected. Bracketed discount text is a preview placeholder.')
+    try:
+        from crm_discount_section import validate_presentation
+        validate_presentation(doc)
+    except ValueError as exc:st.caption('Before publishing: '+str(exc))
+    source='\n'.join(s.get('html','') for s in middle_sections(doc))
+    if '<style' in source.lower():
+        st.caption('HTML source is retained. Edited sections support simple tag, class and ID style rules; media queries and complex selectors are not rendered. Inline email styles remain supported.')
+    if __import__('re').search(r'<\s*(script|iframe|object|form)\b|\bon\w+\s*=|javascript\s*:',source,__import__('re').I):
+        st.caption('Active HTML is excluded from preview and blocks delivery validation. Your source remains editable.')
     payload=json.dumps(dict(scope=identity,version=version,model=cached[1],sections=middle_sections(doc)),default=str).replace('<','\\u003c')
     # Refresh seed data without changing the iframe srcdoc. Existing image nodes,
     # scroll and local edits survive every save acknowledgement and app rerun.

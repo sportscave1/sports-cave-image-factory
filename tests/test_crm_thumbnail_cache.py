@@ -1,3 +1,4 @@
+from tests.test_crm_flow_v4 import webp
 from pathlib import Path
 from copy import deepcopy
 from threading import Event
@@ -43,7 +44,7 @@ class ThumbnailTests(TestCase):
         store=Mock();store.template.return_value={'automation_id':'other'}
         with self.assertRaises(ValueError):cache.source_loader(store,self.row,self.step,self.row['steps'][0])()
     def test_cache_reused_without_database_or_generation(self):
-        key=cache.token('cached');data=b'RIFF0000WEBPtest'
+        key=cache.token('cached');data=webp()
         (cache.cache_dir()/(key+'.webp')).write_bytes(data)
         load=Mock(side_effect=AssertionError('No DB'))
         self.assertEqual(cache.request(key,load),('READY',data));load.assert_not_called()

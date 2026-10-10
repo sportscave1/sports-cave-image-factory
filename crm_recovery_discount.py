@@ -86,10 +86,10 @@ def prepare(shop,doc,checkout,customer_id):
         raise DiscountHold('discount_verification_unavailable: Check Shopify discount read access and retry verification; no email was sent.') from None
 
 
-def substitute(doc,discount=None):
+def substitute(doc,discount=None,*,preview=False):
     """Only the two discount tokens, on a render copy; never evaluates Liquid."""
     from crm_discount_section import validate_presentation
-    validate_presentation(doc)
+    if not preview:validate_presentation(doc)
     result=deepcopy(doc);saved=selection(doc)
     values=discount or saved or {}
     tokens={'discount_code':values.get('code'),'discount_value':values.get('value')}
@@ -98,7 +98,9 @@ def substitute(doc,discount=None):
             raise DiscountHold('discount_variable_in_url: Use discount variables in text. The recovery button applies its code automatically.')
         def one(match):
             value=tokens[match[1]]
-            if not value:raise DiscountHold('discount_not_selected: Select a verified discount before using discount variables.')
+            if not value:
+                if preview:return '[Discount code]' if match[1]=='discount_code' else '[Discount value]'
+                raise DiscountHold('discount_not_selected: Select a verified discount before using discount variables.')
             return escape(str(value),quote=True) if html else str(value)
         return re.sub(r'{{\s*(discount_code|discount_value)\s*}}',one,text)
     for key,value in result['content'].items():

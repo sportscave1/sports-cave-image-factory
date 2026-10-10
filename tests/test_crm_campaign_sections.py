@@ -67,7 +67,8 @@ class SectionTests(unittest.TestCase):
                 self.assertEqual(doc['html_sections'][section], source)
 
     def test_validation_and_combined_size_limit(self):
-        for sections in (None, {'header':1,'footer':''}, {'header':'x'}, {'header':'x'*95000,'footer':''}):
+        from crm_campaign_content import SOURCE_LIMIT
+        for sections in (None, {'header':1,'footer':''}, {'header':'x'}, {'header':'x'*(SOURCE_LIMIT+1),'footer':''}):
             doc = sectioned(); doc['html_sections'] = sections
             with self.assertRaises(ValueError):validate_document(doc)
 

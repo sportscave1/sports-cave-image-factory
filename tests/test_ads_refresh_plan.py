@@ -113,7 +113,7 @@ class RefreshPlanTests(unittest.TestCase):
             for row in executions(fixture(campaign)):
                 applicable = build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=campaign == 'Carousel' and 'detail' in row['role'])
                 self.assertIn(applicable, row['image_prompt'])
-                for required in ('mitred joins', 'ambient occlusion', 'transparent glass', 'physically', 'every word'):
+                for required in ('mitred joins', 'ambient occlusion', 'glass-like reflections', 'physically', 'every word'):
                     self.assertIn(required, row['image_prompt'])
 
     def test_scenes_roles_order_preserved_and_new_execution_declared(self):

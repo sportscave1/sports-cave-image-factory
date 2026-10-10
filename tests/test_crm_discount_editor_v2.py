@@ -47,12 +47,12 @@ class EditorDiscountTests(unittest.TestCase):
         self.assertEqual(len(offer_sections(self.doc)),2)
         self.assertEqual(offer_sections(self.doc)[0]['html'],html)
         for s in offer_sections(self.doc):apply_event(self.doc,event(self.doc,'visible',id=s['id'],visible=False))
-        self.assertNotIn('recovery_discount',self.doc);substitute(self.doc)
+        self.assertEqual(self.doc['recovery_discount']['code'],'FIXTURE5');substitute(self.doc)
         apply_event(self.doc,event(self.doc,'visible',id=identity,visible=True))
         self.assertEqual(self.doc['recovery_discount']['code'],'FIXTURE5')
         snapshot=deepcopy(offer_sections(self.doc)[0])
         for s in offer_sections(self.doc):apply_event(self.doc,event(self.doc,'remove',id=s['id'],confirmed=True))
-        self.assertNotIn('recovery_discount',self.doc)
+        self.assertEqual(self.doc['recovery_discount']['code'],'FIXTURE5')
         apply_event(self.doc,event(self.doc,'restore_section',section=snapshot,position=0))
         self.assertEqual(self.doc['recovery_discount']['code'],'FIXTURE5')
     def test_conflicting_duplicate_cannot_become_active(self):
@@ -89,11 +89,11 @@ class EditorDiscountTests(unittest.TestCase):
             self.assertEqual('A$5 off' in rendered['html'],'discount_value' in markup)
             self.assertNotEqual(offer_sections(frozen)[0]['html'],markup)
 
-    def test_code_required_even_when_amount_omitted(self):
+    def test_code_and_amount_are_optional_presentation(self):
         s=add(self.doc)
         for markup in ('<p>Collector offer</p>','<style>{{discount_code}}</style><p>Offer</p>','<p>{{discount_value}}</p>'):
             self.doc['middle_sections'][-1]['html']=markup
-            with self.assertRaisesRegex(ValueError,'Keep {{discount_code}}'):validate_presentation(self.doc)
+            validate_presentation(self.doc)
 
     def test_preview_cache_updates_immediately_for_code_only_edit(self):
         from crm_automation_preview_cache import output
@@ -107,10 +107,13 @@ class EditorDiscountTests(unittest.TestCase):
         self.assertIn('Private collector code FIXTURE5',new['message']['html'])
         self.assertNotIn('A$5 off',new['message']['html'])
         self.assertEqual(output(state,store,self.doc,cfg)[0],new)
-    def test_removed_offer_tokens_save_as_draft_but_cannot_publish_or_render(self):
+    def test_explicitly_disconnected_offer_tokens_save_but_cannot_publish_or_render(self):
         from crm_automation_definition import new_flow,email_step,validate
         add(self.doc);self.doc['content']['subject']='Offer {{discount_value}}'
         apply_event(self.doc,event(self.doc,'remove',id=offer_sections(self.doc)[0]['id'],confirmed=True))
+        self.assertEqual(self.doc['recovery_discount']['code'],'FIXTURE5')
+        from crm_discount_section import disconnect
+        disconnect(self.doc)
         flow=new_flow('abandoned');flow['emails']=[email_step(self.doc,0)]
         validate(flow,draft=True)
         with self.assertRaises(ValueError):validate(flow)

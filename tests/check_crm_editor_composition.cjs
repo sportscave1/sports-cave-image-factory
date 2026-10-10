@@ -8,10 +8,9 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=r
    const summarize=html=>{const host=document.createElement('div');host.innerHTML=html;return {text:host.textContent.replace(/\s+/g,' ').trim(),images:[...host.querySelectorAll('img')].map(n=>({src:n.getAttribute('src'),alt:n.getAttribute('alt')})),headings:host.querySelectorAll('strong').length};};
    if(sibling_offer){
     const hidden=structuredClone(sections);hidden.find(s=>s.type==='discount').visible=false;
-    let blocked=false;try{SCPreview.sectionHtml(section,model,hidden)}catch(e){blocked=e.message.includes('Select a verified discount')}
-    if(!blocked)throw Error('Hidden sibling offer reused stale rendered discount');
-    const changed=structuredClone(sections);changed.find(s=>s.type==='discount').offer.code='NEWCODE';
-    if(!SCPreview.sectionHtml(section,model,changed).includes('NEWCODE'))throw Error('Changed sibling offer reused stale rendered code');
+    if(!SCPreview.sectionHtml(section,model,hidden).includes(model.offer.code))throw Error('Hidden creative disconnected the email offer');
+    const changed=structuredClone(model);changed.offer.code='NEWCODE';changed.resolved={};
+    if(!SCPreview.sectionHtml(section,changed,sections).includes('NEWCODE'))throw Error('Changed email offer reused stale rendered code');
    }
    return {actual:summarize(SCPreview.sectionHtml(section,model,sections||[section])),expected:summarize(SCPreview.sanitize(expected,model))};
   },test);

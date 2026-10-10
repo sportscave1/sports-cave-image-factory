@@ -11,6 +11,7 @@ from crm_email_blocks import PURPOSES, validate_blocks, legacy_blocks, render_bl
 from crm_tracking import public_https, asset_url
 
 RENDER_VERSION = 1
+SOURCE_LIMIT = 1_000_000  # Draft/source budget; rendered delivery remains 95 KB.
 TYPES = PURPOSES + ('Product Launch','New Collector Edition','Best Sellers','Sport / Collection Spotlight',
          'Offer / Promotion','Newsletter','Seasonal','Custom')
 MARKETS = ('AU','US','Global','UK','CA','NZ')
@@ -56,26 +57,27 @@ def new_document():
 
 
 def validate_document(doc):
-    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections','send_timing','market_audience','recovery_discount'}
+    optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections','send_timing','market_audience','recovery_discount','discount_association_version'}
     if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
     from crm_recovery_discount import validate as validate_discount
     validate_discount(doc)
+    if 'discount_association_version' in doc and doc['discount_association_version']!=1:raise ValueError('Unsupported discount association version.')
     if doc.get('content_mode','Blocks') not in ('HTML','Blocks'): raise ValueError('Invalid content mode.')
-    if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>95000: raise ValueError('Pasted HTML must be at most 95 KB.')
+    if not isinstance(doc.get('custom_html',''),str) or len(doc.get('custom_html','').encode('utf-8'))>SOURCE_LIMIT: raise ValueError('Draft HTML source must be at most 1 MB.')
     if 'html_sections' in doc:
         sections=doc['html_sections']
         if not isinstance(sections,dict) or set(sections)!={'header','footer'} or any(not isinstance(v,str) for v in sections.values()):
             raise ValueError('HTML sections require header and footer source strings.')
-        if doc.get('content_mode')!='HTML' or sum(len(v.encode('utf-8')) for v in [doc.get('custom_html',''),*sections.values()])>95000:
-            raise ValueError('Combined Header, Body and Footer HTML must be at most 95 KB.')
+        if doc.get('content_mode')!='HTML' or sum(len(v.encode('utf-8')) for v in [doc.get('custom_html',''),*sections.values()])>SOURCE_LIMIT:
+            raise ValueError('Combined draft HTML source must be at most 1 MB.')
     if 'middle_sections' in doc:
         from crm_middle_sections import validate_middle
         validate_middle(doc['middle_sections'])
         if doc.get('content_mode') != 'HTML': raise ValueError('Middle sections require HTML content mode.')
         if doc.get('custom_html','') != next((s['html'] for s in doc['middle_sections'] if s.get('html_number')==1), ''):
             raise ValueError('HTML Section 1 and the compatibility source must match.')
-        if sum(len(s.get('html','').encode('utf-8')) for s in doc['middle_sections']) + sum(len(v.encode('utf-8')) for v in doc.get('html_sections',{}).values()) > 95000:
-            raise ValueError('Combined HTML sections must be at most 95 KB.')
+        if sum(len(s.get('html','').encode('utf-8')) for s in doc['middle_sections']) + sum(len(v.encode('utf-8')) for v in doc.get('html_sections',{}).values()) > SOURCE_LIMIT:
+            raise ValueError('Combined draft HTML source must be at most 1 MB.')
     if 'send_timing' in doc:
         from crm_campaign_schedule import validate
         validate(doc['send_timing'])
@@ -123,7 +125,7 @@ def validate_document(doc):
     # The backwards-compatible Body mirror is not additional authored content.
     # Do not halve the existing HTML budget just by adding section metadata.
     budget_doc={**doc,'custom_html':''} if 'middle_sections' in doc else doc
-    if len(json.dumps(budget_doc))>100000: raise ValueError('Campaign is too large.')
+    if len(json.dumps(budget_doc))>2_000_000: raise ValueError('Campaign draft is too large.')
     return doc
 
 
@@ -284,6 +286,11 @@ def preflight(doc, env=None, cfg=None):
         checks.update(block_checks(doc['blocks'],doc['market']))
         checks['HTML size reviewed / below 95 KB']=not html_budget(render_campaign(doc,cfg)['html'])['review_required']
     live['Fresh complete eligible audience']=bool(recent and counts.get('complete') and counts.get('eligible',0)>0)
+    from crm_discount_section import validate_presentation
+    try:validate_presentation(doc)
+    except ValueError:checks['Discount presentation matches a verified Shopify offer']=False
+    if any(re.search(r'{{\s*discount_',s.get('html','')) for s in doc.get('middle_sections',[]) if s.get('visible')):
+        checks['Discount variables resolved before delivery']=False
     from crm_campaign_issues import document_issues, structured_issues
     issues = document_issues(doc, cfg) if doc.get('content_mode') == 'HTML' and not all(checks.values()) else []
     return {'test':checks,'live':live,'issues':issues,'section_issues':structured_issues(doc,cfg) if issues else [],'test_ready':all(checks.values()),'live_ready':False,

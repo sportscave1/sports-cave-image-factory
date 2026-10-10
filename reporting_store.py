@@ -1,4 +1,6 @@
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
 import os_accounts
@@ -82,8 +84,22 @@ def schema_status():
         raise ReportingStoreError("Reporting storage could not be checked.") from error
 
 
-def require_schema():
-    status = schema_status()
+_PAGE_READ_SCHEMA = ContextVar("reporting_page_read_schema", default=None)
+
+
+@contextmanager
+def page_read_schema(status):
+    """Reuse this render's successful schema probe for reads only, never writes."""
+    token = _PAGE_READ_SCHEMA.set((id(_backend()), dict(status)))
+    try:
+        yield
+    finally:
+        _PAGE_READ_SCHEMA.reset(token)
+
+
+def require_schema(*, read_only=False):
+    checked = _PAGE_READ_SCHEMA.get() if read_only else None
+    status = checked[1] if checked and checked[0] == id(_backend()) else schema_status()
     if not status.get("ready"):
         raise ReportingStoreError(
             f"Reporting storage is not ready. Apply migrations/{REPORTING_MIGRATION}."
@@ -424,7 +440,7 @@ def list_archives(
     status_filter="",
 ):
     _require_reporting_access(user)
-    require_schema()
+    require_schema(read_only=True)
     safe_page = max(int(page or 1), 1)
     safe_size = _safe_limit(page_size)
     clauses = []
@@ -465,7 +481,7 @@ def list_archives(
 
 def get_archive(user, archive_id):
     _require_reporting_access(user)
-    require_schema()
+    require_schema(read_only=True)
     backend = _backend()
     with backend.connect() as conn:
         with conn.cursor() as cur:
@@ -493,7 +509,7 @@ def archive_csv(user, archive_id):
 
 def list_delivery_history(user, *, limit=10):
     _require_reporting_access(user)
-    require_schema()
+    require_schema(read_only=True)
     safe_limit = _safe_limit(limit, default=10)
     backend = _backend()
     with backend.connect() as conn:
@@ -518,7 +534,7 @@ def list_delivery_history(user, *, limit=10):
 
 def today_delivery_status(user, report_date):
     _require_reporting_access(user)
-    require_schema()
+    require_schema(read_only=True)
     backend = _backend()
     with backend.connect() as conn:
         with conn.cursor() as cur:

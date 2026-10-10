@@ -4,7 +4,7 @@ const source=fs.readFileSync('components/crm_sections/composer.js','utf8');
 let sent=[],toggle;
 for(const visible of [true,false]){
  const context={s:{id:'html-1',visible},name:'HTML Section 1',opened:{},card:{classList:{toggle(){}}},row:{append(){}},
-  button:(text,label,onclick)=>toggle={label,onclick,dataset:{},attributes:{},setAttribute(k,v){this.attributes[k]=v;}},emit:(...v)=>sent.push(v)};
+  renameControl:()=>({}),button:(text,label,onclick)=>toggle={label,onclick,dataset:{},attributes:{},setAttribute(k,v){this.attributes[k]=v;}},emit:(...v)=>sent.push(v)};
  vm.runInNewContext(source.slice(source.indexOf('let visibility='),source.indexOf('let title=')),context);
  assert.equal(toggle.label,visible?'Visible section — click to hide':'Hidden section — click to show');
  assert.equal(toggle.attributes['aria-pressed'],String(visible));

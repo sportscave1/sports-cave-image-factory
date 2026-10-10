@@ -147,7 +147,7 @@ class CarouselWinnerSystemTests(unittest.TestCase):
                 else:
                     # Upgraded fixed prompts intentionally differ from historic hashes.
                     # Verify their preserved contracts and non-generative master guidance.
-                    self.assertIn("SPORTS_CAVE_PREMIUM_VISUAL_REALISM_V3", text)
+                    self.assertIn("SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4", text)
                     self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES", text)
                     self.assertIn(row['kwargs']['product_name'], text)
                     for url in structures['winner/' + str(index)]['product_urls']:

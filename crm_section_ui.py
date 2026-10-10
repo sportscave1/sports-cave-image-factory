@@ -106,10 +106,10 @@ def middle_editor(doc, key, shop, store=None):
         from crm_campaign_library import library_rows
         from crm_store import StoreUnavailable
         try:
-            from crm_campaign_library import template_html
+            from crm_campaign_library import template_html,template_sections
             for row in library_rows(store):
                 item={k:row[k] for k in ('id','name','version')}
-                try:item.update(html=template_html(store,row),builtin=bool(row.get('builtin')))
+                try:item.update(html=template_html(store,row),sections=template_sections(store,row),builtin=bool(row.get('builtin')))
                 except (ValueError,StoreUnavailable):pass
                 templates.append(item)
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
@@ -124,6 +124,7 @@ def middle_editor(doc, key, shop, store=None):
     from crm_local_preview import scope
     from crm_checkout_elements import element,starter
     from crm_checkout_template import load as load_checkout
+    from crm_discount_section import default_html as discount_html
     from crm_template_cache import cached
     checkout=cached(store,('local-checkout-master',),lambda:load_checkout(store)) if store else None
     def resolve_insert(action):
@@ -132,10 +133,11 @@ def middle_editor(doc, key, shop, store=None):
             return {'html':validate(checkout['html']),'name':'Abandoned Checkout'}
         row=next((r for r in library_rows(store) if str(r['id'])==str(action.get('template_id')) and r['version']==action.get('version')),None)
         if row is None:raise ValueError('Template changed. Reload the template list.')
-        return {'html':template_html(store,row),'name':row['name'] if row.get('builtin') else '',
+        return {'html':template_html(store,row),'sections':template_sections(store,row),'name':row['name'] if row.get('builtin') else '',
                 'template_ref':{k:str(row[k]) if k=='id' else row[k] for k in ('id','name','version')}}
     trigger=getattr(store,'preview_trigger',None) if getattr(store,'email_mode',None)=='automation' else None
-    event = render_component(component,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=180,clipboard_script=clipboard_script(),history_scope=scope(key),preview_scope=scope(key),element_defaults=element()['settings'],starter_sections=starter(),checkout_template=checkout,draft_version=editor.get('version'),save_status=st.session_state.get('campaign_save_status','Saved'),save_error=st.session_state.get('campaign_save_error',''),edit_error=st.session_state.get(key+'edit_error',''),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
+    component_args={'discount_offer':doc.get('recovery_discount'),'discount_html':discount_html()}
+    event = render_component(component,**component_args,on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=180,clipboard_script=clipboard_script(),history_scope=scope(key),preview_scope=scope(key),element_defaults=element()['settings'],starter_sections=starter(),checkout_template=checkout,draft_version=editor.get('version'),save_status=st.session_state.get('campaign_save_status','Saved'),save_error=st.session_state.get('campaign_save_error',''),edit_error=st.session_state.get(key+'edit_error',''),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')

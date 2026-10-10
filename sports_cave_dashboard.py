@@ -4813,6 +4813,7 @@ def build_new_design_ideas_prompt(
     *,
     exclude_existing=True,
     calendar_relevance=True,
+    intelligence_snapshot=None,
 ):
     selected_sport = normalize_design_idea_sport(sport)
     if not selected_sport:
@@ -4863,7 +4864,9 @@ Current relevance should strengthen a genuinely collectible concept. Do not forc
         else "Do not use current calendar or news relevance as a required ranking signal. Prioritise enduring collector demand."
     )
 
-    return f"""You are the Sports Cave product researcher, commercial range planner and premium collector-art creative director.
+    import design_studio_sales_intelligence
+    commercial_context = design_studio_sales_intelligence.intelligence_context(intelligence_snapshot, ideas=True)
+    return commercial_context + "\n\n" + f"""You are the Sports Cave product researcher, commercial range planner and premium collector-art creative director.
 
 Your task is to produce exactly {requested_total} new {selected_sport} collector-art concepts for Sports Cave.
 
