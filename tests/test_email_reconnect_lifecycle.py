@@ -91,8 +91,8 @@ class WorkspaceRecoveryTests(unittest.TestCase):
         model = self.w.model()
         self.assertEqual(model['recovery']['state'], '')
         self.assertFalse(model['error'] or model['live_error'])
-        self.assertEqual(model['selected'], model['threads'][0]['key'])
-        self.assertTrue(any(m['expanded'] for m in model['messages']))
+        self.assertIsNone(model['selected'])
+        self.assertEqual(model['messages'], [])
 
     def test_refresh_outage_keeps_view_selection_and_recovers_once(self):
         self.event('open_thread', thread_key=self.state['threads'][2]['thread_key'])
@@ -124,6 +124,7 @@ class WorkspaceRecoveryTests(unittest.TestCase):
     def test_removed_selection_and_empty_inbox_after_recovery(self):
         for empty in (False, True):
             with self.subTest(empty=empty):
+                self.event('open_thread',thread_key=self.state['threads'][0]['thread_key'])
                 self.imap.fail = True;self.event('refresh')
                 selected = self.state['active_message']
                 from support_email_workspace import reference_key
@@ -132,7 +133,7 @@ class WorkspaceRecoveryTests(unittest.TestCase):
                 model = self.w.model()
                 self.assertFalse(model['error'] or model['recovery']['state'])
                 if empty:self.assertFalse(model['threads'] or model['selected'])
-                else:self.assertEqual(model['selected'], model['threads'][0]['key'])
+                else:self.assertIsNone(model['selected'])
 
     def test_folder_switch_failure_restores_requested_folder_without_old_rows(self):
         self.imap.messages[0]['folder'] = 'Archive'

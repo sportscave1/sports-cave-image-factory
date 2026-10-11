@@ -1,0 +1,13 @@
+const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const ctx={};vm.createContext(ctx);vm.runInContext(fs.readFileSync('components/support_email/draft_journal.js','utf8'),ctx);
+const values=new Map(),storage={get length(){return values.size},key:i=>[...values.keys()][i],getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};
+let now=0,j=ctx.EmailDraftJournal.create(storage,'actor-A/mailbox-A',()=>now);
+j.write({id:'draft',html:'new edits',edit_revision:4,attachments:[{data:'must never persist'}]});
+j.acknowledge('draft',3);assert.equal(j.list()[0].html,'new edits');
+assert.ok(!JSON.stringify([...values.values()]).includes('must never persist'));
+j=ctx.EmailDraftJournal.create(storage,'actor-A/mailbox-A',()=>now);assert.equal(j.list().length,1);
+j.acknowledge('draft',4);assert.equal(j.list().length,0);
+j.write({id:'draft',edit_revision:5});now=8*60*60*1000+1;assert.equal(j.list().length,0);
+j.write({id:'draft',edit_revision:6});j=ctx.EmailDraftJournal.create(storage,'actor-B/mailbox-A',()=>now);assert.equal(j.list().length,0);assert.equal(values.size,0);
+j.write({id:'draft',edit_revision:1});j=ctx.EmailDraftJournal.create(storage,'actor-B/mailbox-B',()=>now);assert.equal(j.list().length,0);
+console.log('Journal: old ack, reload, retention, actor/mailbox isolation and attachment exclusion passed');

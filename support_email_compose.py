@@ -277,6 +277,10 @@ def new_draft(mailbox, *, mode="new", header=None, text="", signature="company")
              "signature": signature, "quote_html": "", "include_quote": mode == "forward",
              "in_reply_to": "", "references": [], "attachments": [], "revision": 0, "mailbox_ref": None}
     if header:
+        # Immutable origin metadata; never derive a resumed reply from current selection.
+        draft['source_message'] = deepcopy(header)
+        draft['source_mailbox'] = mailbox.casefold()
+        draft['edit_revision'] = 0
         draft["subject"] = header["subject"]
         if mode in {"reply", "reply_all"}:
             draft["to"], draft["cc"] = reply_recipients(header, mailbox, reply_all=mode == "reply_all")

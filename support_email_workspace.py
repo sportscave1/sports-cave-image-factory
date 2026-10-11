@@ -1,9 +1,11 @@
 """Event-driven mailbox controller; only explicit actions send or change mail."""
 import base64
+from copy import deepcopy
 from contextlib import nullcontext
 from datetime import datetime, timezone
 import hashlib
 import logging
+import json
 import re
 import time
 from urllib.parse import urlencode
@@ -29,6 +31,12 @@ TERMINAL_CONNECTION_ERRORS = {"configuration", "authentication", "tls", "select"
 
 def reference_key(header):
     return hashlib.sha256(f"{header['folder']}\n{header['uidvalidity']}\n{header['uid']}".encode()).hexdigest()
+
+
+def snapshot_signature(key, snapshot):
+    data = {k: v for k, v in snapshot.items() if k not in {'refreshed_at', 'observed_at'}}
+    data['messages'] = [dict(m, flags=sorted(m.get('flags', ()))) for m in snapshot['messages']]
+    return key, json.dumps(data, sort_keys=True, default=str)
 
 
 def formatted_date(value, user):
@@ -62,10 +70,21 @@ class Workspace:
         self.progress = progress
         for key, default in {"cache": {}, "processed": set(), "limit": 50, "query": "", "field": "TEXT",
                              "settings": default_settings(), "expanded": set(), "notice": "", "view": "mail",
-                             "mailbox_version": 0, "history_pending": False}.items():
+                             "mailbox_version": 0, "history_pending": False,
+                             "selected": None, "active_message": None, "conversation": []}.items():
             state.setdefault(key, default)
         # Content lives separately from short-lived mailbox/header snapshots and selection.
         self.bodies = DisplayLRU(state, "opened_content", limit=BODY_LIMIT, byte_limit=BODY_BYTES)
+        from support_email_render import RENDER_POLICY
+        reader_scope = hashlib.sha256(repr((self.config.scope, str(user['id']), RENDER_POLICY)).encode()).hexdigest()
+        if state.get('reader_scope') != reader_scope:
+            from support_email_completion import revoke
+            revoke(state.get('reader_session'))
+            state.pop('body_completion', None)
+            state.pop('contact_result', None)
+            state.pop('bulk_result', None)
+            state.update(reader_scope=reader_scope, image_grants=set(), reader_session=str(uuid.uuid4()))
+            self.bodies.clear()
         self.resolved_threads = DisplayLRU(state, "resolved_threads", limit=THREAD_LIMIT, byte_limit=THREAD_BYTES)
 
     @property
@@ -83,13 +102,14 @@ class Workspace:
         except Exception as error:
             LOGGER.info("Email audit unavailable (%s)", type(error).__name__)
 
-    def load(self, *, force=False, previews=True, defer_body=False):
+    def load(self, *, force=False, previews=True, defer_body=False, essential_only=False):
         self.state.update(initial_load_pending=False, initial_load_attempted=True)
         if self.durable and self.state.get('folder')==self.roles.get('drafts') and self.roles.get('drafts'):
             try:self.state['local_drafts']=self.durable.list_drafts(self.config.address,self.user['id'])
             except Exception:self.state['notice']='Saved drafts are temporarily unavailable; retry shortly.'
         if not force and (self.state.get("recovery_state") == "stopped" or
-                          time.monotonic() < self.state.get("load_retry_at", 0)):
+                          (self.state.get('connection_code') != 'pending'
+                           and time.monotonic() < self.state.get("load_retry_at", 0))):
             if self.state.get("snapshot_view") != (self.state.get("folder"), self.state["query"], self.state["field"]):
                 self.state["error"] = self.state.get("connection_message") or "Mailbox connection unavailable."
             return
@@ -98,7 +118,7 @@ class Workspace:
             self.state.update(recovery_attempts=0, recovery_state="", load_failures=0, load_retry_at=0)
         refresh = getattr(self.imap, "interactive_refresh", None)
         with refresh() if force and refresh else nullcontext():
-            self._load(force=force, previews=previews, recovering=recovering, defer_body=defer_body)
+            self._load(force=force, previews=previews, recovering=recovering, defer_body=defer_body, essential_only=essential_only)
 
     def _unavailable(self, message, *, code="temporary", retry_after=0):
         s = self.state
@@ -146,7 +166,14 @@ class Workspace:
             LOGGER.warning("email_workspace_reconnect_failed code=%s stopped=%s",
                            s.get("connection_code"), s["recovery_state"] == "stopped")
 
-    def _load(self, *, force=False, previews=True, recovering=False, defer_body=False):
+    def load_settings(self):
+        try:
+            settings, preference = store.load_email_settings(self.config.address, self.user['id'])
+            self.state.update(settings=settings, preference=preference, settings_available=True)
+        except Exception:
+            self.state['settings_available'] = False
+
+    def _load(self, *, force=False, previews=True, recovering=False, defer_body=False, essential_only=False):
         if not self.config.configured:
             self.state.update(error="Mailbox is not configured.", folders=[], threads=[])
             return
@@ -156,12 +183,8 @@ class Workspace:
             self.cache.clear()
             self.state.pop("folder_failure", None)
             self.state["history_pending"] = False
-        if "settings_available" not in self.state or force:
-            try:
-                settings, preference = store.load_email_settings(self.config.address, self.user["id"])
-                self.state.update(settings=settings, preference=preference, settings_available=True)
-            except Exception:
-                self.state["settings_available"] = False
+        if not essential_only and ("settings_available" not in self.state or force):
+            self.load_settings()
         folders = None if force or hasattr(self.imap,'reads') else self.state.get("folder_cache")
         failure = self.state.get("folder_failure", {})
         if failure.get("expires", 0) > time.monotonic():
@@ -188,16 +211,42 @@ class Workspace:
             return
         if self.state.get("folder") not in names:
             self.state["folder"] = self.roles.get("inbox", names[0])
+        if hasattr(self.imap, 'reads'):
+            revision = self.imap.read_revision()
+            if self.state.get('mutation_revision') != revision:
+                self.cache.clear()
+                self.state['mutation_revision'] = revision
+        search_filters = self.state.get("filters", {})
         key = ("headers", self.state["folder"], self.state["limit"], self.state["query"], self.state["field"])
+        if search_filters:key += (json.dumps(search_filters, sort_keys=True),)
         list_started = time.monotonic()
-        entry = cached_read(self.cache, key, lambda: self.imap.list_headers(self.state["limit"], self.state["folder"],
-                            query=self.state["query"], field=self.state["field"], previews=previews))
+        page = self.state.get('page_request')
+        cursor = {'before_uid': page['before_uid'], 'uidvalidity': page['uidvalidity']} if page else {}
+        def fetch_headers():
+            if search_filters.get('scope') == 'all':
+                return self.imap.search_folders([f['name'] for f in self.state['folders']], query=self.state['query'],
+                    field=self.state['field'],filters=search_filters)
+            options = dict(filters=search_filters) if search_filters else {}
+            return self.imap.list_headers(50 if page else self.state["limit"], self.state["folder"],
+                query=self.state["query"], field=self.state["field"], previews=previews, **cursor, **options)
+        entry = cached_read(self.cache, key, fetch_headers)
         LOGGER.info("Email list ready duration_ms=%.1f", (time.monotonic()-list_started)*1000)
         if entry["error"]:
             self.cache.pop(key, None)  # Retry timing belongs to backoff, never a failed data cache.
             self._unavailable(entry["error"], code=entry.get("error_code", "temporary"), retry_after=entry.get("retry_after", 0))
             return
         snapshot = entry["data"]
+        if page:
+            old = self.state.get('snapshot', {})
+            if str(snapshot['uidvalidity']) != str(page['uidvalidity']):
+                self.state.pop('page_request', None)
+                raise MailboxError('Mailbox identifiers changed. Refresh before loading another page.')
+            unique = {(m['folder'], str(m['uidvalidity']), str(m['uid'])): m
+                      for m in [*old.get('messages', []), *snapshot['messages']]}
+            snapshot = dict(snapshot, messages=sorted(unique.values(), key=lambda m: int(m['uid'])),
+                            matched=old.get('matched', snapshot['matched']))
+            entry['data'] = snapshot
+            self.state.pop('page_request', None)
         target = self.state.get('sent_focus_header')
         if (target and target['folder'] == self.state['folder']
                 and str(target['uidvalidity']) == str(snapshot['uidvalidity'])
@@ -206,9 +255,11 @@ class Workspace:
             snapshot = dict(snapshot, messages=[*snapshot['messages'], target])
         # Two refreshes can share a wall-clock tick. Fresh snapshots must still
         # invalidate membership/flags and UIDVALIDITY-dependent caches.
-        signature = (key, entry.get("revision", entry["refreshed_at"]))
-        changed = self.state.get("snapshot_signature") != signature
+        # Freshness is not a data revision. No-op sync must preserve reading caches.
+        signature = snapshot_signature(key, snapshot)
+        changed = force or self.state.get("snapshot_signature") != signature
         self.state.update(error="",
+                          snapshot_filters=deepcopy(search_filters),
                           snapshot_view=(self.state["folder"], self.state["query"], self.state["field"]),
                           refreshed_at=entry["refreshed_at"], snapshot=snapshot)
         if changed:
@@ -220,9 +271,9 @@ class Workspace:
             self.resolved_threads.clear()
             folder, validity = self.state["folder"], str(snapshot["uidvalidity"])
             self.bodies.remove_where(lambda k: k[1] == folder and k[2] != validity)
-        if self.state.get("selected") and not any(t["thread_key"] == self.state["selected"] for t in self.state["threads"]):
+        if self.state['view'] != 'compose' and self.state.get("selected") and not any(t["thread_key"] == self.state["selected"] for t in self.state["threads"]):
             self.state.update(selected=None, conversation=[], history_pending=False)
-        elif changed and self.state.get("selected"):
+        elif changed and self.state.get("selected") and self.state['view'] != 'compose':
             # Refresh header flags/membership without re-fetching immutable, identity-matched MIME.
             view, context = self.state["view"], self.state.get("context", {})
             self._select_thread(self._thread())
@@ -239,12 +290,6 @@ class Workspace:
                 self.state.pop('sent_focus', None)
                 self.state.pop('sent_focus_header', None)
                 selected_first = True
-        if (not self.state.get("selected") and self.state["threads"]
-                and self.state["folder"] == self.roles.get("inbox")
-                and not self.state["query"] and self.state["view"] == "mail"):
-            # Initial Inbox paint only: preserve ordering and do not mutate read flags.
-            self._select_thread(self.state["threads"][0])
-            selected_first = True
         if (self.state["view"] == "mail" and self.state.get("selected")
                 and (selected_first or recovering or self.state.get("recovery_state"))):
             message = next((m for m in self.state.get("conversation", [])
@@ -284,11 +329,46 @@ class Workspace:
                 str(message["uid"]), message["message_id"])
 
     def _content(self, message):
-        return self.bodies.get(self._content_key(message))
+        content = self.bodies.get(self._content_key(message))
+        if content:
+            from support_email_render import RENDER_POLICY
+            if content.get('render_policy') != RENDER_POLICY:
+                self._prepare_reader(content)
+                if not self.bodies.put(self._content_key(message), content):return None
+        return content
+
+    def _reader_identity(self, message):
+        return hashlib.sha256(repr((self.state['reader_scope'], self.state['reader_session'],
+                                    self._content_key(message))).encode()).hexdigest()
+
+    def _prepare_reader(self, content):
+        from support_email_render import RENDER_POLICY, sanitize_received_html, reader_document
+        content.update(render_policy=RENDER_POLICY, reader_document='', blocked_images=0)
+        content.pop('approved_reader_document', None)
+        body = content['body']
+        if body.get('html'):
+            markup = sanitize_received_html(body['html'], body.get('inline_images'))
+            content.update(reader_markup=markup, reader_document=reader_document(markup),
+                           blocked_images=markup.count(' data-sc-remote-src='))
+
+    def show_images(self, event):
+        message = self._header(event.get('message_key'))
+        identity = self._reader_identity(message)
+        if (self.state['view'] != 'mail' or reference_key(message) not in self.state['expanded']
+                or event.get('reader_identity') != identity):
+            raise MailboxError('Message changed. Open it again before showing images.')
+        content = self._content(message)
+        if not content or not content.get('blocked_images'):return
+        from support_email_render import reader_document
+        if not content.get('approved_reader_document'):
+            content['approved_reader_document'] = reader_document(content['reader_markup'], allow_remote=True)
+            if not self.bodies.put(self._content_key(message), content):
+                raise MailboxError('Message exceeds the display cache limit.')
+        self.state.setdefault('image_grants', set()).add(identity)
 
     def _body(self, message, *, defer=False):
         key = self._content_key(message)
-        existing = self.bodies.get(key)
+        existing = self._content(message)
         if existing is not None:
             return existing["body"]
         try:
@@ -300,6 +380,15 @@ class Workspace:
             LOGGER.info("Email body read unavailable (%s)", type(error).__name__)
             if isinstance(error, MailboxError) and error.code == 'pending':
                 self.state.update(body_pending=reference_key(message), body_loading=True)
+                if hasattr(self.imap, 'body_key'):
+                    from support_email_completion import issue
+                    import top_bar_security
+                    with self.imap.reads.lock:
+                        job = self.imap.reads.jobs.get(self.imap.body_key(message))
+                    if job:
+                        self.state['body_completion'] = dict(ticket=issue(job[0], self.user['id'], self.state['reader_session']),
+                            token=top_bar_security.create_top_bar_token(self.user, allowed_routes=['Email'], seconds=60),
+                            identity=self._reader_identity(message))
                 return None
             if isinstance(error, MailboxError) and (error.retryable or error.code in
                     TERMINAL_CONNECTION_ERRORS | {"deferred", "busy", "limit"}):
@@ -309,19 +398,24 @@ class Workspace:
         text, quote = split_quote(body["text"])
         content = {"body": body, "html": readable_html(text), "quote": readable_html(quote)}
         if body.get("html"):
-            from support_email_render import sanitize_received_html, reader_document
             try:
                 render_started = time.monotonic()
-                content["reader_document"] = reader_document(sanitize_received_html(body["html"],body.get("inline_images")))
+                self._prepare_reader(content)
                 LOGGER.info("Email HTML sanitized duration_ms=%.1f", (time.monotonic()-render_started)*1000)
             except (ValueError, TypeError, RecursionError):
                 LOGGER.info("Email HTML fallback used")
         if not self.bodies.put(key, content):
             raise MailboxError("This message exceeds the display cache limit. Open it in your mail client.")
         self.state['body_loading'] = False
+        self.state.pop('body_completion', None)
         return body
 
     def _select_thread(self, thread):
+        from support_email_completion import revoke
+        revoke(self.state['reader_session'])
+        self.state.pop('body_completion', None)
+        self.state.pop('read_mark_pending', None)
+        self.state['body_loading'] = False
         self.state.pop("body_pending", None)
         self.state.update(selected=thread["thread_key"], expanded=set(), view="mail", context={})
         resolved = self.resolved_threads.get((self.state["mailbox_version"], thread["thread_key"]))
@@ -342,7 +436,7 @@ class Workspace:
         # First paint needs only the requested MIME, never historical searches.
         message = self._select_thread(thread)
         if self._body(message, defer=True) is not None:
-            self._read_visible(message)
+            self._visible_ready(message)
         else:
             self.state['body_mark_read'] = reference_key(message)
 
@@ -352,6 +446,12 @@ class Workspace:
                 self.message_action("mark_read", message)
             except MailboxError:
                 self.state["notice"] = "Could not update message. Try again."
+
+    def _visible_ready(self, message):
+        if hasattr(self.imap, 'reads'):
+            if message.get('unread'):self.state['read_mark_pending'] = reference_key(message)
+        else:
+            self._read_visible(message)
 
     def _folder_count(self, folder, count, *, checked_at=None):
         if not isinstance(count, int):
@@ -364,6 +464,18 @@ class Workspace:
             self.state["inbox_status"] = {"unread_count": count, "checked_at": checked_at or time.time()}
 
     def _refresh_rows(self, *, membership_changed=True):
+        filters = self.state.get('filters', {})
+        if filters.get('unread') or filters.get('flagged'):
+            snapshot = self.state.get('snapshot', {})
+            previous = snapshot.get('messages', [])
+            kept = [m for m in previous if (not filters.get('unread') or m['unread'])
+                    and (not filters.get('flagged') or '\\Flagged' in m['flags'])]
+            if len(kept) != len(previous):
+                snapshot['messages'] = kept
+                snapshot['matched'] = max(0, snapshot.get('matched', len(previous)) - len(previous) + len(kept))
+                self.state['threads'] = sorted(build_threads(kept, self.config.address), key=lambda t:t['last_activity'], reverse=True)
+                self.state['thread_index'] = {t['thread_key']:t for t in self.state['threads']}
+                membership_changed = True
         for thread in self.state.get("threads", []):
             thread["unread"] = sum(m["unread"] for m in thread["messages"])
         self.state.pop("list_model", None)
@@ -375,6 +487,11 @@ class Workspace:
         for thread_key, messages in retained:
             self.resolved_threads.put((self.state["mailbox_version"], thread_key), messages)
         self.cache.clear()
+
+        if self.state.get('snapshot'):
+            key = ('headers', self.state['folder'], self.state['limit'], self.state['query'], self.state['field'])
+            if filters:key += (json.dumps(filters, sort_keys=True),)
+            self.state['snapshot_signature'] = snapshot_signature(key, self.state['snapshot'])
 
     def _apply_flag(self, message, flag, enabled):
         key = reference_key(message)
@@ -389,6 +506,11 @@ class Workspace:
 
     def live_check(self, signal_version=None):
         """Heartbeat or validated push invokes this; selections/reruns do not."""
+        if self.state.get('filters'):
+            if time.monotonic()-self.state.get('filter_checked',0)>LIVE_INTERVAL:
+                self.state['filter_checked']=time.monotonic()
+                self.load(previews=False,defer_body=True)
+            return
         if (hasattr(self.imap, 'reads') and self.state.get('folder', 'INBOX') == 'INBOX'
                 and self.state['limit'] == 50 and not self.state['query']):
             # The index worker owns Inbox refresh. Heartbeats consume it, never
@@ -396,6 +518,13 @@ class Workspace:
             for key in list(self.cache):
                 if key[0] == 'headers':self.cache.pop(key, None)
             self._load(previews=False, defer_body=True)
+            if signal_version:
+                from support_email_idle import HUB
+                signal = HUB.snapshot()
+                if (signal.get('version') == signal_version and
+                        signal.get('mailbox') == self.config.address.casefold() and
+                        time.time() - signal.get('checked_at', 0) < 120):
+                    self.state['idle_version'] = signal_version
             return
         if self.state.get("recovery_state"):
             self.reconnect()
@@ -569,6 +698,9 @@ class Workspace:
             return
         if self.state.get("send_result", {}).get("status") in {"accepted", "unknown", "in_progress"} or self.state.get("draft_pending"):
             return
+        revision = int(payload.get('edit_revision', draft.get('edit_revision', 0)))
+        if revision < int(draft.get('edit_revision', 0)):
+            return
         for key in ("to", "cc", "bcc", "subject"):
             value = str(payload.get(key, draft[key]))
             if len(value) > 4000:
@@ -580,9 +712,13 @@ class Workspace:
         if payload.get("signature") in {"company", "nathan", "reina", "none"}:
             draft["signature"] = payload["signature"]
         draft["include_quote"] = bool(payload.get("include_quote", draft["include_quote"]))
+        draft['edit_revision'] = revision
 
     def handle(self, event):
         if not os_accounts.can_access_page(self.user, "Email"):
+            from support_email_completion import revoke
+            revoke(self.state['reader_session'])
+            self.state['image_grants'] = set()
             raise PermissionError("Email permission required.")
         if not isinstance(event, dict) or not event.get("id"):
             return False
@@ -605,12 +741,36 @@ class Workspace:
         try:
             self._sync_draft(event.get("draft"))
             action = event.get("action")
+            if action in {'open_thread','open_message','folder','search','compose','resume_composer',
+                          'open_local_draft','recover_draft_copy','close_panel','close_composer'}:
+                from support_email_completion import revoke
+                revoke(self.state['reader_session'])
+                self.state.pop('body_completion', None)
+                self.state.pop('read_mark_pending', None)
+                self.state.pop('body_pending', None)
+                self.state.pop('body_mark_read', None)
+                self.state['body_loading'] = False
+                self.state['image_grants'] = set()
+            if action in {'open_thread', 'open_message', 'folder', 'search', 'settings', 'context',
+                          'close_composer', 'edit_draft', 'open_local_draft', 'compose', 'close_panel'}:
+                self.autosave_draft()  # Failed/conflicting persistence cancels destructive navigation.
             if action not in {"request_delete_forever", "confirm_delete_forever", "cancel_delete_forever", "live_check", "resolve_thread"}:
                 self.state.pop("delete_confirmation", None)
-            if action == "load_initial_mailbox":
+            from support_email_tools import handle as handle_tools
+            if handle_tools(self, action, event):
+                pass
+            elif action == "load_initial_mailbox":
                 if self.state.pop("initial_load_pending", False):
-                    self.load(defer_body=True)
-                    self.restore_draft()
+                    self.load(defer_body=True, essential_only=True)
+                    self.state['discovery_pending'] = True
+            elif action == 'load_mail_metadata':
+                if self.state.pop('discovery_pending', False):
+                    if 'settings_available' not in self.state:self.load_settings()
+                    self.discover_recovery()
+                    if self.state.pop('navigation_refresh_pending', False):
+                        self.load(defer_body=True)
+            elif action == 'show_images':
+                self.show_images(event)
             elif action == 'autosave_draft':
                 self.autosave_draft()
             elif action == 'mail_diagnostics':
@@ -625,8 +785,13 @@ class Workspace:
                 if key and key == self.state.get("active_message") and key == event.get("message_key"):
                     self.state.pop('body_pending',None)
                     message = self._header(key)
-                    if self._body(message, defer=True) is not None and self.state.pop('body_mark_read',None) == key:
-                        self._read_visible(message)  # Only the prior explicit Open action permits this.
+                    if self._body(message) is not None and self.state.pop('body_mark_read',None) == key:
+                        self._visible_ready(message)  # Paint before the explicit Open's flag write.
+            elif action == 'mark_visible_read':
+                key = self.state.pop('read_mark_pending', None)
+                if (key and key == event.get('message_key') == self.state.get('active_message')
+                        and self.state['view'] == 'mail'):
+                    self._read_visible(self._header(key))
             elif action == "reconnect":
                 self.reconnect()
             elif action == "retry_connection":
@@ -643,17 +808,26 @@ class Workspace:
             elif action in {"refresh_folder", "search_folder", "mark_folder_read"}:
                 self.folder_action(action, event.get("folder"), confirmed=event.get("confirmed") is True)
             elif action in {"refresh", "folder", "search", "load_more"}:
+                if action != 'load_more':self.state.pop('page_request', None)
                 if action == "folder":
                     if event.get("folder") not in {f["name"] for f in self.state.get("folders", [])}:
                         raise MailboxError("Choose a discovered mailbox folder.")
+                    self.state["filters"] = {}
                     self.state.update(folder=event["folder"], query="", limit=50, selected=None, conversation=[], history_pending=False)
                 elif action == "search":
+                    from support_email_tools import filters
+                    self.state["filters"] = filters(event.get("filters", self.state.get("filters", {})))
                     query, field = str(event.get("query") or "").strip()[:256], "TEXT"
                     match = re.match(r"^(from|to|subject|text):\s*(.*)", query, re.I)
                     if match:
                         field, query = match[1].upper(), match[2]
                     self.state.update(query=query, field=field, limit=50, selected=None, conversation=[], history_pending=False)
                 elif action == "load_more":
+                    rows = self.state.get('snapshot', {}).get('messages', [])
+                    cursor = self.state.get('snapshot', {}).get('next_before_uid') or min((int(m['uid']) for m in rows), default=0)
+                    if not cursor or self.state.get('page_request'):return True
+                    self.state['page_request'] = dict(before_uid=cursor,
+                                                     uidvalidity=self.state['snapshot']['uidvalidity'])
                     self.state["limit"] = min(1000, self.state["limit"] + 50)
                 self.load(force=action == "refresh")
                 if action == "refresh" and not self.state.get("error"):
@@ -667,7 +841,7 @@ class Workspace:
                 self.state["active_message"] = reference_key(message)
                 self.state["expanded"].add(reference_key(message))
                 if self._body(message, defer=True) is not None:
-                    self._read_visible(message)
+                    self._visible_ready(message)
                 else:
                     self.state['body_mark_read'] = reference_key(message)
             elif action in {"mark_read", "mark_unread", "star", "unstar", "archive", "trash", "junk", "move", "copy"}:
@@ -678,6 +852,9 @@ class Workspace:
                 file = self.imap.read_attachment(message, event["section"])
                 self.state["download"] = {"id": event_id, "filename": file["filename"], "base64": base64.b64encode(file["data"]).decode()}
             elif action == "compose":
+                if 'settings_available' not in self.state:self.load_settings()
+                if self.state.get('send_result', {}).get('status') in {'unknown', 'in_progress'}:
+                    raise ComposeError('Resolve the saved send outcome first. Do not resend.')
                 if self.state.get("send_stage") in {"SENDING", "SAVING_SENT_COPY"}:
                     raise ComposeError("Wait for the current send to finish.")
                 self.autosave_draft()
@@ -696,8 +873,14 @@ class Workspace:
                     signature=selected_signature(self.state["settings"], self.user, self.state.get("preference")))
                 if mode != "new":
                     thread = self._thread()
-                    self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
+                    if thread:
+                        self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
+                self.state.pop('sent_focus', None)
+                self.state.pop('sent_focus_header', None)
                 self.state.update(view="compose", send_result={}, sent_result={}, send_progress={}, sent_checks=0, draft_pending=None, send_stage="")
+                # Establish actor-owned provenance before the first keystroke.
+                # Recovery can then verify even edits interrupted before debounce.
+                self.autosave_draft()
             elif action == 'open_local_draft':
                 if self.state.get('send_result',{}).get('status') in {'in_progress','unknown'}:
                     raise ComposeError('Resolve the current send before opening another draft.')
@@ -705,6 +888,17 @@ class Workspace:
                 self.autosave_draft()
                 self.state.update(draft=None,send_result={},send_stage='',sent_result={})
                 self.restore_draft(draft_id)
+            elif action == 'recover_draft_copy':
+                self.recover_draft_copy(event.get('recovery'))
+            elif action == 'dismiss_receipt':
+                delivery = self.state.get('last_sent', {})
+                if (event.get('operation_id') == delivery.get('operation_id') and
+                        delivery.get('copy', {}).get('status') in {'present', 'appended'}):
+                    self.state.pop('last_sent', None)
+                    self.state.pop('sent_focus', None)
+                    self.state['send_stage'] = ''
+            elif action == 'refresh_recovery':
+                self.discover_recovery()
             elif action in {"attach", "remove_attachment", "forward_attachment"}:
                 draft = self._editable_draft()
                 if action == "attach":
@@ -752,6 +946,8 @@ class Workspace:
                 if draft and self.durable:self.durable.discard(self.config.address,self.user['id'],draft['id'])
                 self.state.update(draft=None, draft_pending=None, view="mail", send_result={})
             elif action in {"close_composer", "close_panel", "resume_composer", "settings", "context"}:
+                if action == 'resume_composer':
+                    self.bind_draft_source()
                 if action == "context":
                     self.load_context()
                 self.state["view"] = {"close_composer": "mail", "close_panel": "mail", "resume_composer": "compose"}.get(action, action)
@@ -882,6 +1078,8 @@ class Workspace:
                 self.state["threads"] = build_threads(snapshot["messages"], self.config.address)
                 self.state["threads"].sort(key=lambda t: t["last_activity"], reverse=True)
                 self.state["thread_index"] = {t["thread_key"]: t for t in self.state["threads"]}
+                if not self.state['conversation']:
+                    self.state.update(selected=None, active_message=None, history_pending=False)
             if message["unread"]:
                 for folder in self.state["folders"]:
                     if isinstance(folder.get("unread"), int):
@@ -892,6 +1090,8 @@ class Workspace:
             self.audit({"archive": "email_archived", "trash": "email_trashed", "junk": "email_junked"}.get(action, "email_moved")
                        if result["status"] == "moved" else "email_copied", reference_key(message))
         self._refresh_rows(membership_changed=action not in {"mark_read", "mark_unread", "star", "unstar"})
+        if hasattr(self.imap, 'reads') and self.imap.reads.health.get('mutation_warning'):
+            self.state['notice'] = 'Mailbox action confirmed. Shared synchronization is delayed; do not repeat the action.'
         from support_email_notifications import invalidate
         invalidate()
 
@@ -918,25 +1118,96 @@ class Workspace:
         try:
             self.durable.save_draft(self.config.address,self.user['id'],draft)
             self.state['draft_save_status']='Saved'
-        except Exception:
-            self.state['draft_save_status']='Not saved — storage unavailable; keep this tab open'
+            self.state['draft_saved_revision'] = int(draft.get('edit_revision', 0))
+            self.state['draft_save_error'] = ''
+        except Exception as error:
+            self.state['draft_save_status'] = 'Conflict' if isinstance(error, ComposeError) else 'Failed'
+            self.state['draft_save_error'] = 'Your edits are retained. Recover a separate copy or retry saving.'
             raise
 
+    def discover_recovery(self):
+        if not self.durable:
+            return
+        try:
+            self.state['local_drafts'] = self.durable.list_drafts(self.config.address, self.user['id'])
+            # Narrow metadata only. Resolved historical sends do not take over Inbox.
+            self.state['unresolved_receipts'] = self.durable.unresolved_receipts(self.config.address, self.user['id'])
+        except Exception:
+            self.state['notice'] = 'Draft recovery is temporarily unavailable. Retry shortly.'
+
+    def bind_draft_source(self):
+        draft = self.state.get('draft') or {}
+        self.state.update(selected=None, active_message=None, conversation=[], expanded=set(),
+                          history_pending=False, context={})
+        self.state.pop('body_pending', None)
+        source = draft.get('source_message')
+        self.state['draft_source_unavailable'] = draft.get('mode') != 'new'
+        if not source and draft.get('mode') in {'reply', 'reply_all'} and draft.get('in_reply_to'):
+            try:
+                provider = self.imap.provider if hasattr(self.imap, 'reads') else self.imap
+                folders = [f['name'] for f in self.state.get('folders', [])][:20]
+                candidates = provider.related_headers_many(folders, [draft['in_reply_to']])
+                exact = {self._content_key(m):m for m in candidates if m['message_id'] == draft['in_reply_to']}
+                if len(exact) == 1:
+                    source = deepcopy(next(iter(exact.values())))
+                    draft.update(source_message=source, source_mailbox=self.config.address.casefold())
+            except Exception:
+                pass  # Legacy quotes remain intact even if origin cannot be proven.
+        if not source or draft.get('source_mailbox', self.config.address.casefold()) != self.config.address.casefold():
+            return  # Legacy drafts retain their quote/recipients; never guess a source.
+        try:
+            # Exact folder/Message-ID lookup supports sources outside the loaded window.
+            rows = self.imap.related_headers(source['folder'], [source['message_id']]) if source.get('message_id') else []
+            found = next((m for m in rows if self._content_key(m) == self._content_key(source)), None)
+            if not found:
+                return
+            thread = build_threads([found], self.config.address)[0]
+            self._select_thread(thread)
+            self._body(found)
+            self.state['draft_source_unavailable'] = False
+        except Exception:
+            pass  # The saved draft and original quote are always usable independently.
+        finally:
+            self.state['view'] = 'compose'
+
+    def recover_draft_copy(self, recovery):
+        """Explicit recovery forks instead of overwriting another tab's revision."""
+        if not self.durable or not isinstance(recovery, dict):
+            raise ComposeError('Saved draft recovery is unavailable.')
+        draft_id = str(uuid.UUID(str(recovery.get('id'))))
+        original = self.durable.restore_draft(self.config.address, self.user['id'], draft_id)
+        if not original:
+            raise ComposeError('This draft is unavailable or already sent. Copy your unsaved text for review; do not resend.')
+        receipt = self.durable.get_receipt(self.config.address, original['operation_id'])
+        if receipt and receipt.get('status') != 'rejected':
+            raise ComposeError('This draft has a saved send operation. Check its outcome; do not resend or recover a sendable copy.')
+        local = self.state.get('draft') or {}
+        attachments = local.get('attachments', []) if local.get('id') == draft_id else original['attachments']
+        if 'attachment_ids' in recovery:
+            if set(recovery['attachment_ids']) != {a['id'] for a in attachments}:
+                raise ComposeError('Attachment references changed in another session. Keep your recovery text and review the saved attachments first.')
+        original['attachments'] = deepcopy(attachments)
+        self.state['draft'] = deepcopy(original)
+        # Keep server-owned attachments/source/operation provenance. Only editable fields cross this boundary.
+        self.state.update(send_result={}, draft_pending=None)
+        self.state['draft']['edit_revision'] = 0
+        self._sync_draft(recovery)
+        draft = self.state['draft']
+        draft.update(id=str(uuid.uuid4()), operation_id=str(uuid.uuid4()), _storage_version=0,
+                     mailbox_ref=None, recovered_from=draft_id)
+        self.state['view'] = 'compose'
+        self.autosave_draft()
+        self.bind_draft_source()
+        self.state['view'] = 'compose'
+
     def restore_draft(self,draft_id=None):
-        if not self.durable or self.state.get('draft'):return
-        if not self.state.get('last_sent'):
-            row=self.durable.latest_sent(self.config.address,self.user['id'])
-            if row:
-                from support_email_durable import decode,receipt
-                from email.parser import BytesHeaderParser
-                mime=decode(row['payload'])
-                self.state['last_sent']={'operation_id':str(row['operation_id']), 'mime':mime,
-                    'result':receipt(row),'subject':str(BytesHeaderParser().parsebytes(mime['bytes']).get('Subject','')),
-                    'checks':0,'copy':{'status':row['copy_status'],'notice':'Saved locally; mailbox copy is synchronising.'}}
-                self._sent_preview(self.state['last_sent'])
+        if not self.durable or not draft_id or self.state.get('draft'):return
         draft=self.durable.restore_draft(self.config.address,self.user['id'],draft_id)
         if not draft:return
         self.state.update(draft=draft,view='compose',draft_save_status='Saved')
+        self.state['draft_saved_revision'] = int(draft.get('edit_revision', 0))
+        self.bind_draft_source()
+        self.state['view'] = 'compose'
         row=self.durable.get(self.config.address,draft['operation_id'])
         if row:
             from support_email_durable import decode,receipt
@@ -962,12 +1233,16 @@ class Workspace:
             return
         if self.state.get("draft_pending"):
             raise ComposeError("Resolve the pending draft save before sending.")
+        if not self.state.get('settings_available'):
+            raise ComposeError('Email settings are unavailable. Refresh settings before sending.')
         if not self.durable and len(self.state.get("pending_sent", {})) >= 5:
             raise ComposeError("Save the pending Sent copies before sending more messages. No email was sent.")
         # handle() enforces Email access for every action. Optional support-workflow
         # metadata is not transport authorization: all permitted users share this
         # send path, even when that metadata is unavailable or marked for review.
         self.state["send_stage"] = "VALIDATING"
+        self.state.pop('sent_focus', None)
+        self.state.pop('sent_focus_header', None)
         mime = build_mime(draft, self.config.address, self.state["settings"]["sender_name"], self.state["settings"]["signatures"])
         prepared=None
         if self.durable:
@@ -1215,11 +1490,20 @@ class Workspace:
 
     def model(self):
         """Whitelisted browser payload: no credentials, raw MIME or unsolicited attachment bytes."""
+        can_read = os_accounts.can_access_page(self.user, 'Email')
+        if not can_read:
+            from support_email_completion import revoke
+            revoke(self.state['reader_session'])
+            self.state['image_grants'] = set()
+        if not os_accounts.can_access_page(self.user, 'CRM Customers') and self.state.get('contact_result'):
+            self.state['contact_result']['rows'] = [r for r in self.state['contact_result']['rows'] if r.get('source') in {'Your recent drafts','Your recent sends'}]
         self.recover_send()
         s, user = self.state, self.user
         if "list_model" not in s:
             s["list_model"] = self._list_model()
-        threads = s["list_model"] if not s.get("error") else []
+        same_view = (s.get('snapshot_view') == (s.get('folder'), s['query'], s['field'])
+                     and s.get('snapshot_filters', {}) == s.get('filters', {}))
+        threads = s["list_model"] if not s.get("error") and same_view else []
         conversation = []
         reply_prompts = []
         prompt_source = None
@@ -1228,14 +1512,22 @@ class Workspace:
                 key = reference_key(m)
                 content = self._content(m) if key in s["expanded"] else None
                 body = content["body"] if content else None
-                row = {"key": key, "sender": m["sender"], "subject": m["subject"], "to": m["to"], "cc": m["cc"],
+                row = {"key": key, "reply_to": m.get("reply_to", []), "sender": m["sender"], "subject": m["subject"], "to": m["to"], "cc": m["cc"],
                     "time": formatted_date(m["date"] or m["received_at"], user), "folder": m["folder"],
                     "own": m["sender"]["email"].casefold() == self.config.address.casefold(), "unread": m["unread"],
                     "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}
                 if body:
                     row.update(html=content["html"], reader_document=content.get("reader_document", ""), quote=content["quote"], warnings=body.get("warnings", []),
                         attachments=[{k: a[k] for k in ("section", "filename", "content_type", "encoded_size")} for a in body["attachments"]])
-                if body and key == s.get("active_message") and s.get("view") == "compose" and (s.get("draft") or {}).get("mode") == "reply":
+                    identity = self._reader_identity(m)
+                    allowed = (identity in s.get('image_grants', set()) and s['view'] == 'mail'
+                               and can_read)
+                    row.update(reader_identity=identity, blocked_images=content.get('blocked_images', 0),
+                               images_allowed=allowed,
+                               approved_reader_document=content.get('approved_reader_document', '') if allowed else '')
+                origin = (s.get('draft') or {}).get('source_message')
+                if (body and origin and self._content_key(m) == self._content_key(origin) and
+                        key == s.get("active_message") and s.get("view") == "compose" and (s.get("draft") or {}).get("mode") == "reply"):
                     from support_email_reply_prompts import build_reply_prompts
                     prompt_source = (m, {"html": content["html"], "review": body.get("review")})
                 conversation.append(row)
@@ -1254,11 +1546,20 @@ class Workspace:
                 safe_order['lines'] = [{k: line[k] for k in ('product_title', 'variant_title') if k in line}
                                        for line in order.get('lines', [])]
             reply_prompts = build_reply_prompts(*prompt_source, thread_context=history, order_context=safe_order)
+        for row in conversation:
+            if row.get('reader_document'):
+                # Rich mail is rendered exclusively by its safe document. Keep
+                # plain text in the server cache for replies/prompts, not twice
+                # in every browser update. Plain-only mail retains its fallback.
+                row['html'] = ''
+                row['quote'] = ''
         draft = s.get("draft")
         public_draft = None
         if draft:
             public_draft = {k: draft[k] for k in ("id", "operation_id", "mode", "to", "cc", "bcc", "subject", "html", "signature", "include_quote", "quote_html")}
             public_draft.update(attachments=[{"id": a["id"], "filename": a["filename"], "size": len(a["data"])} for a in draft["attachments"]], saved=bool(draft.get("mailbox_ref")))
+            public_draft.update(edit_revision=int(draft.get('edit_revision', 0)), storage_version=int(draft.get('_storage_version', 0)))
+            public_draft['recovered_from'] = draft.get('recovered_from')
         settings = s["settings"]
         signature_source = tuple((key, value.get("label", key), value.get("html", ""))
                                  for key, value in settings["signatures"].items() if key in {"company", "nathan", "reina"})
@@ -1267,7 +1568,14 @@ class Workspace:
             s["signature_source"] = signature_source
         signatures = s["signature_model"]
         return {"mailbox": self.config.address, "configured": self.config.configured,
-            'local_drafts':s.get('local_drafts',[]) if s.get('folder')==self.roles.get('drafts') and not s.get('query') else [],
+            'draft_scope':hashlib.sha256(repr((self.config.scope, str(user['id']))).encode()).hexdigest(),
+            'reader_scope':s['reader_scope']+s['reader_session'],
+            'recoverable_drafts':s.get('local_drafts', []),
+            'unresolved_receipts':s.get('unresolved_receipts', []),
+            'draft_saved_revision':s.get('draft_saved_revision', -1),
+            'draft_save_error':s.get('draft_save_error', ''),
+            'draft_source_unavailable':s.get('draft_source_unavailable', False),
+            'local_drafts':s.get('local_drafts',[]) if s.get('folder')==self.roles.get('drafts') and not s.get('query') and not s.get('filters') else [],
             'durable_drafts':bool(self.durable),'draft_save_status':s.get('draft_save_status',''),
             'uncertain_checks':s.get('uncertain_checks',0),
             'sent_view_pending':bool(s.get('sent_focus')),
@@ -1286,10 +1594,18 @@ class Workspace:
             "delete_confirmation": ({"token": s["delete_confirmation"]["token"], "subject": s["delete_confirmation"]["subject"],
                 "count": len(s["delete_confirmation"]["messages"])} if s.get("delete_confirmation") else None),
             "initial_load_pending": bool(s.get("initial_load_pending")),
+            "discovery_pending": bool(s.get('discovery_pending')),
             "read_pending": bool(s.get('read_pending')), "body_loading": bool(s.get('body_loading')),
+            "body_completion": s.get('body_completion') if can_read and s['view']=='mail' and s.get('body_pending')==s.get('active_message') else None,
+            "read_mark_pending": s.get('read_mark_pending'),
             "live_pending": bool(s.get('live_pending')),
             "sync_health": (self.imap.reads.health_snapshot() if hasattr(self.imap,'reads') else {}),
-            "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
+            "can_suggest_crm": can_read and os_accounts.can_access_page(user, "CRM Customers"),
+            "filters": s.get('filters', {}), "search_partial": s.get('snapshot', {}).get('search_partial',False),
+            "search_failures": s.get('snapshot', {}).get('search_failures', []),
+            "contact_result": s.get('contact_result') if can_read and s['view']=='compose' else None,
+            "bulk_result": s.get('bulk_result') if can_read else None,
+            "body_pending": s.get("body_pending"), "view": s["view"], "reply_prompts": reply_prompts, "draft": public_draft, "has_more": same_view and s.get("snapshot", {}).get("has_more", False) and s["limit"] < 1000,
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),
@@ -1304,10 +1620,12 @@ class Workspace:
     def _list_model(self):
         return [{"key": t["thread_key"], "customer": t["customer"]["name"] or t["customer"]["email"],
             "email": t["customer"]["email"], "subject": t["subject"], "time": formatted_date(t["last_activity_at"], self.user),
+            "recipients": ' '.join(p.get('email', '') for m in t['messages'] for p in m.get('to', [])),
             "unread": bool(t["unread"]), "count": len(t["messages"]), "snippet": t["messages"][-1].get("snippet", ""),
             "attachment": any(m.get("has_attachments") for m in t["messages"]),
             "starred": any("\\Flagged" in m["flags"] for m in t["messages"]),
-            "message_key": reference_key(t["messages"][-1]), "message_unread": t["messages"][-1]["unread"],
+            "message_key": reference_key(t["messages"][-1]), "identity": self._reader_identity(t["messages"][-1]),
+            "folder": t["messages"][-1]["folder"], "date": str(t["last_activity_at"]), "message_unread": t["messages"][-1]["unread"],
             "message_starred": "\\Flagged" in t["messages"][-1]["flags"]} for t in self.state.get("threads", [])]
     def context_model(self):
         context = self.state.get("context", {})

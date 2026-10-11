@@ -22,7 +22,7 @@ class RefreshIdentityTests(unittest.TestCase):
             self.event('refresh')
             self.assertGreater(self.state['mailbox_version'],version)
             self.assertFalse(any(m['uid']==removed for t in self.state['threads'] for m in t['messages']))
-            self.assertEqual(self.w.model()['selected'],self.w.model()['threads'][0]['key'])
+            self.assertIsNone(self.w.model()['selected'])
 
 
 class LoadingFeedbackTests(unittest.TestCase):
@@ -37,13 +37,17 @@ class LoadingFeedbackTests(unittest.TestCase):
                 try:yield
                 finally:active.pop()
             workspace=Mock()
+            workspace.model.return_value={}
             workspace.load.side_effect=lambda **kw:seen.append(list(active))
             with patch.object(page.st,'session_state',state),patch.object(page.st,'query_params',{}), \
                  patch.object(page.st,'spinner',side_effect=spinner),patch.object(page,'Workspace',return_value=workspace), \
                  patch.object(page,'load_configuration',return_value=Mock(scope='fixture')), \
                  patch.object(page,'load_smtp_configuration'),patch.object(page,'get_component',return_value=Mock(return_value=None)):
                 page._render_workspace.__wrapped__({'id':'fixture'})
-            if loaded:self.assertEqual(seen,[[label]])
+            if loaded:
+                self.assertEqual(seen,[])
+                self.assertTrue(state['support_email_workspace']['discovery_pending'])
+                self.assertTrue(state['support_email_workspace']['navigation_refresh_pending'])
             else:
                 self.assertEqual(seen,[])
                 self.assertTrue(state['support_email_workspace']['initial_load_pending'])

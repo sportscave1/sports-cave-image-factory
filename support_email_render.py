@@ -6,6 +6,7 @@ from urllib.parse import unquote
 from support_email_compose import _SafeHTML, safe_url
 
 IMAGE_TYPES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
+RENDER_POLICY = 2
 
 class ImageReferences(HTMLParser):
     def __init__(self):
@@ -43,13 +44,22 @@ class ReaderHTML(_SafeHTML):
             if url: clean.update(href=url, target='_blank', rel='noopener noreferrer')
         if tag == 'img':
             src = values.get('src') or ''
+            if not src:
+                # Drop responsive fetching; retain at most one explicit HTTPS image.
+                src = next((item.strip().split()[0] for item in (values.get('srcset') or '').split(',')
+                            if item.strip() and item.strip().split()[0].lower().startswith('https://')
+                            and safe_url(item.strip().split()[0])), '')
+            remote = False
             if src.lower().startswith('cid:'):
                 src = self.inline.get(unquote(src[4:]).strip('<>'), '')
                 if not re.fullmatch(r'data:image/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+', src): src = ''
             elif not (src.lower().startswith('https://') and safe_url(src)):
                 src = ''
+            else:
+                remote = True
             if src:
-                clean.update(src=src, loading='lazy', referrerpolicy='no-referrer')
+                clean['data-sc-remote-src' if remote else 'src'] = src
+                clean.update(loading='lazy', referrerpolicy='no-referrer')
             clean['alt'] = values.get('alt') or ('Image unavailable' if not src else '')
             if not src:
                 self.out.append('<span role="img" aria-label="Image unavailable">'+escape(clean['alt'])+'</span>')
@@ -86,7 +96,11 @@ def sanitize_received_html(markup, inline=None):
     parser.feed(markup)
     return parser.finish()
 
-def reader_document(markup):
+def reader_document(markup, *, allow_remote=False):
+    """Wrap ReaderHTML output only. Approval changes images, never active content."""
+    if allow_remote:
+        markup = re.sub(r' data-sc-remote-src="([^"]*)"', r' src="\1"', markup)
+    images = 'https: data:' if allow_remote else 'data:'
     return '''<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-src 'none'">
-<style>html,body{margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}body{font:14px/1.6 Arial,sans-serif;color:#222}img{max-width:100%!important;height:auto!important}table{max-width:100%!important}pre{white-space:pre-wrap}*{box-sizing:border-box}a{overflow-wrap:anywhere}</style></head><body>'''+markup+'</body></html>'
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src '''+images+'''; script-src 'none'; style-src 'unsafe-inline'; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<style>html,body{margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}body{font:14px/1.6 Arial,sans-serif;color:#222}img{max-width:100%!important;height:auto!important}img[data-sc-remote-src]{display:none!important}table{max-width:100%!important}pre{white-space:pre-wrap}*{box-sizing:border-box}a{overflow-wrap:anywhere}</style></head><body>'''+markup+'</body></html>'

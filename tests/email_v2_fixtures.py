@@ -71,6 +71,8 @@ class MailboxFixture:
         if self.fail:
             raise RuntimeError("fixture-secret must never be displayed")
         items = [m for m in self.messages if m["folder"] == folder]
+        if kwargs.get('before_uid') is not None:
+            items = [m for m in items if int(m['uid']) < int(kwargs['before_uid'])]
         query = kwargs.get("query", "")
         if query:
             items = [m for m in items if query.casefold() in str(m).casefold()]

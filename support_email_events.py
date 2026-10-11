@@ -10,8 +10,8 @@ EVENTS_PATH = '/api/os/top-bar/email-events'
 
 
 async def email_events(request):
-    from top_bar_api import _claims
-    claims = _claims(request)
+    from support_email_access import current_email_claims
+    claims = await asyncio.to_thread(current_email_claims, request)
     if not claims or 'Email' not in set(claims.get('allowed_routes') or ()):
         return JSONResponse({'ok': False, 'error': 'Access not approved.'}, status_code=403)
     return StreamingResponse(event_stream(request), media_type='text/event-stream', headers={
@@ -22,11 +22,17 @@ async def event_stream(request, *, hub=HUB, duration=55, interval=.25):
     previous = ''
     started = time.monotonic()
     heartbeat = started
+    checked = 0
     yield ': connected\n\n'
     # Rotate streams so ordinary token expiry/permission validation still applies.
     while time.monotonic() - started < duration:
         if await request.is_disconnected():
             return
+        if time.monotonic() - checked >= 1:
+            from support_email_access import current_email_claims
+            if not await asyncio.to_thread(current_email_claims, request):
+                return
+            checked = time.monotonic()
         value = hub.snapshot()
         if value.get('version') != previous and time.time() - value.get('checked_at', 0) < 120:
             previous = value['version']

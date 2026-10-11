@@ -254,13 +254,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         request=Mock();request.is_disconnected=Mock(side_effect=lambda:asyncio.sleep(0,result=False))
         hub=SignalHub();hub.accept({'mailbox':CONFIG.address,'version':'v','uidvalidity':500,'uidnext':4,
                                   'unseen':2,'messages':3,'checked_at':time.time(),'body':'forbidden'})
-        chunks=[c async for c in event_stream(request,hub=hub,duration=.02,interval=.005)]
+        with patch('support_email_access.current_email_claims',return_value={'sub':'fixture','allowed_routes':['Email']}):
+            chunks=[c async for c in event_stream(request,hub=hub,duration=.02,interval=.005)]
         self.assertEqual(len([c for c in chunks if c.startswith('data:')]),1)
         self.assertNotIn('forbidden',''.join(chunks))
 
     async def test_endpoint_requires_existing_email_permission(self):
         for claims in ({},{'allowed_routes':['Orders']}):
-            with patch('top_bar_api._claims',return_value=claims):
+            with patch('support_email_access.current_email_claims',return_value=claims):
                 result=await email_events(Mock());self.assertEqual(result.status_code,403)
 
     async def test_lifecycle_owns_watcher_start_stop(self):

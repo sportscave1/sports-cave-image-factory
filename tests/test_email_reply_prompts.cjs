@@ -6,7 +6,7 @@ for(const mode of ['new','forward','reply_all'])assert.equal(replyPromptControls
 const source=fs.readFileSync('components/support_email/mail.js','utf8');
 assert.match(source,/HOW PROMPTS WORK/);assert.match(source,/Copy the prompt into ChatGPT/);
 assert.match(source,/<strong>\$\{\{new:[\s\S]*?<\/strong>\$\{replyPromptControls\(draft.mode\)\}/);
-const handlers=source.slice(source.indexOf("if(action==='reply_prompts')"),source.indexOf("if(action==='collapse')"));
+const handlers=source.slice(source.indexOf("if(action==='reply_prompts')"),source.indexOf("if(action==='recover_local_edits')"));
 assert.doesNotMatch(handlers,/emit\(|send\(|snapshot\(|localDraft|editor/);
 const copy=source.slice(source.indexOf('async function copySelectedReplyPrompt'),source.indexOf("document.addEventListener('pointerdown'"));
 assert.doesNotMatch(copy,/emit\(|send\(|snapshot\(|localDraft|editor|draft\./);

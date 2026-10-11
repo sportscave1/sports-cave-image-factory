@@ -48,7 +48,7 @@ assert.doesNotMatch(shell,/setInterval\(refreshEmailStatus|later\(refreshEmailSt
 assert.match(source,/f\.contentWindow===event\.source&&f\.dataset\.scTopBar==='true'/);checks++;
 // Execute the production menu listeners against a tiny DOM fixture.
 const handlers={},menuEvents=[],items=[0,1,2].map(i=>({focus(){dom.activeElement=this;},click(){menuEvents.push(i);}}));
-const dom={activeElement:items[0],addEventListener(type,fn){handlers[type]=fn;}};
+const dom={activeElement:items[0],querySelector(){return null;},addEventListener(type,fn){handlers[type]=fn;}};
 const menus={root:{addEventListener(type,fn){handlers[type]=fn;}},document:dom,
   window:{parent:{document:{addEventListener(type,fn){handlers['parent-'+type]=fn;}}},addEventListener(){}},
   AbortController,menu:null,menuTarget:null,model:{view:'compose'},emit(action){menuEvents.push(action);},

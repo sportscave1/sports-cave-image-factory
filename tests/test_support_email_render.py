@@ -11,8 +11,9 @@ class RendererTests(unittest.TestCase):
     def test_formatting_links_tables_images_and_security(self):
         value='<h2>Hello</h2><b><i>Mark James</i></b><p>Happy<br>Purchase</p><ul><li>One</li></ul><table width="600"><tr><td style="color:#123;font-size:16px;position:fixed;background:url(https://bad)">Cell</td></tr></table><a href="https://example.test/product">Product</a><img src="https://example.test/art.jpg" onerror="evil()"><script>evil()</script><iframe src="https://bad">bad</iframe><form action="https://bad"><input></form><a href="java&#x73;cript:evil()">bad link</a><svg onload="evil()"></svg>'
         result=sanitize_received_html(value)
-        for expected in ('<b><i>Mark James</i></b>','<table width="600">','<ul><li>One</li></ul>','href="https://example.test/product"','src="https://example.test/art.jpg"','color:#123','referrerpolicy="no-referrer"'):
+        for expected in ('<b><i>Mark James</i></b>','<table width="600">','<ul><li>One</li></ul>','href="https://example.test/product"','data-sc-remote-src="https://example.test/art.jpg"','color:#123','referrerpolicy="no-referrer"'):
             self.assertIn(expected,result)
+        self.assertNotIn(' src="https://',result)
         for forbidden in ('script','onerror','onload','iframe','<form','<input','<svg','position:','url('):self.assertNotIn(forbidden,result)
         self.assertIn('max-width:100%!important;height:auto!important',reader_document(result))
     def test_cid_and_missing_and_malformed(self):
@@ -50,7 +51,10 @@ class RendererTests(unittest.TestCase):
             fixture.w.bodies.clear();fixture.state.update(selected=None,conversation=[])
             fixture.imap.calls.clear();fixture.w.load(force=True,defer_body=True)
             self.assertFalse(any(c[0] in ('body','attachment','flag','move') for c in fixture.imap.calls))
-            model=fixture.w.model();key=model['body_pending']
+            self.assertIsNone(fixture.w.model()['selected'])
+            message=fixture.w._select_thread(fixture.state['threads'][0])
+            from support_email_workspace import reference_key
+            key=reference_key(message);fixture.state['body_pending']=key
             fixture.w.handle({'id':str(uuid.uuid4()),'action':'load_visible_body','message_key':key})
             self.assertEqual(sum(c[0]=='body' for c in fixture.imap.calls),1)
             self.assertFalse(any(c[0] in ('attachment','flag','move') for c in fixture.imap.calls))
@@ -64,7 +68,7 @@ class RendererTests(unittest.TestCase):
             with patch.object(fixture.imap,'read_message',return_value={'text':'Hello','html':'<b>Hello</b>','attachments':[],'warnings':[]}):
                 documents=[]
                 for folder in ('INBOX','INBOX.Sent Items'):
-                    message=copy.deepcopy(fixture.state['conversation'][0]);message['folder']=folder
+                    message=copy.deepcopy(fixture.state['threads'][0]['messages'][0]);message['folder']=folder
                     fixture.w.bodies.clear();fixture.w._body(message)
                     content=fixture.w._content(message)
                     documents.append(content['reader_document']);self.assertIn('Hello',content['html'])

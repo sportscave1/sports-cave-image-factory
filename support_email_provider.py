@@ -545,7 +545,9 @@ class ImapProvider:
             count, uidvalidity = 0, ""
             if argument is not None:
                 stage = "select"
+                select_started = time.monotonic()
                 count = int(self._ok(conn.select(argument, readonly=not write), stage=stage)[0])
+                LOGGER.info('email_stage stage=select duration_ms=%.1f', (time.monotonic()-select_started)*1000)
                 _, validity = conn.response("UIDVALIDITY")
                 uidvalidity = validity[0].decode("ascii")
                 if not uidvalidity.isdigit():
@@ -568,6 +570,7 @@ class ImapProvider:
             raise failure from None
         finally:
             if conn is not None:
+                logout_started = time.monotonic()
                 try:
                     sock = vars(conn).get('sock')
                     if sock is not None:sock.settimeout(1)  # Cleanup must not add another 8s after failure.
@@ -583,6 +586,7 @@ class ImapProvider:
                         pass
                     finally:
                         _close_resources(conn)
+                        LOGGER.info('email_stage stage=logout duration_ms=%.1f', (time.monotonic()-logout_started)*1000)
 
     @staticmethod
     def _ok(response, *, stage="operation"):
@@ -748,17 +752,34 @@ class ImapProvider:
     def _fetch_uids(self, conn, uids, validity, folder):
         if not uids:
             return []
-        return self._headers(self._ok(conn.uid("FETCH", ",".join(uids),
-            f"(UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])")), validity, folder)
+        started = time.monotonic()
+        try:
+            return self._headers(self._ok(conn.uid("FETCH", ",".join(uids),
+                f"(UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])")), validity, folder)
+        finally:
+            LOGGER.info('email_stage stage=fetch_headers duration_ms=%.1f', (time.monotonic()-started)*1000)
 
     @_retry_read
-    def list_headers(self, limit=50, folder="INBOX", *, query="", field="TEXT", since=None, before=None, previews=False):
+    def list_headers(self, limit=50, folder="INBOX", *, query="", field="TEXT", since=None, before=None, previews=False,
+                     before_uid=None, uidvalidity=None, filters=None):
+        from support_email_tools import criteria, filters as validate_filters
+        filters = validate_filters(filters or {})
+        search = (search_criteria(query, field, since, before) + ' ' + criteria(filters)).strip()
         limit = min(max(int(limit), 1), 1000)
-        with self._connection(folder) as (conn, count, validity):
+        if before_uid is not None and not re.fullmatch(r'[1-9]\d*', str(before_uid)):
+            raise MailboxError('Invalid mailbox page cursor.')
+        with self._connection(folder, uidvalidity) as (conn, count, validity):
             rows = []
             matched = count
-            if query or since or before:
-                uids = self._search(conn, search_criteria(query, field, since, before))
+            if before_uid is not None:
+                upper = int(before_uid) - 1
+                criteria = f'UID 1:{upper} ' + search
+                uids = self._search(conn, criteria) if upper > 0 else []
+                uids = sorted({uid for uid in uids if int(uid) < int(before_uid)}, key=int)
+                matched = len(uids)
+                rows = self._fetch_uids(conn, uids[-limit:], validity, folder)
+            elif query or since or before or filters:
+                uids = self._search(conn, search)
                 matched = len(uids)
                 rows = self._fetch_uids(conn, uids[-limit:], validity, folder)
             elif count:
@@ -766,13 +787,32 @@ class ImapProvider:
                 response = self._ok(conn.fetch(f"{max(1, count-limit+1)}:{count}",
                     f"(UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS ({HEADER_FIELDS})])"))
                 rows = self._headers(response, validity, folder)
+            next_before_uid = min((int(m['uid']) for m in rows), default=0)
+            if filters.get('attachments'):
+                for row in rows:
+                    row['has_attachments'] = any(p['attachment'] for p in self._structure(conn, row['uid']))
+                rows = [m for m in rows if m['has_attachments']]
             if previews and rows:
                 self._previews(conn, rows)
             _, next_uid = conn.response("UIDNEXT")
             baseline = int(next_uid[0]) - 1 if next_uid and isinstance(next_uid[0], bytes) and next_uid[0].isdigit() else max((int(m["uid"]) for m in rows), default=0)
             return {"messages": rows, "total": count, "matched": matched, "uidvalidity": validity,
                     "live_uid": max(baseline, max((int(m["uid"]) for m in rows), default=0)),
-                    "refreshed_at": datetime.now(timezone.utc), "has_more": matched > limit}
+                    "refreshed_at": datetime.now(timezone.utc), "has_more": matched > limit,
+                    "next_before_uid": next_before_uid, "search_partial": bool(filters.get("attachments") and matched > limit)}
+
+    def search_folders(self, folders, *, query='', field='TEXT', filters=None):
+        # Bounded cross-folder search. Incomplete folders/windows are explicit.
+        messages, partial, failures = [], len(folders)>12, []
+        for folder in folders[:12]:
+            try:
+                page=self.list_headers(50,folder,query=query,field=field,filters=filters,previews=False)
+                messages.extend(page['messages']);partial=partial or page['has_more']
+            except MailboxError:
+                failures.append(folder);partial=True
+        if failures and len(failures)==min(len(folders),12):raise MailboxError('Search unavailable. No folders could be searched.')
+        return dict(messages=messages,total=len(messages),matched=len(messages),uidvalidity='multi',
+                    has_more=False,search_partial=partial,search_failures=failures,refreshed_at=datetime.now(timezone.utc))
 
     def live_changes(self, folder, snapshot, *, limit=50, query="", field="TEXT"):
         # Different sessions share immutable deltas, never a connection or selection.

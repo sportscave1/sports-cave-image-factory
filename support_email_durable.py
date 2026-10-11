@@ -41,6 +41,7 @@ def receipt(row):
     if isinstance(due,str):due=datetime.fromisoformat(due.replace('Z','+00:00'))
     delay=max(1000,int((due-datetime.now(timezone.utc)).total_seconds()*1000)) if due and status=='queued' else 1000
     return {'operation_id':str(row['operation_id']), 'status':'in_progress' if status=='queued' else status,
+            'transport_status':status,
             'retry_delay_ms':delay,
             'reconcile_attempts':int(row.get('reconcile_attempts') or 0),
             'verification_overdue':bool(created and status=='unknown' and (datetime.now(timezone.utc)-created).total_seconds()>900),
@@ -87,6 +88,24 @@ class MailStore(SignalStore):
                     AND o.operation_id=d.operation_id AND o.status='accepted')
                 ORDER BY updated_at DESC LIMIT 50''',(mailbox.lower(),str(actor)))
             return [{k:str(v or '') for k,v in row.items()} for row in cur.fetchall()]
+
+    def recent_recipients(self, mailbox, actor):
+        """Narrow actor-owned address history; never retrieve MIME or other users' sends."""
+        with self.transaction() as cur:
+            cur.execute('''SELECT payload->'recipients' AS recipients FROM support_email_outbox
+                WHERE mailbox=%s AND actor=%s AND status='accepted'
+                ORDER BY accepted_at DESC NULLS LAST LIMIT 20''', (mailbox.lower(), str(actor)))
+            return [email for row in cur.fetchall() for email in (row['recipients'] or []) if isinstance(email,str)][:500]
+
+    def unresolved_receipts(self, mailbox, actor):
+        """Actor-private startup warnings; never retrieve MIME for status UI."""
+        with self.transaction() as cur:
+            cur.execute('''SELECT operation_id,status,copy_status,message_id,accepted_at,error_category,
+                due_at,reconcile_attempts,created_at,fingerprint FROM support_email_outbox
+                WHERE mailbox=%s AND actor=%s AND (status IN ('queued','in_progress','unknown')
+                    OR (status='accepted' AND copy_status NOT IN ('present','appended')))
+                ORDER BY created_at DESC LIMIT 50''', (mailbox.lower(), str(actor)))
+            return [dict(receipt(row), copy_status=row['copy_status']) for row in cur.fetchall()]
 
     def discard(self,mailbox,actor,draft_id):
         with self.transaction() as cur:

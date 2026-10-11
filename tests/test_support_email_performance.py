@@ -95,9 +95,9 @@ class SelectionPerformanceTests(unittest.TestCase):
     def test_changed_message_id_cannot_reuse_old_content(self):
         self.open();self.imap.messages[-1]['message_id']='<different@example.test>'
         self.imap.calls.clear();self.event('refresh')
-        self.assertEqual([c[0] for c in self.imap.calls if c[0]=='body'],['body'])
+        self.assertFalse([c for c in self.imap.calls if c[0]=='body'])
         self.imap.calls.clear();self.open()
-        self.assertEqual(self.imap.calls,[])  # Fallback selection fetched the new identity.
+        self.assertEqual([c[0] for c in self.imap.calls if c[0]=='body'],['body'])
 
     def test_delayed_history_for_old_selection_or_version_is_ignored(self):
         self.open();old=self.state['selected'];version=self.state['mailbox_version']

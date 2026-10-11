@@ -474,9 +474,9 @@ class PageTests(unittest.TestCase):
         self.fake.read_message.assert_not_called()
         model = self.component.call_args.kwargs["model"]
         self.assertEqual(len(model["threads"]), 50)
-        self.assertEqual(model["selected"], model["threads"][0]["key"])
-        self.assertFalse(model["messages"][0]["expanded"])
-        self.assertEqual(model["body_pending"],model["active_message"])
+        self.assertIsNone(model["selected"])
+        self.assertEqual(model["messages"], [])
+        self.assertIsNone(model["body_pending"])
         self.assertNotIn(CONFIG.password, str(model))
 
     def test_not_configured_and_not_authorized_do_not_connect(self):
@@ -498,12 +498,30 @@ class PageTests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertEqual(len(self.component.call_args.kwargs["model"]["threads"]), 50)
 
-    def test_changed_navigation_epoch_rereads_real_provider(self):
+    def test_changed_navigation_epoch_reuses_fresh_headers(self):
         app = self.app()
         self.load_initial(app)
         app.session_state["navigation_epoch"] = 9
         app.run()
+        self.assertEqual(self.fake.list_headers.call_count, 1)
+        # Explicit Refresh retains the authoritative-read contract.
+        import uuid
+        self.component.return_value = {'id':str(uuid.uuid4()), 'action':'refresh'}
+        app.run()
         self.assertEqual(self.fake.list_headers.call_count, 2)
+
+    def test_returning_navigation_preserves_draft_without_opening_composer(self):
+        from support_email_compose import new_draft
+        app = self.app();self.load_initial(app)
+        state = app.session_state['support_email_workspace']
+        draft = new_draft(CONFIG.address)
+        state.update(draft=draft, view='compose')
+        app.session_state['navigation_epoch'] = 12
+        app.run()
+        model = self.component.call_args.kwargs['model']
+        self.assertEqual(model['view'], 'mail')
+        self.assertEqual(model['draft']['id'], draft['id'])
+        self.fake.read_message.assert_not_called()
 
     def test_full_app_boot_home_orders_and_email_keep_imap_route_local(self):
         import time

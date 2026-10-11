@@ -21,7 +21,7 @@ ctx.menu={remove(){}};ctx.signalTick('after-menu');assert.equal(sent.length,3);
 ctx.closeMenu();assert.equal(deferred.length,1);deferred.shift()();
 assert.equal(sent.length,4);assert.equal(sent[3].value.signal_version,'after-menu');
 assert.match(source,/signalAttempts<3/);assert.match(source,/1500/);
-assert.match(source,/snapshot\(\); \/\/ Keep edits made/);
+assert.match(source,/snapshot\(\); \/\/ Keep edits/);
 assert.match(source,/sc:email-change/);
 const shell=fs.readFileSync('components/sports_cave_top_bar/index.html','utf8');
 assert.match(shell,/emailEventsController\?\.abort\(\)/);

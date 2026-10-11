@@ -1,5 +1,6 @@
 """Pure threading, conservative order matching and per-session display cache."""
 from datetime import datetime, timezone
+from bisect import bisect_left, bisect_right
 import hashlib
 import re
 import time
@@ -65,6 +66,16 @@ def build_threads(messages, mailbox):
             join(a, b)
             ancestry.setdefault(b, set()).add(a)
 
+    originals = {}
+    for message in messages:
+        if (not message.get('references') and not message.get('in_reply_to')
+                and not re.match(r'^\s*(?:re|fw|fwd)\s*:', message['subject'], re.I)):
+            key = (normalize_subject(message['subject']), participants(message, mailbox))
+            originals.setdefault(key, []).append((timestamp(message), message))
+    for key, rows in originals.items():
+        rows.sort(key=lambda row: row[0])
+        originals[key] = ([row[0] for row in rows], [row[1] for row in rows])
+
     # Fallback only for messages with no reply relationship headers, and exactly one
     # same-subject/same-participant original within seven days. Separate roots stay separate.
     for message in messages:
@@ -73,24 +84,24 @@ def build_threads(messages, mailbox):
         subject = normalize_subject(message["subject"])
         if not subject or not re.match(r"^\s*(?:re|fw|fwd)\s*:", message["subject"], re.I):
             continue
-        candidates = [m for m in messages if m is not message
-                      and not m.get("references") and not m.get("in_reply_to")
-                      and not re.match(r"^\s*(?:re|fw|fwd)\s*:", m["subject"], re.I)
-                      and normalize_subject(m["subject"]) == subject
-                      and participants(m, mailbox) == participants(message, mailbox)
-                      and participants(message, mailbox)
-                      and 0 <= timestamp(message) - timestamp(m) <= 7 * 86400]
-        if len(candidates) == 1:
-            a, b = message_identity(candidates[0]), message_identity(message)
+        people = participants(message, mailbox)
+        dates, candidates = originals.get((subject, people), ([], []))
+        when = timestamp(message)
+        low, high = bisect_left(dates, when - 7 * 86400), bisect_right(dates, when)
+        if people and high - low == 1:
+            a, b = message_identity(candidates[low]), message_identity(message)
             join(a, b)
             ancestry.setdefault(b, set()).add(a)
 
     grouped = {}
     for message in messages:
         grouped.setdefault(root(message_identity(message)), []).append(message)
+    identifiers_by_root = {}
+    for identifier in parents:
+        identifiers_by_root.setdefault(root(identifier), set()).add(identifier)
     threads = []
     for group_root, members in grouped.items():
-        identifiers = {identifier for identifier in parents if root(identifier) == group_root}
+        identifiers = identifiers_by_root[group_root]
         roots = sorted(identifier for identifier in identifiers if not ancestry.get(identifier))
         canonical = (roots or sorted(identifiers))[0]
         members.sort(key=lambda m: (timestamp(m), int(m["uid"])))

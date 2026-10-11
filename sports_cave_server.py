@@ -14,6 +14,7 @@ from google_seo_api import GOOGLE_SEO_ROUTE_HANDLERS
 import run_migrations
 from top_bar_api import TOP_BAR_ROUTE_HANDLERS
 from support_email_events import EVENTS_PATH, email_events
+from support_email_completion import PATH as EMAIL_READY_PATH, read_ready
 from support_email_idle import IdleLifecycle
 from wall_preview_api import WALL_PREVIEW_PATH, WALL_PREVIEW_ROUTES
 from wall_preview_crm_api import ROUTES as WALL_PREVIEW_CRM_ROUTES
@@ -42,6 +43,7 @@ routes = [
 ]
 routes.extend(app_branding.public_branding_routes())
 routes.append(Route(EVENTS_PATH, email_events, methods=['GET']))
+routes.append(Route(EMAIL_READY_PATH, read_ready, methods=['GET']))
 
 
 MAIN_HEALTH_PATHS = frozenset({"/_stcore/health", "/healthz"})

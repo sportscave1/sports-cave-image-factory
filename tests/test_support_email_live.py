@@ -170,7 +170,7 @@ class LiveWorkspaceTests(unittest.TestCase):
     def test_only_visible_message_marks_read_and_reopen_does_not_store_again(self):
         before=self.w.model()['inbox_status']['unread_count']
         self.imap.calls.clear();self.open()
-        self.assertEqual([c[0] for c in self.imap.calls],['flag'])  # Default selection already cached the body.
+        self.assertEqual([c[0] for c in self.imap.calls],['body','flag'])  # First deliberate open fetches its body.
         self.assertFalse(self.w.model()['messages'][0]['unread'])
         self.assertEqual(self.w.model()['inbox_status']['unread_count'],before-1)
         self.imap.calls.clear();self.open();self.assertEqual(self.imap.calls,[])

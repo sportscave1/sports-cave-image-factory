@@ -9,11 +9,11 @@ class InboxSelectionTests(unittest.TestCase):
     setUp = existing.WorkspaceTests.setUp
     event = existing.WorkspaceTests.event
 
-    def test_first_conversation_and_body_are_ready_without_mailbox_writes(self):
+    def test_initial_list_is_unselected_without_mailbox_writes(self):
         model = self.w.model()
-        self.assertEqual(model['selected'], model['threads'][0]['key'])
-        self.assertTrue(any(m['expanded'] and m.get('html') for m in model['messages']))
-        self.assertEqual(len([c for c in self.imap.calls if c[0]=='body']), 1)
+        self.assertIsNone(model['selected'])
+        self.assertEqual(model['messages'], [])
+        self.assertEqual(len([c for c in self.imap.calls if c[0]=='body']), 0)
         self.assertFalse(any(c[0] in ('flag','move','append','delete') for c in self.imap.calls))
 
     def test_valid_selection_survives_refresh_and_rerun(self):
@@ -28,16 +28,17 @@ class InboxSelectionTests(unittest.TestCase):
         for selected in (None, 'no-longer-present'):
             self.state.update(selected=selected, conversation=[])
             self.w.load(force=True)
-            self.assertEqual(self.state['selected'], self.state['threads'][0]['thread_key'])
-            self.assertTrue(self.w.model()['messages'][0]['expanded'])
+            self.assertIsNone(self.state['selected'])
+            self.assertEqual(self.w.model()['messages'], [])
 
     def test_removed_selected_conversation_falls_back_on_refresh(self):
+        self.event('open_thread', thread_key=self.state['threads'][0]['thread_key'])
         removed = self.state['conversation'][0]['uid']
         self.imap.messages = [m for m in self.imap.messages if m['uid']!=removed]
         self.event('refresh')
-        self.assertEqual(self.state['selected'], self.state['threads'][0]['thread_key'])
-        self.assertNotEqual(self.state['conversation'][0]['uid'], removed)
-        self.assertTrue(self.w.model()['messages'][0]['expanded'])
+        self.assertIsNone(self.state['selected'])
+        self.assertNotIn(removed, [m['uid'] for t in self.state['threads'] for m in t['messages']])
+        self.assertEqual(self.w.model()['messages'], [])
 
     def test_empty_inbox_keeps_empty_state(self):
         self.imap.messages=[]; self.event('refresh')
@@ -55,8 +56,8 @@ class InboxSelectionTests(unittest.TestCase):
             self.assertIsNone(self.state['selected'])
             self.assertEqual(self.w.model()['messages'], [])
         self.event('folder',folder='INBOX')
-        self.assertEqual(self.state['selected'],self.state['threads'][0]['thread_key'])
-        self.assertTrue(self.w.model()['messages'][0]['expanded'])
+        self.assertIsNone(self.state['selected'])
+        self.assertEqual(self.w.model()['messages'], [])
 
     def test_search_and_compose_are_not_auto_selected(self):
         self.event('search',query='customer0@example.test')
@@ -71,6 +72,7 @@ class InboxSelectionTests(unittest.TestCase):
         self.state.update(selected=None,conversation=[]); self.w.bodies.clear()
         with patch.object(self.imap,'read_message',side_effect=RuntimeError('private-error')):
             self.w.load(force=True)
+            self.event('open_thread',thread_key=self.state['threads'][0]['thread_key'])
         model=self.w.model()
         self.assertTrue(model['threads'])
         self.assertEqual(model['selected'],model['threads'][0]['key'])

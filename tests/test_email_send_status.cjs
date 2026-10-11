@@ -8,7 +8,7 @@ for(const copy of ['pending','unknown','appended']) {
 }
 assert.equal(locked({draft:null,send_result:{status:'accepted'}}),false);
 assert.match(sendStatus({send_result:{status:'accepted'},send_stage:'SAVING_SENT_COPY'}),/confirming Sent copy/);
-assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'failed',retryable:true}}}),/Email sent successfully.*Retry saving Sent copy/);
+assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'failed',retryable:true}}}),/Accepted by the mail server.*Retry saving Sent copy/);
 assert.doesNotMatch(sentReceipt({last_sent:{operation_id:'op',copy:{status:'appended'}}}),/pending|Retry|Check/);
 assert.match(sentReceipt({last_sent:{operation_id:'op',copy:{status:'unknown',retryable:false}}}),/Check Sent copy/);
 assert.doesNotMatch(sentReceipt({last_sent:{operation_id:'op',copy:{status:'unknown',retryable:false}}}),/Retry/);
@@ -17,8 +17,8 @@ assert.match(sendStatus({send_result:{status:'unknown'}}),/Do not resend/);
 assert.match(sendStatus({send_result:{status:'unknown'},uncertain_checks:6}),/Unable to confirm original send/);
 assert.match(sendStatus({send_result:{status:'rejected'}}),/Email not sent/);
 const processing=sendStatus({send_result:{status:'in_progress'},send_progress:{percent:100}});
-assert.doesNotMatch(processing,/✓ Sent|%|<progress/);assert.match(processing,/Sending email/);
-assert.match(sendStatus({send_result:{status:'in_progress'},send_stage:'SENDING'}),/Sending email/);
+assert.doesNotMatch(processing,/✓ Sent|%|<progress/);assert.match(processing,/Submitting to mail server/);
+assert.match(sendStatus({send_result:{status:'in_progress'},send_stage:'SENDING'}),/Submitting to mail server/);
 const source=fs.readFileSync('components/support_email/mail.js','utf8');
 assert.doesNotMatch(source,/percent:5|sc:send-progress|progress\.percent/);
 const timers=[],ctx={model:{view:'mail',last_sent:{operation_id:'op',copy:{status:'pending'},checks:0}},busy:false,
@@ -43,3 +43,5 @@ assert.equal(sendFeedback({send_stage:'SENT',send_result:{status:'accepted'}}),'
 assert.match(sendFeedback({sent_view_pending:true}),/Opening sent email.*<progress/);
 
 assert.doesNotMatch(sendFeedback({send_stage:'CONFIRMING_SENT_COPY',send_result:{status:'accepted'},last_sent:{checks:3}}),/<progress/);
+
+assert.match(sendStatus({sent_view_pending:true,draft:{id:'new'},send_stage:'VALIDATING',send_result:{status:'in_progress'}}),/Validating/);

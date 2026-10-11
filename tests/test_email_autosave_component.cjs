@@ -2,8 +2,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 const source=fs.readFileSync('components/support_email/mail.js','utf8');
 const timers=new Map(),handlers={},events=[];let id=0;
 const ctx={model:{durable_drafts:true,draft:{id:'draft'}},busy:false,locked:()=>false,$:()=>null,
+ document:{addEventListener(){}},editRevision:0,persistEdits(){},
  root:{addEventListener(name,fn){handlers[name]=fn;}},window:{addEventListener(){}},
- clearTimeout(key){timers.delete(key);},setTimeout(fn,ms){assert.equal(ms,1500);timers.set(++id,fn);return id;},
+ clearTimeout(key){timers.delete(key);},setTimeout(fn,ms){assert.ok([700,300].includes(ms));timers.set(++id,fn);return id;},
  emit(action){events.push(action);}};
 vm.createContext(ctx);
 vm.runInContext(source.slice(source.indexOf('let autosaveTimer='),source.indexOf('let sentTimer=')),ctx);

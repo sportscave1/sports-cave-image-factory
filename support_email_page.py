@@ -34,6 +34,9 @@ def _safe_text(value, *, note=False):
 
 def render_page(user):
     if not os_accounts.can_access_page(user, "Email"):
+        from support_email_completion import revoke
+        revoke(st.session_state.get('support_email_workspace', {}).get('reader_session'))
+        st.session_state.get('support_email_workspace', {})['image_grants'] = set()
         st.info("Your OS account does not have Email access.")
         return
     email_shell_styles()
@@ -102,10 +105,14 @@ def _render_workspace(user):
         if not state.get("initial_load_attempted") and not state.get("loaded") and not state.get("recovery_state"):
             state["initial_load_pending"] = True
         elif state.get("navigation_epoch") != epoch:
-            with st.spinner("Refreshing inbox…"):
-                # Returning to Email honors the existing header TTL and recovery backoff.
-                # Explicit Refresh still forces an authoritative provider read.
-                workspace.load(defer_body=not state.get("loaded"))
+            # Returning is discovery, not permission to reopen an old composer.
+            state['view'] = 'mail'
+            state['image_grants'] = set()
+            if state.get('loaded'):
+                state.update(discovery_pending=True, navigation_refresh_pending=True)
+            else:
+                workspace.load(defer_body=True, essential_only=True)
+                state['discovery_pending'] = True
             state["navigation_epoch"] = epoch
         target = {key: str(st.query_params.get("email_" + key, ""))[:998]
                   for key in ("uid", "uidvalidity", "message_id")}

@@ -194,7 +194,9 @@ class SignatureTests(unittest.TestCase):
         self.assertIn("img-src data: https:;",html)
         self.assertIn("style-src-attr 'unsafe-inline';",html)
         self.assertIn("script-src 'self';",html)
-        self.assertIn("connect-src 'none';",html)
+        self.assertIn("connect-src 'self';",html)  # Trusted component's readiness API only.
+        from support_email_render import reader_document
+        self.assertIn("connect-src 'none'", reader_document('<p>Received mail</p>'))
         self.assertNotIn('img-src *',html)
 
 

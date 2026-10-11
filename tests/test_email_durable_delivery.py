@@ -209,6 +209,7 @@ class DurableDelivery(unittest.TestCase):
         w=Workspace({},USER,config,SMTPConfiguration(),imap=self.imap,smtp=self.provider,registry=self.registry)
         draft=new_draft(self.mailbox);draft.update(to='fixture@example.test',subject='Accepted locally',html='<p>Stored reply</p>')
         w.state['draft']=draft
+        w.state['settings_available']=True  # This test starts after authoritative settings loading.
         w.send(draft['operation_id']);self.provider.submit.assert_not_called()
         self.assertEqual(self.store.get(self.mailbox,draft['operation_id'])['status'],'queued')
         with patch.object(w,'audit'):
@@ -218,9 +219,10 @@ class DurableDelivery(unittest.TestCase):
         self.assertIn('Stored reply',w.state['last_sent']['html'])
         self.imap.find_message_id.assert_not_called();self.imap.append_message.assert_not_called()
         restored=Workspace({},USER,config,SMTPConfiguration(),imap=self.imap,smtp=self.provider,registry=DurableRegistry(self.store))
-        restored.restore_draft()
-        self.assertEqual(restored.state['last_sent']['operation_id'],draft['operation_id'])
-        self.assertIn('Stored reply',restored.state['last_sent']['html'])
+        restored.discover_recovery()
+        self.assertEqual(restored.state['unresolved_receipts'][0]['operation_id'],draft['operation_id'])
+        self.assertNotIn('last_sent', restored.state)
+        self.assertNotIn('Stored reply', str(restored.model()))
         self.assertIsNone(restored.state.get('draft'))
 
     def test_persistent_inbox_lease_and_cursor_restart(self):

@@ -5,7 +5,7 @@ Only this allowlist can run asynchronously, and no mail mutation is replayed.
 """
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from datetime import datetime, timezone
 import logging
@@ -20,7 +20,8 @@ from support_email_db_guard import SNAPSHOT_DB
 from support_email_runtime import operation
 
 LOGGER = logging.getLogger(__name__)
-READS = {'discover_folders','list_headers','read_message','related_headers_many','live_changes'}
+READS = {'discover_folders','list_headers','read_message','related_headers_many','live_changes','search_folders'}
+MUTATIONS = {'set_flag', 'move_message', 'copy_message', 'mark_folder_read', 'delete_trash_messages'}
 
 
 class ReadService:
@@ -39,10 +40,17 @@ class ReadService:
         self.epoch = 0
         self.sync_lock = threading.Lock()
         self.manual_refresh = False
+        self.mutation_lock = threading.Lock()
 
     def request(self, key, loader, ttl=20, *, wait=False):
         with self.lock:
             now = self.clock()
+            if key[0] == 'read_message':
+                # Optional history that has not started must yield to an explicit
+                # selected body. Never interrupt an active socket or a mutation.
+                for old, entry in list(self.jobs.items()):
+                    if old[0] == 'related_headers_many' and entry[0].cancel():
+                        self.jobs.pop(old, None)
             job = self.jobs.get(key)
             if job and job[0].done() and (now > job[1] or job[0].exception() is not None):
                 self.jobs.pop(key); job = None
@@ -87,6 +95,86 @@ class ReadService:
             self.manual_refresh = True
         self.wake.set()
 
+    def mutate(self, name, *args, **kwargs):
+        """Fence in-flight reads and publish confirmed provider writes to all sessions.
+
+        Never replay a write. Rejected/ambiguous writes invalidate reads but are not
+        projected as successful. Exact folder/UIDVALIDITY/UID identities only.
+        """
+        with self.mutation_lock:
+            guard = self.store.mutation_guard(self.config) if isinstance(self.store, SnapshotStore) else nullcontext({'valid':True})
+            with guard as lease:
+                with self.lock:
+                    self.epoch += 1
+                    self.jobs.clear()
+                try:
+                    result = getattr(self.provider, name)(*deepcopy(args), **deepcopy(kwargs))
+                except Exception:
+                    self.wake.set()
+                    raise
+                if not lease['valid']:
+                    with self.lock:
+                        self.epoch += 1;self.jobs.clear()
+                        self.value['force_full'] = True
+                        self.health['mutation_warning'] = True
+                    self.wake.set()
+                    return result
+                def project(value):
+                    snapshot = value.get('snapshot')
+                    if not snapshot:return value
+                    rows = snapshot['messages']
+                    unread_before = sum(bool(m['unread']) for m in rows)
+                    def same(row, message):
+                        return all(str(row.get(k, '')) == str(message.get(k, ''))
+                                   for k in ('folder','uidvalidity','uid','message_id'))
+                    if name == 'set_flag':
+                        message, flag, enabled = args
+                        for row in rows:
+                            if same(row, message):
+                                flags = set(row['flags'])
+                                flags.add(flag) if enabled else flags.discard(flag)
+                                row.update(flags=tuple(sorted(flags)), unread='\\Seen' not in flags)
+                    elif name == 'mark_folder_read':
+                        for row in rows:
+                            if (row['folder'] == args[0] and str(row['uidvalidity']) == str(result['uidvalidity'])
+                                    and row['uid'] in result['uids']):
+                                row.update(flags=tuple(sorted({*row['flags'], '\\Seen'})), unread=False)
+                    elif name == 'move_message' and result.get('status') == 'moved':
+                        snapshot['messages'] = [m for m in rows if not same(m, args[0])]
+                    elif name == 'delete_trash_messages' and result.get('status') == 'deleted':
+                        snapshot['messages'] = [m for m in rows if not any(same(m, target) for target in args[0])]
+                    removed = len(rows) - len(snapshot['messages'])
+                    for count in ('total','matched'):
+                        snapshot[count] = max(0, snapshot.get(count, 0) - removed)
+                    unread_delta = sum(bool(m['unread']) for m in snapshot['messages']) - unread_before
+                    for folder in (value.get('folders') or {}).get('folders', []):
+                        if folder['name'] == 'INBOX' and isinstance(folder.get('unread'), int):
+                            folder['unread'] = max(0, folder['unread'] + unread_delta)
+                    value.update(observed_at=time.time(), mutation_revision=str(uuid.uuid4()))
+                    if name in {'move_message', 'copy_message'} and len(args) > 1 and args[1] == 'INBOX':
+                        value['force_full'] = True  # Destination UIDs belong to the provider, never guessed.
+                    return value
+                with self.lock:
+                    self.epoch += 1
+                    confirmed_epoch = self.epoch
+                    self.jobs.clear()
+                    value = project(deepcopy(self.value))
+                    if value:self.value = value
+                if value and value.get('snapshot'):
+                    try:
+                        if isinstance(self.store, SnapshotStore):
+                            published = self.store.save_confirmed(self.config, project, value)
+                            with self.lock:
+                                if self.epoch == confirmed_epoch:self.value = published
+                        else:
+                            self.store.save_index(self.config, value)
+                        with self.lock:self.health.pop('mutation_warning', None)
+                    except Exception as error:
+                        SNAPSHOT_DB.failed(error, 'mutation_snapshot_write')
+                        with self.lock:self.health.update(database_verified=False, mutation_warning=True)
+                self.wake.set()
+                return result
+
     def sync(self):
         # One index owner, including manual refresh and tests/admin callers.
         if not self.sync_lock.acquire(blocking=False):
@@ -128,7 +216,7 @@ class ReadService:
         with self.lock: epoch = self.epoch
         try:
             with self.lock:old = deepcopy(self.value)
-            if old.get('snapshot'):
+            if old.get('snapshot') and not old.get('force_full'):
                 # Existing IMAP UID/UIDVALIDITY + loaded flag delta, never full history.
                 snap = old['snapshot']
                 delta = self.provider.live_changes('INBOX', snap, limit=50)
@@ -147,6 +235,7 @@ class ReadService:
             unique={(m['folder'],str(m['uidvalidity']),str(m['uid'])):m for m in raw}
             snap=dict(snap,messages=list(unique.values()))
             value = dict(old,snapshot=snap,synced_at=time.time(),observed_at=observed_at)
+            value.pop('force_full', None)
             # Publish the useful list BEFORE optional folder discovery/database writes.
             with self.lock:
                 if epoch != self.epoch or self.stop.is_set():return
@@ -197,7 +286,14 @@ class ReadService:
             cached = self.store.read_index(self.config)
             with self.lock:
                 self.health['database_verified']=True
-                if cached.get('snapshot') and cached.get('observed_at',0)>self.value.get('observed_at',-1):
+                different_revision = cached.get('mutation_revision') != self.value.get('mutation_revision')
+                # A local confirmed write may not yet be durable. Clock skew in
+                # the older shared snapshot must not undo it during that outage.
+                blocked_revision = different_revision and self.health.get('mutation_warning')
+                if cached.get('snapshot') and not blocked_revision and (different_revision or cached.get('observed_at',0)>self.value.get('observed_at',-1)):
+                    if cached.get('mutation_revision') != self.value.get('mutation_revision'):
+                        self.epoch += 1
+                        self.jobs.clear()
                     self.value = cached
                     self.health['last_success_at'] = cached.get('synced_at')
                     # A recent confirmed sync from the lease owner is healthy; a
@@ -206,8 +302,10 @@ class ReadService:
                         self.health.update(state='CONNECTED',category='',attempts=0,retry_at=0)
         except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_read')
 
-    def index(self):
+    def index(self, *, check_shared=True):
         self.start()
+        if check_shared and isinstance(self.store, SnapshotStore):
+            self.restore()  # Observe confirmed writes from another OS worker/session.
         with self.lock:
             if self.value.get('snapshot'):return deepcopy(self.value['snapshot'])
             if self.health['category']:
@@ -237,7 +335,7 @@ def service(config):
 
 
 class AsyncInbox:
-    """Read-only facade; actual SMTP/mutations still use existing provider methods."""
+    """Async reads and confirmed-write fences; the provider still owns all IMAP I/O."""
     def __init__(self,config,reads=None):
         self.reads = reads or service(config)
         self.provider = self.reads.provider
@@ -250,11 +348,23 @@ class AsyncInbox:
     def read_body_for_action(self, message):
         # Compose/download keep their existing bounded synchronous semantics and
         # reuse an in-flight read instead of opening a second socket.
-        key = ('read_message',repr((message,)),repr([]))
+        key = self.body_key(message)
         return self.reads.request(key,lambda:self.provider.read_message(deepcopy(message)),wait=True)
+
+    def body_key(self, message):
+        # Mutable flags/snippets must not fork a read of the same immutable MIME.
+        return ('read_message', tuple(str(message.get(k, '')) for k in
+                ('folder', 'uidvalidity', 'uid', 'message_id')), self.reads.epoch)
+
+    def read_revision(self):
+        if isinstance(self.reads.store, SnapshotStore):self.reads.restore()
+        self._revision_checked = True
+        with self.reads.lock:return self.reads.value.get('mutation_revision', '')
 
     def __getattr__(self,name):
         method = getattr(self.provider,name)
+        if name in MUTATIONS:
+            return lambda *args, **kwargs: self.reads.mutate(name, *args, **kwargs)
         if name not in READS:return method
         def read(*args,**kwargs):
             if name == 'discover_folders':
@@ -263,8 +373,16 @@ class AsyncInbox:
                 if folders:return folders
                 # IMAP's reserved Inbox name is authoritative; other folders arrive lazily.
                 return {'folders':[{'name':'INBOX','label':'Inbox','role':'inbox','flags':()}], 'capabilities':[]}
-            if name == 'list_headers' and (len(args)<2 or args[1]=='INBOX') and (not args or args[0]==50) and not kwargs.get('query'):
-                return self.reads.index()
-            key = (name,repr(args),repr(sorted(kwargs.items())))
-            return self.reads.request(key,lambda:method(*deepcopy(args),**deepcopy(kwargs)))
+            if name == 'list_headers' and (len(args)<2 or args[1]=='INBOX') and (not args or args[0]==50) and not kwargs.get('query') and not kwargs.get('before_uid') and not kwargs.get('filters'):
+                checked = getattr(self, '_revision_checked', False)
+                self._revision_checked = False
+                return self.reads.index(check_shared=not checked)
+            if name in {'list_headers','live_changes'} and isinstance(self.reads.store, SnapshotStore):
+                self.reads.restore()
+            epoch = self.reads.epoch
+            key = self.body_key(args[0]) if name == 'read_message' else (name,repr(args),repr(sorted(kwargs.items())),epoch)
+            result = self.reads.request(key,lambda:method(*deepcopy(args),**deepcopy(kwargs)))
+            if epoch != self.reads.epoch:
+                raise MailboxError('Mailbox changed; refreshing…', code='pending', retry_after=1)
+            return result
         return read

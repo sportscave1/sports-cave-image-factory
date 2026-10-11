@@ -83,7 +83,7 @@ class RoleParityTests(unittest.TestCase):
         calls = []
         for user in (v2.USER, v2.WORKER):
             self.reset_user(user)
-            self.assertTrue(self.state["selected"])
+            self.assertIsNone(self.state["selected"])
             incoming = deepcopy(self.imap.messages[-1])
             incoming.update(uid="99", message_id="<new-incoming@example.test>")
             self.imap.messages.append(incoming)

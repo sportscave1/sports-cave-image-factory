@@ -10136,6 +10136,14 @@ def _auth_cookie_script(cookie_value="", *, max_age_seconds=None, clear=False):
         const cookie = cookieName + "=" + cookieValue + "; " + attributes + secure;
         // Retired HttpOnly cookies cannot be replaced by document.cookie.
         // Cleanup runs only on explicit sign-in/sign-out, never navigation.
+        // Email recovery text is tab-local and must not survive account changes.
+        try {{
+            const storage = window.parent.sessionStorage;
+            for (let i = storage.length - 1; i >= 0; i--) {{
+                const key = storage.key(i);
+                if (key && key.startsWith('sc-email-draft-v2:')) storage.removeItem(key);
+            }}
+        }} catch (_) {{}}
         window.parent.fetch('/api/os/auth/clear-cookie', {{method:'POST',credentials:'same-origin'}})
           .then(function(response) {{
             // Plain local Streamlit has no API router or retired HttpOnly cookie.

@@ -215,3 +215,20 @@ def save_email_preference(mailbox, *, actor, signature_key):
         cur.execute("""INSERT INTO customer_support_email_preferences(mailbox,user_id,signature_key) VALUES (%s,%s,%s)
             ON CONFLICT(mailbox,user_id) DO UPDATE SET signature_key=EXCLUDED.signature_key,updated_at=now()""",
             (mailbox.casefold(), str(actor["id"]), signature_key))
+
+
+def search_contacts(actor, term):
+    """Read only already-synced customer addresses; CRM permission is mandatory."""
+    if not os_accounts.can_access_page(actor, 'Email') or not os_accounts.can_access_page(actor, 'CRM Customers'):
+        raise PermissionError('CRM Customers permission required.')
+    term = str(term).strip()
+    if not 2 <= len(term) <= 80 or any(ord(c)<32 for c in term):return []
+    # Literal substring match, not wildcard or raw SQL input. Small fixed result.
+    with cursor() as cur:
+        cur.execute("""SELECT customer_name AS name,
+            COALESCE(NULLIF(customer_email,''),email) AS email, shopify_order_id
+            FROM shopify_orders
+            WHERE position(lower(%s) in lower(COALESCE(customer_name,'') || ' ' ||
+                COALESCE(NULLIF(customer_email,''),email,''))) > 0
+            ORDER BY created_at DESC NULLS LAST LIMIT 8""", (term,))
+        return [dict(name=r['name'] or '',email=r['email'] or '',source='Synced customer record') for r in cur.fetchall()]

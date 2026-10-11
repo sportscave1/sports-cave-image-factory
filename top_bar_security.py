@@ -56,6 +56,7 @@ def create_top_bar_token(
     payload = {
         "v": TOP_BAR_TOKEN_VERSION,
         "sub": str(user.get("id") or "").strip(),
+        "sv": sc_auth._session_version(user.get("session_version")),
         "display_name": str(user.get("display_name") or "").strip()[:160],
         "username": str(user.get("username") or "").strip()[:160],
         "role": str(user.get("role") or "").strip().casefold()[:40],
