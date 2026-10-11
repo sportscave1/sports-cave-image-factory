@@ -33,6 +33,21 @@ class RegistryTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
+    def test_reopen_preserves_workspace_settings(self):
+        item = {"id": "test", "category": "CORE", "branch": "task", "worktree_path": str(self.home)}
+        path = studio.workspace_file(self.home, item)
+        existing = json.loads(path.read_text())
+        existing["settings"]["editor.fontSize"] = 17
+        studio.atomic(path, existing)
+        before = path.read_bytes()
+        self.assertEqual(studio.workspace_file(self.home, item), path)
+        self.assertEqual(path.read_bytes(), before)
+    def test_reopen_rejects_changed_workspace_folder(self):
+        item = {"id": "test", "category": "CORE", "branch": "task", "worktree_path": str(self.home)}
+        path = studio.workspace_file(self.home, item)
+        studio.atomic(path, {"folders": [{"path": str(self.home / "other")} ]})
+        with self.assertRaises(RuntimeError):
+            studio.workspace_file(self.home, item)
     def test_atomic_roundtrip(self):
         path = self.home / "registry.json"
         studio.atomic(path, {"value": 1})

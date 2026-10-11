@@ -113,6 +113,12 @@ def task_by_id(d, task_id, owner=None):
 
 def workspace_file(home, item):
     path = home / ".studio" / "workspaces" / (item["id"] + ".code-workspace")
+    if path.exists():
+        existing = json.loads(path.read_text(encoding="utf-8"))
+        folders = existing.get("folders", [])
+        if len(folders) != 1 or Path(folders[0].get("path", "")).resolve() != Path(item["worktree_path"]).resolve():
+            raise RuntimeError("Existing VS Code workspace targets another folder; confirm before changing it.")
+        return path  # Preserve user workspace settings on reopen.
     atomic(path, {"folders": [{"name": item["id"] + " | " + item["category"], "path": item["worktree_path"]}],
         "settings": {"window.title": item["id"] + " | " + item["branch"],
                      "git.autofetch": False, "task.allowAutomaticTasks": "off"}})
