@@ -47,6 +47,7 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
+    {"key": "developer_studio", "route": "Developer Studio", "label": "Developer Studio", "worker_assignable": False, "top_level": True},
     {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
     {"key": "orders", "route": "Orders", "label": "Orders", "worker_assignable": True},
@@ -404,6 +405,8 @@ def can_access_page(user, route_or_key):
     page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
+    if page and page["key"] == "developer_studio":
+        return is_reporting_owner(user)
     if page and page['key']=='crm_settings_view':
         return is_admin(user) or any(key in permission_keys(user) for key,_,_ in crm_navigation.PAGES)
     if page and page["key"] == REPORTING_PAGE_KEY:

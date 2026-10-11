@@ -1,0 +1,286 @@
+"""Authenticated local draft operations; application execution is Docker-contained."""
+import hmac
+import json
+import secrets
+import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+import drafts
+import studio
+
+ASSETS = {"/pair": ("pair.html", "text/html; charset=utf-8"),
+          "/pair.js": ("pair.js", "text/javascript; charset=utf-8"),
+          "/pair.css": ("pair.css", "text/css; charset=utf-8"),"/": ("index.html", "text/html; charset=utf-8"),
+          "/drafts.js": ("drafts.js", "text/javascript; charset=utf-8"),
+          "/drafts.css": ("drafts.css", "text/css; charset=utf-8"),
+          "/editor.js": ("editor.js", "text/javascript; charset=utf-8"),
+          "/editor.css": ("editor.css", "text/css; charset=utf-8")}
+BLOCKER = "Full-application preview disabled: OS isolation and safety probes are not verified."
+
+class DraftServer(HTTPServer):
+    def __init__(self, home, task_id, owner, idle_seconds=900):
+        with studio.locked(home) as file:
+            drafts.assigned(studio.read(file), task_id, owner)
+        self.home, self.task_id, self.owner = home, task_id, owner
+        self.token = secrets.token_urlsafe(32)
+        self.idle_seconds = idle_seconds
+        self.last_activity = time.monotonic()
+        self.stopping = False
+        self.preview_runtime = None
+        self.release_preview = None
+        self.release_candidate = None
+        self.children = {}
+        super().__init__(("127.0.0.1", 0), Handler)
+        self.timeout = 1
+        self.origin = "http://127.0.0.1:" + str(self.server_port)
+
+    def state(self):
+        with studio.locked(self.home) as file:
+            registry = studio.read(file)
+            task, _ = drafts.assigned(registry, self.task_id, self.owner)
+            found = next((d for d in registry.get("drafts", []) if d["task_id"] == self.task_id), None)
+        draft = drafts.inspect(self.home, found["id"], self.owner) if found else None
+        return {"task": {k: task[k] for k in ("id", "owner", "branch", "worktree_path", "category")},
+                "draft": draft, "preview": {"enabled": True, "status": "Running" if self.preview_runtime and self.preview_runtime.name else "Stopped", "reason": "Synthetic raster preview; safety probes run before startup"},
+                "idle_seconds": self.idle_seconds}
+
+    def catalog(self):
+        # Metadata only: no whole-worktree scans and no credential/path export.
+        with studio.locked(self.home) as file:
+            registry = studio.read(file)
+            drafts.assigned(registry, self.task_id, self.owner)
+            tasks = {t["id"]: t for t in registry["tasks"]}
+            rows = []
+            for draft in registry.get("drafts", []):
+                task = tasks.get(draft["task_id"])
+                if not task:
+                    continue
+                test = task.get("last_verified_test") or {}
+                rows.append({**{k: draft.get(k) for k in
+                    ("id", "name", "category", "owner", "branch", "revision", "task_id")},
+                    "status": task.get("status", "Unknown"),
+                    "updated_at": max(draft.get("updated_at") or "", task.get("updated_at") or ""),
+                    "review_status": draft.get("review_status", "Unreviewed"),
+                    "actionable": draft.get("owner") == self.owner == task.get("owner"),
+                    "test": {**{k: test.get(k) for k in ("passed", "verified_at", "evidence")},
+                             "snapshot": {k: (test.get("snapshot") or {}).get(k) for k in ("commit", "files_hash")}}})
+            return {"categories": list(studio.CATEGORIES), "rows": rows}
+
+    def handoff(self, draft_id, intent):
+        if intent not in {"open", "edit", "preview", "changes"}:
+            raise ValueError("Unsupported local handoff.")
+        with studio.locked(self.home) as file:
+            draft, task, _ = drafts.draft_by_id(studio.read(file), draft_id, self.owner)
+            task_id = task["id"]
+        target = self
+        if task_id != self.task_id:
+            child = self.children.get(task_id)
+            if child and child[1].is_alive() and not child[0].stopping:
+                target = child[0]
+            else:
+                target = DraftServer(self.home, task_id, self.owner, self.idle_seconds)
+                thread = threading.Thread(target=target.run, daemon=True)
+                self.children[task_id] = (target, thread)
+                thread.start()
+        # Only returned to same-origin, authenticated localhost caller. Never sent to OS.
+        return {"url": target.origin + "/#token=" + target.token + "&intent=" + intent,
+                "draft_id": draft["id"], "task_id": task_id}
+
+    def action(self, data):
+        # Validate scope again on EVERY request; never accept owner/home/task from browser.
+        action = data.get("action")
+        if action in {"release-catalog","release-operation","release-preview"}:
+            import releases
+            if action=="release-catalog":return releases.catalog(self.home,self.task_id,self.owner)
+            if action=="release-operation":return releases.action(self.home,self.task_id,self.owner,data)
+            candidate,root=releases.read_candidate(self.home,self.task_id,self.owner,data.get("id"))
+            operation=data.get("operation")
+            if operation=="start":
+                if self.release_preview and self.release_preview.name:raise ValueError("Stop the current combined preview first.")
+                from preview_runtime import Preview
+                from preview_export import capture_objects
+                source=capture_objects(releases.GitObjects(root),candidate)
+                self.release_preview=Preview(self.home,self.task_id,self.owner,source_provider=lambda:source)
+                self.release_candidate=candidate["id"]
+                try:
+                    frame=self.release_preview.start()
+                    logged=self.release_preview.event({"action":"login-synthetic"})
+                    if "Synthetic Preview Admin" not in logged.get("text",""):
+                        logged=self.release_preview.event({"action":"frame"})
+                    okay="Synthetic Preview Admin" in logged.get("text","") and "Traceback" not in logged.get("text","")
+                    result=releases.runtime_result(self.home,self.task_id,self.owner,candidate["id"],candidate["fingerprint"],{"isolated_preview":True,"combined_runtime":okay},self.release_preview.evidence)
+                    return {"record":result,"frame":logged,"safety":self.release_preview.evidence}
+                except Exception:
+                    self.release_preview.stop()
+                    releases.runtime_result(self.home,self.task_id,self.owner,candidate["id"],candidate["fingerprint"],{"isolated_preview":False,"combined_runtime":False})
+                    raise
+            if self.release_candidate!=candidate["id"] or not self.release_preview:raise ValueError("Preview does not belong to the selected candidate.")
+            if operation=="stop":self.release_preview.stop();return {"stopped":True}
+            if operation=="event":return {"frame":self.release_preview.event(data.get("event",{}))}
+            raise ValueError("Unknown combined preview operation.")
+        if action == "catalog":
+            return self.catalog()
+        if action == "handoff":
+            self.catalog()  # Revalidate the initiating owner before selected-task lookup.
+            return self.handoff(data.get("draft_id"), data.get("intent"))
+        state = self.state()
+        if action == "new":
+            return drafts.new(self.home, self.task_id, self.owner, data.get("name"))
+        if action == "close":
+            self.stopping = True
+            return {"stopped": True}
+        draft = state["draft"]
+        if not draft:
+            raise ValueError("Create a named draft first.")
+        if action == "save":
+            files = data.get("files")
+            revision = data.get("expected_revision")
+            if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
+                raise ValueError("Files must be explicit source paths.")
+            if type(revision) is not int:
+                raise ValueError("Expected revision must be an integer.")
+            return drafts.save(self.home, draft["id"], self.owner, revision, files)
+        if action == "recover":
+            revision = data.get("revision")
+            if type(revision) is not int:
+                raise ValueError("Choose an integer revision.")
+            return drafts.recover_copy(self.home, draft["id"], self.owner, revision)
+        if action in {"editor-open","editor-save","editor-diff"}:
+            import editor
+            path=data.get("path",editor.VISUAL_FILE)
+            if action=="editor-open":
+                return editor.open_file(self.home,draft["id"],self.owner,path)
+            if action=="editor-diff":
+                return editor.view_changes(self.home,draft["id"],self.owner,path)
+            result=editor.write(self.home,draft["id"],self.owner,path,
+                data.get("expected_hash"),data.get("expected_revision"),
+                source=data.get("source"),component=data.get("component"),
+                changes=data.get("changes"),restore=data.get("restore"))
+            if result["changed"] and self.preview_runtime and self.preview_runtime.name:
+                try:
+                    result["frame"]=self.preview_runtime.refresh_source()
+                except (ValueError,RuntimeError,OSError) as exc:
+                    result["preview_error"]="Source saved; preview refresh failed: "+str(exc)
+            return result
+        if action in {"start-preview", "stop-preview", "restart-preview", "preview-event"}:
+            if self.preview_runtime is None:
+                from preview_runtime import Preview
+                self.preview_runtime=Preview(self.home,self.task_id,self.owner)
+            if action=="stop-preview":
+                if not self.preview_runtime.name:
+                    raise ValueError("Preview is already stopped.")
+                self.preview_runtime.stop()
+                return {"stopped":True}
+            if action=="restart-preview":
+                if not self.preview_runtime.name:
+                    raise ValueError("No active preview to restart.")
+                self.preview_runtime.stop()
+            if action in {"start-preview","restart-preview"}:
+                return self.preview_runtime.start()
+            return self.preview_runtime.event(data.get("event",{}))
+        if action == "close":
+            self.stopping = True
+            return {"stopped": True}
+        raise ValueError("Unsupported action.")
+
+    def run(self):
+        try:
+            while not self.stopping and time.monotonic() - self.last_activity < self.idle_seconds:
+                self.handle_request()
+        finally:
+            for child, thread in self.children.values():
+                child.stopping = True
+                thread.join(4)
+            if self.release_preview:
+                self.release_preview.stop()
+            if self.preview_runtime:
+                self.preview_runtime.stop()
+            self.server_close()
+
+class Handler(BaseHTTPRequestHandler):
+    # A stalled local client cannot indefinitely prevent idle shutdown.
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(2)
+
+    def log_message(self, *args):
+        pass  # Never log bearer tokens or user source paths.
+
+    def reply(self, status, data, content_type="application/json"):
+        body = json.dumps(data).encode() if content_type == "application/json" else data
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'none'; script-src 'self'; style-src 'self'; "
+                         "connect-src 'self'; img-src data:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def guard(self, authenticated=False):
+        if self.headers.get_all("Host") != [self.server.origin.removeprefix("http://")]:
+            self.reply(403, {"error": "Host rejected."})
+            return False
+        origin = self.headers.get("Origin")
+        if origin and origin != self.server.origin:
+            self.reply(403, {"error": "Origin rejected."})
+            return False
+        if authenticated:
+            token = self.headers.get("X-Studio-Token", "")
+            if not hmac.compare_digest(token.encode("utf-8"), self.server.token.encode("ascii")):
+                self.reply(401, {"error": "Reopen the launcher URL to authenticate."})
+                return False
+            self.server.last_activity = time.monotonic()
+        return True
+
+    def do_GET(self):
+        if not self.guard(authenticated=self.path.startswith("/api/")):
+            return
+        if self.path == "/api/state":
+            try:
+                self.reply(200, self.server.state())
+            except (ValueError, RuntimeError, OSError) as exc:
+                self.reply(409, {"error": str(exc)})
+        elif self.path in ASSETS:
+            name, mime = ASSETS[self.path]
+            self.reply(200, (Path(__file__).parent / "ui" / name).read_bytes(), mime)
+        else:
+            self.reply(404, {"error": "Not found."})
+
+    def do_POST(self):
+        if not self.guard(authenticated=True):
+            return
+        if self.path != "/api/action":
+            self.reply(404, {"error": "Not found."})
+            return
+        try:
+            if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
+                raise ValueError("A single Content-Length is required.")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 < length <= 2 * 1024 * 1024 + 16384 or self.headers.get("Content-Type") != "application/json":
+                raise ValueError("Expected bounded application/json.")
+            data = json.loads(self.rfile.read(length))
+            if not isinstance(data, dict):
+                raise ValueError("Expected an object.")
+            self.reply(200, self.server.action(data))
+        except (ValueError, RuntimeError, OSError) as exc:
+            self.reply(409, {"error": str(exc)})
+
+def launch(home, task_id, owner, open_browser=False):
+    server = DraftServer(home, task_id, owner)
+    url = server.origin + "/#" + server.token
+    print("Draft Studio: on-demand synthetic Docker previews; security probes required.", flush=True)
+    print("Private session URL (do not share): " + url, flush=True)
+    print("Stops after 15 minutes without authenticated requests or Ctrl+C.", flush=True)
+    if open_browser:
+        import webbrowser
+        webbrowser.open(url)
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        server.server_close()

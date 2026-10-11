@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Studio: New isolated task",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/studio/Studio.ps1",
+        "New",
+        "-Description",
+        "${input:studioDescription}",
+        "-Owner",
+        "${input:studioOwner}",
+        "-Open"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Studio: List tasks",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/studio/Studio.ps1",
+        "List"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Studio: Workspace identity",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/studio/Studio.ps1",
+        "Where"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Studio: Open task",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-File",
+        "${workspaceFolder}/scripts/studio/Studio.ps1",
+        "Open",
+        "-Id",
+        "${input:studioId}",
+        "-Owner",
+        "${input:studioOwner}",
+        "-Open"
+      ],
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "studioDescription",
+      "type": "promptString",
+      "description": "Plain-English task description"
+    },
+    {
+      "id": "studioOwner",
+      "type": "promptString",
+      "description": "Unique owner/session identifier"
+    },
+    {
+      "id": "studioId",
+      "type": "promptString",
+      "description": "Existing stable task ID"
+    }
+  ]
+}
