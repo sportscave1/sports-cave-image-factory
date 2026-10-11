@@ -66,7 +66,7 @@ def validate(flow, *, draft=False):
             if flow['trigger'] not in ('post_purchase','fulfilled'):raise ValueError('Order rules require a paid/fulfilled order trigger.')
             pattern=r'gid://shopify/Product/\d+' if rule['field']=='product_purchased' else r'[A-Z]{3} [0-9]{1,9}(?:\.[0-9]{1,2})?'
             if not isinstance(rule['value'],str) or not re.fullmatch(pattern,rule['value']):raise ValueError('Use a product GID or currency and amount (for example AUD 100).')
-    if not isinstance(flow['emails'],list) or not flow['emails']: raise ValueError('Add an email.')
+    if not isinstance(flow['emails'],list) or (not draft and not flow['emails']): raise ValueError('Add an email.')
     seen=set()
     for step in flow['emails']:
         if not isinstance(step,dict) or set(step)-{'step_id','delay_seconds','document','name','enabled','anchor','requires_fulfilment'} or not {'step_id','delay_seconds','document'}.issubset(step): raise ValueError('Invalid email step.')

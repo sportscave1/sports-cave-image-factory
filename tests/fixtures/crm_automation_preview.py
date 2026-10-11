@@ -21,6 +21,12 @@ from tests.test_crm_send_flow import LIVE,CFG
 from tests.test_crm_simple_editor import document
 
 st.set_page_config(layout='wide',page_title='Local automation fixture')
+if st.query_params.get('fixture_empty') or st.query_params.get('fixture_existing') or st.query_params.get('fixture_uninitialised'):
+    st.html('''<style>:root{--sc-topbar-height:64px}header[data-testid="stHeader"]{display:none}
+    .fixture-topbar{position:fixed;inset:0 0 auto;height:64px;background:#fcfbf8;border-bottom:1px solid #ddd;z-index:99;padding:20px;box-sizing:border-box}
+    </style><div class="fixture-topbar">SPORTS CAVE OS · Local fixture</div>''')
+    import streamlit.components.v1 as components
+    components.html('<script>/* inert OS navigation bridge */</script>',height=0,width=0)
 os.environ.update(LIVE)
 requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionError('External network forbidden'))
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
@@ -71,6 +77,21 @@ def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False):
     return identities
 
 identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')))
+@st.cache_resource
+def empty_setup(kind,run,mode='empty'):
+    from tests.test_crm_lifecycle_expansion import DatabaseTests
+    DatabaseTests.setUpClass()
+    store=AutomationStore(connect)
+    if mode=='uninitialised':
+        import uuid
+        identity=str(uuid.uuid4())
+        store.q("INSERT INTO crm_automations(id,automation_key,name,trigger_type,config,steps) VALUES(%s,%s,'Unused draft',%s,'{}','[]')",(identity,identity,kind))
+        return identity
+    return str(store.create(ADMIN,kind,empty=mode=='empty',lifecycle=mode=='empty' and kind in ('welcome','post_purchase','win_back'))['id'])
+for mode in ('empty','existing','uninitialised'):
+    if st.query_params.get('fixture_'+mode) and not st.session_state.get('fixture_selected'):
+        st.session_state['automation_selected']=empty_setup(st.query_params['fixture_'+mode],str(st.query_params.get('fixture_run','')),mode)
+        st.session_state['fixture_selected']=True
 if st.query_params.get('fixture_toolbar_live') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[0];st.session_state['fixture_selected']=True
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):

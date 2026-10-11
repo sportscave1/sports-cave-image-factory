@@ -48,11 +48,11 @@ def chooser(store,user):
     st.caption('Win Back uses a scheduled customer inactivity scan. Identifiable abandoned-cart events are not available; checkout recovery uses verified Shopify checkouts.')
     for kind,(name,label,_) in TRIGGERS.items():
         if st.button(name+' · '+label,key='auto_create_'+kind,use_container_width=True):
-            row=store.create(user,kind,**({'lifecycle':True} if kind in ('welcome','post_purchase','win_back') else {}));changed();open_flow(row['id'])
+            row=store.create(user,kind,empty=True,**({'lifecycle':True} if kind in ('welcome','post_purchase','win_back') else {}));changed();open_flow(row['id'])
     with st.expander('Start from scratch'):
         kind=st.selectbox('Choose trigger',list(TRIGGERS),format_func=lambda t:TRIGGERS[t][1],key='auto_scratch_trigger')
         if st.button('Create blank flow',key='auto_scratch_create'):
-            row=store.create(user,kind,'New automation',**({'lifecycle':True} if kind in ('welcome','post_purchase','win_back') else {}));changed();open_flow(row['id'])
+            row=store.create(user,kind,'New automation',empty=True,**({'lifecycle':True} if kind in ('welcome','post_purchase','win_back') else {}));changed();open_flow(row['id'])
     st.caption('Product viewed · Product added to cart · Cart viewed · Checkout started: coming / secure identity-dependent. Anonymous activity never sends email.')
 
 
@@ -324,19 +324,11 @@ def editor_dialog(shop,store,actions,identity):
         content.html('<div class="sc-auto-editor-loading" role="status">Opening automation…</div>')
         try:
             existing=current_display_row(store,st.session_state,str(uuid.UUID(str(identity))))
-            if (existing and existing['status']=='DRAFT' and existing['trigger_type'] in ('welcome','post_purchase','win_back')
-                and not existing.get('config',{}).get('draft',{}).get('lifecycle_version')):
-                # Explicit conversion keeps the exact previous config and steps for rollback.
-                with content.container():
-                    st.subheader(existing['name'])
-                    st.caption('Prepare the shared flow experience and starter emails. Existing draft content and history will be preserved in the audit snapshot.')
-                    if st.button('Prepare draft flow',key='lifecycle-prepare'):
-                        store.prepare_lifecycle(actions.user,identity);changed();st.rerun(scope='app')
-                    if st.button('← Automations',key='lifecycle-prepare-back'):
-                        request_route(None);st.rerun(scope='app')
-                return
+            from crm_automation_definition import native
+            if existing and status(existing)=='DRAFT' and not existing.get('config',{}).get('deleted_at') and not native(existing) and existing['trigger_type'] in TRIGGERS:
+                existing=store.adopt(actions.user,identity)
+                changed()
             with content.container():
-                from crm_automation_definition import native
                 if existing and not native(existing):
                     st.subheader(existing['name']);st.caption('Legacy '+existing['status'].lower()+' flow · runtime and audit history retained')
                     if st.button('← Automations',key='legacy_auto_back'):

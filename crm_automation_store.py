@@ -66,11 +66,19 @@ class AutomationStore(CampaignStore):
         if scope is None or scope[0] is not self:return None
         return scope[1].get(str(identity))
 
-    def create(self,user,trigger='welcome',name=None,*,lifecycle=False):
+    def create(self,user,trigger='welcome',name=None,*,lifecycle=False,empty=False):
         require(user,'crm_automations_manage')
         from crm_automation_definition import TRIGGERS
         identity=str(uuid.uuid4())
         cfg={'format':FORMAT,'revision':1,'published_version':0,'draft':new_flow(trigger)}
+        if empty:
+            cfg['draft']['emails']=[]
+            if lifecycle and trigger in ('welcome','post_purchase','win_back'):
+                cfg['draft'].update(lifecycle_version=1,exit_on_purchase=trigger!='post_purchase',
+                    inactive_days=90,reentry_days=90 if trigger=='win_back' else 0,fulfilment_fallback_days=14)
+            validate(cfg['draft'],draft=True)
+            return self.q("""INSERT INTO crm_automations(id,automation_key,name,trigger_type,config)
+              VALUES(%s,%s,%s,%s,%s::jsonb) RETURNING *""",(identity,'native:'+identity,name or TRIGGERS[trigger][0],trigger,json.dumps(cfg)),True)
         from crm_html_workspace import html_document
         from crm_middle_sections import middle_sections,commit_middle
         rendering=self.render_settings()
@@ -231,27 +239,33 @@ class AutomationStore(CampaignStore):
         return self.save_flow(user,row['id'],row['name'],flow,1)
 
     def adopt(self,user,identity):
-        """Explicitly convert an unused legacy draft, never a live journey."""
+        """Initialise an unused legacy draft idempotently, never a live journey."""
         require(user,'crm_automations_manage')
         from crm_automation_definition import TRIGGERS,email_step
         from crm_html_workspace import html_document
         with self.db() as conn:
             row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
-            if not row or row['status']!='DRAFT' or native(row) or row['trigger_type'] not in TRIGGERS:
+            if row and native(row):return row
+            if not row or status(row)!='DRAFT' or row['config'].get('deleted_at') or row['trigger_type'] not in TRIGGERS:
                 raise ValueError('Only an unused supported legacy draft can be converted.')
             if conn.execute('SELECT 1 FROM crm_automation_enrollments WHERE automation_id=%s LIMIT 1',(identity,)).fetchone():
                 raise ValueError('This legacy flow has journey history; retain it for audit.')
             emails=[];delay=0
-            for step in row['steps']:
+            for step in ([] if 'draft' in row['config'] else row['steps']):
                 if step['type']=='delay':delay+=int(float(step['hours'])*3600)
                 elif step['type']=='send':
                     template=conn.execute('SELECT * FROM crm_templates WHERE template_key=%s',(step['template'],)).fetchone()
                     if not template:raise ValueError('Legacy email template is unavailable.')
                     emails.append(email_step(html_document(self.template_document(template)),delay));delay=0
-                elif step['type']!='stop':raise ValueError('Legacy flow contains unsupported steps.')
-            flow=new_flow(row['trigger_type']);flow['emails']=emails or flow['emails'];validate(flow)
-            cfg={'format':FORMAT,'revision':1,'published_version':0,'draft':flow,'legacy_config':row['config']}
-            return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps='[]'::jsonb,updated_at=now() WHERE id=%s RETURNING *",(json.dumps(cfg),identity)).fetchone()
+                elif step['type'] not in ('stop','revalidate'):raise ValueError('Legacy flow contains unsupported steps.')
+            # Existing native drafts never reach conversion. Keep every legacy
+            # email and its timing; an unused empty record stays empty.
+            flow=new_flow(row['trigger_type']);flow['emails']=emails
+            if row['trigger_type']=='win_back':flow['inactive_days']=row['config'].get('days',180)
+            if 'draft' in row['config']:flow=deepcopy(row['config']['draft'])
+            validate(flow,draft=True)
+            cfg={**deepcopy(row['config']),'format':FORMAT,'revision':1,'published_version':0,'draft':flow,'legacy_config':deepcopy(row['config'])}
+            return conn.execute("UPDATE crm_automations SET config=%s::jsonb,updated_at=now() WHERE id=%s RETURNING *",(json.dumps(cfg),identity)).fetchone()
 
     def draft(self,identity,*,row=None):
         row=self.flow(identity) if row is None else row

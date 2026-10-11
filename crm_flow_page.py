@@ -32,6 +32,11 @@ STYLE='''<style>
 .st-key-flow-workspace{gap:6px!important}
 [data-testid="stMainBlockContainer"]:has(.st-key-flow-workspace){padding-top:calc(var(--sc-topbar-height,64px) + 8px)!important}
 .st-key-crm-workspace:has(.st-key-flow-workspace),.st-key-automation-flow-route:has(.st-key-flow-workspace){gap:6px!important}
+/* Invisible shell bridges and route placeholders must not reserve row gaps. */
+[data-testid="stMainBlockContainer"] [data-testid="stVerticalBlock"]:has(.st-key-flow-workspace){gap:0!important}
+[data-testid="stMainBlockContainer"]:has(.st-key-flow-workspace) [data-testid="stElementContainer"]:has(>[data-testid="stEmpty"]){display:none}
+.sc-flow-empty{border:1px solid #e5e5e5;border-radius:6px;padding:12px;font-size:13px;color:#626262}
+.sc-flow-empty strong{display:block;color:#242424;margin-bottom:3px}
 .st-key-flow-workspace [data-testid="stExpander"] details{border-radius:4px!important}
 .st-key-flow-workspace [data-testid="stExpander"] summary{min-height:32px;padding:4px 8px;font-size:13px}
 .sc-flow-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:0;padding:0!important}
@@ -195,6 +200,8 @@ def sequence(shop,store,user,identity,period):
     row=definition(store,st.session_state,identity);flow=row['config']['draft']
     slots={};detail_slots={}
     from crm_flow_thumbnail import thumbnail
+    if not flow['emails']:
+        st.html('<div class="sc-flow-empty"><strong>No emails yet</strong>Add your first email to build this draft flow.</div>')
     for i,s in enumerate(flow['emails']):
         sid=s['step_id'];prefix='flow-step-'+sid+'-';content=s['document']['content']
         amount,unit=delay_controls(s['delay_seconds']);delay=f'{amount} {unit.lower().rstrip("s") if amount==1 else unit.lower()}'+delay_origin(flow['emails'],i)
@@ -221,7 +228,8 @@ def sequence(shop,store,user,identity,period):
                         st.caption('Per-email unsubscribe attribution is unavailable in the current ledger.')
     if status(row)!='ARCHIVED' and st.button('+ Add Email',key='flow-add-'+str(identity)):
         draft=deepcopy(flow);step=email_step(delay_seconds=86400)
-        if flow.get('lifecycle_version'):step['anchor']=flow['emails'][0]['anchor']
+        if flow.get('lifecycle_version'):
+            step['anchor']=flow['emails'][0]['anchor'] if flow['emails'] else {'welcome':'subscription','post_purchase':'payment','win_back':'last_purchase'}[flow['trigger']]
         draft['emails'].append(step);commit(store,user,row,draft)
     step_performance(store,identity,slots,detail_slots)
     preview=next((s for s in flow['emails'] if s['step_id']==st.session_state.get('flow_preview_step')),None)
