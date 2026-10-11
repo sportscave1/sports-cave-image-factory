@@ -3,7 +3,7 @@ import sys
 import os
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from threading import Event
+from threading import Event, Timer
 from unittest.mock import patch, Mock
 import streamlit as st
 from tests.test_meta_posting_jobs import Ledger
@@ -11,6 +11,7 @@ from tests.test_meta_posting import FakePostingClient, request_for
 from meta_posting_service import MetaPostingService
 from meta_posting_jobs import PostingJobs
 import ads_posting_progress as progress
+import ads_posting_page as posting
 
 
 @st.cache_resource
@@ -29,15 +30,18 @@ def fixture():
 gate, store, client, jobs = fixture()
 if os.environ.get('META_POSTING_UI_FIXTURE') == '1':
     # Fragment timer callbacks execute after the script's patch contexts exit.
-    import ads_posting_page as posting
     import requests
     progress.JOBS = jobs
     posting.MetaPostingClient = lambda: Mock(ad_account_id='act_123')
     posting._load_recent_posts = Mock(side_effect=store.recent)
     requests.sessions.Session.request = Mock(side_effect=AssertionError('No external network allowed'))
+progress.cleanup_completed()
 st.title('Creative Refresh / New Ads — mocked posting')
 if st.button('Create 3 Paused Meta Ads'):
-    progress.track(jobs.submit(request_for()))
+    request = request_for()
+    st.session_state[posting.SUBMISSION_ID_KEY] = request.submission_id
+    progress.track(jobs.submit(request))
+    Timer(4, gate.set).start()
 if st.button('Continue mocked Meta job'):
     gate.set()
 if store.record.get('status') == 'FAILED':

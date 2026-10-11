@@ -1705,6 +1705,15 @@ def _render_recent_posts():
 
 
 def render_page():
+    from ads_posting_progress import cleanup_completed, render_current
+    cleanup_completed()
+    tracked = st.query_params.get("meta_posting_job") or st.session_state.get("posting_tracked_job")
+    if tracked and not st.session_state.get(SUBMISSION_ID_KEY):
+        # Restore the ledger identity before normal form defaults allocate a run.
+        # Status reconciliation below owns whether this run may be retried.
+        st.session_state[SUBMISSION_ID_KEY] = str(tracked)
+        st.session_state[RUN_STATE_KEY] = RUN_STATE_ACTIVE
+        st.session_state[PROCESSING_KEY] = True
     from ads_posting_style import CSS
     st.markdown(CSS, unsafe_allow_html=True)
     # Detach editable values from widget cleanup while the progress view is shown.
@@ -1720,14 +1729,12 @@ def render_page():
             st.session_state[key] = st.session_state[key]
     with st.container(key="post-ad-workspace"):
         _render_post_ad()
+    render_current(compact=True)
 
 
 def _render_post_ad():
     title_col, refresh_col = st.columns([5, 1])
     title_col.title("Post Ad")
-    from ads_posting_progress import render_current
-    if render_current(compact=True):
-        return
     if st.session_state.get(posting_handoff.PENDING_KEY):
         try:
             records, _ = _product_selector_state(_product_rows_state())
@@ -1808,9 +1815,9 @@ def _render_post_ad():
     )
 
     result = dict(st.session_state.get(RESULT_KEY) or {})
-    if str(result.get("status") or "") == "COMPLETE":
-        _render_success(result, compact=True)
-        return
+    if st.session_state.get("posting_tracked_job") or st.query_params.get("meta_posting_job"):
+        # The modal owns job messages; keep the configuration form underneath it.
+        result = {}
     if str(result.get("status") or "") == "ABANDONED_EXTERNALLY":
         st.error(
             str(
@@ -2602,12 +2609,13 @@ def _render_post_ad():
 
     create_clicked = st.button(
         "Create Ad", type="primary",
-        disabled=not ready or st.session_state[PROCESSING_KEY],
+        disabled=not ready or st.session_state[PROCESSING_KEY] or bool(
+            st.session_state.get("posting_tracked_job") or st.query_params.get("meta_posting_job")
+        ),
         key=f"{STATE_PREFIX}create",
     )
 
     if create_clicked:
-        st.progress(0, text="Validating campaign settings…")
         st.session_state[PROCESSING_KEY] = True
         st.session_state[RUN_STATE_KEY] = RUN_STATE_ACTIVE
         request = _build_posting_request(

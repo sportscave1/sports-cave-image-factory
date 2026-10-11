@@ -16205,6 +16205,11 @@ def main():
 
     log_startup_stage("ROUTER START")
     current_page = get_current_page()
+    if st.session_state.get("posting_success_receipt"):
+        from ads_posting_progress import cleanup_completed, RECEIPT_KEY
+        cleanup_completed()
+        if current_page != "Posting":
+            st.session_state.pop(RECEIPT_KEY, None)
     apply_global_search_context(current_page)
     log_startup_stage(f"PAGE SELECTED: {current_page}")
     log_app_memory(f"Page load start: {current_page}")

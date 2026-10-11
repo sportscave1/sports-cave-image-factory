@@ -20,122 +20,152 @@ def clear():
 def progress_value(row):
     """Object confirmation, never a fabricated time/operation percentage."""
     done, total = confirmed_ads(row)
-    # Include final verification as a separate unit, even if every ID is saved.
-    verified = row.get('status') == 'COMPLETE' and done == total
-    return (done + int(verified)) / (total + 1)
+    return done / total if total else 0
+
+
+RECEIPT_KEY = 'posting_success_receipt'
+
+
+def verified_success(row):
+    done, total = confirmed_ads(row)
+    return row.get('status') == 'COMPLETE' and total > 0 and done == total
+
+
+def cleanup_completed():
+    """Run before widgets. Only clear inputs owned by this completed submission."""
+    import ads_posting_page as posting
+    receipt = st.session_state.get(RECEIPT_KEY)
+    if not receipt or not verified_success(receipt):
+        return
+    identity = receipt['submission_id']
+    if st.session_state.get(posting.SUBMISSION_ID_KEY) == identity:
+        for key in list(st.session_state):
+            if key.startswith(posting.STATE_PREFIX):
+                st.session_state.pop(key, None)
+        st.session_state.pop(posting.posting_handoff.LOADED_KEY, None)
+        st.session_state.pop(posting.PRODUCT_SELECTOR_STATE_KEY, None)
+    if st.session_state.get(JOB_KEY) == identity:
+        clear()
+
+
+def _close_success():
+    st.session_state.pop(RECEIPT_KEY, None)
+    st.rerun()
 
 
 def render_current(*, compact=False):
+    receipt = st.session_state.get(RECEIPT_KEY)
     identity = st.query_params.get(QUERY_KEY) or st.session_state.get(JOB_KEY)
-    if not identity:
+    if not identity and not receipt:
         return False
-    try:
-        identity = str(uuid.UUID(str(identity)))
-    except ValueError:
-        st.error('Invalid Posting job reference.')
-        if st.button('Return to Posting', key='posting_invalid_return'):
-            clear()
-            st.rerun()
-        return True
-    track(identity)
-    polling_paused = st.session_state.get('posting_status_failures', 0) >= 5
-    @st.fragment(run_every=None if polling_paused or st.session_state.get('posting_finished_job') == identity else 2)
-    def panel():
-        import ads_posting_page as posting
+    if identity:
         try:
-            row = JOBS.snapshot(identity)
-        except Exception as error:
-            from meta_posting_recovery import diagnostic
-            diagnostic(error, 'checkpoint_status_read', identity)
-            failures = st.session_state.get('posting_status_failures', 0) + 1
-            st.session_state['posting_status_failures'] = failures
-            st.warning('Posting status is temporarily unavailable. The job may still be running. Do not submit again.')
-            if failures >= 5:
-                st.caption('Automatic status checks paused after five failures. Retry status to check the same job; this does not create ads.')
-            if st.button('Retry status', key='posting_retry_status'):
-                st.session_state.pop('posting_status_failures', None)
-                st.rerun()
-            if failures == 5:
-                st.rerun()
-            return
-        st.session_state.pop('posting_status_failures', None)
-        if not row.get('submission_id'):
-            st.error('This Posting job could not be found. Reconcile the saved job reference before creating another.')
-            if st.button('Return to Posting', key='posting_missing_return'):
-                clear()
-                st.rerun()
-            return
-        status = row.get('status')
-        done, total = confirmed_ads(row)
-        st.session_state[posting.RESULT_KEY] = dict(row)
-        st.session_state[posting.SUBMISSION_ID_KEY] = identity
-        st.session_state[posting.RUN_STATE_KEY] = status
-        st.session_state[posting.PROCESSING_KEY] = status not in TERMINAL
-        st.subheader('Creating your Meta ads' if status not in TERMINAL else 'Meta posting result')
-        if compact and status not in TERMINAL:
-            st.button('Create Ad', disabled=True, key='posting_create_in_progress')
-        st.progress(progress_value(row), text=f'{done} of {total} ads confirmed · final PAUSED verification required'
-                    if status != 'COMPLETE' else f'{done} of {total} ads verified · PAUSED')
-        if (status in TERMINAL and not row.get('running_here')
-                and st.session_state.get('posting_finished_job') != identity):
-            st.session_state['posting_finished_job'] = identity
-            posting._load_recent_posts.clear()
-            st.rerun()
-        if status == 'COMPLETE':
-            posting._render_success(row, compact=compact)
-        elif status in TERMINAL:
-            st.error(row.get('safe_error') or 'Posting stopped. Review the saved result.')
-            if row.get('last_operation'):
-                st.caption('Stopped during: ' + row['last_operation'])
-            posting._render_object_result(row, title=f'{done} of {total} ads confirmed · partial result')
-            if row.get('can_retry') and st.button('Retry incomplete steps', key='posting_retry_job'):
-                try:
-                    JOBS.retry(identity)
-                except Exception:
-                    st.error('Retry could not start. Refresh status before trying again.')
-                else:
-                    st.session_state.pop('posting_finished_job', None)
+            identity = str(uuid.UUID(str(identity)))
+        except ValueError:
+            st.error('Invalid Posting job reference. Reconcile it before creating another campaign.')
+            return True
+        track(identity)
+    polling_paused = st.session_state.get('posting_status_failures', 0) >= 5
+
+    @st.dialog('Meta Ads', width='small', dismissible=False)
+    def modal():
+        st.markdown("""<style>
+        div[role="dialog"] {width:min(500px,calc(100vw - 24px));border:1px solid #d6dce5;
+          border-radius:12px;box-shadow:0 16px 48px #14223826;
+          position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+          margin:0;max-height:calc(100dvh - 24px);overflow:auto;}
+        div[role="dialog"] [data-testid="stVerticalBlock"] {gap:.65rem;}
+        div[role="dialog"] [data-testid="stHorizontalBlock"] {flex-wrap:nowrap;gap:.75rem;}
+        div[role="dialog"] [data-testid="stColumn"] {min-width:0;flex:1;}
+        div[role="dialog"] [role="progressbar"] > div > div {background:#0078d4;}
+        div[role="dialog"]:has(.posting-success) [role="progressbar"] > div > div {background:#168342;}
+        div[role="dialog"] [role="progressbar"] * {transition:none!important;animation:none!important;}
+        div[role="dialog"] button[kind="primary"] {background:#0078d4;border-color:#0078d4;}
+        .posting-success {color:#168342;font-weight:600;}
+        </style>""", unsafe_allow_html=True)
+
+        @st.fragment(run_every=None if receipt or polling_paused or st.session_state.get('posting_finished_job') == identity else 2)
+        def panel():
+            import ads_posting_page as posting
+            if receipt:
+                done, total = confirmed_ads(receipt)
+                st.markdown('<div class="posting-success">✓ Ads created successfully.</div>', unsafe_allow_html=True)
+                st.progress(1.0, text=f'{done} of {total} ads verified')
+                st.write(receipt.get('campaign_name') or 'Meta campaign')
+                st.caption('PAUSED — Ready for Review')
+                left, right = st.columns(2)
+                if left.button('New Campaign', type='primary', use_container_width=True):
+                    _close_success()
+                if right.button('Close', use_container_width=True):
+                    _close_success()
+                return
+            # A late fragment callback must never restore an older run.
+            if st.session_state.get(JOB_KEY) != identity:
+                return
+            try:
+                row = JOBS.snapshot(identity)
+            except Exception as error:
+                from meta_posting_recovery import diagnostic
+                diagnostic(error, 'checkpoint_status_read', identity)
+                failures = st.session_state.get('posting_status_failures', 0) + 1
+                st.session_state['posting_status_failures'] = failures
+                st.warning('Posting status is unavailable. The job may still be running. Do not submit again.')
+                if failures >= 5:
+                    st.caption('Automatic status checks paused. Retry status checks this same job without creating ads.')
+                if st.button('Retry status', key='posting_retry_status'):
+                    st.session_state.pop('posting_status_failures', None)
                     st.rerun()
-            if status in {'AMBIGUOUS', 'ABANDONED_EXTERNALLY'} or not row.get('can_retry'):
-                st.caption('No automatic retry. Reconcile the saved IDs in Meta before any new submission.')
-            if row.get('needs_original_inputs'):
-                st.caption('After a server restart, return to posting setup and restore the original images and copy. Create Ad will resume this same job only if its saved content fingerprint matches.')
-            if st.button('Back to posting setup', key='posting_result_setup'):
-                clear()
+                if failures == 5:
+                    st.rerun()
+                return
+            if st.session_state.get(JOB_KEY) != identity:
+                return
+            st.session_state.pop('posting_status_failures', None)
+            if not row.get('submission_id'):
+                st.error('Posting job not found. Reconcile the saved reference before creating another campaign.')
+                return
+            if verified_success(row):
+                st.session_state[RECEIPT_KEY] = dict(row)
+                # Remove the durable browser restoration pointer immediately.
+                st.query_params.pop(QUERY_KEY, None)
+                posting._load_recent_posts.clear()
                 st.rerun()
-        else:
-            stage = row.get('operation') or str(status or 'VALIDATING').replace('_', ' ').title()
-            st.info(stage)
-            if row.get('elapsed_seconds') is not None:
-                st.caption(f"Elapsed: {row['elapsed_seconds']} seconds · current operation: {row['operation_seconds']} seconds")
-            completed = [label for key, label in (
-                ('campaign_id', 'Campaign selected or created'),
-                ('adset_id', 'Ad set selected or created'),
-            ) if row.get(key)]
-            if done:
-                completed.append(f'{done} paused ads confirmed')
-            if completed:
-                st.caption('✓ ' + ' · ✓ '.join(completed[-4:]))
-            if (row.get('operation_seconds') or 0) >= 90:
-                st.warning('Meta is taking longer than expected. The outcome is not yet confirmed; do not submit again. Status checks continue using this saved job.')
-            st.caption('Job '+identity+' · You can leave this page; posting continues on the server.')
-            if not row.get('running_here'):
-                st.warning('Outcome unknown: this server has no running worker for the saved checkpoint. Another worker may still be posting. Reconcile the saved IDs in Meta before retrying; this job will not be replayed automatically.')
-        with st.expander('View Posting Details', expanded=False):
-            st.write('Posting job: '+identity)
-            posting._render_object_result(row, title='Saved posting result')
-        if st.button('Close', key='posting_progress_close'):
-            from ads_navigation import (
-                ADS_PAGE_KEY, CREATIVE_REFRESH_PAGE_KEY, ADS_CREATE_ROUTE, CREATIVE_REFRESH_ROUTE,
-            )
-            loaded = st.session_state.get(posting.posting_handoff.LOADED_KEY) or {}
-            refresh = bool(loaded.get('creative_refresh'))
-            st.session_state['current_page'] = CREATIVE_REFRESH_ROUTE if refresh else ADS_CREATE_ROUTE
-            st.session_state['selected_page'] = st.session_state['current_page']
-            st.query_params['page'] = CREATIVE_REFRESH_PAGE_KEY if refresh else ADS_PAGE_KEY
-            st.rerun()
-    panel()
-    import ads_posting_page as posting
-    if not compact:
-        posting._render_recent_posts()
+            status = row.get('status')
+            done, total = confirmed_ads(row)
+            # History inspection must not overwrite a newer draft's identity.
+            owner = st.session_state.get(posting.SUBMISSION_ID_KEY)
+            if owner in (None, identity):
+                st.session_state[posting.RESULT_KEY] = dict(row)
+                st.session_state[posting.SUBMISSION_ID_KEY] = identity
+                st.session_state[posting.RUN_STATE_KEY] = status
+                st.session_state[posting.PROCESSING_KEY] = status not in TERMINAL
+            if status in TERMINAL:
+                st.error(row.get('safe_error') or 'Posting is incomplete or unverified. Saved progress has been preserved.')
+                st.caption(f'{done} of {total} ads confirmed PAUSED')
+                if row.get('can_retry') and st.button('Retry incomplete steps', key='posting_retry_job'):
+                    try:
+                        JOBS.retry(identity)
+                    except Exception:
+                        st.error('Retry could not start. Check status before trying again.')
+                    else:
+                        st.session_state.pop('posting_finished_job', None)
+                        st.rerun()
+                if row.get('needs_original_inputs'):
+                    st.caption('Restore the original images and copy in Posting to resume this same job safely.')
+                elif not row.get('can_retry'):
+                    st.caption('Reconcile the saved Meta IDs before retrying. No automatic reposting.')
+                if st.button('Back to posting setup', key='posting_result_setup'):
+                    clear()
+                    st.rerun()
+                if not row.get('running_here') and st.session_state.get('posting_finished_job') != identity:
+                    st.session_state['posting_finished_job'] = identity
+                    st.rerun()
+            else:
+                st.subheader('Creating Meta Ads…')
+                st.progress(progress_value(row), text=f'{done} of {total} ads verified PAUSED · final verification pending')
+                st.caption(row.get('operation') or 'Validating campaign settings…')
+                if not row.get('running_here'):
+                    st.warning('Outcome unknown. Reconcile the saved job before retrying; it will not be replayed automatically.')
+        panel()
+    modal()
     return True

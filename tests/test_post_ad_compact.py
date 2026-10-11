@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import requests
 from streamlit.testing.v1 import AppTest
 import ads_posting_page as page
-from ads_posting_progress import progress_value
+from ads_posting_progress import progress_value, verified_success
 
 FIXTURE = Path(__file__).parent / 'fixtures/post_ad_compact_preview.py'
 
@@ -56,9 +56,10 @@ class CompactPostingTests(unittest.TestCase):
         updated, _ = page._product_selector_state(changed, state=state)
         self.assertIn('Changed', updated[0]['label'])
 
-    def test_progress_reserves_final_verification(self):
+    def test_progress_uses_counts_and_success_requires_final_verification(self):
         ads = [{'index': n, 'meta_ad_id': str(n), 'meta_ad_configured_status': 'PAUSED'} for n in (1, 2, 3)]
-        self.assertLess(progress_value({'status': 'AD_CREATED', 'ad_results': ads}), 1)
+        self.assertEqual(progress_value({'status': 'AD_CREATED', 'ad_results': ads}), 1)
+        self.assertFalse(verified_success({'status': 'AD_CREATED', 'ad_results': ads}))
         self.assertEqual(progress_value({'status': 'COMPLETE', 'ad_results': ads}), 1)
         ads[2]['meta_ad_configured_status'] = 'ACTIVE'
         self.assertLess(progress_value({'status': 'COMPLETE', 'ad_results': ads}), 1)
