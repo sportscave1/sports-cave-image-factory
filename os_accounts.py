@@ -178,7 +178,7 @@ PAGE_REGISTRY = (
     {
         "key": "accounts_access",
         "route": "Accounts & Access",
-        "label": "Accounts & Access",
+        "label": "Settings",
         "worker_assignable": False,
     },
     {"key": "developer", "route": "Developer", "label": "Developer", "worker_assignable": False},
@@ -206,7 +206,7 @@ PAGE_REGISTRY = (
 )
 
 PAGE_ALIASES = {
-    "Settings": "Developer",
+    "Settings": "Accounts & Access",
     "Marketing Factory": "Ads",
     "Dropbox": "Files",
     social_media.LEGACY_REELS_ROUTE: social_media.AI_REELS_ROUTE,

@@ -24,7 +24,7 @@ ALIASES = {
     "analytics": ("ga4", "google analytics", "traffic"),
     "seo": ("search console", "gsc", "organic"),
     "email": ("mail", "inbox", "support email", "reply"),
-    "accounts_access": ("users", "staff", "permissions", "roles", "accounts"),
+    "accounts_access": ("settings", "users", "staff", "permissions", "roles", "accounts"),
 }
 
 # These features have no stable section deep link; route to their existing parent.
@@ -36,7 +36,7 @@ FEATURES = (
     ("email_signatures", "Signatures", "Email Settings · Nathan, Maria & Company Default", "email", ("signature", "email signature"), ("email", "settings"), "Setting"),
     ("certificates", "Certificates", "Edition Ops · certificates", "edition_ops", ("certificate",), ("edition",), "Tool"),
     ("order_certificates", "Orders — Certificate status", "Orders · certificate status", "orders", (), ("certificate", "certificates"), "Tool"),
-    ("email_permissions", "Accounts & Access — Email permission", "Accounts & Access · page permissions", "accounts_access", (), ("email", "permission"), "Setting"),
+    ("email_permissions", "Settings — Email permission", "Settings · Users & Access", "accounts_access", (), ("email", "permission"), "Setting"),
 )
 
 

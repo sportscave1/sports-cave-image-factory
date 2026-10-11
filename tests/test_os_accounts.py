@@ -2299,7 +2299,7 @@ class AccountAccessTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         permission_source = source[
             source.index("def _account_permission_fields") :
-            source.index("\n\ndef render_accounts_access_page")
+            source.index("\n@st.fragment\ndef render_accounts_access_page")
         ]
 
         self.assertIn('"View activity log"', permission_source)
@@ -2309,7 +2309,7 @@ class AccountAccessTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         permission_source = source[
             source.index("def _account_permission_fields") :
-            source.index("\n\ndef render_accounts_access_page")
+            source.index("\n@st.fragment\ndef render_accounts_access_page")
         ]
 
         self.assertIn('"Edit prompts"', permission_source)
@@ -2348,6 +2348,7 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["sports_cave_current_user"] = worker
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
         app_test.session_state["selected_page"] = "Accounts & Access"
+        app_test.session_state["settings-section"] = "Security & Account"
 
         with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker), patch.dict(
             "os.environ",
@@ -2410,6 +2411,7 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["sports_cave_current_user"] = worker
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
         app_test.session_state["selected_page"] = "Accounts & Access"
+        app_test.session_state["settings-section"] = "Security & Account"
 
         with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker), patch.dict(
             "os.environ",
