@@ -343,7 +343,7 @@ def list_tasks(home):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("action", choices=["route", "init", "categories", "new", "open", "list", "where",
-                                      "verify", "record-tests", "status", "approve-base", "preview"])
+                                      "verify", "record-tests", "status", "approve-base", "preview", "new-draft", "save-draft", "open-draft", "list-drafts", "recover-draft", "draft-ui"])
     p.add_argument("--home", type=Path, default=DEFAULT_HOME)
     p.add_argument("--repo", type=Path, default=Path.cwd())
     p.add_argument("--description", default="")
@@ -356,11 +356,31 @@ def main(argv=None):
     p.add_argument("--status", choices=STATES)
     p.add_argument("--open", action="store_true")
     p.add_argument("--create", action="store_true")
+    p.add_argument("--name")
+    p.add_argument("--file", action="append", default=[])
+    p.add_argument("--expected-revision", type=int)
+    p.add_argument("--revision", type=int)
     a = p.parse_args(argv)
     a.home = a.home.resolve()
     if a.action in {"new", "open", "init", "verify", "record-tests", "status", "approve-base"} and not a.owner:
         p.error("--owner must identify the assigned task/session")
-    if a.action == "route":
+    if a.action == "draft-ui":
+        import draft_ui
+        draft_ui.launch(a.home, a.id, a.owner, a.open)
+        return 0
+    if a.action in {"new-draft", "save-draft", "open-draft", "list-drafts", "recover-draft"}:
+        import drafts  # No application imports; lazy draft tooling only.
+        if a.action == "new-draft":
+            out = drafts.new(a.home, a.id, a.owner, a.name)
+        elif a.action == "save-draft":
+            out = drafts.save(a.home, a.id, a.owner, a.expected_revision, a.file)
+        elif a.action == "open-draft":
+            out = drafts.inspect(a.home, a.id, a.owner, a.revision, a.open)
+        elif a.action == "recover-draft":
+            out = drafts.recover_copy(a.home, a.id, a.owner, a.revision)
+        else:
+            out = drafts.listing(a.home, a.owner)
+    elif a.action == "route":
         candidates = route(a.description, a.category)
         out = {"candidates": candidates, "needs_confirmation": len(candidates) != 1}
     elif a.action == "init":
@@ -377,7 +397,7 @@ def main(argv=None):
         out = {"path": git(a.repo, "rev-parse", "--show-toplevel"),
                "branch": git(a.repo, "branch", "--show-current"), "commit": git(a.repo, "rev-parse", "HEAD")}
     elif a.action == "preview":
-        raise RuntimeError("Preview disabled: Phase 2 must isolate data, credentials and provider transports.")
+        raise RuntimeError("Use task-local Studio.ps1 DraftUI -Id <task-id> -Owner <owner>; Start Preview runs mandatory Docker isolation probes.")
     elif a.action == "open":
         with locked(a.home) as registry:
             d = read(registry)

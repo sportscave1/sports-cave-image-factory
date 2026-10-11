@@ -8969,6 +8969,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Reporting": ":material/bar_chart:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
+    "Developer Studio": ":material/developer_mode:",
     "Accounts & Access": ":material/group:",
 }
 
@@ -9327,6 +9328,7 @@ def render_sidebar():
     with st.sidebar:
         _render_sidebar_create_growth(current_page, allowed_routes, history_routes)
 
+    _sidebar_route_button("Developer Studio", current_page, allowed_routes)
     _sidebar_route_button("Image Protection", current_page, allowed_routes)
 
     reporting_overview_allowed = os_accounts.can_access_page(user, "Reporting")
@@ -16021,7 +16023,7 @@ def render_selected_page(current_page):
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
         "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
-        "Developer", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Developer Studio", "Developer", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -16048,6 +16050,9 @@ def render_selected_page(current_page):
 
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
+    elif current_page == "Developer Studio":
+        from developer_studio_page import render_page
+        render_page(current_os_user())
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
     elif current_page == "Reporting":
