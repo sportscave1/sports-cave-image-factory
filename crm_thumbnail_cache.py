@@ -12,10 +12,12 @@ import os
 import subprocess
 import sys
 import tempfile
+from worker_memory import thumbnail_workers
+from crm_thumbnail_process import run_renderer
 
 LOG = logging.getLogger(__name__)
-# At most two isolated Chromium subprocesses, including publication prewarming.
-WORKERS = max(1, min(2, int(os.getenv('CRM_THUMBNAIL_WORKERS', '2'))))
+# Budget the entire browser tree, not just the small parent Python process.
+WORKERS = thumbnail_workers(max(1, min(2, int(os.getenv('CRM_THUMBNAIL_WORKERS', '2')))))
 POOL = ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix='email-thumbnail')
 LOCK = Lock()
 PENDING = {}
@@ -101,8 +103,8 @@ def generate(key, load, store=None):
                 source = Path(folder) / 'input.json'
                 output = Path(folder) / 'output.webp'
                 source.write_text(json.dumps({'document': doc, 'settings': cfg}), encoding='utf8')
-                result = subprocess.run([sys.executable, str(Path(__file__).with_name('crm_thumbnail_render.py')), str(source), str(output)],
-                    capture_output=True, timeout=120, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                LOG.info('email_thumbnail_started key=%s renderer_workers=%s', key[:12], WORKERS)
+                result = run_renderer([sys.executable, str(Path(__file__).with_name('crm_thumbnail_render.py')), str(source), str(output)])
                 if result.returncode:
                     # Never log source HTML, URLs, tokens or raw browser stderr.
                     reason = result.stderr.decode('utf8', errors='replace').strip()

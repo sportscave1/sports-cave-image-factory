@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from worker_memory import MemoryMonitor
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class Supervisor:
         self.stop = threading.Event()
         self.children = {}
         self.restart_at = {}
+        self.memory = MemoryMonitor()
 
     def request_stop(self, *_args):
         self.stop.set()
@@ -82,6 +84,7 @@ class Supervisor:
         try:
             while not self.stop.is_set():
                 self.check_children()
+                self.memory.sample(self.children)
                 self.stop.wait(0.5)
         finally:
             self.shutdown()

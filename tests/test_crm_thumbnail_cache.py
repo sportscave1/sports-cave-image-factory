@@ -58,7 +58,7 @@ class ThumbnailTests(TestCase):
         entered=Event();release=Event();load=Mock()
         def slow(*args,**kwargs):entered.set();release.wait(3);raise RuntimeError('fixture failure')
         key=cache.token('failed')
-        with patch('crm_thumbnail_cache.subprocess.run',side_effect=slow):
+        with patch('crm_thumbnail_cache.run_renderer',side_effect=slow):
             load.return_value=({}, {})
             started=time.monotonic()
             self.assertEqual(cache.request(key,load)[0],'LOADING')
