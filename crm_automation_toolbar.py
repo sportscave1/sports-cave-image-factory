@@ -79,7 +79,11 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                     request_route(None);st.rerun(scope='app')
             title=display_name(editor['name'] if editor else row['name'])
             badge='' if flow_view else '<span class="automation-state">'+escape(label(row,pending)+(' · Unsaved changes' if dirty else ''))+'</span>'
-            st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong>'+badge+'</div>')
+            if flow_view:
+                from crm_flow_inline import title_control
+                title_control(store,user,row,title)
+            else:
+                st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong>'+badge+'</div>')
             if flow_view:
                 from crm_checkout_analytics import PERIODS
                 with st.container(width=145):
@@ -125,6 +129,13 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                 action='pause' if row['status']=='ACTIVE' else 'resume'
                 if st.button(action.title(),key='toolbar-lifecycle'):
                     store.lifecycle(user,identity,action);changed();st.rerun(scope='fragment')
+        if flow_view:
+            signature=(str(identity),row['status'],version,publication.get('state'))
+            previous=st.session_state.get('flow-status-observed')
+            st.session_state['flow-status-observed']=signature
+            if previous and previous[0]==str(identity) and previous!=signature:
+                from crm_flow_page import refresh_control
+                refresh_control('flow-step-metrics-refresh')
         if flow_view and st.session_state.pop('flow-period-dirty',False):
             from crm_flow_page import refresh_control
             refresh_control('flow-analytics-refresh')
@@ -138,4 +149,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         from pathlib import Path
         script=Path(__file__).with_name('components').joinpath('crm_sections','automation_publish.js').read_text(encoding='utf-8')
         st.html('<script>'+script+'</script>',unsafe_allow_javascript=True)
+        if flow_view:
+            from crm_flow_inline import scripts
+            scripts()
     except (ValueError,PermissionError,StoreUnavailable) as exc:st.error(str(exc))

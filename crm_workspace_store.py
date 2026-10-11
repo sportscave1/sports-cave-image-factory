@@ -82,7 +82,7 @@ class WorkspaceRecords(BrandTemplates):
 
     def html_library(self,metadata=False):
         # A template used by an automation is managed by that workflow, not here.
-        fields="t.id,t.name,t.version,t.kind,t.updated_at,jsonb_build_object('format',t.content->'format') AS content" if metadata else 't.*'
+        fields="t.id,t.name,t.version,t.kind,t.updated_at,jsonb_build_object('format',t.content->'format','library_group',t.content->'library_group') AS content" if metadata else 't.*'
         return self.q("""SELECT """+fields+""" FROM crm_templates t WHERE t.archived_at IS NULL
           AND t.kind='Campaign' AND t.content->>'format'='campaign_blocks_v1'
           AND NOT EXISTS (SELECT 1 FROM crm_automations a,
@@ -99,7 +99,7 @@ class WorkspaceRecords(BrandTemplates):
         doc['blocks']=legacy_blocks(doc['content']);doc['type']='Custom'
         return doc
 
-    def save_design(self,user,name,document,identity=None,version=None):
+    def save_design(self,user,name,document,identity=None,version=None,*,library_group=None):
         require(user,'crm_templates_manage');validate_document(document)
         if not name.strip() or len(name)>150:raise ValueError('Use a template name of 1–150 characters.')
         doc=new_document();doc['type']=document['type'];doc['market']=document['market']
@@ -108,8 +108,15 @@ class WorkspaceRecords(BrandTemplates):
         if 'html_sections' in document:doc['html_sections']=deepcopy(document['html_sections'])
         if 'middle_sections' in document:doc['middle_sections']=deepcopy(document['middle_sections'])
         content={'format':'campaign_blocks_v1','document':doc}
+        if library_group is not None:
+            from crm_template_library import GROUPS
+            if library_group not in GROUPS:raise ValueError('Choose a template group.')
+            content['library_group']=library_group
         with self.db() as conn:
             if identity:
+                if library_group is None:
+                    previous=conn.execute('SELECT content FROM crm_templates WHERE id=%s',(identity,)).fetchone()
+                    if previous and previous['content'].get('library_group'):content['library_group']=previous['content']['library_group']
                 row=conn.execute("UPDATE crm_templates SET name=%s,content=%s::jsonb,version=version+1,updated_at=now() WHERE id=%s AND version=%s AND archived_at IS NULL AND content->>'format' IS DISTINCT FROM 'campaign_brand_section_v1' AND content->>'format' IS DISTINCT FROM 'campaign_delivery_v1' AND content->>'format' IS DISTINCT FROM 'automation_delivery_v1' RETURNING *",(name,json.dumps(content),identity,version)).fetchone()
             else:row=conn.execute("INSERT INTO crm_templates(template_key,name,kind,content) VALUES(%s,%s,'Campaign',%s::jsonb) RETURNING *",('design_'+uuid.uuid4().hex,name,json.dumps(content))).fetchone()
             if not row:raise ValueError('Template changed elsewhere or was archived. Reload before editing.')

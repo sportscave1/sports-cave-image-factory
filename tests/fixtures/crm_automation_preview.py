@@ -21,6 +21,8 @@ from tests.test_crm_send_flow import LIVE,CFG
 from tests.test_crm_simple_editor import document
 
 st.set_page_config(layout='wide',page_title='Local automation fixture')
+if st.query_params.get('fixture_inline'):
+    st.session_state['fixture_inline_runs']=st.session_state.get('fixture_inline_runs',0)+1
 if st.query_params.get('fixture_empty') or st.query_params.get('fixture_existing') or st.query_params.get('fixture_uninitialised'):
     st.html('''<style>:root{--sc-topbar-height:64px}header[data-testid="stHeader"]{display:none}
     .fixture-topbar{position:fixed;inset:0 0 auto;height:64px;background:#fcfbf8;border-bottom:1px solid #ddd;z-index:99;padding:20px;box-sizing:border-box}
@@ -236,3 +238,5 @@ if st.query_params.get('fixture_profile'):st.caption('Fixture Shopify requests: 
 if st.query_params.get('fixture_rerun'):st.caption('Fixture hydrations: '+str(st.session_state.get('fixture_hydrations',0)))
 
 if st.query_params.get("fixture_stability"):st.html("<pre id=fixture-measurements>"+json.dumps(sampled())+"</pre>")
+if st.query_params.get('fixture_inline'):
+    st.html('<span hidden id="inline-full-runs" data-runs="'+str(st.session_state['fixture_inline_runs'])+'"></span>')

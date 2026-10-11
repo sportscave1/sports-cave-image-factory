@@ -64,7 +64,35 @@ STYLE='''<style>
 .sc-flow-trigger{font-size:12px;color:#686b65;padding:4px 0}
 @media(max-width:1100px){.sc-flow-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:1000px){.st-key-flow-workspace .automation-title{height:auto!important;min-height:32px;gap:4px;flex-wrap:nowrap!important}.st-key-flow-workspace .automation-title strong{min-width:0!important}}
-@media(max-width:700px){[class*='st-key-flow-row-']{flex-wrap:wrap!important}[class*='st-key-flow-row-']>div:nth-child(2){flex:1 1 calc(100% - 100px)!important;min-width:0!important}[class*='st-key-flow-row-']>div:last-child{margin-left:88px}.sc-flow-metrics{gap:8px}.sc-flow-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.st-key-flow-workspace{cursor:default}
+.st-key-flow-workspace :is(p,small,strong,span,dt,dd,label){cursor:default}
+.st-key-flow-workspace :is(button,[role="button"],[role="combobox"]),.st-key-flow-workspace :is(button,[role="button"],[role="combobox"]) *{cursor:pointer}
+.st-key-flow-workspace :is(input,textarea){cursor:text}
+.st-key-flow-workspace :is(button:disabled,input:disabled){cursor:not-allowed}
+.st-key-flow-workspace .sc-flow-thumbnail *{cursor:pointer}
+.st-key-flow-workspace .sc-flow-thumbnail{width:61px!important;height:80px!important;margin:0 auto}
+[class*='st-key-flow-row-']{padding:7px 0;gap:12px!important}
+.sc-flow-copy p.sc-flow-summary{-webkit-line-clamp:1;margin-top:0!important}
+[class*='st-key-flow-inline-']{gap:4px!important;flex-wrap:nowrap!important;justify-content:flex-end}
+[class*='st-key-flow-inline-'] button,.st-key-flow-rename-start button{width:28px!important;min-width:28px!important;padding:3px!important;border-color:transparent!important}
+[class*='st-key-flow-inline-'] button p,.st-key-flow-rename-start button p{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+[class*='st-key-flow-inline-'] [data-testid="stNumberInputStepUp"],[class*='st-key-flow-inline-'] [data-testid="stNumberInputStepDown"]{display:none}
+[class*='st-key-flow-inline-'] input{padding:3px 6px;min-width:0}
+[class*='st-key-flow-inline-'] [data-baseweb="select"]>div{padding-left:6px;padding-right:3px;font-size:12px}
+[class*='st-key-flow-inline-'] [data-baseweb="select"]>div>div,[class*='st-key-flow-state-'] [data-baseweb="select"]>div>div{padding:0!important;min-width:0}
+[class*='st-key-flow-state-'] [data-baseweb="select"] svg{width:14px}
+[class*='st-key-flow-state-'] [data-baseweb="select"]>div{font-size:10px;min-height:22px!important;height:22px!important;padding:0 3px;background:transparent;border:none}
+[class*='st-key-flow-state-live-'] [data-baseweb="select"]>div{color:#277344}
+[class*='st-key-flow-state-paused-'] [data-baseweb="select"]>div{color:#8e650e}
+[class*='st-key-flow-state-draft-'] [data-baseweb="select"]>div{color:#72767a}
+[class*='st-key-flow-state-'] [data-baseweb="select"]>div:before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0;margin-right:3px}
+.st-key-automation-toolbar>[data-testid="stLayoutWrapper"]:has(.st-key-flow-title){flex:1 1 210px!important;min-width:0!important}
+.st-key-flow-title{gap:4px!important;min-width:0}
+.st-key-flow-workspace .st-key-flow-title>[data-testid="stElementContainer"]:has(.automation-title){flex:0 1 auto!important;width:auto!important;min-width:0}
+.st-key-flow-rename-input{min-width:130px;width:100%}
+.st-key-flow-rename-cancel{display:none}
+@media(max-width:850px){[class*='st-key-flow-row-']{flex-wrap:wrap!important}[class*='st-key-flow-row-']>div:nth-child(2){flex:1 1 calc(100% - 110px)!important;min-width:0!important}[class*='st-key-flow-row-']>div:last-child{margin-left:auto!important;max-width:100%}.sc-flow-metrics{gap:8px}}
+@media(max-width:700px){.sc-flow-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>'''
 
 def rate(n,total):return f'{100*n/total:.1f}%' if total else '—'
@@ -99,6 +127,9 @@ def refresh_control(key):
     fixed application-owned keys are used; no timers, polling or user HTML.
     """
     import json,uuid
+    if key=='toolbar-refresh':
+        st.html('<script>/* '+uuid.uuid4().hex+' */window.scFlowToolbarRefresh?.();</script>',unsafe_allow_javascript=True)
+        return
     st.html('<script>/* '+uuid.uuid4().hex+' */document.querySelector('+json.dumps('.st-key-'+key+' button')+')?.click();</script>',unsafe_allow_javascript=True)
 
 
@@ -134,28 +165,6 @@ def commit(store,user,row,draft):
     st.session_state['flow-toolbar-dirty']=True
     st.toast('Draft saved');st.rerun(scope='fragment')
 
-def step_settings(store,user,row,s,index,prefix):
-    flow=row['config']['draft'];amount,unit=delay_controls(s['delay_seconds'])
-    with st.form(prefix+'settings'):
-        name=st.text_input('Email name',s.get('name') or 'Email '+str(index+1),max_chars=150)
-        delay=st.number_input('Delay',0,525600,amount)
-        units=st.selectbox('Unit',['Minutes','Hours','Days'],index=['Minutes','Hours','Days'].index(unit))
-        enabled=st.checkbox('Enable this email',s.get('enabled',True))
-        anchor=s.get('anchor')
-        if flow.get('lifecycle_version') and flow['trigger']=='post_purchase':
-            anchor=st.selectbox('Timing event',['payment','delivery'],index=['payment','delivery'].index(anchor))
-            fulfilment=st.checkbox('Require successful fulfilment',value=s.get('requires_fulfilment',False),disabled=s.get('requires_fulfilment',False))
-        if st.form_submit_button('Save step'):
-            draft=deepcopy(flow);step=draft['emails'][index]
-            step.update(name=name,enabled=enabled,delay_seconds=s['delay_seconds'] if (delay,units)==(amount,unit) else int(delay)*{'Minutes':60,'Hours':3600,'Days':86400}[units])
-            if anchor:step['anchor']=anchor
-            if flow.get('lifecycle_version') and flow['trigger']=='post_purchase':step['requires_fulfilment']=fulfilment
-            commit(store,user,row,draft)
-    for label,action,disabled in [('Duplicate','duplicate',False),('Move up','up',index==0),('Move down','down',index==len(flow['emails'])-1)]:
-        if st.button(label,key=prefix+action,disabled=disabled):commit(store,user,row,edit_sequence(flow,s['step_id'],action))
-    confirm=st.checkbox('Confirm delete email from this draft',key=prefix+'confirm')
-    if st.button('Delete email',key=prefix+'delete',disabled=not confirm or len(flow['emails'])==1):commit(store,user,row,edit_sequence(flow,s['step_id'],'delete'))
-
 def snippet(doc):
     source=doc.get('custom_html','') or doc.get('content',{}).get('body','')
     source=re.sub(r'<(style|script)\b[^>]*>.*?</\1>','',source,flags=re.S|re.I)
@@ -182,8 +191,6 @@ def step_performance(store,identity,slots,detail_slots):
         m=metrics.get(sid,{k:0 for k in ('sent','opened','clicked','orders','delivered','queued','bounced','failed','skipped')})
         fields=[('Sent',m['sent']),('Opens',rate(m['opened'],m['sent'])),('Clicks',rate(m['clicked'],m['sent'])),('Sales',m['orders']),('Orders',m['orders'])]
         slot.html('<div class="sc-flow-metrics" data-period="'+escape(period,quote=True)+'" data-phase="'+escape(phase,quote=True)+'">'+''.join('<span>'+label+' <b>'+escape(str(value) if values is not None else '—')+'</b></span>' for label,value in fields)+'</div>')
-        if sid in detail_slots:
-            detail_slots[sid].html('<small>'+escape(' · '.join(label+' '+(str(m[key]) if values is not None else '—') for label,key in [('Delivered','delivered'),('Queued','queued'),('Failed','failed'),('Skipped','skipped'),('Bounced','bounced')]))+'</small>')
     if phase in ('LOADING','REFRESHING'):arm('flow-steps',1)
     elif phase in ('ERROR','TIMED_OUT'):
         st.caption('Step analytics unavailable.')
@@ -199,6 +206,10 @@ def sequence(shop,store,user,identity,period):
     from crm_automation_toolbar import definition
     row=definition(store,st.session_state,identity);flow=row['config']['draft']
     slots={};detail_slots={}
+    from crm_flow_inline import controls,status_control
+    error=st.session_state.pop('flow-inline-error',None)
+    if error:st.caption(error)
+    if flow.get('lifecycle_version'):st.caption('Draft only: publishing is locked for this flow.')
     from crm_flow_thumbnail import thumbnail
     if not flow['emails']:
         st.html('<div class="sc-flow-empty"><strong>No emails yet</strong>Add your first email to build this draft flow.</div>')
@@ -209,7 +220,8 @@ def sequence(shop,store,user,identity,period):
             from crm_lifecycle_definition import timing_label
             delay=f'{amount} {unit.lower()}'+timing_label(s)+' · Draft'
         with st.container(horizontal=True,key='flow-row-'+sid):
-            with st.container(width=78):
+            with st.container(width=86):
+                status_control(store,user,row,s)
                 thumbnail(store,s,row)
                 if st.button('Preview email',key='flow-preview-'+sid):st.session_state['flow_preview_step']=sid
             with st.container(width='stretch'):
@@ -217,15 +229,10 @@ def sequence(shop,store,user,identity,period):
                 body=snippet(s['document'])
                 title='Email '+str(i+1)+((' · '+name) if name!='Email '+str(i+1) else '')
                 copy=''.join('<p'+(' class="sc-flow-summary"' if n else '')+' title="'+escape(text,quote=True)+'"><small>'+escape(text)+'</small></p>' for n,text in enumerate((preheader,body)) if text)
-                st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+' · '+('Enabled' if s.get('enabled',True) else 'Disabled')+'</small></div>')
+                st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+(' · Disabled in draft' if not s.get('enabled',True) else '')+'</small></div>')
                 slots[sid]=st.empty()
-            with st.container(width=130):
-                if st.button('Edit Email',key=prefix+'edit'):open_email(sid)
-                with st.popover('⋮',help='Email step settings',key=prefix+'menu',on_change='rerun') as menu:
-                    if menu.open:
-                        if status(row)!='ARCHIVED':step_settings(store,user,row,s,i,prefix)
-                        detail_slots[sid]=st.empty()
-                        st.caption('Per-email unsubscribe attribution is unavailable in the current ledger.')
+            with st.container(width=302,key='flow-actions-'+sid):
+                controls(store,user,row,s,i)
     if status(row)!='ARCHIVED' and st.button('+ Add Email',key='flow-add-'+str(identity)):
         draft=deepcopy(flow);step=email_step(delay_seconds=86400)
         if flow.get('lifecycle_version'):
@@ -289,6 +296,8 @@ def checkouts(shop,store,user,row):
 
 def flow_page(shop,store,user,row):
     st.html(STYLE)
+    from crm_flow_inline import scripts
+    scripts()
     # The parent route already loaded this authenticated, current definition.
     # Sibling fragments still check updated_at before reusing the document.
     st.session_state['_automation_toolbar_definition']=((str(row['id']),row.get('updated_at')),row)

@@ -70,8 +70,8 @@ def thumbnail(store,step,row):
         st.html('<div id="'+key+'" class="sc-flow-thumbnail" role="button" tabindex="0" data-phase="'+phase+'" data-key="'+key+'" data-preview="flow-preview-'+step['step_id']+'" aria-label="Open email preview" style="width:76px;height:100px;overflow:hidden;background:#fff;font-size:10px;display:flex;align-items:center;justify-content:center">'+body+'</div>')
         if phase=='ERROR':
             info=diagnostic(digest)
-            st.caption('Stage preview: '+info.get('category','image_unavailable').replace('_',' ')+'. Retry after one minute.')
-            if st.button('Retry preview',key='thumb-retry-'+digest):
+            if st.button('Retry preview',key='thumb-retry-'+digest,
+                    help='Preview '+info.get('category','image_unavailable').replace('_',' ')+'. Retry after one minute.'):
                 st.session_state[key]=True;st.rerun(scope='fragment')
 
 SCRIPT='''<script>(()=>{

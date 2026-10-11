@@ -105,6 +105,11 @@ def settings_control(editor,key):
     context=st.session_state['automation_editor_context'];store,user=context
     row=store.flow(editor['id']);flow=deepcopy(row['config']['draft']);step=next(s for s in flow['emails'] if s['step_id']==store.step_id)
     flow_email_control(flow,editor['id'],store.step_id)
+    step_name=st.text_input('Email name',step.get('name',''),max_chars=150,key=key+'step_name')
+    anchor=step.get('anchor');fulfilment=step.get('requires_fulfilment',False)
+    if flow.get('lifecycle_version') and flow['trigger']=='post_purchase':
+        anchor=st.selectbox('Timing event',['payment','delivery'],index=['payment','delivery'].index(anchor),key=key+'anchor')
+        fulfilment=st.checkbox('Require successful fulfilment',value=fulfilment,disabled=fulfilment,key=key+'fulfilment')
     kind=st.selectbox('Trigger',list(TRIGGERS),index=list(TRIGGERS).index(flow['trigger']),format_func=lambda t:TRIGGERS[t][1],key=key+'trigger',disabled=bool(flow.get('lifecycle_version')))
     rules=[]
     from crm_automation_definition import RULE_FIELDS
@@ -140,6 +145,10 @@ def settings_control(editor,key):
     with unit_slot:units=st.selectbox('Delay unit',['Minutes','Hours','Days'],index=['Minutes','Hours','Days'].index(unit),key=key+'delay_unit')
     st.caption('Flow status · '+status(row)+' · fresh consent and suppressions checked before every email')
     desired=deepcopy(flow);desired.update(trigger=kind,rules=rules,reentry_days=days)
+    desired_step=next(s for s in desired['emails'] if s['step_id']==store.step_id)
+    if step_name!=step.get('name',''):desired_step['name']=step_name
+    if anchor:desired_step['anchor']=anchor
+    if flow.get('lifecycle_version') and flow['trigger']=='post_purchase' and fulfilment!=step.get('requires_fulfilment',False):desired_step['requires_fulfilment']=fulfilment
     store.preview_trigger=kind
     next(s for s in desired['emails'] if s['step_id']==store.step_id)['delay_seconds']=step['delay_seconds'] if (delay,units)==(initial,unit) else int(delay)*{'Minutes':60,'Hours':3600,'Days':86400}[units]
     if desired!=flow:
