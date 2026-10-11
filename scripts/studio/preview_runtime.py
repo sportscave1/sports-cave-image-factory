@@ -11,12 +11,16 @@ import studio
 import drafts
 
 PROFILE=Path(__file__).parent/"isolation/chromium-seccomp.json"
-PROFILE_SHA256="9b2439ca75c7f538e75d39599505fc79cf564f834896021533c11b5d749bcc3d"
+PROFILE_SHA256="4540a0c176f2bdd83936ef958c0b306dc6ab6ea4310608149d11ac0803c68022"
+
+def profile_digest():
+    # Git may normalise CRLF on checkout. Pin identical LF policy bytes.
+    return hashlib.sha256(PROFILE.read_bytes().replace(b"\r\n",b"\n")).hexdigest()
 IMAGE_TAG="sports-cave-studio-runtime:20261011-c24ca137"
 RELAY="import sys,urllib.request; data=sys.stdin.buffer.read(12000); r=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8877',data=data,headers={'Content-Type':'application/json'}),timeout=15); sys.stdout.buffer.write(r.read(2000000))"
 
 def options(image,name,task):
-    if hashlib.sha256(PROFILE.read_bytes()).hexdigest()!=PROFILE_SHA256:
+    if profile_digest()!=PROFILE_SHA256:
         raise RuntimeError("Unreviewed preview seccomp policy.")
     args=boundary.hardened(image,name,task)
     args[args.index("256m")]="1g"
@@ -48,8 +52,9 @@ def validate_runtime(config,image,task):
     return boundary.validate(checked,image,task)
 
 class Preview:
-    def __init__(self,home,task,owner):
+    def __init__(self,home,task,owner,source_provider=None):
         self.home,self.task,self.owner=home,task,owner
+        self.source_provider=source_provider
         self.name=None
         self.manifest=None
         self.evidence=None
@@ -73,7 +78,7 @@ class Preview:
 
     def _start(self):
         if self.name: raise RuntimeError("Preview already running.")
-        archive,manifest=preview_export.capture(self.home,self.task,self.owner)
+        archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture(self.home,self.task,self.owner))
         context=json.loads(boundary.docker("context","inspect").stdout)[0]
         if not context["Endpoints"]["docker"]["Host"].startswith("npipe://"):
             raise RuntimeError("Remote Docker contexts are forbidden.")
@@ -93,7 +98,7 @@ class Preview:
             if not probe["passed"] or not browser["passed"]:
                 raise RuntimeError("Runtime negative probes did not pass.")
             self.evidence={"image":image,"policy":policy,"probe":probe,"browser":browser,
-                           "profile_sha256":hashlib.sha256(PROFILE.read_bytes()).hexdigest()}
+                           "profile_sha256":profile_digest()}
             # Copy a generated tar only after the exact runtime passes probes.
             cp=subprocess.run(["docker","exec","-i",name,"python","-B","-c",
                 "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],input=archive,capture_output=True,timeout=30)
@@ -135,7 +140,7 @@ class Preview:
     def refresh_source(self):
         """Re-export checked source inside the existing boundary; retain synthetic DB."""
         if not self.name: raise RuntimeError("Preview is stopped.")
-        archive,manifest=preview_export.capture(self.home,self.task,self.owner)
+        archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture(self.home,self.task,self.owner))
         config=json.loads(boundary.docker("inspect",self.name).stdout)[0]
         validate_runtime(config,self.evidence["image"],self.task)
         result=subprocess.run(["docker","exec","-i",self.name,"python","-B","-c",

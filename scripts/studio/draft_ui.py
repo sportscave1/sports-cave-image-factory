@@ -29,6 +29,8 @@ class DraftServer(HTTPServer):
         self.last_activity = time.monotonic()
         self.stopping = False
         self.preview_runtime = None
+        self.release_preview = None
+        self.release_candidate = None
         self.children = {}
         super().__init__(("127.0.0.1", 0), Handler)
         self.timeout = 1
@@ -89,6 +91,35 @@ class DraftServer(HTTPServer):
     def action(self, data):
         # Validate scope again on EVERY request; never accept owner/home/task from browser.
         action = data.get("action")
+        if action in {"release-catalog","release-operation","release-preview"}:
+            import releases
+            if action=="release-catalog":return releases.catalog(self.home,self.task_id,self.owner)
+            if action=="release-operation":return releases.action(self.home,self.task_id,self.owner,data)
+            candidate,root=releases.read_candidate(self.home,self.task_id,self.owner,data.get("id"))
+            operation=data.get("operation")
+            if operation=="start":
+                if self.release_preview and self.release_preview.name:raise ValueError("Stop the current combined preview first.")
+                from preview_runtime import Preview
+                from preview_export import capture_objects
+                source=capture_objects(releases.GitObjects(root),candidate)
+                self.release_preview=Preview(self.home,self.task_id,self.owner,source_provider=lambda:source)
+                self.release_candidate=candidate["id"]
+                try:
+                    frame=self.release_preview.start()
+                    logged=self.release_preview.event({"action":"login-synthetic"})
+                    if "Synthetic Preview Admin" not in logged.get("text",""):
+                        logged=self.release_preview.event({"action":"frame"})
+                    okay="Synthetic Preview Admin" in logged.get("text","") and "Traceback" not in logged.get("text","")
+                    result=releases.runtime_result(self.home,self.task_id,self.owner,candidate["id"],candidate["fingerprint"],{"isolated_preview":True,"combined_runtime":okay},self.release_preview.evidence)
+                    return {"record":result,"frame":logged,"safety":self.release_preview.evidence}
+                except Exception:
+                    self.release_preview.stop()
+                    releases.runtime_result(self.home,self.task_id,self.owner,candidate["id"],candidate["fingerprint"],{"isolated_preview":False,"combined_runtime":False})
+                    raise
+            if self.release_candidate!=candidate["id"] or not self.release_preview:raise ValueError("Preview does not belong to the selected candidate.")
+            if operation=="stop":self.release_preview.stop();return {"stopped":True}
+            if operation=="event":return {"frame":self.release_preview.event(data.get("event",{}))}
+            raise ValueError("Unknown combined preview operation.")
         if action == "catalog":
             return self.catalog()
         if action == "handoff":
@@ -162,6 +193,8 @@ class DraftServer(HTTPServer):
             for child, thread in self.children.values():
                 child.stopping = True
                 thread.join(4)
+            if self.release_preview:
+                self.release_preview.stop()
             if self.preview_runtime:
                 self.preview_runtime.stop()
             self.server_close()

@@ -33,6 +33,9 @@ def source_bytes(root, name):
     if not path.resolve().is_relative_to(root.resolve()) or not path.is_file() or path.stat().st_nlink>1:
         raise ValueError("Unsafe source path: "+name)
     data=path.read_bytes()
+    return sanitise_source(name,data)
+
+def sanitise_source(name,data):
     if len(data)>5*1024*1024:
         raise ValueError("Oversized export source: "+name)
     if name in ASSETS:
@@ -93,3 +96,24 @@ def capture(home,task_id,owner):
                 info.size=len(data); info.uid=info.gid=65532; info.mode=0o644
                 tar.addfile(info,io.BytesIO(data))
         return buffer.getvalue(),manifest
+
+
+def capture_objects(repo,record):
+    """Export the locked approved object composition, not any host working tree."""
+    import releases
+    releases.intact(record)
+    names=sorted(n for n in record["tree"] if allowed(n))
+    if "app.py" not in names or "sc_auth.py" not in names:raise ValueError("Candidate lacks the application entry point.")
+    for n in names:releases.safe_name(n)
+    entries=[record["tree"][n] for n in names]
+    raw=repo.blobs(entries)
+    captured=[(n,*sanitise_source(n,data)) for n,data in zip(names,raw)]
+    if sum(len(data) for _,data,_ in captured)>50*1024*1024:raise ValueError("Candidate export exceeds 50 MiB.")
+    manifest={"candidate_id":record["id"],"fingerprint":record["fingerprint"],"commit":record["candidate_commit"],
+              "files":[{"path":n,"sha256":hashlib.sha256(data).hexdigest(),"synthetic_override":r} for n,data,r in captured]}
+    buffer=io.BytesIO()
+    with tarfile.open(fileobj=buffer,mode="w") as tar:
+        for name,data,_ in captured:
+            info=tarfile.TarInfo("source/"+name);info.size=len(data);info.uid=info.gid=65532;info.mode=0o644
+            tar.addfile(info,io.BytesIO(data))
+    return buffer.getvalue(),manifest

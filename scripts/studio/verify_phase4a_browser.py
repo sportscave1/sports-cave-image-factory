@@ -2,6 +2,7 @@
 Actual application checks must use the existing isolated Docker preview separately.
 """
 import sys
+import argparse
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -19,8 +20,9 @@ class Panel(BaseHTTPRequestHandler):
         self.send_header("Cache-Control","no-store");self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
 
 if __name__=="__main__":
+    parser=argparse.ArgumentParser();parser.add_argument("--task",default="20261011-c24ca137");parser.add_argument("--owner",default="me/phase2");args=parser.parse_args()
     home=Path(r"C:\Dev\SportsCaveWorktrees")
-    local=draft_ui.DraftServer(home,"20261011-c24ca137","me/phase2",idle_seconds=900)
+    local=draft_ui.DraftServer(home,args.task,args.owner,idle_seconds=900)
     fixture=HTTPServer(("127.0.0.1",0),Panel)
     thread=threading.Thread(target=local.run,daemon=True);thread.start()
     print("Browser fixture (panel only): http://127.0.0.1:"+str(fixture.server_port),flush=True)

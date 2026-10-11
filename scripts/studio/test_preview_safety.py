@@ -40,6 +40,13 @@ class ExportTests(unittest.TestCase):
     def test_export_path_escape_refused(self):
         with self.assertRaises(ValueError):
             export.source_bytes(self.root,"../outside.py")
+    def test_policy_line_endings_do_not_change_reviewed_rules(self):
+        original=runtime.PROFILE.read_bytes().replace(b"\r\n",b"\n")
+        from unittest.mock import Mock
+        for data in [original,original.replace(b"\n",b"\r\n")]:
+            with patch.object(runtime,"PROFILE",Mock(read_bytes=lambda:data)):
+                self.assertEqual(runtime.profile_digest(),runtime.PROFILE_SHA256)
+
     def test_unreviewed_policy_hash_refused(self):
         with patch.object(runtime,"PROFILE_SHA256","0"*64):
             with self.assertRaises(RuntimeError):
