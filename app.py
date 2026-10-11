@@ -8969,7 +8969,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Reporting": ":material/bar_chart:",
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
-    "Accounts & Access": ":material/group:",
+    "Accounts & Access": ":material/settings:",
 }
 
 
@@ -8992,7 +8992,7 @@ def _sidebar_route_button(
 ):
     if route not in allowed_routes and route != "Accounts & Access":
         return False
-    container = (root or st.sidebar).container(
+    container = (root if root is not None else st.sidebar).container(
         key=f"sidebar-row-{os_accounts.page_key_for_route(route) or route}"
     )
     clicked = container.button(
@@ -9343,12 +9343,6 @@ def render_sidebar():
                 reporting_weekly_allowed=reporting_weekly_allowed,
             )
 
-    _sidebar_route_button(
-        "Accounts & Access",
-        current_page,
-        allowed_routes,
-        icon=SIDEBAR_ICON_BY_ROUTE["Accounts & Access"],
-    )
     if (
         current_page not in MENU_OPTIONS
         and current_page not in {social_media.AI_REELS_ROUTE, social_media.WALL_PREVIEW_ROUTE}
@@ -9363,17 +9357,9 @@ def render_sidebar():
             set_current_page("Dashboard", source="sidebar")
             st.rerun()
 
-    profile = st.sidebar.container(key="sidebar-profile-footer")
-    profile.divider()
-    display_name = str(user.get("display_name") or user.get("username") or "").strip()
-    if display_name:
-        profile.caption(display_name)
-        profile.markdown(
-            f'<div class="sc-sidebar-role">{html.escape(str(user.get("role") or "Account").title())}</div>',
-            unsafe_allow_html=True,
-        )
-    if profile.button("Logout", key="sidebar-logout", use_container_width=True, icon=":material/logout:"):
-        logout_app()
+    from settings_workspace import render_account_footer
+    render_account_footer(st, user, current_page, _sidebar_route_button, allowed_routes, logout_app)
+
 
 
 def build_mockup_final_prompt_items(product_name, sport_category, *, artwork_reference_available=True):
@@ -11746,7 +11732,7 @@ def _country_select(label, *, value="", key="account-country"):
 
 
 def render_my_profile_section(user):
-    st.markdown("### My Profile")
+    st.markdown("### Profile")
     with st.form("my-profile-form"):
         profile_cols = st.columns(2)
         display_name = profile_cols[0].text_input(
@@ -11765,7 +11751,8 @@ def render_my_profile_section(user):
             value=user.get("country") or os_accounts.default_country_for_role(user.get("role")),
             key="my-profile-country",
         )
-        submitted = st.form_submit_button("Save profile", type="primary", use_container_width=True)
+        st.caption(f"Timezone: {os_accounts.timezone_for_country(country)} (set by country)")
+        submitted = st.form_submit_button("Save profile", type="secondary", use_container_width=False)
     if submitted:
         try:
             updated = os_accounts.update_my_profile(
@@ -11791,15 +11778,16 @@ def render_my_profile_section(user):
                     "timezone": updated.get("timezone") or "",
                 },
             )
-            st.success("Profile saved.")
+            st.session_state["settings-notice"] = "Profile saved."
             st.rerun()
 
+    st.markdown("### Password")
     with st.form("my-password-form"):
         password_cols = st.columns(3)
         current_password = password_cols[0].text_input("Current password", type="password")
         new_password = password_cols[1].text_input("New password", type="password")
         confirm_password = password_cols[2].text_input("Confirm new password", type="password")
-        password_submitted = st.form_submit_button("Change password", use_container_width=True)
+        password_submitted = st.form_submit_button("Change password", use_container_width=False)
     if not password_submitted:
         return
     if new_password != confirm_password:
@@ -11849,7 +11837,7 @@ def render_my_profile_section(user):
             entity_id=updated.get("id") or "",
             metadata={"status": "success"},
         )
-        st.success("Password changed.")
+        st.session_state["settings-notice"] = "Password changed."
         st.rerun()
 
 
@@ -11875,7 +11863,7 @@ def render_reporting_permission_section(user):
         submitted = st.form_submit_button(
             "Save Reporting access",
             disabled=not is_owner,
-            use_container_width=True,
+            use_container_width=False,
         )
     if not is_owner:
         st.caption("Reporting is locked and unticked for this account.")
@@ -11917,18 +11905,38 @@ def render_reporting_permission_section(user):
     st.rerun()
 
 
+@st.fragment
 def render_accounts_access_page():
-    user = current_os_user()
-    st.title("Accounts & Access")
-    render_my_profile_section(user)
-    render_passwords_section(user)
-    render_reporting_permission_section(user)
-    if not os_accounts.is_admin(user):
-        st.caption("Your profile is available here. Admin account controls are not available for your account.")
-        return
+    from settings_workspace import render_workspace
+    # Fragment interactions bypass the outer router; retain session revocation checks.
+    user = _refresh_session_account_if_due(current_os_user())
+    render_workspace(
+        st, user,
+        general=lambda: render_my_profile_section(user),
+        users=lambda: render_settings_users_section(user),
+        reporting=lambda: render_reporting_permission_section(user),
+        credentials=lambda: render_passwords_section(user),
+        security=lambda: render_settings_security_section(user),
+    )
 
-    st.divider()
-    st.markdown("### Admin Controls")
+
+def render_settings_security_section(user):
+    st.markdown("### Sessions")
+    if st.button("Log out", key="settings-logout", icon=":material/logout:"):
+        logout_app()
+    if os_accounts.is_admin(user):
+        render_account_access_section(user, user)
+    else:
+        # Retain previously assigned worker credential access without granting
+        # access to the administrator Credentials workspace.
+        render_passwords_section(user)
+
+
+def render_settings_users_section(user):
+    # Guard the renderer too: a crafted section selection must never load users.
+    if not os_accounts.account_is_active(user) or not os_accounts.is_admin(user):
+        st.error("Administrator access required.")
+        return
     _pop_accounts_admin_notice()
     try:
         users = os_accounts.DEFAULT_STORE.list_users()
@@ -11936,28 +11944,9 @@ def render_accounts_access_page():
         st.warning("Accounts could not load right now. Please try again shortly.")
         return
 
-    account_rows = []
-    for account in users:
-        account_rows.append(
-            {
-                "Name": account.get("display_name") or "",
-                "Username": account.get("username") or "",
-                "Email": account.get("email") or "",
-                "Role": str(account.get("role") or "").title(),
-                "Country": account.get("country") or "",
-                "Timezone": account.get("timezone") or "",
-                "Status": "Active" if account.get("is_active") else "Inactive",
-                "Last login": format_dashboard_timestamp(account.get("last_login_at"))
-                if account.get("last_login_at")
-                else "Never",
-            }
-        )
-    st.dataframe(account_rows, use_container_width=True, hide_index=True, row_height=TABLE_ROW_HEIGHT)
-
-    with st.expander(
-        "Create worker account",
-        expanded=not any(row.get("role") == os_accounts.ROLE_WORKER for row in users),
-    ):
+    from settings_workspace import render_user_picker, rerun_settings
+    selected_id, creating = render_user_picker(st, users, format_dashboard_timestamp)
+    if creating:
         with st.form("create-worker-account", clear_on_submit=True):
             fields = st.columns(2)
             worker_name = fields[0].text_input("Display name")
@@ -11969,16 +11958,16 @@ def render_accounts_access_page():
                 value=os_accounts.COUNTRY_PHILIPPINES,
                 key="create-worker-country",
             )
-            st.markdown("**Page access**")
-            create_permissions = _account_permission_fields("create-worker-permission")
-            st.markdown("**Password Access**")
-            create_credential_permissions = _credential_permission_fields(
-                "create-worker-credential-permission"
-            )
+            with st.expander("Page Access", expanded=False):
+                create_permissions = _account_permission_fields("create-worker-permission")
+            with st.expander("Credential Access", expanded=False):
+                create_credential_permissions = _credential_permission_fields(
+                    "create-worker-credential-permission"
+                )
             create_submitted = st.form_submit_button(
                 "Create account",
-                type="primary",
-                use_container_width=True,
+                type="secondary",
+                use_container_width=False,
             )
         if create_submitted:
             try:
@@ -12015,30 +12004,22 @@ def render_accounts_access_page():
                     },
                 )
                 _record_credential_permission_changes(user, {}, created)
-                st.success("Worker account created.")
-                st.rerun()
+                _set_accounts_admin_notice("Worker account created.")
+                rerun_settings(st)
 
-    workers = [account for account in users if account.get("role") == os_accounts.ROLE_WORKER]
-    if not workers:
+    if creating or not selected_id:
         return
-
-    st.markdown("### Edit worker access")
-    worker_by_id = {worker["id"]: worker for worker in workers}
-    selected_worker_id = st.selectbox(
-        "Worker",
-        alphabetize_options(
-            worker_by_id,
-            label=lambda worker_id: worker_by_id[worker_id].get("display_name")
-            or worker_by_id[worker_id].get("username")
-            or "Worker",
-        ),
-        format_func=lambda worker_id: worker_by_id[worker_id].get("display_name")
-        or worker_by_id[worker_id].get("username")
-        or "Worker",
-        key="accounts-edit-worker",
-    )
-    selected_worker = worker_by_id[selected_worker_id]
+    selected_worker = next((account for account in users if account.get("id") == selected_id), None)
+    if selected_worker is None:
+        return
+    selected_worker_id = selected_worker["id"]
+    st.markdown("### " + str(selected_worker.get("display_name") or selected_worker.get("username") or "Account"))
+    if selected_worker.get("role") != os_accounts.ROLE_WORKER:
+        st.caption("Administrator | " + str(selected_worker.get("country") or ""))
+        render_account_access_section(user, selected_worker)
+        return
     with st.form(f"edit-worker-account::{selected_worker_id}"):
+        st.markdown("**Profile**")
         fields = st.columns(2)
         edit_name = fields[0].text_input(
             "Display name",
@@ -12065,20 +12046,20 @@ def render_accounts_access_page():
             value=selected_worker.get("country") or os_accounts.COUNTRY_PHILIPPINES,
             key=f"edit-worker-country::{selected_worker_id}",
         )
-        st.markdown("**Page access**")
-        edit_permissions = _account_permission_fields(
-            f"edit-worker-permission::{selected_worker_id}",
-            selected_worker.get("page_permissions") or (),
-        )
-        st.markdown("**Password Access**")
-        edit_credential_permissions = _credential_permission_fields(
-            f"edit-worker-credential-permission::{selected_worker_id}",
-            selected_worker.get("page_permissions") or (),
-        )
+        with st.expander("Page Access", expanded=False):
+            edit_permissions = _account_permission_fields(
+                f"edit-worker-permission::{selected_worker_id}",
+                selected_worker.get("page_permissions") or (),
+            )
+        with st.expander("Credential Access", expanded=False):
+            edit_credential_permissions = _credential_permission_fields(
+                f"edit-worker-credential-permission::{selected_worker_id}",
+                selected_worker.get("page_permissions") or (),
+            )
         edit_submitted = st.form_submit_button(
             "Save account",
-            type="primary",
-            use_container_width=True,
+            type="secondary",
+            use_container_width=False,
         )
     render_account_access_section(user, selected_worker)
     if not edit_submitted:
@@ -12136,8 +12117,8 @@ def render_accounts_access_page():
         },
     )
     _record_credential_permission_changes(user, selected_worker, updated)
-    st.success("Account access saved.")
-    st.rerun()
+    _set_accounts_admin_notice("Account access saved.")
+    rerun_settings(st)
 
 
 def render_settings_page():

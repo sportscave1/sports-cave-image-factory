@@ -1,0 +1,48 @@
+/* Scoped to Settings and its sidebar footer; preserve all other OS workspaces. */
+.st-key-settings-workspace {font-family:"Segoe UI Variable","Segoe UI",system-ui,sans-serif;}
+.st-key-settings-workspace > div {min-width:0;}
+.st-key-settings-navigation {position:sticky;top:0;max-height:calc(100dvh - 180px);overflow-y:auto!important;padding:2px 8px 8px 0;scrollbar-width:thin;gap:4px!important;}
+.st-key-settings-workspace .st-key-settings-navigation button {justify-content:flex-start!important;text-align:left;min-height:34px!important;font-size:13px!important;padding:6px 9px!important;border:0!important;background:transparent!important;}
+.st-key-settings-workspace .st-key-settings-navigation button[kind="primary"] {background:#eee9da!important;color:#302b1f!important;box-shadow:inset 3px 0 #b99436!important;}
+.st-key-settings-workspace .st-key-settings-navigation button:hover {background:#f0eeea!important;}
+.st-key-settings-content {height:calc(100dvh - 200px)!important;min-height:calc(100dvh - 200px)!important;max-height:calc(100dvh - 200px)!important;flex:none!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain;scrollbar-width:thin;padding:0 14px 20px 4px;gap:10px!important;}
+.st-key-settings-content [data-testid="stVerticalBlock"] {gap:10px!important;}
+.st-key-settings-content [data-testid="stForm"] {padding:12px;border:1px solid #e7e5df;border-radius:8px;}
+.st-key-settings-content input {min-height:32px!important;font-size:14px!important;}
+.st-key-settings-content button {min-height:32px!important;padding:4px 10px!important;font-size:13px!important;}
+.st-key-settings-content button[kind="secondaryFormSubmit"] {background:#f4f3f0!important;color:#242621!important;border:1px solid #d5d5cf!important;}
+.st-key-settings-content h2 {font-size:22px!important;}
+.st-key-settings-content h3 {font-size:16px!important;}
+.st-key-settings-content [data-testid="stCheckbox"] label p {font-size:13px;}
+.st-key-settings-content button:focus-visible,.st-key-settings-workspace .st-key-settings-navigation button:focus-visible {outline:2px solid #9c7a24!important;outline-offset:2px;}
+.st-key-settings-user-table {border:1px solid #e7e5df;border-radius:8px;padding:6px 10px;}
+[class*="st-key-settings-user-row-"] {border-top:1px solid #efeee9;padding:3px 0;}
+[class*="st-key-settings-user-row-"] [data-testid="stText"] {font-size:12px;overflow-wrap:anywhere;white-space:normal;}
+.st-key-settings-user-head p {font-size:11px!important;}
+.st-key-settings-content [class*="st-key-credential-card-"] {padding:10px;}
+.st-key-settings-content [class*="st-key-credential-card-"] button {background:#f4f3f0!important;color:#242621!important;border:1px solid #deddd6!important;}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {min-height:calc(100dvh - var(--sc-topbar-height,60px) - 24px);}
+section[data-testid="stSidebar"] [data-testid="stLayoutWrapper"]:has(> .st-key-sidebar-profile-footer) {margin-top:auto!important;position:sticky;bottom:0;z-index:2;}
+section[data-testid="stSidebar"] .st-key-sidebar-profile-footer {margin-top:auto!important;position:sticky;bottom:0;padding:8px 0 4px;border-top:1px solid #30312e;background:var(--sidebar-bg-bottom,#101211);z-index:2;}
+.st-key-sidebar-profile-footer [data-testid="stPopover"] button {background:transparent!important;color:#eeeeeb!important;border:0!important;font-size:13px!important;min-height:38px;}
+section[data-testid="stSidebar"] .st-key-sidebar-profile-footer [data-testid="stPopover"] button,
+section[data-testid="stSidebar"] .st-key-sidebar-profile-footer [data-testid="stPopover"] button * {color:#eeeeeb!important;-webkit-text-fill-color:#eeeeeb!important;}
+.st-key-settings-content input:disabled {opacity:.65;background:#f2f2ef!important;cursor:not-allowed;}
+/* Native popover handles focus, outside click and Escape; footer sits at viewport bottom. */
+@media(max-width:1000px) {
+ .st-key-settings-workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {flex-wrap:wrap!important;}
+ .st-key-settings-workspace > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {width:100%!important;flex:1 1 100%!important;min-width:0!important;}
+ .st-key-settings-navigation {max-height:150px;position:relative;padding:0 0 8px;}
+ .st-key-settings-navigation {display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px!important;}
+ .st-key-settings-content {height:calc(100dvh - 350px)!important;min-height:calc(100dvh - 350px)!important;max-height:calc(100dvh - 350px)!important;padding-right:4px;}
+}
+@media(max-width:640px) {
+ .st-key-settings-user-head {display:none;}
+ [class*="st-key-settings-user-row-"] > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px!important;}
+ [class*="st-key-settings-user-row-"] [data-testid="stColumn"] {width:100%!important;min-width:0!important;}
+ .st-key-settings-content [data-testid="stForm"] [data-testid="stHorizontalBlock"] {flex-wrap:wrap;}
+ .st-key-settings-content [data-testid="stForm"] [data-testid="stColumn"] {flex:1 1 100%;width:100%;min-width:0;}
+}
+
+.st-key-settings-workspace .st-key-settings-content button {background:#f4f3f0!important;color:#242621!important;border:1px solid #deddd6!important;}
+.st-key-settings-workspace [data-baseweb="input"], .st-key-settings-workspace [data-baseweb="select"] > div {min-height:34px!important;}

@@ -244,8 +244,10 @@ class ReportingPermissionTests(unittest.TestCase):
         }
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
         app_test.session_state["selected_page"] = "Accounts & Access"
+        app_test.session_state["settings-section"] = "Reporting"
 
-        with patch.dict(
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user",
+                          return_value=app_test.session_state["sports_cave_current_user"]), patch.dict(
             os.environ,
             {"SPORTS_CAVE_REPORTING_OWNER_EMAIL": OWNER_EMAIL},
             clear=False,
