@@ -71,6 +71,8 @@ def flow_preview(doc,cfg,key):
 def composer_styles():
     from crm_composer_style import polished_styles
     polished_styles()
+    from crm_template_library_style import styles
+    styles()
     # Campaign-only overrides: the shell, Inbox and Flow canvas keep their styles.
     st.html("""<style>
     .st-key-crm-campaign-toolbar{gap:8px!important;flex-wrap:wrap!important;margin-bottom:8px}

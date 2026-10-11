@@ -191,8 +191,6 @@ def library(store,user,doc,target=None):
     except StoreUnavailable:
         st.caption('Templates temporarily unavailable. Campaign editing remains available.');return
     if not rows:st.caption('No saved templates yet.')
-    if getattr(store,'preview_trigger',None) in ('welcome','post_purchase','win_back'):
-        st.caption('V2 stage starters marked “replace body” replace the middle content, subject and preview text when you click Use. The existing draft save keeps the previous revision. Header/footer, audience and timing stay unchanged.')
     def use(row):
         try:insert_saved_template(store,doc,row['id'],row['version'])
         except (ValueError,StoreUnavailable):

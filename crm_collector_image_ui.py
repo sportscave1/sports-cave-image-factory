@@ -16,8 +16,7 @@ def control(doc,key,shop,store):
     for part in parts:
         for index,match in enumerate(MARKER.finditer(part.get('html',''))):
             choices[part['id']+':'+str(index)]=(part,index,json.loads(bytes.fromhex(match[1]).decode()))
-    with st.popover('Personalise Image',icon=':material/image:'):
-        st.caption('Recipient artwork resolves when delivered. Preview labels use sample data.')
+    with st.container(key='crm-personalise-image'),st.expander('Personalise Image',icon=':material/image:'):
         chosen=st.selectbox('Image block',['new',*choices],format_func=lambda x:'Add image block' if x=='new' else (choices[x][0].get('name') or 'Image')+' · '+str(choices[x][1]+1),key=key+'collector_block')
         original=choices[chosen][2] if chosen!='new' else settings()
         widget=key+'collector_'+chosen+'_'

@@ -211,11 +211,15 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
             with templates_tab:
                 if templates_tab.open and available:
-                    from crm_brand_template_ui import brand_templates_settings
-                    brand_templates_settings(drafts,actions.user,cfg,target=COMPOSER_TARGET)
-                    st.divider()
-                    from crm_campaign_library import library
-                    library(drafts,actions.user,doc,target=COMPOSER_TARGET)
+                    if mode=='automation':
+                        from crm_template_library_ui import library
+                        library(drafts,actions.user,cfg)
+                    else:
+                        from crm_brand_template_ui import brand_templates_settings
+                        brand_templates_settings(drafts,actions.user,cfg,target=COMPOSER_TARGET)
+                        st.divider()
+                        from crm_campaign_library import library
+                        library(drafts,actions.user,doc,target=COMPOSER_TARGET)
         with st.container(width='stretch'):composer_canvas(doc,cfg,key,drafts if available else None)
     if before!={k:v for k,v in doc.items() if k!='copy_reviewed'}:
         from crm_email_editor_context import mark_content_edit

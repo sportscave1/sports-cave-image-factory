@@ -190,9 +190,14 @@ function renderTemplates(){
  const container=document.getElementById('saved-templates');container.replaceChildren();
  if((args.templates||[]).length)container.append(el('hr'));
  for(const template of args.templates||[]){
-  const item=button(template.name,'Insert '+template.name,()=>{
+  const item=button(template.name,(args.automation?'Apply ':'Insert ')+template.name,async()=>{
+   if(args.automation){
+    const hasContent=args.sections.some(s=>(drafts[s.id]??s.html??'').trim()||!['html','image'].includes(s.type));
+    if(hasContent&&!window.confirm('Replace this email’s current content with '+template.name+'? Subject, preview text and email settings will be kept.'))return;
+    try{await flushSections();}catch(error){saveStatus(error.message);return;}
+   }
    document.getElementById('add').open=false;
-   emit('add',{kind:'template',template_id:template.id,version:template.version});
+   emit('add',{kind:'template',template_id:template.id,version:template.version,confirmed:!!args.automation});
   });
   item.dataset.add='template';container.append(item);
  }

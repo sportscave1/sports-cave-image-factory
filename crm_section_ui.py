@@ -149,10 +149,13 @@ def middle_editor(doc, key, shop, store=None):
         from crm_store import StoreUnavailable
         try:
             from crm_campaign_library import template_html,template_sections
+            if getattr(store,'email_mode',None)=='automation':
+                from crm_template_library import rows as library_rows
             for row in library_rows(store):
                 item={k:row[k] for k in ('id','name','version')}
-                try:item.update(html=template_html(store,row),sections=template_sections(store,row),builtin=bool(row.get('builtin')))
-                except (ValueError,StoreUnavailable):pass
+                if getattr(store,'email_mode',None)!='automation':
+                    try:item.update(html=template_html(store,row),sections=template_sections(store,row),builtin=bool(row.get('builtin')))
+                    except (ValueError,StoreUnavailable):pass
                 templates.append(item)
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
     from crm_image_prompt import image_prompt
@@ -195,7 +198,10 @@ def middle_editor(doc, key, shop, store=None):
                 from crm_store import StoreUnavailable
                 try:
                     with st.spinner('Loading template...'):
-                        insert_saved_template(store,doc,event.get('template_id'),event.get('version'))
+                        if getattr(store,'email_mode',None)=='automation':
+                            from crm_template_library import apply_template
+                            apply_template(store,doc,event.get('template_id'),event.get('version'),confirmed=event.get('confirmed') is True)
+                        else:insert_saved_template(store,doc,event.get('template_id'),event.get('version'))
                 except (ValueError,StoreUnavailable):raise ValueError('Template could not be loaded.') from None
                 rerun_editor()
             elif event.get('type')=='picker':
