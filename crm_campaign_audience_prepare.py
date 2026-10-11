@@ -33,7 +33,7 @@ def measured_reads(shop,store):
 
 
 def fingerprint(shop, document, settings=None):
-    inputs = {key: document.get(key) for key in ('market_audience', 'market', 'audience', 'smart_hours')}
+    inputs = {key: document.get(key) for key in ('market_audience', 'market', 'audience', 'smart_hours', 'shopify_segment_ids', 'shopify_segment_store')}
     inputs['shop'] = str(getattr(shop, 'namespace', 'session'))
     from crm_resend_marketing import get_resend_marketing_config_status
     delivery=get_resend_marketing_config_status()
@@ -47,9 +47,11 @@ class AudienceJob:
         self.identity = fingerprint(shop, document, settings)
         self.settings = deepcopy(settings)
         self.future = Future()
+        self._ownership_lock = threading.Lock()
+        self._review_owners = 0
         self.completed_at = None
         self.previous = previous.display() if previous and previous.identity == self.identity else None
-        doc = {key:deepcopy(document[key]) for key in ('market_audience','market','audience','smart_hours') if key in document}
+        doc = {key:deepcopy(document[key]) for key in ('market_audience','market','audience','smart_hours','shopify_segment_ids','shopify_segment_store') if key in document}
         def work():
             if not self.future.set_running_or_notify_cancel(): return
             started = time.monotonic()
@@ -94,6 +96,23 @@ class AudienceJob:
         LOG.info('audience_prepare cache_hit=true snapshot_age_ms=%.1f', (time.monotonic()-self.completed_at)*1000)
         return deepcopy(state)
 
+    def retain_for_review(self):
+        # A dialog can outlive the controls that prepared its input. Ownership
+        # must be acquired before starting the review thread, not inside it.
+        with self._ownership_lock:
+            if self.future.cancelled():
+                raise ValueError('Audience verification replaced. Review again.')
+            self._review_owners += 1
+
+    def release_review(self):
+        with self._ownership_lock:
+            self._review_owners -= 1
+
+    def cancel_if_unused(self):
+        with self._ownership_lock:
+            if not self._review_owners and self.future.cancel():
+                self.timer.cancel()
+
 
 def prepare(previous, shop, store, document, settings=None, *, debounce=0.4):
     token = fingerprint(shop, document, settings)
@@ -101,8 +120,8 @@ def prepare(previous, shop, store, document, settings=None, *, debounce=0.4):
         if not previous.future.done() or previous.valid(): return previous
         # Errors remain visible and retryable; polling never creates a retry storm.
         if not previous.future.cancelled() and previous.future.exception() is not None: return previous
-    if previous and not previous.future.running() and not previous.future.done():
-        previous.timer.cancel(); previous.future.cancel()
+    if previous:
+        previous.cancel_if_unused()
     return AudienceJob(shop, store, document, settings, previous, debounce)
 
 

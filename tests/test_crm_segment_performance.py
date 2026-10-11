@@ -109,7 +109,7 @@ class ComposerTests(unittest.TestCase):
             with patch('crm_segment_counts.COUNTS',cache):
                 at=AppTest.from_string(SCRIPT.replace("'role':'worker'","'role':'admin'"));at.session_state['route']='CRM Campaigns';at.run(timeout=10)
                 self.assertFalse(at.exception);self.assertTrue(entered.wait(2));self.assertFalse(release.is_set())
-                self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,
+                self.assertEqual(next(s for s in at.selectbox if s.label=='Location').options,
                     ['AUSTRALIA · …','USA · …','UK · …','ALL SUBSCRIBERS · …','CANADA · …','NEW ZEALAND · …'])
                 self.assertTrue({'Save draft','Send now'}.issubset({b.label for b in at.button}))
                 for label in ['Subject','Preview text','Campaign name']:
@@ -128,7 +128,7 @@ class ComposerTests(unittest.TestCase):
                 self.assertFalse(any('Loading subscribers'  in c.value for c in at.caption))
                 release.set();executor.shutdown(wait=True)
                 at.run(timeout=10)
-                self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options[0],'AUSTRALIA · 4')
+                self.assertEqual(next(s for s in at.selectbox if s.label=='Location').options[0],'AUSTRALIA · 4')
         finally:release.set();executor.shutdown(wait=True)
     def test_list_metadata_excludes_bodies_and_selected_template_loads(self):
         from crm_campaign_store import CampaignStore

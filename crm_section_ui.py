@@ -135,6 +135,8 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
 
 
 def middle_editor(doc, key, shop, store=None):
+    from crm_collector_image_ui import control as collector_control
+    collector_control(doc,key,shop,store)
     # Opening a saved snapshot is read-only. The existing Refresh action and
     # final test/send validation own fresh product facts, never tab activation.
     sections = middle_sections(doc)

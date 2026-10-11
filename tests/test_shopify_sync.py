@@ -3129,6 +3129,10 @@ class ShopifySyncClientTests(unittest.TestCase):
 
 class SupabaseProductSyncLogicTests(unittest.TestCase):
     def setUp(self):
+        tagging = patch('product_sport_tag_sync.sync_product_sport_tags',
+                        return_value={'status': 'verified', 'review': []})
+        tagging.start()
+        self.addCleanup(tagging.stop)
         self.config = {
             "store_domain": "sports-cave.myshopify.com",
             "access_token": "test-token",

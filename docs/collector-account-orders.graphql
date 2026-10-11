@@ -1,0 +1,33 @@
+query SportsCaveCustomerCertificates($after: String) {
+  customer {
+    id
+    orders(first: 50, reverse: true, after: $after) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        name
+        processedAt
+        lineItems(first: 100) {
+          nodes {
+            id
+            name
+            productId
+            variantId
+            sku
+            image {
+              url
+              altText
+              width
+              height
+            }
+          }
+        }
+        metafield(namespace: "sports_cave", key: "certificates_json") {
+          type
+          jsonValue
+          value
+        }
+      }
+    }
+  }
+}

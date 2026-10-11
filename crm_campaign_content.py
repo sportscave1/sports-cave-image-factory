@@ -57,8 +57,15 @@ def new_document():
 
 
 def validate_document(doc):
+    from crm_collector_images import configurations
+    configurations(doc)
     optional={'blocks','tags','campaign_key','smart_hours','template_ref','content_mode','custom_html','html_sections','middle_sections','send_timing','market_audience','recovery_discount','discount_association_version'}
+    optional.update({'shopify_segment_ids', 'shopify_segment_store'})
     if not isinstance(doc, dict) or set(doc)-set(new_document())-optional or set(new_document())-optional-set(doc): raise ValueError('Invalid campaign structure.')
+    from crm_buyer_segments import validate_ids
+    validate_ids(doc.get('shopify_segment_ids', []))
+    if 'shopify_segment_store' in doc and (not isinstance(doc['shopify_segment_store'], str) or len(doc['shopify_segment_store']) > 300):
+        raise ValueError('Invalid Shopify store scope.')
     from crm_recovery_discount import validate as validate_discount
     validate_discount(doc)
     if 'discount_association_version' in doc and doc['discount_association_version']!=1:raise ValueError('Unsupported discount association version.')
@@ -134,6 +141,10 @@ def fingerprint(doc, cfg):
 
 
 def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, production=False, test_tracking=False, campaign_id=None, send_id=None):
+    from crm_collector_images import configurations,render as render_collector,sample_facts
+    if configurations(doc):
+        if production:raise ValueError('Recipient artwork must be resolved before production rendering.')
+        doc=render_collector(doc,sample_facts(doc),preview=True)
     from crm_lifestyle_images import resolve as resolve_lifestyle
     doc=resolve_lifestyle(doc)
     from crm_frame_banner_template import resolve as resolve_banner

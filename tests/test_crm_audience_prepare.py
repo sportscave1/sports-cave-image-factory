@@ -81,6 +81,39 @@ class PreparationTests(unittest.TestCase):
             self.assertTrue(a.future.cancelled());fetch.assert_not_called()
             b.timer.cancel();b.future.cancel()
 
+    def test_control_rerender_cannot_cancel_audience_owned_by_review(self):
+        # The review has explicit sender settings; the control rerender does
+        # not. Replacing its estimate must not cancel the dialog's dependency.
+        pending=prepare(None,self.shop,self.store,self.doc,CFG,debounce=.1)
+        editor={'id':'fixture','version':1,'name':'Fixture','document':self.doc}
+        entered=threading.Event();continue_review=threading.Event()
+        def reviewed(*args,**kwargs):
+            entered.set();continue_review.wait(3)
+            return kwargs['audience_job'].result()
+        with patch('crm_campaign_review.review',side_effect=reviewed):
+            job=start_review(None,self.shop,self.store,{},editor,editor,CFG,pending)
+            self.assertTrue(entered.wait(2))
+            replacement=prepare(pending,self.shop,self.store,self.doc,None,debounce=10)
+            try:
+                self.assertIsNot(replacement,pending)
+                self.assertFalse(pending.future.cancelled())
+                continue_review.set()
+                self.assertEqual(job.future.result(3)['eligible'],2)
+                self.assertEqual(pending._review_owners,0)
+            finally:
+                continue_review.set();replacement.cancel_if_unused()
+
+    def test_cancelled_audience_cannot_start_review_or_use_previous_counts(self):
+        pending=prepare(None,self.shop,self.store,self.doc,CFG,debounce=10)
+        pending.previous={'eligible':999}
+        pending.cancel_if_unused()
+        editor={'id':'fixture','version':1,'name':'Fixture','document':self.doc}
+        with patch('crm_campaign_review.review') as reviewed:
+            job=start_review(None,self.shop,self.store,{},editor,editor,CFG,pending)
+            with self.assertRaisesRegex(ValueError,'replaced'):
+                job.future.result(3)
+            reviewed.assert_not_called()
+
     def test_expired_snapshot_retains_count_but_cannot_be_used_for_send_review(self):
         a=self.ready();a.completed_at-=61
         with self.assertRaisesRegex(ValueError,'expired'):a.result()
@@ -152,10 +185,11 @@ class PreparationTests(unittest.TestCase):
         self.assertIn("status='ACCEPTED'",db.q.call_args_list[1].args[0])
         self.assertIn('test_send=false',db.q.call_args_list[1].args[0])
 
-    def test_exact_audience_preparation_is_deferred_until_review(self):
+    def test_audience_preparation_is_session_owned_in_controls_and_review(self):
         source=Path('crm_campaign_page.py').read_text(encoding='utf-8')
         self.assertNotIn('prepare_session',source)
-        self.assertNotIn('prepare_session',Path('crm_campaign_controls.py').read_text(encoding='utf-8'))
+        self.assertIn('prepare_session',Path('crm_campaign_controls.py').read_text(encoding='utf-8'))
+        self.assertNotIn('final_audience(',Path('crm_campaign_controls.py').read_text(encoding='utf-8'))
         self.assertIn('prepare_session',Path('crm_campaign_send_ui.py').read_text(encoding='utf-8'))
 
     def test_campaign_switch_retains_only_one_active_audience_cache(self):

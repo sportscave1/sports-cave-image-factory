@@ -9,14 +9,49 @@ def market_control(shop,store,doc,key):
     from crm_segment_counts import COUNTS
     state=COUNTS.display(shop,store,doc.get('smart_hours',16))
     counts=state['counts'];previous=doc['market']
-    doc['market']=st.selectbox('Segment',list(MARKET_LABELS),index=list(MARKET_LABELS).index(previous),
+    advanced=not doc.get('market_audience')
+    doc['market']=st.selectbox('Location',list(MARKET_LABELS),index=list(MARKET_LABELS).index(previous),
         format_func=lambda m:MARKET_LABELS[m]+' · '+(format(counts[m],',') if m in counts else '—' if state['error'] else '…'),key=key+'market')
     selected=audience(doc['market'])
-    if doc.get('audience')!=selected:doc['counts']={}
-    doc['audience']=selected;doc['market_audience']=True
-    # This dropdown needs only aggregate counts. Exact recipient preparation is
-    # owned by Review & send, including fresh eligibility and identity checks.
-    st.caption('Shopify subscribed segment size. Eligible recipients and exclusions are checked before sending.')
+    if not advanced:
+        if doc.get('audience')!=selected:doc['counts']={}
+        doc['audience']=selected
+    else:st.caption('Saved advanced audience preserved. Buyer segments require a location-based campaign.')
+    from crm_buyer_segments import CATALOGUE
+    catalogue=CATALOGUE.display(shop,store)
+    options=catalogue['snapshot'];old=list(doc.get('shopify_segment_ids',[]))
+    choices=list(options)+[i for i in old if i not in options]
+    current=st.multiselect('Segments',choices,default=old,
+        format_func=lambda i:options.get(i,{}).get('name','Unavailable · '+i.rsplit('/',1)[-1]),
+        placeholder='None selected · all sporting interests',key=key+'buyer-segments',disabled=advanced)
+    if current!=old:
+        doc['shopify_segment_ids']=current
+        doc['shopify_segment_store']=shop.namespace
+        doc['counts']={};doc['copy_reviewed']=False
+    if current:
+        st.caption(str(len(current))+' selected · match any selected segment')
+    if any(i not in options for i in old):st.warning('A saved segment is unavailable or still loading. Selection preserved; sending requires verification.')
+    if catalogue['error']:st.caption('Shopify segment sync delayed; cached options may be stale.')
+    elif not options:st.caption('Loading Shopify buyer segments…')
+    elif any(r.get('missing') for r in options.values()):st.warning('Some expected Shopify buyer segments are missing. Review synchronization before release.')
+    if options:
+        from datetime import datetime,timezone
+        stamp=next(iter(options.values()))['checked_at']
+        stale=(datetime.now(timezone.utc)-datetime.fromisoformat(stamp)).total_seconds()>300
+        st.caption(('Stale Shopify sync: ' if stale else 'Last Shopify sync: ')+datetime.fromisoformat(stamp).strftime('%d %b %H:%M UTC'))
+    # Reuse session-owned background preparation; never fetch membership in render.
+    from crm_campaign_audience_prepare import prepare_session
+    job=prepare_session(st.session_state,shop,store,{'document':doc},key)
+    summary=job.display()
+    if summary:
+        st.caption(('Verified estimate: ' if job.valid() else 'Stale estimate: ')+str(summary['members'])+
+            ' unique customers · '+str(summary['eligible'])+' eligible, deduplicated recipients · '+
+            str(sum(summary['excluded'].values()))+' excluded')
+    elif job.future.done():
+        st.caption('Audience verification unavailable. Sending is blocked until it succeeds.')
+        if st.button('Retry audience verification',key=key+'audience-retry'):
+            st.session_state.pop(key+'audience_job',None);st.rerun(scope='fragment')
+    else:st.caption('Calculating unique recipients and current eligibility…')
     if state['error']:st.caption('Audience refresh delayed. Last available counts are shown; sending still requires current eligibility.')
     if doc['market']!=previous:
         doc['copy_reviewed']=False

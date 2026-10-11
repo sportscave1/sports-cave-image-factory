@@ -579,6 +579,7 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
         "ok": True,
         "status": result.get("status") or ("processed" if not (result.get("errors") or []) else "processed_with_warnings"),
         "eligibility_results": result.get("eligibility_results") or [],
+        "sport_tagging": result.get("sport_tagging") or {},
         "source": "webhook",
         "webhook_id": claim.get("webhook_id") or webhook_id,
         "shopify_product_id": result.get("shopify_product_id") or claim.get("shopify_product_id") or "",

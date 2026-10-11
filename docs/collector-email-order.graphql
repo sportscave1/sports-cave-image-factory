@@ -1,0 +1,22 @@
+query CollectorEmailOrder($id: ID!) {
+  order(id: $id) {
+    id
+    customer { id }
+    cancelledAt
+    fullyPaid
+    displayFinancialStatus
+    lineItems(first: 2) {
+      nodes {
+        id
+        title
+        variantTitle
+        product { id }
+        variant {
+          id
+          product { id }
+          image { url(transform: {maxWidth: 1000, preferredContentType: JPG}) }
+        }
+      }
+    }
+  }
+}

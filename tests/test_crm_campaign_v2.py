@@ -164,6 +164,13 @@ class PersistenceAndSchedulingTests(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class SimplifiedUiTests(unittest.TestCase):
+    def setUp(self):
+        # These legacy UI tests isolate typing/layout from the new background
+        # projection and eligibility workers, covered by buyer-segment tests.
+        job=Mock();job.display.return_value=None;job.future.done.return_value=False
+        for target,value in [('crm_buyer_segments.CATALOGUE.display',{'snapshot':{},'pending':True,'error':False}),
+                             ('crm_campaign_audience_prepare.prepare_session',job)]:
+            guard=patch(target,return_value=value);guard.start();self.addCleanup(guard.stop)
     def app(self):
         from streamlit.testing.v1 import AppTest
         from tests.test_crm_ui import SCRIPT
@@ -181,7 +188,7 @@ class SimplifiedUiTests(unittest.TestCase):
             self.assertFalse(any('Smart Sending' in n.label for n in at.number_input))
     def test_market_and_timing_save_reload_and_no_hidden_copy_confirmation(self):
         at=self.app();at.run(timeout=20)
-        market=next(s for s in at.selectbox if s.label=='Segment')
+        market=next(s for s in at.selectbox if s.label=='Location')
         self.assertEqual([s.split(' · ')[0] for s in market.options],['AUSTRALIA','USA','UK','ALL SUBSCRIBERS','CANADA','NEW ZEALAND'])
         market.set_value('US').run(timeout=20)
         next(r for r in at.radio if r.label=='Send timing').set_value('Schedule').run(timeout=20)
@@ -197,6 +204,6 @@ class SimplifiedUiTests(unittest.TestCase):
         with patch('crm_segment_counts.COUNTS.display',return_value={'counts':{},'pending':False,'error':True}):
             at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertEqual(next(s for s in at.selectbox if s.label=='Segment').options,['AUSTRALIA · —','USA · —','UK · —','ALL SUBSCRIBERS · —','CANADA · —','NEW ZEALAND · —'])
+            self.assertEqual(next(s for s in at.selectbox if s.label=='Location').options,['AUSTRALIA · —','USA · —','UK · —','ALL SUBSCRIBERS · —','CANADA · —','NEW ZEALAND · —'])
             self.assertTrue(any('Audience refresh delayed' in c.value for c in at.caption))
             self.assertFalse(any('SECRET' in c.value for c in at.caption))

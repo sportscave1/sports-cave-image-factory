@@ -33,8 +33,8 @@ def open_editor(row):
     editor=st.session_state['campaign_editor']
     from crm_campaign_markets import audience
     from crm_middle_sections import middle_sections,commit_middle
-    editor['document']['market_audience']=True
-    editor['document']['audience']=audience(editor['document']['market'])
+    if editor['document'].get('market_audience'):
+        editor['document']['audience']=audience(editor['document']['market'])
     editor['document'].setdefault('send_timing',{'mode':'now'})
     commit_middle(editor['document'],middle_sections(editor['document']))
     if any(s.get('type')=='abandoned_checkout_products' for s in editor['document'].get('middle_sections',[])):
@@ -146,7 +146,9 @@ def delete_dialog(store,user,editor):
 def new_compose(smart_hours=16,cfg=None,sections=None):
     """Empty composer; first meaningful edit creates a durable checkpoint."""
     from crm_campaign_sections import section_defaults
-    doc=new_document();doc.update(content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=deepcopy(sections) if sections is not None else section_defaults(cfg or settings()))
+    doc=new_document();doc.update(market='Global',market_audience=True,shopify_segment_ids=[],content_mode='HTML',custom_html='',smart_hours=smart_hours,html_sections=deepcopy(sections) if sections is not None else section_defaults(cfg or settings()))
+    from crm_campaign_markets import audience
+    doc['audience']=audience('Global')
     if cfg and 'email_defaults' in cfg:doc['html_sections']=deepcopy(cfg['email_defaults'])
     open_editor({'id':None,'version':None,'name':'Untitled campaign','status':'DRAFT',
                  'archived_at':None,'last_tested_at':None,'document':doc})
@@ -407,9 +409,9 @@ def _selected_campaign(shop,store,actions,navigate,drafts,*,toolbar=None):
             continue_campaign_leave(drafts,navigate)
         return
     from crm_campaign_markets import audience
-    doc['market_audience']=True
-    selected_audience=audience(doc['market'])
-    if doc['audience']!=selected_audience:doc['audience']=selected_audience;doc['counts']={}
+    if doc.get('market_audience'):
+        selected_audience=audience(doc['market'])
+        if doc['audience']!=selected_audience:doc['audience']=selected_audience;doc['counts']={}
     key=st.session_state.setdefault('campaign_edit_key',str(uuid.uuid4()))
     composer_styles()
     if st.session_state.get('campaign_delete_notice'):st.info(st.session_state.pop('campaign_delete_notice'))

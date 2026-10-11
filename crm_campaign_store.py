@@ -66,7 +66,7 @@ class CampaignStore(WorkspaceRecords):
             else:
                 row=conn.execute('INSERT INTO crm_campaign_drafts(name,document,status,created_by) VALUES(%s,%s::jsonb,%s,%s) RETURNING *',(name,json.dumps(document),status,actor)).fetchone()
             actions=['campaign_duplicated' if duplicate_of else 'campaign_edited' if old else 'campaign_created']
-            if old and old['document']['audience']!=document['audience']: actions.append('segment_changed')
+            if old and any(old['document'].get(k)!=document.get(k) for k in ('audience','market','shopify_segment_ids','shopify_segment_store')): actions.append('segment_changed')
             if old and any(old['document'].get(field)!=document.get(field) for field in ('content','blocks','custom_html','content_mode','html_sections','middle_sections')): actions.append('content_changed')
             if old and old['status']!=status: actions.append('compliance_status_changed')
             for action in actions:

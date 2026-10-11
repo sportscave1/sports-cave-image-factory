@@ -1,7 +1,8 @@
 """Native frozen campaign dispatch. Existing worker lease owns all DB mutations.
 
 Batch manifests live in existing server-only runtime storage. Receipts/progress
-remain in crm_marketing_sends; delivery remains webhook-owned. No Shopify I/O.
+remain in crm_marketing_sends; delivery remains webhook-owned. Selected buyer
+audiences receive a fresh remove-only Shopify check before batch submission.
 """
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -124,6 +125,14 @@ def prepare(engine,campaign,content,provider_blocked):
 def attempt(engine,transport,key,state,content):
     claim_started=time.monotonic()
     engine.hold_lease();engine.config.require_send(False)
+    from crm_buyer_segments import dispatch_exclusions
+    audience_blocked=set()
+    if content['document'].get('shopify_segment_ids'):
+        recipients=engine.store.q('SELECT shopify_customer_id,recipient_hash FROM crm_marketing_sends WHERE id=ANY(%s)',(state['recipient_ids'],))
+        if len(recipients)!=len(state['recipient_ids']):raise ValueError('Frozen recipient identities are incomplete.')
+        audience_blocked=dispatch_exclusions(engine,content['document'],
+            [{'id':r['shopify_customer_id'],'hash':r['recipient_hash']} for r in recipients])
+        engine.hold_lease()
     # Commit attempts/timestamps before external I/O. Frozen payload and key
     # never change, including when receipt persistence fails after acceptance.
     with engine.store.db() as conn:
@@ -131,7 +140,7 @@ def attempt(engine,transport,key,state,content):
         if campaign['status']!='SENDING':return None
         rows=conn.execute('SELECT * FROM crm_marketing_sends WHERE id=ANY(%s)',(state['recipient_ids'],)).fetchall()
         reasons={str(r['id']):r['reason'] for r in stop_state(conn,campaign,rows,content['document']['smart_hours'],engine.clock())}
-        blocked=[i for i in state['recipient_ids'] if reasons.get(i)]
+        blocked=[str(r['id']) for r in rows if reasons.get(str(r['id'])) or r['recipient_hash'] in audience_blocked]
         if blocked:
             if state['attempt_count']:
                 state['status']='HELD';state['error']='stop_state_changed';persist(conn,key,state)
@@ -210,7 +219,8 @@ def dispatch(engine):
     provider_blocked=transport.suppressed_hashes()
     engine.hold_lease()
     prepared=time.monotonic();plans=prepare(engine,campaign,content,provider_blocked)
-    LOG.info('campaign_dispatch campaign_id=%s batch_prepare_ms=%.1f payload_prepare_ms=%.1f batch_count=%s shopify_calls_during_dispatch=0 individual_email_calls=0',campaign['id'],(time.monotonic()-prepared)*1000,sum(s.get('_prepare_ms',0) for _,s in plans),len(plans))
+    shopify_reads='fresh_buyer_checks' if content['document'].get('shopify_segment_ids') else 0
+    LOG.info('campaign_dispatch campaign_id=%s batch_prepare_ms=%.1f payload_prepare_ms=%.1f batch_count=%s shopify_calls_during_dispatch=%s individual_email_calls=0',campaign['id'],(time.monotonic()-prepared)*1000,sum(s.get('_prepare_ms',0) for _,s in plans),len(plans),shopify_reads)
     calls=0;accepted=0
     with ThreadPoolExecutor(max_workers=2,thread_name_prefix='crm-batch') as executor:
         index=0
@@ -239,5 +249,5 @@ def dispatch(engine):
             if any(state.get('status')=='RETRY' for _,state in wave):break
     elapsed=time.monotonic()-started
     total_calls=transport.api_calls-previous_calls if previous_calls is not None else calls
-    LOG.info('campaign_dispatch campaign_send_id=%s recipient_total=%s total_batches=%s total_resend_calls=%s batch_email_calls=%s individual_email_calls=0 shopify_calls_during_dispatch=0 accepted_count=%s total_dispatch_ms=%.1f emails_per_second=%.2f',campaign['campaign_send_id'],campaign['final_recipient_count'],len(plans),total_calls,calls,accepted,elapsed*1000,accepted/max(elapsed,.001))
+    LOG.info('campaign_dispatch campaign_send_id=%s recipient_total=%s total_batches=%s total_resend_calls=%s batch_email_calls=%s individual_email_calls=0 shopify_calls_during_dispatch=%s accepted_count=%s total_dispatch_ms=%.1f emails_per_second=%.2f',campaign['campaign_send_id'],campaign['final_recipient_count'],len(plans),total_calls,calls,shopify_reads,accepted,elapsed*1000,accepted/max(elapsed,.001))
     return bool(plans)

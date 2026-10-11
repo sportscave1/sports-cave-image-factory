@@ -100,7 +100,10 @@ def apply_rules(prompt):
         ('VISIBLE PRODUCT DESCRIPTION IN FULL STANDARDISATION MODE','SEO IN FULL STANDARDISATION MODE'),
         ('\nDESCRIPTION\n','\nSEO\n'),
     ):
-        text=re.sub(re.escape(start)+r'.*?(?='+re.escape(end)+r')',
+        # Older saved exports contain a UTF-8 em dash decoded as Windows-1252.
+        # Match that heading too; do not normalize unrelated operator content.
+        heading=re.escape(start).replace('—', '(?:—|â€”)')
+        text=re.sub(heading+r'.*?(?='+re.escape(end)+r')',
                     start+'\nUse the shared collector-copy rules below when copy changes are authorised.\n\n',text,flags=re.S)
     lines=[]
     for line in text.splitlines():

@@ -86,8 +86,10 @@ class FlowV4Tests(TestCase):
         import crm_flow_page as page
         source=inspect.getsource(page.flow_page)
         main=source[source.index("with st.container(key='flow-workspace'):"):]
-        self.assertIn('recipient_details(',main);self.assertIn('checkouts(',main)
-        self.assertLess(main.index('sequence('),main.index('recipient_details('))
+        self.assertIn('checkouts(',main);self.assertIn('audience(store,user,row)',main)
+        self.assertLess(main.index('sequence('),main.index('checkouts('))
+        self.assertIn("row['trigger_type']=='abandoned'",main)
+        self.assertIn("row['config']['draft'].get('lifecycle_version')",main)
         self.assertIn('os_accounts.is_admin(user)',source)
         import crm_automation_toolbar as toolbar
         code=Path(toolbar.__file__).read_text(encoding="utf8")

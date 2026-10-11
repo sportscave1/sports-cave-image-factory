@@ -126,8 +126,13 @@ class Shopify:
             if cached is not None:
                 return cached
         try:
-            with _LIMIT:
+            left = self._optional_remaining()
+            acquired = _LIMIT.acquire(timeout=left) if left is not None else _LIMIT.acquire()
+            if not acquired: raise CapabilityUnavailable('optional artwork busy')
+            try:
                 data = self.transport(document, variables) if self.transport else self._request(document, variables)
+            finally:
+                _LIMIT.release()
             return self.cache.put(key, data, ttl) if ttl and not fresh else data
         except CapabilityUnavailable:
             raise
@@ -135,14 +140,23 @@ class Shopify:
             logging.getLogger(__name__).warning('crm_shopify_unavailable capability=%s type=%s', capability, type(exc).__name__)
             raise CapabilityUnavailable(capability) from None
 
+    def _optional_remaining(self):
+        deadline = getattr(self, 'optional_deadline', None)
+        if deadline is None: return None
+        left = deadline - time.monotonic()
+        if left <= 0: raise CapabilityUnavailable('optional artwork timeout')
+        return left
+
     def _request(self, document, variables):
         import requests
         from shopify_sync import graphql_request
         global _NEXT_REQUEST
-        for attempt in range(3):
+        optional = self._optional_remaining() is not None
+        attempts = 1 if optional else 3
+        for attempt in range(attempts):
             with _COST_LOCK:
                 delay = max(0, _NEXT_REQUEST-time.monotonic())
-            if delay > 10:
+            if delay > 10 or optional and delay >= self._optional_remaining():
                 raise CapabilityUnavailable('rate limit; retry shortly')
             self.sleeper(delay)
             transient = False
@@ -169,9 +183,9 @@ class Shopify:
                     _NEXT_REQUEST = max(_NEXT_REQUEST, time.monotonic()+wait)
                 return response
             try:
-                return graphql_request(document, variables=variables, timeout=20, request_post=post)[0]
+                return graphql_request(document, variables=variables, timeout=min(3, self._optional_remaining()) if optional else 20, request_post=post)[0]
             except Exception:
-                if not transient or attempt == 2:
+                if not transient or attempt == attempts-1:
                     raise
 
     def campaign_subscribers(self, after=None):

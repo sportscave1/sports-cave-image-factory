@@ -39,7 +39,7 @@ class InboxStages(unittest.TestCase):
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Requires isolated loopback fixture')
 class CRMStages(unittest.TestCase):
-    def test_campaign_list_precedes_selected_settings_and_hidden_editor(self):
+    def test_selected_campaign_defers_list_history_and_hidden_editor(self):
         from streamlit.testing.v1 import AppTest
         from crm_campaign_store import CampaignStore
         from tests.test_crm_ui import SCRIPT
@@ -50,8 +50,8 @@ class CRMStages(unittest.TestCase):
         with patch.object(CampaignStore,'q',record),patch('crm_html_workspace.section_editor') as editor:
             at=AppTest.from_string(SCRIPT);at.session_state['route']='CRM Campaigns';at.run(timeout=20)
             self.assertFalse(at.exception)
-            self.assertIn('FROM crm_campaign_drafts d',calls[0])
-            self.assertIn('jsonb_build_object',calls[0])
+            # The selected composer no longer loads the unrelated home list.
+            self.assertFalse(any('FROM crm_campaign_drafts d' in q for q in calls))
             self.assertFalse(any('crm_campaign_history' in q for q in calls))
             editor.assert_not_called()
             at.session_state[at.session_state['campaign_edit_key']+'panel']='Editor';at.run(timeout=20)

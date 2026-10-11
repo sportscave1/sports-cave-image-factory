@@ -177,10 +177,15 @@ class CollectorVaultAuthenticationTests(unittest.TestCase):
             self.assertEqual(collector_vault._session_token_secrets(), [])
 
     def test_expired_wrong_audience_and_tampered_tokens_are_rejected(self):
+        original = _session_token()
+        prefix, signature = original.rsplit('.', 1)
+        raw = bytearray(base64.urlsafe_b64decode(signature + '=' * (-len(signature) % 4)))
+        raw[0] ^= 1  # Change a signature byte, never an unused base64 padding bit.
+        tampered = prefix + '.' + base64.urlsafe_b64encode(raw).rstrip(b'=').decode('ascii')
         scenarios = [
             _session_token(expires_in=-120),
             _session_token(audience="another-app"),
-            _session_token()[:-1] + "x",
+            tampered,
         ]
         for token in scenarios:
             with self.subTest(token=token[-12:]):
@@ -1033,13 +1038,22 @@ class CollectorVaultBootstrapResilienceTests(unittest.TestCase):
 class CollectorVaultImplementationTests(unittest.TestCase):
     def test_render_declares_frame_product_variables_without_values(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        import re
+        from scripts.validate_render_topology import parse_services, validation_errors
+        services = parse_services(source)
+        self.assertEqual(validation_errors(services), [])
+        self.assertEqual([s['name'] for s in services], ['sports-cave-os-webhooks'])
         for name in (
             "FRAMED_CERTIFICATE_PRODUCT_HANDLE",
             "FRAMED_CERTIFICATE_PRODUCT_ID",
             "FRAMED_CERTIFICATE_VARIANT_ID",
         ):
-            self.assertEqual(source.count(f"key: {name}"), 2)
-        self.assertGreaterEqual(source.count("sync: false"), 6)
+            self.assertEqual(source.count(f"key: {name}"), 1)
+            declaration = re.search(r'(?m)^      - key: '+name+r'\n((?:        .*\n)*)', source)
+            self.assertIsNotNone(declaration)
+            self.assertIn('sync: false', declaration[1])
+            self.assertNotIn('value:', declaration[1])
+        self.assertGreaterEqual(source.count("sync: false"), 3)
         self.assertNotIn("gid://shopify/Product/", source)
         self.assertNotIn("gid://shopify/ProductVariant/", source)
 

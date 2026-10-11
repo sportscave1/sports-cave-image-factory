@@ -1,0 +1,6 @@
+query CollectorEmailBestsellers($id: ID!) {
+  collection(id: $id) {
+    id
+    products(first: 12, sortKey: BEST_SELLING) { nodes { id } }
+  }
+}

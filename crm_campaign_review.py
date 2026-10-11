@@ -52,6 +52,13 @@ class ReviewJob:
         if not _SLOTS.acquire(blocking=False):
             self.future.set_exception(ValueError('Review service is busy. Retry shortly.'))
             return
+        try:
+            if audience_job is not None:
+                audience_job.retain_for_review()
+        except Exception as exc:
+            _SLOTS.release()
+            self.future.set_exception(exc)
+            return
         def work():
             try:
                 started = time.monotonic()
@@ -65,6 +72,8 @@ class ReviewJob:
             except Exception as exc:
                 self.future.set_exception(exc)
             finally:
+                if audience_job is not None:
+                    audience_job.release_review()
                 LOG.info('campaign_review stage=total duration_ms=%.1f',(time.monotonic()-self.started)*1000)
                 _SLOTS.release()
         threading.Thread(target=work,name='campaign-review',daemon=True).start()

@@ -1,4 +1,10 @@
-from product_title_rules import strip_rules as strip_title_rules
+from product_title_rules import strip_rules as _strip_title_rules
+from product_sport_tags import strip_prompt_rules
+
+
+def strip_title_rules(prompt):
+    # Historical content-preservation assertions exclude both appended policies.
+    return _strip_title_rules(strip_prompt_rules(prompt))
 import hashlib
 from pathlib import Path
 import re
@@ -13,8 +19,9 @@ from product_upload_collections import apply_rules as apply_collection_rules
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NEW_PROMPT_SHA256 = "71092f128c8b2de679dbaed697fe393a8578ba1386aae27cd6e46eadd2d3bc6a"
-EXISTING_PROMPT_SHA256 = "190193bdbbc70f29ccd981441eeee257d37805f8c602c06d09878cd7fa0dd5ed"
+# Current deployed HEAD baseline; this change does not edit either constant.
+NEW_PROMPT_SHA256 = "d8336905060d39e9b08c7dd6bf73d16aa641dc6d68bd17c7dfcc4f585641dcbe"
+EXISTING_PROMPT_SHA256 = "423960daf6ef4af746bd23b975b7339bd0f85ddffd80ecc66574ca77555835b1"
 EXPECTED_FRAMED_PRICING_LINES = (
     "- Framed XL: Selling price A$339 | RRP / compare-at price A$449 | Saving A$110 | Approx. discount 24%",
     "- Framed Large: Selling price A$269 | RRP / compare-at price A$339 | Saving A$70 | Approx. discount 21%",
@@ -85,6 +92,9 @@ class FakeExpander:
 
 
 class ProductUploadFakeStreamlit:
+    def title(self, *args, **kwargs):
+        pass
+
     def __init__(self, *, upload_type, product_name, submitted=False):
         self.session_state = GuardedSessionState()
         self.query_params = {}

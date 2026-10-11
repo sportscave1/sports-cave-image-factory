@@ -5518,7 +5518,7 @@ PRODUCT_UPLOAD_PRICE_BLOCK_START = "CENTRAL SPORTS CAVE AUD PRICE LADDER"
 PRODUCT_UPLOAD_PRICE_BLOCK_END = (
     "These rules do not authorise live publishing or live Shopify price updates."
 )
-PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION = """EXISTING PRODUCT â€” PRICE PROTECTION
+PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION = """EXISTING PRODUCT — PRICE PROTECTION
 
 Only when the operator intentionally runs a pricing update for the selected existing product, set the Australian Small Black/Oak/White framed selling price to A$169 and Medium Black/Oak/White framed selling price to A$209. Update only the Price field of those six variants; omit compare-at/RRP from the mutation and preserve its exact existing value, including blank values. Preserve Large, XL, every unframed price, international market prices, savings and discount percentages. This restriction takes precedence over the central ladder, Full Standardisation pricing instructions and pricing QA: read back the six selling prices and verify all other prices/RRPs against the pre-update snapshot. Media-only updates do not authorise price changes. Never update other products or run a mass/startup update."""
 
@@ -5590,7 +5590,7 @@ def apply_product_upload_pricing_update(prompt_text):
     prompt = re.sub(
         r"(Black, Oak,? and White framed variants:\r?\n)(.*?)(?=\r?\nUnframed variants:)",
         lambda match: match[1] + re.sub(
-            r"(?m)^((XL|L|M|S)[ \t]+[â€”â€“-][ \t]+Price[ \t]+\$)[\d.]+([ \t]*/[ \t]*Compare-at price[ \t]+\$)[\d.]+",
+            r"(?m)^((XL|L|M|S)[ \t]+(?:—|–|-|â€”|â€“)[ \t]+Price[ \t]+\$)[\d.]+([ \t]*/[ \t]*Compare-at price[ \t]+\$)[\d.]+",
             lambda price: price[1] + framed_prices[price[2]][0] + ".00"
             + price[3] + framed_prices[price[2]][1] + ".00",
             match[2],
@@ -5598,12 +5598,13 @@ def apply_product_upload_pricing_update(prompt_text):
         prompt,
         flags=re.DOTALL,
     )
-    prompt = prompt.replace(
-        "EXISTING PRODUCT â€” ABSOLUTE PRICE PROTECTION",
-        PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
+    prompt = re.sub(
+        r"EXISTING PRODUCT (?:—|â€”) ABSOLUTE PRICE PROTECTION",
+        lambda match: PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
+        prompt,
     )
     prompt = re.sub(
-        r"EXISTING PRODUCT â€” PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian (?:Small )?Black, Oak and White framed variants[^\r\n]*",
+        r"EXISTING PRODUCT (?:—|â€”) PRICE PROTECTION\r?\n\r?\nAuthorised exception for every Sports Cave product: set only the Australian (?:Small )?Black, Oak and White framed variants[^\r\n]*",
         lambda match: PRODUCT_UPLOAD_EXISTING_FRAMED_EXCEPTION,
         prompt,
     )
@@ -5982,6 +5983,8 @@ def apply_product_upload_prompt_updates(
     preview=False,
     publication_mode='DRAFT',
 ):
+    from product_sport_tags import strip_prompt_rules
+    prompt_text = strip_prompt_rules(prompt_text)
     from product_title_rules import strip_rules as strip_title_rules
     prompt_text = strip_title_rules(prompt_text)
     if update_existing and publication_mode!='DRAFT':
@@ -6007,7 +6010,8 @@ def apply_product_upload_prompt_updates(
         prompt=apply_collection_rules(prompt,metadata)
         prompt=finalise_prompt(prompt,publication_mode)
     from product_title_rules import apply_rules as apply_title_rules
-    return apply_title_rules(prompt, metadata, preview=preview)
+    from product_sport_tags import apply_prompt_rules as apply_sport_tag_rules
+    return apply_sport_tag_rules(apply_title_rules(prompt, metadata, preview=preview), metadata)
 
 
 def product_upload_embedded_sections():

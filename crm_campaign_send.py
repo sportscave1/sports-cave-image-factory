@@ -15,6 +15,11 @@ OFF='Marketing delivery is currently OFF. No emails were sent.'
 
 
 def final_audience(shop,store,doc,*,clock=time.monotonic):
+    if doc.get('shopify_segment_ids'):
+        from crm_buyer_segments import audience
+        if not doc.get('market_audience'):
+            raise ValueError('Buyer segments require location audience mode; preserve and review the advanced audience.')
+        return verified_native_audience(audience(shop, store, doc))
     if doc.get('market_audience'):
         from crm_campaign_markets import calculate
         return verified_native_audience(calculate(shop,store,doc.get('smart_hours',16),clock=clock,market=doc['market'])[doc['market']])
@@ -176,6 +181,10 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     from crm_email_size import REPRESENTATIVE_UNSUBSCRIBE
     blocked_recipients={}
     delivery_recipients={}
+    current_members = None
+    if doc.get('shopify_segment_ids'):
+        from crm_buyer_segments import member_ids
+        current_members = member_ids(shop, store, doc)
     from crm_campaign_review_reads import bounded_reads,batches
     verification_deadline=time.monotonic()+120
     # Signed consent changes arriving during verification must remain visible to
@@ -199,6 +208,7 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
             for recipient in batch:
                 customer=profiles.get(recipient['id'])
                 valid,reason=eligibility(customer,recipient['hash'] in hashes or recipient['id'] in ids)
+                if current_members is not None and recipient['id'] not in current_members:reason='buyer_membership_changed'
                 if valid and recipient_hash(customer.get('email'))!=recipient['hash']:reason='recipient_changed'
                 if valid and not reason and 'policy_version' in doc.get('send_timing',{}):
                     from crm_campaign_segments import COUNTRIES

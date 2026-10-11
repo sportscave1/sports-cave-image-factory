@@ -142,6 +142,8 @@ class ProductLifecycleTests(unittest.TestCase):
         self.db = MemoryDatabase()
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch('product_sport_tag_sync.sync_product_sport_tags',
+                                      return_value={'status': 'verified', 'review': []}))
         self.stack.enter_context(patch.object(backend, 'connect', self.db.connect))
         self.stack.enter_context(patch.object(backend, '_set_webhook_app_setting'))
         self.stack.enter_context(patch.object(backend, '_update_webhook_event_status'))

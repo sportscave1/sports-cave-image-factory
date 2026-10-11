@@ -21,6 +21,11 @@ def library_rows(store):
     rows.extend(lifestyle_rows())
     from crm_frame_banner_template import library_row as frame_banner_row
     rows.append(frame_banner_row())
+    if getattr(store,'preview_trigger',None) in ('welcome','post_purchase','win_back'):
+        from crm_collector_templates import library_rows as collector_rows
+        rows.extend(collector_rows())
+        from crm_collector_stages import library_rows as stage_rows
+        rows.extend(stage_rows(store.preview_trigger))
     if getattr(store,'email_mode',None)=='automation':
         from crm_wall_preview_template import library_row
         rows.append(library_row())
@@ -28,6 +33,10 @@ def library_rows(store):
 
 
 def template_html(store,row):
+    from crm_collector_stages import PREFIX as stage_prefix,source as stage_source
+    if row.get('builtin') and str(row['id']).startswith(stage_prefix):return stage_source(row['id'])
+    from crm_collector_templates import PREFIX as collector_prefix,source as collector_source
+    if row.get('builtin') and str(row['id']).startswith(collector_prefix):return collector_source(row['id'])
     from crm_lifestyle_images import IDENTITIES,source as lifestyle_source
     if row.get('builtin') and row['id'] in IDENTITIES:return lifestyle_source(IDENTITIES[row['id']])
     from crm_frame_banner_template import IDENTITY as banner_id,source as banner_source
@@ -64,6 +73,9 @@ def template_sections(store,row):
 def insert_saved_template(store,doc,identity,version):
     row=next((r for r in library_rows(store) if str(r['id'])==str(identity) and r['version']==version),None)
     if row is None:raise ValueError('Template could not be loaded.')
+    from crm_collector_stages import PREFIX as stage_prefix,apply as apply_stage
+    if row.get('builtin') and str(row['id']).startswith(stage_prefix):
+        apply_stage(doc,row['id']);return
     source=template_sections(store,row)
     if source is not None:
         proposed=deepcopy(doc)
@@ -179,6 +191,8 @@ def library(store,user,doc,target=None):
     except StoreUnavailable:
         st.caption('Templates temporarily unavailable. Campaign editing remains available.');return
     if not rows:st.caption('No saved templates yet.')
+    if getattr(store,'preview_trigger',None) in ('welcome','post_purchase','win_back'):
+        st.caption('V2 stage starters marked “replace body” replace the middle content, subject and preview text when you click Use. The existing draft save keeps the previous revision. Header/footer, audience and timing stay unchanged.')
     def use(row):
         try:insert_saved_template(store,doc,row['id'],row['version'])
         except (ValueError,StoreUnavailable):

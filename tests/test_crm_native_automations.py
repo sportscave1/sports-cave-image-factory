@@ -448,7 +448,9 @@ class NativeAutomationTests(unittest.TestCase):
         a=self.published(delays=(86400,));j=self.enroll(a)
         before=date(j['next_due_at']);old=deepcopy(j['steps'])
         self.store.lifecycle(ADMIN,a['id'],'pause')
-        row=self.store.flow(a['id']);row['config']['paused_at']=(now()-timedelta(hours=2)).isoformat()
+        # Pause/resume uses the database clock; do not compare host-clock skew.
+        resumed_at=date(self.store.q('SELECT now() AS at',one=True)['at'])
+        row=self.store.flow(a['id']);row['config']['paused_at']=(resumed_at-timedelta(hours=2)).isoformat()
         self.store.q('UPDATE crm_automations SET config=%s::jsonb WHERE id=%s',(__import__('json').dumps(row['config']),a['id']))
         self.store.publish(ADMIN,a['id'],row['config']['revision'],env=LIVE)
         current=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(j['id'],),True)

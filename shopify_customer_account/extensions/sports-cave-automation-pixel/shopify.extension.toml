@@ -1,6 +1,7 @@
 type = "web_pixel_extension"
 name = "Sports Cave Automations"
 runtime_context = "strict"
+uid = "883c01ba-4d8d-270c-238b-b97412cda28adf3227a1"
 
 [customer_privacy]
 analytics = true

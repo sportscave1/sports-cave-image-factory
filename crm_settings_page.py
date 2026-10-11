@@ -74,6 +74,8 @@ def settings_page(shop,store,actions,navigate,initial=None,compact=False):
 
 def templates_page(store,shop,user):
     from crm_campaign_page import open_editor,block_editor,reset_widgets,dirty
+    from crm_collector_library_ui import starters as collector_starters
+    collector_starters(store,user)
     unsaved=bool(st.session_state.get('campaign_editor') and dirty(st.session_state['campaign_editor']))
     if unsaved:st.info('Save or discard the open campaign before starting another draft from a template.')
     st.caption('Versioned templates · campaigns keep an independent snapshot · no automatic seeding')

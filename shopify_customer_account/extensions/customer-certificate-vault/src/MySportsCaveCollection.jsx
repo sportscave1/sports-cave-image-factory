@@ -10,6 +10,7 @@ import {
   customerSafeErrorMessage,
 } from "./legacy-certificate-utils.js";
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
+import {loadCollectionOrders} from "./collection-order-pages.js";
 import {formatFramePrice, frameCartInput} from "./vault-utils.js";
 
 export const COLLECTOR_VAULT_REDESIGN_ENABLED = false;
@@ -24,10 +25,11 @@ const CART_CREATE_MUTATION = `mutation SportsCaveFramedCertificateCart($input: C
     userErrors { field message }
   }
 }`;
-const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates {
+const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates($after: String) {
   customer {
     id
-    orders(first: 50, reverse: true) {
+    orders(first: 50, reverse: true, after: $after) {
+      pageInfo { hasNextPage endCursor }
       nodes {
         id
         name
@@ -77,39 +79,8 @@ function Extension() {
       setStatus("loading");
       setErrorMessage("");
       try {
-        const response = await fetch(
-          `shopify://customer-account/api/${API_VERSION}/graphql.json`,
-          {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({query: CERTIFICATES_QUERY}),
-          },
-        );
-        let payload = {};
-        try {
-          payload = await response.json();
-        } catch (_error) {
-          payload = {};
-        }
-        if (!response.ok) {
-          const requestError = Object.assign(
-            new Error("Customer Account API request failed."),
-            {status: response.status},
-          );
-          throw requestError;
-        }
-        const graphQLErrors = Reflect.get(payload, "errors");
-        if (Array.isArray(graphQLErrors) && graphQLErrors.length) {
-          const requestError = Object.assign(
-            new Error("Customer Account API query failed."),
-            {graphQLErrors},
-          );
-          throw requestError;
-        }
-
-        const responseData = Reflect.get(payload, "data") || {};
-        const customer = responseData.customer || {};
-        const orderNodes = customer.orders?.nodes || [];
+        const fetchCustomerPage = (_url, options) => fetch(`shopify://customer-account/api/${API_VERSION}/graphql.json`, options);
+        const {customer, orders: orderNodes} = await loadCollectionOrders(fetchCustomerPage, API_VERSION, CERTIFICATES_QUERY);
         const rows = attachPurchasedArtwork(
           collectCertificates(orderNodes, customer),
           orderNodes,
