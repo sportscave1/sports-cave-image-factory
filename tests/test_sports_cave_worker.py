@@ -16,44 +16,40 @@ class SupervisorTests(unittest.TestCase):
     def child(self):
         return Mock(pid=123, poll=Mock(return_value=None))
 
-    def test_both_start_with_original_arguments_and_inherited_environment(self):
-        seo, crm = self.child(), self.child()
+    def test_only_operational_crm_starts_with_unchanged_environment(self):
+        crm = self.child()
         supervisor = worker.Supervisor()
-        with patch.object(worker.subprocess, 'Popen', side_effect=[seo, crm]) as launch:
+        with patch.object(worker.subprocess, 'Popen', return_value=crm) as launch:
             supervisor.check_children()
-        self.assertEqual(supervisor.children, {'seo': seo, 'crm': crm})
-        self.assertEqual(launch.call_args_list[0].args[0],
-                         [sys.executable, '-u', 'google_seo_import.py', 'worker', '--poll-seconds', '15'])
-        self.assertEqual(launch.call_args_list[1].args[0], [sys.executable, '-u', 'crm_worker.py'])
-        for call in launch.call_args_list:
-            self.assertEqual(call.kwargs, {'cwd': worker.ROOT})
+            supervisor.check_children()
+        self.assertEqual(supervisor.children, {'crm': crm})
+        launch.assert_called_once_with([sys.executable, '-u', 'crm_worker.py'], cwd=worker.ROOT)
+        self.assertEqual(worker.WORKERS, {'crm': ('crm_worker.py',)})
 
-    def test_each_child_restarts_without_stopping_its_sibling(self):
-        for failed in ('seo', 'crm'):
-            with self.subTest(failed=failed):
-                supervisor = worker.Supervisor()
-                original = {name: self.child() for name in worker.WORKERS}
-                supervisor.children.update(original)
-                original[failed].poll.return_value = 1
-                replacement = self.child()
-                with patch.object(worker.time, 'monotonic', return_value=100), self.assertLogs(level='WARNING'):
-                    supervisor.check_children()
-                sibling = original['crm' if failed == 'seo' else 'seo']
-                sibling.terminate.assert_not_called()
-                with patch.object(worker.time, 'monotonic', return_value=104), patch.object(worker.subprocess, 'Popen') as launch:
-                    supervisor.check_children()
-                    launch.assert_not_called()
-                with patch.object(worker.time, 'monotonic', return_value=105), patch.object(worker.subprocess, 'Popen', return_value=replacement) as launch:
-                    supervisor.check_children()
-                    launch.assert_called_once()
-                self.assertIs(supervisor.children[failed], replacement)
-
-    def test_start_failure_is_redacted_and_other_child_starts(self):
+    def test_crm_restarts_after_original_five_second_delay(self):
         supervisor = worker.Supervisor()
-        with patch.object(worker.subprocess, 'Popen', side_effect=[OSError('secret-value'), self.child()]), self.assertLogs(level='ERROR') as logs:
+        failed, replacement = self.child(), self.child()
+        supervisor.children['crm'] = failed
+        failed.poll.return_value = 1
+        with patch.object(worker.time, 'monotonic', return_value=100), self.assertLogs(level='WARNING'):
             supervisor.check_children()
-        self.assertIn('crm', supervisor.children)
+        with patch.object(worker.time, 'monotonic', return_value=104), patch.object(worker.subprocess, 'Popen') as launch:
+            supervisor.check_children()
+            launch.assert_not_called()
+        with patch.object(worker.time, 'monotonic', return_value=105), patch.object(worker.subprocess, 'Popen', return_value=replacement) as launch:
+            supervisor.check_children()
+            launch.assert_called_once()
+        self.assertIs(supervisor.children['crm'], replacement)
+
+    def test_start_failure_is_redacted_and_retried(self):
+        supervisor = worker.Supervisor()
+        with patch.object(worker.time, 'monotonic', return_value=100), patch.object(worker.subprocess, 'Popen', side_effect=OSError('secret-value')), self.assertLogs(level='ERROR') as logs:
+            supervisor.check_children()
+        self.assertEqual(supervisor.restart_at['crm'], 105)
         self.assertNotIn('secret-value', '\n'.join(logs.output))
+        with patch.object(worker.time, 'monotonic', return_value=105), patch.object(worker.subprocess, 'Popen', return_value=self.child()) as launch:
+            supervisor.check_children()
+            launch.assert_called_once()
 
     def test_shutdown_signals_both_before_wait_and_reaps_them(self):
         supervisor = worker.Supervisor()

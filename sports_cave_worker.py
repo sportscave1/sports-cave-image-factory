@@ -1,4 +1,4 @@
-"""Supervise the existing SEO and CRM workers in one Render worker service."""
+"""Supervise the operational CRM worker in the existing Render worker service."""
 
 import logging
 from pathlib import Path
@@ -11,8 +11,9 @@ from worker_memory import MemoryMonitor
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger(__name__)
+# Direct Google reporting is on demand. The retired import/repair child only
+# polled no-op entry points; CRM and its independent delivery threads stay intact.
 WORKERS = {
-    "seo": ("google_seo_import.py", "worker", "--poll-seconds", "15"),
     "crm": ("crm_worker.py",),
 }
 RESTART_SECONDS = 5
@@ -45,7 +46,7 @@ class Supervisor:
             if time.monotonic() < self.restart_at.get(name, 0):
                 continue
             try:
-                # No env override: both children inherit the service's complete
+                # No env override: children inherit the service's complete
                 # environment. Streams remain attached to Render's log capture.
                 child = subprocess.Popen([sys.executable, "-u", *args], cwd=ROOT)
             except OSError as exc:
