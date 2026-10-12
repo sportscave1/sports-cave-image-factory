@@ -33,6 +33,25 @@ def main(report):
             page.get_by_role('button',name='Files',exact=True).click()
             page.locator('#ws-list').get_by_role('button',name='app.py',exact=False).click()
             expect(page.locator('#ed-text')).to_have_value('Welcome back')
+            # A delayed file selection must lock existing fields until its response arrives.
+            pending=[]
+            def hold_open(route):
+                data=route.request.post_data_json or {}
+                if data.get('action')=='workspace-request' and data.get('command',{}).get('action')=='editor-open':pending.append(route)
+                else:route.continue_()
+            context.route('**/api/action',hold_open)
+            page.locator('#ws-list').get_by_role('button',name='app.py',exact=False).click()
+            try:
+                expect(page.locator('#ed-text')).to_be_disabled()
+                deadline=time.monotonic()+5
+                while not pending and time.monotonic()<deadline:page.wait_for_timeout(20)
+                assert pending,'Expected a held file-open response'
+            finally:
+                context.unroute('**/api/action',hold_open)
+                for route in pending:route.continue_()
+            expect(page.locator('#ed-text')).to_be_enabled()
+            expect(page.locator('#ws-save')).to_be_enabled()
+            result['delayed_file_open_locks_fields']=True
             page.locator('#ed-text').fill('V6 visual fixture')
             page.locator('#ws-save').click();expect(page.locator('#ed-status')).to_contain_text('Saved to the actual draft')
             assert 'V6 visual fixture' in (f.root/'app.py').read_text()

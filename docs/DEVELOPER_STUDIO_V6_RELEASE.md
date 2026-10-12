@@ -65,3 +65,15 @@ RELEASE procedure and canonical Render services. If main advances, integrate/tes
 a new immutable candidate before approval. Preserve worker configuration and
 verify exact deployed app/worker revisions and owner-only Studio access afterwards.
 Do not enable Real Publish or claim simulation receipts are production evidence.
+
+## Hosted acceptance follow-up
+
+Actual HTTPS testing found a timing defect: editor inputs were not locked while
+an authorised file/selection reload was pending. A fast edit could be replaced
+by the late response. Selection now uses the existing busy/disabled guard until
+loading completes. The disposable UI acceptance holds a real file-open response
+and verifies the fields stay disabled, then verifies Save/Undo/recovery and all
+existing UI checks. No authentication, file scope or preview boundary changed.
+The final candidate supersedes the first local merge; hosted acceptance must use
+its exact updated editor bundle. Test-harness recovery additionally checks that
+an editor journal entry was created by that test before attempting restoration.
