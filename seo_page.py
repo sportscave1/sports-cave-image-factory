@@ -21,6 +21,7 @@ import os_accounts
 import seo_growth_intelligence
 import seo_blog_workflow
 import seo_live_analytics
+from google_direct_reporting import DirectSEOLiveReader
 import seo_metrics
 import seo_navigation as seo_nav
 import seo_pagination
@@ -524,6 +525,8 @@ def _cached_default_growth_pipeline_status():
 
 
 def invalidate_seo_overview_summary_cache():
+    from google_direct_reporting import REPORTS
+    REPORTS.clear()
     _cached_default_shopify_health.clear()
     _cached_default_google_connection.clear()
     _cached_default_phase4_health.clear()
@@ -768,110 +771,7 @@ def _render_historical_import_controls(
     connection_store=None,
     config_ready=True,
 ):
-    import_store = import_store or google_seo_import.default_import_store()
-    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
-    st.subheader("Google data import")
-    try:
-        progress_statuses = _load_sync_progress_statuses(import_store, phase4_store)
-    except (google_seo_import.SEOImportError, google_seo_phase4.SEOPhase4Error) as error:
-        st.warning(getattr(error, "public_message", "Import status is temporarily unavailable."))
-        return
-    statuses = progress_statuses.get("phase3") or {}
-    columns = st.columns(2)
-    for column, source in zip(columns, google_seo_import.SOURCES):
-        column.markdown(
-            _import_status_card(source, statuses.get(source) or {}),
-            unsafe_allow_html=True,
-        )
-
-    phase4_statuses = progress_statuses.get("phase4") or {}
-    if phase4_statuses:
-        st.caption("Phase 4 joined-data jobs")
-        for offset in range(0, len(google_seo_phase4.PHASE4_SOURCES), 3):
-            phase4_columns = st.columns(3)
-            for column, source in zip(
-                phase4_columns,
-                google_seo_phase4.PHASE4_SOURCES[offset:offset + 3],
-            ):
-                column.markdown(
-                    _import_status_card(
-                        source.replace("_", " ").title(),
-                        phase4_statuses.get(source) or {},
-                    ),
-                    unsafe_allow_html=True,
-                )
-
-    if not os_accounts.is_admin(user):
-        return
-
-    can_import = bool(
-        config_ready
-        and connection.get("has_refresh_token")
-        and connection.get("gsc_site_url")
-        and connection.get("ga4_property_id")
-    )
-    actions = st.columns(3)
-    if actions[0].button(
-        "Import historical data",
-        type="primary",
-        icon=":material/history:",
-        disabled=not can_import,
-        key="seo-google-import-history",
-    ):
-        try:
-            google_seo_import.queue_imports(
-                user,
-                "historical",
-                import_store=import_store,
-                connection_store=connection_store,
-            )
-        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError) as error:
-            _set_notice(getattr(error, "public_message", str(error)), success=False)
-        else:
-            _set_notice("Historical GSC and GA4 imports queued.")
-            invalidate_seo_overview_summary_cache()
-        st.rerun(scope="fragment")
-    if actions[1].button(
-        "Sync now",
-        icon=":material/sync:",
-        disabled=not can_import,
-        key="seo-google-import-sync-now",
-    ):
-        try:
-            google_seo_import.queue_imports(
-                user,
-                "manual",
-                import_store=import_store,
-                connection_store=connection_store,
-            )
-        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError) as error:
-            _set_notice(getattr(error, "public_message", str(error)), success=False)
-        else:
-            _set_notice("GSC and GA4 refresh queued.")
-            invalidate_seo_overview_summary_cache()
-        st.rerun(scope="fragment")
-
-    failed = next(
-        (
-            row for row in statuses.values()
-            if row.get("status") in {"failed", "partial"} and row.get("id")
-        ),
-        None,
-    )
-    if actions[2].button(
-        "Retry failed import",
-        icon=":material/replay:",
-        disabled=not bool(failed),
-        key="seo-google-import-retry",
-    ):
-        try:
-            google_seo_import.retry_import(user, failed["id"], import_store=import_store)
-        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError) as error:
-            _set_notice(getattr(error, "public_message", str(error)), success=False)
-        else:
-            _set_notice(f"{failed.get('source') or 'Google'} import queued for retry.")
-            invalidate_seo_overview_summary_cache()
-        st.rerun(scope="fragment")
+    st.caption("Google reports are requested on demand. Historical database imports and retries are disabled. Retained history is preserved pending backup and approved cleanup.")
 
 
 def _phase4_status_card(label, value, detail=""):
@@ -1135,121 +1035,7 @@ def _render_growth_pipeline_admin(user, *, growth_store=None):
 
 
 def _render_analytics_refresh_admin(user, *, growth_store=None, phase4_store=None):
-    if not os_accounts.is_admin(user):
-        return
-    growth_store = growth_store or seo_growth_intelligence.default_store()
-    phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
-    if st.button(
-        "Refresh analytics",
-        type="primary",
-        icon=":material/refresh:",
-        key="seo-refresh-analytics",
-        use_container_width=True,
-    ):
-        try:
-            result = seo_growth_intelligence.run_daily_analytics_refresh(
-                store=growth_store,
-                requested_by=str(user.get("id") or "manual")[:200],
-            )
-        except (google_seo.GoogleSEOError, google_seo_import.SEOImportError, seo_growth_intelligence.SEOGrowthError) as error:
-            _set_notice(getattr(error, "public_message", str(error)), success=False)
-        else:
-            failed = list(result.get("failed_stages") or [])
-            if result.get("status") == "completed":
-                _set_notice("Analytics refreshed from the latest saved source data.")
-            elif result.get("status") == "already_running":
-                _set_notice("An analytics refresh is already running.")
-            else:
-                _set_notice(
-                    result.get("error_summary")
-                    or "Saved analytics remain available; the analytics refresh needs attention.",
-                    success=False,
-                )
-            if failed:
-                st.session_state["seo-refresh-failed-stages"] = failed
-            invalidate_seo_overview_summary_cache()
-        st.rerun()
-
-    if st.button(
-        "Sync / Repair SEO Data",
-        icon=":material/build:",
-        key="seo-repair-gsc-reporting",
-        use_container_width=True,
-    ):
-        try:
-            result = google_seo_import.queue_gsc_reporting_repair(
-                user,
-                phase4_store=phase4_store,
-            )
-        except (
-            google_seo.GoogleSEOError,
-            google_seo_import.SEOImportError,
-            google_seo_phase4.SEOPhase4Error,
-        ) as error:
-            _set_notice(getattr(error, "public_message", str(error)), success=False)
-        else:
-            repair = dict(result.get("reporting_repair") or {})
-            _set_notice(
-                "SEO repair queued. The background worker will refresh a bounded GSC range "
-                "and rebuild the compact snapshot."
-            )
-            st.session_state["seo-reporting-repair-job-id"] = repair.get("id") or ""
-            invalidate_seo_overview_summary_cache()
-        st.rerun()
-
-    st.caption("Refreshes recent Google data, reads the existing Shopify/Supabase ledger and updates saved reporting.")
-    with st.expander("Developer details", expanded=False):
-        try:
-            source = phase4_store.connection_record()
-            context = seo_reporting_runtime.default_reader().reporting_context()
-        except Exception:
-            source, context = {}, {}
-        if source or context:
-            st.caption(
-                "GSC pipeline: "
-                f"property={source.get('gsc_site_url') or context.get('gsc_site_url') or 'Not selected'}"
-                f" | canonical through={source.get('gsc_canonical_data_through_date') or 'Unavailable'}"
-                f" | last Google sync={source.get('gsc_canonical_synced_at') or source.get('last_successful_sync_at') or 'Unavailable'}"
-                f" | source revision={source.get('gsc_canonical_revision') or 0}"
-                f" | snapshot={context.get('status') or 'Unavailable'}"
-                f" | snapshot through={context.get('through_date') or 'Unavailable'}"
-                f" | snapshot revision={context.get('snapshot_revision') or 0}"
-            )
-            if context.get("error_code"):
-                st.caption(
-                    f"Latest snapshot issue: {context.get('error_code')} — "
-                    f"{context.get('error_summary') or 'No safe detail was saved.'}"
-                )
-        try:
-            status = growth_store.recent_pipeline_status()
-        except Exception:
-            status = {}
-        run = dict((status or {}).get("run") or {})
-        if not run:
-            st.caption("No analytics refresh has been recorded yet.")
-        else:
-            st.caption(
-                f"Last refresh: {str(run.get('status') or 'unknown').replace('_', ' ').title()}"
-                f" | Completed: {run.get('completed_at') or 'Not completed'}"
-            )
-            if run.get("error_summary"):
-                st.caption(str(run.get("error_summary")))
-        try:
-            repair = phase4_store.recent_reporting_repair()
-        except Exception:
-            repair = {}
-        if repair:
-            st.caption(
-                "SEO repair: "
-                f"{str(repair.get('status') or 'unknown').replace('_', ' ').title()}"
-                f" | Requested: {repair.get('requested_at') or 'Unknown'}"
-                f" | Completed: {repair.get('completed_at') or 'Not completed'}"
-            )
-            if repair.get("error_code"):
-                st.caption(
-                    f"Repair issue: {repair.get('error_code')} — "
-                    f"{repair.get('error_summary') or 'No safe detail was saved.'}"
-                )
+    st.caption("GA4 reports are cached in memory for 20 minutes; Search Console reports for 8 hours. Refresh data clears these caches without queuing imports or repairs.")
 
 
 def _load_reporting_health(phase4_store=None):
@@ -1350,7 +1136,7 @@ def _load_reporting_snapshot(
         legacy_arguments = {key: value for key, value in arguments.items() if key != "source_scope"}
         return reporting_reader.snapshot(**legacy_arguments)
     if phase4_store is not None:
-        return seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store).snapshot(
+        return DirectSEOLiveReader(phase4_store).snapshot(
             **arguments, source_health=source_health
         )
     return _cached_default_reporting_snapshot(
@@ -1812,7 +1598,7 @@ def _render_reporting_dashboard(*, phase4_store=None, reporting_reader=None, nav
     if reporting_reader is not None and hasattr(reporting_reader, "source_health"):
         health = reporting_reader.source_health()
     elif phase4_store is not None:
-        reporting_reader = seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store)
+        reporting_reader = DirectSEOLiveReader(phase4_store)
         health = reporting_reader.source_health()
     else:
         try:
@@ -1955,6 +1741,8 @@ def _render_data_connections_admin(
             connection,
             gsc_health,
         )
+        if gsc_health.get("status") == "google_direct" and gsc_health.get("available"):
+            gsc_status = "Connected and data ready"
         ga4_status = google_seo.connection_status_label(
             config_status, connection, service="ga4"
         )
@@ -1974,7 +1762,8 @@ def _render_data_connections_admin(
                 or ""
             ),
             data_date=(
-                connection.get("gsc_canonical_data_through_date")
+                gsc_health.get("through_date")
+                or connection.get("gsc_canonical_data_through_date")
                 or connection.get("gsc_data_through_date")
                 or ""
             ),
@@ -2848,7 +2637,7 @@ def _render_saved_query_intelligence(*, growth_store=None):
             opportunity_type=opportunity_type,
         )
     except Exception:
-        st.info("Saved query intelligence is unavailable until reporting snapshots have been built.")
+        st.info("Google query intelligence is temporarily unavailable. Check the connection and selected date range.")
         return
     prepared = []
     for row in rows:
@@ -3242,8 +3031,9 @@ def _interactive_reader(*, phase4_store=None, reporting_reader=None):
         return None, False
     if phase4_store is not None:
         backend = phase4_store._backend() if hasattr(phase4_store, "_backend") else None
-        return seo_reporting_runtime.PostgresSEOInteractiveReader(backend), False
-    return seo_reporting_runtime.default_reader(), True
+        from google_direct_reporting import DirectSEOReader
+        return DirectSEOReader(settings_store=phase4_store), False
+    return seo_reporting_runtime.default_reader(), False
 
 
 def _interactive_context(reader, *, use_cache):
@@ -3549,6 +3339,8 @@ def _render_search_overview(
             source_scope="seo",
         )
     _snapshot_unavailable_notice(snapshot)
+    if snapshot.get("data_note"):
+        st.caption(snapshot["data_note"])
     current = snapshot.get("current") or {}
     previous = snapshot.get("previous") or {}
     columns = st.columns(5)
@@ -3596,8 +3388,8 @@ def _render_search_overview(
     through = _display_progress_date(health.get("through_date"), "Unavailable")
     source_label = health.get("source_label") or "Google Search Console"
     summary_label = {
-        "property_totals": "Exact saved property totals",
-        "query_dimensions": "Saved dimensioned Search Console rows",
+        "property_totals": "Direct property totals",
+        "query_dimensions": "Direct filtered Search Console totals",
     }.get(str(snapshot.get("summary_dataset") or ""), "Saved SEO reporting data")
     if snapshot.get("reason") == "property_totals_missing_for_range":
         summary_label = "Exact property totals pending background repair"
@@ -4026,6 +3818,8 @@ def _render_search_landing_pages(*, phase4_store=None, reporting_reader=None):
             else reader.landing_pages(filters, context=context, limit=25)
         )
         source_rows = result.get("rows") or []
+        if result.get("notice"):
+            st.warning(result["notice"])
         st.caption(f"Showing {len(source_rows):,} of {int(result.get('total') or 0):,} landing pages")
         if not context.get("available"):
             _snapshot_unavailable_notice({"reason": "reporting_snapshot_unavailable"})
@@ -4059,12 +3853,12 @@ def _render_search_landing_pages(*, phase4_store=None, reporting_reader=None):
         )
     if reader is None:
         rows = _paginated_rows(rows, key="seo-v2-pages-legacy")
-    _table(rows, empty="No saved Search Console page rows are available.", height=520)
+    _table(rows, empty="No Search Console page rows were returned.", height=520)
 
 
 def _render_seo_health(user, *, google_store=None, import_store=None, phase4_store=None, reporting_reader=None, growth_store=None):
     _header(seo_nav.SEO_HEALTH_ROUTE)
-    reader = reporting_reader or seo_live_analytics.PostgresSEOLiveAnalyticsReader(phase4_store)
+    reader = reporting_reader or DirectSEOLiveReader(phase4_store)
     try:
         rows = reader._query_all(
             "technical",
@@ -4954,7 +4748,7 @@ def _render_active_route(
     except Exception as error:
         render_status = "error"
         logging.exception("SEO route render failed route=%s", route)
-        st.error("This SEO view could not be loaded, but the workspace is still available.")
+        st.error(getattr(error, "public_message", "This SEO view could not be loaded, but the workspace is still available."))
         st.caption("Retry this view or return to SEO Overview. No saved SEO data was changed.")
         retry_col, back_col, _ = st.columns([1, 1, 6])
         if retry_col.button("Retry", key=f"seo-route-retry::{route}"):
@@ -5000,6 +4794,9 @@ def render_page(
         raise ValueError(f"Unknown SEO route: {route}")
     _inject_styles()
     _render_notice()
+    if st.button("Refresh data", key="seo-direct-refresh"):
+        invalidate_seo_overview_summary_cache()
+        st.rerun()
     store = store or seo.default_store()
     _render_active_route(
         user,
