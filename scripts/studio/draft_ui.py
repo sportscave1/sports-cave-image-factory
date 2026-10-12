@@ -105,8 +105,19 @@ class DraftServer(HTTPServer):
             except (ValueError, OSError, KeyError):
                 live = None
                 live_error = "Verify GitHub main and running production locally before creating a new application copy."
+            if not technical:
+                for row in rows:
+                    if row["actionable"]:
+                        try:
+                            draft = next(d for d in registry["drafts"] if d["id"] == row["id"])
+                            row.update(application_drafts.revision_status(self.home, registry, draft, self.owner, live))
+                        except (ValueError, RuntimeError, OSError, KeyError):
+                            row["actionable"] = False
+                            row["action_reason"] = "Registered application identity could not be verified."
+            default_id = application_drafts.default_selection(self.home, registry, self.owner) if not technical else None
             return {"categories": list(studio.CATEGORIES), "rows": rows, "workspace_v6": True,
-                    "application_drafts": True, "live": live, "live_error": live_error}
+                    "application_drafts": True, "default_draft_id": default_id,
+                    "live": live, "live_error": live_error}
 
     def application_prepare(self, data):
         import application_drafts as apps
@@ -182,6 +193,11 @@ class DraftServer(HTTPServer):
             draft,task,_=drafts.draft_by_id(studio.read(file),draft_id,self.owner)
         self.workspace_grants={k:v for k,v in self.workspace_grants.items() if v["expires"]>time.monotonic()}
         if len(self.workspace_grants)>=8:raise ValueError("Close an existing editor session first.")
+        import application_drafts
+        with studio.locked(self.home) as file:
+            chosen = next(d for d in studio.read(file).get("drafts", []) if d["id"] == draft_id)
+        if chosen.get("kind") == "application":
+            application_drafts.remember_selection(self.home, draft_id, self.owner)
         capability=secrets.token_urlsafe(32)
         self.workspace_grants[capability]={"task":task["id"],"draft":draft_id,"expires":time.monotonic()+900}
         return {"capability":capability,"draft_id":draft_id}
@@ -301,6 +317,7 @@ class DraftServer(HTTPServer):
             if result["changed"] and self.preview_runtime and self.preview_runtime.name:
                 try:
                     result["frame"]=self.preview_runtime.refresh_source([path])
+                    self.last_preview_activity=time.monotonic()
                 except (ValueError,RuntimeError,OSError) as exc:
                     result["preview_error"]="Source saved; preview refresh failed: "+str(exc)
             return result

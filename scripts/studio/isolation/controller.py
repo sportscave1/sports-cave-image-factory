@@ -53,7 +53,8 @@ import urllib.request
 def start_app():
     process=subprocess.Popen(["python","-B","-m","streamlit","run","/opt/studio/entry.py",
         "--server.address=127.0.0.1","--server.port=8501","--server.headless=true",
-        "--server.fileWatcherType=none","--browser.gatherUsageStats=false"],
+        "--server.fileWatcherType=none","--browser.gatherUsageStats=false",
+        "--server.disconnectedSessionTTL=10"],
         cwd="/tmp/source",stdout=open("/tmp/application.log","w"),stderr=subprocess.STDOUT)
     for _ in range(100):
         try:
@@ -83,16 +84,27 @@ with sync_playwright() as p:
                 if not 0<length<12000: raise ValueError("Oversized event")
                 data=json.loads(self.rfile.read(length))
                 op=data.get("action");inspection=None
+                if op=='health':
+                    body=json.dumps({'alive':app.poll() is None and not page.is_closed(),'synthetic':True}).encode()
+                    self.send_response(200);self.send_header('Content-Length',str(len(body)))
+                    self.end_headers();self.wfile.write(body)
+                    return
                 if op=="reload-source":
                     # New Streamlit session re-executes entry.py/runpy against updated source.
                     # Keep the verified process, browser, synthetic DB and authentication cookies.
-                    page.reload(wait_until="domcontentloaded")
+                    page.evaluate("() => document.activeElement?.blur()")
+                    page.keyboard.press("r")
                     page.locator('[data-testid="stAppViewContainer"]').wait_for(timeout=10000)
                 elif op=="navigate":
                     from urllib.parse import quote
                     selected=next((p for p in pages(Path("/tmp/source")) if p["key"]==data.get("page")),None)
                     if not selected:raise ValueError("Unknown OS page")
                     if selected["key"]=="__signin__":context.clear_cookies()
+                    elif page.get_by_placeholder("Username or email",exact=True).is_visible():
+                        page.get_by_placeholder("Username or email",exact=True).fill("preview@example.invalid")
+                        page.get_by_placeholder("Password",exact=True).fill("StudioOnly-2026")
+                        page.get_by_role("button",name="Sign in",exact=True).click()
+                        page.get_by_placeholder("Username or email",exact=True).wait_for(state="hidden",timeout=10000)
                     page.goto("http://127.0.0.1:8501/?page="+quote(selected["route"]),wait_until="domcontentloaded")
                     page.locator('[data-testid="stAppViewContainer"]').wait_for(timeout=10000)
                 elif op=="inspect":

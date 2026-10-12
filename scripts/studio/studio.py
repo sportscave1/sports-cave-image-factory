@@ -32,9 +32,13 @@ TERMINAL = {"Integrated", "Released"}
 def now():
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
+def quiet_process():
+    return {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+
+
 def git(repo, *args):
     p = subprocess.run(["git", "--no-optional-locks", "-C", str(repo), *args],
-                       capture_output=True, text=True, encoding="utf-8")
+                       capture_output=True, text=True, encoding="utf-8", **quiet_process())
     if p.returncode:
         raise RuntimeError(p.stderr.strip() or p.stdout.strip())
     return p.stdout.rstrip("\r\n")
@@ -128,7 +132,7 @@ def open_workspace(home, item):
     code = shutil.which("code.cmd") or shutil.which("code")
     if not code:
         raise RuntimeError("VS Code CLI unavailable. Open the reported path manually.")
-    subprocess.run([code, "--new-window", str(workspace_file(home, item))], check=True)
+    subprocess.run([code, "--new-window", str(workspace_file(home, item))], check=True, **quiet_process())
 
 def initialize(home, repo, base, evidence, owner):
     home, repo = home.resolve(), repo.resolve()
@@ -159,7 +163,7 @@ def categories(home, create=False):
                 path = home / ("sports-cave-" + category.lower())
                 branch = "codex/category/" + category.lower()
                 exists = subprocess.run(["git", "-C", d["original_repo"], "show-ref", "--verify",
-                                         "--quiet", "refs/heads/" + branch]).returncode == 0
+                                         "--quiet", "refs/heads/" + branch], **quiet_process()).returncode == 0
                 if path.exists() or exists:
                     raise RuntimeError("Unregistered existing folder/branch; ask the owner: " + str(path))
                 item = {"id": "category-" + category.lower(), "category": category, "worktree_path": str(path),
@@ -267,7 +271,7 @@ def verify(repo, base):
             content = p.read_bytes()
             if b"\0" not in content and secret_findings(content.decode("utf-8", errors="replace")):
                 failures.append("Potential secret (value withheld): " + name)
-    diff = subprocess.run(["git", "-C", str(repo), "diff", "--check", base], capture_output=True, text=True)
+    diff = subprocess.run(["git", "-C", str(repo), "diff", "--check", base], capture_output=True, text=True, **quiet_process())
     if diff.returncode:
         failures.append(diff.stdout)
     check = Path(repo) / "scripts" / "studio" / "test_studio.py"
@@ -275,7 +279,7 @@ def verify(repo, base):
         env = {k: v for k, v in os.environ.items() if k.upper() in
                {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT", "USERPROFILE"}}
         env["PYTHONDONTWRITEBYTECODE"] = "1"
-        p = subprocess.run([sys.executable, "-B", str(check)], cwd=repo, env=env, capture_output=True, text=True)
+        p = subprocess.run([sys.executable, "-B", str(check)], cwd=repo, env=env, capture_output=True, text=True, **quiet_process())
         checked.append("studio unit tests")
         if p.returncode:
             failures.append(p.stdout + p.stderr)

@@ -92,13 +92,32 @@ class DeviceTests(test_draft_ui.UITests):
         self.assertEqual(status,200)
         token=json.loads(body)["token"]
         self.assertNotEqual(token,access)
-        self.assertEqual(self.device(s,"renew",headers={"Cookie":cookie})[0],403)
+        self.assertEqual(self.device(s,"renew",headers={"Cookie":cookie})[0],200, "Lost response retry must recover the same rotation")
         cookie=new["Set-Cookie"].split(";",1)[0]
         self.assertEqual(self.device(s,"renew",origin="https://evil.example",headers={"Cookie":cookie})[0],403)
         self.assertEqual(self.device(s,"revoke",headers={"X-Studio-Token":token})[0],200)
         self.assertFalse(s.device.valid(token))
         self.assertEqual(self.device(s,"renew",headers={"Cookie":cookie})[0],403)
         record=s.device.read();self.assertTrue(all(r["expires"]==0 for r in record["records"].values()))
+    def test_lost_rotation_response_retry_is_bounded_durable_and_origin_scoped(self):
+        clock=[1000]
+        trust=device_trust.Trust(self.home,"task-a","owner-a",clock=lambda:clock[0])
+        original,_=trust.enroll("https://os.example")
+        expires=next(iter(trust.read()["records"].values()))["expires"]
+        replacement,_=trust.renew(original,"https://os.example")
+        trust=device_trust.Trust(self.home,"task-a","owner-a",clock=lambda:clock[0])
+        clock[0]+=30
+        retry,token=trust.renew(original,"https://os.example")
+        self.assertEqual(retry,replacement)
+        self.assertTrue(trust.valid(token))
+        self.assertEqual(next(iter(trust.read()["records"].values()))["expires"],expires)
+        with self.assertRaises(ValueError):trust.renew(original,"https://evil.example")
+        clock[0]+=31
+        with self.assertRaises(ValueError):trust.renew(original,"https://os.example")
+        final,_=trust.renew(replacement,"https://os.example")
+        trust.revoke()
+        with self.assertRaises(ValueError):trust.renew(final,"https://os.example")
+
     def test_chrome_and_edge_trust_coexist(self):
         trust=device_trust.Trust(self.home,"task-a","owner-a")
         chrome,chrome_access=trust.enroll("https://os.example")

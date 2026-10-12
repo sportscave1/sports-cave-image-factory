@@ -37,7 +37,7 @@ class ApplicationDraftTests(unittest.TestCase):
                         "verified_at": studio.now(), "evidence": "synthetic fixture"}
         studio.atomic(apps.live_path(self.home), self.receipt)
         self.remote = patch.object(apps, "remote_main", return_value=self.sha)
-        self.remote.start()
+        self.remote_mock = self.remote.start()
         self.addCleanup(self.remote.stop)
 
     def create(self, **kwargs):
@@ -116,6 +116,34 @@ class ApplicationDraftTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in server.catalog()["rows"]], [draft["id"]])
         self.assertEqual([r["id"] for r in server.catalog(True)["rows"]], [self.legacy["id"]])
         self.assertEqual((self.home/".studio/registry.json").read_bytes(), before)
+
+    def test_default_selection_verifies_ancestry_and_persists_authorised_id(self):
+        older=self.create()
+        (self.repo/"screen.html").write_text("new verified Live")
+        studio.git(self.repo,"add",".")
+        studio.git(self.repo,"commit","-m","New synthetic revision")
+        newer_sha=studio.git(self.repo,"rev-parse","HEAD")
+        self.remote_mock.return_value=newer_sha
+        studio.atomic(apps.live_path(self.home),{**self.receipt,"revision":newer_sha})
+        newer=self.create()
+        registry=studio.read(self.home/".studio/registry.json")
+        self.assertEqual(apps.default_selection(self.home,registry,"owner"),newer["id"])
+        apps.remember_selection(self.home,older["id"],"owner")
+        self.assertEqual(apps.default_selection(self.home,registry,"owner"),older["id"])
+        with self.assertRaises((ValueError, RuntimeError)):apps.remember_selection(self.home,older["id"],"intruder")
+        server=draft_ui.DraftServer(self.home,self.task["id"],"owner")
+        self.addCleanup(server.server_close)
+        catalog=server.catalog()
+        self.assertEqual(catalog["default_draft_id"],older["id"])
+        row=next(r for r in catalog["rows"] if r["id"]==older["id"])
+        self.assertTrue(row["live_newer"])
+        (Path(older["worktree_path"])/"screen.html").write_text("unfinished")
+        row=next(r for r in server.catalog()["rows"] if r["id"]==older["id"])
+        self.assertTrue(row["dirty"])
+        self.assertEqual(studio.git(older["worktree_path"],"rev-parse","HEAD"),self.sha)
+        registry["drafts"][-1]["archived_at"]=studio.now()
+        registry["drafts"][-2]["archived_at"]=studio.now()
+        self.assertIsNone(apps.default_selection(self.home,registry,"owner"))
 
     def test_archive_requires_review_and_retains_source_and_task(self):
         draft = self.create()

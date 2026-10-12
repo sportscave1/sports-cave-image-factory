@@ -13,7 +13,7 @@ function fixture(saved='a') {
  connect();return {node,emit,messages,classes,connect};
 }
 const rows=[{kind:'application',id:'a',name:'Owned A',category:'CORE',owner:'me/a',actionable:true,test:{evidence:'Evidence A'}},{kind:'application',id:'b',name:'Other B',category:'ADS',owner:'me/b',actionable:false,action_reason:'Different assigned owner',test:{evidence:'Evidence B'}}];
-const catalog={type:'catalog',rows,categories:['CORE','ADS'],trusted:true,workspace_v6:true,application_drafts:true};
+const catalog={type:'catalog',rows,categories:['CORE','ADS'],trusted:true,workspace_v6:true,application_drafts:true,default_draft_id:'a'};
 (async()=>{
  const f=fixture();assert.ok(f.classes.has('editing'));assert.equal(f.node('workspace-v6').hidden,false);
  f.emit(catalog);assert.equal(f.messages.at(-1).d.type,'workspace-begin');assert.equal(f.messages.at(-1).d.draft_id,'a');
@@ -23,6 +23,8 @@ const catalog={type:'catalog',rows,categories:['CORE','ADS'],trusted:true,worksp
  f.emit({type:'disconnected'});assert.equal(f.node('selected-preview').disabled,true);assert.equal(f.node('workspace-v6').hidden,false);
  f.connect();f.emit(catalog);assert.equal(f.messages.at(-1).d.type,'workspace-begin');assert.equal(f.messages.at(-1).d.draft_id,'a');
  for(const stored of ['b','deleted','']){const locked=fixture(stored);locked.emit(catalog);assert.equal(locked.messages.at(-1).d.draft_id,'a');assert.equal(locked.node('resume-editor').disabled,false);assert.equal(locked.node('workspace-v6').hidden,false);}
+ const noDefault=fixture('');noDefault.emit({...catalog,default_draft_id:null});assert.equal(noDefault.messages.some(m=>m.d.type==='workspace-begin'),false,'Never pick an arbitrary application');
+ const registrySaved=fixture('a');registrySaved.emit({...catalog,rows:[...rows,{...rows[0],id:'c',name:'Saved C'}],default_draft_id:'c'});assert.equal(registrySaved.messages.at(-1).d.draft_id,'c');
  const legacy=fixture();legacy.emit({...catalog,workspace_v6:false});assert.equal(legacy.messages.some(m=>m.d.type==='handoff'),false);assert.match(legacy.node('message').textContent,/V6 workspace update/);
  assert.equal(f.messages.some(m=>m.d.type==='handoff'),false,'V6 editing stays embedded');
  await new Promise(r=>setImmediate(r));

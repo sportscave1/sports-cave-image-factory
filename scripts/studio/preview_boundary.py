@@ -11,8 +11,9 @@ import uuid
 import drafts
 import studio
 
-def docker(*args, timeout=60, check=True):
-    result = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout)
+def docker(*args, timeout=60, check=True, context=None):
+    command = ["docker", *(["--context", context] if context else []), *args]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, **studio.quiet_process())
     if check and result.returncode:
         raise RuntimeError("Docker command failed: " + result.stderr.strip()[:1000])
     return result

@@ -13,6 +13,7 @@ import studio
 
 SESSION_SECONDS = 300
 TRUST_SECONDS = 30 * 86400
+RENEW_RETRY_SECONDS = 60
 
 class Blob(ctypes.Structure):
     _fields_ = [("size", wintypes.DWORD), ("data", ctypes.POINTER(ctypes.c_byte))]
@@ -114,9 +115,20 @@ class Trust:
         store = self.read()
         identity, value = self.split(secret)
         record = store["records"].get(identity) if store else None
-        if not record or record["origin"] != exact_origin(origin) or record["expires"] <= self.clock() or not hmac.compare_digest(record["hash"], digest(value)):
+        if not record or record["origin"] != exact_origin(origin) or record["expires"] <= self.clock():
             raise ValueError("Trust expired or revoked. Approve this computer locally again.")
+        current = hmac.compare_digest(record["hash"], digest(value))
+        retry = record.get("renew_retry", {})
+        if not current:
+            if (retry.get("until", 0) <= self.clock()
+                    or not hmac.compare_digest(retry.get("hash", ""), digest(value))):
+                raise ValueError("Trust expired or revoked. Approve this computer locally again.")
+            # A lost response may be replayed briefly, without rotating again or
+            # extending either the retry deadline or the original 30-day expiry.
+            return identity + "." + retry["replacement"], self.issue(record)
         replacement = secrets.token_urlsafe(32)
+        record["renew_retry"] = {"hash": record["hash"], "replacement": replacement,
+                                 "until": min(record["expires"], self.clock()+RENEW_RETRY_SECONDS)}
         record["hash"] = digest(replacement)
         self.write(store)
         return identity + "." + replacement, self.issue(record)

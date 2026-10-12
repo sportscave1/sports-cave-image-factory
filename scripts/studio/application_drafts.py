@@ -53,7 +53,7 @@ def remote_main(repo):
     response = subprocess.run(["git", "-C", str(repo), "-c", "credential.interactive=never",
                                "ls-remote", "origin", "refs/heads/main"],
                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-                              capture_output=True, text=True, encoding="utf-8", timeout=30)
+                              capture_output=True, text=True, encoding="utf-8", timeout=30, **studio.quiet_process())
     if response.returncode:
         raise ValueError("GitHub main could not be verified. No copy was created.")
     result = response.stdout.split()
@@ -79,6 +79,68 @@ def verified_live(home, registry, fresh=False):
     if fresh and remote_main(registry["original_repo"]) != sha:
         raise ValueError("GitHub main changed since production verification. Verify Live again.")
     return receipt
+
+
+def selection_path(home):
+    return drafts.plain_path(Path(home) / ".studio" / "application-selections.json")
+
+
+def remember_selection(home, draft_id, owner):
+    with studio.locked(home) as file:
+        assigned(studio.read(file), draft_id, owner)
+        path = selection_path(home)
+        selections = json.loads(path.read_text()) if path.exists() else {}
+        selections[owner] = draft_id
+        studio.atomic(path, selections)
+
+
+def default_selection(home, registry, owner):
+    # Only verified application provenance and current worktree identity qualify.
+    candidates = []
+    for draft in registry.get("drafts", []):
+        receipt = draft.get("production_base") or {}
+        if (draft.get("kind") != "application" or draft.get("archived_at")
+                or draft.get("owner") != owner or receipt.get("service_id") != SERVICE
+                or receipt.get("repository") != REPOSITORY or receipt.get("status") != "live"
+                or not receipt.get("deployment_id") or not receipt.get("evidence")):
+            continue
+        try:
+            _, _, root = assigned(registry, draft["id"], owner)
+            studio.sha(root, receipt["revision"])
+            candidates.append(draft)
+        except (ValueError, RuntimeError, OSError, KeyError):
+            continue
+    path = selection_path(home)
+    saved = json.loads(path.read_text()).get(owner) if path.exists() else None
+    if any(d["id"] == saved for d in candidates):
+        return saved
+    if not candidates:
+        return None
+    import releases
+    objects = releases.GitObjects(registry["original_repo"])
+    # Prefer a descendant verified source, never numeric revisions across copies.
+    latest = [d for d in candidates if not any(
+        d["production_base"]["revision"] != other["production_base"]["revision"]
+        and objects.ancestor(d["production_base"]["revision"], other["production_base"]["revision"])
+        for other in candidates)]
+    return max(latest, key=lambda d: (d.get("updated_at", ""), d.get("created_at", ""), d["id"]))["id"]
+
+
+def revision_status(home, registry, draft, owner, live):
+    _, _, root = assigned(registry, draft["id"], owner)
+    current = studio.git(root, "rev-parse", "HEAD")
+    dirty = bool(studio.git(root, "status", "--porcelain"))
+    import releases
+    relation = "unverified"
+    if live:
+        if current == live["revision"]:
+            relation = "current"
+        elif releases.GitObjects(root).ancestor(current, live["revision"]):
+            relation = "live-newer"
+        else:
+            relation = "diverged"
+    return {"draft_commit": current, "dirty": dirty, "live_relation": relation,
+            "live_newer": relation == "live-newer" if live else None}
 
 
 def assigned(registry, draft_id, owner):
