@@ -93,8 +93,10 @@ class StageTests(unittest.TestCase):
 
     def test_container_copies_only_host_and_panel(self):
         dockerfile=Path(__file__).with_name('staging.Dockerfile').read_text(encoding='utf-8-sig')
-        self.assertEqual(len([line for line in dockerfile.splitlines() if line.startswith('COPY ')]),2)
+        self.assertEqual(len([line for line in dockerfile.splitlines() if line.startswith('COPY ')]),3)
         self.assertNotIn('COPY . ',dockerfile)
+        self.assertNotIn('app.py',dockerfile)
+        self.assertIn('workspace.js',dockerfile)
         self.assertNotIn('requirements.txt',dockerfile)
         self.assertIn('USER 65532:65532',dockerfile)
 

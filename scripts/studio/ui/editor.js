@@ -1,5 +1,6 @@
 let panel, request, showFrame, opened, dirty=false, busy=false, stack=[], selected="title";
 const $=id=>panel.querySelector("#"+id);
+const beforeUnload=event=>{if(dirty){event.preventDefault();event.returnValue="";}};
 const esc=s=>s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
 const msg=s=>{$("ed-status").textContent=s;};
 function confirmDiscard(message) {
@@ -37,7 +38,7 @@ function component() {
   area.replaceChildren();
   const field=(label,value,key)=>{
     const wrap=document.createElement("label"), input=document.createElement("input");
-    wrap.textContent=label;input.value=value;
+    wrap.textContent=label;wrap.dataset.fieldKind=key==="text"?"text":"style";input.value=value;
     if(key==="text")input.id="ed-text";else input.dataset.property=key;
     input.addEventListener("input",modified);wrap.append(input);area.append(wrap);
   };
@@ -71,9 +72,10 @@ async function load(path) {
 }
 async function act(fn) {
   if(busy)return;busy=true;
-  panel.querySelectorAll("button").forEach(b=>b.disabled=true);
+  const disabled=new Map([...panel.querySelectorAll("button,input,select,textarea")].map(n=>[n,n.disabled]));
+  disabled.forEach((_,n)=>n.disabled=true);
   try{await fn();}catch(error){msg(error.message);}
-  finally{busy=false;panel.querySelectorAll("button").forEach(b=>b.disabled=false);$("ed-restore").disabled=!opened?.history.length;}
+  finally{busy=false;disabled.forEach((value,n)=>n.disabled=value);$("ed-restore").disabled=!opened?.history.length;}
 }
 async function save(restore) {
   const data={action:"editor-save",path:opened.path,expected_hash:opened.hash,expected_revision:opened.revision};
@@ -87,6 +89,7 @@ async function save(restore) {
   msg("Saving source and refreshing any running isolated preview…");
   const result=await request("/api/action",data);
   await load(opened.path);
+  panel.dispatchEvent(new CustomEvent("studio-saved",{bubbles:true,detail:{revision:opened.revision,path:opened.path}}));
   $("ed-diff").textContent=result.diff||"No source changes.";
   if(result.frame)showFrame(result.frame);
   msg(result.preview_error||"Saved to the actual draft. Revision "+opened.revision+".");
@@ -94,8 +97,8 @@ async function save(restore) {
 export async function mount(target,transport,frameCallback) {
   panel=target;request=transport;showFrame=frameCallback;
   if(!panel.dataset.mounted) {
-    const css=document.createElement("link");css.rel="stylesheet";css.href="/editor.css";document.head.append(css);
-    panel.innerHTML='<div class="heading"><div><p class="eyebrow">DRAFT EDITOR</p><h2>Make a focused change</h2></div><button id="ed-close">Close editor</button></div><p class="hint">Explicit component mappings only. The selected worktree is the source of truth. Live integrations remain disabled.</p><label>Editing target<select id="ed-file"><option value="app.py">Visual · Sign-in and shared submit buttons</option><option>components/sports_cave_top_bar/index.html</option><option>mockups_page.css</option><option>orders_page.css</option><option>components/session_recovery.js</option></select></label><p id="ed-status" role="status"></p><div id="ed-visual"><label>Component<select id="ed-component"></select></label><p class="hint">Properties accept literal hex colours, CSS sizes, and supported alignment/layout values. Empty removes the override. Mobile panel settings apply below 760 px.</p><div id="ed-fields"></div></div><div id="ed-code" hidden><label>Search<input id="ed-search" placeholder="Find source text"></label><button id="ed-find">Find next</button><div class="code-wrap"><pre id="ed-lines" aria-hidden="true"></pre><div class="code-stack"><pre id="ed-highlight" aria-hidden="true"></pre><textarea id="ed-source" wrap="off" spellcheck="false" aria-label="Authorised source code"></textarea></div></div></div><div class="actions"><button class="primary" id="ed-save">Save Draft</button><button id="ed-undo">Undo</button><button id="ed-discard">Discard Unsaved Changes</button><button id="ed-changes">View Changes</button></div><label>Saved editor revision<select id="ed-history"></select></label><button id="ed-restore">Restore Revision</button><pre id="ed-diff" aria-label="Source changes"></pre>';
+    if(!document.querySelector("[data-studio-editor-css]")){const css=document.createElement("link");css.rel="stylesheet";css.href="/editor.css";css.dataset.studioEditorCss="true";document.head.append(css);}
+    panel.innerHTML='<div class="heading"><div><p class="eyebrow">DRAFT EDITOR</p><h2>Make a focused change</h2></div><button id="ed-close">Close editor</button></div><p class="hint">Explicit component mappings only. The selected worktree is the source of truth. Live integrations remain disabled.</p><label>Editing target<select id="ed-file"></select></label><p id="ed-status" role="status"></p><div id="ed-visual"><label>Component<select id="ed-component"></select></label><p class="hint">Properties accept literal hex colours, CSS sizes, and supported alignment/layout values. Empty removes the override. Mobile panel settings apply below 760 px.</p><div id="ed-fields"></div></div><div id="ed-code" hidden><label>Search<input id="ed-search" placeholder="Find source text"></label><button id="ed-find">Find next</button><div class="code-wrap"><pre id="ed-lines" aria-hidden="true"></pre><div class="code-stack"><pre id="ed-highlight" aria-hidden="true"></pre><textarea id="ed-source" wrap="off" spellcheck="false" aria-label="Authorised source code"></textarea></div></div></div><div class="actions"><button class="primary" id="ed-save">Save Draft</button><button id="ed-undo">Undo</button><button id="ed-discard">Discard Unsaved Changes</button><button id="ed-changes">View Changes</button></div><label>Saved editor revision<select id="ed-history"></select></label><button id="ed-restore">Restore Revision</button><pre id="ed-diff" aria-label="Source changes"></pre>';
     $("ed-file").onchange=()=>act(async()=>{
       const path=$("ed-file").value;
       if(dirty&&!await confirmDiscard("Discard unsaved editor changes?")){$("ed-file").value=opened.path;return;}
@@ -138,10 +141,27 @@ export async function mount(target,transport,frameCallback) {
       await save({id:$("ed-history").value,side:"after"});
     });
     $("ed-close").onclick=async()=>{if(!dirty||await confirmDiscard("Discard unsaved changes and close?")){dirty=false;panel.hidden=true;}};
-    window.addEventListener("beforeunload",event=>{if(dirty){event.preventDefault();event.returnValue="";}});
+    window.addEventListener("beforeunload",beforeUnload);
     panel.dataset.mounted="true";
   }
   panel.hidden=false;
   if(dirty)return;
-  await act(()=>load(opened?.path||"app.py"));
+  await act(async()=>{
+    const listing=await request("/api/action",{action:"editor-files"});
+    $("ed-file").replaceChildren();
+    for(const file of listing.files){
+      const option=document.createElement("option");option.value=file.path;
+      option.textContent=(file.mode==="visual"?"Visual mappings · ":"")+file.path+(file.available?"":" · unavailable");
+      option.disabled=!file.available;option.title=file.reason||"";$("ed-file").append(option);
+    }
+    const path=listing.files.find(f=>f.available&&f.path===opened?.path)?.path||listing.files.find(f=>f.available)?.path;
+    if(!path)throw Error("No authorised editor files are available in this draft.");
+    await load(path);
+  });
 }
+
+export async function canLeave(){if(busy)return false;return !dirty||await confirmDiscard("Discard unsaved changes before changing draft or selection?");}
+export async function selectFile(path){if(busy)return false;if(dirty&&!await canLeave())return false;await load(path);return true;}
+export async function selectComponent(key){if(busy)return false;if(dirty&&!await canLeave())return false;if(opened?.path!=="app.py")await load("app.py");if(!opened.visual[key])throw Error("Unmapped component");selected=key;render();return true;}
+export async function command(name){if(!["save","undo","changes","discard"].includes(name))throw Error("Unsupported editor control");await $("ed-"+name).onclick();}
+export function dispose(){window.removeEventListener("beforeunload",beforeUnload);dirty=false;stack=[];opened=null;panel=null;request=null;showFrame=null;}

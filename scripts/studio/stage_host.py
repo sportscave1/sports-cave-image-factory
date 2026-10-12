@@ -2,6 +2,7 @@
 import base64
 import hashlib
 import hmac
+import json
 import os
 from pathlib import Path
 import re
@@ -22,15 +23,17 @@ def validate_environment(environ):
 
 def page():
     assets = ROOT / 'components/developer_studio'
+    bundle = json.dumps({name: (ROOT / 'scripts/studio/ui' / name).read_text(encoding='utf-8-sig') for name in ('workspace.js','workspace.css','editor.js','editor.css')}).replace('</', '<\\/')
     return (assets.joinpath('panel.html').read_text(encoding='utf-8')
             .replace('/*STUDIO_CSS*/', assets.joinpath('panel.css').read_text(encoding='utf-8'))
-            .replace('/*STUDIO_JS*/', assets.joinpath('panel.js').read_text(encoding='utf-8')))
+            .replace('/*STUDIO_JS*/', assets.joinpath('panel.js').read_text(encoding='utf-8'))
+            .replace('/*STUDIO_V6_BUNDLE*/', bundle))
 
 
 def policy(html):
     scripts = ['\'sha256-' + base64.b64encode(hashlib.sha256(s.encode()).digest()).decode() + '\''
                for s in re.findall(r'<script>(.*?)</script>', html, re.S)]
-    return ("default-src 'none'; script-src " + (' '.join(scripts) or "'none'") +
+    return ("default-src 'none'; script-src " + (' '.join(scripts) + ' blob:' if scripts else "'none'") +
             "; style-src 'unsafe-inline'; img-src data:; frame-src 'self'; "
             "connect-src 'none'; base-uri 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'self'")
 
