@@ -1,4 +1,6 @@
-let panel, request, showFrame, opened, dirty=false, busy=false, stack=[], selected="title";
+let panel, request, showFrame, opened, dirty=false, busy=false, stack=[], selected="title", recoveryKey='';
+function persist(){if(!recoveryKey||!opened)return;try{if(dirty)localStorage.setItem(recoveryKey,JSON.stringify({path:opened.path,hash:opened.hash,revision:opened.revision,selected,value:capture()}));else localStorage.removeItem(recoveryKey);}catch{msg('Browser recovery storage unavailable. Keep this editor open until changes are saved.');}}
+function clearRecovery(){try{if(recoveryKey)localStorage.removeItem(recoveryKey);}catch{}}
 const $=id=>panel.querySelector("#"+id);
 const beforeUnload=event=>{if(dirty){event.preventDefault();event.returnValue="";}};
 const esc=s=>s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
@@ -32,7 +34,7 @@ function apply(value) {
     panel.querySelectorAll("[data-property]").forEach(input=>{input.value=value.properties[input.dataset.property]||"";});
   }
 }
-function modified() { dirty=true;stack.push(capture());if(stack.length>100)stack.splice(1,1);msg("Unsaved changes"); }
+function modified() { dirty=true;stack.push(capture());if(stack.length>100)stack.splice(1,1);msg("Unsaved changes");persist(); }
 function component() {
   const model=opened.visual[selected], area=$("ed-fields");
   area.replaceChildren();
@@ -69,6 +71,7 @@ function render() {
 }
 async function load(path) {
   opened=await request("/api/action",{action:"editor-open",path});render();
+  if(recoveryKey){let saved;try{saved=JSON.parse(localStorage.getItem(recoveryKey)||'null');}catch{}if(saved?.path===path){if(opened.visual&&opened.visual[saved.selected]){selected=saved.selected;render();}const stale=saved.hash!==opened.hash||saved.revision!==opened.revision;apply(saved.value);opened.hash=saved.hash;opened.revision=saved.revision;dirty=true;stack.push(capture());msg(stale?'Recovered unsaved buffer; source changed. Save is blocked by the original hash/revision. Compare or explicitly discard.':'Recovered unsaved changes for this application draft.');}}
 }
 async function act(fn) {
   if(busy)return;busy=true;
@@ -88,25 +91,26 @@ async function save(restore) {
   } else data.source=$("ed-source").value;
   msg("Saving source and refreshing any running isolated preview…");
   const result=await request("/api/action",data);
+  clearRecovery();dirty=false;
   await load(opened.path);
   panel.dispatchEvent(new CustomEvent("studio-saved",{bubbles:true,detail:{revision:opened.revision,path:opened.path}}));
   $("ed-diff").textContent=result.diff||"No source changes.";
   if(result.frame)showFrame(result.frame);
   msg(result.preview_error||"Saved to the actual draft. Revision "+opened.revision+".");
 }
-export async function mount(target,transport,frameCallback) {
-  panel=target;request=transport;showFrame=frameCallback;
+export async function mount(target,transport,frameCallback,options={}) {
+  panel=target;request=transport;showFrame=frameCallback;recoveryKey=options.recoveryKey?'studio-buffer:'+options.recoveryKey:'';
   if(!panel.dataset.mounted) {
     if(!document.querySelector("[data-studio-editor-css]")){const css=document.createElement("link");css.rel="stylesheet";css.href="/editor.css";css.dataset.studioEditorCss="true";document.head.append(css);}
     panel.innerHTML='<div class="heading"><div><p class="eyebrow">DRAFT EDITOR</p><h2>Make a focused change</h2></div><button id="ed-close">Close editor</button></div><p class="hint">Explicit component mappings only. The selected worktree is the source of truth. Live integrations remain disabled.</p><label>Editing target<select id="ed-file"></select></label><p id="ed-status" role="status"></p><div id="ed-visual"><label>Component<select id="ed-component"></select></label><p class="hint">Properties accept literal hex colours, CSS sizes, and supported alignment/layout values. Empty removes the override. Mobile panel settings apply below 760 px.</p><div id="ed-fields"></div></div><div id="ed-code" hidden><label>Search<input id="ed-search" placeholder="Find source text"></label><button id="ed-find">Find next</button><div class="code-wrap"><pre id="ed-lines" aria-hidden="true"></pre><div class="code-stack"><pre id="ed-highlight" aria-hidden="true"></pre><textarea id="ed-source" wrap="off" spellcheck="false" aria-label="Authorised source code"></textarea></div></div></div><div class="actions"><button class="primary" id="ed-save">Save Draft</button><button id="ed-undo">Undo</button><button id="ed-discard">Discard Unsaved Changes</button><button id="ed-changes">View Changes</button></div><label>Saved editor revision<select id="ed-history"></select></label><button id="ed-restore">Restore Revision</button><pre id="ed-diff" aria-label="Source changes"></pre>';
     $("ed-file").onchange=()=>act(async()=>{
       const path=$("ed-file").value;
-      if(dirty&&!await confirmDiscard("Discard unsaved editor changes?")){$("ed-file").value=opened.path;return;}
+      if(dirty&&!await confirmDiscard("Discard unsaved editor changes?")){$("ed-file").value=opened.path;return;}clearRecovery();
       await load(path);
     });
     $("ed-component").onchange=async()=>{
       if(dirty&&!await confirmDiscard("Discard unsaved component changes?")){$("ed-component").value=selected;return;}
-      selected=$("ed-component").value;component();msg("Editing "+opened.visual[selected].label);
+      clearRecovery();selected=$("ed-component").value;component();msg("Editing "+opened.visual[selected].label);
     };
     $("ed-source").oninput=()=>{highlight();modified();};
     $("ed-source").onscroll=()=>{
@@ -123,13 +127,14 @@ export async function mount(target,transport,frameCallback) {
     };
     $("ed-save").onclick=()=>act(()=>save());
     $("ed-undo").onclick=()=>act(async()=>{
-      if(dirty&&stack.length>1){stack.pop();apply(stack.at(-1));dirty=stack.length>1;msg(dirty?"Unsaved changes":"Local edits undone.");return;}
+      if(dirty&&stack.length>1){stack.pop();apply(stack.at(-1));dirty=stack.length>1;msg(dirty?"Unsaved changes":"Local edits undone.");persist();return;}
       const undone=new Set(opened.history.filter(h=>h.undo_of).map(h=>h.undo_of));
       const latest=[...opened.history].reverse().find(h=>h.operation!=="undo"&&!undone.has(h.id));
       if(latest)await save({id:latest.id,side:"before"});else msg("Nothing to undo.");
     });
     $("ed-discard").onclick=()=>act(async()=>{
       if(dirty&&!await confirmDiscard("Discard unsaved editor changes?"))return;
+      clearRecovery();dirty=false;
       await load(opened.path);
     });
     $("ed-changes").onclick=()=>act(async()=>{
@@ -140,7 +145,7 @@ export async function mount(target,transport,frameCallback) {
       if(dirty&&!await confirmDiscard("Discard unsaved changes and restore the selected saved revision?"))return;
       await save({id:$("ed-history").value,side:"after"});
     });
-    $("ed-close").onclick=async()=>{if(!dirty||await confirmDiscard("Discard unsaved changes and close?")){dirty=false;panel.hidden=true;}};
+    $("ed-close").onclick=async()=>{if(!dirty||await confirmDiscard("Discard unsaved changes and close?")){dirty=false;clearRecovery();panel.hidden=true;}};
     window.addEventListener("beforeunload",beforeUnload);
     panel.dataset.mounted="true";
   }
@@ -154,14 +159,15 @@ export async function mount(target,transport,frameCallback) {
       option.textContent=(file.mode==="visual"?"Visual mappings · ":"")+file.path+(file.available?"":" · unavailable");
       option.disabled=!file.available;option.title=file.reason||"";$("ed-file").append(option);
     }
-    const path=listing.files.find(f=>f.available&&f.path===opened?.path)?.path||listing.files.find(f=>f.available)?.path;
+    let savedPath;try{savedPath=JSON.parse(localStorage.getItem(recoveryKey)||'null')?.path;}catch{}
+    const path=listing.files.find(f=>f.available&&f.path===(savedPath||opened?.path))?.path||listing.files.find(f=>f.available)?.path;
     if(!path)throw Error("No authorised editor files are available in this draft.");
     await load(path);
   });
 }
 
-export async function canLeave(){if(busy)return false;return !dirty||await confirmDiscard("Discard unsaved changes before changing draft or selection?");}
-export async function selectFile(path){if(busy)return false;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{await load(path);loaded=true;});return loaded;}
+export async function canLeave(){if(busy)return false;if(!dirty)return true;if(!await confirmDiscard("Discard unsaved changes before changing draft or selection?"))return false;dirty=false;clearRecovery();return true;}
+export async function selectFile(path){if(busy)return false;if(opened?.path===path&&dirty)return true;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{await load(path);loaded=true;});return loaded;}
 export async function selectComponent(key){if(busy)return false;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{if(opened?.path!=="app.py")await load("app.py");if(!opened.visual[key])throw Error("Unmapped component");selected=key;render();loaded=true;});return loaded;}
 export async function command(name){if(!["save","undo","changes","discard"].includes(name))throw Error("Unsupported editor control");await $("ed-"+name).onclick();}
-export function dispose(){window.removeEventListener("beforeunload",beforeUnload);dirty=false;stack=[];opened=null;panel=null;request=null;showFrame=null;}
+export function dispose(){persist();window.removeEventListener("beforeunload",beforeUnload);dirty=false;stack=[];opened=null;panel=null;request=null;showFrame=null;}

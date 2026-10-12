@@ -92,6 +92,8 @@ def draft_by_id(registry, draft_id, owner):
     draft = next((d for d in registry.get("drafts", []) if d["id"] == draft_id), None)
     if not draft:
         raise ValueError("Unknown draft UUID.")
+    if draft.get("kind") == "application" and draft.get("archived_at"):
+        raise ValueError("Application draft is archived. Its worktree and recovery history are retained.")
     task, root = assigned(registry, draft["task_id"], owner)
     if (draft["owner"] != owner or draft["branch"] != task["branch"]
             or Path(draft["worktree_path"]).resolve() != root.resolve()):

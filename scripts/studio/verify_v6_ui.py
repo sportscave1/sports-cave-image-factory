@@ -4,16 +4,22 @@ from pathlib import Path
 from http.server import HTTPServer
 from playwright.sync_api import sync_playwright,expect
 import test_editor,test_drafts,drafts,studio,draft_ui
+from unittest.mock import patch
+import application_drafts
 from verify_phase4a_browser import Panel
 
 def main(report):
     f=test_editor.EditorTests();f.setUp()
+    changed=patch.object(application_drafts,'changed_source',return_value={});changed.start();f.addCleanup(changed.stop)
     (f.root/'os_accounts.py').write_text("PAGE_REGISTRY=({'key':'home','route':'Home','label':'Home','group':'OS pages'},)")
     registry=studio.read(f.home/'.studio/registry.json')
     locked_root=f.home/'locked-task';locked_root.mkdir();(locked_root/'app.py').write_text(test_editor.FIXTURE)
     registry['tasks'].append({**f.task,'id':'task-b','owner':'owner-b','branch':'codex/task/b','worktree_path':str(locked_root)})
     studio.atomic(f.home/'.studio/registry.json',registry)
     locked=drafts.new(f.home,'task-b','owner-b','Locked other owner')
+    registry=studio.read(f.home/'.studio/registry.json')
+    for row in registry['drafts']:row['kind']='application'
+    studio.atomic(f.home/'.studio/registry.json',registry)
     server=draft_ui.DraftServer(f.home,'task-a','owner-a',idle_seconds=300)
     panel=HTTPServer(('127.0.0.1',0),Panel)
     thread=threading.Thread(target=server.run,daemon=True);thread.start()
@@ -104,7 +110,7 @@ def main(report):
             expect(page.locator('#ed-source')).to_have_value('<h1>unsaved survives reconnect</h1>')
             page.locator('#ws-discard').click();page.get_by_role('button',name='Discard changes',exact=True).click()
             expect(page.locator('#ed-source')).to_have_value('<h1>Example</h1>')
-            page.locator('#ws-tests').click();expect(page.locator('#ws-info')).to_contain_text('Not recorded')
+            page.locator('#ws-tests').click();expect(page.locator('#ws-info')).to_contain_text('static-only')
             page.locator('#ws-tests').click()
             for width in [1440,1100,390]:
                 page.set_viewport_size({'width':width,'height':900})
@@ -119,14 +125,16 @@ def main(report):
             expect(page.locator('#ws-selector')).to_be_visible()
             local.locator('#open').click();expect(page.locator('#ws-title')).to_have_text('Editor fixture')
             assert len([p for p in context.pages if '/workspace' in p.url])==0
-            # A remembered locked draft must leave the compact selector open.
+            # A remembered locked draft is never opened; offer the authorised application copy.
             page.evaluate('(key)=>localStorage.setItem(key[0],key[1])',['studio-v6-last-draft:'+server.origin,locked['id']])
             page.reload();expect(page.locator('#ws-selector')).to_be_visible()
             with page.expect_popup() as popup:page.locator('#connect').click()
             local=popup.value;local.locator('#session').fill(server.origin+'/#'+server.token);local.locator('#trust').uncheck();local.locator('#approve').click()
             expect(page.locator('#connection')).to_contain_text('connected')
-            expect(local.locator('#handoff')).to_be_hidden()
-            expect(page.locator('#ws-open-draft')).to_be_disabled()
+            expect(local.locator('#handoff')).to_be_visible()
+            expect(local.locator('#selection')).to_contain_text('Editor fixture')
+            expect(local.locator('#selection')).not_to_contain_text('Locked other owner')
+            expect(page.locator('#ws-selector')).to_be_visible()
             result.update(default_workspace=True,locked_draft_explanation=True,last_draft_restore_requires_approval=True,locked_restore_denied=True,no_separate_editor=True)
             result.update({'visual_save_undo_restore':True,'source_save_undo':True,'discard_confirmations':True,'same_draft_unsaved_reconnect':True,'tests_history':True,'responsive_widths':[1440,1100,390],'browser':browser.version,'errors':errors})
             assert not errors,errors

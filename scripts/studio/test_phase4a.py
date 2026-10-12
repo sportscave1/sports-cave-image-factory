@@ -15,6 +15,9 @@ class CatalogTests(test_draft_ui.UITests):
     def test_catalog_real_drafts_no_paths_or_tokens(self):
         s=self.server()
         draft=drafts.new(self.home,"task-a","owner-a","Actual draft")
+        registry=studio.read(self.home/".studio/registry.json")
+        registry["drafts"][0]["kind"]="application"
+        studio.atomic(self.home/".studio/registry.json",registry)
         status,body,_=self.request(s,"/api/action",{"action":"catalog"})
         data=json.loads(body)
         self.assertEqual(status,200)
@@ -39,7 +42,8 @@ class CatalogTests(test_draft_ui.UITests):
         registry["drafts"][0]["owner"]="other-owner"
         studio.atomic(self.home/".studio/registry.json",registry)
         self.assertEqual(self.request(s,"/api/action",command)[0],409)
-        self.assertFalse(json.loads(self.request(s,"/api/action",{"action":"catalog"})[1])["rows"][0]["actionable"])
+        self.assertEqual(json.loads(self.request(s,"/api/action",{"action":"catalog"})[1])["rows"],[])
+        self.assertFalse(json.loads(self.request(s,"/api/action",{"action":"technical-catalog"})[1])["rows"][0]["actionable"])
 
     def test_other_draft_reuses_distinct_owned_companion(self):
         s=self.server()

@@ -4,7 +4,8 @@
  const setupTicket=/^\/pair\/setup\/([A-Za-z0-9_-]{43})$/.exec(location.pathname)?.[1]||"";
  history.replaceState(null,"",setupTicket?"/pair":location.pathname);
  const bootstrap=nonce.startsWith("bootstrap=")?nonce.slice(10):"";
- let trusted=false, workspaceGrant=null, workspaceQueue=Promise.resolve();
+ let trusted=false, workspaceGrant=null, workspaceQueue=Promise.resolve(), applicationPlan=null;
+ const applicationDialog=$('application-confirm');
  let origin="", token="", approved=false, rows=[], pending=null, timer, busy=false, releasePending=null, releaseCatalog=null;
  const status=s=>$("status").textContent=s;
  function exactOrigin(value){let u;try{u=new URL(value);}catch{throw Error("Enter the exact HTTPS OS origin or localhost origin, without a path, query or fragment.");}if(u.origin!==value||u.username||u.password||!(u.protocol==="https:"||(u.protocol==="http:"&&["127.0.0.1","localhost"].includes(u.hostname))))throw Error("Enter the exact HTTPS OS origin or localhost origin, without a path, query or fragment.");return value;}
@@ -34,6 +35,12 @@
   }
   if(busy)return;
   try{busy=true;
+   if(d.type==="application-request"){
+    const q=d.request||{};applicationPlan=await api({action:'application-prepare',operation:q.operation,draft_id:q.draft_id,name:q.name});
+    $('application-detail').textContent=JSON.stringify(applicationPlan.detail,null,2)+'\n'+applicationPlan.operation.toUpperCase()+(applicationPlan.name?' · '+applicationPlan.name:'')+'\nArchiving preserves all source and recovery records. No production changes.';
+    $('application-confirmation').value='';applicationDialog.hidden=false;status('Review this application draft operation locally.');
+   }
+   if(d.type==='technical-catalog')send('technical-catalog',{result:await api({action:'technical-catalog'})});
    if(d.type==="workspace-begin"){
     const row=rows.find(r=>r.id===d.draft_id&&r.actionable);if(!row)throw Error("Draft is locked to another owner.");
     pending={draft_id:row.id,intent:"edit",kind:"workspace"};
@@ -88,6 +95,13 @@
   }catch(e){send("error",{error:e.message});status(e.message);}finally{busy=false;$("release-confirmation").value="";}
  };
  $("revoke").onclick=revoke;
+ $('application-cancel').onclick=()=>{applicationPlan=null;applicationDialog.hidden=true;};
+ $('application-run').onclick=async()=>{
+  if(!approved||!applicationPlan||busy)return;
+  const plan=applicationPlan;applicationPlan=null;busy=true;
+  try{const result=await api({action:'application-run',ticket:plan.ticket,confirmation:$('application-confirmation').value});await catalog();send('application-result',{result});applicationDialog.hidden=true;status('Application draft updated locally. Worktree identity and production are preserved.');}
+  catch(e){send('error',{error:e.message});status(e.message);}finally{busy=false;}
+ };
  $("cancel").onclick=()=>{pending=null;$("handoff").hidden=true;};
  $("open").onclick=async()=>{
   if(!approved||!pending||busy)return;

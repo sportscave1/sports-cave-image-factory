@@ -148,7 +148,7 @@ def finish_pending(home,file,registry,draft,root):
         files.append({"path":path,"sha256":pending["after"],"size":len(data)})
         draft["revisions"].append({"number":draft["revision"],"commit":studio.git(root,"rev-parse","HEAD"),
           "saved_at":studio.now(),"files":files,"scope":"explicit selected files, not a complete application export"})
-        draft["editing_status"]="Implemented Locally"
+        draft["editing_status"]="Saved locally" if draft.get("kind")=="application" else "Implemented Locally"
         draft["release_eligible"]=False
     elif current!=pending["before"]:
         raise RuntimeError("Interrupted edit conflicts with source. Recovery blobs retained; manual review required.")

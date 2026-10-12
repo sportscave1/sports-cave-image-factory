@@ -50,6 +50,7 @@ class DraftServer(HTTPServer):
         self.children = {}
         self.pairing_setups = {}
         self.workspace_grants = {}
+        self.application_plans = {}
         super().__init__(("127.0.0.1", port), Handler)
         self.timeout = 1
         self.origin = "http://127.0.0.1:" + str(self.server_port)
@@ -61,10 +62,10 @@ class DraftServer(HTTPServer):
             found = next((d for d in registry.get("drafts", []) if d["task_id"] == self.task_id), None)
         draft = drafts.inspect(self.home, found["id"], self.owner) if found else None
         return {"task": {k: task[k] for k in ("id", "owner", "branch", "worktree_path", "category")},
-                "draft": draft, "test": task.get("last_verified_test"), "task_status": task.get("status", "Unknown"), "preview": {"enabled": True, "status": "Running" if self.preview_runtime and self.preview_runtime.name else "Stopped", "reason": "Synthetic raster preview; safety probes run before startup"},
+                "draft": draft, "test": (draft or {}).get("test") or task.get("last_verified_test"), "task_status": task.get("status", "Unknown"), "preview": {"enabled": True, "status": "Running" if self.preview_runtime and self.preview_runtime.name else "Stopped", "reason": "Synthetic raster preview; safety probes run before startup"},
                 "idle_seconds": self.idle_seconds}
 
-    def catalog(self):
+    def catalog(self, technical=False):
         # Metadata only: no whole-worktree scans and no credential/path export.
         with studio.locked(self.home) as file:
             registry = studio.read(file)
@@ -72,20 +73,88 @@ class DraftServer(HTTPServer):
             tasks = {t["id"]: t for t in registry["tasks"]}
             rows = []
             for draft in registry.get("drafts", []):
+                ordinary = draft.get("kind") == "application" and not draft.get("archived_at")
+                if technical == ordinary:
+                    continue
                 task = tasks.get(draft["task_id"])
                 if not task:
                     continue
                 test = task.get("last_verified_test") or {}
                 rows.append({**{k: draft.get(k) for k in
-                    ("id", "name", "category", "owner", "branch", "revision", "task_id")},
+                    ("id", "name", "kind", "category", "owner", "branch", "revision", "task_id", "editing_status", "base_commit", "created_at", "archived_at", "metadata_version")},
                     "status": task.get("status", "Unknown"),
                     "updated_at": max(draft.get("updated_at") or "", task.get("updated_at") or ""),
                     "review_status": draft.get("review_status", "Unreviewed"),
-                    "actionable": draft.get("owner") == self.owner == task.get("owner"),
+                    "actionable": ordinary and draft.get("owner") == self.owner == task.get("owner"),
                     "action_reason": "" if draft.get("owner") == self.owner == task.get("owner") else "Open this draft with its assigned owner companion; this connection cannot edit another owner\'s workspace.",
                     "test": {**{k: test.get(k) for k in ("passed", "verified_at", "evidence")},
                              "snapshot": {k: (test.get("snapshot") or {}).get(k) for k in ("commit", "files_hash")}}})
-            return {"categories": list(studio.CATEGORIES), "rows": rows, "workspace_v6": True}
+            if technical:
+                represented = {d["task_id"] for d in registry.get("drafts", [])}
+                for task in registry["tasks"]:
+                    if task["id"] not in represented:
+                        rows.append({"id": task["id"], "task_id": task["id"], "kind": "technical-task",
+                                     "name": task["name"], "owner": task["owner"], "category": task["category"],
+                                     "branch": task["branch"], "status": task["status"], "actionable": False,
+                                     "action_reason": "Technical development record; use its assigned owner workflow.",
+                                     "history": task.get("history", []), "test": task.get("last_verified_test")})
+            import application_drafts
+            try:
+                live = application_drafts.verified_live(self.home, registry)
+                live_error = None
+            except (ValueError, OSError, KeyError):
+                live = None
+                live_error = "Verify GitHub main and running production locally before creating a new application copy."
+            return {"categories": list(studio.CATEGORIES), "rows": rows, "workspace_v6": True,
+                    "application_drafts": True, "live": live, "live_error": live_error}
+
+    def application_prepare(self, data):
+        import application_drafts as apps
+        operation = data.get("operation")
+        if operation not in {"configure", "create", "duplicate", "rename", "archive", "update"}:
+            raise ValueError("Unsupported application draft operation.")
+        with studio.locked(self.home) as file:
+            registry = studio.read(file)
+            drafts.assigned(registry, self.task_id, self.owner)
+            if operation in {"configure", "create"}:
+                detail = {"production_base": apps.verified_live(self.home, registry, fresh=True)}
+            else:
+                apps.assigned(registry, data.get("draft_id"), self.owner)
+                detail = None
+        if detail is None:
+            detail = apps.update_plan(self.home, data["draft_id"], self.owner) if operation == "update" else apps.review(self.home, data["draft_id"], self.owner)
+        if operation == "update" and detail["conflicts"]:
+            paths = detail["conflicting_files"] + detail["unfinished_files"]
+            raise ValueError(" ".join(detail["conflicts"]) + (" Review: " + ", ".join(paths) if paths else ""))
+        plan = {"operation": operation, "draft_id": data.get("draft_id"), "name": data.get("name"),
+                "detail": detail, "expires": time.monotonic()+300}
+        self.application_plans = {k:v for k,v in self.application_plans.items() if v["expires"] > time.monotonic()}
+        if len(self.application_plans) >= 8:
+            raise ValueError("Finish or cancel a pending local draft operation first.")
+        ticket = secrets.token_urlsafe(32)
+        self.application_plans[ticket] = plan
+        return {"ticket": ticket, **{k:plan[k] for k in ("operation", "name", "detail")}}
+
+    def application_run(self, data):
+        import application_drafts as apps
+        plan = self.application_plans.pop(data.get("ticket"), None)
+        if not plan or plan["expires"] <= time.monotonic():
+            raise ValueError("Local draft review expired. Review again.")
+        op, detail = plan["operation"], plan["detail"]
+        if op in {"configure", "create", "duplicate"}:
+            if op != "duplicate":
+                with studio.locked(self.home) as file:
+                    live = apps.verified_live(self.home, studio.read(file), fresh=True)
+                if live["revision"] != detail["production_base"]["revision"]:
+                    raise ValueError("Live changed after review.")
+            result = apps.create(self.home, self.task_id, self.owner, plan["name"], default=op=="configure",
+                                 source_id=plan["draft_id"] if op=="duplicate" else None,
+                                 expected=detail.get("fingerprint"))
+            return {"id": result["id"], "name": result["name"], "operation": op}
+        if op == "update":
+            return apps.update_from_live(self.home, plan["draft_id"], self.owner, detail["fingerprint"], data.get("confirmation"))
+        return apps.rename_or_archive(self.home, plan["draft_id"], self.owner, op,
+                                      detail["fingerprint"], name=plan["name"], confirmation=data.get("confirmation"))
 
     def handoff(self, draft_id, intent):
         if intent not in {"open", "edit", "preview", "changes"}:
@@ -123,7 +192,7 @@ class DraftServer(HTTPServer):
         self.catalog()
         with studio.locked(self.home) as file:
             drafts.draft_by_id(studio.read(file),grant["draft"],self.owner)
-        allowed={"workspace-model","editor-files","editor-open","editor-save","editor-diff","start-preview","stop-preview","restart-preview","preview-event"}
+        allowed={"workspace-model","editor-files","editor-open","editor-save","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
         command=data.get("command")
         if not isinstance(command,dict) or command.get("action") not in allowed:raise ValueError("Editor operation not allowlisted")
         if any(k in command for k in ("owner","task_id","draft_id","home","root","url","command")):raise ValueError("Editor scope cannot be overridden")
@@ -139,7 +208,7 @@ class DraftServer(HTTPServer):
             _,_,root=drafts.draft_by_id(studio.read(file),draft["id"],self.owner)
         try:pages=page_catalog.pages(root);page_error=None
         except (ValueError,OSError) as exc:pages=[];page_error=str(exc)
-        return {"draft":{k:draft.get(k) for k in ("id","name","category","owner","branch","revision","revisions")},
+        return {"draft":{k:draft.get(k) for k in ("id","name","kind","category","owner","branch","revision","revisions","production_base","editing_status","metadata_version","release_readiness")},
                 "task":{k:state["task"][k] for k in ("id","owner","branch","category")},
                 "files":editor.files(self.home,draft["id"],self.owner)["files"],"pages":pages,"page_error":page_error,
                 "test":state["test"],"preview":state["preview"],"status":state["task_status"]}
@@ -147,6 +216,9 @@ class DraftServer(HTTPServer):
     def action(self, data):
         # Validate scope again on EVERY request; never accept owner/home/task from browser.
         action = data.get("action")
+        if action == "application-prepare":return self.application_prepare(data)
+        if action == "application-run":return self.application_run(data)
+        if action == "technical-catalog":return self.catalog(technical=True)
         if action=="workspace-grant":return self.workspace_grant(data.get("draft_id"))
         if action=="workspace-request":return self.workspace_request(data)
         if action=="workspace-revoke":
@@ -198,6 +270,9 @@ class DraftServer(HTTPServer):
         draft = state["draft"]
         if not draft:
             raise ValueError("Create a named draft first.")
+        if action == "application-tests":
+            import application_drafts
+            return application_drafts.check(self.home, draft["id"], self.owner)
         if action == "save":
             files = data.get("files")
             revision = data.get("expected_revision")
@@ -243,7 +318,15 @@ class DraftServer(HTTPServer):
                     raise ValueError("No active preview to restart.")
                 self.preview_runtime.stop()
             if action in {"start-preview","restart-preview"}:
-                return self.preview_runtime.start()
+                frame = self.preview_runtime.start()
+                if draft.get("kind") == "application":
+                    with studio.locked(self.home) as file:
+                        registry = studio.read(file)
+                        selected, _, _ = drafts.draft_by_id(registry, draft["id"], self.owner)
+                        selected["preview_result"] = {"at": studio.now(), "revision": draft["revision"],
+                            "manifest": self.preview_runtime.manifest, "isolation": self.preview_runtime.evidence}
+                        studio.atomic(file, registry)
+                return frame
             return self.preview_runtime.event(data.get("event",{}))
         if action == "close":
             self.stopping = True

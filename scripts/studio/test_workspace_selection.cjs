@@ -12,8 +12,8 @@ function fixture(saved='a') {
  const emit=data=>handlers.message({source:popup,origin:'http://127.0.0.1:18762',data:{studio:1,nonce:new URL(url).hash.slice(1),...data}});
  connect();return {node,emit,messages,classes,connect};
 }
-const rows=[{id:'a',name:'Owned A',category:'CORE',owner:'me/a',actionable:true,test:{evidence:'Evidence A'}},{id:'b',name:'Other B',category:'ADS',owner:'me/b',actionable:false,action_reason:'Different assigned owner',test:{evidence:'Evidence B'}}];
-const catalog={type:'catalog',rows,categories:['CORE','ADS'],trusted:true,workspace_v6:true};
+const rows=[{kind:'application',id:'a',name:'Owned A',category:'CORE',owner:'me/a',actionable:true,test:{evidence:'Evidence A'}},{kind:'application',id:'b',name:'Other B',category:'ADS',owner:'me/b',actionable:false,action_reason:'Different assigned owner',test:{evidence:'Evidence B'}}];
+const catalog={type:'catalog',rows,categories:['CORE','ADS'],trusted:true,workspace_v6:true,application_drafts:true};
 (async()=>{
  const f=fixture();assert.ok(f.classes.has('editing'));assert.equal(f.node('workspace-v6').hidden,false);
  f.emit(catalog);assert.equal(f.messages.at(-1).d.type,'workspace-begin');assert.equal(f.messages.at(-1).d.draft_id,'a');
@@ -22,7 +22,7 @@ const catalog={type:'catalog',rows,categories:['CORE','ADS'],trusted:true,worksp
  f.emit({type:'workspace-approved',draft_id:'b'});assert.equal(f.messages.length,calls,'Locked or unsolicited approval must not load a workspace');
  f.emit({type:'disconnected'});assert.equal(f.node('selected-preview').disabled,true);assert.equal(f.node('workspace-v6').hidden,false);
  f.connect();f.emit(catalog);assert.equal(f.messages.at(-1).d.type,'workspace-begin');assert.equal(f.messages.at(-1).d.draft_id,'a');
- for(const stored of ['b','deleted','']){const locked=fixture(stored);locked.emit(catalog);assert.equal(locked.messages.some(m=>m.d.type==='workspace-begin'),false);assert.equal(locked.node('resume-editor').disabled,true);assert.equal(locked.node('workspace-v6').hidden,false);}
+ for(const stored of ['b','deleted','']){const locked=fixture(stored);locked.emit(catalog);assert.equal(locked.messages.at(-1).d.draft_id,'a');assert.equal(locked.node('resume-editor').disabled,false);assert.equal(locked.node('workspace-v6').hidden,false);}
  const legacy=fixture();legacy.emit({...catalog,workspace_v6:false});assert.equal(legacy.messages.some(m=>m.d.type==='handoff'),false);assert.match(legacy.node('message').textContent,/V6 workspace update/);
  assert.equal(f.messages.some(m=>m.d.type==='handoff'),false,'V6 editing stays embedded');
  await new Promise(r=>setImmediate(r));
