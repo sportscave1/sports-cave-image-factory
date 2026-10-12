@@ -4,3 +4,6 @@
 body:has(#local-status){margin:0;padding:8px;background:#171815;color:#eeeae0;font:12px "Segoe UI",sans-serif}#local-status{margin:0 0 8px;color:#b9b5a5}body:has(#local-status) .ws-v6{height:calc(100dvh - 45px)}
 
 .ws-v6 small{letter-spacing:normal}.ws-mobile-close{display:none}@media(max-width:760px){.ws-v6 .ws-mobile-close{display:block;flex:0 0 27px}body.editing>.connect{position:static;justify-content:flex-end}body.editing>#message{padding:0;min-height:18px;max-height:40px;overflow:auto}body.editing .ws-v6{height:calc(100dvh - 92px);min-height:430px}}
+
+/* Draft selection is part of the shared Editor, including before approval. */
+.ws-v6 .ws-empty{max-width:360px;width:100%;padding:16px}.ws-v6 #ws-selector label{display:block;margin:8px 0;color:#d3cbbb}.ws-v6 #ws-draft-select{display:block;width:100%;max-width:100%;margin:8px 0}.ws-v6 #ws-draft-help{font-size:11px}.ws-v6 .ws-bar{gap:5px;padding:6px 8px}.ws-v6 .ws-bar button{font-size:11px;padding:5px 7px}.ws-v6 .ws-preview-tools{padding:5px;gap:4px}.ws-v6 .ws-preview-tools button{font-size:10px;padding:4px 6px}.ws-v6 .ws-tabs{margin:0;flex-wrap:nowrap}

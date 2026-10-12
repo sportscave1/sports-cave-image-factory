@@ -20,4 +20,16 @@ def render_page(user):
         st.error("Developer Studio is available only to the configured owner.")
         return
     from streamlit.components.v1 import html
-    html(panel_html(), height=790, scrolling=False)
+    st.html("""<style>
+    [data-testid="stMain"]:has(.st-key-developer-studio-workspace) {overflow:hidden !important;}
+    [data-testid="stMainBlockContainer"]:has(.st-key-developer-studio-workspace) {
+        max-width:none !important; width:100% !important;
+        padding:calc(var(--sc-topbar-height, 0px) + 6px) 6px 0 !important;
+    }
+    [data-testid="stMainBlockContainer"]:has(.st-key-developer-studio-workspace) > [data-testid="stVerticalBlock"] {gap:0 !important;}
+    .st-key-developer-studio-workspace iframe {
+        display:block; width:100%; height:calc(100dvh - var(--sc-topbar-height, 0px) - 12px) !important;
+    }
+    </style>""")
+    with st.container(key="developer-studio-workspace"):
+        html(panel_html(), height=790, scrolling=False)
