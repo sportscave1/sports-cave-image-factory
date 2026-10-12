@@ -48,7 +48,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             edition_ops._render_table()
         kwargs = fake_st.data_editor.call_args.kwargs
         self.assertEqual(kwargs["column_order"], (
-            "product_title", "edition_next_number", "edition_total", "sync_status", "admin_url", "online_store_url",
+            "product_title", "edition_next_number", "edition_total", "display_status", "psd_file",
         ))
         for field in ("edition_total", "edition_next_number", "edition_enabled"):
             self.assertNotIn(field, kwargs["disabled"])
@@ -60,7 +60,9 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             self.assertIn(field, fake_st.session_state[edition_ops.ROWS_KEY][0])
             self.assertIn(field, edition_ops.CSV_COLUMNS)
         self.assertIn("Existing import warning", fake_st.captions)
-        self.assertEqual(fake_st.editor_payloads[0][0]['sync_status'], 'needs_reconciliation')
+        self.assertEqual(fake_st.editor_payloads[0][0]['display_status'], 'Sync Issue')
+        self.assertEqual(fake_st.editor_payloads[0][0]['psd_file'], 'Not linked')
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]['sync_status'], 'needs_reconciliation')
         self.assertIn("edition_status", edition_ops.SHOPIFY_MIRROR_METAFIELD_KEYS)
 
     def test_numeric_config_allows_sold_out_sentinel(self):
@@ -126,7 +128,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             self.assertFalse(columns[field].get("disabled", False))
         for field in ("edition_sold_count", "edition_remaining", "handle"):
             self.assertTrue(columns[field]["disabled"])
-        self.assertEqual(columns["admin_url"]["type_config"]["type"], "link")
+        self.assertEqual(columns["psd_file"]["type_config"]["type"], "link")
 
         def edit_next(value):
             table = app.get("dataframe")[0]
