@@ -161,7 +161,7 @@ export async function mount(target,transport,frameCallback) {
 }
 
 export async function canLeave(){if(busy)return false;return !dirty||await confirmDiscard("Discard unsaved changes before changing draft or selection?");}
-export async function selectFile(path){if(busy)return false;if(dirty&&!await canLeave())return false;await load(path);return true;}
-export async function selectComponent(key){if(busy)return false;if(dirty&&!await canLeave())return false;if(opened?.path!=="app.py")await load("app.py");if(!opened.visual[key])throw Error("Unmapped component");selected=key;render();return true;}
+export async function selectFile(path){if(busy)return false;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{await load(path);loaded=true;});return loaded;}
+export async function selectComponent(key){if(busy)return false;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{if(opened?.path!=="app.py")await load("app.py");if(!opened.visual[key])throw Error("Unmapped component");selected=key;render();loaded=true;});return loaded;}
 export async function command(name){if(!["save","undo","changes","discard"].includes(name))throw Error("Unsupported editor control");await $("ed-"+name).onclick();}
 export function dispose(){window.removeEventListener("beforeunload",beforeUnload);dirty=false;stack=[];opened=null;panel=null;request=null;showFrame=null;}
