@@ -111,35 +111,7 @@ def prepare_google_seo_storage():
         return False
     for filename in google_seo.GOOGLE_SEO_PIPELINE_MIGRATIONS:
         run_migrations.run_migrations(only=filename)
-    try:
-        import google_seo_phase4
-
-        repair = google_seo_phase4.ensure_initial_gsc_reporting_repair(
-            schema_ready=True
-        )
-        logging.info(
-            "Initial GSC reporting repair enqueue status=%s reason=%s",
-            str(repair.get("status") or "unknown"),
-            str(repair.get("reason") or ""),
-        )
-        import google_seo_import
-
-        totals_repair = google_seo_import.default_import_store().ensure_gsc_property_totals_repair(
-            schema_ready=True
-        )
-        logging.info(
-            "Initial GSC property totals repair enqueue status=%s reason=%s",
-            str(totals_repair.get("status") or "unknown"),
-            str(totals_repair.get("reason") or ""),
-        )
-    except Exception as error:
-        # GSC imports also queue revision-triggered repairs. A transient queue
-        # inspection failure must not turn an otherwise valid schema migration
-        # into another web-service startup failure.
-        logging.warning(
-            "Initial GSC reporting repair enqueue deferred code=%s",
-            str(getattr(error, "code", "enqueue_failed")),
-        )
+    # Direct Google reports are requested only by report pages. No repair enqueue.
     return True
 
 

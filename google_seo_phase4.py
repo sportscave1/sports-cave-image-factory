@@ -1023,6 +1023,8 @@ class PostgresSEOPhase4Store:
         return result
 
     def queue_run(self, source, mode, *, requested_by="", start_date=None, end_date=None):
+        if source == "ga4_transactions":
+            return {"status": "disabled", "reason": "direct_google_reporting"}
         source = str(source or "")
         mode = str(mode or "").casefold()
         if source not in PHASE4_SOURCES or mode not in {"historical", "daily", "manual"}:
@@ -1079,12 +1081,13 @@ class PostgresSEOPhase4Store:
                     WITH candidate AS (
                         SELECT id FROM seo_phase4_runs
                         WHERE status IN ('queued', 'running')
+                          AND source <> 'ga4_transactions'
                           AND (status='queued' OR lease_expires_at IS NULL OR lease_expires_at < %s)
                           AND (
                               source<>'mapping' OR NOT EXISTS (
                                   SELECT 1 FROM seo_phase4_runs AS dependency
                                   WHERE dependency.workspace_key=seo_phase4_runs.workspace_key
-                                    AND dependency.source IN ('shopify_pages', 'ga4_transactions')
+                                    AND dependency.source IN ('shopify_pages')
                                     AND dependency.status IN ('queued', 'running')
                               )
                           )
@@ -1092,7 +1095,7 @@ class PostgresSEOPhase4Store:
                               source<>'reconciliation' OR NOT EXISTS (
                                   SELECT 1 FROM seo_phase4_runs AS dependency
                                   WHERE dependency.workspace_key=seo_phase4_runs.workspace_key
-                                    AND dependency.source IN ('shopify_orders', 'ga4_transactions', 'mapping')
+                                    AND dependency.source IN ('shopify_orders', 'mapping')
                                     AND dependency.status IN ('queued', 'running')
                               )
                           )
@@ -1350,6 +1353,8 @@ class PostgresSEOPhase4Store:
         gsc_sync_run_id="",
     ):
         """Queue one durable compact-snapshot repair for this workspace."""
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         job_id = str(uuid.uuid4())
         with self._backend().connect() as connection:
@@ -1395,6 +1400,8 @@ class PostgresSEOPhase4Store:
         reviewed migrations have succeeded. Other callers prepare the additive
         schema before inspecting or writing the durable queue.
         """
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         if not schema_ready:
             self.ensure_schema()
         job_id = str(uuid.uuid4())
@@ -1705,6 +1712,8 @@ class PostgresSEOPhase4Store:
         return _as_date(row.get("earliest_date")), _as_date(row.get("latest_date"))
 
     def replace_ga4_transactions_date(self, property_id, slice_data):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         slice_date = _as_date(slice_data.get("date"))
         rows = list(slice_data.get("rows") or [])
         with self._backend().connect() as connection:
@@ -2729,6 +2738,8 @@ class PostgresSEOPhase4Store:
         return " OR ".join(f"LOWER({column_name}) LIKE %s" for _term in terms), [f"%{term}%" for term in terms]
 
     def refresh_reporting_snapshots(self, *, trigger_source="background"):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         settings = self.get_settings()
         brand_expr, brand_params = self._brand_expression_sql("query", settings.get("brand_terms") or [])
@@ -4111,12 +4122,16 @@ def default_phase4_store():
 
 def ensure_initial_gsc_reporting_repair(*, phase4_store=None, schema_ready=False):
     """Idempotently enqueue initial compact reporting after schema readiness."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     store = phase4_store or default_phase4_store()
     return store.ensure_initial_gsc_reporting_repair(schema_ready=schema_ready)
 
 
 def process_queued_reporting_repair(*, phase4_store=None, worker_id=""):
     """Process at most one durable compact-reporting repair job."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return None
     store = phase4_store or default_phase4_store()
     worker_id = str(worker_id or f"seo-reporting-{secrets.token_hex(6)}")[:200]
     job = store.claim_reporting_repair(worker_id)
@@ -4627,6 +4642,8 @@ class SEOPhase4Worker:
         self.worker_id = str(worker_id or f"seo-phase4-{secrets.token_hex(6)}")[:200]
 
     def run_once(self, *, source=""):
+        if source == "ga4_transactions":
+            return None
         run = self.store.claim_next_run(self.worker_id, source=source)
         if not run:
             return None
@@ -4772,6 +4789,7 @@ class SEOPhase4Worker:
         return self.store.complete_run(run["id"], self.worker_id)
 
     def _process_ga4_transactions(self, run):
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         config = self.config_loader()
         access_token, connection = self.access_token_loader(self.connection_store, config)
         property_id = str(connection.get("ga4_property_id") or "")

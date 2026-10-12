@@ -176,13 +176,9 @@ print(json.dumps({"forbidden_loaded": [name for name in forbidden if name in loa
             worker_id="phase3-failure-reporting"
         )
 
-    def test_missing_database_configuration_fails_startup_clearly(self):
-        with patch("supabase_backend.is_configured", return_value=False):
-            with self.assertRaises(google_seo_import.SEOImportError) as raised:
-                google_seo_import._validate_worker_startup()
-
-        self.assertEqual(raised.exception.code, "worker_database_not_configured")
-        self.assertFalse(raised.exception.retryable)
+    def test_retired_import_worker_does_not_require_database(self):
+        with patch("supabase_backend.is_configured", side_effect=AssertionError("database access")):
+            self.assertIsNone(google_seo_import._validate_worker_startup())
 
 
 if __name__ == "__main__":

@@ -131,7 +131,7 @@ class AnalyticsClientTests(unittest.TestCase):
             "application_reader_or_renderer",
         )
 
-    def test_custom_queue_saves_complete_reports_and_marks_failures(self):
+    def test_retired_custom_queue_does_not_fetch_or_persist_reports(self):
         class Store:
             def __init__(self):
                 self.saved = []
@@ -155,9 +155,10 @@ class AnalyticsClientTests(unittest.TestCase):
         client.fetch_report.return_value = {"complete": True}
         store = Store()
         result = analytics_reporting.process_custom_report_queue(client, store)
-        self.assertEqual(result, {"written": 1, "failures": []})
-        self.assertEqual(store.saved, [{"complete": True}])
-        self.assertEqual(store.completed, [("queue-1", "")])
+        self.assertEqual(result["status"], "disabled")
+        self.assertEqual(store.saved, [])
+        self.assertEqual(store.completed, [])
+        client.fetch_report.assert_not_called()
 
 
 if __name__ == "__main__":

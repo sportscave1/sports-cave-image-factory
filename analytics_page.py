@@ -12,6 +12,7 @@ import streamlit as st
 import analytics_contracts
 import analytics_navigation as navigation
 import analytics_reporting
+from google_direct_reporting import DirectAnalyticsStore
 import google_seo
 import navigation_runtime
 import seo_live_analytics
@@ -58,7 +59,7 @@ def _session_report_store(user):
     if not saved or saved[0] != scope:
         # Reuse the store so its successful schema check is not repeated per rerun.
         cache = session_cache(st.session_state, f"{STATE_PREFIX}display-cache", user)
-        saved = (scope, _ReportDisplayStore(analytics_reporting.PostgresAnalyticsStore(), cache))
+        saved = (scope, _ReportDisplayStore(DirectAnalyticsStore(), cache))
         st.session_state[key] = saved
     return saved[1]
 
@@ -271,7 +272,7 @@ def _table(report, dimension_labels, metric_labels, *, height=300):
     if rows:
         st.dataframe(rows, use_container_width=True, hide_index=True, height=height, row_height=TABLE_ROW_HEIGHT)
     else:
-        st.caption("No saved rows are available for this exact date range.")
+        st.caption("No rows were returned for this exact date range.")
 
 
 def _report_notice(report, store, property_id, contract_key, period):
@@ -281,7 +282,7 @@ def _report_notice(report, store, property_id, contract_key, period):
         preliminary = " Preliminary recent data." if period.get("preliminary") else ""
         st.caption(
             f"{quality} | Exact inclusive dates: {period['start_date']} to {period['end_date']} | "
-            f"Saved: {fetched or 'unknown'}.{preliminary}"
+            f"Fetched: {fetched or 'unknown'}.{preliminary}"
         )
         return
     latest = store.latest_report(property_id, contract_key) if property_id else {}
@@ -460,7 +461,7 @@ def _ecommerce(store, property_id, period):
 
 def _realtime(store, property_id):
     report = store.latest_report(property_id, "realtime") if property_id else {}
-    st.caption("Saved GA4 realtime snapshot for the last 30 minutes. This page does not poll Google.")
+    st.caption("GA4 realtime activity for the last 30 minutes. Results are cached in memory for 20 minutes; use Refresh data for a new request.")
     _report_notice(
         report,
         store,
@@ -524,11 +525,11 @@ def render_page(
     _inject_styles()
     title = navigation.ANALYTICS_NAV_LABELS[route]
     subtitles = {
-        navigation.ANALYTICS_OVERVIEW_ROUTE: "GA4 performance from exact saved report contracts.",
+        navigation.ANALYTICS_OVERVIEW_ROUTE: "GA4 performance from direct Google API reports.",
         navigation.ANALYTICS_TRAFFIC_ROUTE: "Session acquisition by GA4 default channel group.",
         navigation.ANALYTICS_PAGES_ROUTE: "Pages, screens and landing-page engagement.",
         navigation.ANALYTICS_ECOMMERCE_ROUTE: "GA4 ecommerce attribution, kept distinct from Shopify operations.",
-        navigation.ANALYTICS_REALTIME_ROUTE: "The latest saved realtime activity snapshot.",
+        navigation.ANALYTICS_REALTIME_ROUTE: "Direct GA4 realtime activity.",
     }
     _header(title, subtitles[route])
     connection_store = connection_store or google_seo.default_store()
@@ -542,12 +543,16 @@ def render_page(
         st.info("Connect and select a GA4 property to populate Analytics.")
         _render_connection_settings(connection)
         return
+    if st.button("Refresh data", key="analytics-direct-refresh"):
+        from google_direct_reporting import REPORTS
+        REPORTS.clear()
+        if isinstance(store, _ReportDisplayStore):
+            store.cache.invalidate()
     try:
         if route == navigation.ANALYTICS_REALTIME_ROUTE:
             _realtime(store, property_id)
             return
         period = _filters(connection)
-        _queue_custom_reports(store, property_id, route, period, connection, user)
         navigation_runtime.dispatch_selected(
             route,
             {
@@ -565,4 +570,4 @@ def render_page(
         )
     except (analytics_reporting.AnalyticsReportingError, ValueError) as error:
         st.error(str(getattr(error, "public_message", error)))
-        st.caption("The last complete saved snapshot was preserved; no partial response replaced it.")
+        st.caption("No reporting data was written to the database. Retry after checking the connection or quota cooldown.")

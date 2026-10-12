@@ -1,0 +1,346 @@
+{
+  "project": "ceyzbfpuwuuxaiqwiltz",
+  "read_only": true,
+  "observed_date": "2026-10-12 Australia/Sydney",
+  "inventory": [
+    {
+      "table_name": "analytics_ga4_report_snapshots",
+      "estimated_rows": 3897,
+      "table_bytes": 501227520,
+      "index_bytes": 1310720,
+      "total_bytes": 502538240
+    },
+    {
+      "table_name": "seo_gsc_daily_details",
+      "estimated_rows": 259529,
+      "table_bytes": 168599552,
+      "index_bytes": 85745664,
+      "total_bytes": 254345216
+    },
+    {
+      "table_name": "seo_gsc_query_page_daily_v2",
+      "estimated_rows": 80180,
+      "table_bytes": 36536320,
+      "index_bytes": 80388096,
+      "total_bytes": 116924416
+    },
+    {
+      "table_name": "seo_gsc_query_daily_v2",
+      "estimated_rows": 115583,
+      "table_bytes": 39354368,
+      "index_bytes": 76185600,
+      "total_bytes": 115539968
+    },
+    {
+      "table_name": "seo_gsc_page_daily_v2",
+      "estimated_rows": 76099,
+      "table_bytes": 29016064,
+      "index_bytes": 59498496,
+      "total_bytes": 88514560
+    },
+    {
+      "table_name": "seo_reporting_snapshot_runs",
+      "estimated_rows": 97954,
+      "table_bytes": 31072256,
+      "index_bytes": 50356224,
+      "total_bytes": 81428480
+    },
+    {
+      "table_name": "seo_ga4_daily_landing_pages",
+      "estimated_rows": 12157,
+      "table_bytes": 7331840,
+      "index_bytes": 5210112,
+      "total_bytes": 12541952
+    },
+    {
+      "table_name": "seo_gsc_canonical_date_status",
+      "estimated_rows": 2432,
+      "table_bytes": 1064960,
+      "index_bytes": 745472,
+      "total_bytes": 1810432
+    },
+    {
+      "table_name": "seo_gsc_property_totals_v2",
+      "estimated_rows": 2432,
+      "table_bytes": 901120,
+      "index_bytes": 737280,
+      "total_bytes": 1638400
+    },
+    {
+      "table_name": "seo_gsc_daily_totals",
+      "estimated_rows": 776,
+      "table_bytes": 172032,
+      "index_bytes": 180224,
+      "total_bytes": 352256
+    },
+    {
+      "table_name": "seo_reporting_repair_jobs",
+      "estimated_rows": 334,
+      "table_bytes": 147456,
+      "index_bytes": 106496,
+      "total_bytes": 253952
+    },
+    {
+      "table_name": "analytics_ga4_sync_failures",
+      "estimated_rows": 240,
+      "table_bytes": 147456,
+      "index_bytes": 90112,
+      "total_bytes": 237568
+    },
+    {
+      "table_name": "seo_gsc_search_appearance_daily_v2",
+      "estimated_rows": 321,
+      "table_bytes": 114688,
+      "index_bytes": 65536,
+      "total_bytes": 180224
+    },
+    {
+      "table_name": "seo_reporting_opportunities",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 24576,
+      "total_bytes": 32768
+    },
+    {
+      "table_name": "analytics_ga4_report_queue",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 24576,
+      "total_bytes": 32768
+    },
+    {
+      "table_name": "seo_reporting_landing_page_daily",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 24576,
+      "total_bytes": 32768
+    },
+    {
+      "table_name": "seo_reporting_query_daily",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 24576,
+      "total_bytes": 32768
+    },
+    {
+      "table_name": "seo_reporting_daily_metrics",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 16384,
+      "total_bytes": 24576
+    },
+    {
+      "table_name": "seo_reporting_revenue_daily",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 16384,
+      "total_bytes": 24576
+    },
+    {
+      "table_name": "seo_reporting_landing_page_revenue_daily",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 16384,
+      "total_bytes": 24576
+    },
+    {
+      "table_name": "seo_reporting_page_daily",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 16384,
+      "total_bytes": 24576
+    },
+    {
+      "table_name": "seo_ga4_transactions",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 16384,
+      "total_bytes": 24576
+    },
+    {
+      "table_name": "seo_reporting_settings",
+      "estimated_rows": -1,
+      "table_bytes": 8192,
+      "index_bytes": 8192,
+      "total_bytes": 16384
+    }
+  ],
+  "dependencies": [
+    {
+      "audit": {
+        "views": null,
+        "columns": [
+          {
+            "data_type": "text",
+            "table_name": "analytics_ga4_report_snapshots",
+            "column_name": "workspace_key"
+          },
+          {
+            "data_type": "date",
+            "table_name": "analytics_ga4_report_snapshots",
+            "column_name": "start_date"
+          },
+          {
+            "data_type": "date",
+            "table_name": "analytics_ga4_report_snapshots",
+            "column_name": "end_date"
+          },
+          {
+            "data_type": "text",
+            "table_name": "seo_reporting_repair_jobs",
+            "column_name": "workspace_key"
+          },
+          {
+            "data_type": "text",
+            "table_name": "seo_reporting_repair_jobs",
+            "column_name": "status"
+          },
+          {
+            "data_type": "text",
+            "table_name": "seo_reporting_repair_jobs",
+            "column_name": "error_code"
+          },
+          {
+            "data_type": "timestamp with time zone",
+            "table_name": "seo_reporting_repair_jobs",
+            "column_name": "updated_at"
+          },
+          {
+            "data_type": "text",
+            "table_name": "seo_reporting_snapshot_runs",
+            "column_name": "workspace_key"
+          },
+          {
+            "data_type": "text",
+            "table_name": "seo_reporting_snapshot_runs",
+            "column_name": "status"
+          },
+          {
+            "data_type": "date",
+            "table_name": "seo_reporting_snapshot_runs",
+            "column_name": "common_reporting_date"
+          },
+          {
+            "data_type": "text",
+            "table_name": "seo_reporting_snapshot_runs",
+            "column_name": "error_code"
+          },
+          {
+            "data_type": "date",
+            "table_name": "seo_reporting_snapshot_runs",
+            "column_name": "gsc_reporting_through_date"
+          }
+        ],
+        "foreign_keys": [
+          {
+            "conname": "seo_growth_recommendations_opportunity_key_fkey",
+            "definition": "FOREIGN KEY (opportunity_key) REFERENCES seo_reporting_opportunities(opportunity_key)",
+            "dependent_table": "seo_growth_recommendations",
+            "referenced_table": "seo_reporting_opportunities"
+          }
+        ]
+      }
+    }
+  ],
+  "history": [
+    {
+      "audit": {
+        "history": [
+          {
+            "latest": "2026-10-12",
+            "records": 3936,
+            "earliest": "2026-02-20",
+            "table_name": "analytics_ga4_report_snapshots",
+            "workspace_key": "sports-cave",
+            "older_than_16_months": 0
+          },
+          {
+            "latest": "2026-10-09",
+            "records": 259529,
+            "earliest": "2025-04-01",
+            "table_name": "seo_gsc_daily_details",
+            "workspace_key": "sports-cave",
+            "older_than_16_months": 21522
+          },
+          {
+            "latest": "2026-10-09",
+            "records": 120193,
+            "earliest": "2026-08-02",
+            "table_name": "seo_gsc_query_daily_v2",
+            "workspace_key": "sports-cave",
+            "older_than_16_months": 0
+          },
+          {
+            "latest": "2026-10-09",
+            "records": 78904,
+            "earliest": "2026-08-02",
+            "table_name": "seo_gsc_page_daily_v2",
+            "workspace_key": "sports-cave",
+            "older_than_16_months": 0
+          },
+          {
+            "latest": "2026-10-09",
+            "records": 80984,
+            "earliest": "2026-08-02",
+            "table_name": "seo_gsc_query_page_daily_v2",
+            "workspace_key": "sports-cave",
+            "older_than_16_months": 0
+          }
+        ],
+        "repair_jobs": [
+          {
+            "status": "failed",
+            "records": 337,
+            "error_code": "reporting_snapshot_failed"
+          }
+        ],
+        "snapshot_failures": [
+          {
+            "status": "failed",
+            "records": 102019,
+            "error_code": "reporting_snapshot_failed"
+          }
+        ]
+      }
+    }
+  ],
+  "additional_history": [
+    {
+      "table_name": "seo_gsc_property_totals_v2",
+      "earliest": "2025-03-31",
+      "latest": "2026-10-11",
+      "records": 2432,
+      "expired_records": 264
+    },
+    {
+      "table_name": "seo_gsc_search_appearance_daily_v2",
+      "earliest": "2026-08-02",
+      "latest": "2026-10-09",
+      "records": 328,
+      "expired_records": 0
+    },
+    {
+      "table_name": "seo_gsc_daily_totals",
+      "earliest": "2025-03-31",
+      "latest": "2026-10-11",
+      "records": 776,
+      "expired_records": 75
+    },
+    {
+      "table_name": "seo_ga4_daily_landing_pages",
+      "earliest": "2023-02-27",
+      "latest": "2026-10-11",
+      "records": 12157,
+      "expired_records": 5709
+    }
+  ],
+  "candidate_relation_bytes_upper_bound": 825450496,
+  "backups_verified": false,
+  "production_changes": false,
+  "additional_metadata": {
+    "noninternal_triggers": [],
+    "dependent_views": [],
+    "cron_job_table_installed": false,
+    "database_current_date": "2026-10-11"
+  }
+}

@@ -312,13 +312,12 @@ class SEOOverviewLazyAdminTests(unittest.TestCase):
             "Refresh properties",
             "Manage connection",
             "Disconnect Google",
-            "Import historical data",
-            "Sync now",
-            "Retry failed import",
-            "Refresh analytics",
+            "Refresh data",
             "Historical import recovery",
         ):
             self.assertIn(label, sources)
+        for obsolete in ("Import historical data", "Retry failed import", "Refresh analytics"):
+            self.assertNotIn(obsolete, sources)
         admin_source = inspect.getsource(seo_page._render_data_connections_admin)
         self.assertNotIn("Build joined reporting data", admin_source)
         self.assertNotIn("Run daily pipeline now", admin_source)

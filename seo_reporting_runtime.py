@@ -975,7 +975,8 @@ class PostgresSEOInteractiveReader:
                 "cache_revision": context.get("source_revision") or 0,
                 "reader_path": context.get("reader_path") or "unavailable",
                 "source_label": (
-                    "Saved Google Search Console data"
+                    "Google Search Console API"
+                    if context.get("reader_path") == "google_direct" else "Saved Google Search Console data"
                     if canonical
                     else "Saved SEO reporting snapshot"
                 ),
@@ -1378,7 +1379,8 @@ class PostgresSEOInteractiveReader:
 
 
 def default_reader():
-    return PostgresSEOInteractiveReader()
+    from google_direct_reporting import DirectSEOReader
+    return DirectSEOReader()
 
 
 def log_diagnostics(route, operation, diagnostics, *, cache="miss"):

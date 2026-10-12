@@ -60,6 +60,7 @@ def _latest_final_date(connection_store, connection):
 
 
 def run_repair(*, apply_migrations, backfill_legacy, refetch_latest_14, run_worker):
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     report = {"migrations_applied": False}
     if apply_migrations:
         _apply_pipeline_migrations()
