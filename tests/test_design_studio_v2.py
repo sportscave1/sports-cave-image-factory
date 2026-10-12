@@ -173,7 +173,10 @@ class DesignStudioStyleRegistryTests(unittest.TestCase):
                     "rivalry_faceoff": 20000,
                     "legends_jersey_display": 22000,
                 }.get(slug, 15000)
-                self.assertLess(len(prompt), max_length + len(design_studio_styles.FINAL_GENERATION_EXECUTION_CONTRACT))
+                finish_rules = design_studio_styles.COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES
+                self.assertEqual(prompt.count(finish_rules), 1)
+                original_prompt = prompt.replace("\n\n" + finish_rules, "")
+                self.assertLess(len(original_prompt), max_length + len(design_studio_styles.FINAL_GENERATION_EXECUTION_CONTRACT))
                 for marker in legacy_markers:
                     self.assertNotIn(marker, prompt)
 

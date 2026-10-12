@@ -6,6 +6,8 @@ import io
 from pathlib import Path
 import time as wall_time
 import unittest
+import json
+from contextlib import contextmanager
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 from streamlit.testing.v1 import AppTest
@@ -52,6 +54,31 @@ def owner_user():
         "is_active": True,
         "page_permissions": [],
     }
+
+
+@contextmanager
+def dataframe_selection_events():
+    # AppTest 1.58 doesn't serialize Dataframe (a non-Widget element) on button
+    # reruns. Replay its real selection state as the browser does.
+    from streamlit.testing.v1 import element_tree
+    from streamlit.proto.WidgetStates_pb2 import WidgetState
+    original = element_tree.get_widget_state
+
+    def get_state(node):
+        if isinstance(node, element_tree.Dataframe) and node.key:
+            state = WidgetState(id=node.proto.id)
+            state.string_value = json.dumps(node.root.session_state[node.key])
+            return state
+        return original(node)
+
+    with patch.object(element_tree, "get_widget_state", get_state):
+        yield
+
+
+def select_schedule_row(app_test, index):
+    epoch = app_test.session_state["design-schedule-selection-epoch"]
+    app_test.session_state[f"design-schedule-table::active-designs::{epoch}"] = {"selection": {"rows": [index], "columns": [], "cells": []}}
+    app_test.run(timeout=20)
 
 
 def task_csv_bytes(rows):
@@ -3513,6 +3540,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn("Refresh NFL collection", app_test.dataframe[0].value["Task"].tolist())
         self.assertNotIn("Active design", app_test.dataframe[0].value["Task"].tolist())
 
+    @dataframe_selection_events()
     def test_imported_design_task_handoff_and_unified_save_work_in_streamlit(self):
         backend = FakeDashboardBackend()
         first_details = {
@@ -3559,10 +3587,10 @@ class DashboardRenderContractTests(unittest.TestCase):
         app_test.session_state["sports_cave_current_user"] = owner_user()
         app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
         app_test.session_state["selected_page"] = "Design Studio"
-        app_test.session_state["design-schedule-row::active-designs"] = "design-one"
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             app_test.run(timeout=20)
+            select_schedule_row(app_test, 0)
             next(
                 button
                 for button in app_test.button
@@ -3604,8 +3632,7 @@ class DashboardRenderContractTests(unittest.TestCase):
                 "Equal heroes with restrained atmosphere",
             )
 
-            app_test.session_state["design-schedule-row::active-designs"] = "design-two"
-            app_test.run(timeout=20)
+            select_schedule_row(app_test, 1)
             next(
                 button
                 for button in app_test.button
@@ -3615,8 +3642,7 @@ class DashboardRenderContractTests(unittest.TestCase):
             self.assertEqual(second_values["Design title"], "")
             self.assertEqual(second_values["Principal subject one"], "")
 
-            app_test.session_state["design-schedule-row::active-designs"] = "design-one"
-            app_test.run(timeout=20)
+            select_schedule_row(app_test, 0)
             next(
                 button
                 for button in app_test.button
@@ -3695,6 +3721,7 @@ class DashboardRenderContractTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
 
+    @dataframe_selection_events()
     def test_design_studio_design_delete_cancel_and_confirm(self):
         backend = FakeDashboardBackend()
         backend.tasks = [
@@ -3719,7 +3746,6 @@ class DashboardRenderContractTests(unittest.TestCase):
         app_test.session_state["sports_cave_current_user"] = owner_user()
         app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
         app_test.session_state["selected_page"] = "Design Studio"
-        app_test.session_state["design-schedule-row::active-designs"] = "design-delete-1"
 
         with patch.object(
             sports_cave_dashboard,
@@ -3727,6 +3753,7 @@ class DashboardRenderContractTests(unittest.TestCase):
             return_value=backend,
         ):
             app_test.run(timeout=20)
+            select_schedule_row(app_test, 0)
             trigger_key = "design-schedule-delete::active-designs"
             next(button for button in app_test.button if button.key == trigger_key).click().run(
                 timeout=20
@@ -3772,9 +3799,9 @@ class DashboardRenderContractTests(unittest.TestCase):
         render_source = (ROOT / "design_schedule.py").read_text(encoding="utf-8")
         self.assertIn("task_table_rows(tasks, section)", render_source)
         self.assertIn("st.dataframe(", render_source)
-        self.assertIn('height=420', render_source)
-        self.assertIn('row_height=34', render_source)
-        self.assertIn('selection_mode="single-row"', render_source)
+        self.assertIn('height=min(420, 36 + len(rows) * 32)', render_source)
+        self.assertIn('row_height=32', render_source)
+        self.assertIn('selection_mode="multi-row" if design_view else "single-row"', render_source)
         self.assertIn('"View/Edit Details"', render_source)
         self.assertNotIn("DESIGN_TASK_VISIBLE_LIMIT", render_source)
         self.assertNotIn("overflow_tasks", render_source)
@@ -3800,8 +3827,8 @@ class DashboardRenderContractTests(unittest.TestCase):
         for selector in ("html", "body", ".stApp", ".block-container"):
             self.assertNotIn(f"{selector} {{ overflow: hidden", schedule_source)
             self.assertNotIn(f"{selector} {{ height:", schedule_source)
-        self.assertIn("height=420", schedule_source)
-        self.assertIn("row_height=34", schedule_source)
+        self.assertIn("height=min(420, 36 + len(rows) * 32)", schedule_source)
+        self.assertIn("row_height=32", schedule_source)
 
     def test_design_idea_and_manual_task_workflows_open_only_from_design_studio(self):
         source = (ROOT / "design_schedule.py").read_text(encoding="utf-8")
@@ -3827,8 +3854,8 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertIn('icon=":material/delete:"', row_source)
         self.assertIn('help="Delete design"', row_source)
         self.assertIn('st.session_state[SCHEDULE_DELETE_TASK_KEY] = selected_row["_task_id"]', row_source)
-        self.assertIn('@st.dialog(f\'Delete "{title}"?\')', dialog_source)
-        self.assertIn('"It does not delete anything from Shopify."', dialog_source)
+        self.assertIn("@st.dialog(dialog_title)", dialog_source)
+        self.assertIn("It does not delete anything from Shopify.", dialog_source)
         self.assertIn('"Cancel"', dialog_source)
         self.assertIn('"Delete design"', dialog_source)
         self.assertIn("delete_design_task", dialog_source)
@@ -3838,7 +3865,7 @@ class DashboardRenderContractTests(unittest.TestCase):
         header_source = source[source.index("def _render_header") :]
         render_source = source[source.index("def render_design_schedule") :]
 
-        self.assertIn("st.columns([2.1, .78, .68, .72, .68, .62]", header_source)
+        self.assertIn("st.columns([1.5, 1, .85, .95, .85, .75]", header_source)
         self.assertIn('"Import CSV"', header_source)
         self.assertIn('"CSV Template"', header_source)
         self.assertIn('"Export CSV"', header_source)

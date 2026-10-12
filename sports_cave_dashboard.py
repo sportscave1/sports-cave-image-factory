@@ -1179,7 +1179,7 @@ def upload_task_title_for_design(task_text, mockup_scope):
     return f"{title} ({normalize_mockup_scope(mockup_scope)})"
 
 
-def list_tasks(status="open", *, section=None, limit=200):
+def list_tasks(status="open", *, section=None, limit=200, offset=0):
     try:
         safe_limit = min(max(int(limit or 200), 1), 5000)
     except (TypeError, ValueError):
@@ -1195,6 +1195,7 @@ def list_tasks(status="open", *, section=None, limit=200):
         str(status or "open").strip().casefold(),
         clean_section,
         safe_limit,
+        max(int(offset), 0),
     )
     cached = _cache_get(_TASK_CACHE, cache_key)
     if cached is not None:
@@ -1205,8 +1206,11 @@ def list_tasks(status="open", *, section=None, limit=200):
                 status=status,
                 section=clean_section or None,
                 limit=safe_limit,
+                **({"offset": max(int(offset), 0)} if offset else {}),
             )
         except TypeError:
+            if offset:
+                raise
             raw_tasks = backend.list_dashboard_tasks(status=status, limit=safe_limit)
             if clean_section:
                 raw_tasks = [
@@ -1414,6 +1418,41 @@ def delete_design_task(task_id, *, user):
         raise DashboardStorageError(
             "The design task could not be deleted right now. Refresh the list and try again."
         ) from error
+
+
+def delete_design_tasks(task_ids, *, user):
+    """Delete only active Design Studio schedule tasks; invalidate counts after commit."""
+    clean_ids = list(dict.fromkeys(str(value or "").strip() for value in task_ids))
+    if not clean_ids or not all(clean_ids):
+        raise ValueError("Task IDs are required.")
+    if not can_manage_dashboard_tasks(user):
+        raise PermissionError("You do not have permission to delete design tasks.")
+    try:
+        from activity_log import get_activity_actor
+
+        deleted = get_supabase_backend().delete_dashboard_tasks(
+            clean_ids, required_section=DESIGN_TASK_GROUP,
+            deleted_by=str((user or {}).get("display_name") or (user or {}).get("username") or ""),
+            actor=get_activity_actor(),
+        )
+        if {str(task.get("id")) for task in deleted or []} != set(clean_ids):
+            raise DashboardStorageError(
+                "The backend did not confirm every selected deletion. Close this dialog "
+                "and review the refreshed list before retrying."
+            )
+        return [_normalise_task(task) for task in deleted]
+    except (PermissionError, DashboardStorageError):
+        raise
+    except ValueError as error:
+        raise DashboardStorageError(str(error)) from error
+    except Exception as error:
+        LOGGER.error("Bulk design deletion failed (%s; count=%s)", type(error).__name__, len(clean_ids))
+        raise DashboardStorageError(
+            "Deletion could not be confirmed. Close this dialog and review the refreshed list before retrying."
+        ) from error
+    finally:
+        clear_task_cache()
+        clear_activity_cache()
 
 
 def complete_task(task_id, *, metadata=None):
