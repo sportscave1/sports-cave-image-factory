@@ -2,6 +2,9 @@ import os
 import io
 import hashlib
 import mimetypes
+import logging
+import re
+import html
 import secrets
 import threading
 import time
@@ -301,6 +304,7 @@ class NativeTransferRecord:
     user_id: str
     roots: list
     items: list
+    purpose: str = "files"
     created_at: float = field(default_factory=time.monotonic)
     expires_at: float = field(
         default_factory=lambda: time.monotonic() + FILES_NATIVE_TRANSFER_SECONDS
@@ -456,6 +460,27 @@ class NativeTransferManager:
         with self._lock:
             self._cleanup()
             self._records[ticket] = record
+        return record
+
+    def create_psd(self, *, access_token, root_path, user, metadata):
+        """Create an existing native grant from fresh server-validated ID metadata."""
+        import psd_directory
+        path = str(metadata.get('path_display') or metadata.get('path_lower') or '')
+        root = dropbox_integration.normalize_dropbox_path(root_path)
+        if not psd_directory.approved_file(metadata) or not dropbox_integration.path_is_within_root(path, root):
+            raise FilesUploadError('The linked master is outside the approved Dropbox folder.', status_code=403, code='psd_scope_denied')
+        relative = _validated_relative_path(path[len(root):].lstrip('/'), root)
+        if relative != path or not re.fullmatch(r'[a-fA-F0-9]{64}',str(metadata.get('content_hash') or '')):
+            raise FilesUploadError('Dropbox has not provided the master verification metadata. Retry after sync.',status_code=409,code='psd_metadata_incomplete')
+        item = self._manifest_item(metadata,path,metadata['name'],is_directory=False)
+        item['content_hash'] = metadata['content_hash']
+        record = NativeTransferRecord(ticket=secrets.token_urlsafe(24),secret=secrets.token_urlsafe(32),
+                                      access_token=str(access_token),user_id=str(user.get('id') or ''),
+                                      roots=[{'source_relative_path':path[len(root):].lstrip('/'),'name':metadata['name'],'is_directory':False,'revision':item['revision']}],
+                                      items=[item],purpose='photoshop_master')
+        with self._lock:
+            self._cleanup()
+            self._records[record.ticket] = record
         return record
 
     @staticmethod
@@ -1890,12 +1915,15 @@ async def native_transfer_manifest(request: Request):
                 for key in (
                     "token",
                     "cache_key",
+                    "content_hash",
+                    "dropbox_id",
                     "relative_path",
                     "name",
                     "size",
                     "is_directory",
                     "revision",
                 )
+                if key in item
             }
             for item in record.items
         ]
@@ -1916,6 +1944,7 @@ async def native_transfer_manifest(request: Request):
                 "ok": True,
                 "ticket": record.ticket,
                 "roots": public_roots,
+                "purpose": record.purpose,
                 "items": public_items,
                 "total_bytes": sum(item["size"] for item in record.items),
             },
@@ -2304,44 +2333,88 @@ async def attach_product_psd(request: Request):
         return _response_error(error)
 
 
+def _psd_failure(error, stage, request_id):
+    """Record only controlled stage and exception classes; never error strings."""
+    chain = []
+    tags = []
+    safe_tags = {'path','not_found','no_permission','access_error','user_error','missing_scope','invalid_access_token','expired_access_token','invalid_root','too_many_requests'}
+    current = error
+    for _ in range(4):
+        if current is None:
+            break
+        chain.append(type(current).__name__)
+        provider = getattr(current,'error',None)
+        for _ in range(3):
+            tag = getattr(provider,'_tag',None)
+            if tag in safe_tags:
+                tags.append(tag)
+            provider = getattr(provider,'_value',None)
+        current = current.__cause__
+    logging.getLogger(__name__).warning('PSD_OPEN failed stage=%s exception_classes=%s provider_tags=%s request_id=%s',
+                                        stage, ','.join(chain), ','.join(tags) or 'none', request_id)
+
+
+def _psd_error_page(message, reference='', status=503):
+    content = '<!doctype html><html><head><meta charset="utf-8"><title>Open PSD</title></head><body style="font:16px system-ui;padding:24px"><h2>Open PSD</h2><p>' + html.escape(message) + '</p>'
+    if reference:
+        content += '<p>Support reference: ' + html.escape(reference) + '</p>'
+    return HTMLResponse(content+'</body></html>',status_code=status,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+
+
 async def open_product_psd(request: Request):
-    """Authenticate before resolving one mapped ID on an explicit click."""
+    """Existing link: friendly desktop launch page, then authenticated native grant."""
+    stage = 'authentication'
+    reference = secrets.token_hex(8)
     try:
-        if not _same_origin(request):
-            raise FilesUploadError("PSD request is not allowed.", status_code=403)
-        user = await run_in_threadpool(_request_user, request)
-        if not user or not os_accounts.can_access_page(user, "Files"):
-            raise FilesUploadError("Access not approved.", status_code=403, code="access_denied")
+        if not _same_origin(request) or (request.method == 'POST' and not request.headers.get('origin')):
+            raise FilesUploadError('PSD request is not allowed.',status_code=403,code='psd_origin_denied')
+        user = await run_in_threadpool(_request_user,request)
+        if not user or not os_accounts.can_access_page(user,'Files'):
+            raise FilesUploadError('Sign in to Sports Cave OS with Files access, then retry Open PSD.',status_code=403,code='access_denied')
         import psd_directory
-        from urllib.parse import urlsplit
-        pid = psd_directory.product_id({'shopify_product_gid': request.query_params.get('product_gid')})
+        pid = psd_directory.product_id({'shopify_product_gid':request.query_params.get('product_gid')})
+        if not pid or list(request.query_params.multi_items()) != [('product_gid',request.query_params.get('product_gid'))]:
+            raise FilesUploadError('The PSD product link is invalid. Open it from Edition Ops or Orders.',status_code=400,code='psd_link_invalid')
+        if request.method == 'GET':
+            content = (Path(__file__).resolve().parent/'components'/'psd_open'/'index.html').read_text(encoding='utf-8')
+            return HTMLResponse(content,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
+        payload = await _json_body(request)
+        if payload != {'action':'openPhotoshop'}:
+            raise FilesUploadError('Only the linked master can be opened. Arbitrary paths are not accepted.',status_code=400,code='psd_request_invalid')
+        stage = 'mapping'
         mapping = await run_in_threadpool(psd_directory.directory)
         record = mapping.get(pid) or {}
-        if not psd_directory.link({'shopify_product_gid': pid}, mapping):
-            raise FilesUploadError("No approved PSD is linked.", status_code=404)
+        if not psd_directory.link({'shopify_product_gid':pid},mapping):
+            raise FilesUploadError('No approved PSD is linked to this product.',status_code=404,code='psd_not_linked')
+        stage = 'dropbox_context'
         context = await run_in_threadpool(_dropbox_context)
-        metadata = await run_in_threadpool(dropbox_integration.psd_open_metadata,
-                                          context['access_token'], record['dropbox_file_id'])
+        stage = 'dropbox_metadata_by_id'
+        metadata = await run_in_threadpool(dropbox_integration.psd_open_metadata,context['access_token'],record['dropbox_file_id'],include_preview=False)
+        stage = 'approved_file'
         if metadata.get('id') != record['dropbox_file_id'] or not psd_directory.approved_file(metadata):
-            raise FilesUploadError("PSD is no longer in the approved folder.", status_code=403)
-        target = str(metadata.get('preview_url') or '')
-        parsed = urlsplit(target)
-        # Only an API-provided preview: no share link creation or temporary downloads.
-        valid = (parsed.scheme == 'https' and parsed.netloc == 'www.dropbox.com'
-                 and parsed.path.startswith(('/home/', '/preview/', '/scl/fi/'))
-                 and not parsed.query and not any(c.isspace() for c in target))
-        if not valid:
-            raise FilesUploadError("Dropbox permission-protected preview is unavailable.", status_code=503)
-        return RedirectResponse(target, status_code=307, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
+            raise FilesUploadError('The linked PSD is no longer an approved master. Ask an administrator to review it.',status_code=403,code='psd_scope_denied')
+        stage = 'native_grant'
+        transfer = await run_in_threadpool(NATIVE_TRANSFER_MANAGER.create_psd,access_token=context['access_token'],root_path=context['root_path'],user=user,metadata=metadata)
+        return JSONResponse({'ok':True,'name':metadata['name'],'action':'openPhotoshop','ticket':transfer.ticket,'secret':transfer.secret,
+                             'expires_in':FILES_NATIVE_TRANSFER_SECONDS},headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
     except Exception as error:
-        return _response_error(error)
+        _psd_failure(error,stage,reference)
+        if isinstance(error,FilesUploadError):
+            code,message,status=error.code,str(error),error.status_code
+            if code=='access_denied':
+                message='Sign in to Sports Cave OS with Files access, then retry Open PSD.'
+        else:
+            code,message,status='psd_open_unavailable','The linked PSD could not be prepared. Retry; if it persists, ask an administrator to check Dropbox and the PSD support reference.',503
+        if request.method=='GET':
+            return _psd_error_page(message,reference,status)
+        return JSONResponse({'ok':False,'code':code,'message':message,'reference':reference},status_code=status,headers={'Cache-Control':'no-store'})
 
 
 FILES_UPLOAD_ROUTES = (
     ("/files-psd-picker", psd_picker_page, ("GET",)),
     ("/api/files-psd-options", psd_picker_options, ("GET",)),
     ("/api/files-psd-attach", attach_product_psd, ("POST",)),
-    ("/api/files-psd-open", open_product_psd, ("GET",)),
+    ("/api/files-psd-open", open_product_psd, ("GET", "POST")),
     ("/files-window", files_window_page, ("GET",)),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),
     ("/api/files-list", list_files, ("GET",)),

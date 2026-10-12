@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Open PSD in Photoshop</title><style>body{font:16px system-ui;margin:24px;max-width:700px;color:#202020}button,a{margin-right:12px}#status{white-space:pre-wrap}[hidden]{display:none!important}</style></head><body><h2>Open linked PSD in Photoshop</h2><p id="name"></p><p id="status" role="status">Checking Sports Cave OS Desktop…</p><p id="guidance" hidden>Open <strong>Sports Cave OS Desktop</strong> from the Windows Start menu, sign in, then click Open PSD on the same product or order. Keep Dropbox Desktop running and the approved PSD folder synced.</p><a id="install" href="/api/files-desktop-helper" hidden>Install or update the existing Desktop helper</a><button id="retry" hidden>Retry</button><button id="cancel" hidden>Cancel</button><script>
+const $=id=>document.getElementById(id),bridge=window.chrome?.webview;let pending='',timer=null,opening=false,generation=0;
+function requestId(prefix){return prefix+'-'+Array.from(crypto.getRandomValues(new Uint32Array(4)),n=>n.toString(16).padStart(8,'0')).join('');}
+function message(text){$('status').textContent=text;}
+function fail(text,guidance=false){clearTimeout(timer);opening=false;message(text);$('guidance').hidden=!guidance;$('install').hidden=!guidance;$('retry').hidden=false;$('cancel').hidden=true;pending='';}
+function post(action,id,extra={}){bridge.postMessage({action,request_id:id,...extra});}
+function cancelNative(){try{if(pending)post('cancel',pending);}catch{}}
+async function open(){const attempt=generation;opening=true;$('retry').hidden=true;$('cancel').hidden=false;message('Verifying the linked Dropbox master…');try{
+ const response=await fetch(location.pathname+location.search,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'openPhotoshop'})});
+ let grant;try{grant=await response.json();}catch{throw Error('The server did not return PSD details. Sign in to Sports Cave OS Desktop and retry, or contact an administrator.');}if(attempt!==generation||!opening)return;if(!response.ok)throw Error((grant.message||'The linked master could not be prepared.')+(grant.reference?' Support reference: '+grant.reference:''));
+ $('name').textContent=grant.name;pending=requestId('psd-open');message('Making the synced Dropbox master available and opening Adobe Photoshop…');
+ timer=setTimeout(()=>{cancelNative();fail('Dropbox is taking too long to make this master available. Check Dropbox Desktop sync, then retry.');},180000);
+ post('openPhotoshop',pending,{transfer:{base_url:location.origin,ticket:grant.ticket,secret:grant.secret}});
+ }catch(error){if(attempt===generation)fail(error.message||'Open PSD could not be completed. Retry or contact an administrator.');}}
+function start(){generation++;clearTimeout(timer);if(!bridge?.postMessage||!bridge?.addEventListener){fail('Open PSD requires Sports Cave OS Desktop on Windows.',true);return;}$('retry').hidden=true;pending=requestId('psd-hello');timer=setTimeout(()=>fail('The Desktop bridge did not respond. Restart or update Sports Cave OS Desktop.',true),4000);try{post('hello',pending);}catch{fail('The Desktop bridge is unavailable. Restart or update Sports Cave OS Desktop.',true);}}
+if(bridge?.addEventListener)bridge.addEventListener('message',event=>{const data=event.data;if(data?.type!=='sports-cave-desktop'||data.request_id!==pending)return;
+ if(data.action==='hello'&&!data.ok){fail(data.code==='origin_denied'?'This Sports Cave OS address is not allowed by Desktop. Update the existing helper configuration for your Sports Cave OS address.':(data.message||'The Desktop bridge could not start.'),true);return;}
+ if(data.action==='capabilities'){clearTimeout(timer);if(!data.ok||!data.capabilities?.includes('openPhotoshop')){fail('Update the existing Sports Cave OS Desktop helper to enable verified Photoshop master opening.',true);return;}open();return;}
+ if(data.action==='progress'){message('Making the synced Dropbox master available…');return;}
+ if(data.action==='openPhotoshop'){clearTimeout(timer);opening=false;$('cancel').hidden=true;if(data.ok){message('Opened the linked master in Adobe Photoshop.');}else{fail(data.message||'Photoshop could not open the linked master. Check Desktop and Dropbox sync.',['desktop_outdated','origin_denied'].includes(data.code));}}
+});
+$('retry').onclick=start;$('cancel').onclick=()=>{generation++;if(opening)cancelNative();fail('Opening cancelled. No master file was changed.');};start();
+</script></body></html>

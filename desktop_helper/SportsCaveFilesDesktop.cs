@@ -22,12 +22,12 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("9.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("9.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("10.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("10.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 9;
+    internal const int HelperVersion = 10;
     internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
     private const string MutexName = @"Local\SportsCaveOSDesktop-v9";
     private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v9";
@@ -717,7 +717,7 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
-                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel" } },
+                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openPhotoshop", "openViewer", "folders", "cancel" } },
                 });
                 return;
             }
@@ -748,7 +748,7 @@ internal sealed class DesktopWindow : Window
                 return;
             }
             if (action != "drag" && action != "copyFile"
-                && action != "copyImage" && action != "openFile")
+                && action != "copyImage" && action != "openFile" && action != "openPhotoshop")
             {
                 throw new DesktopException("action_denied", "The desktop action is not allowed.");
             }
@@ -761,7 +761,10 @@ internal sealed class DesktopWindow : Window
             operations[requestId] = cancellation;
             try
             {
-                string[] paths = await cache.MaterializeAsync(
+                string photoshop = action == "openPhotoshop" ? NativePhotoshop.FindRequiredApplication() : "";
+                string[] paths = action == "openPhotoshop"
+                    ? await cache.MaterializePhotoshopAsync(grant, cancellation.Token)
+                    : await cache.MaterializeAsync(
                     grant,
                     cancellation.Token,
                     delegate(long complete, long total, string name)
@@ -811,6 +814,14 @@ internal sealed class DesktopWindow : Window
                     {
                         { "count", 1 },
                     });
+                }
+                else if (action == "openPhotoshop")
+                {
+                    if (paths.Length != 1) throw new DesktopException("master_required", "Select one linked master.");
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    try { Process.Start(NativePhotoshop.StartInfo(photoshop, paths[0])); }
+                    catch (System.ComponentModel.Win32Exception) { throw new DesktopException("photoshop_launch_failed", "Windows could not start Adobe Photoshop. Open Photoshop once, check Windows permissions, then retry."); }
+                    Reply(action, requestId, true, new Dictionary<string, object> { { "count", 1 } });
                 }
                 else
                 {
@@ -1009,6 +1020,47 @@ internal sealed class NativeCache
         localRoot = ResolveConfiguredRoot(configuredRoot);
         Directory.CreateDirectory(root);
         CleanupExpired();
+    }
+
+    internal async Task<string[]> MaterializePhotoshopAsync(TransferGrant grant, CancellationToken cancellation)
+    {
+        var manifest = await GetJson(grant.BaseUrl + "/api/files-native-transfer/manifest?ticket=" + Uri.EscapeDataString(grant.Ticket), grant.Secret, cancellation);
+        string target = ResolvePhotoshopMaster(manifest);
+        var items = manifest["items"] as IList;
+        var item = items[0] as Dictionary<string, object>;
+        await NativePhotoshop.VerifyMasterAsync(target, localRoot, Convert.ToInt64(item["size"]), Convert.ToString(item["content_hash"]), cancellation);
+        return new[] { target };
+    }
+
+    internal string ResolvePhotoshopMaster(Dictionary<string, object> manifest)
+    {
+        if (!manifest.ContainsKey("purpose") || Convert.ToString(manifest["purpose"]) != "photoshop_master")
+            throw new DesktopException("master_required", "A verified linked master transfer is required.");
+        var items = manifest.ContainsKey("items") ? manifest["items"] as IList : null;
+        var roots = manifest.ContainsKey("roots") ? manifest["roots"] as IList : null;
+        if (items == null || roots == null || items.Count != 1 || roots.Count != 1)
+            throw new DesktopException("master_required", "Only one linked PSD master can be opened.");
+        var item = items[0] as Dictionary<string, object>;
+        var entry = roots[0] as Dictionary<string, object>;
+        if (item == null || entry == null || Convert.ToBoolean(item["is_directory"]) || Convert.ToBoolean(entry["is_directory"])
+            || !item.ContainsKey("content_hash") || !item.ContainsKey("dropbox_id")
+            || !System.Text.RegularExpressions.Regex.IsMatch(Convert.ToString(item["dropbox_id"]), "^id:[A-Za-z0-9_-]+$")
+            || !IsHex(Convert.ToString(item["content_hash"]),64))
+            throw new DesktopException("manifest_invalid", "The linked master verification metadata is invalid.");
+        string relative = SafeLocalRelativePath(Convert.ToString(entry["source_relative_path"]));
+        string[] parts = relative.Split(Path.DirectorySeparatorChar);
+        if (parts.Length != 3 || !parts[0].Equals("02_TASKS",StringComparison.OrdinalIgnoreCase)
+            || !parts[1].Equals("03_DESIGNS-LIVE-ONLINE-UPLOADED",StringComparison.OrdinalIgnoreCase)
+            || !Path.GetExtension(parts[2]).Equals(".psd",StringComparison.OrdinalIgnoreCase)
+            || !parts[2].Equals(Convert.ToString(item["name"]),StringComparison.Ordinal))
+            throw new DesktopException("master_scope_denied", "Only an approved main-folder PSD master can be opened.");
+        if (String.IsNullOrWhiteSpace(localRoot))
+            throw new DesktopException("dropbox_sync_unavailable", "Configure the locally synced Sportscave Team Folder using the existing Desktop installer, then retry.");
+        string target = Path.GetFullPath(Path.Combine(localRoot,relative));
+        EnsureInside(localRoot,target);
+        if (!File.Exists(target))
+            throw new DesktopException("master_not_synced", "This linked master is not available locally. Sync the approved PSD folder in Dropbox Desktop, wait for the renamed file if necessary, then retry.");
+        return target;
     }
 
     internal async Task<string[]> MaterializeAsync(
@@ -1341,6 +1393,80 @@ internal sealed class NativeCache
     }
 }
 
+internal static class NativePhotoshop
+{
+    internal static string FindRequiredApplication()
+    {
+        foreach (var hive in new[] { Microsoft.Win32.Registry.CurrentUser, Microsoft.Win32.Registry.LocalMachine })
+        {
+            using (var key = hive.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\App Paths\Photoshop.exe"))
+            {
+                string candidate = key == null ? "" : Convert.ToString(key.GetValue(""));
+                if (!String.IsNullOrWhiteSpace(candidate) && File.Exists(candidate)) return Path.GetFullPath(candidate);
+            }
+        }
+        foreach (string programFiles in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) })
+        {
+            string adobe = Path.Combine(programFiles,"Adobe");
+            if (!Directory.Exists(adobe)) continue;
+            foreach (string folder in Directory.GetDirectories(adobe,"Adobe Photoshop *").OrderByDescending(value => value))
+            {
+                string candidate = Path.Combine(folder,"Photoshop.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        throw new DesktopException("photoshop_unavailable", "Adobe Photoshop is not installed or registered. Install Photoshop, restart Sports Cave OS Desktop, then retry.");
+    }
+
+    internal static ProcessStartInfo StartInfo(string executable, string target)
+    {
+        if (String.IsNullOrWhiteSpace(executable) || !File.Exists(executable) || !Path.GetFileName(executable).Equals("Photoshop.exe",StringComparison.OrdinalIgnoreCase))
+            throw new DesktopException("photoshop_unavailable", "Adobe Photoshop is unavailable. Install or repair Photoshop, then retry.");
+        if (!File.Exists(target) || !Path.GetExtension(target).Equals(".psd",StringComparison.OrdinalIgnoreCase))
+            throw new DesktopException("master_not_synced", "The linked PSD master is unavailable. Check Dropbox sync, then retry.");
+        return new ProcessStartInfo(executable) { Arguments = "\"" + target + "\"", UseShellExecute = false };
+    }
+
+    internal static async Task VerifyMasterAsync(string target, string root, long expectedSize, string expectedHash, CancellationToken cancellation)
+    {
+        try
+        {
+            using (var input = new FileStream(target,FileMode.Open,FileAccess.Read,FileShare.Read,128*1024,true))
+            {
+                var resolved = new StringBuilder(32768);
+                uint length = NativeMethods.GetFinalPathNameByHandle(input.SafeFileHandle,resolved,(uint)resolved.Capacity,0);
+                string actual = resolved.ToString();
+                if (actual.StartsWith(@"\\?\UNC\")) actual = @"\\" + actual.Substring(8);
+                else if (actual.StartsWith(@"\\?\")) actual = actual.Substring(4);
+                string prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                if (length == 0 || length >= resolved.Capacity || !actual.StartsWith(prefix,StringComparison.OrdinalIgnoreCase))
+                    throw new DesktopException("master_scope_denied", "The synced master resolves outside the configured Dropbox folder.");
+                // Reading the cloud placeholder requests Windows/Dropbox hydration, without writing the master.
+                byte[] block = new byte[4*1024*1024];
+                using (var hashes = new MemoryStream())
+                using (var sha = SHA256.Create())
+                {
+                    int total;
+                    while (true)
+                    {
+                        total = 0;
+                        int amount;
+                        while (total < block.Length && (amount = await input.ReadAsync(block,total,block.Length-total,cancellation)) > 0) total += amount;
+                        if (total == 0) break;
+                        byte[] hash = sha.ComputeHash(block,0,total);
+                        hashes.Write(hash,0,hash.Length);
+                    }
+                    string actualHash = BitConverter.ToString(sha.ComputeHash(hashes.ToArray())).Replace("-","").ToLowerInvariant();
+                    if (input.Length != expectedSize || !actualHash.Equals(expectedHash,StringComparison.OrdinalIgnoreCase))
+                        throw new DesktopException("master_sync_pending", "Dropbox has not synced this exact master revision yet. Wait for Dropbox sync to complete, then retry Open PSD.");
+                }
+            }
+        }
+        catch (IOException) { throw new DesktopException("master_hydration_failed", "Dropbox could not make this master available. Check Dropbox Desktop is running, make the file available offline, then retry."); }
+        catch (UnauthorizedAccessException) { throw new DesktopException("master_permission_denied", "Windows cannot read the linked master. Check local file permissions and Dropbox sync, then retry."); }
+    }
+}
+
 internal static class NativePayload
 {
     internal static System.Windows.DataObject Create(string[] paths)
@@ -1372,6 +1498,9 @@ internal sealed class DesktopException : Exception
 
 internal static class NativeMethods
 {
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    internal static extern uint GetFinalPathNameByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int virtualKey);
 

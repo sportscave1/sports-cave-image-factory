@@ -157,7 +157,7 @@ Copy-Item -LiteralPath $runtimeSource -Destination $installRoot -Force
     RootPath = $DropboxRoot
     AppUrl = $AppUrl
     InstalledAt = (Get-Date).ToString("o")
-    HelperVersion = 9
+    HelperVersion = 10
     AllowedOrigins = @(
         $AllowedOrigins |
             ForEach-Object { [string]$_ } |
