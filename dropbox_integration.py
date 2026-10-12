@@ -1,4 +1,5 @@
 import json
+import re
 import hashlib
 import io
 import os
@@ -1278,3 +1279,38 @@ def psd_open_metadata(access_token, file_id, *, include_preview=True):
         return metadata
     except Exception as error:
         raise _dropbox_error(error, "Dropbox PSD is unavailable.") from error
+
+
+def get_psd_file_response(access_token, file_id, revision):
+    """Pin the already verified master by immutable ID and revision; SDK streams."""
+    if not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')) or not revision:
+        raise ValueError('Invalid PSD identity.')
+    try:
+        metadata, response = team_space_client(access_token).files_download(file_id,rev=revision)
+        return _metadata_to_dict(metadata), response
+    except Exception as error:
+        raise _dropbox_error(error,'Dropbox original is unavailable.') from error
+
+
+def get_psd_thumbnail_bytes(access_token, file_id):
+    """Dropbox-generated small flattened preview; never fetch or parse the master."""
+    if not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')):
+        raise ValueError('Invalid PSD identity.')
+    dropbox = _dropbox_sdk()
+    try:
+        _, response = team_space_client(access_token).files_get_thumbnail(
+            file_id,format=dropbox.files.ThumbnailFormat('jpeg'),
+            size=dropbox.files.ThumbnailSize('w1024h768'),mode=dropbox.files.ThumbnailMode('bestfit'))
+        try:
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=64*1024):
+                if len(content)+len(chunk)>2*1024*1024:
+                    raise DropboxApiError('PSD thumbnail is unavailable.')
+                content.extend(chunk)
+            if not content:
+                raise DropboxApiError('PSD thumbnail is unavailable.')
+            return bytes(content)
+        finally:
+            response.close()
+    except Exception as error:
+        raise _dropbox_error(error,'PSD thumbnail is unavailable.') from error
