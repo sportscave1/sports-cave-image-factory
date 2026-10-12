@@ -1,15 +1,16 @@
-query CollectorEmailOrder($id: ID!) {
+query CollectorEmailOrder($id: ID!, $after: String) {
   order(id: $id) {
     id
     customer { id }
     cancelledAt
     fullyPaid
     displayFinancialStatus
-    lineItems(first: 2) {
+    lineItems(first: 100, after: $after) {
       nodes {
         id
         title
         variantTitle
+        quantity
         product { id }
         variant {
           id
@@ -17,6 +18,7 @@ query CollectorEmailOrder($id: ID!) {
           image { url(transform: {maxWidth: 1000, preferredContentType: JPG}) }
         }
       }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }

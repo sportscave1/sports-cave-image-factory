@@ -12,8 +12,11 @@ from urllib.parse import urlsplit
 from crm_campaign_html import email_image_url
 
 SOURCES = ('Actual Purchased Product', 'Related Products', 'Featured Collection',
-           'Verified New Releases', 'Verified Bestsellers', 'Static Selected Image', 'No Image')
+           'Verified New Releases', 'Verified Bestsellers', 'Static Selected Image', 'No Image',
+           'Products Purchased', 'Collections of Products Purchased')
 MARKER = re.compile(r'<!--SC_COLLECTOR_IMAGE_V1:([0-9a-f]+)-->')
+REPEAT = re.compile(r'<!--SC_COLLECTOR_REPEAT_V1:([0-9a-f]+)-->(.*?)<!--SC_COLLECTOR_REPEAT_END-->', re.S)
+START = re.compile(r'<!--SC_COLLECTOR_REPEAT_V1:([0-9a-f]+)-->')
 COLLECTION = 'https://www.sportscaveshop.com/collections/all'
 ACCOUNT = 'https://account.sportscaveshop.com/pages/019ef355-648a-7996-8977-897320e5ffd7'
 
@@ -21,8 +24,9 @@ ACCOUNT = 'https://account.sportscaveshop.com/pages/019ef355-648a-7996-8977-8973
 def validate(config):
     if not isinstance(config, dict) or set(config) != {'source','count','product_ids','collection_id','image','alt'}:
         raise ValueError('Invalid personalised image settings.')
-    if config['source'] not in SOURCES or type(config['count']) is not int or not 1 <= config['count'] <= 3:
-        raise ValueError('Choose an image source and one to three products.')
+    limit=250 if config.get('source')=='Products Purchased' else 6 if config.get('source')=='Collections of Products Purchased' else 3
+    if config['source'] not in SOURCES or type(config['count']) is not int or not 1 <= config['count'] <= limit:
+        raise ValueError('Choose a valid image source and product count.')
     ids = config['product_ids']
     if not isinstance(ids, list) or len(ids)>12 or any(not isinstance(i,str) or not re.fullmatch(r'gid://shopify/Product/[1-9][0-9]*',i) for i in ids) or len(set(ids))!=len(ids):
         raise ValueError('Choose up to twelve distinct Shopify products.')
@@ -50,8 +54,12 @@ def configurations(doc):
     if 'middle_sections' not in doc:sources=[doc.get('custom_html','')]
     result=[]
     for source in sources:
+        if '[[product.' in REPEAT.sub('',source):raise ValueError('Product fields require a complete gallery repeat binding.')
+        if 'SC_COLLECTOR_REPEAT_' in REPEAT.sub('',source):raise ValueError('Damaged product gallery binding. Restore its opening and closing comments.')
         if 'SC_COLLECTOR_IMAGE_V1:' in MARKER.sub('',source):raise ValueError('Damaged personalised image block.')
-        for match in MARKER.finditer(source):
+        for match in [*MARKER.finditer(source),*REPEAT.finditer(source)]:
+            if match.re is REPEAT and re.search(r'\[\[product\.(?!(?:title|variant|quantity|image|url)\]\])',match[2]):
+                raise ValueError('Use supported product gallery fields: title, variant, quantity, image and url.')
             if len(match[1])>16000:raise ValueError('Personalised image settings are too large.')
             try:config=json.loads(bytes.fromhex(match[1]).decode())
             except (ValueError,UnicodeError):raise ValueError('Invalid personalised image block.') from None
@@ -82,7 +90,9 @@ def card(product, *, small=False):
         if value and value!='Default Title':parts.append('<p style="margin:4px 0;color:#d3b779;font-size:14px;line-height:21px">'+e(value)+'</p>')
     from crm_catalogue import canonical_product_url
     url=canonical_product_url({'url':product.get('url','')})
-    if url and not product.get('owned'):
+    if product.get('quantity'):
+        parts.append('<p style="color:#d3b779;font:14px Arial">Quantity: '+e(product['quantity'])+'</p>')
+    if url:
         parts.append('<p style="margin:14px 0"><a style="color:#d3b779;font-size:14px" href="'+e(url)+'">Explore artwork</a></p>')
     return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#171717"><tr><td align="center" style="padding:20px 16px;border-bottom:1px solid #39342b;font-family:Arial,sans-serif">'+''.join(parts)+'</td></tr></table>'
 
@@ -93,31 +103,45 @@ def render(doc, facts=None, *, preview=False):
     if not configs:return doc
     facts=facts or {};result=deepcopy(doc)
     emitted=set()
-    def replace(match):
+    def products_for(match):
         config=validate(json.loads(bytes.fromhex(match[1]).decode()))
         key=marker(config)
+        products=facts.get(key,[])
+        if config['source'] not in ('Actual Purchased Product','Products Purchased'):
+            unique=[]
+            seen=set() if config['source']=='Collections of Products Purchased' else emitted
+            for p in products:
+                identity=p.get('id') or p.get('url')
+                if identity and identity in seen:continue
+                unique.append(p)
+                if identity:seen.add(identity)
+            products=unique
+        count=min(config['count'],2) if config['source']=='Actual Purchased Product' else config['count']
+        return config,products[:count]
+    def repeat(match):
+        _,products=products_for(match)
+        from crm_catalogue import canonical_product_url
+        def item(product):
+            values={k:escape(str(product.get(k) or ''),quote=True) for k in ('title','variant','quantity')}
+            values.update(image=escape(durable_image(product.get('image','')),quote=True),url=escape(canonical_product_url({'url':product.get('url','')}),quote=True))
+            source=match[2]
+            if not values['image']:source=re.sub(r'<img\b[^>]*\[\[product.image\]\][^>]*>', '', source,flags=re.I)
+            return re.sub(r'\[\[product\.(title|variant|quantity|image|url)\]\]',lambda m:values[m[1]],source)
+        return ''.join(item(p) for p in products)
+    def replace(match):
+        config,products=products_for(match)
         if config['source']=='No Image':return ''
         if config['source']=='Static Selected Image':
             return '<img src="'+escape(durable_image(config['image']),quote=True)+'" alt="'+escape(config['alt'],quote=True)+'" width="520" style="display:block;width:100%;max-width:520px;height:auto;margin:0 auto;border:0">'
-        products=facts.get(key,[])
-        if config['source']!='Actual Purchased Product':
-            unique=[]
-            for p in products:
-                identity=p.get('id') or p.get('url')
-                if identity and identity in emitted:continue
-                unique.append(p)
-                if identity:emitted.add(identity)
-            products=unique
-        count=min(config['count'],2 if config['source']=='Actual Purchased Product' else 3)
-        body=''.join(card(p,small=config['source']=='Actual Purchased Product' and config['count']==1) for p in products[:count])
+        body=''.join(card(p,small=config['source']=='Actual Purchased Product' and config['count']==1) for p in products)
         if preview:
             label='Sample preview · fixture artwork' if body else 'Sample preview · no verified artwork selected'
             body='<p style="color:#d3b779;font:12px Arial;padding:12px 16px">'+label+'</p>'+body
         return body
     for section in result.get('middle_sections',[]):
-        if 'html' in section:section['html']=MARKER.sub(replace,section['html'])
+        if 'html' in section:section['html']=MARKER.sub(replace,REPEAT.sub(repeat,section['html']))
     emitted.clear()  # custom_html is a mirror, not a second displayed section.
-    result['custom_html']=MARKER.sub(replace,result.get('custom_html',''))
+    result['custom_html']=MARKER.sub(replace,REPEAT.sub(repeat,result.get('custom_html','')))
     return result
 
 
@@ -141,7 +165,7 @@ def purchased(order, customer_id, products, *, allocation_reader=None):
     from crm_lifecycle_policy import qualifying
     if not qualifying(order) or order.get('displayFinancialStatus')=='PARTIALLY_REFUNDED':return []
     by_id={p['id']:p for p in products};result=[]
-    for line in (order.get('lineItems') or {}).get('nodes',[])[:2]:
+    for line in (order.get('lineItems') or {}).get('nodes',[]):
         pid=(line.get('product') or {}).get('id');product=by_id.get(pid,{})
         if not pid or not line.get('title'):continue
         variant=line.get('variant') or {}
@@ -153,5 +177,12 @@ def purchased(order, customer_id, products, *, allocation_reader=None):
         if edition:
             number,total=map(int,edition[1:].split('/'))
             if not 1<=number<=total:edition=None
-        result.append(dict(title=line['title'],variant=line.get('variantTitle',''),image=image,edition=edition,owned=True))
+        identity=variant.get('id') if exact and variant.get('id') else (pid,line.get('variantTitle',''))
+        existing=next((p for p in result if p['identity']==identity),None)
+        quantity=line.get('quantity',1)
+        if type(quantity) is not int or quantity<1:raise ValueError('Invalid purchased product quantity.')
+        if existing:existing['quantity']+=quantity;continue
+        from crm_catalogue import canonical_product_url
+        result.append(dict(id=pid,identity=identity,title=line['title'],variant=line.get('variantTitle',''),image=image,edition=edition,owned=True,
+                           quantity=quantity,url=canonical_product_url({'url':product.get('onlineStoreUrl','')})))
     return result

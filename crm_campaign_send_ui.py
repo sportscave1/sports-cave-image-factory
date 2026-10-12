@@ -63,7 +63,8 @@ def test_control(store,user,editor,key,available=True,cfg=None):
         with st.form(key+'single_test',clear_on_submit=False,border=False):
             if automation:
                 from crm_checkout_preview import needs_checkout
-                if needs_checkout(editor['document']):st.caption('Uses your authorized test address’s own verified checkout. No automation journey is started.')
+                if getattr(store,'preview_trigger','abandoned')!='abandoned':st.caption('Uses the selected example customer’s content. Delivered only to your authorized test address.')
+                elif needs_checkout(editor['document']):st.caption('Uses your authorized test address’s own verified checkout. No automation journey is started.')
             cols=st.columns([6,1],vertical_alignment='bottom',gap='small')
             recipient=cols[0].text_input('Send test email',placeholder='email@example.com',key=key+'test_recipient',help='Send test uses the real Shopify unsubscribe link for this customer.')
             submit=cols[1].form_submit_button('→',help='Send this test email',disabled=bool(st.session_state.get(key+'test_busy')))
@@ -76,7 +77,8 @@ def test_control(store,user,editor,key,available=True,cfg=None):
             editor=active
             # Identical content/recipient retries retain their durable operation ID.
             doc={k:v for k,v in editor['document'].items() if k!='copy_reviewed'}
-            digest=hashlib.sha256(json.dumps([doc,recipient.strip().casefold()],sort_keys=True).encode()).hexdigest()
+            example=(st.session_state.get('_automation_flow_pin') or {}).get('selected') if automation and getattr(store,'preview_trigger','abandoned')!='abandoned' else None
+            digest=hashlib.sha256(json.dumps([doc,recipient.strip().casefold(),example],sort_keys=True,default=str).encode()).hexdigest()
             operations=st.session_state.setdefault(key+'test_operations',{})
             operation=operations.setdefault(digest,str(uuid.uuid4()))
             st.session_state[key+'test_busy']=True

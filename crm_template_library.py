@@ -33,7 +33,17 @@ def rows(store):
         if row.get('builtin'):
             row['base_version']=row['version'];row['revision']=int(edit['revision']) if edit else 0
             if edit:row.update(name=edit['name'],library_group=edit['library_group'],version=row['version']+row['revision'])
-    return result
+    # Keep legacy source functions/IDs and saved edits available without offering
+    # five overlapping built-ins. User-created templates are never deleted.
+    legacy={'builtin-collector-v1-collected-artwork','builtin-collector-v1-build-collection'}
+    legacy.update('builtin-collector-stage-v2-post_purchase-'+str(n) for n in (1,2,3))
+    kept=[]
+    for row in result:
+        if row.get('builtin') and row['id'] in legacy:
+            if not row.get('revision'):continue
+            row['library_group']='Other Templates'
+        kept.append(row)
+    return kept
 
 
 def source(store,row):

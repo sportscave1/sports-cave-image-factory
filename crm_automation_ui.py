@@ -193,6 +193,7 @@ def detail(shop,store,actions,identity,*,row=None):
         st.session_state['automation_editor']=editor;st.session_state['automation_saved']=deepcopy(editor)
     st.session_state['automation_step']=step['step_id'];st.session_state['automation_editor_context']=(store,user)
     store.preview_trigger=flow['trigger']
+    store.preview_row=row;store.preview_flow=flow
     key='auto_'+str(identity)+'_'+step['step_id']+'_'
     namespace=getattr(shop,'namespace',None)
     preview_scope=(key,flow['trigger'],namespace if isinstance(namespace,str) else 'configured-shop')
@@ -200,7 +201,7 @@ def detail(shop,store,actions,identity,*,row=None):
         st.session_state['_automation_preview_open']=preview_scope
         st.session_state.pop('_automation_checkout_pin',None)
         from crm_checkout_preview import needs_checkout
-        if needs_checkout(editor['document']):
+        if flow['trigger']=='abandoned' and needs_checkout(editor['document']):
             from crm_abandoned_checkout import preview_context
             preview_context(st.session_state,shop,auto_refresh=False,slot='_automation_checkout_pin')
     cfg=store.render_settings();composer_styles()

@@ -212,7 +212,7 @@ from crm_collector_templates import document
 from crm_collector_image_ui import control
 from crm_collector_images import configurations
 if 'doc' not in st.session_state:st.session_state.doc=document('collected-artwork')
-store=Mock();store.preview_trigger='post_purchase';store.connect=None
+store=Mock();store.preview_trigger='welcome';store.connect=None
 shop=Mock()
 with patch('crm_section_ui.rerun_editor'):
     control(st.session_state.doc,'fixture_',shop,store)
@@ -227,12 +227,13 @@ assert not shop.query.called
         self.assertEqual(len(app.exception),0)
         self.assertEqual(configurations(app.session_state.doc)[0]['source'],'No Image')
 
-    def test_abandoned_composer_has_no_personalise_image_control(self):
+    def test_abandoned_and_post_purchase_have_no_personalise_image_control(self):
         from crm_collector_image_ui import control
-        store=Mock();store.preview_trigger='abandoned'
-        with patch('crm_collector_image_ui.st.popover') as popover:
-            control({},'fixture',Mock(),store)
-            popover.assert_not_called()
+        for trigger in ('abandoned','post_purchase'):
+            store=Mock();store.preview_trigger=trigger
+            with patch('crm_collector_image_ui.st.container') as container:
+                control({},'fixture',Mock(),store)
+                container.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

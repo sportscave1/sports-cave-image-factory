@@ -83,6 +83,15 @@ function sectionHtml(s,model,sections=[]){
  }
  source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>esc(offer?.[k]||('[Discount '+k+']')));
  for(const [token,value]of Object.entries(model.replacements))source=source.split(token).join(value);
+ source=source.replace(/<!--SC_COLLECTOR_REPEAT_V1:([0-9a-f]+)-->([\s\S]*?)<!--SC_COLLECTOR_REPEAT_END-->/g,(_,config,body)=>{
+  const products=model.collector?.['<!--SC_COLLECTOR_IMAGE_V1:'+config+'-->'];
+  if(!products)throw Error('Product gallery facts are unavailable. Save or refresh this section.');
+  return products.map(p=>{
+   let card=body;if(!imageUrl(p.image))card=card.replace(/<img\b[^>]*\[\[product.image\]\][^>]*>/gi,'');
+   return card.replace(/\[\[product\.(title|variant|quantity|image|url)\]\]/g,(_,field)=>esc(field==='image'?imageUrl(p.image):p[field]||''));
+  }).join('');
+ });
+ if(/SC_COLLECTOR_(?:REPEAT|IMAGE)|\[\[product\./.test(source))throw Error('Damaged product gallery binding. Restore its opening and closing comments.');
  if(/{{|{%|SC_FRAME_BANNER_/.test(source))throw Error('Unresolved template variable. Correct this section; the draft is retained.');
  const template=document.createElement('template');template.innerHTML=source;const parsed=template.content;
  const theme=clone(model.theme||{});

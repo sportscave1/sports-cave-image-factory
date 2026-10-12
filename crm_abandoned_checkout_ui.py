@@ -10,7 +10,8 @@ def automation_canvas(doc,cfg,key,store,*,current_document=True):
     # Only a genuinely pending initial checkout lookup gets a completion timer.
     # The completion app rerun mounts the same native iframe without a timer.
     pin=st.session_state.get('_automation_checkout_pin')
-    pending=bool(pin and not pin['future'].done())
+    flow_pin=st.session_state.get('_automation_flow_pin') or {}
+    pending=bool(pin and not pin['future'].done() or flow_pin.get('future'))
     st.fragment(run_every=1 if pending else None)(_automation_canvas)(doc,cfg,key,store,current_document=current_document,loading=pending)
 
 
@@ -47,12 +48,21 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                         except TimeoutError:st.rerun(scope='app')
                         except Exception:pass # preview_context retains last-good.
         if current_document:
+            if getattr(store,'preview_trigger','abandoned')!='abandoned':
+                from crm_flow_preview import control,NoPreviewCustomer
+                control(st.session_state,store,key)
             # Hydrate the selected preview context once; local section edits no
             # longer depend on a successful whole-document production render.
             try:
                 _,label=store.preview_document(doc)
                 st.caption(label or 'Draft preview')
-            except ValueError:
+            except ValueError as exc:
+                from crm_flow_preview import NoPreviewCustomer
+                if isinstance(exc,NoPreviewCustomer):
+                    st.info(str(exc))
+                    flow_pin=st.session_state.get('_automation_flow_pin') or {}
+                    if bool(flow_pin.get('future'))!=loading:st.rerun(scope='app')
+                    return
                 st.caption('Draft preview · section errors appear beside their content.')
             offer_slot=st.empty();header_slot=st.empty();warning_slot=st.empty()
             if doc.get('recovery_discount'):
@@ -67,8 +77,9 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                     headers=size_cache['personalised_headers']
                     header_slot.html('<div class="sc-personalised-headers" style="font-size:13px;line-height:1.4"><strong>'+escape(headers['subject'])+'</strong><br><span style="color:#646464">'+escape(headers['preheader'])+'</span></div>')
                 automation_size_meter(size_cache)
-            except Exception:
+            except Exception as exc:
                 st.html('<div class="sc-email-size" style="height:32px;font-size:11px">Email size · Correct section errors to calculate</div>')
+                if isinstance(exc,ValueError):st.caption(str(exc))
             from crm_local_preview import canvas
             canvas(doc,cfg,key,store)
             pin=st.session_state.get('_automation_checkout_pin')

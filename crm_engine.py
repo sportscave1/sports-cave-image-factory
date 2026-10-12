@@ -170,8 +170,9 @@ class Engine:
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 from crm_automation_runtime import render as render_automation
-                if content.get('trigger') in ('welcome','post_purchase','win_back'):
-                    from crm_collector_resolver import resolve as resolve_collector
+                if content.get('trigger') in ('welcome','post_purchase','fulfilled','win_back'):
+                    from crm_collector_resolver import resolve as resolve_collector,with_history
+                    context=with_history(self.shop,self.store,content['document'],context,content['trigger'],self.clock())
                     context['_collector_images']=resolve_collector(self.shop,self.store,content['document'],context,row['shopify_customer_id'],self.clock())
                 if content.get('lifecycle_version'):
                     from crm_lifecycle_products import selected,recommend

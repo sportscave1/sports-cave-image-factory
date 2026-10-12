@@ -21,6 +21,8 @@ def library_rows(store):
     rows.extend(lifestyle_rows())
     from crm_frame_banner_template import library_row as frame_banner_row
     rows.append(frame_banner_row())
+    from crm_post_purchase_templates import library_rows as purchase_rows
+    rows.extend(purchase_rows())
     if getattr(store,'preview_trigger',None) in ('welcome','post_purchase','win_back'):
         from crm_collector_templates import library_rows as collector_rows
         rows.extend(collector_rows())
@@ -33,6 +35,8 @@ def library_rows(store):
 
 
 def template_html(store,row):
+    from crm_post_purchase_templates import PREFIX as purchase_prefix,source as purchase_source
+    if row.get('builtin') and str(row['id']).startswith(purchase_prefix):return purchase_source(row['id'])
     from crm_collector_stages import PREFIX as stage_prefix,source as stage_source
     if row.get('builtin') and str(row['id']).startswith(stage_prefix):return stage_source(row['id'])
     from crm_collector_templates import PREFIX as collector_prefix,source as collector_source

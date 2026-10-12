@@ -54,11 +54,21 @@ def model(doc,cfg,store=None):
     from crm_campaign_html import TAGS,CSS
     import streamlit as st
     data=((st.session_state.get('_automation_checkout_pin') or {}).get('last_good') if getattr(store,'email_mode',None)=='automation' else None) or sample(doc)
+    lifecycle=getattr(store,'email_mode',None)=='automation' and getattr(store,'preview_trigger','abandoned')!='abandoned'
+    if lifecycle:
+        from crm_flow_preview import selected,checkout_data
+        data=checkout_data(selected(st.session_state,store))
     # Never expose recovery credentials to the reactive renderer. Preview links
     # are inert and all checkout data remains the already selected visual sample.
     data={**deepcopy(data),'recovery_url':''}
     galleries,banner_fragments,asset_shop=preview_assets(data,store,st.session_state,doc)
     sections=middle_sections(doc)
+    if lifecycle:
+        # Resolve all bindings together before isolated sections. Copied/reordered
+        # HTML uses this complete fact set during immediate browser edits.
+        store.preview_document(doc)
+        collector=deepcopy(st.session_state.get('_automation_selected_artwork',{}))
+    else:collector={}
     base=deepcopy(doc);base.pop('recovery_discount',None)
     base['content']={**base['content'],'subject':'Email preview','preheader':''}
     base['blocks']=[]
@@ -85,7 +95,7 @@ def model(doc,cfg,store=None):
                 resolved[s['id']]={'section':s,'html':entries[token]}
                 continue
             from crm_recovery_discount import substitute
-            hydrated=document(substitute(isolated,preview=True),data,test=True,shop=asset_shop)[0]
+            hydrated=store.preview_document(isolated)[0] if lifecycle else document(substitute(isolated,preview=True),data,test=True,shop=asset_shop)[0]
             resolved[s['id']]={'section':s,'html':render_middle(hydrated)[0]}
             entries[token]=resolved[s['id']]['html']
             while len(entries)>128:entries.pop(next(iter(entries)))
@@ -110,13 +120,16 @@ def model(doc,cfg,store=None):
     from crm_checkout_elements import element
     # Rich dynamic HTML uses the same server compiler on the pinned sample.
     replacements={MARKER:block_html(data,test=True)}
+    from crm_collector_images import MARKER as IMAGE_MARKER,render as render_images
+    for match in IMAGE_MARKER.finditer(json.dumps(sections)):
+        replacements[match[0]]=render_images({'custom_html':match[0]},collector)['custom_html']
     for n in (2,3,4):
         replacements[f'SC_LIFESTYLE_IMAGE_{n}_URL']=items[0]['gallery'][n-1] if items and len(items[0]['gallery'])>=n else ''
     replacements['SC_WALL_PREVIEW_URL']=''
     replacements['SC_CHECKOUT_RECOVERY_URL']=''
     replacements.update(banner_fragments)
     replacements['SC_FRAME_BANNER_URL']=''
-    return dict(context_token=digest([data,cfg]),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,offer=doc.get('recovery_discount'),association_independent=True,
+    return dict(context_token=digest([data,cfg,collector]),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,collector=collector,offer=doc.get('recovery_discount'),association_independent=True,
                 tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
 
 
@@ -128,7 +141,7 @@ def canvas(doc,cfg,key,store=None):
     identity=scope(key)
     from crm_email_editor_context import current
     version=current(st.session_state,{}).get('version',0)
-    token=digest([doc,cfg,(st.session_state.get('_automation_checkout_pin') or {}).get('last_good')])
+    token=digest([doc,cfg,(st.session_state.get('_automation_checkout_pin') or {}).get('last_good'),(st.session_state.get('_automation_flow_pin') or {}).get('selected')])
     cached=st.session_state.get(key+'local_preview_model')
     if not cached or cached[0]!=token:
         cached=(token,model(doc,cfg,store));st.session_state[key+'local_preview_model']=cached

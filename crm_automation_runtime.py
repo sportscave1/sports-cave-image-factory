@@ -238,7 +238,7 @@ def render(content,row,unsubscribe,context=None):
     doc=production_document(content['document']);doc['campaign_key']='auto_'+str(row['id']).replace('-','')
     from crm_collector_images import configurations,render as render_collector
     if configurations(doc):
-        if content.get('trigger') not in ('welcome','post_purchase','win_back') or '_collector_images' not in (context or {}):
+        if content.get('trigger') not in ('welcome','post_purchase','fulfilled','win_back') or '_collector_images' not in (context or {}):
             raise ValueError('Verified lifecycle artwork context required.')
         if ((context or {}).get('_customer') or {}).get('id')!=row['shopify_customer_id'] or context['_collector_images'].get('recipient')!=row['shopify_customer_id']:
             raise ValueError('Artwork recipient mismatch.')

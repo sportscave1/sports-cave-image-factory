@@ -243,16 +243,38 @@ def sequence(shop,store,user,identity,period):
     if preview:
         from crm_thumbnail_cache import selection,source_loader
         _,label,live=selection(row,preview)
-        st.caption('Email preview · neutral sample data')
         from crm_html_workspace import flow_preview
         try:
             doc,cfg=source_loader(store,row,preview,live)()
-            from crm_thumbnail_render import preview_document
-            flow_preview(preview_document(doc),cfg,'flow-readonly-'+preview['step_id'])
+            if flow['trigger']=='abandoned':
+                st.caption('Email preview · neutral sample data')
+                from crm_thumbnail_render import preview_document
+                flow_preview(preview_document(doc),cfg,'flow-readonly-'+preview['step_id'])
+            else:
+                store.preview_shop=shop;store.preview_trigger=flow['trigger'];store.preview_row=row;store.preview_flow=flow
+                lifecycle_preview(store,doc,cfg,'flow-readonly-'+preview['step_id'])
         except (ValueError,RuntimeError,KeyError,TypeError,AttributeError):
             st.warning('This stage preview could not render. Check its saved content in Edit Email. Sending and publication are unchanged.')
         if st.button('Close preview'):st.session_state.pop('flow_preview_step',None);st.rerun(scope='fragment')
     refresh_toolbar()
+
+
+def lifecycle_preview(store,doc,cfg,key):
+    from crm_flow_preview import context
+    pending=bool(context(st.session_state,store).get('future'))
+    st.fragment(run_every=1 if pending else None)(_lifecycle_preview)(store,doc,cfg,key,loading=pending)
+
+
+def _lifecycle_preview(store,doc,cfg,key,*,loading=False):
+    from crm_flow_preview import control,NoPreviewCustomer
+    from crm_html_workspace import flow_preview
+    control(st.session_state,store,key)
+    try:
+        hydrated,label=store.preview_document(doc)
+        st.caption(label);flow_preview(hydrated,cfg,key)
+        if loading:st.rerun(scope='app')
+    except NoPreviewCustomer as exc:
+        st.info(str(exc))
 
 
 @st.fragment

@@ -8,7 +8,7 @@ from crm_collector_images import SOURCES,MARKER,marker,settings,validate
 
 def control(doc,key,shop,store):
     # No visual or behavioural change to Abandoned Cart or other composers.
-    if getattr(store,'preview_trigger',None) not in ('welcome','post_purchase','win_back'):return
+    if getattr(store,'preview_trigger',None) not in ('welcome','win_back'):return
     from crm_middle_sections import middle_sections,commit_middle
     from crm_catalogue import Catalogue
     parts=middle_sections(doc)

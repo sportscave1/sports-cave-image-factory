@@ -1,6 +1,7 @@
 """Read-only, bounded artwork adapter for the existing lifecycle send context."""
 from pathlib import Path
 from datetime import timedelta
+from itertools import zip_longest
 import logging
 
 from crm_collector_images import configurations,marker,purchased
@@ -14,6 +15,27 @@ PRODUCTS=(Path(__file__).parent/'docs/collector-email-facts.graphql').read_text(
 ORDER=(Path(__file__).parent/'docs/collector-email-order.graphql').read_text()
 BESTSELLERS=(Path(__file__).parent/'docs/collector-email-bestsellers.graphql').read_text()
 DISCOVERY=(Path(__file__).parent/'docs/collector-email-discovery.graphql').read_text()
+
+
+def with_history(shop,store,doc,context,trigger,at):
+    """Native flows reuse verified lifecycle reads for artwork only.
+
+    Never change enrollment, delivery eligibility or stage timing. Lifecycle
+    flows already supply this history; native flows previously omitted it.
+    """
+    if '_lifecycle_orders' in context or not configurations(doc):return context
+    from types import SimpleNamespace
+    from crm_lifecycle_runtime import verified_plan
+    from crm_lifecycle_policy import latest_paid
+    policy={'trigger_type':trigger,'config':{'draft':{'trigger':'post_purchase' if trigger=='fulfilled' else trigger,'emails':[],'inactive_days':1}}}
+    try:
+        plan=verified_plan(SimpleNamespace(shop=bounded(shop),store=store,clock=lambda:at),policy,context['_customer'])
+    except (ValueError,CapabilityUnavailable):
+        logging.getLogger(__name__).warning('collector_history_omitted reason=verification_unavailable')
+        return context
+    result={**context,'_lifecycle_orders':plan['orders']}
+    if not result.get('_order') and trigger=='win_back':result['_order']=latest_paid(plan['orders']) or {}
+    return result
 
 
 def saleable(product):
@@ -61,28 +83,95 @@ def _resolve(shop,store,doc,context,customer_id,at,*,allocation_reader=None):
     if source and (source.get('customer') or {}).get('id')!=customer_id:raise ValueError('Artwork order context mismatch.')
     for order in context.get('_lifecycle_orders',[]):
         if (order.get('customer') or {}).get('id')!=customer_id:raise ValueError('Order history recipient mismatch.')
-    if any(c['source']=='Actual Purchased Product' for c in configs) and source:
+    if any(c['source'] in ('Actual Purchased Product','Products Purchased','Collections of Products Purchased') for c in configs) and source:
         # Reverify the exact order; never choose lastOrder or a different customer.
         fresh=shop.query(ORDER,{'id':source['id']},'collector purchased artwork',0,True).get('order')
         if not fresh or fresh.get('id')!=source['id'] or (fresh.get('customer') or {}).get('id')!=customer_id:
             raise ValueError('Artwork order verification failed.')
+        page=fresh['lineItems'];lines=list(page['nodes']);seen=set()
+        for _ in range(10):
+            if not (page.get('pageInfo') or {}).get('hasNextPage'):break
+            cursor=page['pageInfo'].get('endCursor')
+            if not cursor or cursor in seen:raise ValueError('Purchased artwork pagination incomplete.')
+            seen.add(cursor)
+            following=shop.query(ORDER,{'id':source['id'],'after':cursor},'collector purchased artwork',0,True).get('order')
+            if not following or following.get('id')!=source['id'] or (following.get('customer') or {}).get('id')!=customer_id:raise ValueError('Artwork order verification failed.')
+            page=following['lineItems'];lines.extend(page['nodes'])
+        if (page.get('pageInfo') or {}).get('hasNextPage'):raise ValueError('Purchased artwork exceeds verification bound.')
+        fresh={**fresh,'lineItems':{'nodes':lines,'pageInfo':{'hasNextPage':False}}}
+        from crm_lifecycle_policy import qualifying
+        verified_order={**source,**fresh}
+        if not qualifying(verified_order) or verified_order.get('displayFinancialStatus')=='PARTIALLY_REFUNDED':return result
         ids=list(dict.fromkeys((line.get('product') or {}).get('id') for line in fresh['lineItems']['nodes']))
         ids=[i for i in ids if i]
-        purchased_products=shop.products(ids,fresh=True)
+        purchased_products=[p for start in range(0,len(ids),50) for p in shop.products(ids[start:start+50],fresh=True)]
         if allocation_reader is None:
             from crm_personalisation_data import allocation as allocation_reader
         def optional_allocation(*args):
             try:return allocation_reader(*args)
             except Exception:return None
-        rows=purchased({**source,**fresh},customer_id,purchased_products,allocation_reader=optional_allocation)
+        rows=purchased(verified_order,customer_id,purchased_products,allocation_reader=optional_allocation)
         for c in configs:
             if c['source']=='Actual Purchased Product':result[marker(c)]=rows[:min(c['count'],2)]
-    recommendations=[c for c in configs if c['source'] not in ('Actual Purchased Product','No Image','Static Selected Image')]
+            elif c['source']=='Products Purchased':result[marker(c)]=rows[:c['count']]
+        for c in configs:
+            if c['source']=='Collections of Products Purchased':
+                result[marker(c)]=matching_collections(shop,context,customer_id,at,purchased_products,fresh,c['count'])
+    recommendations=[c for c in configs if c['source'] not in ('Actual Purchased Product','Products Purchased','Collections of Products Purchased','No Image','Static Selected Image')]
     if not recommendations:return result
     try:
         result.update(recommend(shop,store,recommendations,context,customer_id,at,purchased_products))
     except Exception:
         logging.getLogger(__name__).warning('collector_recommendations_omitted reason=optional_unavailable')
+    return result
+
+
+def matching_collections(shop,context,customer_id,at,products,order,count):
+    """Exact purchased collection memberships; Shopify sales sorting, no claims."""
+    owned=owned_ids(shop,[*context.get('_lifecycle_orders',[]),order],customer_id)
+    interests=set().union(*(classifications(p) for p in products)) if products else set()
+    collections={}
+    for product in products:
+        page=product.get('collections') or {};seen=set()
+        for _ in range(5):
+            for collection in page.get('nodes',[]):
+                collections[collection['id']]=collection
+            if not (page.get('pageInfo') or {}).get('hasNextPage'):break
+            cursor=page['pageInfo'].get('endCursor')
+            if not cursor or cursor in seen:raise ValueError('Purchased collection membership incomplete.')
+            seen.add(cursor);page=shop.collections(product['id'],after=cursor,fresh=True)
+        if (page.get('pageInfo') or {}).get('hasNextPage'):raise ValueError('Purchased collection membership exceeds bound.')
+    # Sport-specific memberships outrank generic merchandise/storewide groups.
+    from sports_categories import detect_sport_in_text,normalize_sport_category
+    def sport(c):return detect_sport_in_text(c.get('title','')+' '+c.get('handle',''))
+    categories={normalize_sport_category(s) for s in interests}-{''}
+    specific=[c for c in collections.values() if normalize_sport_category(sport(c)) in categories] if categories else []
+    selected=specific or [c for c in collections.values() if c.get('handle','').lower() not in ('all','frontpage','best-sellers','bestsellers','new-arrivals')]
+    ranked=[]
+    for collection in selected[:6]:
+        try:
+            response=shop.query(BESTSELLERS,{'id':collection['id']},'collector sales ranking',0,True).get('collection')
+        except CapabilityUnavailable:
+            # Same collection's established order, never a storewide fallback.
+            response=shop.query(BESTSELLERS.replace('BEST_SELLING','COLLECTION_DEFAULT'),{'id':collection['id']},'collector collection order',0,True).get('collection')
+        if response and response.get('id')==collection['id']:
+            ranked.append([p['id'] for p in (response.get('products') or {}).get('nodes',[]) if p['id'] not in owned])
+    # Round-robin preserves each collection's sales order for mixed-sport orders.
+    ids=list(dict.fromkeys(i for group in zip_longest(*ranked) for i in group if i))[:48] if ranked else []
+    if not ids:return []
+    country=(context['_customer'].get('defaultAddress') or {}).get('countryCodeV2')
+    if not country or len(country)!=2:return []
+    nodes=shop.query(PRODUCTS,{'ids':ids,'country':country},'collector recommendation availability',0,True)['nodes']
+    by_id={p['id']:p for p in nodes if p and p.get('id') in ids and saleable(p)}
+    from crm_collector_images import durable_image
+    result=[]
+    for identity in ids:
+        p=by_id.get(identity)
+        if not p or interests and relevance(interests,p) is None:continue
+        image=durable_image((p.get('featuredImage') or {}).get('url',''))
+        if not image:continue
+        result.append(dict(id=identity,title=p['title'],image=image,url=p['onlineStoreUrl']))
+        if len(result)>=min(count,6):break
     return result
 
 

@@ -282,6 +282,13 @@ class AutomationStore(CampaignStore):
                 'document':doc,'archived_at':row['config'].get('archived_at')}
 
     def preview_document(self,doc):
+        trigger=getattr(self,'preview_trigger',None)
+        if trigger and trigger!='abandoned':
+            import streamlit as st
+            from crm_flow_preview import hydrate
+            self.preview_warning=''
+            rendered,label=hydrate(st.session_state,self,doc)
+            return rendered,'Previewing: '+label
         from crm_recovery_discount import substitute
         doc=substitute(doc,preview=True)
         from crm_personalisation import present as has_personalisation,render as personalise,values_from_preview
@@ -333,6 +340,12 @@ class AutomationStore(CampaignStore):
         return (personalise(rendered,values_from_preview(data)) if has_personalisation(rendered) else rendered),label
 
     def test_document(self,doc,operation_id,*,recipient=None,customer=None,shop=None):
+        trigger=self.flow(self.draft_identity)['config']['draft']['trigger']
+        if trigger!='abandoned':
+            from crm_checkout_styles import count
+            from crm_checkout_preview import legacy
+            if count(doc) or legacy(doc):raise ValueError('Checkout abandoned trigger required.')
+            if shop is not None:self.preview_shop=shop
         if recipient is not None and self.flow(self.draft_identity)['config']['draft']['trigger']=='abandoned':
             from crm_test_checkout import document
             from crm_shopify import Shopify
@@ -345,6 +358,12 @@ class AutomationStore(CampaignStore):
             if discount['status']!='ACTIVE':raise ValueError('Selected discount is not active. Refresh the offer before sending a test.')
             doc=substitute(doc,discount)
         else:doc=substitute(doc)
+        if trigger!='abandoned':
+            import streamlit as st
+            from crm_flow_preview import hydrate
+            # Test transport/unsubscribe remain bound to the authorised internal
+            # address; only artwork/name facts come from the selected example.
+            return hydrate(st.session_state,self,doc,fresh=True)[0]
         from crm_personalisation import present as has_personalisation,render as personalise,values_from_preview
         from crm_abandoned_checkout import latest
         from crm_checkout_preview import needs_checkout,document,sample
