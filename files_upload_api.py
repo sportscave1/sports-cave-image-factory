@@ -2231,6 +2231,79 @@ async def paste_files(request: Request):
         return _response_error(error)
 
 
+def _psd_admin(request):
+    user = _request_user(request)
+    if not user or not os_accounts.is_admin(user) or not os_accounts.can_access_page(user, 'Files'):
+        raise FilesUploadError('Administrator access required.', status_code=403)
+    return user
+
+
+async def psd_picker_page(request: Request):
+    try:
+        await run_in_threadpool(_psd_admin, request)
+        content = (Path(__file__).resolve().parent / 'components' / 'psd_picker' / 'picker.html').read_text(encoding='utf-8')
+        return HTMLResponse(content, headers={'Cache-Control':'no-store','X-Frame-Options':'SAMEORIGIN'})
+    except Exception as error:
+        return _response_error(error)
+
+
+async def psd_picker_options(request: Request):
+    try:
+        user = await run_in_threadpool(_psd_admin, request)
+        import psd_directory as psd
+        from psd_mapping_store import STORE
+        pid = psd.product_id({'shopify_product_gid':request.query_params.get('product_gid')})
+        product = await run_in_threadpool(STORE.get_product, pid)
+        mapping = await run_in_threadpool(STORE.read)
+        context = await run_in_threadpool(_dropbox_context)
+        entries = await run_in_threadpool(_directory_entries, context['access_token'], psd.ROOT,
+                                         root_path=context['root_path'],user_id=str(user.get('id') or ''))
+        owners = {r['dropbox_file_id']:owner for owner,r in mapping.items()}
+        files = []
+        for entry in entries:
+            if not psd.approved_file(entry):
+                continue
+            path = entry.get('path_display') or entry.get('path_lower')
+            files.append({'id':entry['id'],'name':entry['name'],
+                          'mismatch':psd.filename_key(entry['name'][:-4]) not in psd.title_filename_keys(product['product_title']),
+                          'assigned_other':entry['id'] in owners and owners[entry['id']] != pid,
+                          'thumbnail_url':'/api/files-thumbnail?path='+quote(path,safe='')})
+        return JSONResponse({'product_title':product['product_title'],'product_gid':pid,
+                             'current_file_id':(mapping.get(pid) or {}).get('dropbox_file_id',''),'files':files},headers={'Cache-Control':'no-store'})
+    except ValueError as error:
+        return _response_error(FilesUploadError(str(error),status_code=400))
+    except Exception as error:
+        return _response_error(error)
+
+
+async def attach_product_psd(request: Request):
+    try:
+        if not request.headers.get('origin') or not _same_origin(request):
+            raise FilesUploadError('PSD attachment request is not allowed.',status_code=403)
+        user = await run_in_threadpool(_psd_admin, request)
+        import psd_directory as psd
+        from psd_mapping_store import STORE
+        payload = await _json_body(request)
+        pid = psd.product_id({'shopify_product_gid':payload.get('product_gid')})
+        if not pid or not psd.re.fullmatch(r'id:[A-Za-z0-9_-]+',str(payload.get('file_id') or '')):
+            raise FilesUploadError('Invalid product or file identity.',status_code=400)
+        context = await run_in_threadpool(_dropbox_context)
+        metadata = await run_in_threadpool(dropbox_integration.psd_open_metadata,context['access_token'],payload['file_id'],include_preview=False)
+        if metadata.get('id') != payload['file_id'] or not psd.approved_file(metadata):
+            raise FilesUploadError('Only an approved main-folder PSD can be attached.',status_code=403)
+        record = await run_in_threadpool(STORE.attach,pid,metadata,user,
+                                        expected_file_id=payload.get('expected_file_id') or '',
+                                        confirm_replace=payload.get('confirm_replace') is True,
+                                        confirm_mismatch=payload.get('confirm_mismatch') is True)
+        return JSONResponse({'ok':True,'mapping':record,'open_url':psd.link({'shopify_product_gid':pid},{pid:record})},headers={'Cache-Control':'no-store'})
+    except PermissionError as error:
+        return _response_error(FilesUploadError(str(error),status_code=403))
+    except ValueError as error:
+        return _response_error(FilesUploadError(str(error),status_code=409))
+    except Exception as error:
+        return _response_error(error)
+
+
 async def open_product_psd(request: Request):
     """Authenticate before resolving one mapped ID on an explicit click."""
     try:
@@ -2242,7 +2315,7 @@ async def open_product_psd(request: Request):
         import psd_directory
         from urllib.parse import urlsplit
         pid = psd_directory.product_id({'shopify_product_gid': request.query_params.get('product_gid')})
-        mapping = psd_directory.directory()
+        mapping = await run_in_threadpool(psd_directory.directory)
         record = mapping.get(pid) or {}
         if not psd_directory.link({'shopify_product_gid': pid}, mapping):
             raise FilesUploadError("No approved PSD is linked.", status_code=404)
@@ -2265,6 +2338,9 @@ async def open_product_psd(request: Request):
 
 
 FILES_UPLOAD_ROUTES = (
+    ("/files-psd-picker", psd_picker_page, ("GET",)),
+    ("/api/files-psd-options", psd_picker_options, ("GET",)),
+    ("/api/files-psd-attach", attach_product_psd, ("POST",)),
     ("/api/files-psd-open", open_product_psd, ("GET",)),
     ("/files-window", files_window_page, ("GET",)),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),

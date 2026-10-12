@@ -1,0 +1,27 @@
+<!doctype html><html><body><script>
+const send=(type,extra={})=>parent.postMessage({isStreamlitMessage:true,type,...extra},'*');
+send('streamlit:componentReady',{apiVersion:1});send('streamlit:setFrameHeight',{height:0});
+const target=window.parent,doc=target.document;
+target.SportsCavePsdPicker?.destroy?.();
+const original=target.open,controller=new target.AbortController();let modal=null,frame=null;
+function close(){modal?.remove();modal=null;frame=null;}
+function launch(url){
+ close();modal=doc.createElement('dialog');modal.style.cssText='width:min(680px,90vw);height:min(600px,85vh);padding:0;border:1px solid #ccc;border-radius:8px';
+ const header=doc.createElement('div');header.style.cssText='text-align:right;padding:6px';
+ const button=doc.createElement('button');button.textContent='Close';button.onclick=close;header.append(button);
+ frame=doc.createElement('iframe');frame.src=url;frame.title='Attach approved Dropbox PSD';frame.style.cssText='border:0;width:100%;height:calc(100% - 42px)';
+ modal.append(header,frame);doc.body.append(modal);modal.showModal();modal.addEventListener('cancel',close,{once:true});
+}
+function pickerUrl(value){try{const url=new URL(value,target.location.href);return url.origin===target.location.origin&&url.pathname==='/files-psd-picker'?url.href:null;}catch{return null;}}
+const wrapper=function(url,...args){if(url==='Not linked'||url==='Unavailable')return null;const href=pickerUrl(url);if(href){launch(href);return null;}return original.call(this,url,...args);};
+target.open=wrapper;
+doc.addEventListener('click',event=>{const anchor=event.target.closest?.('a[href]');if(anchor&&pickerUrl(anchor.href)){event.preventDefault();event.stopPropagation();launch(anchor.href);}},{capture:true,signal:controller.signal});
+target.addEventListener('message',event=>{
+ if(event.origin!==target.location.origin||!frame||event.source!==frame.contentWindow)return;
+ if(event.data?.type==='sports-cave-psd-saved'){close();send('streamlit:setComponentValue',{value:{product_gid:event.data.product_gid,nonce:Date.now()},dataType:'json'});}
+ if(event.data?.type==='sports-cave-psd-cancel')close();
+},{signal:controller.signal});
+const lifecycle={destroy(){close();controller.abort();if(target.open===wrapper)target.open=original;}};
+target.SportsCavePsdPicker=lifecycle;
+window.addEventListener('pagehide',()=>{if(target.SportsCavePsdPicker===lifecycle)lifecycle.destroy();},{once:true});
+</script></body></html>

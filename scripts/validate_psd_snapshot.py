@@ -52,10 +52,10 @@ def validate(snapshot, write_local=False):
         for name, data in raw.items():
             (folder / name).write_bytes(data)
         # Apply only after full validation; reconcile protects any existing verified assignment.
-        _, merged = psd.snapshot_mapping(products, approved, excluded, psd.directory())
+        _, merged = psd.snapshot_mapping(products, approved, excluded, psd.directory(psd.STORE))
         if any(merged[pid].get('dropbox_file_id') != row.get('dropbox_file_id') for pid, row in mapping.items()):
             raise ValueError('Existing verified mapping conflicts; preserved without overwriting.')
-        psd.save(merged)
+        psd.save(merged, psd.STORE)
         (folder / 'validation_results.json').write_text(json.dumps(counts, indent=2), encoding='utf-8')
         (folder / 'unmatched_products_51.json').write_text(json.dumps(unmatched, indent=2), encoding='utf-8')
     return counts
