@@ -165,9 +165,11 @@ class ApplicationDraftTests(unittest.TestCase):
             apps.update_from_live(self.home, draft["id"], "owner", plan["fingerprint"], plan["confirmation"])
         self.assertEqual(before, studio.snapshot(root))
 
-    def test_update_exact_confirmation_and_recovery_command_plan_without_merge(self):
+    def test_update_live_checkpoint_reopens_saves_undoes_and_retains_recovery(self):
+        import editor
         draft = self.create()
         root = Path(draft["worktree_path"])
+        drafts.save(self.home, draft["id"], "owner", 0, ["screen.html"])
         (self.repo/"screen.html").write_text("New synthetic live source")
         studio.git(self.repo, "add", "screen.html")
         studio.git(self.repo, "commit", "-m", "Disposable new live fixture")
@@ -178,18 +180,24 @@ class ApplicationDraftTests(unittest.TestCase):
             self.assertEqual(plan["conflicts"], [])
             with self.assertRaises(ValueError):
                 apps.update_from_live(self.home, draft["id"], "owner", plan["fingerprint"], "UPDATE wrong")
-            real_git, mutations = studio.git, []
-            def read_only_git(repo, *args):
-                if (args[0] == "branch" and len(args) == 3 and not args[1].startswith("--")) or "merge" in args:
-                    mutations.append(args)
-                    return ""  # Never execute branch creation or merge in this test.
-                return real_git(repo, *args)
-            with patch.object(studio, "git", side_effect=read_only_git):
-                result = apps.update_from_live(self.home, draft["id"], "owner", plan["fingerprint"], plan["confirmation"])
-            self.assertEqual(mutations[0], ("branch", result["recovery_branch"], self.sha))
-            self.assertEqual(mutations[1][-4:], ("merge", "--ff-only", "--no-edit", newer))
-            self.assertEqual(studio.git(root, "rev-parse", "HEAD"), self.sha)
-            self.assertEqual((root/"screen.html").read_text(), "<h1>live</h1>")
+            result = apps.update_from_live(self.home, draft["id"], "owner", plan["fingerprint"], plan["confirmation"])
+            self.assertEqual(studio.git(root, "rev-parse", result["recovery_branch"]), self.sha)
+            self.assertEqual(studio.git(root, "rev-parse", "HEAD"), newer)
+            self.assertEqual((root/"screen.html").read_text(), "New synthetic live source")
+            server = draft_ui.DraftServer(self.home, draft["task_id"], "owner")
+            self.addCleanup(server.server_close)
+            reopened = server.state()["draft"]
+            self.assertEqual(reopened["changed_since_checkpoint"], [])
+            self.assertEqual(reopened["selected_revision"]["commit"], newer)
+            recovered = drafts.recover_copy(self.home, draft["id"], "owner", reopened["revision"])
+            self.assertEqual((Path(recovered["recovery_path"])/"screen.html").read_text(), "New synthetic live source")
+            opened = editor.open_file(self.home, draft["id"], "owner", "app.py")
+            editor.write(self.home, draft["id"], "owner", "app.py", opened["hash"], opened["revision"],
+                         component="title", changes={"text": "After Live update", "properties": {}})
+            saved = editor.open_file(self.home, draft["id"], "owner", "app.py")
+            editor.write(self.home, draft["id"], "owner", "app.py", saved["hash"], saved["revision"],
+                         restore={"id": saved["history"][-1]["id"], "side": "before"})
+            self.assertEqual(editor.open_file(self.home, draft["id"], "owner", "app.py")["hash"], opened["hash"])
             with self.assertRaises(ValueError):
                 apps.update_from_live(self.home, draft["id"], "owner", plan["fingerprint"], plan["confirmation"])
 

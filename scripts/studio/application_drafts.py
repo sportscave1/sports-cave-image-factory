@@ -325,9 +325,14 @@ def update_from_live(home, draft_id, owner, expected, confirmation):
         recovery = "codex/recovery/" + draft_id + "-" + uuid.uuid4().hex[:8]
         studio.git(root, "branch", recovery, snapshot["commit"])
         studio.git(root, "-c", "core.hooksPath=NUL", "merge", "--ff-only", "--no-edit", receipt["revision"])
+        # A revision is a real checkpoint, not just a stale-edit counter. Preserve
+        # prior selections at the new source revision so state/open/recovery work.
+        checkpoint = live_checkpoint(home, draft, root, receipt["revision"])
         draft["base_commit"] = draft["current_commit"] = task["current_commit"] = receipt["revision"]
         draft["production_base"] = receipt
-        draft["revision"] += 1
+        draft["revisions"].append(checkpoint)
+        draft["revision"] = checkpoint["number"]
+        draft["editing_status"] = "Saved locally"
         draft["metadata_version"] = draft.get("metadata_version", 1) + 1
         draft["updated_at"] = studio.now()
         draft["release_eligible"] = False
@@ -337,6 +342,23 @@ def update_from_live(home, draft_id, owner, expected, confirmation):
                                                 "recovery_branch": recovery})
         studio.atomic(file, registry)
         return {"updated": True, "revision": receipt["revision"], "recovery_branch": recovery}
+
+
+def live_checkpoint(home, draft, root, revision):
+    import editor
+    previous = draft["revisions"][-1]["files"] if draft["revisions"] else []
+    names = sorted({"app.py"} | {item["path"] for item in previous})
+    captured = [drafts.read_source(root, name, allow_missing=True) for name in names]
+    if sum(len(data or b"") for _, data in captured) > drafts.MAX_TOTAL:
+        raise ValueError("Updated checkpoint exceeds the safe size limit.")
+    for meta, data in captured:
+        if drafts.read_source(root, meta["path"], allow_missing=True) != (meta, data):
+            raise ValueError("Source changed while checkpointing Live. Recovery branch retained.")
+        if data is not None:
+            editor.blob(home, data)
+    return {"number": draft["revision"] + 1, "commit": revision, "saved_at": studio.now(),
+            "files": [meta for meta, _ in captured],
+            "scope": "explicit selected files after verified Live update"}
 
 
 if __name__ == "__main__":
