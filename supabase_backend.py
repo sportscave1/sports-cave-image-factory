@@ -3753,7 +3753,7 @@ def list_activity_logs(
             return cur.fetchall()
 
 
-def list_dashboard_tasks(status="open", *, section=None, limit=200):
+def list_dashboard_tasks(status="open", *, section=None, limit=200, offset=0):
     ensure_dashboard_schema()
     clean_status = str(status or "open").strip().casefold()
     clean_section = str(section or "").strip()
@@ -3770,7 +3770,7 @@ def list_dashboard_tasks(status="open", *, section=None, limit=200):
         safe_limit = min(max(int(limit or 200), 1), 5000)
     except (TypeError, ValueError):
         safe_limit = 200
-    params.append(safe_limit)
+    params.extend((safe_limit, max(int(offset), 0)))
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3779,8 +3779,8 @@ def list_dashboard_tasks(status="open", *, section=None, limit=200):
                 SELECT id, title, section, status, created_at, completed_at, completed_by, design_style, metadata
                 FROM dashboard_tasks
                 {where_sql}
-                ORDER BY created_at DESC
-                LIMIT %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s OFFSET %s
                 """,
                 params,
             )
@@ -4256,7 +4256,7 @@ def delete_dashboard_task(
                     metadata=COALESCE(metadata, '{}'::jsonb)
                         || jsonb_build_object(
                             'deleted_at', now()::text,
-                            'deleted_by', %s
+                            'deleted_by', %s::text
                         )
                 WHERE id=%s AND section=%s AND status='open'
                 RETURNING *
@@ -4291,6 +4291,47 @@ def delete_dashboard_task(
             )
         conn.commit()
     return task
+
+
+def delete_dashboard_tasks(task_ids, *, required_section, deleted_by="", actor="sports_cave_os"):
+    """Soft-delete exactly the requested open tasks, with audit, in one transaction."""
+    clean_ids = list(dict.fromkeys(str(value or "").strip() for value in task_ids))
+    clean_section = str(required_section or "").strip()
+    if not clean_ids or not all(clean_ids) or not clean_section:
+        raise ValueError("Task IDs and task section are required.")
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE dashboard_tasks
+                SET status='deleted',
+                    metadata=COALESCE(metadata, '{}'::jsonb)
+                        || jsonb_build_object('deleted_at', now()::text, 'deleted_by', %s::text)
+                WHERE id=ANY(%s::uuid[]) AND section=%s AND status='open'
+                RETURNING *
+                """,
+                (str(deleted_by or "").strip(), clean_ids, clean_section),
+            )
+            tasks = [_dashboard_task_from_row(row) for row in cur.fetchall()]
+            if len(tasks) != len(clean_ids):
+                # Raising inside the connection context rolls back every update.
+                raise ValueError(
+                    "No designs were deleted. One or more selected tasks are no longer active "
+                    "design tasks. Close this dialog and review the refreshed selection."
+                )
+            for task in tasks:
+                title = task.get("title") or "Design task"
+                _insert_audit_log(
+                    cur, event_type="task_deleted", entity_type="dashboard_task",
+                    entity_id=str(task["id"]),
+                    new_value={"message": f"Design task deleted: {title}", "page": "Design Studio",
+                               "action_type": "task_deleted", "title": title, "section": clean_section},
+                    reason=f"Design task deleted: {title}",
+                    actor=str(actor or "").strip() or "sports_cave_os", source="Design Studio",
+                )
+        conn.commit()
+    return tasks
 
 
 def complete_dashboard_task(
@@ -19652,6 +19693,20 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
         # classify the current Shopify product, including publication and tags.
         product = shopify_sync.fetch_product_by_shopify_id(product["shopify_product_id"], config=config)
         product["_edition_registration_canonical"] = True
+        # Shared tagging applies to both create/update and Draft/Active products.
+        # Do not use the webhook snapshot or Edition Ops' truncated collections.
+        # Transient failures use this receipt's existing failed/retry lifecycle.
+        from product_sport_tag_sync import sync_product_sport_tags
+        sport_tagging_error = None
+        try:
+            sport_tagging = sync_product_sport_tags(product["shopify_product_id"], config=config)
+        except Exception as error:
+            # Preserve existing Edition Ops processing even when Shopify tagging
+            # is temporarily unavailable; fail the receipt afterwards for retry.
+            sport_tagging_error = error
+            sport_tagging = {"status": "unverified", "review": []}
+        tag_warnings = ["Sport classification review required: " + reason
+                        for reason in sport_tagging.get("review", [])]
         _webhook_log(
             "webhook_product_processing_started",
             source="webhook",
@@ -19661,6 +19716,8 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             shopify_handle=product.get("handle") or "",
         )
         if not _live_edition_product(product):
+            if sport_tagging_error:
+                raise sport_tagging_error
             _webhook_log("edition_product_classified", "skipped", topic=topic, webhook_id=webhook_id,
                          shopify_product_id=product.get("shopify_product_id"), handle=product.get("handle"),
                          product_status=product.get("status"), eligible=False, action="skipped", reason="not_active")
@@ -19669,7 +19726,8 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                 "duplicate": False,
                 "processed": True,
                 "reason": "Product is not active; a later products/update can initialize it.",
-                "status": "skipped", "action": "skipped",
+                "status": "processed_with_warnings" if tag_warnings else "skipped", "action": "skipped",
+                "sport_tagging": sport_tagging,
                 "shopify_product_id": product.get("shopify_product_id") or "",
                 "shopify_handle": product.get("handle") or "",
                 "new_products_inserted": 0,
@@ -19677,11 +19735,12 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                 "existing_products_skipped": 1,
                 "shopify_metafields_pushed": 0,
                 "shopify_metafields_failed_pending": 0,
-                "errors": [],
+                "errors": tag_warnings,
             }
             _update_webhook_event_status(
                 webhook_id,
-                "skipped",
+                result["status"],
+                error_message="\n".join(tag_warnings),
                 skipped_count=1,
                 processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
             )
@@ -19690,9 +19749,10 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_HANDLE_KEY, product.get("handle") or "")
             _set_webhook_app_setting(
                 LAST_PRODUCT_WEBHOOK_RESULT_KEY,
-                json_dumps({"status": "skipped", "topic": topic, "reason": result.get("reason") or ""}),
+                json_dumps({"status": result["status"], "topic": topic,
+                            "reason": result.get("reason") or "", "sport_tagging": sport_tagging}),
             )
-            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "")
+            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "\n".join(tag_warnings))
             return result
 
         apply_summary = register_shopify_products_for_edition_ops(
@@ -19702,11 +19762,13 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             topic=topic,
             webhook_id=webhook_id,
         )
-        errors = list(apply_summary.get("errors") or [])
+        if sport_tagging_error:
+            raise sport_tagging_error
+        errors = list(apply_summary.get("errors") or []) + tag_warnings
         errors.extend(apply_summary.get("variant_sync_errors") or [])
         decisions = apply_summary.get("eligibility_results") or []
         ineligible = bool(decisions) and not any(item.get("eligible") for item in decisions)
-        status = "skipped" if ineligible else "processed" if not errors else "processed_with_warnings"
+        status = "processed_with_warnings" if errors else "skipped" if ineligible else "processed"
         inserted_count = int(apply_summary.get("new_products_inserted") or 0)
         updated_count = int(apply_summary.get("existing_products_updated") or 0)
         skipped_count = int(apply_summary.get("existing_products_skipped") or 0)
@@ -19732,6 +19794,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             "shopify_metafields_pushed": int(apply_summary.get("shopify_metafields_pushed") or 0),
             "shopify_metafields_failed_pending": int(mirror_result.get("skipped") or mirror_result.get("failed") or 0),
             "product_metafield_mirror": mirror_result,
+            "sport_tagging": sport_tagging,
             "errors": errors,
         }
         _update_webhook_event_status(
@@ -19757,6 +19820,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                     "new_products_inserted": inserted_count,
                     "existing_products_updated": updated_count,
                     "existing_products_skipped": skipped_count,
+                    "sport_tagging": sport_tagging,
                 }
             ),
         )

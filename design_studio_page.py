@@ -4183,7 +4183,6 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
     st.markdown(
         """
         <style>
-        .sc-design-v2-intro { color: #706b62; margin: -.3rem 0 .7rem; }
         .sc-design-v2-style { border-left: 2px solid #b79243; color: #5f5a52; font-size: .82rem; margin: .35rem 0 .65rem; padding: .35rem .65rem; }
         .sc-design-v2-steps { background: #f8f6f1; border: 1px solid #ded8cb; border-radius: 6px; color: #292724; font-size: .84rem; font-weight: 650; margin: .65rem 0; padding: .55rem .75rem; text-align: center; }
         .sc-design-v2-badge { background: #f3ecdc; border: 1px solid #d9c28d; border-radius: 999px; color: #6d531c; display: inline-block; font-size: .68rem; font-weight: 700; margin-left: .35rem; padding: .12rem .42rem; }
@@ -4191,12 +4190,6 @@ def render_design_studio_v2(can_edit_prompts=False, user=None):
         """,
         unsafe_allow_html=True,
     )
-    st.title("Design Studio")
-    st.markdown(
-        '<div class="sc-design-v2-intro">Manage the design schedule, then build one selected collector artwork.</div>',
-        unsafe_allow_html=True,
-    )
-
     selected_task = design_schedule.render_design_schedule(
         user,
         copy_prompt_renderer=lambda prompt, key, label: _render_copy_button(

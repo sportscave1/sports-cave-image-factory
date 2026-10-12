@@ -27,6 +27,10 @@ SCHEDULE_TOAST_KEY = "design-schedule-toast"
 SCHEDULE_DETAILS_TASK_KEY = "design-schedule-details-task-id"
 SCHEDULE_COMPLETE_TASK_KEY = "design-schedule-complete-task-id"
 SCHEDULE_DELETE_TASK_KEY = "design-schedule-delete-task-id"
+SCHEDULE_DELETE_IDS_KEY = "design-schedule-delete-task-ids"
+SCHEDULE_DELETE_BUSY_KEY = "design-schedule-delete-busy"
+SCHEDULE_SELECTION_SCOPE_KEY = "design-schedule-selection-scope"
+SCHEDULE_TABLE_REVISION_KEY = "design-schedule-table-revision"
 
 DESIGN_SCHEDULE_VIEWS = (
     "Active Designs",
@@ -71,13 +75,55 @@ DESIGN_TASK_TABLE_COLUMNS = (
 )
 
 
-def _inject_styles():
+def _inject_styles(*, mixed_selection=False):
     st.markdown(
         """
         <style>
-        .sc-design-schedule-title { align-items: baseline; display: flex; gap: .55rem; }
-        .sc-design-schedule-title strong { color: #171512; font-size: 1.05rem; }
-        .sc-design-schedule-count { color: #756f65; font-size: .76rem; }
+        section[data-testid="stMain"]:has(.st-key-design-schedule) .block-container { padding-top: 1rem; }
+        .st-key-design-schedule [data-testid="stVerticalBlock"] { gap: .4rem; }
+        .st-key-design-schedule-header h1 { font-size: 1.5rem; line-height: 32px; padding: 0; margin: 0; letter-spacing: -.02em; }
+        .st-key-design-schedule :is(button, input, [data-baseweb="select"]) { font-size: 13px; }
+        .st-key-design-schedule :is([data-testid="stButton"], [data-testid="stDownloadButton"]) button {
+            min-height: 32px; padding: 3px 10px; border-radius: 4px;
+        }
+        .st-key-design-schedule [data-testid="stWidgetLabel"] { min-height: 0; margin-bottom: 2px; }
+        .st-key-design-schedule [data-testid="stWidgetLabel"] p { font-size: 12px; }
+        .st-key-design-schedule [data-baseweb="input"],
+        .st-key-design-schedule [data-baseweb="select"] > div { min-height: 32px; }
+        .st-key-design-schedule [data-testid="stTextInput"] input { min-height: 30px; padding: 4px 9px; }
+        .st-key-design-schedule [data-testid="stButtonGroup"] { margin: 0; }
+        .st-key-design-schedule [data-testid="stButtonGroup"] button { min-height: 30px; border-radius: 4px; padding: 3px 12px; }
+        .st-key-design-schedule [data-testid="stButtonGroup"] button:is([aria-pressed="true"], [data-testid="stBaseButton-segmented_controlActive"]) { background: #eee7d7 !important; border-color: #b79243 !important; color: #27231d !important; }
+        .st-key-design-schedule-actions { border-top: 1px solid #ded8cb; padding-top: 5px; }
+        .st-key-design-schedule-actions [data-testid="stCaptionContainer"] p { font-size: 12px; line-height: 30px; margin: 0; white-space: nowrap; }
+        .st-key-design-schedule-actions [data-testid="stButton"] button { background: #fffdf8 !important; border: 1px solid #cfc8bb !important; }
+        .st-key-design-schedule-actions [class*="st-key-design-schedule-delete"] button { color: #a63c32 !important; border-color: #d9b9b4 !important; background: #fff7f5 !important; }
+        .st-key-design-schedule-actions [class*="st-key-design-schedule-delete"] button * { color: #a63c32 !important; }
+        .st-key-design-schedule-actions button:disabled { opacity: .45 !important; }
+        .st-key-design-schedule [data-testid="stDataFrame"] { border: 1px solid #d9d5ca; border-radius: 4px; }
+        /* Keep the native header marker discoverable at rest and show a mixed
+           selection dash. The overlay never intercepts native grid clicks. */
+        [class*="st-key-design-schedule-table--active-designs"] [data-testid="stDataFrame"]::after {
+            content: ""; position: absolute; left: 9px; top: 10px; width: 14px; height: 14px;
+            border: 1px solid #b8b6af; border-radius: 3px; pointer-events: none;
+            background-image: SELECTION_HEADER_FILL; background-size: 8px 2px;
+            background-position: center; background-repeat: no-repeat;
+        }
+        @media (max-width: 1100px) {
+            .st-key-design-schedule-header [data-testid="stHorizontalBlock"],
+            .st-key-design-schedule-actions [data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: wrap !important; gap: 6px !important; }
+            .st-key-design-schedule .st-key-design-schedule-header [data-testid="stColumn"],
+            .st-key-design-schedule .st-key-design-schedule-actions [data-testid="stColumn"] { flex: 1 1 130px !important; min-width: 130px !important; width: auto !important; }
+            .st-key-design-schedule .st-key-design-schedule-header [data-testid="stColumn"]:first-child { flex-basis: 100% !important; min-height: 36px; }
+        }
+        @media (max-width: 600px) {
+            .st-key-design-schedule-filters [data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: wrap !important; gap: 6px !important; }
+            .st-key-design-schedule .st-key-design-schedule-filters div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] { flex: 1 1 140px !important; min-width: 140px !important; width: auto !important; }
+            .st-key-design-schedule .st-key-design-schedule-filters div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:first-child,
+            .st-key-design-schedule .st-key-design-schedule-actions [data-testid="stColumn"]:first-child { flex-basis: 100% !important; }
+            .st-key-design-schedule :is([data-testid="stButton"], [data-testid="stDownloadButton"]) button { min-height: 36px !important; height: 36px !important; }
+            .st-key-design-schedule [data-testid="stButtonGroup"] > div { flex-wrap: wrap; }
+        }
         .sc-selected-design { align-items: center; background: #f8f6f1; border: 1px solid #ded8cb; border-left: 2px solid #b79243; border-radius: 5px; display: flex; gap: .55rem; margin: .45rem 0 .65rem; min-height: 38px; overflow: hidden; padding: .45rem .65rem; white-space: nowrap; }
         .sc-selected-design span { color: #756f65; font-size: .7rem; font-weight: 700; text-transform: uppercase; }
         .sc-selected-design strong { color: #211f1b; font-size: .82rem; overflow: hidden; text-overflow: ellipsis; }
@@ -105,7 +151,7 @@ def _inject_styles():
             border-color: #b79243 !important;
         }
         </style>
-        """,
+        """.replace("SELECTION_HEADER_FILL", "linear-gradient(#7b622c, #7b622c)" if mixed_selection else "none"),
         unsafe_allow_html=True,
     )
 
@@ -675,45 +721,62 @@ def _render_complete_dialog():
 
 def _render_delete_dialog(user=None):
     task_id = str(st.session_state.get(SCHEDULE_DELETE_TASK_KEY) or "")
-    if not task_id:
+    task_ids = list(st.session_state.get(SCHEDULE_DELETE_IDS_KEY) or ([task_id] if task_id else []))
+    if not task_ids:
         return
-    task = sports_cave_dashboard.get_task(task_id)
-    if not task:
-        st.session_state.pop(SCHEDULE_DELETE_TASK_KEY, None)
-        return
+    task = sports_cave_dashboard.get_task(task_ids[0]) or {}
     title = (
         sports_cave_dashboard.design_task_list_details(task).get("design_title")
         or task.get("title")
         or "Design task"
     )
 
-    @st.dialog(f'Delete "{title}"?')
+    dialog_title = f'Delete "{title}"?' if len(task_ids) == 1 else f"Delete {len(task_ids)} designs?"
+
+    @st.dialog(dialog_title)
     def dialog():
         st.write(
-            "This removes the design task from Sports Cave OS. "
-            "It does not delete anything from Shopify."
+            f"This removes {len(task_ids)} selected design schedule task(s) only. "
+            "It does not delete anything from Shopify. Artwork files, media and completed orders are preserved."
         )
+        busy = bool(st.session_state.get(SCHEDULE_DELETE_BUSY_KEY))
         actions = st.columns(2)
-        if actions[0].button("Cancel", key=f"design-schedule-delete-cancel::{task_id}", use_container_width=True):
+        if actions[0].button("Cancel", key=f"design-schedule-delete-cancel::{task_id}", disabled=busy, use_container_width=True):
             st.session_state.pop(SCHEDULE_DELETE_TASK_KEY, None)
+            st.session_state.pop(SCHEDULE_DELETE_IDS_KEY, None)
             st.rerun()
-        if actions[1].button(
-            "Delete design",
+        confirm = actions[1].empty()
+        if confirm.button(
+            "Confirm Delete" if len(task_ids) > 1 else "Delete design",
             key=f"design-schedule-delete-confirm::{task_id}",
             type="primary",
+            disabled=busy,
             use_container_width=True,
         ):
+            # A queued click cannot replay a consumed confirmation.
+            if busy or not (st.session_state.get(SCHEDULE_DELETE_TASK_KEY) or st.session_state.get(SCHEDULE_DELETE_IDS_KEY)):
+                return
+            st.session_state[SCHEDULE_DELETE_BUSY_KEY] = True
+            confirm.button("Deleting...", key="design-schedule-delete-pending", disabled=True, use_container_width=True)
             try:
-                deleted = sports_cave_dashboard.delete_design_task(task_id, user=user or {})
+                if len(task_ids) == 1:
+                    deleted = sports_cave_dashboard.delete_design_task(task_ids[0], user=user or {})
+                else:
+                    deleted = sports_cave_dashboard.delete_design_tasks(task_ids, user=user or {})
             except (PermissionError, sports_cave_dashboard.DashboardStorageError) as error:
                 st.warning(str(error))
                 return
+            finally:
+                st.session_state[SCHEDULE_DELETE_BUSY_KEY] = False
             if not deleted:
                 st.warning("That design task is no longer active.")
                 return
-            _clear_selected_design(task_id)
+            for deleted_id in task_ids:
+                _clear_selected_design(deleted_id)
+            st.session_state[SCHEDULE_TABLE_REVISION_KEY] = int(st.session_state.get(SCHEDULE_TABLE_REVISION_KEY, 0)) + 1
             st.session_state.pop(SCHEDULE_DELETE_TASK_KEY, None)
-            st.session_state[SCHEDULE_TOAST_KEY] = f'Deleted "{title}".'
+            st.session_state.pop(SCHEDULE_DELETE_IDS_KEY, None)
+            st.session_state[SCHEDULE_TOAST_KEY] = f'Deleted "{title}".' if len(task_ids) == 1 else f"Deleted {len(task_ids)} designs."
             st.rerun()
 
     dialog()
@@ -722,6 +785,11 @@ def _render_delete_dialog(user=None):
 def _load_view_tasks(view):
     status, section = VIEW_TASK_FILTERS[view]
     tasks = sports_cave_dashboard.list_tasks(status=status, section=section, limit=5000)
+    if view == "Active Designs":
+        batch = tasks
+        while len(batch) == 5000:
+            batch = sports_cave_dashboard.list_tasks(status=status, section=section, limit=5000, offset=len(tasks))
+            tasks.extend(batch)
     if section:
         rows = sports_cave_dashboard.task_table_rows(tasks, section)
     else:
@@ -739,14 +807,8 @@ def _render_header(copy_prompt_renderer=None):
 
 
 def _render_header_controls():
-    active_count = int(st.session_state.get(SCHEDULE_ACTIVE_COUNT_KEY) or 0)
-    columns = st.columns([2.1, .78, .68, .72, .68, .62], gap="small")
-    columns[0].markdown(
-        '<div class="sc-design-schedule-title"><strong>Design Schedule</strong>'
-        f'<span class="sc-design-schedule-count">{active_count} active design'
-        f'{"s" if active_count != 1 else ""}</span></div>',
-        unsafe_allow_html=True,
-    )
+    columns = st.columns([1.5, 1, .85, .95, .85, .75], gap="small")
+    columns[0].title("Design Studio")
     if columns[1].button(
         "Generate Ideas",
         key="design-schedule-generator-toggle",
@@ -756,10 +818,8 @@ def _render_header_controls():
         st.session_state[SCHEDULE_GENERATOR_OPEN_KEY] = not bool(
             st.session_state.get(SCHEDULE_GENERATOR_OPEN_KEY)
         )
-        st.rerun()
     if columns[2].button("Import CSV", key="design-schedule-import-trigger", use_container_width=True):
         _reset_import(keep_open=True)
-        st.rerun()
     columns[3].download_button(
         "CSV Template",
         data=sports_cave_dashboard.build_task_import_template_csv(),
@@ -770,10 +830,8 @@ def _render_header_controls():
     )
     if columns[4].button("Export CSV", key="design-schedule-export-trigger", use_container_width=True):
         st.session_state[SCHEDULE_EXPORT_OPEN_KEY] = True
-        st.rerun()
     if columns[5].button("Add Task", key="design-schedule-add-trigger", use_container_width=True):
         st.session_state[SCHEDULE_ADD_OPEN_KEY] = True
-        st.rerun()
 
 
 def _selected_task_record(tasks):
@@ -793,7 +851,11 @@ def _selected_task_record(tasks):
 
 
 def render_design_schedule(user=None, *, copy_prompt_renderer=None):
-    _inject_styles()
+    with st.container(key="design-schedule"):
+        return _render_schedule_contents(user, copy_prompt_renderer=copy_prompt_renderer)
+
+
+def _render_schedule_contents(user=None, *, copy_prompt_renderer=None):
     st.session_state.setdefault(SCHEDULE_VIEW_KEY, "Active Designs")
     toast = st.session_state.pop(SCHEDULE_TOAST_KEY, "")
     if toast:
@@ -828,7 +890,8 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
     design_view = view == "Active Designs"
     group_key = view.casefold().replace(" ", "-")
     if design_view:
-        filters = st.columns([2.2, 1, 1, .8], gap="small")
+        with st.container(key="design-schedule-filters"):
+            filters = st.columns([2.2, 1, 1, .8], gap="small")
         search = filters[0].text_input(
             "Search designs",
             placeholder="Search designs",
@@ -878,31 +941,44 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
         )
         rows = sports_cave_dashboard.filter_task_table_rows(authoritative_rows, search=search)
 
+    # The native multi-row grid provides header select-all, mixed state and virtualisation.
+    # Bind its identity to the full filtered ID set AND filter values, never row positions.
+    scope = repr((view, search, (style, sport, priority) if design_view else (),
+                  [row["_task_id"] for row in rows], st.session_state.get(SCHEDULE_TABLE_REVISION_KEY, 0)))
+    if st.session_state.get(SCHEDULE_SELECTION_SCOPE_KEY) != scope:
+        st.session_state[SCHEDULE_SELECTION_SCOPE_KEY] = scope
+        st.session_state["design-schedule-selection-epoch"] = int(st.session_state.get("design-schedule-selection-epoch", 0)) + 1
+        st.session_state[f"design-schedule-row::{group_key}"] = ""
+    table_key = f"design-schedule-table::{group_key}::{st.session_state['design-schedule-selection-epoch']}"
+    selected_ids = []
     if rows:
         event = st.dataframe(
             _display_rows(rows, design_view=design_view, user=user),
             hide_index=True,
             width="stretch",
-            height=420,
-            row_height=TABLE_ROW_HEIGHT,
-            key=f"design-schedule-table::{group_key}",
+            height=min(420, 36 + len(rows) * 32),
+            row_height=32,
+            column_config={label: st.column_config.TextColumn(label, width=240 if label in ("Design title", "Task") else 155)
+                           for label in _display_rows(rows[:1], design_view=design_view, user=user)[0]},
+            key=table_key,
             on_select="rerun",
-            selection_mode="single-row",
+            selection_mode="multi-row" if design_view else "single-row",
         )
         indices = _selected_indices(event)
-        if indices and 0 <= indices[0] < len(rows):
-            st.session_state[f"design-schedule-row::{group_key}"] = rows[indices[0]]["_task_id"]
+        selected_ids = [rows[index]["_task_id"] for index in indices if 0 <= index < len(rows)]
     elif authoritative_rows:
         st.info("No tasks match the current search and filters.")
     else:
         st.caption("Nothing waiting.")
 
-    row_id = str(st.session_state.get(f"design-schedule-row::{group_key}") or "")
+    _inject_styles(mixed_selection=design_view and 0 < len(selected_ids) < len(rows))
+    row_id = selected_ids[0] if len(selected_ids) == 1 else ""
+    st.session_state[f"design-schedule-row::{group_key}"] = row_id
     selected_row = next((row for row in rows if row.get("_task_id") == row_id), None)
-    selected_raw = next((task for task in tasks if str(task.get("id") or "") == row_id), None)
     can_manage = sports_cave_dashboard.can_manage_dashboard_tasks(user or {})
-    actions = st.columns([1.25, 1, 1.15, .8, .8], gap="small")
-    actions[0].caption(f"{len(rows)} {'designs' if design_view else 'tasks'} - select one row for actions")
+    with st.container(key="design-schedule-actions"):
+        actions = st.columns([1.25, 1, 1.15, .8, .95], gap="small")
+    actions[0].caption(f"{len(rows)} {'designs' if design_view else 'tasks'} · {len(selected_ids)} selected")
     if actions[1].button(
         "Open in Studio",
         icon=":material/open_in_new:",
@@ -941,14 +1017,18 @@ def render_design_schedule(user=None, *, copy_prompt_renderer=None):
                 st.session_state[SCHEDULE_TOAST_KEY] = "Task completed."
                 st.rerun()
     if actions[4].button(
-        "Delete design",
+        "Delete selected" if len(selected_ids) > 1 else "Delete design",
         icon=":material/delete:",
         help="Delete design",
         key=f"design-schedule-delete::{group_key}",
         type="tertiary",
-        disabled=not design_view or selected_raw is None or not can_manage,
+        disabled=not design_view or not selected_ids or not can_manage,
     ):
-        st.session_state[SCHEDULE_DELETE_TASK_KEY] = selected_row["_task_id"]
+        if len(selected_ids) == 1:
+            st.session_state[SCHEDULE_DELETE_TASK_KEY] = selected_row["_task_id"]
+        else:
+            st.session_state.pop(SCHEDULE_DELETE_TASK_KEY, None)
+        st.session_state[SCHEDULE_DELETE_IDS_KEY] = selected_ids
         st.rerun()
 
     selected_task = _selected_task_record(tasks)

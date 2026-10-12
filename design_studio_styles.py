@@ -1491,6 +1491,33 @@ A link, attachment, local file path, source-image preview, downloadable photogra
 """.strip()
 
 
+COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES = """
+SPORTS CAVE - DARK CINEMATIC COLLECTOR WITH SUBTLE VINTAGE CHARACTER
+
+SCOPE AND PRECEDENCE
+Apply these additive finishing and compositing directions to future artwork generation only. They do not authorise editing or regenerating any saved or approved artwork, supplied Bathurst artwork, Shopify product image, product file or thumbnail. An existing design requires the user's explicit request to regenerate or edit that particular design; for an authorised edit, apply these directions only within the requested correction and preserve all non-target pixels. Preserve approved compositions and templates, original-source image preservation and identity locks, and the established title, border, signature, typography and exact supplied official Sports Cave collector plaque systems. Never recolour, texture, redraw or replace the plaque to apply this finish.
+Resolve these additions in this order: 1. Authentic original photographic subjects. 2. The user's explicit request. 3. Approved research and existing composition. 4. Realistic photographic blending. 5. Appropriate Sports Cave collector finish. 6. Existing branding, plaque and typography. This is a finishing direction within the existing design system, never permission to redesign it or relax its source and asset protections.
+
+UNIVERSAL COLLECTOR FINISH
+Aim for premium limited-edition sporting memorabilia with emotional, nostalgic collector presentation. Use slightly darker cinematic backgrounds, deep black and charcoal atmosphere, controlled highlights, realistic shadows, a subtle matte photographic finish, natural film grain, restrained environmental texture, premium muted gold detailing and authentic, accurate sporting colours. Avoid excessively bright or glossy HDR, artificial shine, gold particles, excessive effects, an overly clean digital-poster appearance, heavy grunge that damages photographic realism, or darkening that makes subjects difficult to see.
+
+AUTOMATIC TREATMENT SELECTION
+Choose the appropriate treatment from the actual era, subject and emotional story in the task and approved research, rather than the sport alone. These are finishing treatments, not replacements for the selected Design Type or approved composition. All four retain the established Sports Cave visual identity; adapt only where compatible with higher-priority instructions and locked templates.
+- HERITAGE LEGENDS - VINTAGE COLLECTOR: Historic legends, nostalgic sporting moments and classic eras. Use richer vintage character, restrained photographic grain, aged atmospheric backgrounds and warm antique-gold accents.
+- MODERN CHAMPIONS - CINEMATIC COLLECTOR: Modern victories, contemporary athletes and recent championships. Use dark cinematic backgrounds, authentic vibrant sporting colours, subtle matte finishes and very light grain. Do not artificially age modern sporting photographs.
+- RIVALRIES AND ICONS - LEGACY COLLECTOR: Iconic rivalries, GOAT tributes and career-defining legendary moments. Use dramatic shadows, balanced subject lighting, controlled colour, charcoal atmosphere and timeless collector presentation.
+- PRESTIGE SPORTS - HERITAGE LUXURY: Tennis, golf, horse racing and other elegant championship stories when the actual story supports this treatment. Use sophisticated cinematic backgrounds, subtle photographic texture, restrained gold and minimal grunge.
+
+MANDATORY NATURAL SUBJECT BLENDING
+Whenever an athlete, driver or other photographic subject is partially visible behind a vehicle, foreground object, graphic layer or background element, integrate the visible body with an intentional, professionally blended and physically believable transition. Build around the actual source crop using natural foreground occlusion by the real object, carefully feathered photographic masks where appropriate, subtle environmental shadows, localised background blending of clothing/body edges, gentle contextual cinematic depth, haze or tonal transitions, or deliberate photographic layering that explains why only part of the subject is visible.
+Never leave a straight horizontal crop across a person's waist, chest or legs, hard rectangular image boundaries, a body floating above a vehicle, an abrupt disconnected torso or obvious pasted-on cutout effects. Never fade a face or important identifiable details, or use excessive blur, smoke or artificial effects to conceal an incorrect crop.
+Preserve the original face, facial expression, body proportions, pose, anatomy, uniform, sponsor logos, colours and visible hands, arms and torso. Preserve the real vehicle's bodywork, livery, geometry, markings and proportions; never alter the vehicle to hide a cropping problem. If the source ends at the waist or another point, never invent missing legs, arms or body parts, or regenerate, stretch or reconstruct the original body. Use masking, natural foreground coverage, photographic layering or restrained environmental blending around the genuine source detail instead. The result must feel like professionally art-directed photographic memorabilia.
+
+PRE-FINALISATION VISUAL REVIEW
+Before finalising future generated artwork, inspect every visible transition between athletes, vehicles, supporting photographs and backgrounds. Reject obvious straight-edged cropping, floating bodies, disconnected anatomy and unnatural cutouts. Require physically grounded, naturally integrated subjects without losing genuine photographic detail; correct only within the authorised composition and source-preservation limits. When output pixels cannot be inspected, state that visual review remains unverified rather than claiming it passed.
+""".strip()
+
+
 def finalize_generation_handoff(prompt):
     """Apply execution semantics only to generation, never research or review."""
     prompt = str(prompt).strip().replace(FINAL_GENERATION_EXECUTION_CONTRACT, "").strip()
@@ -1513,6 +1540,8 @@ def finalize_generation_handoff(prompt):
         "Every listed human principal needs one verified authentic signature asset. If a mapping is missing, make that incompleteness explicit rather than presenting the design as final.",
     ):
         prompt = prompt.replace(old, "If a verified signature is unavailable, omit it and generate the artwork unless the selected Design Type explicitly requires that asset before generation. Never fabricate a signature.")
+    if COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES not in prompt:
+        prompt = "\n\n".join((prompt, COLLECTOR_FINISH_AND_NATURAL_BLENDING_RULES))
     return "\n\n".join((FINAL_GENERATION_EXECUTION_CONTRACT, prompt, command))
 
 
