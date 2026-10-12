@@ -32,7 +32,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 9", self.install)
+        self.assertIn("HelperVersion = 10", self.install)
         self.assertIn("SportsCaveFiles.ico", self.install)
         self.assertIn("$shortcut.IconLocation = $iconPath", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
@@ -113,7 +113,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn('action == "openViewer"', self.source)
         self.assertIn("await OpenImageViewer(viewer)", self.source)
         self.assertIn(
-            '"drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel"',
+            '"drag", "copyFile", "copyImage", "openFile", "openPhotoshop", "openViewer", "folders", "cancel"',
             self.source,
         )
         self.assertIn("Settings.AreHostObjectsAllowed = false", self.source)
@@ -151,7 +151,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("return localPaths", self.source)
         self.assertLess(
             self.source.index("return localPaths"),
-            self.source.index('var items = manifest["items"] as IList'),
+            self.source.index('var items = manifest["items"] as IList', self.source.index("internal async Task<string[]> MaterializeAsync")),
         )
 
     def test_image_clipboard_sets_pixels_and_png_transparency_payload(self):
@@ -236,7 +236,7 @@ class DesktopWindowsBuildTests(unittest.TestCase):
                     "AppUrl": "http://127.0.0.1:8501/files-window",
                     "RootPath": "",
                     "AllowedOrigins": ["http://127.0.0.1:8501"],
-                    "HelperVersion": 9,
+                    "HelperVersion": 10,
                 }
             ),
             encoding="utf-8",
