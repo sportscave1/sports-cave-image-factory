@@ -2017,7 +2017,7 @@ def _render_ledger_diagnostics():
 
 def _display_rows(rows, *, normalised=False):
     output = []
-    psd_mapping = psd_directory.directory()
+    psd_mapping = psd_directory.page_directory(st)
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
@@ -2207,7 +2207,7 @@ def _column_config():
         "prodigi": st.column_config.TextColumn("Fulfilment", width="small"),
         "file": st.column_config.LinkColumn(
             "PSD",
-            display_text=r"(Open PSD|Not linked)$",
+            display_text=r"(Open PSD|Not linked|Unavailable)$",
             width="small",
         ),
     }

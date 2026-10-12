@@ -6,6 +6,11 @@ import orders_page as orders
 
 
 class CompactOrdersTests(unittest.TestCase):
+    def setUp(self):
+        self.directory_patch=patch.object(orders.psd_directory,'directory',return_value={})
+        self.directory_patch.start()
+        self.addCleanup(self.directory_patch.stop)
+
     def test_selection_only_normalises_selected_units(self):
         rows=[{'order':'#SC1','allocation_index':i,'edition_number':i} for i in range(1,63)]
         before=deepcopy(rows)

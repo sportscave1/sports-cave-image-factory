@@ -28,6 +28,7 @@ def _page():
 class EditionOpsTableEditingTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
+        self.stack.enter_context(patch.object(edition_ops.psd_directory, 'directory', return_value={}))
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(socket.socket, "connect", side_effect=AssertionError("No network in tests")))
         self.stack.enter_context(patch("edition_versions.kick"))
@@ -60,8 +61,8 @@ class EditionOpsTableEditingTests(unittest.TestCase):
             self.assertIn(field, fake_st.session_state[edition_ops.ROWS_KEY][0])
             self.assertIn(field, edition_ops.CSV_COLUMNS)
         self.assertIn("Existing import warning", fake_st.captions)
-        self.assertEqual(fake_st.editor_payloads[0][0]['display_status'], 'Sync Issue')
-        self.assertEqual(fake_st.editor_payloads[0][0]['psd_file'], 'Not linked')
+        self.assertEqual(fake_st.editor_payloads[0][0]['display_status'], 'Offline')
+        self.assertEqual(fake_st.editor_payloads[0][0]['psd_file'], '/files-psd-picker?product_gid=' + __import__('urllib.parse',fromlist=['quote']).quote(row['shopify_product_gid'],safe='') + '#Add')
         self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]['sync_status'], 'needs_reconciliation')
         self.assertIn("edition_status", edition_ops.SHOPIFY_MIRROR_METAFIELD_KEYS)
 

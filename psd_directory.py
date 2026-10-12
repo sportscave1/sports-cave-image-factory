@@ -113,7 +113,11 @@ def _read(path, stamp):
         return {}
 
 
-def directory(path=STORE):
+def directory(path=None):
+    if path is None:
+        from psd_mapping_store import STORE as persistent_store
+        return persistent_store.read()
+    # Explicit paths are offline fixture/export storage only, never the runtime source.
     try:
         stat = Path(path).stat()
         return _read(str(path), (stat.st_mtime_ns, stat.st_size))
@@ -121,7 +125,9 @@ def directory(path=STORE):
         return {}
 
 
-def save(mapping, path=STORE):
+def save(mapping, path=None):
+    if path is None:
+        raise ValueError('Runtime writes require the audited mapping repository; use reviewed backfill or manual attachment.')
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix('.tmp')
@@ -140,26 +146,54 @@ def link(row, mapping):
     return '/api/files-psd-open?product_gid=' + quote(product_id(row), safe='')
 
 
-def display_link(row, mapping):
+def display_link(row, mapping, missing='Not linked'):
+    if getattr(mapping, 'unavailable', False):
+        return 'Unavailable'
     url = link(row, mapping)
     # Fragment is client-only; the authenticated endpoint resolves the stable ID.
-    return url.split('#', 1)[0] + '#Open PSD' if url else 'Not linked'
+    return url.split('#', 1)[0] + '#Open PSD' if url else (picker_link(row) + '#Add' if missing == 'Add' and product_id(row) else missing)
 
 
 def status(row):
-    sync = str(row.get('sync_status') or '').casefold()
-    if row.get('sync_error') or 'failed' in sync or sync == 'error':
-        return 'Sync Issue'
-    publication = str(row.get('status') or '').casefold()
-    if publication in {'draft', 'archived', 'unpublished'}:
+    """Display-only edition-run state. Never inspect storefront publication."""
+    def number(value, default=0):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+    run = str(row.get('current_run_status') or row.get('run_status') or '').casefold()
+    total = number(row.get('current_run_total', row.get('edition_total')), 0)
+    next_number = number(row.get('current_run_next_number', row.get('edition_next_number', row.get('next_edition_number'))), 1)
+    sold = number(row.get('current_run_sold_count', row.get('edition_sold_count', row.get('sold_count'))), 0)
+    if run in {'expired', 'sold_out'} or (total > 0 and (next_number > total or sold >= total)):
+        return 'Expired'
+    sync = str(row.get('sync_status') or row.get('metafields_sync_status') or '').casefold()
+    enabled = row.get('edition_enabled', row.get('active', False))
+    if (not enabled or total <= 0 or row.get('sync_error') or row.get('allocation_blocked')
+            or run in {'inactive', 'archived', 'closed', 'pending_sync'}):
         return 'Offline'
-    healthy = sync in {'synced', 'synced to shopify', 'shopify mirror updated'}
-    if publication == 'active' and row.get('online_store_url') and healthy:
-        return 'Live'
-    return 'Pending sync' if sync in {'needs_shopify_sync', 'needs sync', 'unsaved', 'saved locally', 'saved in supabase'} else ('Unknown' if not healthy else 'Publication unverified')
+    return 'Live' if sync in {'synced', 'synced to shopify', 'shopify mirror updated'} else 'Offline'
 
 
-def refresh_from_dropbox(access_token, products, path=STORE):
+class UnavailableDirectory(dict):
+    unavailable = True
+
+
+def page_directory(ui=None):
+    from psd_mapping_store import MappingUnavailable
+    try:
+        return directory()
+    except MappingUnavailable:
+        if ui and hasattr(ui, 'warning'):
+            ui.warning('PSD directory unavailable. Retry or check database activation.')
+        return UnavailableDirectory()
+
+
+def picker_link(row):
+    return '/files-psd-picker?product_gid=' + quote(product_id(row), safe='')
+
+
+def refresh_from_dropbox(access_token, products, path=None):
     """Explicit read-only refresh with existing integration; never called per row."""
     from dropbox_integration import list_folder_page
     entries, cursor = [], ''
@@ -174,54 +208,31 @@ def refresh_from_dropbox(access_token, products, path=STORE):
             raise ValueError('Incomplete Dropbox inventory; directory unchanged.')
         seen.add(cursor)
     mapping = reconcile(products, entries, directory(path))
+    if path is None:
+        from psd_mapping_store import STORE as persistent_store
+        return persistent_store.backfill(mapping)  # Preview only; never automatic writes.
     save(mapping, path)
     return mapping
 
 
 def render_import(products, ui=None):
-    """Local metadata only: no production credentials or live customer data."""
     import streamlit
+    import os_accounts
     st = ui or streamlit
-    if not hasattr(st, "file_uploader"):
+    if not hasattr(st, 'link_button') or not os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
         return
-    with st.expander('PSD directory', expanded=False):
-        st.caption('Import an approved PSD metadata export. Review-folder files are excluded; Dropbox access is checked when opening a file.')
-        inventory = st.file_uploader('Approved PSD metadata (JSON)', type=['json'], key='psd-directory-inventory')
-        if st.button('Link approved PSDs', disabled=inventory is None):
-            try:
-                data = json.load(inventory)
-                if not isinstance(data, dict) or data.get('complete') is not True or data.get('folder') != ROOT or not isinstance(data.get('entries'), list):
-                    raise ValueError('Expected complete=true, the approved folder, and an entries list.')
-                mapping = reconcile(products, data['entries'], directory())
-                save(mapping)
-                st.success(f"{sum(r.get('state') == 'Linked' for r in mapping.values())} PSDs linked.")
-            except (ValueError, TypeError, KeyError) as error:
-                st.error(str(error))
-        mapping = directory()
-        reviews = [(r.get('product_title'), (mapping.get(product_id(r)) or {}).get('state', 'Not linked')) for r in products if not link(r, mapping)]
-        if reviews and hasattr(st, "dataframe"):
-            st.dataframe([{'Product': title, 'PSD review': state} for title, state in reviews], hide_index=True)
-
-
-MISSING_LINK_GUARD = """<script>
-(() => {
-  const target = window.parent || window;
-  if (target.sportsCavePsdMissingGuard) return;
-  const original = target.open;
-  target.open = function(url, ...args) {
-    if (url === 'Not linked') return null;
-    return original.call(this, url, ...args);
-  };
-  target.sportsCavePsdMissingGuard = true;
-})();
-</script>"""
+    with st.expander('PSD links', expanded=False):
+        by_id = {product_id(r): r for r in products if product_id(r)}
+        if by_id:
+            pid = st.selectbox('Product', list(by_id), format_func=lambda key: by_id[key]['product_title'], key='psd-replace-product')
+            st.link_button('Add or replace PSD', picker_link(by_id[pid]))
 
 
 def render_missing_link_guard(ui):
-    # Native Streamlit LinkColumn has no per-cell text type: suppress its placeholder click.
     if getattr(ui, '__name__', '') == 'streamlit':
         import streamlit.components.v1 as components
-        components.html(MISSING_LINK_GUARD, height=0, width=0)
+        component = components.declare_component('psd_picker_events', path=str(Path(__file__).resolve().parent / 'components' / 'psd_picker'))
+        component(key='psd-picker-events', default=None)
 
 
 def snapshot_mapping(products, approved, excluded, previous=None):

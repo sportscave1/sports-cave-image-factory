@@ -9603,7 +9603,8 @@ def list_edition_products_read_only(search="", limit=500, offset=0, *, product_i
         ),
         run_totals AS (
             SELECT edition_run_id,
-                   COALESCE(MAX(edition_number), 0) AS max_assigned
+                   COALESCE(MAX(edition_number), 0) AS max_assigned,
+                   COUNT(*) FILTER (WHERE COALESCE(status,'') NOT IN ('voided','refunded','cancelled','superseded')) AS confirmed_sold_count
             FROM selected_orders
             WHERE edition_run_id IS NOT NULL
             GROUP BY edition_run_id
@@ -9672,6 +9673,7 @@ def list_edition_products_read_only(search="", limit=500, offset=0, *, product_i
                to_jsonb(er)->>'revision_reason' AS release_revision_reason,
                er.updated_at AS run_updated_at,
                COALESCE(rt.max_assigned, 0) AS active_run_max_assigned,
+               CASE WHEN er.id IS NOT NULL THEN COALESCE(rt.confirmed_sold_count,0) + COALESCE(er.allocation_baseline_sold_count,0) ELSE ep.sold_count END AS current_run_sold_count,
                COALESCE(
                    NULLIF(ep.featured_image_url, ''),
                    NULLIF(shp.featured_image_url, ''),

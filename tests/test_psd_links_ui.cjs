@@ -1,18 +1,2 @@
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const vm = require('node:vm');
-const source = fs.readFileSync('psd_directory.py', 'utf8');
-const script = source.match(/MISSING_LINK_GUARD = """<script>([\s\S]*?)<\/script>"""/)[1];
-const calls = [];
-const parent = {open(...args) { calls.push(args); return 'opened'; }};
-const context = {window: {parent}};
-vm.runInNewContext(script, context);
-assert.equal(parent.open('Not linked', '_blank'), null);
-assert.equal(calls.length, 0);
-assert.equal(parent.open('https://www.dropbox.com/preview/test#Open PSD', '_blank', 'noopener,noreferrer'), 'opened');
-assert.equal(parent.open('https://example.test/fulfilment', '_blank'), 'opened');
-assert.equal(calls.length, 2);
-const wrapped = parent.open;
-vm.runInNewContext(script, context);
-assert.equal(parent.open, wrapped);
-console.log('PSD missing-link guard: pass; unrelated navigation preserved.');
+// The active picker component also owns missing-link navigation suppression.
+require('./test_psd_picker_ui.cjs');

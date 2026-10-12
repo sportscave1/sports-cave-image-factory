@@ -553,6 +553,8 @@ def _row_from_supabase_product(product):
         "edition_product_id": product.get("id") or product.get("edition_product_id") or "",
         "edition_run_id": str(product.get("edition_run_id") or product.get("active_edition_run_id") or ""),
         "run_status": product.get("run_status") or product.get("status"),
+        "current_run_sold_count": product.get("current_run_sold_count", sold),
+        "metafields_sync_status": mirror_status,
         "release_revision_reason": product.get('release_revision_reason'),
         "shopify_product_gid": product.get("shopify_product_gid") or product.get("shopify_product_id") or "",
         "legacy_resource_id": product.get("legacy_resource_id") or "",
@@ -1982,7 +1984,7 @@ def _editor_payload(row, psd_mapping=None):
     keys = ("edition_product_id", "shopify_product_gid", *VISIBLE_COLUMNS)
     payload = {key: normalised.get(key) for key in keys}
     payload["display_status"] = psd_directory.status(normalised)
-    payload["psd_file"] = psd_directory.display_link(normalised, psd_mapping if psd_mapping is not None else psd_directory.directory())
+    payload["psd_file"] = psd_directory.display_link(normalised, psd_mapping if psd_mapping is not None else psd_directory.page_directory(), missing="Add")
     return payload
 
 
@@ -2039,7 +2041,7 @@ def _column_config():
         "edition_remaining": st.column_config.NumberColumn("Remaining",width="small"),
         "edition_status": st.column_config.TextColumn("Status"),
         "display_status": st.column_config.TextColumn("Status",width="small"),
-        "psd_file": st.column_config.LinkColumn("File", display_text=r"(Open PSD|Not linked)$", width="small"),
+        "psd_file": st.column_config.LinkColumn("File", display_text=r"(Open PSD|Add|Unavailable)$", width="small"),
     }
 
 
@@ -2448,7 +2450,7 @@ def _render_table():
     criteria=(selected,status)
     if st.session_state.get('edition-grid-criteria')!=criteria:
         st.session_state['edition-grid-criteria']=criteria;st.session_state['edition-grid-page']=0;st.session_state.pop(EDITOR_KEY,None)
-    psd_mapping = psd_directory.directory()
+    psd_mapping = psd_directory.page_directory(st)
     st.data_editor([_editor_payload(r, psd_mapping) for r in visible],hide_index=True,width='stretch',height=600,num_rows='fixed',
         key=EDITOR_KEY,column_order=VISIBLE_COLUMNS,on_change=_capture_editor_changes,args=(deepcopy(visible),),
         column_config=_column_config(),row_height=32,

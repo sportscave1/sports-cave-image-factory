@@ -1264,7 +1264,7 @@ def normalise_asset_metadata(
     }
 
 
-def psd_open_metadata(access_token, file_id):
+def psd_open_metadata(access_token, file_id, *, include_preview=True):
     """Read current metadata by immutable ID; no file writes or link creation."""
     import re
     if not re.fullmatch(r"id:[A-Za-z0-9_-]+", str(file_id or "")):
@@ -1272,7 +1272,7 @@ def psd_open_metadata(access_token, file_id):
     client = team_space_client(access_token)
     try:
         metadata = _metadata_to_dict(client.files_get_metadata(file_id))
-        if not metadata.get("preview_url"):
+        if include_preview and not metadata.get("preview_url"):
             shared = client.sharing_get_file_metadata(file_id)
             metadata["preview_url"] = str(getattr(shared, "preview_url", "") or "")
         return metadata
