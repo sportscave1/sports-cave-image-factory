@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -2333,8 +2334,8 @@ async def attach_product_psd(request: Request):
         return _response_error(error)
 
 
-def _psd_failure(error, stage, request_id):
-    """Record only controlled stage and exception classes; never error strings."""
+def _psd_exception_details(error):
+    """Allowlisted provider tags and class names, without exception strings."""
     chain = []
     tags = []
     safe_tags = {'path','not_found','no_permission','access_error','user_error','missing_scope','invalid_access_token','expired_access_token','invalid_root','too_many_requests'}
@@ -2350,8 +2351,22 @@ def _psd_failure(error, stage, request_id):
                 tags.append(tag)
             provider = getattr(provider,'_value',None)
         current = current.__cause__
+    return chain, tags
+
+
+def _psd_failure(error, stage, request_id):
+    chain, tags = _psd_exception_details(error)
     logging.getLogger(__name__).warning('PSD_OPEN failed stage=%s exception_classes=%s provider_tags=%s request_id=%s',
                                         stage, ','.join(chain), ','.join(tags) or 'none', request_id)
+
+
+def _psd_provider_problem(error):
+    _, tags = _psd_exception_details(error)
+    if 'not_found' in tags:
+        return 'psd_file_missing','The linked master is missing in Dropbox. Ask an administrator to check its location; the mapping has been preserved.',404
+    if set(tags) & {'no_permission','missing_scope','invalid_access_token','expired_access_token','invalid_root'}:
+        return 'psd_dropbox_access','Dropbox access is unavailable. Sign in with your authorised team account; an administrator may need to reconnect the existing Dropbox integration.',403
+    return 'psd_open_unavailable','The linked PSD could not be prepared. Retry; if it persists, ask an administrator to check Dropbox and the PSD support reference.',503
 
 
 def _psd_error_page(message, reference='', status=503):
@@ -2362,7 +2377,7 @@ def _psd_error_page(message, reference='', status=503):
 
 
 async def open_product_psd(request: Request):
-    """Existing link: friendly desktop launch page, then authenticated native grant."""
+    """Shared device-aware PSD menu and authenticated, validated file actions."""
     stage = 'authentication'
     reference = secrets.token_hex(8)
     try:
@@ -2379,7 +2394,7 @@ async def open_product_psd(request: Request):
             content = (Path(__file__).resolve().parent/'components'/'psd_open'/'index.html').read_text(encoding='utf-8')
             return HTMLResponse(content,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
         payload = await _json_body(request)
-        if payload != {'action':'openPhotoshop'}:
+        if set(payload) != {'action'} or payload.get('action') not in {'openPhotoshop','describe','preview'}:
             raise FilesUploadError('Only the linked master can be opened. Arbitrary paths are not accepted.',status_code=400,code='psd_request_invalid')
         stage = 'mapping'
         mapping = await run_in_threadpool(psd_directory.directory)
@@ -2393,6 +2408,28 @@ async def open_product_psd(request: Request):
         stage = 'approved_file'
         if metadata.get('id') != record['dropbox_file_id'] or not psd_directory.approved_file(metadata):
             raise FilesUploadError('The linked PSD is no longer an approved master. Ask an administrator to review it.',status_code=403,code='psd_scope_denied')
+        action = payload['action']
+        if action == 'describe':
+            # Account navigation, never a public sharing link or download capability.
+            path = str(metadata.get('path_display') or metadata.get('path_lower'))
+            parent, name = path.rsplit('/',1)
+            relative = path[len(context['root_path'].rstrip('/')):].lstrip('/')
+            if not path.startswith(context['root_path'].rstrip('/')+'/'):
+                raise FilesUploadError('The Dropbox master is outside the configured team folder.',status_code=403,code='psd_scope_denied')
+            native_url = ''
+            if re.fullmatch('[a-fA-F0-9]{64}',str(metadata.get('content_hash') or '')):
+                native_url = ('sports-cave-files://open?kind=master&path='+quote(relative,safe='')+
+                              '&hash='+metadata['content_hash']+'&size='+str(int(metadata.get('size') or 0)))
+            return JSONResponse({'ok':True,'name':name,'size':int(metadata.get('size') or 0),
+                                 'dropbox_url':'https://www.dropbox.com/home'+quote(parent,safe='/')+'?preview='+quote(name,safe=''),
+                                 'mac_url':native_url},headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+        if action == 'preview':
+            stage = 'thumbnail'
+            try:
+                content = await run_in_threadpool(dropbox_integration.get_psd_thumbnail_bytes,context['access_token'],metadata['id'])
+            except Exception as error:
+                raise FilesUploadError('Artwork preview is unavailable. Open in Dropbox or download the original PSD instead.',status_code=422,code='psd_preview_unavailable') from error
+            return Response(content,media_type='image/jpeg',headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
         stage = 'native_grant'
         transfer = await run_in_threadpool(NATIVE_TRANSFER_MANAGER.create_psd,access_token=context['access_token'],root_path=context['root_path'],user=user,metadata=metadata)
         return JSONResponse({'ok':True,'name':metadata['name'],'action':'openPhotoshop','ticket':transfer.ticket,'secret':transfer.secret,
@@ -2404,10 +2441,54 @@ async def open_product_psd(request: Request):
             if code=='access_denied':
                 message='Sign in to Sports Cave OS with Files access, then retry Open PSD.'
         else:
-            code,message,status='psd_open_unavailable','The linked PSD could not be prepared. Retry; if it persists, ask an administrator to check Dropbox and the PSD support reference.',503
+            code,message,status=_psd_provider_problem(error)
         if request.method=='GET':
             return _psd_error_page(message,reference,status)
         return JSONResponse({'ok':False,'code':code,'message':message,'reference':reference},status_code=status,headers={'Cache-Control':'no-store'})
+
+
+async def download_product_psd(request: Request):
+    """Session-authenticated original stream; no public URL or download grant."""
+    upstream = None
+    reference = secrets.token_hex(8)
+    stage = 'download_authentication'
+    try:
+        if not _same_origin(request) or request.headers.get('sec-fetch-site') == 'cross-site':
+            raise FilesUploadError('Open the download from Sports Cave OS.',status_code=403,code='psd_origin_denied')
+        user = await run_in_threadpool(_request_user,request)
+        if not user or not os_accounts.can_access_page(user,'Files'):
+            raise FilesUploadError('Sign in to Sports Cave OS with Files access, then retry the download.',status_code=403,code='access_denied')
+        import psd_directory
+        pid = psd_directory.product_id({'shopify_product_gid':request.query_params.get('product_gid')})
+        if not pid or list(request.query_params.multi_items()) != [('product_gid',request.query_params.get('product_gid'))]:
+            raise FilesUploadError('Open the PSD from Edition Ops or Orders.',status_code=400,code='psd_link_invalid')
+        stage = 'download_mapping'
+        mapping = await run_in_threadpool(psd_directory.directory)
+        if not psd_directory.link({'shopify_product_gid':pid},mapping):
+            raise FilesUploadError('No approved PSD is linked to this product.',status_code=404,code='psd_not_linked')
+        context = await run_in_threadpool(_dropbox_context)
+        file_id = mapping[pid]['dropbox_file_id']
+        stage = 'download_metadata'
+        expected = await run_in_threadpool(dropbox_integration.psd_open_metadata,context['access_token'],file_id,include_preview=False)
+        if expected.get('id') != file_id or not psd_directory.approved_file(expected) or not expected.get('rev'):
+            raise FilesUploadError('The linked master is no longer approved. Ask an administrator to review it.',status_code=403,code='psd_scope_denied')
+        stage = 'download_stream'
+        metadata, upstream = await run_in_threadpool(dropbox_integration.get_psd_file_response,context['access_token'],file_id,expected['rev'])
+        if not psd_directory.approved_file(metadata) or any(metadata.get(key) != expected.get(key) for key in ('id','rev','size','content_hash')) or not callable(getattr(upstream,'iter_content',None)):
+            raise FilesUploadError('The master changed during download. Retry from Open PSD.',status_code=409,code='psd_changed')
+        return StreamingResponse(_stream_upstream_response(upstream),media_type='application/octet-stream',
+                                 background=BackgroundTask(upstream.close),headers={
+            'Content-Disposition':_content_disposition('attachment',expected['name']),
+            'Content-Length':str(int(expected['size'])), 'Cache-Control':'no-store',
+            'Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'})
+    except Exception as error:
+        if upstream is not None:
+            with suppress(Exception): upstream.close()
+        _psd_failure(error,stage,reference)
+        if isinstance(error,FilesUploadError):
+            return _psd_error_page(str(error),reference,error.status_code)
+        _,message,status = _psd_provider_problem(error)
+        return _psd_error_page(message,reference,status)
 
 
 FILES_UPLOAD_ROUTES = (
@@ -2415,6 +2496,7 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-psd-options", psd_picker_options, ("GET",)),
     ("/api/files-psd-attach", attach_product_psd, ("POST",)),
     ("/api/files-psd-open", open_product_psd, ("GET", "POST")),
+    ("/api/files-psd-original", download_product_psd, ("GET",)),
     ("/files-window", files_window_page, ("GET",)),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),
     ("/api/files-list", list_files, ("GET",)),

@@ -717,7 +717,7 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
-                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openPhotoshop", "openViewer", "folders", "cancel" } },
+                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openPhotoshop", "openPsdApp", "openViewer", "folders", "cancel" } },
                 });
                 return;
             }
@@ -748,7 +748,7 @@ internal sealed class DesktopWindow : Window
                 return;
             }
             if (action != "drag" && action != "copyFile"
-                && action != "copyImage" && action != "openFile" && action != "openPhotoshop")
+                && action != "copyImage" && action != "openFile" && action != "openPhotoshop" && action != "openPsdApp")
             {
                 throw new DesktopException("action_denied", "The desktop action is not allowed.");
             }
@@ -762,7 +762,7 @@ internal sealed class DesktopWindow : Window
             try
             {
                 string photoshop = action == "openPhotoshop" ? NativePhotoshop.FindRequiredApplication() : "";
-                string[] paths = action == "openPhotoshop"
+                string[] paths = (action == "openPhotoshop" || action == "openPsdApp")
                     ? await cache.MaterializePhotoshopAsync(grant, cancellation.Token)
                     : await cache.MaterializeAsync(
                     grant,
@@ -814,6 +814,14 @@ internal sealed class DesktopWindow : Window
                     {
                         { "count", 1 },
                     });
+                }
+                else if (action == "openPsdApp")
+                {
+                    if (paths.Length != 1) throw new DesktopException("master_required", "Select one linked master.");
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    try { Process.Start(NativePhotoshop.DefaultAppStartInfo(paths[0])); }
+                    catch (System.ComponentModel.Win32Exception) { throw new DesktopException("psd_app_unavailable", "Windows has no available PSD application. Choose a default app for .psd in Windows Settings, or select Photoshop and retry."); }
+                    Reply(action, requestId, true, new Dictionary<string, object> { { "count", 1 } });
                 }
                 else if (action == "openPhotoshop")
                 {
@@ -1416,6 +1424,13 @@ internal static class NativePhotoshop
             }
         }
         throw new DesktopException("photoshop_unavailable", "Adobe Photoshop is not installed or registered. Install Photoshop, restart Sports Cave OS Desktop, then retry.");
+    }
+
+    internal static ProcessStartInfo DefaultAppStartInfo(string target)
+    {
+        if (!File.Exists(target) || !String.Equals(Path.GetExtension(target), ".psd", StringComparison.OrdinalIgnoreCase))
+            throw new DesktopException("master_required", "The verified PSD master is unavailable.");
+        return new ProcessStartInfo(target) { UseShellExecute = true };
     }
 
     internal static ProcessStartInfo StartInfo(string executable, string target)

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import hashlib
+import re
 import os
 from pathlib import Path
 import subprocess
@@ -35,11 +37,20 @@ def read_request(protocol_uri):
     if parsed.scheme != "sports-cave-files" or parsed.netloc != "open":
         fail("Unsupported request.")
     query = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
-    if set(query) - {"path", "kind"} or len(query.get("path", [])) != 1:
+    kind = query.get("kind", ["file"])[0]
+    allowed = {"path", "kind", "hash", "size"} if kind == "master" else {"path", "kind"}
+    if set(query) - allowed or len(query.get("path", [])) != 1:
         fail("Unsupported request.")
-    if len(query.get("kind", ["file"])) != 1 or query.get("kind", ["file"])[0] not in {"file", "folder"}:
+    if len(query.get("kind", ["file"])) != 1 or query.get("kind", ["file"])[0] not in {"file", "folder", "master"}:
         fail("Unsupported request.")
-    return query["path"][0], query.get("kind", ["file"])[0]
+    if kind == "master":
+        path = query['path'][0]
+        prefix = '02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED/'
+        if (not path.startswith(prefix) or '/' in path[len(prefix):] or not path.lower().endswith('.psd')
+                or len(query.get('hash', [])) != 1 or not re.fullmatch('[a-fA-F0-9]{64}', query['hash'][0])
+                or len(query.get('size', [])) != 1 or not re.fullmatch('[0-9]{1,16}', query['size'][0])):
+            fail('The verified master request is invalid. Open it from Edition Ops or Orders.')
+    return query["path"][0], kind
 
 
 def resolve_target(relative_path):
@@ -67,16 +78,31 @@ def resolve_target(relative_path):
     return target
 
 
-def open_target(target):
+def verify_master(target, expected_hash, size):
+    """Read-only Dropbox block hash; reading allows Dropbox placeholder hydration."""
+    combined = hashlib.sha256()
+    with target.open('rb') as source:
+        if os.fstat(source.fileno()).st_size != int(size):
+            fail('The local master differs from Dropbox. Wait for sync and retry.')
+        while True:
+            block = source.read(4 * 1024 * 1024)
+            if not block:
+                break
+            combined.update(hashlib.sha256(block).digest())
+    if combined.hexdigest() != expected_hash.lower():
+        fail('The local master differs from Dropbox. Wait for sync and retry.')
+
+
+def open_target(target, prefer_adobe=True):
     if target.is_dir():
         subprocess.run(["/usr/bin/open", str(target)], check=True)
         return
     extension = target.suffix.casefold()
-    if extension in {".psd", ".psb"}:
+    if prefer_adobe and extension in {".psd", ".psb"}:
         preferred = subprocess.run(["/usr/bin/open", "-a", "Adobe Photoshop", str(target)], check=False)
         if preferred.returncode == 0:
             return
-    if extension == ".ai":
+    if prefer_adobe and extension == ".ai":
         preferred = subprocess.run(["/usr/bin/open", "-a", "Adobe Illustrator", str(target)], check=False)
         if preferred.returncode == 0:
             return
@@ -87,7 +113,11 @@ def main():
     if len(sys.argv) != 2:
         fail("Unsupported request.")
     relative_path, _kind = read_request(sys.argv[1])
-    open_target(resolve_target(relative_path))
+    target = resolve_target(relative_path)
+    if _kind == 'master':
+        query = parse_qs(urlparse(sys.argv[1]).query)
+        verify_master(target, query['hash'][0], query['size'][0])
+    open_target(target, prefer_adobe=_kind != 'master')
 
 
 if __name__ == "__main__":

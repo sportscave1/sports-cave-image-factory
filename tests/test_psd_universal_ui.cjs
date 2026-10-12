@@ -1,0 +1,24 @@
+const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const html=fs.readFileSync('components/psd_open/index.html','utf8');let count=0;
+for(const platform of ['Windows','MacIntel','iPhone','iPad','Android','Linux','ChromeOS']){
+ const context=await browser.newContext({viewport:{width:platform==='iPhone'?390:1000,height:800}}),page=await context.newPage();let actions=[],download=0;
+ await page.addInitScript(({platform})=>{Object.defineProperty(navigator,'platform',{value:platform==='iPad'?'MacIntel':platform});Object.defineProperty(navigator,'userAgent',{value:platform});Object.defineProperty(navigator,'maxTouchPoints',{value:platform==='iPad'?5:0});},{platform});
+ await context.route('**/*',route=>{const url=new URL(route.request().url());assert.equal(url.hostname,'psd-universal.local.test');if(url.pathname.includes('original')){download++;return route.fulfill({status:403,contentType:'text/html',body:'Sign in with Files access to download.'});}if(route.request().method()==='GET')return route.fulfill({contentType:'text/html',body:html});const action=route.request().postDataJSON().action;actions.push(action);if(action==='preview')return route.fulfill({contentType:'image/jpeg',body:Buffer.from([0xff,0xd8,0xff,0xd9])});return route.fulfill({json:{ok:true,name:'Renamed master.psd',size:2147483648,dropbox_url:'https://www.dropbox.com/home/team?preview=Renamed%20master.psd',mac_url:'sports-cave-files://open?kind=master&path=02_TASKS%2F03_DESIGNS-LIVE-ONLINE-UPLOADED%2FRenamed.psd&hash='+'a'.repeat(64)+'&size=2147483648'}});});
+ await page.goto('http://psd-universal.local.test/api/files-psd-open?product_gid=gid%3A%2F%2Fshopify%2FProduct%2F1');
+ assert.equal(actions.length,0);assert.equal(download,0);await page.locator('#app').click();
+ if(platform==='MacIntel'){await page.locator('#mac').waitFor({state:'visible'});assert.deepEqual(actions,['describe']);assert((await page.locator('#mac').getAttribute('href')).startsWith('sports-cave-files://open?kind=master'));}
+ else {assert.equal(actions.length,0);await page.getByText(/Open in App needs|Choose Open in Dropbox/).waitFor();}
+ if(platform==='iPhone'||platform==='iPad'||platform==='Android')assert((await page.locator('#guidance').textContent()).includes('Files or Downloads'));
+ await page.locator('#artwork').click();await page.getByText(/Artwork preview only/).waitFor();assert(actions.includes('preview'));assert.equal(download,0);
+ assert.equal(await page.locator('body').evaluate(e=>e.scrollWidth<=innerWidth),true);
+ assert.equal(await page.locator('#download').getAttribute('href'),'/api/files-psd-original?product_gid=gid%3A%2F%2Fshopify%2FProduct%2F1');
+ const popup=page.waitForEvent('popup');await page.locator('#download').click();const opened=await popup;await opened.waitForLoadState();assert.equal(download,1);assert((await opened.locator('body').textContent()).includes('Files access'));
+ await context.close();count++;
+}
+for(const mode of ['preview-unavailable','permission','bad-server','dropbox']){
+ const page=await browser.newPage();let actions=0,navigation='';await page.route('**/*',route=>{const url=new URL(route.request().url());if(url.hostname==='www.dropbox.com'){navigation=url.href;return route.fulfill({body:'Authorised Dropbox sign-in'});}if(url.hostname!=='psd-universal.local.test')return route.abort();if(route.request().method()==='GET')return route.fulfill({contentType:'text/html',body:html});actions++;if(mode==='bad-server')return route.fulfill({status:503,body:'SECRET provider traceback'});if(mode==='dropbox')return route.fulfill({json:{ok:true,name:'Renamed.psd',dropbox_url:'https://www.dropbox.com/home/team?preview=Renamed.psd'}});return route.fulfill({status:mode==='permission'?403:422,json:{message:mode==='permission'?'Sign in with Files access, then retry.':'Artwork preview is unavailable. Open in Dropbox or download the original PSD instead.',reference:'safe-reference'}});});
+ await page.goto('http://psd-universal.local.test/api/files-psd-open?product_gid=gid%3A%2F%2Fshopify%2FProduct%2F1');await page.locator(mode==='dropbox'?'#dropbox':'#artwork').click();if(mode==='dropbox'){await page.getByText('Authorised Dropbox sign-in').waitFor();assert.equal(navigation,'https://www.dropbox.com/home/team?preview=Renamed.psd');}else {await page.getByText(mode==='permission'?/Sign in with Files access/:mode==='bad-server'?/server did not return PSD details/:/Artwork preview is unavailable/).waitFor();assert(!(await page.locator('body').textContent()).includes('SECRET'));}assert.equal(actions,1);await page.close();count++;
+}
+console.log('Universal PSD menu: '+count+' platform/fallback scenarios passed, no live requests, no unsolicited master downloads.');
+}finally{await browser.close();}})().catch(error=>{console.error(error);process.exitCode=1;});

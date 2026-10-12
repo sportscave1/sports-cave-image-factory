@@ -35,6 +35,7 @@ class NativePhotoshopWindowsTests(unittest.TestCase):
                   NativePhotoshop.VerifyMasterAsync(target,root,System.Convert.ToInt64(item["size"]),System.Convert.ToString(item["content_hash"]),System.Threading.CancellationToken.None).GetAwaiter().GetResult();
                   return "verified"; } catch(DesktopException error) { return error.Code; }
               }
+              public static bool DefaultApp(string target) { return NativePhotoshop.DefaultAppStartInfo(target).UseShellExecute; }
               public static string MissingPhotoshop(string target) { try{NativePhotoshop.StartInfo("",target);return "unexpected";}catch(DesktopException error){return error.Code;} }
               public static string LaunchSpec(string target) {
                 string executable=NativePhotoshop.FindRequiredApplication();var spec=NativePhotoshop.StartInfo(executable,target);
@@ -57,6 +58,7 @@ class NativePhotoshopWindowsTests(unittest.TestCase):
             $target=Join-Path $root $data.roots[0].source_relative_path
             $result=@{}
             $result.verified=[NativePsdHarness]::Check($root,$manifest)
+            $result.defaultApp=[NativePsdHarness]::DefaultApp($target)
             $result.unavailablePhotoshop=[NativePsdHarness]::MissingPhotoshop($target)
             $result.launchSpec=[NativePsdHarness]::LaunchSpec($target)|ConvertFrom-Json
             $data.items[0].content_hash='0000000000000000000000000000000000000000000000000000000000000000'
@@ -75,7 +77,7 @@ class NativePhotoshopWindowsTests(unittest.TestCase):
             run=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-File',str(base/'harness.ps1'),str(HELPER),str(base)],capture_output=True,text=True,encoding='utf-8',timeout=45)
             self.assertEqual(run.returncode,0,run.stderr)
             result=json.loads(run.stdout)
-            self.assertEqual(result['verified'],'verified');self.assertEqual(result['unavailablePhotoshop'],'photoshop_unavailable')
+            self.assertTrue(result['defaultApp']);self.assertEqual(result['verified'],'verified');self.assertEqual(result['unavailablePhotoshop'],'photoshop_unavailable')
             self.assertEqual(result['stale'],'master_sync_pending');self.assertEqual(result['missing'],'master_not_synced');self.assertEqual(result['review'],'master_scope_denied');self.assertEqual(result['traversal'],'unsafe_path');self.assertEqual(result['untrustedGrant'],'master_required')
             self.assertEqual(result['launchSpec']['executable'],'Photoshop.exe');self.assertEqual(result['launchSpec']['arguments'],'"'+str(target)+'"');self.assertFalse(result['launchSpec']['shell']);self.assertEqual(result['launchSpec']['version'],10)
             self.assertEqual(target.read_bytes(),data)
