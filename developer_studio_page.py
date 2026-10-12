@@ -1,12 +1,16 @@
 """Lazy owner-only browser surface. No local filesystem or Docker server API."""
 from pathlib import Path
+import json
 
 
 def panel_html():
     assets = Path(__file__).parent / "components" / "developer_studio"
+    local_assets=Path(__file__).parent/"scripts"/"studio"/"ui"
+    bundle=json.dumps({name:local_assets.joinpath(name).read_text(encoding="utf-8-sig") for name in ("workspace.js","workspace.css","editor.js","editor.css")}).replace("</", "<\\/")
     return (assets.joinpath("panel.html").read_text(encoding="utf-8")
             .replace("/*STUDIO_CSS*/", assets.joinpath("panel.css").read_text(encoding="utf-8"))
-            .replace("/*STUDIO_JS*/", assets.joinpath("panel.js").read_text(encoding="utf-8")))
+            .replace("/*STUDIO_JS*/", assets.joinpath("panel.js").read_text(encoding="utf-8"))
+            .replace("/*STUDIO_V6_BUNDLE*/",bundle))
 
 
 def render_page(user):
@@ -16,4 +20,4 @@ def render_page(user):
         st.error("Developer Studio is available only to the configured owner.")
         return
     from streamlit.components.v1 import html
-    html(panel_html(), height=650, scrolling=True)
+    html(panel_html(), height=790, scrolling=False)

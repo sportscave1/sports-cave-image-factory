@@ -13,7 +13,8 @@ import studio
 ASSETS = {"assets/sports-cave-os-app-icon.webp",
           "assets/sports-cave-logo-landscape-gold-transparent.webp",
           "assets/sports-cave-sc-gold-favicon.svg"}
-DEVELOPMENT_ADDITIONS = {"developer_studio_page.py", "components/developer_studio/panel.html",
+STUDIO_UI = {"scripts/studio/ui/"+name for name in ("workspace.js","workspace.css","editor.js","editor.css")}
+DEVELOPMENT_ADDITIONS = STUDIO_UI | {"developer_studio_page.py", "components/developer_studio/panel.html",
                          "components/developer_studio/panel.css", "components/developer_studio/panel.js"}
 SOURCE_DIRS = {"components", "ui_components"}
 DENIED_MODULES = {"run_migrations.py", "sports_cave_server.py"}
@@ -26,7 +27,7 @@ def allowed(name):
     if "worker" in p.stem or "webhook" in p.stem:
         return False
     return (name == "design_studio_prompts/SPORTS-CAVE-HIGH-QUALITY-IMAGE-SEARCH-PROMPT-V2.txt" or len(p.parts)==1 and p.suffix in {".py",".css",".js"} or
-            p.parts[0] in SOURCE_DIRS and p.suffix in {".html",".css",".js"} or name in ASSETS)
+            p.parts[0] in SOURCE_DIRS and p.suffix in {".html",".css",".js"} or name in ASSETS or name in STUDIO_UI)
 
 def source_bytes(root, name):
     path=drafts.plain_path(root/name)
@@ -117,3 +118,22 @@ def capture_objects(repo,record):
             info=tarfile.TarInfo("source/"+name);info.size=len(data);info.uid=info.gid=65532;info.mode=0o644
             tar.addfile(info,io.BytesIO(data))
     return buffer.getvalue(),manifest
+
+
+def capture_delta(home,task_id,owner,paths,previous):
+    """Refresh only a verified editor save; full refresh remains available for external edits."""
+    import editor
+    if not paths or any(p not in (editor.VISUAL_FILE,*editor.CODE_FILES) for p in paths):raise ValueError("Unapproved incremental source")
+    with studio.locked(home) as file:
+        _,root=drafts.assigned(studio.read(file),task_id,owner)
+        if studio.git(root,"rev-parse","HEAD")!=previous["commit"]:raise ValueError("Draft commit changed; restart or fully refresh preview")
+        entries=[];buffer=io.BytesIO()
+        with tarfile.open(fileobj=buffer,mode="w") as tar:
+            for name in paths:
+                data,redacted=source_bytes(root,name)
+                if source_bytes(root,name)!=(data,redacted):raise RuntimeError("Source changed during refresh")
+                info=tarfile.TarInfo("source/"+name);info.size=len(data);info.uid=info.gid=65532;info.mode=0o644
+                tar.addfile(info,io.BytesIO(data))
+                entries.append({"path":name,"sha256":hashlib.sha256(data).hexdigest(),"synthetic_override":redacted})
+        manifest={**previous,"files":[f for f in previous["files"] if f["path"] not in paths]+entries,"refresh_scope":"editor-saved files; full refresh for external changes"}
+        return buffer.getvalue(),manifest

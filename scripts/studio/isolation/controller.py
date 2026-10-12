@@ -10,6 +10,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from playwright.sync_api import sync_playwright
 import psycopg
+from inspection import INSPECT, TARGETS
+from page_catalog import pages
 
 def synthetic_cookie_cleanup(route):
     """Plain Streamlit lacks the OS cookie router; emulate only its empty cleanup.
@@ -72,6 +74,7 @@ with sync_playwright() as p:
     context.route("http://127.0.0.1:8501/api/os/auth/clear-cookie", synthetic_cookie_cleanup)
     page=context.new_page()
     page.goto("http://127.0.0.1:8501")
+    page.wait_for_function("() => !!document.querySelector('.sc-login-title')",timeout=20000)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args): pass
         def do_POST(self):
@@ -79,16 +82,23 @@ with sync_playwright() as p:
                 length=int(self.headers.get("Content-Length","0"))
                 if not 0<length<12000: raise ValueError("Oversized event")
                 data=json.loads(self.rfile.read(length))
-                op=data.get("action")
+                op=data.get("action");inspection=None
                 if op=="reload-source":
-                    global app
-                    app.terminate()
-                    try: app.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        app.kill(); app.wait(timeout=5)
-                    app=start_app()
-                    page.reload()
-                    page.get_by_placeholder("Username or email",exact=True).wait_for(timeout=10000)
+                    # New Streamlit session re-executes entry.py/runpy against updated source.
+                    # Keep the verified process, browser, synthetic DB and authentication cookies.
+                    page.reload(wait_until="domcontentloaded")
+                    page.locator('[data-testid="stAppViewContainer"]').wait_for(timeout=10000)
+                elif op=="navigate":
+                    from urllib.parse import quote
+                    selected=next((p for p in pages(Path("/tmp/source")) if p["key"]==data.get("page")),None)
+                    if not selected:raise ValueError("Unknown OS page")
+                    if selected["key"]=="__signin__":context.clear_cookies()
+                    page.goto("http://127.0.0.1:8501/?page="+quote(selected["route"]),wait_until="domcontentloaded")
+                    page.locator('[data-testid="stAppViewContainer"]').wait_for(timeout=10000)
+                elif op=="inspect":
+                    x,y=data.get("x"),data.get("y")
+                    if type(x) is not int or type(y) is not int or not 0<=x<page.viewport_size["width"] or not 0<=y<page.viewport_size["height"]:raise ValueError("Coordinates")
+                    inspection=page.evaluate(INSPECT,{"x":x,"y":y})
                 elif op=="login-synthetic":
                     page.get_by_placeholder("Username or email",exact=True).fill("preview@example.invalid")
                     page.get_by_placeholder("Password",exact=True).fill("StudioOnly-2026")
@@ -110,18 +120,33 @@ with sync_playwright() as p:
                 elif op=="scroll":
                     page.mouse.wheel(0,max(-900,min(900,int(data["delta"]))))
                 elif op=="size":
-                    page.set_viewport_size({"width":390 if data["mode"]=="mobile" else 1280,"height":900})
+                    widths={"desktop":1280,"tablet":820,"mobile":390}
+                    if data.get("mode") not in widths:raise ValueError("Viewport")
+                    page.set_viewport_size({"width":widths[data["mode"]],"height":900})
                 elif op=="refresh":
                     page.reload()
                 elif op!="frame":
                     raise ValueError("Unknown event")
                 # Bounded event settling; no unattended screenshot loop.
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(200)
+                if op in {"frame","reload-source","navigate","login-synthetic","refresh"}:
+                    # Cookie restoration may schedule a second Streamlit rerun. Wait for
+                    # bounded, stable content instead of returning a half-rendered frame.
+                    previous=None;stable=0
+                    for _ in range(24):
+                        text=page.locator("body").inner_text()
+                        ready=bool(text.strip()) and page.locator('[data-testid="stMainBlockContainer"]').count()>0
+                        running=page.locator('[data-testid="stStatusWidget"]').filter(has_text="Running").count()>0
+                        stable=stable+1 if ready and not running and text==previous else 0
+                        if stable>=3:break
+                        previous=text;page.wait_for_timeout(200)
+                    if stable<3:raise RuntimeError("OS screen is still loading. Refresh the preview; no source was discarded.")
                 result={"image":base64.b64encode(page.screenshot(type="jpeg",quality=80)).decode(),
-                        "text":page.locator("body").inner_text()[:12000],
+                        "text":("\n".join(f.locator("body").inner_text(timeout=1500)[:5000] for f in page.frames if f.url.startswith(("http://127.0.0.1:8501","about:srcdoc"))))[:12000],
                         "width":page.viewport_size["width"],"height":page.viewport_size["height"],
                         "login_visible":page.get_by_placeholder("Username or email",exact=True).is_visible(),
-                        "synthetic":True}
+                        "synthetic":True,"inspect_targets":page.evaluate(TARGETS)}
+                if inspection is not None:result["inspection"]=inspection
                 body=json.dumps(result).encode()
                 self.send_response(200)
             except Exception as exc:

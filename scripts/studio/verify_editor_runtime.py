@@ -1,4 +1,5 @@
 """Opt-in real editor acceptance. Restores only its own tested edits through history."""
+import argparse
 import base64
 import hashlib
 import json
@@ -8,21 +9,34 @@ import time
 import draft_ui
 import editor
 import studio
-from verify_preview_runtime import HOME, OWNER, request, query
+from verify_preview_runtime import HOME, request, query
 
-def main():
-    server=draft_ui.DraftServer(HOME,'20261011-c24ca137',OWNER,idle_seconds=300)
+def main(task,owner,report_path):
+    server=draft_ui.DraftServer(HOME,task,owner,idle_seconds=300)
     root=Path(server.state()['task']['worktree_path'])
     files=['app.py',editor.CODE_FILES[0]]
     baseline={p:(root/p).read_bytes() for p in files}
-    report={'phase3_verified':False,'started_at':studio.now()}
+    report={'task':task,'owner':owner,'started_at':studio.now(),'browser_UI':'not operated; authenticated HTTP and actual isolated runtime acceptance'}
     thread=threading.Thread(target=server.run,daemon=True);thread.start()
     cleanup=[]
     def opened(path='app.py'):return request(server,'editor-open',path=path)
     def save(state,**values):
         return request(server,'editor-save',path=state['path'],expected_hash=state['hash'],expected_revision=state['revision'],**values)
+    def restore_owned(path,change,side='before'):
+        current=opened(path)
+        expected=change['after' if side=='before' else 'before']
+        if current['hash']!=expected:
+            raise RuntimeError('Acceptance source changed concurrently; refusing automatic restore: '+path)
+        return save(current,restore={'id':change['id'],'side':side})
     try:
-        request(server,'start-preview')
+        opened_list=request(server,'editor-files')
+        assert opened_list['task_id']==task and all(x['available'] for x in opened_list['files'])
+        t=time.monotonic();first_frame=request(server,'start-preview')
+        report['preview_start_seconds']=round(time.monotonic()-t,3)
+        title=next(t for t in first_frame['inspect_targets'] if t['component']=='title')
+        hit=request(server,'preview-event',event={'action':'inspect','x':title['x'],'y':title['y']})['inspection']
+        assert hit['supported'] and hit['location']['path']=='app.py' and hit['location']['line']>0
+        report['real_click_inspection']=True
         container=server.preview_runtime.name
         query(container,"INSERT INTO studio_marker VALUES ('editor-refresh-retains-data')")
         first=opened()
@@ -30,12 +44,12 @@ def main():
         result=save(first,component='title',changes={'text':'Studio verification draft','properties':{'color':'#1264B4'}})
         report['save_to_preview_seconds']=round(time.monotonic()-t,3)
         changed=opened(); change=changed['history'][-1]
-        cleanup.append(('app.py',change['id']))
+        cleanup.append(('app.py',change))
         assert 'preview_error' not in result,result.get('preview_error')
         assert 'Studio verification draft' in result['frame']['text'],result['frame']['text']
         assert container==server.preview_runtime.name
         assert ['editor-refresh-retains-data'] in query(container,'SELECT label FROM studio_marker')
-        (HOME/'.studio/phase3-edited-preview.jpg').write_bytes(base64.b64decode(result['frame']['image']))
+        report_path.with_suffix('.jpg').write_bytes(base64.b64decode(result['frame']['image']))
         assert 'Studio verification draft' in request(server,'editor-diff',path='app.py')['diff']
         try:save(first,component='title',changes={'text':'stale'})
         except RuntimeError:report['http_conflict_denied']=True
@@ -45,28 +59,53 @@ def main():
             except RuntimeError:pass
             else:raise AssertionError('File allowlist bypass')
         report['http_file_restrictions']=True
-        save(changed,restore={'id':change['id'],'side':'before'})
+        restore_owned('app.py',change)
         assert (root/'app.py').read_bytes()==baseline['app.py']
-        result=save(opened(),restore={'id':change['id'],'side':'after'})
+        result=restore_owned('app.py',change,'after')
         assert 'Studio verification draft' in result['frame']['text']
-        save(opened(),restore={'id':change['id'],'side':'before'})
+        restore_owned('app.py',change)
         cleanup.pop()
+        signed=request(server,'preview-event',event={'action':'login-synthetic'})
+        assert not signed['login_visible']
         code=opened(files[1])
-        result=save(code,source=code['source']+'\n<!-- Studio source editor verification -->\n')
-        current=opened(files[1]);change=current['history'][-1];cleanup.append((files[1],change['id']))
+        assert code['source'].count('<span>Files</span>')==1
+        result=save(code,source=code['source'].replace('<span>Files</span>','<span>V6 source check</span>'))
+        current=opened(files[1]);change=current['history'][-1];cleanup.append((files[1],change))
         assert 'preview_error' not in result,result.get('preview_error')
         from preview_boundary import docker
         received=docker('exec',container,'python','-B','-c',"import hashlib;print(hashlib.sha256(open('/tmp/source/"+files[1]+"','rb').read()).hexdigest())").stdout.strip()
         assert received==current['hash']
-        save(current,restore={'id':change['id'],'side':'before'});cleanup.pop()
+        assert 'V6 source check' in result['frame']['text'],result['frame']['text']
+        report['source_edit_visibly_rendered_after_cached_load']=True
+        restored=restore_owned(files[1],change);cleanup.pop()
+        assert 'V6 source check' not in restored['frame']['text']
+        for mode,width in [('desktop',1280),('tablet',820),('mobile',390)]:
+            frame=request(server,'preview-event',event={'action':'size','mode':mode})
+            assert frame['width']==width
+            report[mode+'_preview']=True
+        assert not request(server,'preview-event',event={'action':'frame'})['login_visible']
+        page=request(server,'preview-event',event={'action':'navigate','page':'developer_studio'})
+        assert 'Developer Studio' in page['text'] and not page['login_visible'],page['text']
+        report['synthetic_login_and_real_os_navigation']=True
         assert all((root/p).read_bytes()==data for p,data in baseline.items())
         report.update({'visual_edit_rendered':True,'source_edit_transferred':True,'save_reopen':True,
           'undo_restore':True,'synthetic_data_retained_on_edit':True,'application_source_restored':True,
           'runtime_safety':server.preview_runtime.evidence,'editor_runtime_checks_passed':True})
     finally:
-        for path,revision in reversed(cleanup):
-            save(opened(path),restore={'id':revision,'side':'before'})
-        server.stopping=True;thread.join(10)
-        studio.atomic(HOME/'.studio/phase3-editor-acceptance.json',report)
+        try:
+            for path,change in reversed(cleanup):
+                if (root/path).read_bytes()!=baseline[path]:restore_owned(path,change)
+        except Exception as exc:
+            report['recovery_error']=str(exc)
+            raise
+        finally:
+            server.stopping=True;thread.join(10)
+        report['source_hashes']={p:hashlib.sha256(data).hexdigest() for p,data in baseline.items()}
+        report['source_restored_after_cleanup']=all((root/p).read_bytes()==data for p,data in baseline.items())
+        studio.atomic(report_path,report)
         print(json.dumps({k:v for k,v in report.items() if k!='runtime_safety'},indent=2))
-if __name__=='__main__':main()
+if __name__=='__main__':
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--task',required=True);parser.add_argument('--owner',required=True)
+    parser.add_argument('--report',type=Path,required=True)
+    args=parser.parse_args();main(args.task,args.owner,args.report)

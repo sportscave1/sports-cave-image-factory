@@ -37,4 +37,12 @@ def audit(event,args):
     if event in {"subprocess.Popen","os.system","os.posix_spawn","os.fork","os.forkpty","pty.spawn"}:
         raise RuntimeError("Application child jobs disabled in preview.")
 sys.addaudithook(audit)
+# Preview-only cache invalidation for the explicit frontend editor allowlist.
+# These modules stay cached in the long-lived Streamlit process after a browser reload.
+# Never change production cache behaviour or clear data/application caches here.
+for module_name,function_name in (("top_bar","_component_source"),("session_recovery","_source")):
+    module=sys.modules.get(module_name)
+    cached=getattr(module,function_name,None) if module else None
+    if cached is not None and hasattr(cached,"cache_clear"):
+        cached.cache_clear()
 runpy.run_path("/tmp/source/app.py",run_name="__main__")

@@ -32,7 +32,7 @@ class CatalogTests(test_draft_ui.UITests):
         status,body,_=self.request(s,"/api/action",command)
         self.assertEqual(status,200)
         self.assertEqual(json.loads(body)["task_id"],"task-a")
-        self.assertTrue(json.loads(body)["url"].startswith(s.origin+"/#token="))
+        self.assertTrue(json.loads(body)["url"].startswith(s.origin+"/workspace#token="))
         for change in [{"intent":"publish"},{"draft_id":"../other"}]:
             self.assertEqual(self.request(s,"/api/action",{**command,**change})[0],409)
         registry=studio.read(self.home/".studio/registry.json")
@@ -110,7 +110,7 @@ class OwnerTests(unittest.TestCase):
         self.assertIn("Production unchanged",page)
         self.assertNotIn("/*STUDIO_",page)
         self.assertNotIn("setInterval",page)
-        self.assertLess(len(page.encode()),20000)
-        self.assertEqual(set(n.name for n in ast.walk(ast.parse((ROOT/"developer_studio_page.py").read_text())) if isinstance(n,ast.Import) for n in n.names),{"os_accounts","streamlit"})
+        self.assertLess(len(page.encode()),90000)
+        self.assertEqual(set(n.name for n in ast.walk(ast.parse((ROOT/"developer_studio_page.py").read_text())) if isinstance(n,ast.Import) for n in n.names),{"os_accounts","streamlit","json"})
 
 if __name__=="__main__":unittest.main()

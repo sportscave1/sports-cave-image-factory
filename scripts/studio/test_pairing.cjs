@@ -1,8 +1,9 @@
 // Protocol unit checks in a disposable DOM fixture; no browser/network access.
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const windows=[];let blockWindow=false;
 const listeners={},sent=[],requests=[],nodes={},nonce='a'.repeat(48),opener={postMessage:(d,o)=>sent.push({d,o})};
 const node=id=>nodes[id] ||= {textContent:'',value:'',disabled:false,hidden:true,replaceChildren(){},append(){}};
-const context={document:{getElementById:node,createElement:()=>({})},location:{hash:'#'+nonce,pathname:'/pair',origin:'http://127.0.0.1:12345'},history:{replaceState(){}},window:{opener,addEventListener:(n,f)=>listeners[n]=f},URL,URLSearchParams,setTimeout:()=>1,clearTimeout(){},fetch:async(url,options)=>{const q=JSON.parse(options.body);requests.push(q);return {ok:true,json:async()=>q.action==='release-catalog'?{base:{commit:'a'.repeat(40)},options:[{id:'accepted',eligible:true,commit:'a'.repeat(40)}],records:[{id:'candidate',version:2,candidate_commit:'a'.repeat(40),fingerprint:'f',checks:{},risks:[]}]}:{rows:[{id:'draft',actionable:true}],categories:['CORE']}}}};
+const context={document:{getElementById:node,createElement:()=>({})},location:{hash:'#'+nonce,pathname:'/pair',origin:'http://127.0.0.1:12345'},history:{replaceState(){}},window:{opener,open:(url)=>{assert.equal(url,"about:blank");if(blockWindow)return null;const w={opener:{},location:{replace:u=>w.url=u},close:()=>w.closed=true};windows.push(w);return w;},addEventListener:(n,f)=>listeners[n]=f},URL,URLSearchParams,setTimeout:()=>1,clearTimeout(){},fetch:async(url,options)=>{const q=JSON.parse(options.body);if(url==="/api/device")return {ok:false,status:403,json:async()=>({error:"No saved trust"})};requests.push(q);return {ok:true,json:async()=>q.action==='handoff'?{draft_id:'draft',task_id:'task',url:'http://127.0.0.1:12345/workspace#token='+'t'.repeat(43)+'&intent='+q.intent}:q.action==='workspace-grant'?{draft_id:'draft',capability:'local-only-editor-capability'}:q.action==='workspace-request'?{ok:true}:q.action==='release-catalog'?{base:{commit:'a'.repeat(40)},options:[{id:'accepted',eligible:true,commit:'a'.repeat(40)}],records:[{id:'candidate',version:2,candidate_commit:'a'.repeat(40),fingerprint:'f',checks:{},risks:[]}]}:{rows:[{id:'draft',actionable:true}],categories:['CORE']}}}};
 vm.runInNewContext(fs.readFileSync(__dirname+'/ui/pair.js','utf8'),context);
 const emit=(source,origin,data)=>listeners.message({source,origin,data:{studio:1,nonce,...data}});
 (async()=>{
@@ -19,6 +20,14 @@ const emit=(source,origin,data)=>listeners.message({source,origin,data:{studio:1
  await emit(opener,'https://evil.example',{type:'handoff',draft_id:'draft',intent:'edit'});assert.equal(node('handoff').hidden,true);
  await emit(opener,'https://os.example',{type:'handoff',draft_id:'draft',intent:'publish'});assert.equal(node('handoff').hidden,true);
  await emit(opener,'https://os.example',{type:'handoff',draft_id:'draft',intent:'edit'});assert.equal(node('handoff').hidden,false);
+ await node('open').onclick();
+ assert.equal(windows.length,1);assert.equal(windows[0].opener,null);
+ assert.match(windows[0].url,/intent=edit$/);assert.equal(sent.at(-1).d.type,'workspace-opened');
+ assert.equal(sent.at(-1).d.draft_id,'draft');assert.ok(!JSON.stringify(sent).includes('t'.repeat(43)));
+ blockWindow=true;
+ await emit(opener,'https://os.example',{type:'handoff',draft_id:'draft',intent:'preview'});
+ await node('open').onclick();assert.equal(node('handoff').hidden,false);
+ assert.match(node('status').textContent,/Browser blocked/);
  await emit(opener,'https://os.example',{type:'release-catalog'});
  const before=requests.length;
  await emit({},'https://os.example',{type:'release-request',request:{operation:'prepare',task_ids:['accepted']}});assert.equal(requests.length,before);
@@ -31,6 +40,18 @@ const emit=(source,origin,data)=>listeners.message({source,origin,data:{studio:1
  node('release-confirmation').value='APPROVE '+'a'.repeat(40);node('release-scenario').value='success';await node('release-run').onclick();
  assert.equal(requests.at(-1).action,'release-operation');assert.equal(requests.at(-1).confirmation,'APPROVE '+'a'.repeat(40));
  assert.ok(!JSON.stringify(sent).includes('t'.repeat(43)));
+ await emit(opener,'https://os.example',{type:'workspace-begin',draft_id:'draft'});
+ assert.equal(node('open').textContent,'Allow editing this selected draft');
+ await node('open').onclick();assert.equal(sent.at(-1).d.type,'workspace-approved');
+ assert.ok(!JSON.stringify(sent).includes('local-only-editor-capability'));
+ const editorRequest={type:'workspace-call',request_id:'1'.repeat(24),draft_id:'draft',command:{action:'workspace-model'}};
+ let calls=requests.length;await emit(opener,'https://wrong.example',editorRequest);assert.equal(requests.length,calls);
+ await emit(opener,'https://os.example',editorRequest);await new Promise(r=>setImmediate(r));
+ assert.equal(requests.at(-1).capability,'local-only-editor-capability');assert.equal(sent.at(-1).d.type,'workspace-result');
+ await emit(opener,'https://os.example',{type:'workspace-close'});
+ await emit(opener,'https://os.example',editorRequest);await new Promise(r=>setImmediate(r));
+ assert.match(sent.at(-1).d.error,/Confirm this selected draft/);
+ assert.ok(!JSON.stringify(sent).includes('local-only-editor-capability'));
  const count=requests.length;await emit(opener,'https://os.example',{type:'release-frame',id:'candidate',event:{action:'click',x:1,y:1}});assert.equal(requests.length,count);
  await emit(opener,'https://os.example',{type:'disconnect'});assert.equal(node('handoff').hidden,true);
  await emit(opener,'https://os.example',{type:'handoff',draft_id:'draft',intent:'edit'});assert.equal(node('handoff').hidden,true);

@@ -156,6 +156,40 @@ def finish_pending(home,file,registry,draft,root):
     draft["updated_at"]=registry["updated_at"]=studio.now()
     studio.atomic(file,registry)
 
+def locations(text):
+    result={}
+    for key,mapping in MAPPINGS.items():
+        hit=mapped_css(text,mapping)
+        if mapping.get("text_class"):
+            found=re.search(r'<div class="'+mapping["text_class"]+r'">',text)
+            if found:hit=found
+        if mapping.get("button"):
+            hit=re.search(r'submitted = st\.form_submit_button\(',text) or hit
+        if hit:
+            line=text.count("\n",0,hit.start())+1
+            lines=text.splitlines()
+            result[key]={"path":VISUAL_FILE,"line":line,"excerpt":"\n".join(lines[max(0,line-2):line+3])}
+    return result
+
+
+def files(home,draft_id,owner):
+    """List only explicit editor mappings, never browse arbitrary filesystem paths."""
+    with studio.locked(home) as file:
+        registry=studio.read(file)
+        draft,task,root=drafts.draft_by_id(registry,draft_id,owner)
+        result=[]
+        for path in (VISUAL_FILE,*CODE_FILES):
+            item={"path":path,"mode":"visual" if path==VISUAL_FILE else "source","available":False}
+            try:
+                _,data=drafts.read_source(root,path)
+                if path==VISUAL_FILE:visual_values(data.decode("utf-8-sig"))
+                item["available"]=True
+            except (ValueError,RuntimeError,OSError) as exc:
+                item["reason"]=str(exc)
+            result.append(item)
+        return {"draft_id":draft["id"],"task_id":task["id"],"files":result}
+
+
 def open_file(home,draft_id,owner,path=VISUAL_FILE):
     with studio.locked(home) as file:
         registry=studio.read(file)
@@ -165,6 +199,7 @@ def open_file(home,draft_id,owner,path=VISUAL_FILE):
         text=data.decode("utf-8-sig")
         return {"path":path,"hash":meta["sha256"],"revision":draft["revision"],
           "visual":visual_values(text) if path==VISUAL_FILE else None,
+          "locations":locations(text) if path==VISUAL_FILE else {},
           "source":None if path==VISUAL_FILE else text,"code_files":CODE_FILES,
           "history":[h for h in draft.get("editor_history",[]) if h["path"]==path]}
 

@@ -1,22 +1,34 @@
 "use strict";
 const fragment = location.hash.slice(1);
 const params = new URLSearchParams(fragment);
-const token = fragment.startsWith("token=") ? params.get("token") : fragment;
+let token = fragment.startsWith("token=") ? params.get("token") : fragment;
 const intent = fragment.startsWith("token=") ? params.get("intent") : "open";
 history.replaceState(null, "", location.pathname);
 const $ = id => document.getElementById(id);
-let state, busy = false, dirty = false;
+let state, busy = false, dirty = false, activeTab = "draft", hasFrame = false;
+let editorModule;
 function message(text) { $("message").textContent = text; }
-async function request(path, data) {
+async function request(path, data, retried = false) {
   const response = await fetch(path, {method: data ? "POST" : "GET", headers: {
     "X-Studio-Token": token, ...(data ? {"Content-Type": "application/json"} : {})
   }, ...(data ? {body: JSON.stringify(data)} : {})});
   const result = await response.json();
+  if (response.status === 401 && !retried) {
+    // Restore authentication without reloading the editor or replacing unsaved source.
+    let approvedOrigin;try { approvedOrigin = localStorage.getItem("studio-approved-origin"); } catch {}
+    if (approvedOrigin) {
+      const renew = () => fetch("/api/device", {method:"POST",headers:{"Content-Type":"application/json","X-Studio-Local":"1"},body:JSON.stringify({operation:"renew",origin:approvedOrigin})});
+      const renewed = globalThis.navigator?.locks ? await navigator.locks.request("studio-device-renewal",renew) : await renew();
+      if (renewed.ok) {token=(await renewed.json()).token;return request(path,data,true);}
+    }
+  }
   if (!response.ok) throw new Error(result.error || "Request failed");
   return result;
 }
 function render() {
   const d = state.draft;
+  $("selected-draft").textContent=(d?d.name+" · ":"")+state.task.id+" · "+state.task.owner;
+  $("test-evidence").textContent=JSON.stringify({task_id:state.task.id,draft_id:d?.id,status:state.task_status,recorded_test:state.test||"No test result recorded",current_files_verified:false,note:"Recorded evidence only. Re-run focused tests before review after editing."},null,2);
   $("workspace-category").textContent = "DEVELOPER STUDIO / " + state.task.category;
   $("name").textContent = d ? d.name : "Name your draft";
   $("identity").replaceChildren();
@@ -71,20 +83,36 @@ $("close").onclick = () => run(async () => {
   document.querySelectorAll("button").forEach(b => { b.disabled = true; });
   message("Draft Studio stopped. Reopen with the task launcher.");
 });
-run(async () => {
-  await refresh(); message("Connected. Previews start on demand after isolation checks.");
-  if (intent === "edit" || intent === "changes") {
-    editorModule = await import("/editor.js");
-    await editorModule.mount($("editor-panel"), request, showFrame);
-    if (intent === "changes") document.getElementById("ed-changes").click();
+async function selectTab(tab) {
+  activeTab=tab;
+  $("draft-panel").hidden=tab!=="draft";$("tests-panel").hidden=tab!=="tests";
+  $("editor-panel").hidden=tab!=="editor";
+  $("preview-panel").hidden=tab!=="preview"||!hasFrame;
+  $("preview-empty").hidden=tab!=="preview"||hasFrame;
+  document.querySelectorAll("[data-workspace-tab]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.workspaceTab===tab)));
+  if(tab==="editor"){
+    editorModule=editorModule||await import("/editor.js");
+    await editorModule.mount($("editor-panel"),request,showFrame);
   }
-  if (intent === "preview") await previewAction("start-preview");
+}
+document.querySelectorAll("[data-workspace-tab]").forEach(b=>b.onclick=()=>run(()=>selectTab(b.dataset.workspaceTab)));
+$("editor-panel").addEventListener("studio-saved",()=>run(async()=>{
+  state=await request("/api/state");if(!dirty)render();
+}));
+run(async () => {
+  await refresh();message("Connected to the selected draft. Editor changes remain on this computer.");
+  if(intent==="edit"||intent==="changes"){
+    await selectTab("editor");
+    if(intent==="changes")document.getElementById("ed-changes").click();
+  }else if(intent==="preview"){
+    await selectTab("preview");await previewAction("start-preview");
+  }
 });
 
 
 let frameSize = {width:1280,height:900};
 function showFrame(frame) {
-  $("preview-panel").hidden=false;
+  hasFrame=true;$("preview-panel").hidden=activeTab!=="preview";$("preview-empty").hidden=true;
   $("preview-image").src="data:image/jpeg;base64,"+frame.image;
   frameSize=frame;
   $("preview-status").textContent="Running · "+frame.width+" × "+frame.height+" · synthetic data only";
@@ -93,10 +121,10 @@ async function previewAction(action,event) {
   message("Working in the isolated preview…");
   const result=await request("/api/action",{action,event});
   if (result.image) showFrame(result);
-  else { $("preview-panel").hidden=true; }
+  else { hasFrame=false;$("preview-panel").hidden=true;$("preview-empty").hidden=activeTab!=="preview"; }
   message(action==="stop-preview" ? "Preview stopped. Draft source preserved." : "Preview ready. No production connections.");
 }
-$("start-preview").onclick=()=>run(()=>previewAction("start-preview"));
+$("start-preview").onclick=()=>run(async()=>{await selectTab("preview");await previewAction("start-preview");});
 $("stop-preview").onclick=()=>run(()=>previewAction("stop-preview"));
 $("restart-preview").onclick=()=>run(()=>previewAction("restart-preview"));
 const sendEvent=event=>run(()=>previewAction("preview-event",event));
@@ -115,8 +143,4 @@ $("preview-image").onclick=event=>{
     y:Math.floor((event.clientY-box.top)*frameSize.height/box.height)});
 };
 
-let editorModule;
-$("edit-draft").onclick=()=>run(async()=>{
-  editorModule=editorModule || await import("/editor.js");
-  await editorModule.mount($("editor-panel"),request,showFrame);
-});
+$("edit-draft").onclick=()=>run(()=>selectTab("editor"));

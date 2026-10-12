@@ -36,6 +36,20 @@ class EditorTests(unittest.TestCase):
         return editor.open_file(self.home,self.draft["id"],owner,path)
     def write(self,opened,**kwargs):
         return editor.write(self.home,self.draft["id"],"owner-a",opened["path"],opened["hash"],opened["revision"],**kwargs)
+    def test_file_browser_is_explicit_and_owner_scoped(self):
+        listing=editor.files(self.home,self.draft["id"],"owner-a")
+        self.assertEqual(listing["draft_id"],self.draft["id"])
+        self.assertEqual({f["path"] for f in listing["files"]},{editor.VISUAL_FILE,*editor.CODE_FILES})
+        self.assertTrue(listing["files"][0]["available"])
+        self.assertFalse(next(f for f in listing["files"] if f["path"]=="orders_page.css")["available"])
+        with self.assertRaises(RuntimeError):editor.files(self.home,self.draft["id"],"wrong")
+
+    def test_changed_visual_mapping_does_not_block_authorised_code_files(self):
+        (self.root/"app.py").write_text("# mapping removed by task\n")
+        listing=editor.files(self.home,self.draft["id"],"owner-a")
+        self.assertFalse(listing["files"][0]["available"])
+        self.assertTrue(listing["files"][1]["available"])
+
     def test_visual_updates_real_source_and_checkpoint(self):
         before=self.open()
         result=self.write(before,component="title",changes={"text":"Draft heading","properties":{"color":"#123456","font-size":"2rem"}})

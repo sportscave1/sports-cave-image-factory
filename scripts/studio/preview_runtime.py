@@ -16,7 +16,7 @@ PROFILE_SHA256="4540a0c176f2bdd83936ef958c0b306dc6ab6ea4310608149d11ac0803c68022
 def profile_digest():
     # Git may normalise CRLF on checkout. Pin identical LF policy bytes.
     return hashlib.sha256(PROFILE.read_bytes().replace(b"\r\n",b"\n")).hexdigest()
-IMAGE_TAG="sports-cave-studio-runtime:phase4d-login-369a5c73"
+IMAGE_TAG="sports-cave-studio-runtime:v6-e16f6570"
 RELAY="""import sys,urllib.request,urllib.error
 data=sys.stdin.buffer.read(12000)
 try:
@@ -76,7 +76,7 @@ class Preview:
             if self.task in leases:
                 raise RuntimeError("This worktree already has a preview lease. Stop its owning session first.")
             self.lease=uuid.uuid4().hex
-            leases[self.task]={"id":self.lease,"owner":self.owner,"created_at":studio.now()}
+            leases[self.task]={"id":self.lease,"owner":self.owner,"created_at":studio.now(),"pid":__import__("os").getpid()}
             studio.atomic(file,registry)
         try:
             return self._start()
@@ -94,6 +94,13 @@ class Preview:
         name="sc-studio-preview-"+uuid.uuid4().hex[:12]
         boundary.docker("create",*options(image,name,self.task),"sleep","900")
         self.name=name
+        with studio.locked(self.home) as file:
+            registry=studio.read(file)
+            lease=registry.get("preview_leases",{}).get(self.task,{})
+            if lease.get("id")!=self.lease:
+                raise RuntimeError("Preview lease changed during startup.")
+            lease["container"]=name
+            studio.atomic(file,registry)
         try:
             config=json.loads(boundary.docker("inspect",name).stdout)[0]
             policy=validate_runtime(config,image,self.task)
@@ -136,6 +143,15 @@ class Preview:
         config=json.loads(boundary.docker("inspect",self.name).stdout)[0]
         if config["Config"]["Labels"].get("sports-cave-studio.task")!=self.task:
             raise RuntimeError("Container ownership mismatch.")
+        allowed={"frame","reload-source","login-synthetic","click","inspect","text","key","scroll","size","refresh","navigate"}
+        if not isinstance(data,dict) or data.get("action") not in allowed:raise ValueError("Unsupported preview event")
+        if data.get("action")=="size" and data.get("mode") not in {"desktop","tablet","mobile"}:raise ValueError("Unsupported viewport")
+        if data.get("action")=="navigate":
+            import page_catalog
+            with studio.locked(self.home) as file:_,root=drafts.assigned(studio.read(file),self.task,self.owner)
+            selected=next((p for p in page_catalog.pages(root) if p["key"]==data.get("page")),None)
+            if not selected:raise ValueError("Unknown OS page")
+            data={"action":"navigate","page":selected["key"]}
         body=json.dumps(data).encode()
         if len(body)>11000: raise ValueError("Event is too large.")
         r=subprocess.run(["docker","exec","-i",self.name,"python","-B","-c",RELAY],
@@ -143,12 +159,28 @@ class Preview:
         if r.returncode: raise RuntimeError("Preview relay exit "+str(r.returncode)+": "+(r.stderr or r.stdout).decode()[-600:])
         result=json.loads(r.stdout)
         if len(result.get("image",""))>1500000: raise RuntimeError("Oversized preview frame.")
+        if data.get("action")=="inspect":
+            import editor
+            metadata=result.get("inspection",{})
+            key=metadata.get("component")
+            if metadata.get("supported"):
+                if key not in editor.MAPPINGS:raise RuntimeError("Unknown inspection mapping")
+                with studio.locked(self.home) as file:
+                    registry=studio.read(file);draft=next(d for d in registry["drafts"] if d["task_id"]==self.task)
+                try:
+                    opened=editor.open_file(self.home,draft["id"],self.owner)
+                    exported=next(f["sha256"] for f in self.manifest["files"] if f["path"]==editor.VISUAL_FILE)
+                    root=Path(draft["worktree_path"])
+                    if hashlib.sha256(preview_export.source_bytes(root,editor.VISUAL_FILE)[0]).hexdigest()!=exported:raise ValueError("Preview is behind source; restart before inspection")
+                    metadata["location"]=opened["locations"].get(key)
+                except (ValueError,RuntimeError):
+                    metadata.update(supported=False,reason="Source mapping changed; read-only inspection")
         return result
 
-    def refresh_source(self):
+    def refresh_source(self,paths=None):
         """Re-export checked source inside the existing boundary; retain synthetic DB."""
         if not self.name: raise RuntimeError("Preview is stopped.")
-        archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture(self.home,self.task,self.owner))
+        archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture_delta(self.home,self.task,self.owner,paths,self.manifest) if paths else preview_export.capture(self.home,self.task,self.owner))
         config=json.loads(boundary.docker("inspect",self.name).stdout)[0]
         validate_runtime(config,self.evidence["image"],self.task)
         result=subprocess.run(["docker","exec","-i",self.name,"python","-B","-c",
