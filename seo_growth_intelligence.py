@@ -1164,116 +1164,34 @@ class PostgresSEOGrowthStore:
 
     @staticmethod
     def _measurement_metrics(cursor, row):
-        due_date = _as_date(row.get("due_date")) or utc_now().date()
-        start_date = due_date - timedelta(days=27)
-        keyword = str(row.get("target_keyword") or "").strip()
-        target_page = str(row.get("target_page") or "").strip()
-        market = str(row.get("target_market") or "").strip().upper()
-        clauses = ["workspace_key=%s", "date BETWEEN %s AND %s"]
-        params = [WORKSPACE_KEY, start_date, due_date]
-        if keyword:
-            clauses.append("LOWER(query)=LOWER(%s)")
-            params.append(keyword)
-        if market in {"AU", "US", "UK"}:
-            clauses.append("market_code=%s")
-            params.append(market)
-        cursor.execute(
-            f"""
-            SELECT COALESCE(SUM(organic_clicks), 0) AS clicks,
-                   COALESCE(SUM(organic_impressions), 0) AS impressions,
-                   CASE WHEN SUM(organic_impressions)>0
-                        THEN SUM(position_weight)/SUM(organic_impressions) ELSE NULL END AS average_position
-            FROM seo_reporting_query_daily
-            WHERE {' AND '.join(clauses)}
-            """,
-            params,
-        )
-        metrics = dict(cursor.fetchone() or {})
-        metrics["start_date"] = start_date.isoformat()
-        metrics["end_date"] = due_date.isoformat()
-        metrics["target_page"] = target_page
-        return _json_safe(metrics)
+        from google_direct_reporting import GoogleReports, DirectSEOReader
+        end = _as_date(row.get("due_date")) or utc_now().date()
+        start = end - timedelta(days=27)
+        filters = {"market": row.get("target_market") or "All markets"}
+        reports = GoogleReports()
+        clauses = []
+        if row.get("target_keyword"):
+            clauses.append({"dimension": "query", "operator": "equals", "expression": row["target_keyword"]})
+        if row.get("target_page"):
+            clauses.append({"dimension": "page", "operator": "equals", "expression": row["target_page"]})
+        filters["extra_filters"] = clauses
+        rows = reports.gsc(start, end, (), filters)
+        metrics = DirectSEOReader._totals(rows)
+        return _json_safe({"clicks": metrics["organic_clicks"], "impressions": metrics["organic_impressions"], "average_position": metrics["average_position"], "start_date": start.isoformat(), "end_date": end.isoformat(), "target_page": row.get("target_page") or ""})
 
     def keyword_workspace_rows(self, *, filters, opportunity_type="All", limit=250):
-        self.ensure_schema()
-        health = self.phase4_store.saved_health()
-        through = _as_date(health.get("common_reporting_date"))
-        if not through:
-            return []
-        period = google_seo_phase4.reporting_period(
-            filters.get("preset") or "Last 28 days",
-            through_date=through,
-            custom_start=filters.get("custom_start"),
-            custom_end=filters.get("custom_end"),
-        )
-        reporting_filters = google_seo_phase4.ReportingFilters(
-            period,
-            market=filters.get("market") or "All markets",
-            device=filters.get("device") or "All devices",
-            search=filters.get("search") or "All searches",
-        )
-        countries = sorted(str(value).upper() for value in reporting_filters.country_values())
-        devices = sorted(str(value).casefold() for value in reporting_filters.device_values())
-        params = []
-        where = [
-            "query_daily.workspace_key=%s",
-            "query_daily.date BETWEEN %s AND %s",
-            "query_daily.search_class=%s",
-        ]
-        if countries:
-            where.append("UPPER(query_daily.country_code)=ANY(%s)")
-            params.append(countries)
-        if devices:
-            where.append("LOWER(query_daily.device_category)=ANY(%s)")
-            params.append(devices)
-        search_class = google_seo_phase4.PostgresSEOReportingReader._search_class(reporting_filters)
-        query_params = [WORKSPACE_KEY, period.start_date, period.end_date, search_class, *params]
-        opportunity_clause = ""
-        if opportunity_type and opportunity_type != "All":
-            opportunity_clause = " AND opportunity.opportunity_type=%s"
-            query_params.append(opportunity_type)
-        query_params.append(int(limit))
+        from google_direct_reporting import DirectSEOReader
+        reader = DirectSEOReader(settings_store=self.phase4_store)
+        rows = reader.query_export(filters, view="All")["rows"]
+        # Preserve reviewed opportunity decisions and recommendations without loading raw reporting history.
         with self._backend().connect() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    f"""
-                    WITH query_metric AS (
-                        SELECT query_daily.query, query_daily.canonical_page_key,
-                               SUM(query_daily.organic_clicks) AS clicks,
-                               SUM(query_daily.organic_impressions) AS impressions,
-                               CASE WHEN SUM(query_daily.organic_impressions)>0
-                                    THEN SUM(query_daily.organic_clicks)/SUM(query_daily.organic_impressions) ELSE 0 END AS ctr,
-                               CASE WHEN SUM(query_daily.organic_impressions)>0
-                                    THEN SUM(query_daily.position_weight)/SUM(query_daily.organic_impressions) ELSE 0 END AS average_position
-                        FROM seo_reporting_query_daily AS query_daily
-                        WHERE {' AND '.join(where)}
-                        GROUP BY query_daily.query, query_daily.canonical_page_key
-                    )
-                    SELECT query_metric.query, query_metric.canonical_page_key,
-                           page.canonical_url AS current_page,
-                           page.page_type, query_metric.clicks, query_metric.impressions,
-                           query_metric.ctr, query_metric.average_position,
-                           opportunity.opportunity_key, opportunity.opportunity_type,
-                           opportunity.priority_score, opportunity.status AS opportunity_status,
-                           opportunity.recommended_action
-                    FROM query_metric
-                    LEFT JOIN seo_canonical_pages AS page ON page.page_key=query_metric.canonical_page_key
-                    LEFT JOIN seo_reporting_opportunities AS opportunity
-                      ON opportunity.workspace_key=%s
-                     AND opportunity.status IN ('open', 'snoozed')
-                     AND (
-                         LOWER(opportunity.query)=LOWER(query_metric.query)
-                         OR opportunity.canonical_page_key=query_metric.canonical_page_key
-                     )
-                     {opportunity_clause}
-                    WHERE query_metric.query<>''
-                    ORDER BY COALESCE(opportunity.priority_score, 0) DESC,
-                             query_metric.clicks DESC, query_metric.impressions DESC
-                    LIMIT %s
-                    """,
-                    [*query_params[:-1], WORKSPACE_KEY, *query_params[-(2 if opportunity_clause else 1):]],
-                )
-                return [_json_safe(dict(row)) for row in cursor.fetchall() or []]
+                cursor.execute("SELECT query, opportunity_key, opportunity_type, priority_score, status AS opportunity_status, recommended_action FROM seo_reporting_opportunities WHERE workspace_key=%s AND status IN ('open', 'snoozed')", (WORKSPACE_KEY,))
+                owned = {str(item.get("query") or "").casefold(): dict(item) for item in cursor.fetchall() or []}
+        result = [{**row, **owned.get(row["query"].casefold(), {})} for row in rows]
+        if opportunity_type != "All":
+            result = [row for row in result if row.get("opportunity_type") == opportunity_type]
+        return result[:limit]
 
 
 _DEFAULT_STORE = None
@@ -1478,6 +1396,8 @@ def run_daily_analytics_refresh(
     fresh_gsc_refresher=None,
 ):
     """Refresh saved analytics without running reports, tasks or measurements."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     phase4_store = phase4_store or google_seo_phase4.default_phase4_store()
     store = store or PostgresSEOGrowthStore(phase4_store)
     import_store = import_store or google_seo_import.default_import_store()

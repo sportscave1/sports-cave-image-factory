@@ -166,15 +166,22 @@ class CanonicalGA4Client:
         metadata = {}
         expected_rows = 0
         offset = 0
+        page_count = 0
         while True:
+            page_count += 1
+            if page_count > 10:
+                raise AnalyticsReportingError("Report pagination exceeded its safe limit. Narrow the date range.", code="ga4_pagination_limit", retryable=False)
             request = {
                 "dimensions": [{"name": name} for name in contract.dimensions],
                 "metrics": [{"name": name} for name in metrics],
-                "limit": str(min(PAGE_SIZE, contract.row_limit)),
+                "limit": str(min(PAGE_SIZE, contract.row_limit - offset)),
                 "offset": str(offset),
                 "keepEmptyRows": False,
                 "returnPropertyQuota": True,
             }
+            if contract.realtime:
+                request.pop("offset")
+                request.pop("keepEmptyRows")
             if not contract.realtime:
                 request["dateRanges"] = [{"startDate": start_date.isoformat(), "endDate": end_date.isoformat()}]
             expression = analytics_contracts.filter_expression((*contract.filters, *tuple(filters or ())))
@@ -216,7 +223,7 @@ class CanonicalGA4Client:
                     }
                 )
             offset += len(page_rows)
-            if not page_rows or offset >= expected_rows or offset >= contract.row_limit:
+            if contract.realtime or not page_rows or offset >= expected_rows or offset >= contract.row_limit:
                 break
 
         complete = expected_rows <= contract.row_limit and len(rows_out) >= expected_rows
@@ -275,6 +282,8 @@ class PostgresAnalyticsStore:
         self._schema_ready = True
 
     def save_report(self, report):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         report = dict(report or {})
         if not report.get("complete"):
             raise AnalyticsReportingError(
@@ -324,6 +333,8 @@ class PostgresAnalyticsStore:
         return dict(saved)
 
     def record_failure(self, *, property_id, contract_key, request_hash, error):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
@@ -400,6 +411,8 @@ class PostgresAnalyticsStore:
         currency="",
         requested_by="",
     ):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
@@ -427,6 +440,8 @@ class PostgresAnalyticsStore:
         return dict(row)
 
     def claim_report_queue(self, limit=20):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return []
         self.ensure_schema()
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
@@ -461,6 +476,8 @@ class PostgresAnalyticsStore:
         return [dict(row) for row in rows]
 
     def complete_report_request(self, request_id, *, error=""):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         status = "failed" if error else "completed"
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
@@ -520,6 +537,8 @@ def prewarm_common_reports(
     property_currency="",
     today=None,
 ):
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     written = 0
     failures = []
     contract_keys = tuple(key for key in analytics_contracts.GA4_REPORT_CONTRACTS if key != "realtime")
@@ -584,6 +603,8 @@ def prewarm_common_reports(
 
 
 def process_custom_report_queue(client, store, *, limit=20):
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     written = 0
     failures = []
     for request in store.claim_report_queue(limit=limit):
@@ -611,6 +632,8 @@ def process_custom_report_queue(client, store, *, limit=20):
 
 def refresh_saved_report_contracts(*, connection_store=None, store=None, config=None):
     """Refresh canonical GA4 snapshots from a background worker only."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     connection_store = connection_store or google_seo.default_store()
     store = store or PostgresAnalyticsStore()
     config = config or google_seo.load_config()

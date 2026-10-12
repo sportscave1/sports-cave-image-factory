@@ -764,6 +764,8 @@ class PostgresSEOImportStore:
         end_date=None,
         sync_scope="full",
     ):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         source = str(source or "").upper()
         mode = str(mode or "").lower()
         sync_scope = str(sync_scope or "full").casefold()
@@ -809,6 +811,8 @@ class PostgresSEOImportStore:
 
     def ensure_gsc_property_totals_repair(self, *, schema_ready=False):
         """Queue a bounded totals-only repair when saved daily coverage disagrees."""
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         if schema_ready:
             self._schema_ready = True
         else:
@@ -1033,6 +1037,8 @@ class PostgresSEOImportStore:
         return _as_date(row.get("latest"))
 
     def replace_gsc_date(self, site_url, slice_data):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         site_url = str(site_url or "").strip()
         property_key = google_seo.canonical_gsc_property_key(site_url)
@@ -1364,6 +1370,8 @@ class PostgresSEOImportStore:
         aggregation_type="property",
     ):
         """Idempotently repair exact daily totals without rewriting dimensions."""
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         identity = google_seo.gsc_property_identity(site_url)
         property_id = identity["site_url"]
@@ -1473,6 +1481,8 @@ class PostgresSEOImportStore:
         max_dates=0,
     ):
         """Backfill complete canonical grains one legacy date at a time."""
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         selected = str(site_url or "").strip()
         selected_key = google_seo.canonical_gsc_property_key(selected)
@@ -1678,6 +1688,8 @@ class PostgresSEOImportStore:
         }
 
     def replace_ga4_date(self, property_id, slice_data, *, property_timezone="", property_currency=""):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         slice_date = _as_date(slice_data["date"])
         rows = list(slice_data.get("rows") or [])
         currency = str(slice_data.get("currency") or property_currency or "")[:20]
@@ -2109,6 +2121,8 @@ class PostgresSEOImportStore:
         return runs
 
     def retry_run(self, run_id, *, requested_by):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return {"status": "disabled", "reason": "direct_google_reporting"}
         self.ensure_schema()
         with self._backend().connect() as conn:
             with conn.cursor() as cur:
@@ -2138,6 +2152,8 @@ def default_import_store():
 
 
 def queue_imports(user, mode, *, import_store=None, connection_store=None):
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     google_seo.require_admin(user)
     import_store = import_store or default_import_store()
     connection_store = connection_store or google_seo.default_store()
@@ -2179,6 +2195,8 @@ def queue_imports(user, mode, *, import_store=None, connection_store=None):
 
 
 def retry_import(user, run_id, *, import_store=None):
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     google_seo.require_admin(user)
     return (import_store or default_import_store()).retry_run(
         run_id,
@@ -2207,6 +2225,8 @@ class SEOImportWorker:
         self.sleep = sleep
 
     def run_once(self, *, source=""):
+        # Retired: on-demand Google reporting has no durable import/repair jobs.
+        return None
         run = self.import_store.claim_next_run(self.worker_id, source=source)
         if not run:
             return None
@@ -2415,6 +2435,8 @@ class SEOImportWorker:
 
 
 def queue_daily_source(source, *, import_store=None, connection_store=None, requested_by="render-cron"):
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     import_store = import_store or default_import_store()
     connection_store = connection_store or google_seo.default_store()
     connection = connection_store.get_connection_secret()
@@ -2438,6 +2460,8 @@ def queue_daily_source(source, *, import_store=None, connection_store=None, requ
 
 
 def queue_daily_runs(*, import_store=None, connection_store=None, requested_by="render-cron"):
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return []
     return [
         queue_daily_source(
             source,
@@ -2457,6 +2481,8 @@ def queue_gsc_reporting_repair(
     phase4_store=None,
 ):
     """Queue a bounded GSC refresh followed by a compact-snapshot repair."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     google_seo.require_admin(user)
     import_store = import_store or default_import_store()
     connection_store = connection_store or google_seo.default_store()
@@ -2494,6 +2520,8 @@ def queue_gsc_reporting_repair(
 
 def refresh_gsc_fresh_data(*, import_store=None, connection_store=None, today=None):
     """Persist today's explicitly preliminary Search Console grain from a worker."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     import_store = import_store or default_import_store()
     connection_store = connection_store or google_seo.default_store()
     access_token, connection = google_seo.access_token_for_connection(
@@ -2526,6 +2554,8 @@ def refresh_gsc_fresh_data(*, import_store=None, connection_store=None, today=No
 
 
 def run_complete_daily_pipeline():
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return {"status": "disabled", "reason": "direct_google_reporting"}
     if os.getenv("SEO_GOOGLE_IMPORT_DAILY_ONLY", "").strip() == "1":
         queue_daily_runs()
         worker = SEOImportWorker()
@@ -2539,6 +2569,8 @@ def run_complete_daily_pipeline():
 
 def _validate_worker_startup():
     """Fail clearly when the durable worker queue cannot be reached at all."""
+    # Retired: on-demand Google reporting has no durable import/repair jobs.
+    return None
     try:
         import psycopg  # noqa: F401
     except ImportError as error:

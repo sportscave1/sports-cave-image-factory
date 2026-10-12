@@ -3753,7 +3753,7 @@ def list_activity_logs(
             return cur.fetchall()
 
 
-def list_dashboard_tasks(status="open", *, section=None, limit=200):
+def list_dashboard_tasks(status="open", *, section=None, limit=200, offset=0):
     ensure_dashboard_schema()
     clean_status = str(status or "open").strip().casefold()
     clean_section = str(section or "").strip()
@@ -3770,7 +3770,7 @@ def list_dashboard_tasks(status="open", *, section=None, limit=200):
         safe_limit = min(max(int(limit or 200), 1), 5000)
     except (TypeError, ValueError):
         safe_limit = 200
-    params.append(safe_limit)
+    params.extend((safe_limit, max(int(offset), 0)))
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3779,8 +3779,8 @@ def list_dashboard_tasks(status="open", *, section=None, limit=200):
                 SELECT id, title, section, status, created_at, completed_at, completed_by, design_style, metadata
                 FROM dashboard_tasks
                 {where_sql}
-                ORDER BY created_at DESC
-                LIMIT %s
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s OFFSET %s
                 """,
                 params,
             )
@@ -4256,7 +4256,7 @@ def delete_dashboard_task(
                     metadata=COALESCE(metadata, '{}'::jsonb)
                         || jsonb_build_object(
                             'deleted_at', now()::text,
-                            'deleted_by', %s
+                            'deleted_by', %s::text
                         )
                 WHERE id=%s AND section=%s AND status='open'
                 RETURNING *
@@ -4291,6 +4291,47 @@ def delete_dashboard_task(
             )
         conn.commit()
     return task
+
+
+def delete_dashboard_tasks(task_ids, *, required_section, deleted_by="", actor="sports_cave_os"):
+    """Soft-delete exactly the requested open tasks, with audit, in one transaction."""
+    clean_ids = list(dict.fromkeys(str(value or "").strip() for value in task_ids))
+    clean_section = str(required_section or "").strip()
+    if not clean_ids or not all(clean_ids) or not clean_section:
+        raise ValueError("Task IDs and task section are required.")
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE dashboard_tasks
+                SET status='deleted',
+                    metadata=COALESCE(metadata, '{}'::jsonb)
+                        || jsonb_build_object('deleted_at', now()::text, 'deleted_by', %s::text)
+                WHERE id=ANY(%s::uuid[]) AND section=%s AND status='open'
+                RETURNING *
+                """,
+                (str(deleted_by or "").strip(), clean_ids, clean_section),
+            )
+            tasks = [_dashboard_task_from_row(row) for row in cur.fetchall()]
+            if len(tasks) != len(clean_ids):
+                # Raising inside the connection context rolls back every update.
+                raise ValueError(
+                    "No designs were deleted. One or more selected tasks are no longer active "
+                    "design tasks. Close this dialog and review the refreshed selection."
+                )
+            for task in tasks:
+                title = task.get("title") or "Design task"
+                _insert_audit_log(
+                    cur, event_type="task_deleted", entity_type="dashboard_task",
+                    entity_id=str(task["id"]),
+                    new_value={"message": f"Design task deleted: {title}", "page": "Design Studio",
+                               "action_type": "task_deleted", "title": title, "section": clean_section},
+                    reason=f"Design task deleted: {title}",
+                    actor=str(actor or "").strip() or "sports_cave_os", source="Design Studio",
+                )
+        conn.commit()
+    return tasks
 
 
 def complete_dashboard_task(

@@ -1,0 +1,1398 @@
+{
+  "note": "Static references include retired methods and explicit diagnostic scripts; not proof of runtime reachability. Re-audit before deletion.",
+  "tables": {
+    "analytics_ga4_report_snapshots": [
+      {
+        "file": "analytics_reporting.py",
+        "line": 299,
+        "function": "save_report"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 362,
+        "function": "get_report"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 377,
+        "function": "latest_report"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 394,
+        "function": "report_for_period"
+      }
+    ],
+    "analytics_ga4_sync_failures": [
+      {
+        "file": "analytics_reporting.py",
+        "line": 343,
+        "function": "record_failure"
+      }
+    ],
+    "analytics_ga4_report_queue": [
+      {
+        "file": "analytics_reporting.py",
+        "line": 421,
+        "function": "queue_report"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 427,
+        "function": "queue_report"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 450,
+        "function": "claim_report_queue"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 461,
+        "function": "claim_report_queue"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 467,
+        "function": "claim_report_queue"
+      },
+      {
+        "file": "analytics_reporting.py",
+        "line": 486,
+        "function": "complete_report_request"
+      }
+    ],
+    "seo_ga4_daily_landing_pages": [
+      {
+        "file": "design_studio_intelligence_store.py",
+        "line": 67,
+        "function": "<module>"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1699,
+        "function": "replace_ga4_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1704,
+        "function": "replace_ga4_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1710,
+        "function": "replace_ga4_date"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1706,
+        "function": "ga4_completed_bounds"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2004,
+        "function": "map_saved_urls"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2114,
+        "function": "map_saved_urls"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2491,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2494,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2497,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2924,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3046,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3211,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "scripts/audit_seo_phase4_state.py",
+        "line": 23,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 259,
+        "function": "_selected_properties"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 421,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 425,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 883,
+        "function": "_ga4_daily"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 904,
+        "function": "_ga4_top_pages"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 909,
+        "function": "_ga4_top_pages"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 930,
+        "function": "_ga4_breakdowns"
+      }
+    ],
+    "seo_reporting_runtime": [
+      {
+        "file": "google_direct_reporting.py",
+        "line": 262,
+        "function": "period"
+      },
+      {
+        "file": "google_direct_reporting.py",
+        "line": 263,
+        "function": "period"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 31,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 394,
+        "function": "_reader_report"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 28,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 491,
+        "function": "_cached_interactive_reporting_context"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 497,
+        "function": "_cached_interactive_overview"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 506,
+        "function": "_cached_interactive_landing_pages"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 516,
+        "function": "_cached_interactive_rank_distribution"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3036,
+        "function": "_interactive_reader"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3075,
+        "function": "_load_interactive_overview"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3164,
+        "function": "fetch"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3238,
+        "function": "_progressive_query_rows"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3458,
+        "function": "_render_search_overview"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3492,
+        "function": "_render_search_overview"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 3661,
+        "function": "_render_opportunities"
+      },
+      {
+        "file": "seo_page.py",
+        "line": 4195,
+        "function": "_render_blog_v2"
+      }
+    ],
+    "seo_reporting_revenue_daily": [
+      {
+        "file": "google_direct_reporting.py",
+        "line": 421,
+        "function": "source_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2835,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3011,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4405,
+        "function": "_period_metrics"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4469,
+        "function": "_daily_trend"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 450,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 1067,
+        "function": "_reconciliation_bundle"
+      }
+    ],
+    "seo_gsc_property_totals_v2": [
+      {
+        "file": "google_seo_import.py",
+        "line": 849,
+        "function": "ensure_gsc_property_totals_repair"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1131,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1159,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1391,
+        "function": "upsert_gsc_property_totals_daily"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1401,
+        "function": "upsert_gsc_property_totals_daily"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1335,
+        "function": "connection_record"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1424,
+        "function": "ensure_initial_gsc_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2853,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3043,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 43,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 146,
+        "function": "_migration_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 152,
+        "function": "_migration_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 199,
+        "function": "_saved_range_totals"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 432,
+        "function": "_first_divergence"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 330,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 371,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 374,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 377,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 646,
+        "function": "_gsc_daily"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 168,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 195,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 702,
+        "function": "_canonical_overview_base"
+      }
+    ],
+    "seo_gsc_query_daily_v2": [
+      {
+        "file": "google_seo_import.py",
+        "line": 862,
+        "function": "ensure_gsc_property_totals_repair"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1132,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1177,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2874,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3044,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3295,
+        "function": "_refresh_query_snapshots"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 47,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 146,
+        "function": "_migration_report"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 331,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 380,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 668,
+        "function": "_gsc_daily"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 716,
+        "function": "_gsc_top_queries"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 723,
+        "function": "_gsc_top_queries"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 777,
+        "function": "_gsc_breakdowns"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 172,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 208,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 714,
+        "function": "_canonical_overview_base"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 785,
+        "function": "_canonical_overview_base"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 891,
+        "function": "rank_distribution"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1080,
+        "function": "query_page"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1089,
+        "function": "query_page"
+      }
+    ],
+    "seo_gsc_daily_totals": [
+      {
+        "file": "google_seo_import.py",
+        "line": 875,
+        "function": "ensure_gsc_property_totals_repair"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1069,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1086,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1091,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1494,
+        "function": "backfill_gsc_canonical_from_legacy"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1524,
+        "function": "backfill_gsc_canonical_from_legacy"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1543,
+        "function": "backfill_gsc_canonical_from_legacy"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2479,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2482,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2485,
+        "function": "refresh_health"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 37,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 141,
+        "function": "_migration_report"
+      },
+      {
+        "file": "scripts/audit_seo_phase4_state.py",
+        "line": 21,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 245,
+        "function": "_selected_properties"
+      }
+    ],
+    "seo_gsc_daily_details": [
+      {
+        "file": "google_seo_import.py",
+        "line": 1066,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1082,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1106,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1554,
+        "function": "backfill_gsc_canonical_from_legacy"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1995,
+        "function": "map_saved_urls"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2101,
+        "function": "map_saved_urls"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2488,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3191,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 40,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 141,
+        "function": "_migration_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 431,
+        "function": "_first_divergence"
+      },
+      {
+        "file": "scripts/audit_seo_phase4_state.py",
+        "line": 22,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 349,
+        "function": "source_health"
+      }
+    ],
+    "seo_gsc_page_daily_v2": [
+      {
+        "file": "google_seo_import.py",
+        "line": 1133,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1200,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3045,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3164,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 51,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 147,
+        "function": "_migration_report"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 332,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 383,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 751,
+        "function": "_gsc_top_pages"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 756,
+        "function": "_gsc_top_pages"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 176,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 220,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1278,
+        "function": "landing_pages"
+      }
+    ],
+    "seo_gsc_query_page_daily_v2": [
+      {
+        "file": "google_seo_import.py",
+        "line": 1134,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1222,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 55,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 147,
+        "function": "_migration_report"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 333,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 386,
+        "function": "source_health"
+      }
+    ],
+    "seo_gsc_search_appearance_daily_v2": [
+      {
+        "file": "google_seo_import.py",
+        "line": 1135,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1245,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 59,
+        "function": "<module>"
+      }
+    ],
+    "seo_gsc_canonical_date_status": [
+      {
+        "file": "google_seo_import.py",
+        "line": 1148,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1268,
+        "function": "replace_gsc_date"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1430,
+        "function": "upsert_gsc_property_totals_daily"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1442,
+        "function": "upsert_gsc_property_totals_daily"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1443,
+        "function": "upsert_gsc_property_totals_daily"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1648,
+        "function": "backfill_gsc_canonical_from_legacy"
+      },
+      {
+        "file": "google_seo_import.py",
+        "line": 1841,
+        "function": "canonical_gsc_range_status"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 63,
+        "function": "<module>"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 151,
+        "function": "_migration_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 245,
+        "function": "_sync_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 257,
+        "function": "_sync_report"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 334,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 389,
+        "function": "source_health"
+      }
+    ],
+    "seo_reporting_repair_jobs": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1368,
+        "function": "queue_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1378,
+        "function": "queue_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1465,
+        "function": "ensure_initial_gsc_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1482,
+        "function": "ensure_initial_gsc_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1506,
+        "function": "ensure_initial_gsc_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1541,
+        "function": "claim_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1553,
+        "function": "claim_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1569,
+        "function": "claim_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1578,
+        "function": "claim_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1600,
+        "function": "complete_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1626,
+        "function": "fail_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1692,
+        "function": "recent_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3122,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3129,
+        "function": "refresh_reporting_snapshots"
+      }
+    ],
+    "seo_reporting_snapshot_runs": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1433,
+        "function": "ensure_initial_gsc_reporting_repair"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1657,
+        "function": "record_reporting_snapshot_failure"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2764,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3071,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 283,
+        "function": "_compact_reporting_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 285,
+        "function": "_compact_reporting_report"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 300,
+        "function": "_compact_reporting_report"
+      },
+      {
+        "file": "seo_live_analytics.py",
+        "line": 459,
+        "function": "source_health"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 147,
+        "function": "reporting_context"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 155,
+        "function": "reporting_context"
+      }
+    ],
+    "seo_ga4_transactions": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1723,
+        "function": "replace_ga4_transactions_date"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1738,
+        "function": "replace_ga4_transactions_date"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1746,
+        "function": "replace_ga4_transactions_date"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2124,
+        "function": "map_saved_urls"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2151,
+        "function": "map_saved_urls"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2333,
+        "function": "reconcile_revenue"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2500,
+        "function": "refresh_health"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2980,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3047,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3246,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "scripts/audit_seo_phase4_state.py",
+        "line": 24,
+        "function": "<module>"
+      }
+    ],
+    "seo_reporting_settings": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1944,
+        "function": "get_settings"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 1959,
+        "function": "save_settings"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 143,
+        "function": "reporting_context"
+      }
+    ],
+    "seo_reporting_query_daily": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2826,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3052,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3314,
+        "function": "_refresh_query_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3350,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3391,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3478,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3509,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3541,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3547,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3588,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3596,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3655,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3663,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3839,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3901,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4509,
+        "function": "_top_pages"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4595,
+        "function": "_top_queries"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 70,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 598,
+        "function": "overview_base"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 920,
+        "function": "rank_distribution"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1110,
+        "function": "query_page"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1119,
+        "function": "query_page"
+      }
+    ],
+    "seo_reporting_page_daily": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2827,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3053,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3155,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 71,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1333,
+        "function": "landing_pages"
+      }
+    ],
+    "seo_reporting_daily_metrics": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2828,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2843,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2896,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2946,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3051,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4392,
+        "function": "_period_metrics"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4457,
+        "function": "_daily_trend"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 69,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 554,
+        "function": "overview_base"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 581,
+        "function": "overview_base"
+      }
+    ],
+    "seo_reporting_landing_page_revenue_daily": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2833,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3256,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3744,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3825,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4551,
+        "function": "_top_pages"
+      }
+    ],
+    "seo_reporting_landing_page_daily": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 2834,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3183,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3215,
+        "function": "_refresh_landing_page_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3425,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3431,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3731,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3737,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3823,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4543,
+        "function": "_top_pages"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 72,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_reporting_runtime.py",
+        "line": 1340,
+        "function": "landing_pages"
+      }
+    ],
+    "seo_reporting_opportunities": [
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3054,
+        "function": "refresh_reporting_snapshots"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3361,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3400,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3447,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3484,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3515,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3558,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3618,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3682,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3756,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3846,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3908,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3930,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 3993,
+        "function": "_refresh_reporting_opportunities"
+      },
+      {
+        "file": "google_seo_phase4.py",
+        "line": 4613,
+        "function": "_opportunities"
+      },
+      {
+        "file": "scripts/audit_gsc_connection_and_data.py",
+        "line": 73,
+        "function": "<module>"
+      },
+      {
+        "file": "seo_growth_intelligence.py",
+        "line": 1189,
+        "function": "keyword_workspace_rows"
+      }
+    ]
+  }
+}

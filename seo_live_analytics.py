@@ -1357,4 +1357,5 @@ class PostgresSEOLiveAnalyticsReader:
 
 
 def default_reader():
-    return PostgresSEOLiveAnalyticsReader()
+    from google_direct_reporting import DirectSEOLiveReader
+    return DirectSEOLiveReader()
