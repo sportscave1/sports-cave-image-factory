@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+import re
 import preview_boundary as boundary
 import preview_export
 import studio
@@ -16,7 +17,7 @@ PROFILE_SHA256="4540a0c176f2bdd83936ef958c0b306dc6ab6ea4310608149d11ac0803c68022
 def profile_digest():
     # Git may normalise CRLF on checkout. Pin identical LF policy bytes.
     return hashlib.sha256(PROFILE.read_bytes().replace(b"\r\n",b"\n")).hexdigest()
-IMAGE_TAG="sports-cave-studio-runtime:v6-e16f6570"
+IMAGE_TAG="sports-cave-studio-runtime:v8-silent-perf-01a13216"
 RELAY="""import sys,urllib.request,urllib.error
 data=sys.stdin.buffer.read(12000)
 try:
@@ -67,8 +68,30 @@ class Preview:
         self.manifest=None
         self.evidence=None
         self.lease=None
+        self.container_id=None
+        self.docker_context=None
+        self.relay=None
+        self.last_frame=None
+
+    def _docker(self,*args,**kwargs):
+        target_args=[self.container_id if self.container_id and arg==self.name else arg for arg in args]
+        return boundary.docker(*target_args,context=self.docker_context,**kwargs)
+
+    def _scope(self):
+        with studio.locked(self.home) as file:
+            registry=studio.read(file)
+            drafts.assigned(registry,self.task,self.owner)
+            if self.container_id:
+                lease=registry.get('preview_leases',{}).get(self.task,{})
+                if lease.get('id')!=self.lease or lease.get('owner')!=self.owner or lease.get('container_id')!=self.container_id:
+                    raise RuntimeError('Preview lease or container ownership changed.')
 
     def start(self):
+        if self.name:
+            self._scope()
+            if self.container_id and not self.event({'action':'health'}).get('alive'):
+                raise RuntimeError('Preview runtime is unavailable. Use the explicit Restart control.')
+            return dict(self.last_frame) if self.last_frame else self.event({'action':'frame'})
         with studio.locked(self.home) as file:
             registry=studio.read(file)
             drafts.assigned(registry,self.task,self.owner)
@@ -90,9 +113,10 @@ class Preview:
         context=json.loads(boundary.docker("context","inspect").stdout)[0]
         if not context["Endpoints"]["docker"]["Host"].startswith("npipe://"):
             raise RuntimeError("Remote Docker contexts are forbidden.")
-        image=json.loads(boundary.docker("image","inspect",IMAGE_TAG).stdout)[0]["Id"]
+        self.docker_context=context['Name']
+        image=json.loads(self._docker("image","inspect",IMAGE_TAG).stdout)[0]["Id"]
         name="sc-studio-preview-"+uuid.uuid4().hex[:12]
-        boundary.docker("create",*options(image,name,self.task),"sleep","900")
+        self._docker("create",*options(image,name,self.task),"sleep","900")
         self.name=name
         with studio.locked(self.home) as file:
             registry=studio.read(file)
@@ -102,23 +126,32 @@ class Preview:
             lease["container"]=name
             studio.atomic(file,registry)
         try:
-            config=json.loads(boundary.docker("inspect",name).stdout)[0]
+            config=json.loads(self._docker("inspect",name).stdout)[0]
             policy=validate_runtime(config,image,self.task)
-            boundary.docker("start",name)
-            probe_result=boundary.docker("exec",name,"python","-B","/opt/studio/probe.py","192.0.2.1",timeout=90,check=False)
+            if not re.fullmatch('[a-f0-9]{64}',config.get('Id','')):
+                raise RuntimeError('Immutable container identity missing.')
+            self.container_id=config['Id']
+            with studio.locked(self.home) as file:
+                registry=studio.read(file)
+                lease=registry.get('preview_leases',{}).get(self.task,{})
+                if lease.get('id')!=self.lease:raise RuntimeError('Preview lease changed.')
+                lease['container_id']=self.container_id
+                studio.atomic(file,registry)
+            self._docker("start",name)
+            probe_result=self._docker("exec",name,"python","-B","/opt/studio/probe.py","192.0.2.1",timeout=90,check=False)
             if not probe_result.stdout.strip():
                 raise RuntimeError("Runtime probe failed: "+probe_result.stderr[:1000])
             probe=json.loads(probe_result.stdout)
-            browser=json.loads(boundary.docker("exec",name,"python","-B","/opt/studio/browser_probe.py",timeout=60).stdout)
+            browser=json.loads(self._docker("exec",name,"python","-B","/opt/studio/browser_probe.py",timeout=60).stdout)
             if not probe["passed"] or not browser["passed"]:
                 raise RuntimeError("Runtime negative probes did not pass.")
             self.evidence={"image":image,"policy":policy,"probe":probe,"browser":browser,
                            "profile_sha256":profile_digest()}
             # Copy a generated tar only after the exact runtime passes probes.
-            cp=subprocess.run(["docker","exec","-i",name,"python","-B","-c",
-                "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],input=archive,capture_output=True,timeout=30)
+            cp=subprocess.run(["docker","--context",self.docker_context,"exec","-i",self.container_id,"python","-B","-c",
+                "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],input=archive,capture_output=True,timeout=30, **studio.quiet_process())
             if cp.returncode: raise RuntimeError("Source transfer failed: "+cp.stderr.decode()[:500])
-            boundary.docker("exec","-d",name,"sh","-c",
+            self._docker("exec","-d",name,"sh","-c",
                 "exec python -B /opt/studio/controller.py > /tmp/controller.log 2>&1")
             deadline=time.monotonic()+45
             last=""
@@ -130,7 +163,7 @@ class Preview:
                 except RuntimeError as e:
                     last=str(e)
                     time.sleep(.25)
-            log=boundary.docker("exec",name,"cat","/tmp/controller.log",check=False).stdout
+            log=self._docker("exec",name,"cat","/tmp/controller.log",check=False).stdout
             raise RuntimeError("Preview startup failed: "+log[-2500:]+"\n"+last[:200])
         except Exception:
             self.stop()
@@ -138,14 +171,16 @@ class Preview:
 
     def event(self,data):
         if not self.name: raise RuntimeError("Preview is stopped.")
-        with studio.locked(self.home) as file:
-            drafts.assigned(studio.read(file),self.task,self.owner)
-        config=json.loads(boundary.docker("inspect",self.name).stdout)[0]
-        if config["Config"]["Labels"].get("sports-cave-studio.task")!=self.task:
-            raise RuntimeError("Container ownership mismatch.")
-        allowed={"frame","reload-source","login-synthetic","click","inspect","text","key","scroll","size","refresh","navigate"}
+        self._scope()
+        if not self.container_id:
+            config=json.loads(self._docker("inspect",self.name).stdout)[0]
+            if config["Config"]["Labels"].get("sports-cave-studio.task")!=self.task:
+                raise RuntimeError("Container ownership mismatch.")
+        allowed={"frame","health","reload-source","login-synthetic","click","inspect","text","key","scroll","size","refresh","navigate"}
         if not isinstance(data,dict) or data.get("action") not in allowed:raise ValueError("Unsupported preview event")
         if data.get("action")=="size" and data.get("mode") not in {"desktop","tablet","mobile"}:raise ValueError("Unsupported viewport")
+        if data.get('action')=='size' and self.last_frame and self.last_frame.get('width')=={'desktop':1280,'tablet':820,'mobile':390}[data['mode']]:
+            return dict(self.last_frame)
         if data.get("action")=="navigate":
             import page_catalog
             with studio.locked(self.home) as file:_,root=drafts.assigned(studio.read(file),self.task,self.owner)
@@ -154,10 +189,18 @@ class Preview:
             data={"action":"navigate","page":selected["key"]}
         body=json.dumps(data).encode()
         if len(body)>11000: raise ValueError("Event is too large.")
-        r=subprocess.run(["docker","exec","-i",self.name,"python","-B","-c",RELAY],
-                         input=body,capture_output=True,timeout=20)
-        if r.returncode: raise RuntimeError("Preview relay exit "+str(r.returncode)+": "+(r.stderr or r.stdout).decode()[-600:])
-        result=json.loads(r.stdout)
+        if self.container_id:
+            from preview_relay import Relay, RelayTransportError
+            if self.relay is None:self.relay=Relay(self.container_id,self.docker_context)
+            try:result=self.relay.request(data)
+            except RelayTransportError:
+                self.relay.close();self.relay=None
+                raise
+        else:
+            r=subprocess.run(["docker",*(["--context",self.docker_context] if self.docker_context else []),"exec","-i",self.container_id or self.name,"python","-B","-c",RELAY],
+                             input=body,capture_output=True,timeout=20, **studio.quiet_process())
+            if r.returncode: raise RuntimeError("Preview relay exit "+str(r.returncode)+": "+(r.stderr or r.stdout).decode()[-600:])
+            result=json.loads(r.stdout)
         if len(result.get("image",""))>1500000: raise RuntimeError("Oversized preview frame.")
         if data.get("action")=="inspect":
             import editor
@@ -175,30 +218,36 @@ class Preview:
                     metadata["location"]=opened["locations"].get(key)
                 except (ValueError,RuntimeError):
                     metadata.update(supported=False,reason="Source mapping changed; read-only inspection")
+        if result.get('image'):self.last_frame=result
         return result
 
     def refresh_source(self,paths=None):
         """Re-export checked source inside the existing boundary; retain synthetic DB."""
         if not self.name: raise RuntimeError("Preview is stopped.")
+        self._scope()
         archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture_delta(self.home,self.task,self.owner,paths,self.manifest) if paths else preview_export.capture(self.home,self.task,self.owner))
-        config=json.loads(boundary.docker("inspect",self.name).stdout)[0]
+        config=json.loads(self._docker("inspect",self.name).stdout)[0]
         validate_runtime(config,self.evidence["image"],self.task)
-        result=subprocess.run(["docker","exec","-i",self.name,"python","-B","-c",
+        result=subprocess.run(["docker",*(["--context",self.docker_context] if self.docker_context else []),"exec","-i",self.container_id or self.name,"python","-B","-c",
             "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],
-            input=archive,capture_output=True,timeout=30)
+            input=archive,capture_output=True,timeout=30, **studio.quiet_process())
         if result.returncode: raise RuntimeError("Source refresh transfer failed.")
         frame=self.event({"action":"reload-source"})
         self.manifest=manifest
         return frame
 
     def stop(self):
+        if self.relay:
+            self.relay.close();self.relay=None
         if self.name:
             name=self.name
-            config=json.loads(boundary.docker("inspect",name).stdout)[0]
+            config=json.loads(self._docker("inspect",name).stdout)[0]
             if config["Config"]["Labels"].get("sports-cave-studio.task")!=self.task:
                 raise RuntimeError("Refusing to stop a different task's container.")
-            boundary.docker("rm","-f",name)
+            self._docker("rm","-f",name)
             self.name=None
+            self.container_id=None
+            self.last_frame=None
         if self.lease:
             with studio.locked(self.home) as file:
                 registry=studio.read(file)

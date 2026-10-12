@@ -7,3 +7,5 @@ body:has(#local-status){margin:0;padding:8px;background:#171815;color:#eeeae0;fo
 
 /* Draft selection is part of the shared Editor, including before approval. */
 .ws-v6 .ws-empty{max-width:360px;width:100%;padding:16px}.ws-v6 #ws-selector label{display:block;margin:8px 0;color:#d3cbbb}.ws-v6 #ws-draft-select{display:block;width:100%;max-width:100%;margin:8px 0}.ws-v6 #ws-draft-help{font-size:11px}.ws-v6 .ws-bar{gap:5px;padding:6px 8px}.ws-v6 .ws-bar button{font-size:11px;padding:5px 7px}.ws-v6 .ws-preview-tools{padding:5px;gap:4px}.ws-v6 .ws-preview-tools button{font-size:10px;padding:4px 6px}.ws-v6 .ws-tabs{margin:0;flex-wrap:nowrap}
+
+.ws-loading{position:absolute;top:12px;right:12px;z-index:3;padding:6px 10px;border-radius:5px;background:#252622ed;color:#f5d98b;border:1px solid #c6a24b;pointer-events:none}

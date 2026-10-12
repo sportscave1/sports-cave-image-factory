@@ -41,7 +41,7 @@ class GitObjects:
     """Read-only Git interface: no commit, merge, fetch, checkout or shell command."""
     def __init__(self,root):self.root=Path(root)
     def run(self,*args):
-        p=subprocess.run(["git","-C",str(self.root),*args],capture_output=True,timeout=30,check=True)
+        p=subprocess.run(["git","-C",str(self.root),*args],capture_output=True,timeout=30,check=True, **studio.quiet_process())
         return p.stdout
     def tree(self,sha):
         revision(sha)
@@ -65,10 +65,10 @@ class GitObjects:
             if mode not in {"100644","100755"} or kind!="blob":raise ValueError("Unsafe source object type.")
             ids.append(revision(oid))
         query=("\n".join(ids)+"\n").encode()
-        sizes=subprocess.run(["git","-C",str(self.root),"cat-file","--batch-check"],input=query,capture_output=True,check=True,timeout=30).stdout.splitlines()
+        sizes=subprocess.run(["git","-C",str(self.root),"cat-file","--batch-check"],input=query,capture_output=True,check=True,timeout=30, **studio.quiet_process()).stdout.splitlines()
         lengths=[int(line.split()[2]) for line in sizes]
         if len(lengths)!=len(ids) or any(n>5*1024*1024 for n in lengths) or sum(lengths)>50*1024*1024:raise ValueError("Candidate source size limit.")
-        data=subprocess.run(["git","-C",str(self.root),"cat-file","--batch"],input=query,capture_output=True,check=True,timeout=30).stdout
+        data=subprocess.run(["git","-C",str(self.root),"cat-file","--batch"],input=query,capture_output=True,check=True,timeout=30, **studio.quiet_process()).stdout
         out=[];offset=0
         for oid,length in zip(ids,lengths):
             end=data.index(b"\n",offset);header=data[offset:end].decode().split()
@@ -77,7 +77,7 @@ class GitObjects:
         return out
     def ancestor(self,base,head):
         revision(base);revision(head)
-        p=subprocess.run(["git","-C",str(self.root),"merge-base","--is-ancestor",base,head],capture_output=True,timeout=30)
+        p=subprocess.run(["git","-C",str(self.root),"merge-base","--is-ancestor",base,head],capture_output=True,timeout=30, **studio.quiet_process())
         if p.returncode not in {0,1}:raise ValueError("Cannot verify revision ancestry.")
         return p.returncode==0
 

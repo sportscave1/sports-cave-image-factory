@@ -29,12 +29,14 @@ def allowed(name):
     return (name == "design_studio_prompts/SPORTS-CAVE-HIGH-QUALITY-IMAGE-SEARCH-PROMPT-V2.txt" or len(p.parts)==1 and p.suffix in {".py",".css",".js"} or
             p.parts[0] in SOURCE_DIRS and p.suffix in {".html",".css",".js"} or name in ASSETS or name in STUDIO_UI)
 
-def source_bytes(root, name):
+def raw_source(root, name):
     path=drafts.plain_path(root/name)
     if not path.resolve().is_relative_to(root.resolve()) or not path.is_file() or path.stat().st_nlink>1:
         raise ValueError("Unsafe source path: "+name)
-    data=path.read_bytes()
-    return sanitise_source(name,data)
+    return path.read_bytes()
+
+def source_bytes(root, name):
+    return sanitise_source(name,raw_source(root,name))
 
 def sanitise_source(name,data):
     if len(data)>5*1024*1024:
@@ -79,11 +81,15 @@ def capture(home,task_id,owner):
                      {n for n in DEVELOPMENT_ADDITIONS if (root/n).exists() and allowed(n)})
         if "app.py" not in names or "sc_auth.py" not in names:
             raise ValueError("Required application source missing.")
-        captured=[(n,*source_bytes(root,n)) for n in names]
+        fingerprints={};captured=[]
+        for name in names:
+            original=raw_source(root,name)
+            fingerprints[name]=hashlib.sha256(original).digest()
+            captured.append((name,*sanitise_source(name,original)))
         if sum(len(data) for _,data,_ in captured)>50*1024*1024:
             raise ValueError("Export exceeds 50 MiB.")
         for name,data,redacted in captured:
-            if source_bytes(root,name)!=(data,redacted):
+            if hashlib.sha256(raw_source(root,name)).digest()!=fingerprints[name]:
                 raise RuntimeError("Source changed during export.")
         if studio.git(root,"rev-parse","HEAD")!=before:
             raise RuntimeError("Commit changed during export.")
@@ -130,8 +136,9 @@ def capture_delta(home,task_id,owner,paths,previous):
         entries=[];buffer=io.BytesIO()
         with tarfile.open(fileobj=buffer,mode="w") as tar:
             for name in paths:
-                data,redacted=source_bytes(root,name)
-                if source_bytes(root,name)!=(data,redacted):raise RuntimeError("Source changed during refresh")
+                original=raw_source(root,name)
+                data,redacted=sanitise_source(name,original)
+                if raw_source(root,name)!=original:raise RuntimeError("Source changed during refresh")
                 info=tarfile.TarInfo("source/"+name);info.size=len(data);info.uid=info.gid=65532;info.mode=0o644
                 tar.addfile(info,io.BytesIO(data))
                 entries.append({"path":name,"sha256":hashlib.sha256(data).hexdigest(),"synthetic_override":redacted})

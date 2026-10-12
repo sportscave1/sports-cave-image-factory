@@ -29,7 +29,7 @@ def verify(home,task,owner):
     cpu=sum(sum(p.cpu_times()[:2]) for p in own)-before
     memory=sum(p.memory_info().rss for p in own)
     # Attempt duplicate start; established listener and process must remain the same.
-    subprocess.run([sys.executable,"-B",str(Path(companion.__file__).resolve()),"start","--home",str(home),"--id",task,"--owner",owner],check=True,capture_output=True)
+    subprocess.run([sys.executable,"-B",str(Path(companion.__file__).resolve()),"start","--home",str(home),"--id",task,"--owner",owner],check=True,capture_output=True,**studio.quiet_process())
     time.sleep(2)
     assert session()[0]["pid"]==worker.pid
     assert request(token)["task"]["owner"]==owner

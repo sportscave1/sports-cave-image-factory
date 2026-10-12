@@ -95,7 +95,7 @@ async function save(restore) {
   await load(opened.path);
   panel.dispatchEvent(new CustomEvent("studio-saved",{bubbles:true,detail:{revision:opened.revision,path:opened.path}}));
   $("ed-diff").textContent=result.diff||"No source changes.";
-  if(result.frame)showFrame(result.frame);
+  if(result.frame)await showFrame(result.frame);
   msg(result.preview_error||"Saved to the actual draft. Revision "+opened.revision+".");
 }
 export async function mount(target,transport,frameCallback,options={}) {

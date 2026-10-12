@@ -1,6 +1,7 @@
 "use strict";
 (() => {
  const $=id=>document.getElementById(id); let popup=null, origin="", nonce="", connected=false, rows=[], expiry, releaseData=null, activeCandidate=null, lastSeen=0, trusted=false, selectedDraft="", heartbeatTimer;
+ let verifiedLive=null;
  let workspace=null,workspaceId=null,workspaceIntent="edit",workspaceModule=null,workspaceSupported=false,workspaceApproved=false,pendingDraft="",restoreAttempted=false,workspaceLoading=null,applicationSupported=false;const workspaceRequests=new Map();
  const message=s=>$("message").textContent=s;
  const selectionKey=()=>"studio-v6-last-draft:"+origin;
@@ -13,6 +14,8 @@
  function line(parent,tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;parent.append(e);return e;}
  function syncSelection(){
   const draft=rows.find(d=>d.id===selectedDraft),label=draft?`${draft.name} · ${draft.category} · ${draft.owner}`:"Select a registered draft";
+  const revision=$("revision-summary");
+  if(revision)revision.textContent=draft?`Draft ${draft.draft_commit||draft.base_commit||'unverified'} · saved revision ${draft.revision} · ${draft.dirty?'unfinished changes preserved':'clean'} · Live ${verifiedLive?.revision||'verification required'} · ${draft.live_relation==='live-newer'?'Live has newer changes — use Update Draft from Live':draft.live_relation==='current'?'same source revision':draft.live_relation==='diverged'?'source revisions differ — review integration':'Live comparison unavailable'}`:'Connect to verify Live and the selected application revision.';
   $("preview-selected").textContent=label;$("tests-selected").textContent=draft?label:"All registered drafts";
   $("selected-preview").disabled=$("resume-editor").disabled=!connected||!draft?.actionable;
  }
@@ -89,13 +92,14 @@
   if(d.type==="pong")$("connection").textContent="Local device connected";
   if(d.type==="catalog"){
    if(!Array.isArray(d.rows)||!Array.isArray(d.categories))return;
-   workspaceSupported=d.workspace_v6===true;applicationSupported=d.application_drafts===true;connected=true;heartbeat();trusted=d.trusted===true;lastSeen=Date.now();rows=applicationSupported?d.rows.filter(r=>r.kind==='application'&&!r.archived_at):[];
+   verifiedLive=d.live||null;workspaceSupported=d.workspace_v6===true;applicationSupported=d.application_drafts===true;connected=true;heartbeat();trusted=d.trusted===true;lastSeen=Date.now();rows=applicationSupported?d.rows.filter(r=>r.kind==='application'&&!r.archived_at):[];
    $('live-source').replaceChildren();line($('live-source'),'b',d.live?'Verified production source':'Production source verification required');if(d.live){line($('live-source'),'p',d.live.revision);line($('live-source'),'p','GitHub main and running Render deployment checked '+d.live.verified_at+'. Runtime health is not continuously monitored.');}else line($('live-source'),'p',d.live_error||'Refresh provider verification locally. No revision will be guessed.');line($('live-source'),'p','Production unchanged');
    $("connection").textContent="Local device connected";$("connect").hidden=true;$("connection-settings").open=false;$("refresh").disabled=$("disconnect").disabled=$("release-refresh").disabled=false;
    if(workspaceId&&!rows.some(r=>r.id===workspaceId&&r.actionable)){workspaceApproved=false;pendingDraft="";}
    if(selectedDraft&&!rows.some(r=>r.id===selectedDraft&&r.actionable))selectedDraft="";
-   if(!selectedDraft){const saved=rememberedDraft();if(rows.some(r=>r.id===saved&&r.actionable))selectedDraft=saved;}
-   if(!selectedDraft)selectedDraft=rows.find(r=>r.actionable)?.id||'';
+   if(!selectedDraft){const saved=Object.hasOwn(d,"default_draft_id")?d.default_draft_id:rememberedDraft();if(rows.some(r=>r.id===saved&&r.actionable))selectedDraft=saved;}
+   if(!selectedDraft&&rows.some(r=>r.id===d.default_draft_id&&r.actionable))selectedDraft=d.default_draft_id;
+   if(!selectedDraft&&!applicationSupported)selectedDraft=rows.find(r=>r.actionable)?.id||'';
    syncSelection();draw();message(applicationSupported?"Connected · choose an authorised OS copy to open its Editor here.":"This local companion needs the application-draft update. Existing worktrees and permissions are preserved.");clearTimeout(expiry);
    if(!trusted)expiry=setTimeout(()=>{send("disconnect");offline("Pairing expired. Reconnect to refresh local metadata.");},600000);
    if(!restoreAttempted){restoreAttempted=true;if(selectedDraft)openSelected("edit").catch(e=>message(e.message));}
@@ -121,7 +125,7 @@
   if(d.type==="error"){pendingDraft="";message(d.error||"Local operation unavailable.");$("release-preview-status").textContent=d.error||"Local operation unavailable.";}
  });
  // Only remember an address, never credentials. Browsers require a user gesture for the local popup.
- try{const saved=localStorage.getItem("studio-companion-origin");if(saved){const u=new URL(saved);if(u.protocol==="http:"&&u.hostname==="127.0.0.1"&&u.port&&!u.username&&!u.password&&!u.search&&!u.hash&&u.pathname==="/"){$("origin").value=u.origin;message("Trusted address remembered. Click Connect to reopen the secure localhost window; approval resumes automatically where permitted.");}}}catch{}
+ try{let saved=localStorage.getItem("studio-companion-origin");if(saved){const configured=$("origin").value;if(saved==="http://127.0.0.1:18761"&&configured==="http://127.0.0.1:18762")saved=configured;const u=new URL(saved);if(u.protocol==="http:"&&u.hostname==="127.0.0.1"&&u.port&&!u.username&&!u.password&&!u.search&&!u.hash&&u.pathname==="/"){$("origin").value=u.origin;message("Trusted address remembered. Click Connect to reopen the secure localhost window; approval resumes automatically where permitted.");}}}catch{}
  function heartbeat(){clearTimeout(heartbeatTimer);heartbeatTimer=setTimeout(()=>{if(!connected)return;if(!popup||popup.closed){offline("Local approval window closed. Click Connect; unsaved local editors are preserved.");return;}if(Date.now()-lastSeen>90000)$("connection").textContent="Reconnecting";send("ping");heartbeat();},60000);}
  const advanced=document.createElement('details');advanced.innerHTML='<summary>Advanced · technical task history</summary><p>Internal tasks and archived application drafts. Worktrees, ownership, tests and recovery records are retained.</p><button id="technical-refresh">Load technical records</button><pre id="technical-records"></pre>';$('history').append(advanced);$('technical-refresh').onclick=()=>send('technical-catalog');
  tab("editor");workspaceLoading=mountWorkspace(null).catch(e=>message("Editor could not load: "+e.message));
