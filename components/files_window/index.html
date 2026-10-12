@@ -821,6 +821,10 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
 
       const restored = restoredState();
       const query = new URLSearchParams(location.search);
+      const linkedProduct = query.get('psd_product_gid');
+      let linkedAutoOpen = null;
+      let desktopBridge = window.chrome && window.chrome.webview;
+      try { desktopBridge = window.parent.chrome?.webview || desktopBridge; } catch (_) {}
       const requestedRelativePath = query.get("relative_path") || "";
       const state = {
         rootPath: "",
@@ -1681,10 +1685,10 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       }
 
       function desktopPost(message) {
-        if (!window.chrome || !window.chrome.webview || typeof window.chrome.webview.postMessage !== "function") {
+        if (!desktopBridge || typeof desktopBridge.postMessage !== "function") {
           throw desktopError("Open in Sports Cave Desktop to use this action.");
         }
-        window.chrome.webview.postMessage(message);
+        desktopBridge.postMessage(message);
       }
 
       function transferSelection(items) {
@@ -3143,6 +3147,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
           if (state.outboundDrag || state.outboundPointer) cancelExternalDrag();
           else if (elements.modalBackdrop.classList.contains("open")) closeModal();
           else if (document.querySelector(".menu.open")) closeMenus();
+          else if (linkedProduct !== null && window.parent !== window) parent.postMessage({type:'sports-cave-psd-cancel'},location.origin);
           else clearSelection();
           return;
         }
@@ -3214,6 +3219,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
           }
           state.desktopCapabilities = new Set(Array.from(message.capabilities || []));
           state.desktopReady = true;
+          tryOpenLinkedFile();
           elements.helperPanel.classList.remove("visible");
           window.clearTimeout(state.helperTimer);
           return;
@@ -3233,8 +3239,8 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       }
 
       function initialiseDesktopBridge() {
-        if (!window.chrome || !window.chrome.webview) return;
-        window.chrome.webview.addEventListener("message", handleDesktopMessage);
+        if (!desktopBridge) return;
+        desktopBridge.addEventListener("message", handleDesktopMessage);
         try { desktopPost({ action: "hello", request_id: dragRequestId() }); } catch (_) {}
       }
 
@@ -3279,9 +3285,41 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         }
       });
 
+      function tryOpenLinkedFile() {
+        const item = linkedAutoOpen;
+        if (!item || !hasDesktopCapability('openFile')) return;
+        linkedAutoOpen = null;
+        if (state.selection.size === 1 && state.selection.has(item.path)
+            && state.items.some(current => current.id === item.id && current.path === item.path)) openItem(item);
+      }
+
+      async function openLinkedProduct() {
+        try {
+          const response = await fetch('/api/files-psd-open?product_gid='+encodeURIComponent(linkedProduct),{
+            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'files'})});
+          let target;
+          try { target = await response.json(); } catch (_) { throw new Error('Sign in with Files access and retry Open from Files.'); }
+          if (!response.ok) throw new Error(target.message || 'The linked PSD could not be resolved.');
+          state.searchByPath[target.folder_path] = '';
+          if (!await loadFolder(target.folder_path,{refresh:true})) return;
+          if (state.currentPath !== target.folder_path || state.loadingMore) throw new Error('The linked folder is not fully available. Refresh Files and retry Open from Files.');
+          const matches = state.items.filter(item => item.id === target.file_id && item.tag === 'file');
+          if (matches.length !== 1) throw new Error('The exact linked PSD is not available in this folder. Retry Open from Files; no similar filename was selected.');
+          const item = matches[0];
+          setSingleSelection(item.path);
+          const row = Array.from(elements.items.querySelectorAll('.file-item')).find(node => node.dataset.path === item.path);
+          row?.scrollIntoView({block:'nearest'});row?.focus({preventScroll:true});
+          showToast('Linked PSD selected. Use Open or Download.',{duration:5000});
+          linkedAutoOpen = item;tryOpenLinkedFile();
+        } catch (error) {
+          clearSelection();showToast(error.message || 'Sign in with Files access and retry Open from Files.',{kind:'error',duration:8000});
+        }
+      }
+
       async function initialise() {
         document.title = "Sports Cave Files";
         initialiseDesktopBridge();
+        if (linkedProduct !== null) { await openLinkedProduct(); return; }
         state.searchByPath[state.currentPath] = query.get("q") || state.searchByPath[state.currentPath] || "";
         const requestedPath = state.currentPath;
         const loaded = requestedRelativePath
@@ -3295,6 +3333,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         }
       }
 
+      window.addEventListener('pagehide',()=>desktopBridge?.removeEventListener?.('message',handleDesktopMessage),{once:true});
       initialise();
     </script>
   </body>

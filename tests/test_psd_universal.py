@@ -14,6 +14,18 @@ import psd_directory as psd
 
 class UniversalTests(unittest.IsolatedAsyncioTestCase):
     call = original.PsdOpenTests.call
+    async def test_files_resolves_verified_stable_id_and_never_creates_transfer(self):
+        response = await self.call(req=request(payload={'action':'files'}))
+        self.assertEqual(response.status_code,200)
+        value = json.loads(response.body)
+        self.assertEqual(value['file_id'],'id:1')
+        self.assertEqual(value['folder_path'],psd.ROOT)
+        self.assertEqual(len(self.manager._records),0)
+        self.read.assert_called_once_with('fake-test-token','id:1',include_preview=False)
+        self.assertEqual((await self.call(record=False,req=request(payload={'action':'files'}))).status_code,404)
+        self.assertEqual((await self.call(permitted=False,req=request(payload={'action':'files'}))).status_code,403)
+        self.assertEqual((await self.call(meta=metadata(fid='id:other'),req=request(payload={'action':'files'}))).status_code,403)
+
     async def test_describe_current_renamed_id_without_public_grants(self):
         response = await self.call(req=request(payload={'action':'describe'}))
         value = json.loads(response.body)

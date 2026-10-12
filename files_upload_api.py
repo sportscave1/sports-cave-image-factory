@@ -2394,7 +2394,7 @@ async def open_product_psd(request: Request):
             content = (Path(__file__).resolve().parent/'components'/'psd_open'/'index.html').read_text(encoding='utf-8')
             return HTMLResponse(content,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
         payload = await _json_body(request)
-        if set(payload) != {'action'} or payload.get('action') not in {'openPhotoshop','describe','preview'}:
+        if set(payload) != {'action'} or payload.get('action') not in {'openPhotoshop','describe','preview','files'}:
             raise FilesUploadError('Only the linked master can be opened. Arbitrary paths are not accepted.',status_code=400,code='psd_request_invalid')
         stage = 'mapping'
         mapping = await run_in_threadpool(psd_directory.directory)
@@ -2409,6 +2409,8 @@ async def open_product_psd(request: Request):
         if metadata.get('id') != record['dropbox_file_id'] or not psd_directory.approved_file(metadata):
             raise FilesUploadError('The linked PSD is no longer an approved master. Ask an administrator to review it.',status_code=403,code='psd_scope_denied')
         action = payload['action']
+        if action == 'files':
+            return JSONResponse({'ok':True,'file_id':metadata['id'],'folder_path':str(metadata.get('path_display') or metadata.get('path_lower')).rsplit('/',1)[0]},headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
         if action == 'describe':
             # Account navigation, never a public sharing link or download capability.
             path = str(metadata.get('path_display') or metadata.get('path_lower'))
