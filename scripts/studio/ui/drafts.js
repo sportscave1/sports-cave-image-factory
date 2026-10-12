@@ -1,17 +1,25 @@
 "use strict";
 const fragment = location.hash.slice(1);
 const params = new URLSearchParams(fragment);
-const token = fragment.startsWith("token=") ? params.get("token") : fragment;
+let token = fragment.startsWith("token=") ? params.get("token") : fragment;
 const intent = fragment.startsWith("token=") ? params.get("intent") : "open";
 history.replaceState(null, "", location.pathname);
 const $ = id => document.getElementById(id);
 let state, busy = false, dirty = false;
 function message(text) { $("message").textContent = text; }
-async function request(path, data) {
+async function request(path, data, retried = false) {
   const response = await fetch(path, {method: data ? "POST" : "GET", headers: {
     "X-Studio-Token": token, ...(data ? {"Content-Type": "application/json"} : {})
   }, ...(data ? {body: JSON.stringify(data)} : {})});
   const result = await response.json();
+  if (response.status === 401 && !retried) {
+    // Restore authentication without reloading the editor or replacing unsaved source.
+    let approvedOrigin;try { approvedOrigin = localStorage.getItem("studio-approved-origin"); } catch {}
+    if (approvedOrigin) {
+      const renewed = await fetch("/api/device", {method:"POST",headers:{"Content-Type":"application/json","X-Studio-Local":"1"},body:JSON.stringify({operation:"renew",origin:approvedOrigin})});
+      if (renewed.ok) {token=(await renewed.json()).token;return request(path,data,true);}
+    }
+  }
   if (!response.ok) throw new Error(result.error || "Request failed");
   return result;
 }

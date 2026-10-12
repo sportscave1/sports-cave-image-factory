@@ -20,10 +20,23 @@ ASSETS = {"/pair": ("pair.html", "text/html; charset=utf-8"),
 BLOCKER = "Full-application preview disabled: OS isolation and safety probes are not verified."
 
 class DraftServer(HTTPServer):
-    def __init__(self, home, task_id, owner, idle_seconds=900):
+    allow_reuse_address = False
+    def server_bind(self):
+        import socket
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+    def __init__(self, home, task_id, owner, idle_seconds=900, *, persistent=False, port=0):
         with studio.locked(home) as file:
             drafts.assigned(studio.read(file), task_id, owner)
         self.home, self.task_id, self.owner = home, task_id, owner
+        self.persistent = persistent
+        self.last_preview_activity = time.monotonic()
+        self.device = None
+        if persistent:
+            from device_trust import Trust
+            self.device = Trust(home, task_id, owner)
         self.token = secrets.token_urlsafe(32)
         self.idle_seconds = idle_seconds
         self.last_activity = time.monotonic()
@@ -32,7 +45,7 @@ class DraftServer(HTTPServer):
         self.release_preview = None
         self.release_candidate = None
         self.children = {}
-        super().__init__(("127.0.0.1", 0), Handler)
+        super().__init__(("127.0.0.1", port), Handler)
         self.timeout = 1
         self.origin = "http://127.0.0.1:" + str(self.server_port)
 
@@ -80,7 +93,7 @@ class DraftServer(HTTPServer):
             if child and child[1].is_alive() and not child[0].stopping:
                 target = child[0]
             else:
-                target = DraftServer(self.home, task_id, self.owner, self.idle_seconds)
+                target = DraftServer(self.home, task_id, self.owner, self.idle_seconds, persistent=self.persistent)
                 thread = threading.Thread(target=target.run, daemon=True)
                 self.children[task_id] = (target, thread)
                 thread.start()
@@ -91,6 +104,8 @@ class DraftServer(HTTPServer):
     def action(self, data):
         # Validate scope again on EVERY request; never accept owner/home/task from browser.
         action = data.get("action")
+        if action in {"start-preview", "restart-preview", "preview-event", "release-preview"}:
+            self.last_preview_activity = time.monotonic()
         if action in {"release-catalog","release-operation","release-preview"}:
             import releases
             if action=="release-catalog":return releases.catalog(self.home,self.task_id,self.owner)
@@ -185,10 +200,17 @@ class DraftServer(HTTPServer):
             return {"stopped": True}
         raise ValueError("Unsupported action.")
 
+    def idle_previews(self):
+        if time.monotonic() - self.last_preview_activity >= self.idle_seconds:
+            for preview in (self.preview_runtime, self.release_preview):
+                if preview and preview.name:
+                    preview.stop()
+
     def run(self):
         try:
-            while not self.stopping and time.monotonic() - self.last_activity < self.idle_seconds:
+            while not self.stopping and (self.persistent or time.monotonic() - self.last_activity < self.idle_seconds):
                 self.handle_request()
+                self.idle_previews()
         finally:
             for child, thread in self.children.values():
                 child.stopping = True
@@ -208,12 +230,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass  # Never log bearer tokens or user source paths.
 
-    def reply(self, status, data, content_type="application/json"):
+    def reply(self, status, data, content_type="application/json", cookie=None):
         body = json.dumps(data).encode() if content_type == "application/json" else data
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
@@ -232,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if authenticated:
             token = self.headers.get("X-Studio-Token", "")
-            if not hmac.compare_digest(token.encode("utf-8"), self.server.token.encode("ascii")):
+            if not (hmac.compare_digest(token.encode("utf-8"), self.server.token.encode("ascii")) or (self.server.device and self.server.device.valid(token))):
                 self.reply(401, {"error": "Reopen the launcher URL to authenticate."})
                 return False
             self.server.last_activity = time.monotonic()
@@ -241,7 +265,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.guard(authenticated=self.path.startswith("/api/")):
             return
-        if self.path == "/api/state":
+        if self.path == "/api/ping":
+            try:
+                with studio.locked(self.server.home) as file:
+                    studio.task_by_id(studio.read(file), self.server.task_id, self.server.owner)
+                self.reply(200, {"connected": True})
+            except (ValueError, RuntimeError, OSError) as exc:
+                self.reply(403, {"error": str(exc)})
+        elif self.path == "/api/state":
             try:
                 self.reply(200, self.server.state())
             except (ValueError, RuntimeError, OSError) as exc:
@@ -252,7 +283,60 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.reply(404, {"error": "Not found."})
 
+    def device_request(self):
+        if not self.guard() or not self.server.device:
+            return
+        if self.headers.get("Origin") != self.server.origin or self.headers.get("X-Studio-Local") != "1":
+            self.reply(403, {"error": "Same-origin local confirmation required."})
+            return
+        try:
+            if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1 or self.headers.get("Content-Type") != "application/json":
+                raise ValueError("Bounded JSON required.")
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 2048:
+                raise ValueError("Bounded JSON required.")
+            data = json.loads(self.rfile.read(size))
+            if not isinstance(data, dict):
+                raise ValueError("Expected a device operation object.")
+            self.server.state()  # Recheck real registry ownership on renewal too.
+            from http.cookies import SimpleCookie
+            from device_trust import exact_origin, digest
+            origin = exact_origin(data.get("origin"))
+            legacy_name = "studio_device_" + str(self.server.server_port)
+            name = legacy_name + "_" + digest(origin)[:16]
+            cookie = SimpleCookie(self.headers.get("Cookie", ""))
+            secret = cookie[name].value if name in cookie else (cookie[legacy_name].value if legacy_name in cookie else "")
+            if data.get("operation") == "renew":
+                secret, token = self.server.device.renew(secret, data.get("origin"))
+            else:
+                if not self.guard(authenticated=True):
+                    return
+                if data.get("operation") == "trust":
+                    # Enrollment/replacement requires the local bootstrap, never a renewed session.
+                    if not hmac.compare_digest(self.headers.get("X-Studio-Token", ""), self.server.token):
+                        raise ValueError("Fresh local launcher approval required.")
+                    secret, token = self.server.device.enroll(origin, secret)
+                elif data.get("operation") == "revoke":
+                    self.server.device.revoke()
+                    self.reply(200, {"revoked": True}, cookie=name+"=; HttpOnly; SameSite=Strict; Path=/api/device; Max-Age=0")
+                    return
+                elif data.get("operation") == "stop":
+                    self.server.stopping = True
+                    self.reply(200, {"stopped": True})
+                    return
+                else:
+                    raise ValueError("Unknown device operation.")
+            self.reply(200, {"token": token, "expires_in": 300}, cookie=name+"="+secret+"; HttpOnly; SameSite=Strict; Path=/api/device; Max-Age=2592000")
+        except (ValueError, RuntimeError, OSError) as exc:
+            self.reply(403, {"error": str(exc)})
+
     def do_POST(self):
+        if self.path == "/api/device":
+            if not self.server.device:
+                self.reply(404, {"error": "Use the V5 persistent companion for device trust."})
+            else:
+                self.device_request()
+            return
         if not self.guard(authenticated=True):
             return
         if self.path != "/api/action":

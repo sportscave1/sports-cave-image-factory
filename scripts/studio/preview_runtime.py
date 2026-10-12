@@ -76,7 +76,7 @@ class Preview:
             if self.task in leases:
                 raise RuntimeError("This worktree already has a preview lease. Stop its owning session first.")
             self.lease=uuid.uuid4().hex
-            leases[self.task]={"id":self.lease,"owner":self.owner,"created_at":studio.now()}
+            leases[self.task]={"id":self.lease,"owner":self.owner,"created_at":studio.now(),"pid":__import__("os").getpid()}
             studio.atomic(file,registry)
         try:
             return self._start()
@@ -94,6 +94,13 @@ class Preview:
         name="sc-studio-preview-"+uuid.uuid4().hex[:12]
         boundary.docker("create",*options(image,name,self.task),"sleep","900")
         self.name=name
+        with studio.locked(self.home) as file:
+            registry=studio.read(file)
+            lease=registry.get("preview_leases",{}).get(self.task,{})
+            if lease.get("id")!=self.lease:
+                raise RuntimeError("Preview lease changed during startup.")
+            lease["container"]=name
+            studio.atomic(file,registry)
         try:
             config=json.loads(boundary.docker("inspect",name).stdout)[0]
             policy=validate_runtime(config,image,self.task)
