@@ -1,3 +1,4 @@
+import psd_directory
 from table_design import TABLE_ROW_HEIGHT
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta, timezone
@@ -659,9 +660,7 @@ def _normalise_row(row):
         "Needs certificate": "muted",
     }.get(updated["certificate"], "default")
     updated["prodigi"] = _prodigi_label(updated)
-    updated["file"] = files_window_launcher.files_window_href(
-        ORDERS_FILES_RELATIVE_FOLDER
-    )
+    updated["file"] = "Not linked"
     return updated
 
 
@@ -2018,8 +2017,10 @@ def _render_ledger_diagnostics():
 
 def _display_rows(rows, *, normalised=False):
     output = []
+    psd_mapping = psd_directory.directory()
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
+        display_row["file"] = psd_directory.display_link(row, psd_mapping)
         if display_row.get("order"):
             display_row["order"] = f"{COPY_ORDER_ICON} {display_row['order']}"
         output.append(display_row)
@@ -2206,7 +2207,7 @@ def _column_config():
         "prodigi": st.column_config.TextColumn("Fulfilment", width="small"),
         "file": st.column_config.LinkColumn(
             "PSD",
-            display_text="PSD",
+            display_text=r"(Open PSD|Not linked)$",
             width="small",
         ),
     }
@@ -2704,7 +2705,7 @@ def _render_orders_table(rows):
             key=GRID_KEY,
         )
         _render_order_copy_click_handler()
-        _render_files_click_handler()
+        psd_directory.render_missing_link_guard(st)
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 

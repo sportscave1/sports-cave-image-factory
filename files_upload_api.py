@@ -2231,7 +2231,41 @@ async def paste_files(request: Request):
         return _response_error(error)
 
 
+async def open_product_psd(request: Request):
+    """Authenticate before resolving one mapped ID on an explicit click."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("PSD request is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_user, request)
+        if not user or not os_accounts.can_access_page(user, "Files"):
+            raise FilesUploadError("Access not approved.", status_code=403, code="access_denied")
+        import psd_directory
+        from urllib.parse import urlsplit
+        pid = psd_directory.product_id({'shopify_product_gid': request.query_params.get('product_gid')})
+        mapping = psd_directory.directory()
+        record = mapping.get(pid) or {}
+        if not psd_directory.link({'shopify_product_gid': pid}, mapping):
+            raise FilesUploadError("No approved PSD is linked.", status_code=404)
+        context = await run_in_threadpool(_dropbox_context)
+        metadata = await run_in_threadpool(dropbox_integration.psd_open_metadata,
+                                          context['access_token'], record['dropbox_file_id'])
+        if metadata.get('id') != record['dropbox_file_id'] or not psd_directory.approved_file(metadata):
+            raise FilesUploadError("PSD is no longer in the approved folder.", status_code=403)
+        target = str(metadata.get('preview_url') or '')
+        parsed = urlsplit(target)
+        # Only an API-provided preview: no share link creation or temporary downloads.
+        valid = (parsed.scheme == 'https' and parsed.netloc == 'www.dropbox.com'
+                 and parsed.path.startswith(('/home/', '/preview/', '/scl/fi/'))
+                 and not parsed.query and not any(c.isspace() for c in target))
+        if not valid:
+            raise FilesUploadError("Dropbox permission-protected preview is unavailable.", status_code=503)
+        return RedirectResponse(target, status_code=307, headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
+    except Exception as error:
+        return _response_error(error)
+
+
 FILES_UPLOAD_ROUTES = (
+    ("/api/files-psd-open", open_product_psd, ("GET",)),
     ("/files-window", files_window_page, ("GET",)),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),
     ("/api/files-list", list_files, ("GET",)),

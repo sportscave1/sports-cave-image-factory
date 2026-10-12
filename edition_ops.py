@@ -14,6 +14,7 @@ import streamlit as st
 
 from activity_log import record_activity_log
 import shopify_sync
+import psd_directory
 from ui_option_ordering import alphabetize_options
 
 
@@ -53,7 +54,7 @@ EDITABLE_FIELDS = (
 )
 
 VISIBLE_COLUMNS = (
-    "product_title", "edition_next_number", "edition_total", "sync_status", "admin_url", "online_store_url",
+    "product_title", "edition_next_number", "edition_total", "display_status", "psd_file",
 )
 
 CSV_COLUMNS = (
@@ -312,7 +313,7 @@ def _normalise_row(row, *, preserve_derived=True):
         or ""
     )
     updated["handle"] = updated["shopify_handle"]
-    updated["status"] = _normalise_text(updated.get("status") or updated.get("Status") or "ACTIVE")
+    updated["status"] = _normalise_text(updated.get("status") or updated.get("Status") or "")
     updated["edition_enabled"] = _coerce_bool(updated.get("edition_enabled", updated.get("Enabled")))
     updated["edition_total"] = _coerce_int(updated.get("edition_total", updated.get("Edition total")), 100)
     updated["edition_next_number"] = _coerce_int(
@@ -379,7 +380,7 @@ def _row_from_product(product):
         "thumbnail_url": product.get("thumbnail_url") or "",
         "product_title": product.get("title") or "Untitled Product",
         "handle": product.get("handle") or "",
-        "status": product.get("status") or "ACTIVE",
+        "status": product.get("status") or "",
         "edition_enabled": _coerce_bool(edition.get("edition_enabled")),
         "edition_total": _coerce_int(edition.get("edition_total"), 100),
         "edition_next_number": _coerce_int(edition.get("edition_next_number"), 1),
@@ -559,7 +560,7 @@ def _row_from_supabase_product(product):
         "product_title": product.get("product_title") or product.get("title") or "Untitled Product",
         "shopify_handle": product.get("shopify_handle") or product.get("handle") or "",
         "handle": product.get("shopify_handle") or product.get("handle") or "",
-        "status": product.get("shopify_status") or "ACTIVE",
+        "status": product.get("shopify_status") or "",
         "edition_enabled": not allocation_blocked and status != "inactive" and bool(product.get("active", True)),
         "edition_total": total,
         "edition_next_number": next_number,
@@ -1976,10 +1977,13 @@ def _apply_csv_import(uploaded_file):
     return True
 
 
-def _editor_payload(row):
+def _editor_payload(row, psd_mapping=None):
     normalised = _normalise_row(row)
     keys = ("edition_product_id", "shopify_product_gid", *VISIBLE_COLUMNS)
-    return {key: normalised.get(key) for key in keys}
+    payload = {key: normalised.get(key) for key in keys}
+    payload["display_status"] = psd_directory.status(normalised)
+    payload["psd_file"] = psd_directory.display_link(normalised, psd_mapping if psd_mapping is not None else psd_directory.directory())
+    return payload
 
 
 def _editor_visible_rows(rows):
@@ -2034,9 +2038,8 @@ def _column_config():
         "edition_sold_count": st.column_config.NumberColumn("Sold",width="small"),
         "edition_remaining": st.column_config.NumberColumn("Remaining",width="small"),
         "edition_status": st.column_config.TextColumn("Status"),
-        "sync_status": st.column_config.TextColumn("Shopify Sync",width="small"),
-        "admin_url": st.column_config.LinkColumn("Open Admin", display_text="Open"),
-        "online_store_url": st.column_config.LinkColumn("Open live product", display_text="Open"),
+        "display_status": st.column_config.TextColumn("Status",width="small"),
+        "psd_file": st.column_config.LinkColumn("File", display_text=r"(Open PSD|Not linked)$", width="small"),
     }
 
 
@@ -2445,10 +2448,13 @@ def _render_table():
     criteria=(selected,status)
     if st.session_state.get('edition-grid-criteria')!=criteria:
         st.session_state['edition-grid-criteria']=criteria;st.session_state['edition-grid-page']=0;st.session_state.pop(EDITOR_KEY,None)
-    st.data_editor([_editor_payload(r) for r in visible],hide_index=True,width='stretch',height=600,num_rows='fixed',
+    psd_mapping = psd_directory.directory()
+    st.data_editor([_editor_payload(r, psd_mapping) for r in visible],hide_index=True,width='stretch',height=600,num_rows='fixed',
         key=EDITOR_KEY,column_order=VISIBLE_COLUMNS,on_change=_capture_editor_changes,args=(deepcopy(visible),),
         column_config=_column_config(),row_height=32,
-        disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url'])
+        disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url','display_status','psd_file'])
+    psd_directory.render_missing_link_guard(st)
+    psd_directory.render_import(rows, st)
     if selected!=ALL_PRODUCTS_SELECTION:
         for row in visible:
             if row.get('sync_error'):
