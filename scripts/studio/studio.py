@@ -101,9 +101,16 @@ def identity(d, item):
     path = Path(item["worktree_path"])
     if not path.is_dir():
         raise RuntimeError("Workspace missing; preserve registry entry and investigate.")
-    if common(path) != d["common_dir"] or git(path, "branch", "--show-current") != item["branch"]:
+    # One fresh Git invocation reads the same three identity facts. Nothing is
+    # cached: owner/source/lease checks in callers still run on every request.
+    facts=git(path,"rev-parse","--path-format=absolute","--git-common-dir",
+              "--show-toplevel","--abbrev-ref","HEAD").splitlines()
+    if len(facts)!=3:
+        raise RuntimeError("Incomplete workspace identity; refusing to reassign.")
+    common_dir,top_level,branch=facts
+    if str(Path(common_dir).resolve()) != d["common_dir"] or branch == "HEAD" or branch != item["branch"]:
         raise RuntimeError("Workspace identity mismatch; refusing to reassign.")
-    if Path(git(path, "rev-parse", "--show-toplevel")).resolve() != path.resolve():
+    if Path(top_level).resolve() != path.resolve():
         raise RuntimeError("Not the assigned worktree root")
     return path
 

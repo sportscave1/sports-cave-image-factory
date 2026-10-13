@@ -17,7 +17,7 @@ PROFILE_SHA256="4540a0c176f2bdd83936ef958c0b306dc6ab6ea4310608149d11ac0803c68022
 def profile_digest():
     # Git may normalise CRLF on checkout. Pin identical LF policy bytes.
     return hashlib.sha256(PROFILE.read_bytes().replace(b"\r\n",b"\n")).hexdigest()
-IMAGE_TAG="sha256:5a22bde08670c241dd349f56e374ee5510a58f9f13d077831d1cd9de8746d061"
+IMAGE_TAG="sha256:d74525e5ce7bd49a602399f6ac1e16476b9158bfaab00bb00703b42a85815baa"
 RELAY="""import sys,urllib.request,urllib.error
 data=sys.stdin.buffer.read(12000)
 try:
@@ -176,8 +176,11 @@ class Preview:
             config=json.loads(self._docker("inspect",self.name).stdout)[0]
             if config["Config"]["Labels"].get("sports-cave-studio.task")!=self.task:
                 raise RuntimeError("Container ownership mismatch.")
-        allowed={"frame","health","reload-source","login-synthetic","click","inspect","text","key","scroll","size","viewport","refresh","navigate"}
+        allowed={"frame","health","reload-source","login-synthetic","click","inspect","text","key","scroll","size","viewport","refresh","navigate","input-batch"}
         if not isinstance(data,dict) or data.get("action") not in allowed:raise ValueError("Unsupported preview event")
+        if data.get('action')=='input-batch':
+            from preview_input import validate_batch
+            data={'action':'input-batch','page':data.get('page'),'events':validate_batch(data)}
         if data.get('action')=='viewport':
             w,h=data.get('width'),data.get('height')
             if type(w) is not int or type(h) is not int or not 320<=w<=1920 or not 480<=h<=1440:raise ValueError('Unsupported viewport bounds')
@@ -236,7 +239,7 @@ class Preview:
             "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],
             input=archive,capture_output=True,timeout=30, **studio.quiet_process())
         if result.returncode: raise RuntimeError("Source refresh transfer failed.")
-        frame=self.event({"action":"reload-source"})
+        frame=self.event({"action":"reload-source","changed_files":list(paths or [])})
         self.manifest=manifest
         return frame
 
