@@ -1,4 +1,7 @@
 import psd_directory
+import print_jpg
+import hashlib
+import html
 from table_design import TABLE_ROW_HEIGHT
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta, timezone
@@ -112,6 +115,7 @@ VISIBLE_COLUMNS = (
     "date",
     "prodigi",
     "file",
+    "print_jpg",
 )
 
 
@@ -1616,6 +1620,9 @@ def _selected_indices_from_state():
 
 def _selected_rows_from_state(rows):
     rows = rows or []
+    if st.session_state.get('orders-narrow-view'):
+        selected_ids = set(st.session_state.get('orders-mobile-selection') or [])
+        return [_normalise_row(row) for row in rows if _mobile_unit_id(row) in selected_ids]
     selected = []
     for index in _selected_indices_from_state():
         if 0 <= index < len(rows):
@@ -2021,6 +2028,9 @@ def _display_rows(rows, *, normalised=False):
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
+        display_row["print_jpg"] = print_jpg.state(row, psd_mapping.get(psd_directory.product_id(row)))['label']
+        import edition_test
+        if edition_test.eligible(row,psd_mapping.get(psd_directory.product_id(row))):display_row['print_jpg']='/edition-jpg-test#TEST JPG'
         if display_row.get("order"):
             display_row["order"] = f"{COPY_ORDER_ICON} {display_row['order']}"
         output.append(display_row)
@@ -2197,19 +2207,20 @@ def _render_files_click_handler():
 
 def _column_config():
     return {
-        "order": st.column_config.TextColumn("Order", width="small"),
-        "edition": st.column_config.TextColumn("Edition", width="small"),
-        "customer": st.column_config.TextColumn("Customer", width="medium"),
-        "product": st.column_config.TextColumn("Product", width="medium"),
-        "variant": st.column_config.TextColumn("Variant", width="small"),
-        "shipping": st.column_config.TextColumn("Shipping", width="small"),
-        "date": st.column_config.TextColumn("Date", width="small"),
-        "prodigi": st.column_config.TextColumn("Fulfilment", width="small"),
+        "order": st.column_config.TextColumn("Order", width=76),
+        "edition": st.column_config.TextColumn("Edition", width=74),
+        "customer": st.column_config.TextColumn("Customer", width=80),
+        "product": st.column_config.TextColumn("Product", width=150),
+        "variant": st.column_config.TextColumn("Variant", width=100),
+        "shipping": st.column_config.TextColumn("Shipping", width=76),
+        "date": st.column_config.TextColumn("Date", width=74),
+        "prodigi": st.column_config.TextColumn("Fulfilment", width=94),
         "file": st.column_config.LinkColumn(
             "PSD",
             display_text=r"(Open PSD|Not linked|Unavailable)$",
-            width="small",
+            width=82,
         ),
+        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(TEST JPG|Needs Setup|Blocked|Review)$",width=94,help="Only verified SC3284 unit 1 is enabled for a native-resolution TEST JPG. Other units remain disabled; production print approval is separate."),
     }
 
 
@@ -2690,7 +2701,22 @@ def _render_admin_panel(rows):
 def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
+    if st.session_state.get('orders-narrow-view'):
+        _render_mobile_orders(rows)
+        return
     _render_inline_prodigi_actions(rows)
+    selected_print_rows = _selected_rows_from_state(rows)
+    if selected_print_rows:
+        with st.expander("Selected unit details / Print JPG", expanded=False):
+            mapping = psd_directory.page_directory(st)
+            for selected in selected_print_rows:
+                status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
+                st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
+                st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
+                if edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
+                    st.link_button("Generate / Preview TEST JPG", "/edition-jpg-test#TEST JPG")
+                else:
+                    st.caption(f"Print JPG — {status['label']}: {status['reason']}")
     with st.container(border=False, key="orders-table"):
         st.dataframe(
             _display_table_payload(rows, normalised=True),
@@ -2708,6 +2734,47 @@ def _render_orders_table(rows):
         psd_directory.render_missing_link_guard(st)
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+
+
+def _mobile_unit_id(row):
+    return hashlib.sha256(json.dumps([str(row.get('shopify_order_id') or ''), str(row.get('shopify_line_item_id') or ''), int(row.get('allocation_index') or 1), str(row.get('shopify_product_id') or '')], default=str).encode()).hexdigest()[:20]
+
+
+def _mobile_toggle(key, unit):
+    selected = set(st.session_state.get('orders-mobile-selection') or [])
+    if st.session_state.get(key): selected.add(unit)
+    else: selected.discard(unit)
+    st.session_state['orders-mobile-selection'] = list(selected)
+
+
+def _render_mobile_orders(rows):
+    mapping = psd_directory.page_directory(st)
+    for row in rows:
+        unit = _mobile_unit_id(row)
+        key = 'orders-mobile-check-' + unit
+        with st.container(border=True, key='orders-mobile-card-' + unit):
+            st.checkbox(f"{row.get('order')} · {row.get('edition')}", key=key, on_change=_mobile_toggle, args=(key, unit))
+            if row.get('admin_url'): st.link_button('Open Order', row['admin_url'])
+            st.markdown(f"**{row.get('product')}**")
+            st.caption(f"{row.get('customer')} · {row.get('variant_full')}")
+            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {row.get('prodigi')}")
+            link = psd_directory.link(row, mapping)
+            if link: st.link_button('Open PSD', link + '#Open PSD')
+            else: st.caption('PSD: Not linked')
+            status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
+            if edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
+                st.link_button("Generate / Preview TEST JPG", "/edition-jpg-test#TEST JPG")
+            else:
+                st.caption(f"Print JPG: {status['label']} — {status['reason']}")
+    psd_directory.render_missing_link_guard(st)
+
+
+def _responsive_orders_mode():
+    if getattr(st, '__name__', '') != 'streamlit': return
+    widget = components.declare_component('orders_viewport', path=str(BASE_DIR / 'components/orders_viewport'))
+    prior = bool(st.session_state.get('orders-narrow-view'))
+    narrow = widget(prior=prior, default=False, key='orders-viewport-mode')
+    st.session_state['orders-narrow-view'] = narrow is True
 
 
 def _render_orders_search_form():
@@ -2786,6 +2853,7 @@ def _render_orders_data_area():
     # those orders so a quantity-2 line can never lose its second allocation here.
     visible_rows = rows
 
+    _responsive_orders_mode()
     _render_top_actions(visible_rows, None)
 
     _render_orders_table(visible_rows)

@@ -2513,7 +2513,10 @@ async def download_product_psd(request: Request):
 
 from files_native_launch import prepare as prepare_native_open, claim as claim_native_open, page as native_open_page
 
+from edition_test_api import ROUTES as EDITION_TEST_ROUTES
+
 FILES_UPLOAD_ROUTES = (
+    *EDITION_TEST_ROUTES,
     ("/files-psd-picker", psd_picker_page, ("GET",)),
     ("/api/files-psd-options", psd_picker_options, ("GET",)),
     ("/api/files-psd-attach", attach_product_psd, ("POST",)),

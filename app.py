@@ -12112,6 +12112,9 @@ def render_settings_page():
     st.title("Developer")
     st.caption("Protected setup tools. Diagnostics run only when you click a button.")
 
+    import print_specifications
+    print_specifications.render_reference(st)
+
     with st.expander("Basic App Info", expanded=True):
         st.write(f"**App version:** {APP_VERSION}")
         st.write(f"**Git SHA:** {os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_COMMIT') or 'local'}")

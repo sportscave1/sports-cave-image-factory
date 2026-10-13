@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><script>
+let prior=false;
+const send=(type,extra={})=>parent.postMessage({isStreamlitMessage:true,type,...extra},'*');
+function measure(){const narrow=parent.innerWidth<1050;if(narrow!==prior){prior=narrow;send('streamlit:setComponentValue',{value:narrow,dataType:'json'});}}
+addEventListener('message',event=>{if(event.data?.type==='streamlit:render'){prior=!!event.data.args.prior;measure();send('streamlit:setFrameHeight',{height:0});}});
+parent.addEventListener('resize',measure);send('streamlit:componentReady',{apiVersion:1});send('streamlit:setFrameHeight',{height:0});
+</script></body></html>

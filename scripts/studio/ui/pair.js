@@ -34,6 +34,17 @@
    });return;
   }
   if(busy)return;
+  if(d.type==='edition-download'){
+   busy=true;try{send('edition-download',{result:await api({action:'edition-test-download',job_id:d.job_id})});}catch(e){send('edition-download',{error:e.message});}finally{busy=false;}return;
+  }
+  if(d.type==='edition-test'){
+   busy=true;
+   try{let job=await api({action:'edition-test-start',grant:d.grant});send('edition-progress',{status:'Generating the verified #002/100 TEST JPG in local Photoshop...'});
+    for(let i=0;i<200;i++){await new Promise(r=>setTimeout(r,1000));const current=await api({action:'edition-test-status',job_id:job.job_id});if(current.status==='Blocked')throw Error(current.error);if(current.status==='Ready'){send('edition-result',{result:await api({action:'edition-test-result',job_id:job.job_id})});status('Finished verified SC3284 TEST JPG. No production print approval.');return;}}
+    throw Error('Photoshop is still working. Check its dialog before retrying.');
+   }catch(e){send('edition-result',{error:e.message});status(e.message);}finally{busy=false;}return;
+  }
+
   try{busy=true;
    if(d.type==="application-request"){
     const q=d.request||{};applicationPlan=await api({action:'application-prepare',operation:q.operation,draft_id:q.draft_id,name:q.name});

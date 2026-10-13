@@ -37,6 +37,11 @@
 [data-testid="stForm"]:has(.st-key-orders_search_text) [data-testid="stCaptionContainer"] { margin: 0; min-height: 22px; }
 .st-key-orders-actions { gap: 6px; }
 .st-key-orders-table [data-testid="stDataFrame"] { height: auto !important; }
+.st-key-orders-table { min-width: 0; max-width: 100%; }
+[class*="st-key-orders-mobile-card-"] { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+[class*="st-key-orders-mobile-card-"] [data-testid="stVerticalBlock"] { gap: 3px; }
+[class*="st-key-orders-mobile-card-"] p { font-size: 12px; }
+[class*="st-key-orders-mobile-card-"] button { min-height: 28px; }
 .st-key-orders-table [data-testid="stDataFrameResizable"] {
   height: clamp(280px, calc(100dvh - var(--sc-topbar-height, 64px) - 180px), 760px) !important;
 }

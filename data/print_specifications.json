@@ -1,0 +1,376 @@
+{
+  "version": 2,
+  "master_strategy": {
+    "name": "largest_approved_size_first",
+    "master_size": "XL",
+    "scope": "One JPG per exact verified order-line unit and assigned edition; compatible targets reuse the same file",
+    "sizing": "fitPrintArea",
+    "allow_unapproved_padding": false,
+    "allow_stretch": false,
+    "allow_badge_crop": false,
+    "guidance_source": "https://www.prodigi.com/faq/images/",
+    "pixel_specification_source": "https://www.prodigi.com/print-api/docs/reference/#product-details",
+    "verified_on": "2026-10-13",
+    "note": "Workflow guidance verified; this does not verify any mapped SKU print geometry, bleed or margins."
+  },
+  "storefront_references": {
+    "S": {
+      "physical_mm": [
+        300,
+        210
+      ],
+      "pixels_300ppi": [
+        3543,
+        2480
+      ],
+      "verification_status": "Provisional storefront reference",
+      "source": "Owner supplied 2026-10-13"
+    },
+    "M": {
+      "physical_mm": [
+        450,
+        300
+      ],
+      "pixels_300ppi": [
+        5315,
+        3543
+      ],
+      "verification_status": "Provisional storefront reference",
+      "source": "Owner supplied 2026-10-13"
+    },
+    "L": {
+      "physical_mm": [
+        620,
+        450
+      ],
+      "pixels_300ppi": [
+        7323,
+        5315
+      ],
+      "verification_status": "Provisional storefront reference",
+      "source": "Owner supplied 2026-10-13"
+    },
+    "XL": {
+      "physical_mm": [
+        870,
+        620
+      ],
+      "pixels_300ppi": [
+        10276,
+        7323
+      ],
+      "verification_status": "Provisional storefront reference",
+      "source": "Owner supplied 2026-10-13"
+    }
+  },
+  "specifications": [
+    {
+      "frame": "Black",
+      "size": "XL",
+      "prodigi_sku": "GLOBAL-CFP-A1",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1\" (A1)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Black",
+      "size": "L",
+      "prodigi_sku": "GLOBAL-CFP-A2",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4\" (A2)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Black",
+      "size": "M",
+      "prodigi_sku": "GLOBAL-CFP-A3",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5\" (A3)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Black",
+      "size": "S",
+      "prodigi_sku": "GLOBAL-CFP-A4",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7\" (A4)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Oak",
+      "size": "XL",
+      "prodigi_sku": "GLOBAL-CFP-A1",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1\" (A1)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Oak",
+      "size": "L",
+      "prodigi_sku": "GLOBAL-CFP-A2",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4\" (A2)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Oak",
+      "size": "M",
+      "prodigi_sku": "GLOBAL-CFP-A3",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5\" (A3)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Oak",
+      "size": "S",
+      "prodigi_sku": "GLOBAL-CFP-A4",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7\" (A4)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "White",
+      "size": "XL",
+      "prodigi_sku": "GLOBAL-CFP-A1",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1\" (A1)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "White",
+      "size": "L",
+      "prodigi_sku": "GLOBAL-CFP-A2",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4\" (A2)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "White",
+      "size": "M",
+      "prodigi_sku": "GLOBAL-CFP-A3",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5\" (A3)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "White",
+      "size": "S",
+      "prodigi_sku": "GLOBAL-CFP-A4",
+      "supplier_description": "Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7\" (A4)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Unframed",
+      "size": "XL",
+      "prodigi_sku": "GLOBAL-FAP-A1",
+      "supplier_description": "EMA, Enhanced Matte Art Paper, 200gsm, 59.4x84.1cm / 23.4x33.1\" (A1)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Unframed",
+      "size": "L",
+      "prodigi_sku": "GLOBAL-FAP-A2",
+      "supplier_description": "EMA, Enhanced Matte Art Paper, 200gsm, 42x59.4cm / 16.5x23.4\" (A2)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Unframed",
+      "size": "M",
+      "prodigi_sku": "GLOBAL-FAP-A3",
+      "supplier_description": "EMA, Enhanced Matte Art Paper, 200gsm, 29.7x42cm / 11.7x16.5\" (A3)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    },
+    {
+      "frame": "Unframed",
+      "size": "S",
+      "prodigi_sku": "GLOBAL-FAP-A4",
+      "supplier_description": "EMA, Enhanced Matte Art Paper, 200gsm, 21x29.7cm / 8.3x11.7\" (A4)",
+      "printable_mm": null,
+      "horizontalResolution": null,
+      "verticalResolution": null,
+      "pixel_dimensions": null,
+      "bleed_mm": null,
+      "margins_mm": null,
+      "orientation": "landscape_reference",
+      "colour": {
+        "mode": null,
+        "profile": null
+      },
+      "source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; not a supplier specification",
+      "verification_status": "Unverified"
+    }
+  ],
+  "warnings": [
+    "Storefront Unframed Large is 620 x 450 mm; existing GLOBAL-FAP-A2 description is 594 x 420 mm. No mapping is changed.",
+    "No authorised Prodigi SKU-resolution client is available in this codebase. Missing supplier requirements block Print Ready."
+  ]
+}
