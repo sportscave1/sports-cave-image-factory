@@ -14,16 +14,16 @@ class PremiumCatalogueTests(unittest.TestCase):
   section=deepcopy(catalogue_doc()['middle_sections'][-1]);base=section['products'][0]
   section['products']=[{**deepcopy(base),'id':'gid://shopify/Product/'+str(i+1),'title':'63 Years Later: Ryan Fox Open Championship Wall Art','url':'https://www.sportscaveshop.com/products/art-'+str(i)} for i in range(n)]
   return section
- def test_count_selects_hero_not_saved_columns(self):
+ def test_single_keeps_pair_width_not_saved_columns(self):
   for columns in (1,2):
    s=self.section(1);s['settings']['columns']=columns
-   h=catalogue_html(s);self.assertIn('width="552"',h);self.assertNotIn('sc-cat-item',h)
-  s=self.section(2);s['products'][1]['status']='DRAFT';self.assertIn('width="552"',catalogue_html(s))
+   h=catalogue_html(s);self.assertIn('width="274"',h);self.assertNotIn('sc-cat-item',h)
+  s=self.section(2);s['products'][1]['status']='DRAFT';self.assertIn('width="274"',catalogue_html(s))
  def test_counts_and_two_up_fallback(self):
-  for n,c in ((2,2),(3,3),(4,4),(5,3),(6,3),(7,4),(12,4)):
+  for n in range(1,13):
    s=self.section(n);s['settings']['columns']=1;h=catalogue_html(s)
-   self.assertEqual(desktop_columns(s['products']),c);self.assertEqual(h.count('class="sc-cat-item sc-cat-'+str(c)+'"'),n)
-   self.assertNotIn('sc-stack',h);self.assertIn('width:50%',h)
+   self.assertEqual(desktop_columns(s['products']),2);self.assertNotIn('sc-cat-item',h)
+   self.assertNotIn('sc-stack',h);self.assertIn('width="50%"',h)
    self.assertEqual(len(Markup(h).images),n)
   s=self.section(4);s['products'][0]['title']='Very long product identity '*8;self.assertEqual(desktop_columns(s['products']),2)
  def test_alt_and_aspect_ratio(self):
@@ -42,15 +42,15 @@ class PremiumCatalogueTests(unittest.TestCase):
      if tag!='img':continue
      cell=next(a for t,a in reversed(markup.tags[:index]) if t=='td')
      self.assertEqual(cell['bgcolor'],'#151515')
-     self.assertEqual(cell['style'],'padding:0')
+     self.assertTrue(cell['style'].startswith('padding:0;'))
      self.assertIn('width:100%',attrs['style']);self.assertIn('height:auto',attrs['style'])
      self.assertIn('border:0',attrs['style'])
      for forbidden in ('object-fit','border-radius','box-shadow','padding','margin'):
       self.assertNotIn(forbidden,attrs['style'])
    # Preserve the information-panel spacing and outer grid gutters.
    raw=catalogue_html(section)
-   self.assertIn('padding:'+('20px 16px' if count==1 else '12px 8px'),raw)
-   if count>1:self.assertIn('<td style="padding:4px">',raw)
+   self.assertIn('padding:8px 8px 0',raw)
+   self.assertIn('border-left:4px solid #111111',raw)
  def test_optional_copy_escaping_runtime_defaults_no_mutation(self):
   doc=catalogue_doc();before=deepcopy(doc);s=middle_sections(doc)[-1]
   self.assertEqual(s['settings']['headline'],'');self.assertEqual(s['settings']['subtext'],'');self.assertEqual(doc,before)
@@ -60,7 +60,7 @@ class PremiumCatalogueTests(unittest.TestCase):
   with self.assertRaises(ValueError):validate_middle([s])
  def test_sanitizer_trust_is_specific(self):
   h=catalogue_html(self.section(4));safe=import_html(h,trusted_catalogue=True)[0]
-  self.assertIn('class="sc-cat-item sc-cat-4"',safe);self.assertIn('<!--[if mso]>',safe)
+  self.assertIn('table-layout:fixed',safe);self.assertIn('width="50%"',safe)
   self.assertNotIn('sc-cat-item',import_html(h)[0]);self.assertNotIn('<!--[if mso]>',import_html(h)[0])
   for source in ('<div class="sc-cat-item sc-cat-4">x</div>','<table class="sc-cat-item evil">x</table>'):
    self.assertNotIn('class=',import_html(source,trusted_catalogue=True)[0])
@@ -68,7 +68,7 @@ class PremiumCatalogueTests(unittest.TestCase):
  def test_size_and_meaningful_images_off(self):
   for n in (1,2,4,6,12):
    s=self.section(n);h=catalogue_html(s);old=old_html(s)
-   self.assertLess(len(h.encode()),len(old.encode())*1.6)
+   self.assertLess(len(h.encode()),len(old.encode())*2.1)
    self.assertLess(len(h.encode()),40000)
    _,text,checks=import_html(h,images_off=True,trusted_catalogue=True)
    self.assertIn('Ryan Fox',text);self.assertIn('LIMITED TO 100',text);self.assertIn('#037 / 100',text);self.assertIn('64 REMAINING',text)
@@ -85,7 +85,7 @@ class PremiumCatalogueTests(unittest.TestCase):
     self.assertNotIn(absent,h)
  def test_no_unsupported_features_and_wrapper_rules(self):
   doc=catalogue_doc();doc['middle_sections'][-1]=self.section(4);h=render_campaign(doc)['html']
-  self.assertIn('(min-width:540px)',h);self.assertIn('.sc-cat-4{width:25%',h);self.assertIn('.sc-stack{display:block',h)
+  self.assertNotIn('.sc-cat-4{width:25%',h);self.assertNotIn('.sc-cat-3{width:',h);self.assertIn('.sc-stack{display:block',h)
   for word in ('<script','<svg','<iframe','scroll-snap','object-fit','shipping icon','authenticity icon','carousel','base64'):
    self.assertNotIn(word,h)
 

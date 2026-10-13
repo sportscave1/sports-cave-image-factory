@@ -53,19 +53,33 @@ function visual(s,model){
 }
 function catalogue(s){
  const c=s.settings,d=c.display,products=s.products.filter(p=>p.status==='ACTIVE'&&p.title.trim()&&/^https:\/\//.test(p.url)&&(!d.image||imageUrl(p.image))&&(!d.price||(p.price!==''&&p.price!=null&&p.currency))),single=products.length===1;if(!products.length)return '';
- const p=(t,style)=>`<p style="margin:0 0 8px;${style}">${t}</p>`;
+ const table='<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;table-layout:fixed">';
+ const p=(t,style)=>`<p style="margin:0;${style}">${t}</p>`;
  const money=v=>v.price==null?'':`${v.currency==='AUD'?'A$':v.currency==='USD'?'US$':v.currency==='GBP'?'£':v.currency+' '}${Number(v.price).toFixed(2)}`;
- const cards=products.map(v=>{let info='',image='';if(d.image)image=`<tr><td align="center" bgcolor="#151515" style="padding:0"><img src="${esc(v.image)}" alt="${esc(v.image_alt||v.title)}" width="${single?552:260}" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></td></tr>`;
-  if(d.title)info+=p(esc(v.title),`color:#faf6eb;font-size:${single?(v.title.length<80?21:18):14}px;line-height:${single?27:19}px;font-weight:700;word-wrap:break-word`);
-  const e=v.edition;if(e){if(d.limit)info+=p('LIMITED TO '+e.limit+(single?' WORLDWIDE':''),'color:#d4b77d;font-size:11px;line-height:16px');const next=d.next&&e.remaining!==0&&e.sold!==e.limit&&e.next>=1&&e.next<=e.limit&&!['sold_out','sold out','closed','archived','expired','allocation_blocked','unavailable','exhausted','paused'].includes((e.status||'').toLowerCase());if(next)info+=p('#'+String(e.next).padStart(3,'0')+' / '+e.limit,`color:#faf6eb;font-size:${single?24:16}px;line-height:28px;font-weight:700`);const status=next&&single?['NEXT AVAILABLE']:[];if(d.remaining&&e.remaining!=null)status.push(e.remaining?e.remaining+' REMAINING':'SOLD OUT');if(status.length)info+=p(status.join(' · '),'color:#d6d0c4;font-size:11px;line-height:16px');}
-  if(d.price)info+=p('From '+esc(money(v))+(Number(v.compare_at)>Number(v.price)?' <s>'+esc(money({...v,price:v.compare_at}))+'</s>':''),'color:#d6d0c4;font-size:13px;line-height:18px');
-  if(d.cta)info+=`<span style="display:inline-block;background:${single?'#d4b77d;color:#111111':'#151515;color:#eed9ad'};border:1px solid #d4b77d;padding:${single?'12px 18px':'10px 6px'};font-size:${single?13:11}px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">${esc(c.cta)}</span>`;
-  const card=`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed">${image}<tr><td align="${single?'center':'left'}" bgcolor="#151515" style="padding:${single?'20px 16px':'12px 8px'};font-family:Arial,Helvetica,sans-serif">${info}</td></tr></table>`;
-  const columns=products.length<=2?2:[3,5,6].includes(products.length)?3:Math.max(...products.map(p=>p.title.length))<=65?4:products.length===4?2:3;
-  return single?card:`<table class="sc-cat-item sc-cat-${columns}" role="presentation" width="50%" style="display:inline-block;width:50%;vertical-align:top;border-collapse:collapse;table-layout:fixed"><tr><td style="padding:4px">${card}</td></tr></table>`;
+ const cards=products.map(v=>{const info={};
+  if(d.image)info.image=`<img src="${esc(v.image)}" alt="${esc(v.image_alt||v.title)}" width="274" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0">`;
+  if(d.title)info.title=p(esc(v.title),'color:#faf6eb;font-size:14px;line-height:19px;font-weight:700;word-wrap:break-word');
+  const e=v.edition;if(e){if(d.limit)info.limit=p('LIMITED TO '+e.limit+(single?' WORLDWIDE':''),'color:#d4b77d;font-size:11px;line-height:16px');const next=d.next&&e.remaining!==0&&e.sold!==e.limit&&e.next>=1&&e.next<=e.limit&&!['sold_out','sold out','closed','archived','expired','allocation_blocked','unavailable','exhausted','paused'].includes((e.status||'').toLowerCase());if(next)info.next=p('#'+String(e.next).padStart(3,'0')+' / '+e.limit,`color:#faf6eb;font-size:16px;line-height:28px;font-weight:700`);const status=next&&single?['NEXT AVAILABLE']:[];if(d.remaining&&e.remaining!=null)status.push(e.remaining?e.remaining+' REMAINING':'SOLD OUT');if(status.length)info.remaining=p(status.join(' · '),'color:#d6d0c4;font-size:11px;line-height:16px');}
+  if(d.price)info.price=p('From '+esc(money(v))+(Number(v.compare_at)>Number(v.price)?' <s>'+esc(money({...v,price:v.compare_at}))+'</s>':''),'color:#d6d0c4;font-size:13px;line-height:18px');
+  if(d.cta)info.cta=`${table}<tr><td align="center" bgcolor="#151515" style="border:1px solid #d4b77d"><span style="display:block;color:#eed9ad;padding:12px 4px;font-size:11px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">${esc(c.cta)}</span></td></tr></table>`;
+  return info;
  });
- const heading=(c.headline?p(esc(c.headline),'color:#eed9ad;font-size:24px;line-height:29px;font-family:Georgia,serif'):'')+(c.subtext?p(esc(c.subtext),'color:#d6d0c4;font-size:13px;line-height:19px'):'');
- return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111111" style="background:#111111;border-collapse:collapse;table-layout:fixed">${heading?'<tr><td align="center" style="padding:16px 12px 8px">'+heading+'</td></tr>':''}<tr><td align="left" style="padding:8px;font-size:0">${cards.join('')}</td></tr></table>`;
+ const pairs=[];
+ for(let start=0;start<cards.length;start+=2){
+  const pair=cards.slice(start,start+2),rows=[];
+  for(const field of ['image','title','limit','next','remaining','price','cta']){
+   if(!pair.some(p=>field in p))continue;
+   rows.push('<tr>'+[0,1].map(i=>{
+    if(!pair[i])return '<td width="50%" bgcolor="#111111"></td>';
+    const padding=field==='image'?'0':field==='cta'?'8px':'8px 8px 0';
+    return `<td width="50%" valign="top" bgcolor="#151515" style="padding:${padding};border-left:4px solid #111111;border-right:4px solid #111111;font-family:Arial,Helvetica,sans-serif;word-wrap:break-word">${pair[i][field]||''}</td>`;
+   }).join('')+'</tr>');
+  }
+  rows.push('<tr>'+[0,1].map(i=>`<td width="50%" height="8" bgcolor="${pair[i]?'#151515':'#111111'}" style="border-left:4px solid #111111;border-right:4px solid #111111;font-size:0;line-height:0"></td>`).join('')+'</tr>');
+  pairs.push(`<tr><td style="padding:0 0 8px">${table}${rows.join('')}</table></td></tr>`);
+ }
+ const heading=(c.headline?p(esc(c.headline),'margin-bottom:8px;color:#eed9ad;font-size:24px;line-height:29px;font-family:Georgia,serif'):'')+(c.subtext?p(esc(c.subtext),'color:#d6d0c4;font-size:13px;line-height:19px'):'');
+ return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111111" style="background:#111111;border-collapse:collapse;table-layout:fixed">${heading?'<tr><td align="center" style="padding:16px 12px 8px">'+heading+'</td></tr>':''}<tr><td style="padding:8px 4px 0">${table}${pairs.join('')}</table></td></tr></table>`;
 }
 function sectionHtml(s,model,sections=[]){
  const signature=v=>JSON.stringify([v.type,v.html??null,v.settings??null,v.products??null,v.offer??null]);

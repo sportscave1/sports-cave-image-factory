@@ -103,7 +103,7 @@ class ModularTests(unittest.TestCase):
         for text in ('Artwork 1','LIMITED TO 100','#037 / 100','64 REMAINING','A$85.00','A$110.00','View the Edition'):
             self.assertIn(text,output['html']);self.assertIn(text,output['text'])
         self.assertNotIn('Your edition',output['html'])
-        self.assertIn('class="sc-cat-item sc-cat-2"',output['html']);self.assertIn('@media only screen',output['html'])
+        self.assertIn('width="50%"',output['html']);self.assertIn('@media only screen',output['html'])
         self.assertIn('width="50%"',output['html'])
         doc['middle_sections'][-1]['settings']['columns']=1
         self.assertIn('width="100%"',catalogue_html(doc['middle_sections'][-1]))

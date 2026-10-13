@@ -88,7 +88,7 @@ class CataloguePresentationTests(unittest.TestCase):
 
     def test_compact_styles_survive_renderer_without_distorting_images(self):
         result = render_campaign(self.doc)['html']
-        for style in ('width:100%', 'height:auto', 'font-size:21px', 'padding:12px 18px', 'background:#111111', 'color:#faf6eb'):
+        for style in ('width:100%', 'height:auto', 'font-size:14px', 'padding:12px 4px', 'background:#111111', 'color:#faf6eb'):
             self.assertIn(style, result)
         self.assertNotIn('object-fit', result)
         self.assertNotIn('text-transform:uppercase">Artwork', result)
@@ -98,7 +98,7 @@ class CataloguePresentationTests(unittest.TestCase):
             self.section['settings']['columns']=columns
             html=render_campaign(self.doc)['html']
             self.assertNotIn('class="sc-stack"',html)
-            self.assertIn('width="552"',html)
+            self.assertIn('width="274"',html)
             self.assertNotIn('max-height:300px',html)
             self.assertIn('@media only screen and (max-width:480px)',html)
 

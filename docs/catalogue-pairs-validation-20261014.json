@@ -1,0 +1,49 @@
+{
+  "date": "2026-10-14",
+  "task": "20261011-54d8ff88",
+  "status": "Implemented and tested locally; uncommitted",
+  "production_files": {
+    "crm_catalogue.py": "Fixed two-column pairs with shared image, title, edition, remaining, price and CTA table rows. Independent pair heights; full titles; natural image ratios; empty odd-slot layout cell contains no product or link.",
+    "crm_campaign_content.py": "Removed three/four-column desktop CSS and obsolete catalogue-only Outlook override.",
+    "components/crm_sections/preview.js": "Matching table structure in the existing unsaved manual/Smart editor preview."
+  },
+  "validation_files": [
+    "tests/test_crm_catalogue_presentation.py",
+    "tests/test_crm_premium_catalogue.py",
+    "tests/test_crm_modular_catalogue.py",
+    "tests/catalogue_pair_fixtures.py",
+    "tests/test_crm_catalogue_pairs.cjs"
+  ],
+  "results": {
+    "python": "113 tests run: 103 passed, 10 database-dependent tests skipped. Catalogue, Smart matching, customer preview, frozen production payload and email size regressions.",
+    "browser": "360 passing layouts: 15 synthetic cases x 6 widths x 4 renderer modes. Widths 280,320,375,390,768,1440. Modes final email, manual preview, Smart preview, and final email with head CSS removed.",
+    "assertions": [
+      "1-12 product counts and odd rows",
+      "shared field top positions and cell heights",
+      "equal CTA widths/heights and at least 42px browser click target height",
+      "independent pair title heights",
+      "natural image aspect ratios",
+      "no horizontal overflow",
+      "full long and unbroken titles",
+      "missing edition fields and display toggles",
+      "custom and long CTA labels"
+    ],
+    "additional": "Existing smart-preview browser regression, JavaScript syntax and git diff --check passed. Mobile and desktop screenshots visually inspected.",
+    "size": "12-product catalogue fixture is 37,616 bytes, below existing 40,000-byte catalogue regression ceiling."
+  },
+  "commands": [
+    "$env:PYTHONPATH=(Join-Path (Get-Location) .tmp-flow-preview/deps)",
+    "python -m unittest tests.test_crm_catalogue_presentation tests.test_crm_premium_catalogue tests.test_crm_modular_catalogue tests.test_crm_smart_catalogue tests.test_crm_smart_matching tests.test_crm_flow_customer_preview tests.test_crm_email_size",
+    "python -m tests.catalogue_pair_fixtures <temporary-json-path>",
+    "node tests/test_crm_catalogue_pairs.cjs <temporary-json-path> <temporary-screenshot-path>",
+    "node tests/test_crm_smart_preview.cjs",
+    "node --check components/crm_sections/preview.js",
+    "git diff --check"
+  ],
+  "limitations": [
+    "Native Gmail, Outlook and Apple Mail inbox screenshots were not exercised. Compatibility uses inline fixed-layout presentation tables and shared rows without Grid, Flexbox or required media queries.",
+    "Database-dependent regressions were skipped; no local application server or production connection was started."
+  ],
+  "preserved": "Recommendation matching/ranking/filtering, edition calculations, quantity selection, display toggles, custom wording and saved campaign/flow state are unchanged.",
+  "safety": "No commits, pushes, deployment, real email, campaign publication or live automation mutation."
+}

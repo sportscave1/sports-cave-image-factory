@@ -252,11 +252,8 @@ def price_label(p):
 
 
 def desktop_columns(products):
-    count=len(products);longest=max((len(p['title']) for p in products),default=0)
-    if count<=2:return 2
-    if count==3 or count in (5,6):return 3
-    if count==4:return 4 if longest<=65 else 2
-    return 4 if longest<=65 else 3
+    """Catalogue pairs stay two-up in every email client and viewport."""
+    return 2
 
 
 def image_alt(p):
@@ -266,54 +263,66 @@ def image_alt(p):
 
 
 def catalogue_html(section, *, campaign_key=''):
-    """Local snapshot-only hero or hybrid grid; two-up Word/no-media fallback."""
+    """Snapshot-only pairs with shared field rows, including Word email clients.
+
+    Each pair owns its table: the tallest cell sets only that pair's field height.
+    No title estimates, fixed text heights, media queries or client-side layout.
+    """
     if section['settings'].get('smart'):return ''  # Recipient hydration owns these cards.
     cfg=section['settings'];display=cfg['display']
     products=[p for p in section['products'] if not product_issues(p,cfg)]
     if not products:return ''
     single=len(products)==1;e=lambda v:escape(str(v),quote=True)
-    def paragraph(text,style):return '<p style="margin:0 0 8px;'+style+'">'+text+'</p>'
-    def card(p):
+    table='<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;table-layout:fixed">'
+    def paragraph(text,style):return '<p style="margin:0;'+style+'">'+text+'</p>'
+    def fields(p):
         canonical=canonical_product_url(p)
         destination=campaign_link(canonical,campaign_key,'product_'+p['id'].rsplit('/',1)[-1],test=True) if campaign_key else canonical
         link='href="'+e(destination)+'" target="_blank" rel="noopener noreferrer"'
-        parts=[]
+        result={}
         if display['image']:
-            parts.append('<tr><td align="center" bgcolor="#151515" style="padding:0"><a '+link+' style="display:block;text-decoration:none"><img src="'+e(p['image'])+'" alt="'+e(image_alt(p))+'" width="'+('552' if single else '260')+'" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></a></td></tr>')
-        info=[]
+            result['image']='<a '+link+' style="display:block;text-decoration:none"><img src="'+e(p['image'])+'" alt="'+e(image_alt(p))+'" width="274" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></a>'
         if display['title']:
-            info.append(paragraph('<a '+link+' style="color:#faf6eb;text-decoration:none">'+e(p['title'])+'</a>',
-                'font-size:'+('21' if single and len(p['title'])<80 else '18' if single else '14')+'px;line-height:'+('27' if single else '19')+'px;font-weight:700;word-wrap:break-word'))
+            result['title']=paragraph('<a '+link+' style="color:#faf6eb;text-decoration:none">'+e(p['title'])+'</a>',
+                'font-size:14px;line-height:19px;font-weight:700;word-wrap:break-word')
         ed=p['edition']
         if ed:
-            if display['limit']:info.append(paragraph('LIMITED TO '+str(ed['limit'])+(' WORLDWIDE' if single else ''),'color:#d4b77d;font-size:11px;line-height:16px'))
+            if display['limit']:result['limit']=paragraph('LIMITED TO '+str(ed['limit'])+(' WORLDWIDE' if single else ''),'color:#d4b77d;font-size:11px;line-height:16px')
             next_ok=display['next'] and edition_available(ed)
-            if next_ok:info.append(paragraph('#'+format(ed['next'],'03d')+' / '+str(ed['limit']),'color:#faf6eb;font-size:'+('24' if single else '16')+'px;line-height:28px;font-weight:700'))
+            if next_ok:result['next']=paragraph('#'+format(ed['next'],'03d')+' / '+str(ed['limit']),'color:#faf6eb;font-size:16px;line-height:28px;font-weight:700')
             status=['NEXT AVAILABLE'] if next_ok and single else []
             if display['remaining'] and ed['remaining'] is not None:status.append(str(ed['remaining'])+' REMAINING' if ed['remaining'] else 'SOLD OUT')
-            if status:info.append(paragraph(' · '.join(status),'color:#d6d0c4;font-size:11px;line-height:16px'))
+            if status:result['remaining']=paragraph(' · '.join(status),'color:#d6d0c4;font-size:11px;line-height:16px')
         if display['price']:
             price='From '+e(price_label(p))
             if amount(p['compare_at']) and Decimal(p['compare_at'])>Decimal(p['price']):price+=' <s>'+e(price_label({**p,'price':p['compare_at']}))+'</s>'
-            info.append(paragraph(price,'color:#d6d0c4;font-size:13px;line-height:18px'))
-        if display['cta']:info.append('<a '+link+' style="display:inline-block;background:'+('#d4b77d;color:#111111' if single else '#151515;color:#eed9ad')+';border:1px solid #d4b77d;padding:'+('12px 18px' if single else '10px 6px')+';font-size:'+('13' if single else '11')+'px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">'+e(cfg['cta'])+'</a>')
-        parts.append('<tr><td align="'+('center' if single else 'left')+'" bgcolor="#151515" style="padding:'+('20px 16px' if single else '12px 8px')+';font-family:Arial,Helvetica,sans-serif">'+''.join(info)+'</td></tr>')
-        return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed">'+''.join(parts)+'</table>'
+            result['price']=paragraph(price,'color:#d6d0c4;font-size:13px;line-height:18px')
+        if display['cta']:
+            result['cta']=table+'<tr><td align="center" bgcolor="#151515" style="border:1px solid #d4b77d"><a '+link+' style="display:block;color:#eed9ad;padding:12px 4px;font-size:11px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">'+e(cfg['cta'])+'</a></td></tr></table>'
+        return result
+    pairs=[]
+    for start in range(0,len(products),2):
+        pair=[fields(p) for p in products[start:start+2]]
+        rows=[]
+        for field in ('image','title','limit','next','remaining','price','cta'):
+            if not any(field in p for p in pair):continue
+            cells=[]
+            for index in range(2):
+                if index>=len(pair):
+                    # Empty layout cell only; never a fabricated product or link.
+                    cells.append('<td width="50%" bgcolor="#111111"></td>');continue
+                padding='0' if field=='image' else '8px 8px 0'
+                if field=='cta':padding='8px'
+                cells.append('<td width="50%" valign="top" bgcolor="#151515" style="padding:'+padding+';border-left:4px solid #111111;border-right:4px solid #111111;font-family:Arial,Helvetica,sans-serif;word-wrap:break-word">'+pair[index].get(field,'')+'</td>')
+            rows.append('<tr>'+''.join(cells)+'</tr>')
+        # A shared bottom edge also keeps cards equal when the CTA is disabled.
+        rows.append('<tr>'+''.join('<td width="50%" height="8" bgcolor="'+('#151515' if i<len(pair) else '#111111')+'" style="border-left:4px solid #111111;border-right:4px solid #111111;font-size:0;line-height:0"></td>' for i in range(2))+'</tr>')
+        pairs.append('<tr><td style="padding:0 0 8px">'+table+''.join(rows)+'</table></td></tr>')
     heading=''
-    if cfg.get('headline'):heading+=paragraph(e(cfg['headline']),'color:#eed9ad;font-size:24px;line-height:29px;font-family:Georgia,serif')
+    if cfg.get('headline'):heading+=paragraph(e(cfg['headline']),'margin-bottom:8px;color:#eed9ad;font-size:24px;line-height:29px;font-family:Georgia,serif')
     if cfg.get('subtext'):heading+=paragraph(e(cfg['subtext']),'color:#d6d0c4;font-size:13px;line-height:19px')
     rows='<tr><td align="center" style="padding:16px 12px 8px">'+heading+'</td></tr>' if heading else ''
-    if single:content=card(products[0])
-    else:
-        columns=desktop_columns(products);tiles=[]
-        for i,p in enumerate(products):
-            if i%2==0:tiles.append('<!--[if mso]><table role="presentation" width="100%"><tr><![endif]-->')
-            tiles.append('<!--[if mso]><td width="50%" valign="top"><![endif]-->')
-            tiles.append('<table class="sc-cat-item sc-cat-'+str(columns)+'" role="presentation" width="50%" cellspacing="0" cellpadding="0" style="display:inline-block;width:50%;vertical-align:top;border-collapse:collapse;table-layout:fixed"><tr><td style="padding:4px">'+card(p)+'</td></tr></table>')
-            tiles.append('<!--[if mso]></td><![endif]-->')
-            if i%2==1 or i==len(products)-1:tiles.append('<!--[if mso]></tr></table><![endif]-->')
-        content=''.join(tiles)
-    return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111111" style="background:#111111;border-collapse:collapse;table-layout:fixed">'+rows+'<tr><td align="left" style="padding:8px;font-size:0">'+content+'</td></tr></table>'
+    return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" bgcolor="#111111" style="background:#111111;border-collapse:collapse;table-layout:fixed">'+rows+'<tr><td style="padding:8px 4px 0">'+table+''.join(pairs)+'</table></td></tr></table>'
 
 
 def refresh_catalogues(doc, catalogue, *, fresh=True):
