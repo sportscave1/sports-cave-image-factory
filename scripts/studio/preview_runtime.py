@@ -218,6 +218,22 @@ class Preview:
                 with studio.locked(self.home) as file:
                     registry=studio.read(file);draft=next(d for d in registry["drafts"] if d["task_id"]==self.task)
                 try:
+                    root=Path(draft["worktree_path"])
+                    presentation=root/'components/sign_in/presentation.html'
+                    if presentation.exists() and key in {'title','description','brand','panel','mobile_panel'}:
+                        import source_editor
+                        for dependency in ('app.py','signin_presentation.py','components/sign_in/presentation.html','components/sign_in/presentation.css'):
+                            exported=next(f['sha256'] for f in self.manifest['files'] if f['path']==dependency)
+                            if hashlib.sha256(preview_export.source_bytes(root,dependency)[0]).hexdigest()!=exported:
+                                raise ValueError('Preview is behind presentation source; refresh before inspection')
+                        path='signin_presentation.py' if key in {'title','description','brand'} else 'components/sign_in/presentation.css'
+                        opened=source_editor.open_file(self.home,draft['id'],self.owner,path)
+                        anchor={'title':'TITLE =','description':'DESCRIPTION =','brand':'BRAND ='}.get(key,'.sc-login-wrap')
+                        offset=opened['source'].find(anchor)
+                        if offset<0:raise ValueError('Presentation source mapping changed')
+                        metadata['location']={'path':path,'line':opened['source'].count('\n',0,offset)+1}
+                        if result.get('image'):self.last_frame=result
+                        return result
                     opened=editor.open_file(self.home,draft["id"],self.owner)
                     exported=next(f["sha256"] for f in self.manifest["files"] if f["path"]==editor.VISUAL_FILE)
                     root=Path(draft["worktree_path"])
@@ -239,7 +255,10 @@ class Preview:
             "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],
             input=archive,capture_output=True,timeout=30, **studio.quiet_process())
         if result.returncode: raise RuntimeError("Source refresh transfer failed.")
-        frame=self.event({"action":"reload-source","changed_files":list(paths or [])})
+        # The pinned controller uses this hint solely to reinstall the shared header.
+        # All validated batch files are transferred above; one rerun loads them together.
+        header='components/sports_cave_top_bar/index.html'
+        frame=self.event({"action":"reload-source","changed_files":[header] if paths and header in paths else []})
         self.manifest=manifest
         return frame
 

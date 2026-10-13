@@ -61,8 +61,17 @@ def route_sources(root, page):
             except (ValueError,OSError):continue
     components=[]
     if page=='__signin__':
-        for key,value in editor.visual_values(text).items():
+        try: visual=editor.visual_values(text)
+        except ValueError: visual={}
+        for key,value in visual.items():
             components.append({'key':key,'label':value['label'],'location':editor.locations(text).get(key),'editable':True})
+    if page=='__signin__':
+        tree=ast.parse(text)
+        gate=next((n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='render_login_gate'),None)
+        if gate:
+            refs.append({'path':'app.py','line':gate.lineno,'mode':'read-only','source':'','relationship':'Actual sign-in form and authentication boundary'})
+            for path in ('signin_presentation.py','components/sign_in/presentation.html','components/sign_in/presentation.css'):
+                if (root/path).is_file(): refs.append({'path':path,'line':1,'mode':'source','source':'','relationship':'Actual sign-in presentation, referenced by render_login_gate / inject_styles'})
     # Existing allowlisted source remains accessible. Only claim page relevance where the
     # imported module contains a literal reference to that exact source filename.
     files=[]

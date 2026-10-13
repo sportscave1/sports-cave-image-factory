@@ -10,7 +10,8 @@ from pathlib import Path
 import drafts
 import studio
 
-ASSETS = {"/workspace": ("workspace.html", "text/html; charset=utf-8"),
+ASSETS = {
+    "/code-editor.js": ("code-editor.js", "text/javascript; charset=utf-8"),"/workspace": ("workspace.html", "text/html; charset=utf-8"),
           "/workspace-local.js": ("workspace-local.js", "text/javascript; charset=utf-8"),
           "/workspace.js": ("workspace.js", "text/javascript; charset=utf-8"),
           "/workspace.css": ("workspace.css", "text/css; charset=utf-8"),"/pair": ("pair.html", "text/html; charset=utf-8"),
@@ -218,7 +219,7 @@ class DraftServer(HTTPServer):
             _,task,_=drafts.draft_by_id(registry,grant["draft"],self.owner)
             if task['id']!=grant['task']:
                 raise RuntimeError('Local editor grant task changed. Confirm the draft again.')
-        allowed={"workspace-model","editor-reference","editor-files","editor-open","editor-save","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
+        allowed={"workspace-model","editor-reference","editor-files","editor-open","source-open","source-history","editor-save","editor-save-all","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
         command=data.get("command")
         if not isinstance(command,dict) or command.get("action") not in allowed:raise ValueError("Editor operation not allowlisted")
         if any(k in command for k in ("owner","task_id","draft_id","home","root","url","command")):raise ValueError("Editor scope cannot be overridden")
@@ -236,7 +237,7 @@ class DraftServer(HTTPServer):
         except (ValueError,OSError) as exc:pages=[];page_error=str(exc)
         return {"draft":{k:draft.get(k) for k in ("id","name","kind","category","owner","branch","revision","revisions","production_base","editing_status","metadata_version","release_readiness")},
                 "task":{k:state["task"][k] for k in ("id","owner","branch","category")},
-                "files":editor.files(self.home,draft["id"],self.owner)["files"],"pages":pages,"page_error":page_error,
+                "files":__import__("source_editor").files(self.home,draft["id"],self.owner)["files"],"pages":pages,"page_error":page_error,
                 "test":state["test"],"preview":state["preview"],"status":state["task_status"]}
 
     def action(self, data):
@@ -318,7 +319,19 @@ class DraftServer(HTTPServer):
             if type(revision) is not int:
                 raise ValueError("Choose an integer revision.")
             return drafts.recover_copy(self.home, draft["id"], self.owner, revision)
-        if action in {"editor-files","editor-open","editor-save","editor-diff"}:
+        if action in {"source-open","source-history","editor-save-all"}:
+            import source_editor
+            if action=="source-open":return source_editor.open_file(self.home,draft["id"],self.owner,data.get("path"))
+            if action=="source-history":return source_editor.history_source(self.home,draft["id"],self.owner,data.get("path"),data.get("id"),data.get("side"))
+            result=source_editor.write_all(self.home,draft["id"],self.owner,data.get("expected_revision"),data.get("files"))
+            if result["changed"] and self.preview_runtime and self.preview_runtime.name:
+                try:
+                    result["frame"]=self.preview_runtime.refresh_source(result["paths"])
+                    self.last_preview_activity=time.monotonic()
+                except (ValueError,RuntimeError,OSError) as exc:
+                    result["preview_error"]="Source saved; preview refresh failed: "+str(exc)
+            return result
+        if action in {"editor-files","editor-open","source-open","source-history","editor-save","editor-save-all","editor-diff"}:
             import editor
             if action=="editor-files":return editor.files(self.home,draft["id"],self.owner)
             path=data.get("path",editor.VISUAL_FILE)
@@ -547,9 +560,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length", [])) != 1:
                 raise ValueError("A single Content-Length is required.")
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 2 * 1024 * 1024 + 16384 or self.headers.get("Content-Type") != "application/json":
+            if not 0 < length <= 8 * 1024 * 1024 + 65536 or self.headers.get("Content-Type") != "application/json":
                 raise ValueError("Expected bounded application/json.")
             data = json.loads(self.rfile.read(length))
+            if length > 2 * 1024 * 1024 + 16384 and data.get("action") != "editor-save-all" and not (data.get("action")=="workspace-request" and data.get("command",{}).get("action")=="editor-save-all"):raise ValueError("Oversized non-batch request.")
             if not isinstance(data, dict):
                 raise ValueError("Expected an object.")
             self.reply(200, self.server.action(data))
