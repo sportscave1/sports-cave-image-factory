@@ -157,7 +157,7 @@
   $("requester").textContent="Authenticated launcher session for: "+origin;
   status("Ready for your approval. This one-use setup expires in 5 minutes. No saved cookie or private URL is required.");
  }
- else if(opener&&/^[a-f0-9]{48}$/.test(nonce))opener.postMessage({studio:1,type:"ready",nonce},"*");
+ else if(opener&&/^(?:edition=)?[a-f0-9]{48}$/.test(nonce))opener.postMessage({studio:1,type:"ready",nonce},"*");
  else if(bootstrap){$("approve").disabled=false;$("session").disabled=true;$("session-label").hidden=true;$("trust").checked=true;status("Check the exact OS origin, then approve Trust This Computer. No private URL copying is required.");try{origin=exactOrigin($("trusted-origin").value.trim());if(origin!==location.origin)resume();}catch{}}
  else {let saved="";try{saved=localStorage.getItem("studio-approved-origin")||"";}catch{}if(saved&&saved!==location.origin){try{origin=exactOrigin(saved);$("trusted-origin").value=origin;$("trusted-origin").disabled=true;resume();}catch{status("Open pairing from the owner-only Developer Studio page.");}}else status("Open Developer Studio and click Connect once. This restored local page will not open more windows.");}
 })();
