@@ -235,7 +235,7 @@ class DraftServer(HTTPServer):
             _,_,root=drafts.draft_by_id(studio.read(file),draft["id"],self.owner)
         try:pages=page_catalog.pages(root);page_error=None
         except (ValueError,OSError) as exc:pages=[];page_error=str(exc)
-        return {"draft":{k:draft.get(k) for k in ("id","name","kind","category","owner","branch","revision","revisions","production_base","editing_status","metadata_version","release_readiness")},
+        return {"capabilities":{"code_first_source":1,"save_all":True},"draft":{k:draft.get(k) for k in ("id","name","kind","category","owner","branch","revision","revisions","production_base","editing_status","metadata_version","release_readiness")},
                 "task":{k:state["task"][k] for k in ("id","owner","branch","category")},
                 "files":__import__("source_editor").files(self.home,draft["id"],self.owner)["files"],"pages":pages,"page_error":page_error,
                 "test":state["test"],"preview":state["preview"],"status":state["task_status"]}

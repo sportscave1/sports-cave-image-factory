@@ -33,17 +33,17 @@
   for(const d of rows){if(selectedDraft&&d.id!==selectedDraft)continue;
    const e=line($("evidence"),"article","","card");line(e,"h3",d.name);line(e,"p",`Recorded review: ${d.review_status} · ${d.status==="Approved"||d.status==="Integrated"?"Approved task":"Unfinished / awaiting approval"}`);line(e,"p",d.test?.evidence||"No test evidence recorded.");line(e,"p",`Tested snapshot: ${d.test?.snapshot?.files_hash||"unavailable"}`);line(e,"p","Use Check approved revisions in Releases to revalidate immutable task eligibility. Production publishing disabled.");
   }workspace?.refreshCatalog();}
- async function moduleFrom(source){const url=URL.createObjectURL(new Blob([source],{type:"text/javascript"}));try{return await import(url);}finally{URL.revokeObjectURL(url);}}
+ async function moduleFrom(source,name){if(typeof source!=="string"||!source.trim())throw Error("Hosted Dev Mode bundle is missing "+name+". A matching hosted release is required; local drafts and buffers are preserved.");const url=URL.createObjectURL(new Blob([source],{type:"text/javascript"}));try{return await import(url);}finally{URL.revokeObjectURL(url);}}
  async function mountWorkspace(draftId){
   const bundle=window.STUDIO_V6_BUNDLE;
-  if(!workspaceModule){const css=document.createElement("style");css.dataset.studioEditorCss="true";css.textContent=bundle["editor.css"]+bundle["workspace.css"];document.head.append(css);workspaceModule=await moduleFrom(bundle["workspace.js"]);}
+  if(!workspaceModule){const css=document.createElement("style");css.dataset.studioEditorCss="true";css.textContent=bundle["editor.css"]+bundle["workspace.css"];document.head.append(css);const candidate=await moduleFrom(bundle["workspace.js"],"workspace.js");if(typeof candidate.mount!=="function")throw Error("Hosted workspace.js has no mount export");workspaceModule=candidate;}
   const transport=(_path,command)=>new Promise((resolve,reject)=>{
    if(!connected||!workspaceApproved||workspaceId!==draftId||!rows.some(r=>r.id===draftId&&r.actionable))return reject(Error("Local draft permission unavailable. Reconnect and confirm this draft; unsaved work is preserved."));
    const request_id=Array.from(crypto.getRandomValues(new Uint8Array(12)),x=>x.toString(16).padStart(2,"0")).join("");
    const timer=setTimeout(()=>{workspaceRequests.delete(request_id);reject(Error("Local operation timed out. Reopen and compare before retrying a save."));},120000);
    workspaceRequests.set(request_id,{resolve,reject,timer,draftId});send("workspace-call",{request_id,draft_id:draftId,command});
   });
-  workspace=await workspaceModule.mount($("workspace-v6"),transport,{empty:!draftId,connected:()=>connected&&(!draftId||workspaceApproved),selectedDraft:()=>selectedDraft,loadEditor:()=>moduleFrom(bundle["code-editor.js"]),drafts:()=>rows,storageKey:()=>origin+':'+draftId,applications:()=>applicationSupported,
+  workspace=await workspaceModule.mount($("workspace-v6"),transport,{empty:!draftId,connected:()=>connected&&(!draftId||workspaceApproved),selectedDraft:()=>selectedDraft,loadEditor:()=>moduleFrom(bundle["code-editor.js"],"code-editor.js"),drafts:()=>rows,storageKey:()=>origin+':'+draftId,applications:()=>applicationSupported,
    manage:async(operation,name)=>{if(workspace&&!await workspace.canLeave())return;send('application-request',{request:{operation,name,draft_id:selectedDraft}});message('Review this draft operation in the secure local window.');popup.focus();},
    selectDraft:async id=>{if(!rows.some(r=>r.id===id&&r.actionable))return;selectedDraft=id;syncSelection();draw();await openSelected("edit");}});
  }
@@ -54,7 +54,7 @@
   workspaceApproved=true;pendingDraft="";tab("editor");
   if(workspace&&workspaceId===draftId){await workspace.resume();workspace.refreshCatalog();}
   else{workspace?.dispose();workspace=null;workspaceId=draftId;await mountWorkspace(draftId);}
-  rememberDraft(draftId);await workspace.intent(workspaceIntent);message("Local editor connected · changes stay in the selected draft");
+  rememberDraft(draftId);await workspace.intent(workspaceIntent);message("Local workspace connected · source loading errors appear in the editor pane; changes stay in the selected draft");
  }
  function releaseRequest(operation,record,extra={}){
   if(!connected)return message("Connect the assigned RELEASE companion first.");

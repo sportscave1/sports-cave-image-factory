@@ -58,3 +58,5 @@ body:has(#local-status){padding:0}#local-status{position:absolute;z-index:8;bott
 .ws-dev #ws-unsaved{color:#dfbf68;white-space:nowrap;font-size:10px}.ws-dev #ed-source:read-only{caret-color:#bbb;background:#27292544}
 @media(max-width:1400px){.ws-dev{--left:60vw}}@media(max-width:900px){.ws-dev .code-first-left{grid-template-columns:140px minmax(0,1fr)}}
 @media(max-width:760px){.ws-dev .code-first-left{width:95vw;max-width:700px}.ws-dev .ws-bar{gap:2px}.ws-dev .ws-bar #ws-unsaved{flex:1}}
+
+.ws-dev .code-first-left>#ws-editor-error{grid-column:2;grid-row:1/4;align-self:start;margin:0;padding:16px;color:#f5d98b;overflow-wrap:anywhere;min-width:0}

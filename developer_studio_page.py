@@ -3,10 +3,13 @@ from pathlib import Path
 import json
 
 
+STUDIO_ASSETS = ("workspace.js", "workspace.css", "editor.js", "code-editor.js", "editor.css")
+
+
 def panel_html():
     assets = Path(__file__).parent / "components" / "developer_studio"
     local_assets=Path(__file__).parent/"scripts"/"studio"/"ui"
-    bundle=json.dumps({name:local_assets.joinpath(name).read_text(encoding="utf-8-sig") for name in ("workspace.js","workspace.css","editor.js","editor.css")}).replace("</", "<\\/")
+    bundle=json.dumps({name:local_assets.joinpath(name).read_text(encoding="utf-8-sig") for name in STUDIO_ASSETS}).replace("</", "<\\/")
     return (assets.joinpath("panel.html").read_text(encoding="utf-8")
             .replace("/*STUDIO_CSS*/", assets.joinpath("panel.css").read_text(encoding="utf-8"))
             .replace("/*STUDIO_JS*/", assets.joinpath("panel.js").read_text(encoding="utf-8"))
