@@ -22,6 +22,7 @@ def automation_status(store,row):
     result=store.q("""SELECT
       (SELECT max(received_at) FROM crm_webhook_events WHERE provider='shopify' AND topic=ANY(%s)) AS latest_event,
       (SELECT value FROM crm_runtime_state WHERE key='worker_health') AS worker,
+      (SELECT value FROM crm_runtime_state WHERE key='automation_delivery_health') AS delivery_health,
       (SELECT value FROM crm_runtime_state WHERE key='campaign_schedule_health') AS schedule_health,
       (SELECT value FROM crm_runtime_state WHERE key='checkout-cache-v2') AS reconciliation,
       (SELECT min(next_due_at) FROM crm_automation_enrollments WHERE automation_id=%s AND status='ACTIVE') AS next_due,

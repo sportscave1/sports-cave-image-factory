@@ -215,6 +215,9 @@ def publish_direct(store,user,identity,revision,env=None):
         if not has_changes(store,fresh,flow,conn):return fresh
         if fresh['config'].get('publication',{}).get('state')=='PUBLISHING':raise ValueError('A publication is already in progress.')
         if fresh['config']['published_version']!=version-1:raise ValueError('A newer publication exists.')
+        if flow['trigger']!='abandoned':
+            from crm_automation_readiness import require_ready
+            require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},env,conn=conn)
         result=commit(store,conn,fresh,*prepared,version)
     from crm_thumbnail_cache import prewarm
     prewarm(prepared[1],version,store)
@@ -279,6 +282,9 @@ def tick(store,owner,env=None):
                 raise ValueError('Automation changed during publication.')
             if row['config']['published_version']!=frozen['base_version'] or row['config'].get('publication',{}).get('job_id')!=str(job['id']):
                 raise ValueError('A newer publication exists.')
+            if frozen['flow']['trigger']!='abandoned':
+                from crm_automation_readiness import require_ready
+                require_ready(store,{'trigger_type':frozen['flow']['trigger'],'config':{'draft':frozen['flow']}},env,conn=conn)
             commit(store,conn,row,*prepared,job['publication_version'],row['config']['publication'])
             conn.execute("UPDATE crm_automation_publish_jobs SET state='SUCCEEDED',completed_at=now(),lease_until=NULL,error=NULL WHERE id=%s",(job['id'],))
         from crm_thumbnail_cache import prewarm

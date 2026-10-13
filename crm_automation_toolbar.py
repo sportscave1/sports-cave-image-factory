@@ -56,7 +56,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         from crm_automation_readiness import blockers as readiness_blockers
         from crm_automation_publication import preflight
         blockers=readiness_blockers(store,row)
-        resume_blockers=list(blockers)
+        resume_blockers=readiness_blockers(store,row,published=True) if row['status']=='PAUSED' else []
         try:preflight(row,row['config']['revision'])
         except ValueError as exc:blockers.append(str(exc))
     requested=st.session_state.get('automation-confirm-publication')

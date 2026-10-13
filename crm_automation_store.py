@@ -193,7 +193,7 @@ class AutomationStore(CampaignStore):
             cfg=deepcopy(row['config']);current=status(row);target=row['status'];at=date(row['transition_at'])
             if action=='resume' and row['trigger_type']!='abandoned':
                 from crm_automation_readiness import require_ready
-                require_ready(self,row,conn=conn)
+                require_ready(self,row,conn=conn,published=True)
             if action=='pause' and current=='ACTIVE': target='PAUSED';cfg['paused_at']=at.isoformat()
             elif action=='resume' and current=='PAUSED' and cfg.get('published_version'):
                 target='ACTIVE'

@@ -106,7 +106,7 @@ function mount(payload){
  document.querySelectorAll('a').forEach(n=>{n.removeAttribute('href');n.removeAttribute('target')});
  let root=document.getElementById('sc-local-sections'),shell=model.shell;if(!root)return;
  const render=sections=>{
-  const started=performance.now();model=state.model;
+  const started=performance.now();model=state.model;if(model.loading)sections=[model.loading_section];
   if(shell!==model.shell){shell=model.shell;const parsed=new DOMParser().parseFromString(shell,'text/html');document.body.innerHTML=parsed.body.innerHTML;document.querySelectorAll('a').forEach(n=>n.removeAttribute('href'));root=document.getElementById('sc-local-sections');}
   const keep=new Set(sections.filter(s=>s.visible).map(s=>s.id));
   for(const child of [...root.children])if(!keep.has(child.dataset.sectionId))child.remove();

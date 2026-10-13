@@ -13,7 +13,10 @@ def output(state,store,doc,cfg,identity=None):
     if 'email_defaults' not in cfg:cfg={**cfg,'email_defaults':store.default_sections(cfg)}
     hydrated,label=store.preview_document(doc)
     token=digest([hydrated,cfg,identity])
-    entries=state.get('_automation_visual_outputs',{})
+    trigger=getattr(store,'preview_trigger',None)
+    lifecycle=getattr(store,'email_mode',None)=='automation' and isinstance(trigger,str) and trigger!='abandoned'
+    slot='_automation_lifecycle_visual_outputs' if lifecycle else '_automation_visual_outputs'
+    entries=state.get(slot,{})
     cache=entries.get(token)
     if cache is None:
         message=render_production(hydrated,cfg,identity)
@@ -24,6 +27,10 @@ def output(state,store,doc,cfg,identity=None):
         from crm_personalisation import present
         if present(doc):cache['personalised_headers']={k:hydrated['content'][k] for k in ('subject','preheader')}
         entries={**entries,token:cache}
-        if len(entries)>4:entries.pop(next(iter(entries)))
-        state['_automation_visual_outputs']=entries
+        if len(entries)>(16 if lifecycle else 4):entries.pop(next(iter(entries)))
+        state[slot]=entries
+    if lifecycle:
+        # Share this exact resolved document with the visual section compiler.
+        # It is display-only and never replaces authored or published content.
+        cache['document']=hydrated
     return cache,label,getattr(store,'preview_warning','')

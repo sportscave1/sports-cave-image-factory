@@ -213,7 +213,7 @@ class RuntimeTests(unittest.TestCase):
         NativeAutomationTests.setUp(self)
         self.shop.orders.return_value={'nodes':[],'pageInfo':{'hasNextPage':False}}
         self.shop.query.side_effect=lambda query,variables,*args: {'nodes':[dict(id=i,risk={'recommendation':'ACCEPT'},disputes=[],returnStatus='NO_RETURN',fulfillments=[]) for i in variables.get('ids',[])]}
-        self.store.set_state('shopify_automation_capabilities',{'scopes':['read_customers','read_orders','read_all_orders','read_products'],'checked_at':self.clock.isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','win_back','abandoned','fulfilled')},'webhooks':{'ORDERS_PAID':True,'ORDERS_FULFILLED':True}})
+        self.store.set_state('shopify_automation_capabilities',{'scopes':['read_customers','read_orders','read_all_orders','read_products'],'checked_at':self.clock.isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','win_back','abandoned','fulfilled')},'webhooks':{'ORDERS_PAID':True,'ORDERS_FULFILLED':True,'CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE':True}})
     def test_incomplete_shopify_history_access_fails_closed(self):
         from crm_lifecycle_runtime import verified_plan
         self.store.set_state('shopify_automation_capabilities',{'scopes':['read_customers','read_orders']})

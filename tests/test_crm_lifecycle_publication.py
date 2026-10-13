@@ -97,6 +97,74 @@ class LifecyclePublicationTests(unittest.TestCase):
         self.assertIn('SC_COLLECTOR_REPEAT_V1:',texts[0]);self.assertIn('SC_COLLECTOR_REPEAT_V1:',texts[2])
         self.assertEqual(live['config']['draft'],flow)
 
+    def payment_only(self):
+        row=self.expanded('post_purchase');flow=deepcopy(row['config']['draft'])
+        flow['emails'][0]['delay_seconds']=3*3600
+        for step in flow['emails'][1:]:step['enabled']=False
+        return self.store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+
+    def test_payment_only_publishes_without_fulfilment_or_legacy_signer(self):
+        row=self.payment_only()
+        caps=self.store.state('shopify_automation_capabilities');caps['webhooks']['ORDERS_FULFILLED']=False
+        self.store.set_state('shopify_automation_capabilities',caps)
+        native_env={**LIVE,'CRM_UNSUBSCRIBE_SECRET':'','CRM_PUBLIC_BASE_URL':''}
+        with patch.dict(os.environ,native_env):
+            self.job(row);tick(self.store,'native-payment-worker',env=native_env)
+        live=self.state(row)
+        self.assertEqual(live['status'],'ACTIVE')
+        self.assertEqual([s['delay_seconds'] for s in live['steps']],[10800])
+        self.assertEqual([s['enabled'] for s in live['config']['published_flow']['emails']],[True,False,False])
+        self.assertEqual(self.store.q("SELECT count(*) AS n FROM crm_template_versions WHERE content->>'automation_id'=%s",(str(row['id']),),True)['n'],1)
+        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(row['id'],),True)['n'],0)
+        self.store.lifecycle(ADMIN,row['id'],'pause')
+        flow=deepcopy(live['config']['draft']);flow['emails'][1]['enabled']=True
+        changed=self.store.save_flow(ADMIN,row['id'],row['name'],flow,live['config']['revision'])
+        from crm_automation_readiness import blockers
+        self.assertTrue(any('ORDERS_FULFILLED' in x for x in blockers(self.store,changed)))
+        self.assertEqual(blockers(self.store,changed,published=True),[])
+        with self.assertRaisesRegex(ValueError,'ORDERS_FULFILLED'):self.job(changed)
+        self.store.lifecycle(ADMIN,row['id'],'resume')
+        self.assertEqual(len(self.state(row)['steps']),1)
+
+    def test_draft_disabling_fulfilment_is_not_blocked_by_old_published_sequence(self):
+        row=self.expanded('post_purchase');self.job(row);self.run_job();live=self.state(row)
+        flow=deepcopy(live['config']['draft'])
+        for step in flow['emails'][1:]:step['enabled']=False
+        changed=self.store.save_flow(ADMIN,row['id'],row['name'],flow,live['config']['revision'])
+        caps=self.store.state('shopify_automation_capabilities');caps['webhooks']['ORDERS_FULFILLED']=False
+        self.store.set_state('shopify_automation_capabilities',caps)
+        self.job(changed);self.run_job()
+        self.assertEqual(len(self.state(row)['steps']),1)
+
+    def test_readiness_loss_after_rendering_still_rolls_back_at_commit(self):
+        import crm_automation_publication as publication
+        row=self.payment_only();self.job(row);original=publication.prepare
+        def prepare_then_lose_worker(*args,**kwargs):
+            prepared=original(*args,**kwargs)
+            self.store.set_state('automation_publication_health',{})
+            return prepared
+        with patch.object(publication,'prepare',side_effect=prepare_then_lose_worker):self.run_job()
+        self.assertEqual(self.state(row)['status'],'DRAFT')
+        self.assertIn('publication worker',self.state(row)['config']['publication']['error'])
+        self.assertEqual(self.store.q("SELECT count(*) AS n FROM crm_template_versions WHERE content->>'automation_id'=%s",(str(row['id']),),True)['n'],0)
+
+    def test_completed_delivery_checkpoint_persists_with_actual_worker_lease(self):
+        from crm_engine import Engine
+        from crm_store import Store
+        from crm_resend import Config
+        store=Store(self.store.connect);engine=Engine(store,Mock(),config=Config({}))
+        engine.owner='local-health-fixture'
+        try:
+            engine.delivery_checkpoint(force=True)
+            health=store.state('automation_delivery_health')
+            self.assertEqual(health['status'],'ok')
+            self.assertFalse(health['marketing_enabled'])
+            self.assertTrue(health['checked_at'])
+        finally:
+            store.release(engine.owner)
+            from tests.crm_publication_fixture import ready
+            ready(self.store)
+
     def test_native_toolbar_requires_confirmation_and_waits_for_worker(self):
         from streamlit.testing.v1 import AppTest
         source='''

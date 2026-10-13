@@ -3,10 +3,35 @@ from datetime import timedelta
 from crm_logic import date,now
 
 
-def blockers(store,row,env=None,*,conn=None):
+def required_topics(kind,flow):
+    from crm_automation_capabilities import TOPICS
+    topics=list(TOPICS.get(kind,()))
+    if flow.get('lifecycle_version') and 'ORDERS_PAID' not in topics:topics.append('ORDERS_PAID')
+    if kind=='post_purchase' and any(s.get('enabled',True) and
+            (s.get('anchor')=='delivery' or s.get('requires_fulfilment')) for s in flow.get('emails',[])):
+        topics.append('ORDERS_FULFILLED')
+    return tuple(dict.fromkeys(topics))
+
+
+def worker_configuration(config):
+    from email.utils import parseaddr
+    from crm_resend_marketing import single_email
+    return {'marketing_enabled':config.enabled,'provider_configured':bool(config.api_key.strip()),
+        'sender_configured':bool(single_email(parseaddr(config.sender)[1]) and single_email(config.reply_to)
+            and not any(ord(c)<32 for c in config.sender))}
+
+
+def recent_health(health,at=None):
+    checked=date(health.get('checked_at'));at=at or now()
+    return bool(checked and checked<=at+timedelta(minutes=1) and at-checked<=timedelta(minutes=5)
+        and health.get('status')=='ok')
+
+
+def blockers(store,row,env=None,*,conn=None,published=False):
     from crm_automation_capabilities import blocking_reasons
     from crm_resend import Config
-    kind=row['trigger_type'];flow=row['config'].get('published_flow') or row['config']['draft']
+    kind=row['trigger_type']
+    flow=(row['config'].get('published_flow') or row['config']['draft']) if published else row['config']['draft']
     def read(key):
         if conn is None:return store.state(key) or {}
         record=conn.execute('SELECT value FROM crm_runtime_state WHERE key=%s',(key,)).fetchone()
@@ -26,28 +51,28 @@ def blockers(store,row,env=None,*,conn=None):
         scopes.add('read_products')
     for scope in sorted(scopes-set(state.get('scopes',[]))):
         reasons.append('Shopify permission missing: '+scope)
-    # Expanded journeys depend on these events for payment exits and delivery clocks.
-    if flow.get('lifecycle_version'):
-        topics=['ORDERS_PAID']
-        if kind=='post_purchase':topics.append('ORDERS_FULFILLED')
-        for topic in topics:
-            if not state.get('webhooks',{}).get(topic):reasons.append('Verify Shopify webhook: '+topic)
+    for topic in required_topics(kind,flow):
+        if not state.get('webhooks',{}).get(topic):reasons.append('Verify Shopify webhook: '+topic)
     at=now()
     for key,label in (('worker_health','CRM delivery worker'),('automation_publication_health','CRM publication worker')):
-        health=read(key);checked=date(health.get('checked_at'))
-        if not checked or checked>at+timedelta(minutes=1) or at-checked>timedelta(minutes=5) or health.get('status')!='ok':
+        # A full cycle includes slow analytics/maintenance. Only completed,
+        # lease-protected delivery work can supply the more recent evidence.
+        health=(read('automation_delivery_health') or read(key)) if key=='worker_health' else read(key)
+        if not recent_health(health,at):
             reasons.append(label+' unavailable or stale; start the existing CRM worker and rerun Diagnostics')
         elif key=='worker_health' and not all(health.get(k) for k in ('marketing_enabled','provider_configured','sender_configured')):
             reasons.append('CRM delivery worker marketing/provider/sender configuration is incomplete')
     config=Config(env)
     if not config.enabled:reasons.append('Enable the existing marketing delivery configuration before activation')
-    if not config.api_key or not config.sender or not config.reply_to:reasons.append('Configure Resend marketing API, sender and Reply-To')
-    try:config.unsubscribe_url('00000000-0000-4000-8000-000000000001')
-    except ValueError:reasons.append('Configure the public HTTPS unsubscribe endpoint and signing secret')
-    except RuntimeError:reasons.append('Configure the public HTTPS unsubscribe endpoint and signing secret')
+    configuration=worker_configuration(config)
+    if not configuration['provider_configured'] or not configuration['sender_configured']:
+        reasons.append('Configure valid Resend marketing API, sender and Reply-To')
+    # New delivery exclusively obtains Shopify marketingUnsubscribeUrl from a
+    # fresh recipient read and blocks missing/unsafe links in Engine.send_one.
+    # Legacy signed URLs and their endpoint remain supported independently.
     return reasons
 
 
-def require_ready(store,row,env=None,*,conn=None):
-    reasons=blockers(store,row,env,conn=conn)
+def require_ready(store,row,env=None,*,conn=None,published=False):
+    reasons=blockers(store,row,env,conn=conn,published=published)
     if reasons:raise ValueError('Automation publication not ready: '+'; '.join(reasons))

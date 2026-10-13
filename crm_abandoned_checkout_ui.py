@@ -26,14 +26,22 @@ def _lifecycle_canvas(doc,cfg,key,store,*,current_document=True):
     from crm_automation_preview_cache import output
     editor=current(st.session_state,{})
     if current_document:doc=editor.get('document',doc)
-    pin=context(st.session_state,store);cache=None;problem='';renderable=False
+    pin=context(st.session_state,store);cache=None;problem='';renderable=False;hydrated_document=None
     try:
         cache,_,warning=output(st.session_state,store,doc,cfg,editor.get('id'))
+        hydrated_document=cache['document']
         renderable=True
     except NoPreviewCustomer as exc:
         problem='' if pending(st.session_state) else str(exc)
         warning=''
-    except ValueError as exc:problem=str(exc);warning=''
+    except ValueError as exc:
+        problem=str(exc);warning=''
+        # Full production validation remains visible in Diagnostics. Ordinary
+        # section errors must not remove valid neighbouring editor sections.
+        try:
+            hydrated_document=store.preview_document(doc)[0]
+            renderable=True
+        except ValueError:pass
     pin=context(st.session_state,store);data=pin.get('selected')
     with st.container(key='crm-composer-preview' if current_document else 'crm-readonly-preview-'+key):
         def refresh():context(st.session_state,store,refresh=True)
@@ -44,8 +52,11 @@ def _lifecycle_canvas(doc,cfg,key,store,*,current_document=True):
                 details=details(cache,doc)+(['Cached example · fresh consent and delivery checks still apply.'] if (data or {}).get('_cached') else []))
         if renderable:
             from crm_local_preview import canvas
-            try:canvas(doc,cfg,key,store)
+            try:canvas(doc,cfg,key,store,hydrated_document=hydrated_document)
             except NoPreviewCustomer:pass  # Retained iframe survives background work.
+        elif pending(st.session_state):
+            from crm_local_preview import loading_canvas
+            loading_canvas(doc,cfg,key)
         elif not pending(st.session_state):st.caption(problem or 'No eligible customer example is available.')
         if pending(st.session_state):
             import time

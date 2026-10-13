@@ -62,7 +62,7 @@ class PreviewPerformanceTests(TestCase):
             with patch('crm_flow_preview.verify') as verify:choose(state,store,candidate['key']);verify.assert_not_called()
             self.assertEqual(lookup.call_count,2)
 
-    def test_slow_customer_switch_runs_off_thread_and_keeps_previous_example(self):
+    def test_slow_customer_switch_runs_off_thread_without_previous_recipient(self):
         store,_,_,candidate,_=preview_wire();state={};data={'key':candidate['key'],'label':'First'}
         alternate={**candidate,'key':'second','customer_id':'second'}
         with patch('crm_flow_preview.examples',return_value={'selected':data,'options':[candidate,alternate],'error':''}),patch('crm_campaign_home_cache.POOL.submit',side_effect=complete):context(state,store)
@@ -70,7 +70,7 @@ class PreviewPerformanceTests(TestCase):
         with patch('crm_campaign_home_cache.POOL.submit',return_value=f),patch('crm_flow_preview.verify') as verify:
             start=time.perf_counter();choose(state,store,'second');duration=time.perf_counter()-start
             verify.assert_not_called();self.assertLess(duration,.05)
-        self.assertEqual(context(state,store)['selected']['label'],'First')
+        self.assertIsNone(context(state,store)['selected'])
         f.set_result({'selected':{'key':'second','label':'Second'},'error':''})
         self.assertEqual(context(state,store)['selected']['label'],'Second')
 

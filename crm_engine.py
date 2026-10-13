@@ -41,6 +41,12 @@ class Engine:
             if not self.send_one():break
         from crm_campaign_dispatch import dispatch
         dispatch(self)
+        # Persist only after completed delivery work and a renewed lease. This
+        # is separate from the full-cycle/analytics completion timestamp.
+        self.hold_lease()
+        from crm_automation_readiness import worker_configuration
+        self.store.set_state('automation_delivery_health',{'checked_at':self.clock().isoformat(),
+            'status':'ok',**worker_configuration(self.config)})
         self._delivery_checkpoint=self.clock()
     def delivery(self):
         if self.provider is None:self.provider=Resend(self.config)
