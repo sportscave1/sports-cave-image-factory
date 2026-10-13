@@ -13,10 +13,41 @@ import studio
 
 def docker(*args, timeout=60, check=True, context=None):
     command = ["docker", *(["--context", context] if context else []), *args]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, **studio.quiet_process())
+    try:
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True,
+                                text=True, timeout=timeout, **studio.quiet_process())
+    except subprocess.TimeoutExpired as exc:
+        # The scheduled pythonw worker has no console. Never let a CLI timeout
+        # escape the HTTP error boundary and silently close the browser request.
+        raise RuntimeError("Docker " + str(args[0]) + " timed out. The preview is unavailable; source and drafts are preserved. Retry Preview when Docker Desktop is ready.") from exc
     if check and result.returncode:
         raise RuntimeError("Docker command failed: " + result.stderr.strip()[:1000])
     return result
+
+def ready_local_engine(context):
+    """Wake the existing Desktop engine only for an explicitly requested preview."""
+    def ready():
+        result = docker("info", "--format", "{{.OSType}}", context=context, timeout=8)
+        if result.stdout.strip() != "linux":
+            raise ValueError("Preview requires the existing local Linux Docker engine.")
+    try:
+        ready()
+        return
+    except (RuntimeError, OSError):
+        if os.name != "nt":
+            raise
+    # Resource Saver can remove the Linux pipe, and a waking engine can hang
+    # image inspection. Starting Desktop is idempotent; never reset or rebuild it.
+    docker("desktop", "start", "--timeout", "45", timeout=50)
+    deadline = time.monotonic() + 20
+    while True:
+        try:
+            ready()
+            return
+        except (RuntimeError, OSError) as exc:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Docker Desktop did not become ready. Retry Preview after it finishes starting; drafts are unchanged.") from exc
+            time.sleep(1)
 
 def hardened(image, name, task):
     return ["--name", name, "--label", "sports-cave-studio.task="+task,

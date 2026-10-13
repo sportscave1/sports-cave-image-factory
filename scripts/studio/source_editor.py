@@ -66,6 +66,8 @@ def open_file(home, draft_id, owner, path):
         finish_batch(home, file, registry, draft, root)
         editor.finish_pending(home, file, registry, draft, root)
         meta, data = drafts.read_source(root, path)
+        if studio.secret_findings(data.decode('utf-8-sig')):
+            raise ValueError('Potential sensitive source withheld; no partial file exported.')
         return {'path': path, 'hash': meta['sha256'], 'revision': draft['revision'],
                 'source': data.decode('utf-8-sig'), 'complete': True, 'editable': path in EDITABLE,
                 'language': Path(path).suffix.lstrip('.'),
