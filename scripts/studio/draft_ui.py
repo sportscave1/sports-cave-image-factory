@@ -219,7 +219,7 @@ class DraftServer(HTTPServer):
             _,task,_=drafts.draft_by_id(registry,grant["draft"],self.owner)
             if task['id']!=grant['task']:
                 raise RuntimeError('Local editor grant task changed. Confirm the draft again.')
-        allowed={"workspace-model","editor-reference","editor-files","editor-open","source-open","source-history","editor-save","editor-save-all","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
+        allowed={"workspace-model","editor-reference","source-copy","editor-files","editor-open","source-open","source-history","editor-save","editor-save-all","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
         command=data.get("command")
         if not isinstance(command,dict) or command.get("action") not in allowed:raise ValueError("Editor operation not allowlisted")
         if any(k in command for k in ("owner","task_id","draft_id","home","root","url","command")):raise ValueError("Editor scope cannot be overridden")
@@ -235,7 +235,7 @@ class DraftServer(HTTPServer):
             _,_,root=drafts.draft_by_id(studio.read(file),draft["id"],self.owner)
         try:pages=page_catalog.pages(root);page_error=None
         except (ValueError,OSError) as exc:pages=[];page_error=str(exc)
-        return {"capabilities":{"code_first_source":1,"save_all":True},"draft":{k:draft.get(k) for k in ("id","name","kind","category","owner","branch","revision","revisions","production_base","editing_status","metadata_version","release_readiness")},
+        return {"capabilities":{"code_first_source":1,"save_all":True,"source_navigation":1},"draft":{k:draft.get(k) for k in ("id","name","kind","category","owner","branch","revision","revisions","production_base","editing_status","metadata_version","release_readiness")},
                 "task":{k:state["task"][k] for k in ("id","owner","branch","category")},
                 "files":__import__("source_editor").files(self.home,draft["id"],self.owner)["files"],"pages":pages,"page_error":page_error,
                 "test":state["test"],"preview":state["preview"],"status":state["task_status"]}
@@ -252,12 +252,13 @@ class DraftServer(HTTPServer):
             self.workspace_grants.pop(data.get("capability"),None)
             return {"revoked":True}
         if action=="workspace-model":return self.workspace_model()
-        if action=="editor-reference":
-            import dev_sources
+        if action in {"editor-reference","source-copy"}:
+            import source_navigation
             state=self.state()
             with studio.locked(self.home) as file:
                 _,_,root=drafts.draft_by_id(studio.read(file),state['draft']['id'],self.owner)
-            return dev_sources.route_sources(root,data.get('page'))
+            if action=="source-copy":return source_navigation.copy_source(self.home,state['draft']['id'],self.owner,data)
+            return source_navigation.public_model(source_navigation.page_model(root,data.get('page'),state['draft']['id'],state['draft']['revision']))
         if action in {"start-preview", "restart-preview", "preview-event", "release-preview"}:
             self.last_preview_activity = time.monotonic()
         if action in {"release-catalog","release-operation","release-preview"}:
