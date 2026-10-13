@@ -711,6 +711,24 @@ html[data-sc-table-host="uploads"] .upload-row { background: var(--sc-table-pape
 html[data-sc-table-host="uploads"] .upload-row:hover { background: var(--sc-table-hover); }
 html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
 </style>
+<style>
+/* Premium Files polish: presentation only; existing view and scroll geometry retained. */
+.app-title{background:linear-gradient(180deg,#faf9f6,#f2f1ed);letter-spacing:.01em;color:#26313c}
+.address-bar,.search{border-radius:8px;background:#fcfcfa;box-shadow:0 1px 2px #17212b06}
+.command-bar{background:#fbfaf7;gap:3px;padding-top:5px;padding-bottom:5px}
+.command,.icon-button{border-radius:7px;transition:background-color .12s ease,box-shadow .12s ease}
+.command:hover:not(:disabled),.icon-button:hover:not(:disabled){background:#e9edf1;box-shadow:inset 0 0 0 1px #ccd3db}
+.command:active:not(:disabled){background:#dfe5eb}.command-icon svg{width:17px;height:17px;display:block}
+.crumb{border-radius:5px}.crumb:hover:not(:disabled){background:#edf0f3}
+.file-item.focused{outline:1px solid #8e9bad;outline-offset:-1px}
+html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.selected{background:#e3ebf4;box-shadow:inset 3px 0 #526f94}
+.menu{border-radius:10px;box-shadow:0 12px 38px #18263424;border-color:#d5dae2;padding:5px}
+.menu-button{border-radius:5px;min-height:32px}.menu-button:hover:not(:disabled){background:#e9edf3}
+.modal{border-radius:12px;box-shadow:0 20px 65px #17212b30;max-width:min(480px,94vw)}
+@media(max-width:600px){.command{min-height:36px;padding:6px 8px}.address-row{gap:5px}.menu{max-width:calc(100vw - 16px)}.modal-backdrop{padding:10px}}
+@media(pointer:coarse){.menu-button{min-height:40px}}
+@media(prefers-reduced-motion:reduce){.command,.icon-button{transition:none}}
+</style>
 </head>
   <body>
     <div class="app" id="app">
@@ -731,6 +749,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       </div>
       <div class="command-bar" id="commandBar" role="toolbar" aria-label="Files commands">
         <button class="command" id="openButton" type="button" disabled><span class="command-icon">&#8599;</span><span class="command-label">Open</span></button>
+        <button class="command" id="openWithButton" type="button" disabled><span class="command-icon">&#8943;</span><span class="command-label">Open With</span></button>
         <span class="command-separator" aria-hidden="true"></span>
         <button class="command" id="newButton" type="button"><span class="command-icon">+</span><span class="command-label">New</span></button>
         <button class="command" id="uploadButton" type="button"><span class="command-icon">&#8593;</span><span class="command-label">Upload</span></button>
@@ -1217,10 +1236,9 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
           else if (event.shiftKey) selectByIndex(index, { range: true });
           else {
             setSingleSelection(item.path, index);
-            openItem(item);
           }
         });
-        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); });
+        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); if(Date.now()<state.suppressClickUntil)return;setSingleSelection(item.path,index);openPreferredItem(item); });
         row.addEventListener("contextmenu", event => {
           hideFileTooltip();
           event.preventDefault();
@@ -1330,6 +1348,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         const chosen = selectedItems();
         const allFiles = chosen.length > 0 && chosen.every(item => item.tag !== "folder");
         elements.openButton.disabled = chosen.length !== 1;
+        document.getElementById("openWithButton").disabled = chosen.length !== 1 || chosen[0]?.tag === "folder";
         elements.downloadButton.disabled = !allFiles;
         elements.renameButton.disabled = chosen.length !== 1 || chosen[0].protected;
         elements.deleteButton.disabled = !state.canDelete || !chosen.length || chosen.some(item => item.protected);
@@ -2440,6 +2459,52 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         hideOutboundDragPreview();
       }
 
+      // Premium opening additions: existing openItem and native transfers stay intact.
+      function openPreferredItem(item) {
+        if (item?.kind === 'image' && hasDesktopCapability('openFile')) {
+          const now=Date.now();if(state.openStamp.path===item.path&&now-state.openStamp.time<650)return;
+          state.openStamp={path:item.path,time:now};invokeDesktopHelper(item,'file');
+        } else openItem(item);
+      }
+
+      function previewItem(item) {
+        if (item?.kind === 'image') openImageViewer(item);
+        else showToast('Browser preview is unavailable for this file type. Use Open or Download.',{duration:5500});
+      }
+
+      async function chooseFileApplication(item) {
+        if (!item || item.tag === 'folder') return;
+        if (BLOCKED_EXTENSIONS.has(String(item.extension||'').toLocaleLowerCase())) {
+          showToast('This file type cannot be opened by the Sports Cave helper.',{kind:'error'});return;
+        }
+        if (hasDesktopCapability('openWith')) {
+          try {await desktopRequest('openWith',[item]);}
+          catch(error){showDesktopTransferError(error,item);}return;
+        }
+        openModal(modal=>{
+          modalHeading(modal,'Open With','This browser cannot select installed applications. Download the file, then use your device’s Open With or Share action. Sports Cave Desktop can provide the Windows chooser when its existing helper supports Open With.');
+          modalActions(modal,'Download',()=>{closeModal();startDownload([item]);});
+        });
+      }
+
+      function applicationPreferences(item) {
+        const extension=String(item?.extension||'file').toLocaleLowerCase();
+        const platform=(navigator.platform||'')+' '+(navigator.userAgent||'');
+        const mobile=/Android|iPhone|iPad/.test(platform)||(/Mac/.test(platform)&&navigator.maxTouchPoints>1);
+        const mac=!mobile&&/Mac/.test(platform);
+        const windows=hasDesktopCapability('appDefaults')||/Win/.test(platform);
+        openModal(modal=>{
+          modalHeading(modal,'Remember application',mobile?'Use Files or Downloads to choose an installed app or share the file. Remembered app choices depend on your device’s OS; this browser cannot change them.':mac?'In Finder, select the synced or downloaded file → Get Info → Open with. Choose an app, then explicitly use Change All to remember it for this file type. Change it again there when needed.':!windows?'Use your file manager’s Open With and default-application settings. Browser access cannot change installed application preferences.':'Choose a default app for .'+extension+' in Windows Settings → Apps → Default apps. Future native Open actions use that OS preference. Change or reset it there; Sports Cave never changes associations automatically.');
+          if(hasDesktopCapability('appDefaults'))modalActions(modal,'Open Default Apps',async()=>{
+            closeModal();const id=dragRequestId();
+            try{await new Promise((resolve,reject)=>{state.desktopPending.set(id,{resolve,reject,action:'appDefaults'});try{desktopPost({action:'appDefaults',request_id:id});}catch(error){state.desktopPending.delete(id);reject(error);}});}
+            catch(error){showDesktopTransferError(error,item);}
+          });
+          else modalActions(modal,'Done',closeModal);
+        });
+      }
+      // End premium opening additions.
+
       function showItemContextMenu(item, x, y) {
         const chosen = selectedItems();
         const single = chosen.length === 1;
@@ -2447,7 +2512,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         const allFiles = chosen.length > 0 && chosen.every(selected => selected.tag !== "folder");
         if (item.kind === "folder") {
           showMenu([
-            { label: "Open", disabled: !single, action: () => openItem(item) },
+            { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
             { label: desktopFileManagerLabel(), action: () => invokeDesktopHelper(item, "folder") },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
@@ -2463,9 +2528,12 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
           ], x, y);
         } else {
           const definitions = [
-            { label: "Open", disabled: !single, action: () => openItem(item) },
+            { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
           ];
           definitions.push(
+            { label: "Open With", disabled: !single, action: () => chooseFileApplication(item) },
+            { label: "Preview", disabled: !single, action: () => previewItem(item) },
+            { label: "Remember / change application", disabled: !single, action: () => applicationPreferences(item) },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
             { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
@@ -3018,7 +3086,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       function handleItemKeydown(event, item, index) {
         if (event.key === "Enter") {
           event.preventDefault();
-          openItem(item);
+          openPreferredItem(item);
         } else if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowLeft") {
           event.preventDefault();
           const direction = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
@@ -3039,7 +3107,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       elements.forwardButton.onclick = navigateForward;
       elements.upButton.onclick = () => navigateTo(parentPath(state.currentPath));
       elements.refreshButton.onclick = () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
-      elements.openButton.onclick = () => openItem(selectedItems()[0]);
+      elements.openButton.onclick = () => openPreferredItem(selectedItems()[0]);
       elements.newButton.onclick = showNewFolderDialog;
       elements.downloadButton.onclick = () => startDownload();
       elements.renameButton.onclick = () => showRenameDialog();
@@ -3176,7 +3244,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
           updateSelectionUi();
         } else if (event.key === "Enter") {
           const item = state.items.find(candidate => candidate.path === state.focusedPath) || selectedItems()[0];
-          if (item) { event.preventDefault(); openItem(item); }
+          if (item) { event.preventDefault(); openPreferredItem(item); }
         } else if (event.key === "Delete" && state.selection.size) {
           event.preventDefault();
           showDeleteDialog();
@@ -3334,6 +3402,9 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       }
 
       window.addEventListener('pagehide',()=>desktopBridge?.removeEventListener?.('message',handleDesktopMessage),{once:true});
+      document.getElementById('openWithButton').onclick=()=>chooseFileApplication(selectedItems()[0]);
+      const premiumIcons={openButton:'M5 15L15 5M5 5h10v10',openWithButton:'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',uploadButton:'M12 17V3M6 9l6-6 6 6M4 16v5h16v-5',downloadButton:'M12 3v14M6 11l6 6 6-6M4 16v5h16v-5',newButton:'M3 7V4h7l3 3h8v13H3zM12 11v6M9 14h6'};
+      for(const [id,path] of Object.entries(premiumIcons)){const icon=document.getElementById(id)?.querySelector('.command-icon');if(icon)icon.innerHTML='<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="'+path+'"/></svg>';}
       initialise();
     </script>
   </body>
