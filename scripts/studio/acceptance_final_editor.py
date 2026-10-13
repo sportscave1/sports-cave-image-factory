@@ -149,7 +149,7 @@ try:
     record("undo_redo")
     # Reload only this disposable QA page to exercise all buffer recovery.
     page.remove_listener("dialog",no_discard_dialog);page.on("dialog",lambda d:d.accept())
-    page.goto(server.origin+"/workspace#token="+server.token)
+    page.reload()
     expect(page.locator("#ws-unsaved")).to_have_text("Unsaved files: 2",timeout=60000);settled()
     record("unsaved_buffer_recovery")
     before=revision();started=time.perf_counter();page.locator("#ws-save").click()
@@ -208,4 +208,3 @@ finally:
     assert all((ROOT/path).read_bytes()==data for path,data in baseline.items())
     report["source_restored"]=True
     (OUT/"acceptance.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
-

@@ -1,13 +1,18 @@
 // Local fallback shares the exact editor module with the hosted OS.
 import {mount} from '/workspace.js';
-const params=new URLSearchParams(location.hash.slice(1));let token=params.get('token')||'';
+const params=new URLSearchParams(location.hash.slice(1)),tokenKey='studio-workspace-token';let token=params.get('token')||'';
+// Retain only this tab's localhost session credential, never device trust or a
+// cross-tab localStorage token. The server still validates expiry and revocation.
+if(!token)try{token=sessionStorage.getItem(tokenKey)||'';}catch{}
+function rememberToken(){try{if(token)sessionStorage.setItem(tokenKey,token);}catch{}}
 const intent=params.get('intent')||'edit';history.replaceState(null,'',location.pathname);
 let catalog={rows:[]};const status=t=>document.getElementById('local-status').textContent=t;
 async function request(path,data,retried=false){
  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Studio-Token':token},body:JSON.stringify(data)}),result=await r.json();
+ if(r.status===401){try{sessionStorage.removeItem(tokenKey);}catch{}}
  if(r.status===401&&!retried){let origin;try{origin=localStorage.getItem('studio-approved-origin');}catch{}
   if(origin){const renew=()=>fetch('/api/device',{method:'POST',headers:{'Content-Type':'application/json','X-Studio-Local':'1'},body:JSON.stringify({operation:'renew',origin})});const restored=navigator.locks?await navigator.locks.request('studio-device-renewal',renew):await renew();if(restored.ok){token=(await restored.json()).token;return request(path,data,true);}}}
- if(!r.ok)throw Error(result.error||'Local operation rejected');return result;
+ if(!r.ok)throw Error(result.error||'Local operation rejected');rememberToken();return result;
 }
 try{
  const identity=await request('/api/action',{action:'workspace-model'});
