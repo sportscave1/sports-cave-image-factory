@@ -27,6 +27,7 @@ def payload(common,recipient,config):
     address=recipient.get('address','');url=recipient.get('unsubscribe_url','')
     from crm_tracking import public_https
     if not single_email(address) or not public_https(url) or len(url)>len(REPRESENTATIVE_UNSUBSCRIBE):raise ValueError('Invalid frozen recipient.')
+    common=recipient.get('message',common)
     message={**common,'html':common['html'].replace(escape(REPRESENTATIVE_UNSUBSCRIBE,quote=True),escape(url,quote=True)),
              'text':common['text'].replace(REPRESENTATIVE_UNSUBSCRIBE,url)}
     if len(message['html'].encode('utf-8'))>LIMIT_BYTES:raise ValueError('Email size limit.')
@@ -97,6 +98,8 @@ def prepare(engine,campaign,content,provider_blocked):
             if row['recipient_hash'] in provider_blocked:reason='provider_suppression'
             try:
                 if not recipient or recipient_hash(recipient['address'])!=row['recipient_hash']:raise ValueError()
+                from crm_smart_catalogue import enabled as smart_enabled
+                if smart_enabled(content['document']) and not recipient.get('message'):raise ValueError('Missing recipient catalogue snapshot')
                 mail=payload(common,recipient,sender)
             except (ValueError,KeyError,TypeError):reason=reason or 'invalid_frozen_payload'
             if reason:blocked.append({'id':str(row['id']),'code':reason})

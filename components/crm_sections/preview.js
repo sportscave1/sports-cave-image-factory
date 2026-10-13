@@ -75,7 +75,11 @@ function sectionHtml(s,model,sections=[]){
  const known=seedValid&&Object.values(model.resolved).find(r=>signature(r.section)===signature(s));
  if(known)return sanitize(known.html,model);
  if(s.type==='checkout_element')return sanitize(visual(s,model),model);
- if(s.type==='catalogue')return sanitize(catalogue(s),model);
+ if(s.type==='catalogue'){
+  if(!s.settings.smart)return sanitize(catalogue(s),model);
+  const verified=model.resolved[s.id];
+  return verified?.section?.settings?.smart&&Array.isArray(verified.products)?sanitize(catalogue({...s,products:verified.products}),model):'';
+ }
  if(s.type==='abandoned_checkout_products')return sanitize(model.replacements['<!--SC_ABANDONED_CHECKOUT-->']||'',model);
  let source=s.html||'';
  if(s.type==='discount'){

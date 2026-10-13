@@ -176,6 +176,9 @@ def commit_editor_field(editor,key,field):
 @autosaving
 def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='campaign',settings_control=None):
     """Content interactions repaint only composer/preview; no workspace DB reads."""
+    if mode!='automation':
+        drafts.preview_shop=shop
+        st.session_state['_smart_preview_adapter']=(drafts,shop)
     closing=st.session_state.pop('campaign_template_close_dialog',None)
     if closing is not None:closing.close()
     from crm_html_workspace import section_editor,composer_canvas

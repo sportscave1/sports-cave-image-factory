@@ -200,6 +200,12 @@ class Engine:
                 from crm_recovery_discount import prepare as prepare_discount,selection as discount_selection
                 if discount_selection(content['document']):
                     context['_recovery_discount']=prepare_discount(self.shop,content['document'],context.get('_checkout') or {},row['shopify_customer_id'])
+                from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
+                if smart_enabled(content['document']):
+                    context['_smart_document']=smart_hydrate(content['document'],self.store,self.shop,c,
+                        orders=context.get('_lifecycle_orders'),checkout=context.get('_checkout'),fresh=True,
+                        new_since=context.get('_lifecycle_last_purchase') if content['trigger']=='win_back' and 'lifecycle-new-editions' in content['document'].get('tags',[]) else None)
+                    context['_smart_recipient']=c['id']
                 message=render_automation(content,row,unsubscribe,context)
             elif content.get('format')=='campaign_delivery_v1':
                 from crm_campaign_schedule import overdue_reason
@@ -221,6 +227,13 @@ class Engine:
                 if not campaign:raise ValueError('Campaign send identity missing.')
                 message=render_campaign(content['document'],content['render_settings'],unsubscribe_url=unsubscribe,production=True,
                                         campaign_id=str(row['campaign_id']),send_id=str(campaign['campaign_send_id']))
+                from crm_smart_catalogue import enabled as smart_enabled
+                if smart_enabled(content['document']):
+                    frozen=(content.get('dispatch',{}).get('recipients',{}).get(row['recipient_hash']) or {}).get('message')
+                    if not frozen:raise ValueError('Missing recipient catalogue snapshot')
+                    from crm_campaign_dispatch import payload
+                    mail=payload(frozen,{'address':address,'unsubscribe_url':unsubscribe,'message':frozen},self.config)
+                    message={field:mail[field] for field in ('subject','html','text')}
                 from crm_email_size import validate_rendered_email
                 try:validate_rendered_email(message)
                 except ValueError:

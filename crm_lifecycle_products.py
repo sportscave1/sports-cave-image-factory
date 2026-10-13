@@ -8,7 +8,7 @@ from crm_lifecycle_shopify import PRODUCT_AVAILABILITY
 SECTION_ID='lifecycle-recommendations'
 
 def selected(doc):
-    return next((s for s in doc.get('middle_sections',[]) if s['id']==SECTION_ID and s.get('visible')),None)
+    return next((s for s in doc.get('middle_sections',[]) if s['id']==SECTION_ID and s.get('visible') and not s.get('settings',{}).get('smart')),None)
 
 def recommend(store,shop,doc,orders,at,*,new_since=None):
     section=selected(doc)

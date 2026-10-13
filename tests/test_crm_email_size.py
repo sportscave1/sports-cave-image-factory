@@ -206,7 +206,7 @@ editor={'id':'00000000-0000-0000-0000-000000000123','name':'Fixture','document':
 report=analyze_rendered_email('x'*(LIMIT_BYTES+1),'')
 job=Mock(closed=False,applied=True,identity=identity(editor))
 job.future=Future();job.future.set_result({'counts':{'eligible':1,'excluded':{}},'blockers':[SIZE_ERROR],'snapshot_id':None,'tracking_ok':True,'email_size':report})
-with patch('crm_campaign_send_ui.queue_campaign',side_effect=AssertionError('No sends')):
+with patch('crm_campaign_send.queue_campaign',side_effect=AssertionError('No sends')):
  review_finalization(None,None,{},editor,'fixture',job,{'marketing_enabled':True})
 '''
         app=AppTest.from_string(script).run()

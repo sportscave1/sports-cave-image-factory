@@ -459,6 +459,17 @@ def _hydrate(state,store,doc,*,fresh=False,data=None):
         if products is None:
             products=recommend(store,store.preview_shop if fresh else state.get('_automation_flow_visual_shop',store.preview_shop),result,data['_lifecycle_orders'],now());rec_cache[rec_key]=products
         result=hydrate_products(result,products)
+    from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
+    if smart_enabled(result):
+        from crm_lifecycle_policy import latest_paid
+        last=latest_paid(data.get('_lifecycle_orders') or []) or {}
+        new_since=(last.get('paid_at') or last.get('createdAt')) if kind=='win_back' and 'lifecycle-new-editions' in result.get('tags',[]) else None
+        if fresh:
+            result=smart_hydrate(result,store,store.preview_shop,data['_customer'],orders=data.get('_lifecycle_orders'),fresh=True,new_since=new_since)
+        else:
+            from crm_smart_catalogue import preview as smart_preview
+            result=smart_preview(state,store,state.get('_automation_flow_visual_shop',store.preview_shop),result,
+                customer=data['_customer'],orders=data.get('_lifecycle_orders'),revision=preview_key(data),new_since=new_since)
     if present(result):
         wanted=set(TOKEN.findall(result['content']['subject'])+TOKEN.findall(result['content']['preheader']))
         values_key=digest([sorted(wanted),preview_key(data)]);values_cache=state.setdefault('_automation_flow_values',{})

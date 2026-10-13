@@ -135,13 +135,16 @@ def product_picker(doc, section_id, catalogue, key, editor_key=None):
 
 
 def middle_editor(doc, key, shop, store=None):
+    if store is not None:
+        store.preview_shop=shop
+        if getattr(store,'email_mode',None)!='automation':st.session_state['_smart_preview_adapter']=(store,shop)
     from crm_collector_image_ui import control as collector_control
     collector_control(doc,key,shop,store)
     # Opening a saved snapshot is read-only. The existing Refresh action and
     # final test/send validation own fresh product facts, never tab activation.
     sections = middle_sections(doc)
     warnings = {s['id']:[issue for p in s['products'] for issue in product_issues(p,s['settings'])]
-                for s in sections if s['type']=='catalogue'}
+                for s in sections if s['type']=='catalogue' and not s['settings'].get('smart')}
     component = components.declare_component('crm_middle_sections_v2',path=str(Path(__file__).parent/'components'/'crm_sections'))
     templates=[]
     if store is not None:

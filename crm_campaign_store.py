@@ -154,6 +154,25 @@ class CampaignStore(WorkspaceRecords):
             self.draft_identity=identity
             render_doc=self.test_document(render_doc,operation,recipient=recipient,customer=customer,shop=shop)
         checks=preflight(render_doc,env,cfg)
+        from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
+        if smart_enabled(render_doc):
+            example=customer
+            smart_checkout=None
+            if automation:
+                import streamlit as st
+                example=(st.session_state.get('_automation_flow_pin') or {}).get('selected',{}).get('_customer') or customer
+                if getattr(self,'preview_trigger',None)=='abandoned':
+                    cid=((st.session_state.get('_automation_checkout_pin') or {}).get('last_good') or {}).get('customer_id')
+                    if cid:example=(shop or __import__('crm_shopify').Shopify()).customer(cid,fresh=True)
+                    source=getattr(self,'_checkout_test_data',None) or (st.session_state.get('_automation_checkout_pin') or {}).get('last_good') or {}
+                    if source.get('customer_id')==example.get('id'):
+                        smart_checkout={'customer':{'id':example['id']},'products':source.get('items',[])}
+            else:
+                import streamlit as st
+                selected=st.session_state.get('_smart_preview_customer')
+                if selected:example=(shop or __import__('crm_shopify').Shopify()).customer(selected,fresh=True)
+            render_doc=smart_hydrate(render_doc,self,shop or __import__('crm_shopify').Shopify(),example,checkout=smart_checkout,fresh=True)
+            checks=preflight(render_doc,env,cfg)
         if not checks['test_ready']:
             from crm_campaign_issues import CampaignValidationError
             raise CampaignValidationError(checks)

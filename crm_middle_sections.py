@@ -52,7 +52,8 @@ def validate_middle(sections):
             from crm_catalogue import validate_snapshot
             if set(s) != common | {'products', 'settings'}: raise ValueError('Invalid catalogue section.')
             cfg = s['settings']
-            if not isinstance(cfg, dict) or not {'columns','display','cta'} <= set(cfg) or set(cfg)-{'columns','display','cta','headline','subtext'} or type(cfg['columns']) is not int or cfg['columns'] not in (1, 2): raise ValueError('Choose one or two columns.')
+            if not isinstance(cfg, dict) or not {'columns','display','cta'} <= set(cfg) or set(cfg)-{'columns','display','cta','headline','subtext','smart'} or type(cfg['columns']) is not int or cfg['columns'] not in (1, 2): raise ValueError('Choose one or two columns.')
+            if 'smart' in cfg and type(cfg['smart']) is not bool:raise ValueError('Invalid Smart recommendations setting.')
             if not isinstance(cfg['display'], dict) or set(cfg['display']) != set(DISPLAY) or any(type(v) is not bool for v in cfg['display'].values()): raise ValueError('Invalid catalogue display settings.')
             if not isinstance(cfg['cta'], str) or not 1 <= len(cfg['cta'].strip()) <= 60: raise ValueError('Use a short CTA label.')
             for field,limit in (('headline',80),('subtext',180)):
@@ -214,7 +215,7 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
         if s['type'] == 'image':
             from crm_image_prompt import has_image
             result['HTML content present'] |= has_image(markup)
-        if s['type'] == 'catalogue':
+        if s['type'] == 'catalogue' and not s['settings'].get('smart'):
             # sc-stack is the renderer's own allowlisted responsive class.
             result['Catalogue product facts valid'] = bool(s['products']) and not any(product_issues(p, s['settings']) for p in s['products'])
         present |= result.pop('HTML content present')

@@ -224,6 +224,7 @@ def image_alt(p):
 
 def catalogue_html(section, *, campaign_key=''):
     """Local snapshot-only hero or hybrid grid; two-up Word/no-media fallback."""
+    if section['settings'].get('smart'):return ''  # Recipient hydration owns these cards.
     cfg=section['settings'];display=cfg['display']
     products=[p for p in section['products'] if not product_issues(p,cfg)]
     if not products:return ''
@@ -276,11 +277,11 @@ def refresh_catalogues(doc, catalogue, *, fresh=True):
     """Returns a document copy; counters are always read from Edition Ops."""
     result = deepcopy(doc)
     sections = result.get('middle_sections', [])
-    ids = list(dict.fromkeys(p['id'] for s in sections if s['type']=='catalogue' and s['visible'] for p in s['products']))
+    ids = list(dict.fromkeys(p['id'] for s in sections if s['type']=='catalogue' and s['visible'] and not s['settings'].get('smart') for p in s['products']))
     if not ids: return result
     facts = {p['id']:p for p in catalogue.resolve(ids, result['market'], fresh=fresh)}
     for s in sections:
-        if s['type']=='catalogue' and s['visible']: s['products'] = [deepcopy(facts[p['id']]) for p in s['products']]
+        if s['type']=='catalogue' and s['visible'] and not s['settings'].get('smart'): s['products'] = [deepcopy(facts[p['id']]) for p in s['products']]
     return result
 
 
@@ -292,7 +293,7 @@ def verify_catalogues(doc, catalogue):
         raise ValueError('Catalogue live facts could not be verified. Refresh catalogue and retry before testing.') from None
     changed = []
     for old, new in zip(doc.get('middle_sections', []), current.get('middle_sections', [])):
-        if old['type'] != 'catalogue' or not old['visible']: continue
+        if old['type'] != 'catalogue' or not old['visible'] or old['settings'].get('smart'): continue
         for before, after in zip(old['products'], new['products']):
             if before != after:
                 changed.append(dict(section_id=old['id'],section_type='catalogue',display_label='Catalogue',editable=True,

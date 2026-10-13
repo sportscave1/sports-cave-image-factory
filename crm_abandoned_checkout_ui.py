@@ -51,6 +51,9 @@ def _lifecycle_canvas(doc,cfg,key,store,*,current_document=True):
                 warning=problem or pin.get('error','') or warning,
                 details=details(cache,doc)+(['Cached example · fresh consent and delivery checks still apply.'] if (data or {}).get('_cached') else []))
         if renderable:
+            if cache and current_document:
+                from crm_email_size_ui import publish_size
+                publish_size(cache['size'],editor.get('id'))
             from crm_local_preview import canvas
             try:canvas(doc,cfg,key,store,hydrated_document=hydrated_document)
             except NoPreviewCustomer:pass  # Retained iframe survives background work.
@@ -152,6 +155,9 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
         name=label.removeprefix('Previewing: ').split(' · ')[0] or 'Draft preview'
         toolbar(key,name,refresh=refresh,refresh_enabled=needs_checkout(doc) or header_checkout,size=cache['size'],warning=warning,
                 details=details(cache,doc))
+        if current_document:
+            from crm_email_size_ui import publish_size
+            publish_size(cache['size'],editor.get('id'))
         pending=st.session_state.get('_automation_checkout_pin')
         pending=bool(needs_checkout(doc) and pending and not pending['future'].done())
         components.html(cache['message']['html'],width=600 if mode=='Desktop' else 390,height=520,scrolling=True)

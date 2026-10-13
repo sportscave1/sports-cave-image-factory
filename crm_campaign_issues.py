@@ -29,7 +29,7 @@ def structured_issues(doc, cfg):
                     editable=kind not in ('header','footer'))
         def add(issue_type, message, count=1, **extra):
             result.append(dict(base, issue_type=issue_type, message=message, count=count, **extra))
-        if kind == 'catalogue':
+        if kind == 'catalogue' and not section['settings'].get('smart'):
             if not section['products']:
                 add('empty_catalogue','No products selected. Add products or hide this section.')
             for product in section['products']:
@@ -105,13 +105,13 @@ def document_issues(doc, cfg):
     for section in middle_sections(resolved):
         if not section['visible']: continue
         label = section['type'].title() + ' [' + section['id'] + ']'
-        if section['type'] == 'catalogue':
+        if section['type'] == 'catalogue' and not section['settings'].get('smart'):
             if not section['products']:
                 issues.append(label + ' · No products selected. Add products or hide this section.')
             for product in section['products']:
                 for problem in product_issues(product, section['settings']):
                     issues.append(label + ' · ' + product['title'][:120] + ': ' + problem + ' Refresh catalogue before testing.')
-        else:
+        elif section['type'] != 'catalogue':
             issues.extend(html_issues(section['html'], label))
     for kind, source in resolved.get('html_sections', {}).items():
         issues.extend(html_issues(source, kind.title() + ' [locked system section]'))

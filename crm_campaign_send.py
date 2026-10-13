@@ -205,6 +205,10 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
         return batch,profiles
     with timed('queue_profile_fetch'):
         for batch,profiles in bounded_reads(fresh_batch,batches(state['recipients'],50)):
+            from crm_smart_catalogue import enabled as smart_enabled,histories,BatchFacts
+            smart_history=histories(store,list(profiles)) if smart_enabled(doc) else {}
+            smart_facts=BatchFacts(shop,store.connect) if smart_enabled(doc) else None
+            smart_messages={}
             for recipient in batch:
                 customer=profiles.get(recipient['id'])
                 valid,reason=eligibility(customer,recipient['hash'] in hashes or recipient['id'] in ids)
@@ -228,7 +232,18 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
                     optout=native_unsubscribe_url(customer)
                     if len(optout)>len(REPRESENTATIVE_UNSUBSCRIBE):
                         blocked_recipients[recipient['hash']]='unsubscribe_url_size'
-                    else:delivery_recipients[recipient['hash']]={'address':normalized_email(customer['email']),'unsubscribe_url':optout}
+                    else:
+                        frozen={'address':normalized_email(customer['email']),'unsubscribe_url':optout}
+                        from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
+                        if smart_enabled(doc):
+                            personalized=smart_hydrate(doc,store,smart_facts.shop,customer,catalogue=smart_facts,orders=smart_history[customer['id']],fresh=True)
+                            from crm_campaign_content import fingerprint
+                            render_key=fingerprint(personalized,cfg)
+                            if render_key not in smart_messages:
+                                smart_messages[render_key]=validate_tracking(personalized,cfg,identity)
+                                validate_rendered_email(smart_messages[render_key])
+                            frozen['message']=smart_messages[render_key]
+                        delivery_recipients[recipient['hash']]=frozen
     template=str(uuid.uuid5(uuid.UUID(identity),'campaign-delivery-snapshot'))
     # Same queue and worker, immutable template snapshot; no new storage architecture.
     snapshot={'format':'campaign_delivery_v1','document':doc,'render_settings':cfg,'operation_id':operation,

@@ -81,6 +81,9 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
         visual_shop=st.session_state.get('_automation_flow_visual_reads',{}).get(visual_key)
         galleries,banner_fragments,asset_shop=preview_assets(data,store,st.session_state,doc,shop=visual_shop,revision=visual_key)
     else:galleries,banner_fragments,asset_shop=preview_assets(data,store,st.session_state,doc)
+    from crm_smart_catalogue import enabled as smart_enabled,preview as smart_preview
+    if not lifecycle and smart_enabled(doc):
+        hydrated_document=smart_preview(st.session_state,store,getattr(store,'preview_shop',None) or __import__('crm_shopify').Shopify(),doc)
     sections=middle_sections(doc)
     if lifecycle:
         # Resolve all bindings together before isolated sections. Copied/reordered
@@ -100,13 +103,15 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
     else:
         shell=render_campaign(with_email_defaults(base,cfg),cfg)['html']
         shell=shell.replace('<div>SC_LOCAL_PREVIEW_SLOT_7D26</div>','<div id="sc-local-sections"></div>')
+    if not lifecycle and hydrated_document is not None:
+        hydrated_sections={s['id']:s for s in middle_sections(hydrated_document)}
     resolved={};errors={};error_sections={}
     from crm_automation_preview_cache import digest
     entries=st.session_state.setdefault('_local_section_outputs',{})
     for s in sections:
         try:
             isolated=deepcopy({k:v for k,v in doc.items() if k not in ('middle_sections','custom_html','blocks')});isolated['content']=deepcopy(base['content']);isolated['blocks']=[]
-            current={**deepcopy(hydrated_sections.get(s['id'],s) if lifecycle else s),'visible':True}
+            current={**deepcopy(hydrated_sections.get(s['id'],s) if hydrated_document is not None else s),'visible':True}
             if 'html' in current:
                 for marker,value in banner_fragments.items():current['html']=current['html'].replace(marker,value)
                 current['html']=current['html'].replace('SC_FRAME_BANNER_URL','')
@@ -118,10 +123,12 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
             token=digest(isolated) if lifecycle else digest([isolated,data])
             if token in entries:
                 resolved[s['id']]={'section':s,'html':entries[token]}
+                if s.get('type')=='catalogue' and s['settings'].get('smart'):resolved[s['id']]['products']=deepcopy(current['products'])
                 continue
             from crm_recovery_discount import substitute
             hydrated=isolated if lifecycle else document(substitute(isolated,preview=True),data,test=True,shop=asset_shop)[0]
             resolved[s['id']]={'section':s,'html':render_middle(hydrated)[0]}
+            if s.get('type')=='catalogue' and s['settings'].get('smart'):resolved[s['id']]['products']=deepcopy(current['products'])
             entries[token]=resolved[s['id']]['html']
             while len(entries)>128:entries.pop(next(iter(entries)))
         except ValueError as exc:
@@ -154,7 +161,9 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
     replacements['SC_CHECKOUT_RECOVERY_URL']=''
     replacements.update(banner_fragments)
     replacements['SC_FRAME_BANNER_URL']=''
-    return dict(context_token=digest([data,cfg,collector]),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,collector=collector,offer=doc.get('recovery_discount'),association_independent=True,
+    context_data=[data,cfg,collector]
+    if smart_enabled(doc):context_data.append([st.session_state.get('_smart_preview_customer'),hydrated_document])
+    return dict(context_token=digest(context_data),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,collector=collector,offer=doc.get('recovery_discount'),association_independent=True,
                 tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
 
 
@@ -167,6 +176,9 @@ def canvas(doc,cfg,key,store=None,*,hydrated_document=None):
     from crm_email_editor_context import current
     version=current(st.session_state,{}).get('version',0)
     token=digest([doc,cfg,(st.session_state.get('_automation_checkout_pin') or {}).get('last_good'),(st.session_state.get('_automation_flow_pin') or {}).get('selected')])
+    from crm_smart_catalogue import enabled as smart_enabled
+    if smart_enabled(doc) and getattr(store,'email_mode',None)!='automation':
+        token=digest([token,st.session_state.get('_smart_preview_customer'),st.session_state.get('_smart_preview_revision',0)])
     if getattr(store,'email_mode',None)=='automation' and getattr(store,'preview_trigger','abandoned')!='abandoned':
         # Background artwork completion can leave customer/order identity
         # unchanged. Rebuild transient section errors when those facts arrive.
@@ -176,6 +188,15 @@ def canvas(doc,cfg,key,store=None,*,hydrated_document=None):
     cached=st.session_state.get(key+'local_preview_model')
     if not cached or cached[0]!=token:
         cached=(token,model(doc,cfg,store,hydrated_document=hydrated_document));st.session_state[key+'local_preview_model']=cached
+    if getattr(store,'email_mode',None)!='automation':
+        from crm_smart_catalogue import enabled as smart_enabled,preview as smart_preview
+        from crm_email_size_ui import measured,publish_size
+        try:
+            sized=smart_preview(st.session_state,store,store.preview_shop,doc) if smart_enabled(doc) else doc
+            editor=current(st.session_state,{})
+            publish_size(measured(sized,cfg,editor.get('id'))['local'],editor.get('id'))
+        except ValueError:
+            publish_size(None,current(st.session_state,{}).get('id'))
     if any(s['type']=='discount' for s in middle_sections(doc)) and not doc.get('recovery_discount'):
         st.caption('Presentation preview · no checkout discount connected. Bracketed discount text is a preview placeholder.')
     try:

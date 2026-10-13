@@ -12,6 +12,9 @@ def output(state,store,doc,cfg,identity=None):
     # render_settings already carries defaults; don't read them twice per render.
     if 'email_defaults' not in cfg:cfg={**cfg,'email_defaults':store.default_sections(cfg)}
     hydrated,label=store.preview_document(doc)
+    from crm_smart_catalogue import enabled as smart_enabled,preview as smart_preview
+    if getattr(store,'preview_trigger',None)=='abandoned' and smart_enabled(hydrated):
+        hydrated=smart_preview(state,store,store.preview_shop,hydrated)
     token=digest([hydrated,cfg,identity])
     trigger=getattr(store,'preview_trigger',None)
     lifecycle=getattr(store,'email_mode',None)=='automation' and isinstance(trigger,str) and trigger!='abandoned'

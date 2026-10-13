@@ -242,7 +242,9 @@ def render(content,row,unsubscribe,context=None):
     from crm_email_size import validate_rendered_email
     from crm_tracking import send_identity
     from crm_automation_definition import production_document
-    doc=production_document(content['document']);doc['campaign_key']='auto_'+str(row['id']).replace('-','')
+    from crm_smart_catalogue import enabled as smart_enabled
+    if smart_enabled(content['document']) and (context or {}).get('_smart_recipient')!=row['shopify_customer_id']:raise ValueError('Recipient Smart catalogue context required.')
+    doc=production_document((context or {}).get('_smart_document',content['document']));doc['campaign_key']='auto_'+str(row['id']).replace('-','')
     from crm_collector_images import configurations,render as render_collector
     if configurations(doc):
         if content.get('trigger') not in ('welcome','post_purchase','fulfilled','win_back') or '_collector_images' not in (context or {}):
@@ -251,8 +253,8 @@ def render(content,row,unsubscribe,context=None):
             raise ValueError('Artwork recipient mismatch.')
         doc=render_collector(doc,context['_collector_images']['blocks'])
     if content.get('lifecycle_version'):
-        from crm_lifecycle_products import hydrate
-        doc=hydrate(doc,(context or {}).get('_lifecycle_products',[]))
+        from crm_lifecycle_products import hydrate,selected
+        if selected(content['document']):doc=hydrate(doc,(context or {}).get('_lifecycle_products',[]))
     from crm_recovery_discount import selection as discount_selection,substitute,apply_links,DiscountHold
     discount=(context or {}).get('_recovery_discount')
     if discount_selection(doc) and not discount:raise DiscountHold('discount_verification_required: Revalidate Shopify before sending.')

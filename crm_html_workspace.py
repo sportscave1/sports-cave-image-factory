@@ -133,6 +133,12 @@ def composer_styles():
     .st-key-crm-workspace:has(.st-key-crm-composer-layout) .st-key-crm-composer-preview button[kind="primary"]{background:#ece7dc !important;color:#242424 !important;border-color:#b49450 !important}
     @media(max-width:1450px){.st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:330px !important;flex-basis:330px !important}}
     @media(max-width:1000px){.st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:300px !important;flex-basis:300px !important}}
+    @media(max-width:700px){
+      .st-key-crm-composer-layout{flex-direction:column!important;flex-wrap:nowrap!important;align-items:stretch!important}
+      .st-key-crm-composer-layout>div{width:100%!important;flex:0 0 auto!important;min-width:0!important}
+      .st-key-crm-composer-layout>div:has(>.st-key-crm-composer-controls){width:100%!important;flex-basis:auto!important;height:auto!important;max-height:none!important;overflow:visible!important}
+      .st-key-crm-composer-controls{width:100%!important;max-width:100%!important}
+    }
     </style>""")
 
 
@@ -169,6 +175,8 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
     with st.container(key='crm-automation-live-preview' if live else 'crm-composer-preview'):
         with st.container(horizontal=True,vertical_alignment='center'):
             st.markdown('**Email Preview**')
+            from crm_smart_catalogue import enabled as smart_enabled,control as smart_control
+            if store is not None and smart_enabled(doc):smart_control(st.session_state,store)
             with st.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-live-preview-devices' if live else 'crm-preview-devices'):
                 mode=st.session_state.get(key+'preview_device','Desktop')
                 for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
@@ -176,8 +184,13 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
                               on_click=_preview_device,args=(key,label))
         from crm_store import StoreUnavailable
         if store is not None and not live:
-            from crm_local_preview import canvas
-            canvas(doc,cfg,key,store)
+            from crm_local_preview import canvas,loading_canvas
+            from crm_flow_preview import NoPreviewCustomer
+            try:canvas(doc,cfg,key,store)
+            except NoPreviewCustomer:
+                loading_canvas(doc,cfg,key)
+                from crm_preview_toolbar import arm
+                arm(key,seconds=.3)
             return
         try:
             # Existing emails own header/footer snapshots. Their preview must

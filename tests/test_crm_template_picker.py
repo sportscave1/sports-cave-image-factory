@@ -23,7 +23,8 @@ class TemplateCacheTests(unittest.TestCase):
                 'content':{'format':'campaign_blocks_v1'}}
     def test_metadata_shared_sorted_and_copied_without_bodies(self):
         s=Mock(connect=object());s.html_library.return_value=[self.row(),{**self.row(),'id':'a','name':'Alpha'}]
-        self.assertEqual([r['name'] for r in library_rows(s)],['Alpha','Trust Icons'])
+        self.assertEqual([r['name'] for r in library_rows(s) if not r.get('builtin')],['Alpha','Trust Icons'])
+        self.assertTrue(any(r.get('builtin') for r in library_rows(s)))
         library_rows(s)[0]['name']='mutated'
         self.assertEqual(library_rows(s)[0]['name'],'Alpha')
         s.html_library.assert_called_once_with(metadata=True);s.get.assert_not_called()
@@ -53,7 +54,7 @@ class TemplateCacheTests(unittest.TestCase):
         from crm_store import StoreUnavailable
         s=Mock(connect=object());s.html_library.side_effect=[StoreUnavailable('Unavailable'),[]]
         with self.assertRaises(StoreUnavailable):library_rows(s)
-        self.assertEqual(library_rows(s),[]);self.assertEqual(s.html_library.call_count,2)
+        self.assertEqual([r for r in library_rows(s) if not r.get('builtin')],[]);self.assertEqual(s.html_library.call_count,2)
     def test_success_and_cancel_clear_dialog_fields_but_failure_retains_work(self):
         from crm_campaign_library import finish_action
         state={'name':'unfinished','html':'<p>draft</p>'};dialog=Mock()

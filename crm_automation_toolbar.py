@@ -107,6 +107,8 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             if st.button('Save draft',disabled=not dirty or archived,key='toolbar-save'):
                 if flush_current(force=True):changed();st.toast('Draft saved');st.rerun(scope='fragment')
             if editor:
+                from crm_email_size_ui import size_meter
+                if cfg is not None:size_meter(editor,key,cfg)
                 from crm_campaign_send_ui import test_control
                 test_control(store,user,editor,key,cfg=cfg)
             elif flow_view:
