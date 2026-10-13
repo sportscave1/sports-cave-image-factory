@@ -19,10 +19,9 @@ def status_options(row,step):
     options=[step_state(row,step)]
     if status(row)=='ARCHIVED':return options
     options.append('Disable in draft' if step.get('enabled',True) else 'Enable in draft')
-    locked=row['config']['draft'].get('lifecycle_version')
     busy=row['config'].get('publication',{}).get('state')=='PUBLISHING'
     if row['status']=='ACTIVE':options.append('Pause flow')
-    if not locked and not busy:
+    if not busy:
         if row['status']=='PAUSED' and row['config'].get('published_version'):options.append('Resume flow')
         options.append('Publish flow')
     return options
@@ -46,10 +45,13 @@ def status_action(store,user,row,step,key):
             target['enabled']=action=='Enable in draft'
             store.save_flow(user,row['id'],fresh['name'],draft,fresh['config']['revision'])
         elif action=='Publish flow':
-            job=store.request_publish(user,row['id'],fresh['config']['revision'])
-            if not job.get('unchanged'):
-                from crm_automation_home import accepted_publication
-                accepted_publication(job)
+            if fresh['trigger_type']=='abandoned':
+                job=store.request_publish(user,row['id'],fresh['config']['revision'])
+                if not job.get('unchanged'):
+                    from crm_automation_home import accepted_publication
+                    accepted_publication(job)
+            else:
+                st.session_state['automation-confirm-publication']=(str(row['id']),fresh['config']['revision'])
         else:store.lifecycle(user,row['id'],'pause' if action=='Pause flow' else 'resume')
         changed();st.session_state['flow-toolbar-dirty']=True
     except (ValueError,PermissionError,StoreUnavailable) as exc:

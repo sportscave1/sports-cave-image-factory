@@ -112,8 +112,9 @@ class PolicyTests(unittest.TestCase):
     def test_publication_and_entry_lock_even_with_active_row(self):
         from crm_automation_publication import preflight
         from crm_automation_runtime import enter
-        a=dict(status='ACTIVE',config=dict(draft=expanded_flow('welcome')))
-        with self.assertRaisesRegex(ValueError,'draft-only'):preflight(a,1)
+        from crm_automation_definition import FORMAT
+        a=dict(status='ACTIVE',config=dict(format=FORMAT,revision=1,published_version=0,draft=expanded_flow('welcome')))
+        self.assertEqual(preflight(a,1)['trigger'],'welcome')
         engine=Mock()
         self.assertIsNone(enter(engine,a,'id','id','id',AT));engine.shop.customer.assert_not_called()
     def test_abandoned_contract_is_unmodified(self):
@@ -159,7 +160,7 @@ class DatabaseTests(unittest.TestCase):
         for _ in range(2):stage(self.store,self.user,self.flow,self.customer['id'])
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_lifecycle_staged WHERE automation_id=%s',(self.flow['id'],),True)['n'],1)
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(self.flow['id'],),True)['n'],0)
-        with self.assertRaisesRegex(ValueError,'draft-only'):self.store.request_publish(self.user,self.flow['id'],1)
+        with self.assertRaisesRegex(ValueError,'not ready'):self.store.request_publish(self.user,self.flow['id'],1)
     def test_upgrade_preserves_identity_original_revision_content_and_repeat(self):
         old=self.store.create(self.user,'post_purchase')
         upgraded=self.store.prepare_lifecycle(self.user,old['id'])
@@ -210,11 +211,9 @@ class RuntimeTests(unittest.TestCase):
     def setUp(self):
         from tests.test_crm_native_automations import NativeAutomationTests
         NativeAutomationTests.setUp(self)
-        self.release=patch('crm_lifecycle_runtime.DRAFT_ONLY',False)
-        self.release.start();self.addCleanup(self.release.stop)
         self.shop.orders.return_value={'nodes':[],'pageInfo':{'hasNextPage':False}}
         self.shop.query.side_effect=lambda query,variables,*args: {'nodes':[dict(id=i,risk={'recommendation':'ACCEPT'},disputes=[],returnStatus='NO_RETURN',fulfillments=[]) for i in variables.get('ids',[])]}
-        self.store.set_state('shopify_automation_capabilities',{'scopes':['read_customers','read_orders','read_all_orders'],'checked_at':self.clock.isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','win_back','abandoned')}})
+        self.store.set_state('shopify_automation_capabilities',{'scopes':['read_customers','read_orders','read_all_orders','read_products'],'checked_at':self.clock.isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','win_back','abandoned','fulfilled')},'webhooks':{'ORDERS_PAID':True,'ORDERS_FULFILLED':True}})
     def test_incomplete_shopify_history_access_fails_closed(self):
         from crm_lifecycle_runtime import verified_plan
         self.store.set_state('shopify_automation_capabilities',{'scopes':['read_customers','read_orders']})
@@ -231,16 +230,36 @@ class RuntimeTests(unittest.TestCase):
             step['document']=document();step['document']['smart_hours']=1
         a=self.store.save_flow({'role':'admin','id':'test'},a['id'],a['name'],flow,1)
         return self.store.publish({'role':'admin','id':'test'},a['id'],a['config']['revision'],env=LIVE)
-    def test_welcome_once_and_zero_live_sends_when_release_lock_returns(self):
+    def test_welcome_once_and_pause_prevents_delivery(self):
         from crm_lifecycle_runtime import enter,advance
         from crm_logic import now
         a=self.publish('welcome');self.clock=now()+timedelta(seconds=1)
         j=enter(self.engine,a,self.customer['id'],self.customer['id'],'subscribed',self.clock)
         self.assertIsNotNone(j)
         self.assertIsNone(enter(self.engine,a,self.customer['id'],self.customer['id'],'duplicate',self.clock+timedelta(seconds=1)))
-        with patch('crm_lifecycle_runtime.DRAFT_ONLY',True):advance(self.engine,j)
+        self.store.lifecycle({'role':'admin','id':'test'},a['id'],'pause')
+        advance(self.engine,j)
         self.assertFalse(self.store.q('SELECT 1 FROM crm_marketing_sends WHERE enrollment_id=%s',(j['id'],)))
         self.provider.send.assert_not_called()
+    def test_historical_trigger_events_cannot_enroll_after_publication(self):
+        from crm_automation_runtime import process_event
+        for kind,topic in (('welcome','customers_email_marketing_consent/update'),('post_purchase','orders/paid')):
+            a=self.publish(kind)
+            old=date(a['activated_at'])-timedelta(seconds=1)
+            self.shop.customer.reset_mock();self.shop.order.reset_mock()
+            process_event(self.engine,dict(topic=topic,occurred_at=old,object_id='gid://shopify/Order/999',related_customer_id=self.customer['id'],normalized={}),[a])
+            self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],0)
+            self.shop.customer.assert_not_called();self.shop.order.assert_not_called()
+    def test_winback_reconciliation_uses_published_policy_and_skips_historical_thresholds(self):
+        from crm_lifecycle_runtime import reconcile
+        a=self.publish('win_back');self.clock=date(a['activated_at'])+timedelta(seconds=1)
+        draft=deepcopy(a['config']['draft']);draft['inactive_days']=365
+        a=self.store.save_flow({'role':'admin','id':'test'},a['id'],a['name'],draft,a['config']['revision'])
+        historical={'customer_id':self.customer['id'],'last_paid_at':self.clock-timedelta(days=180)}
+        with patch('crm_lifecycle_audience.listing',return_value=[historical]) as listing,patch('crm_lifecycle_runtime.enter') as enter:
+            reconcile(self.engine,a)
+        self.assertEqual(listing.call_args.args[1]['config']['draft']['inactive_days'],90)
+        enter.assert_not_called();self.provider.send.assert_not_called()
     def test_welcome_purchase_exits_and_paid_order_supersedes_previous(self):
         from crm_lifecycle_runtime import enter,paid_exit
         from crm_logic import now

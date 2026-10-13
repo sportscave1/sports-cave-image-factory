@@ -113,7 +113,7 @@ class AutomationStore(CampaignStore):
             if not old or not native(old) or old['config'].get('deleted_at') or status(old)=='ARCHIVED': raise ValueError('Automation is not editable.')
             cfg=deepcopy(old['config'])
             if cfg.get('draft',{}).get('lifecycle_version') and (flow.get('lifecycle_version')!=1 or flow['trigger']!=cfg['draft']['trigger']):
-                raise ValueError('The lifecycle draft safety lock and trigger cannot be removed by editing.')
+                raise ValueError('The lifecycle timing contract and trigger cannot be removed by editing.')
             if cfg.get('draft',{}).get('lifecycle_version') and flow['trigger']=='post_purchase':
                 required={s['step_id'] for s in cfg['draft']['emails'] if s.get('requires_fulfilment')}
                 if any(s['step_id'] in required and not s.get('requires_fulfilment') for s in flow['emails']):
@@ -134,12 +134,12 @@ class AutomationStore(CampaignStore):
     def prepare_lifecycle(self,user,identity):
         """One reversible draft upgrade; no publication, enrollment or history deletion."""
         require(user,'crm_automations_manage')
-        from crm_lifecycle_definition import TRIGGERS,expanded_flow,locked
+        from crm_lifecycle_definition import TRIGGERS,expanded_flow,is_lifecycle
         with self.db() as conn:
             row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
             if not row or row['trigger_type'] not in TRIGGERS or row['status']!='DRAFT':
                 raise ValueError('Only draft lifecycle flows can be prepared.')
-            if locked(row):return row
+            if is_lifecycle(row):return row
             old=deepcopy(row['config']);cfg=deepcopy(old)
             # Preserve exact previous definitions, source steps, versions and IDs.
             cfg['lifecycle_previous']={'config':old,'steps':deepcopy(row['steps']), 'at':now().isoformat(),'actor':str(user.get('id',''))}
@@ -191,8 +191,9 @@ class AutomationStore(CampaignStore):
             # Claims and due timestamps use the same database clock. Host clock
             # skew must not push already-due work into the future on resume.
             cfg=deepcopy(row['config']);current=status(row);target=row['status'];at=date(row['transition_at'])
-            if action=='resume' and cfg.get('draft',{}).get('lifecycle_version'):
-                raise ValueError('Lifecycle expansion is draft-only. Activation requires a separately reviewed release.')
+            if action=='resume' and row['trigger_type']!='abandoned':
+                from crm_automation_readiness import require_ready
+                require_ready(self,row,conn=conn)
             if action=='pause' and current=='ACTIVE': target='PAUSED';cfg['paused_at']=at.isoformat()
             elif action=='resume' and current=='PAUSED' and cfg.get('published_version'):
                 target='ACTIVE'

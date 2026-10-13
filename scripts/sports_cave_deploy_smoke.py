@@ -33,12 +33,12 @@ def main():
         from scripts.validate_render_topology import main as topology
         assert topology(['--path', str(root/'render.yaml')]) == 0
         from crm_lifecycle_definition import expanded_flow
-        from crm_lifecycle_runtime import DRAFT_ONLY, locked
-        assert DRAFT_ONLY is True, 'Lifecycle activation lock must remain enabled'
+        from crm_lifecycle_runtime import locked
         total = 0
         for kind in ('welcome', 'post_purchase', 'win_back'):
             flow = expanded_flow(kind)
             assert locked({'config': {'draft': flow}}), kind
+            assert not locked({'config': {'draft': flow,'published_version':1}}), kind
             total += len(flow['emails'])
             if kind == 'win_back': assert flow['emails'][3]['enabled'] is False
         assert total == 10

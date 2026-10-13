@@ -118,7 +118,8 @@ class NativeAutomationTests(unittest.TestCase):
         self.assertEqual(self.store.q('SELECT count(*) n FROM crm_automation_enrollments WHERE automation_id=%s',(a['id'],),True)['n'],0)
 
     def test_native_winback_polling_dedup_and_purchase_exit(self):
-        self.store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{'win_back':'AVAILABLE'}})
+        from tests.crm_publication_fixture import ready
+        ready(self.store)
         a=self.published('win_back');self.customer['numberOfOrders']=1
         self.customer['lastOrder']={'id':'gid://shopify/Order/100','createdAt':(now()-timedelta(days=181)).isoformat()}
         self.shop.customers.return_value={'nodes':[deepcopy(self.customer)],'pageInfo':{'hasNextPage':False}}
@@ -198,7 +199,8 @@ class NativeAutomationTests(unittest.TestCase):
 
     def setUp(self):
         self.store=AutomationStore(connect);self.clock=now();self.created=[]
-        self.store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
+        from tests.crm_publication_fixture import ready
+        ready(self.store)
         self.addCleanup(lambda:self.store.q("UPDATE crm_automations SET status='PAUSED' WHERE id=ANY(%s::uuid[])",(self.created,)))
         self.guard=patch('requests.sessions.Session.request',side_effect=AssertionError('External network forbidden'))
         self.guard.start();self.addCleanup(self.guard.stop)
@@ -380,7 +382,7 @@ class NativeAutomationTests(unittest.TestCase):
         wire.post.return_value=Mock(status_code=200,json=lambda:{'id':str(uuid.uuid4())})
         before=self.store.q('SELECT count(*) n FROM crm_campaign_drafts',one=True)['n']
         user={**ADMIN,'email':'internal@example.test'}
-        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_shopify.Shopify',return_value=TestRecipientShop()):
+        with patch('crm_resend_marketing._audit',return_value=True),patch('crm_shopify.Shopify',return_value=TestRecipientShop()),patch('crm_flow_preview.hydrate',side_effect=lambda state,store,doc,**kw:(doc,{})):
             first=send_test(self.store,user,editor,'internal@example.test',operation,env=LIVE,session=wire)
             second=send_test(self.store,user,editor,'internal@example.test',operation,env=LIVE,session=wire)
         self.assertEqual(first['message_id'],second['message_id']);wire.post.assert_called_once()

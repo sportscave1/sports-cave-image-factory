@@ -1,4 +1,4 @@
-"""Draft-only lifecycle starter content, using the existing document contract."""
+"""Editable lifecycle starter content, using the existing document contract."""
 from copy import deepcopy
 from crm_automation_definition import new_flow, email_step
 from crm_campaign_content import new_document
@@ -51,7 +51,7 @@ def expanded_flow(trigger, sections=None):
         flow['emails'].append(step)
     return flow
 
-def locked(row):
+def is_lifecycle(row):
     return bool((row.get('config') or {}).get('draft', {}).get('lifecycle_version'))
 
 def timing_label(step):

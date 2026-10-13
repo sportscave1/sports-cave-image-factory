@@ -1,7 +1,6 @@
 """Event-anchored adapter for the existing enrollment and outbound send ledgers.
 
-This release is draft-only. The adapter is exercised with isolated test fixtures;
-removing the release lock requires a separately authorized activation release.
+Activation is authorized by the durable, readiness-checked publication boundary.
 """
 from copy import deepcopy
 from datetime import timedelta
@@ -9,10 +8,9 @@ import json
 from crm_logic import date,recipient_hash,eligibility,consent
 from crm_lifecycle_policy import preview,latest_paid,qualifying,order_from_ledger
 
-DRAFT_ONLY = True
-
 def locked(row):
-    return bool(DRAFT_ONLY and row.get('config',{}).get('draft',{}).get('lifecycle_version'))
+    # A saved lifecycle draft is never authority for delivery.
+    return bool(is_lifecycle(row) and not row.get('config',{}).get('published_version'))
 
 def is_lifecycle(row):
     return bool(row and row.get('config',{}).get('draft',{}).get('lifecycle_version'))
@@ -178,7 +176,10 @@ def reconcile(engine,row):
     key='lifecycle-inactivity:'+str(row['id']);state=engine.store.state(key);at=engine.clock()
     if date(state.get('next_at')) and date(state['next_at'])>at:return
     page=int(state.get('page',0))
-    records=listing(engine.store,row,sort='Longest inactivity',page=page,at=at)
+    # A live draft edit must not change candidate eligibility before publication.
+    published=deepcopy(row)
+    published['config']['draft']=deepcopy(row['config']['published_flow'])
+    records=listing(engine.store,published,sort='Longest inactivity',page=page,at=at)
     for record in records[:50]:
         # Only thresholds reached after activation; no automatic historical replay.
         due=date(record['last_paid_at'])+timedelta(days=row['config']['published_flow'].get('inactive_days',90))

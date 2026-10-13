@@ -147,11 +147,13 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue(has_changes(self.store,row,flow))
     def setUp(self):
         self.store=AutomationStore(connect);self.ids=[]
+        self.env=patch.dict(os.environ,LIVE);self.env.start();self.addCleanup(self.env.stop)
         self.guard=patch('requests.sessions.Session.request',side_effect=AssertionError('External network forbidden'))
         self.guard.start();self.addCleanup(self.guard.stop)
         self.cfg=patch.object(self.store,'render_settings',return_value=deepcopy(CFG));self.cfg.start();self.addCleanup(self.cfg.stop)
         from crm_logic import now
-        self.store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
+        from tests.crm_publication_fixture import ready
+        ready(self.store)
         self.addCleanup(self.cleanup)
 
     def cleanup(self):

@@ -158,8 +158,9 @@ class SportTests(unittest.TestCase):
 class StageTests(unittest.TestCase):
     def test_ten_mappings_keep_original_timing_and_disabled_four(self):
         from crm_lifecycle_definition import expanded_flow
-        from crm_lifecycle_runtime import DRAFT_ONLY
-        self.assertTrue(DRAFT_ONLY);self.assertEqual(len(mapping()),10)
+        from crm_lifecycle_runtime import locked
+        self.assertTrue(locked({'config':{'draft':expanded_flow('welcome')}}))
+        self.assertEqual(len(mapping()),10)
         for row in mapping():
             step=expanded_flow(row['trigger'])['emails'][row['email']-1]
             self.assertEqual((row['days']*86400,row['anchor'],row['enabled']),

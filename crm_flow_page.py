@@ -209,7 +209,6 @@ def sequence(shop,store,user,identity,period):
     from crm_flow_inline import controls,status_control
     error=st.session_state.pop('flow-inline-error',None)
     if error:st.caption(error)
-    if flow.get('lifecycle_version'):st.caption('Draft only: publishing is locked for this flow.')
     from crm_flow_thumbnail import thumbnail
     if not flow['emails']:
         st.html('<div class="sc-flow-empty"><strong>No emails yet</strong>Add your first email to build this draft flow.</div>')

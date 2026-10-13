@@ -21,8 +21,8 @@ with sync_playwright() as pw:
         page.screenshot(path=str(OUT/(label+'-desktop.png')),full_page=True)
         metric={'page':label,'load_ms':timings}
         if flow!='abandoned':
-            assert page.get_by_role('button',name='Publish now',exact=True).count()==0
-            assert 'Draft · activation locked' in page.locator('body').inner_text()
+            assert page.get_by_role('button',name='Publish now',exact=True).count()==1
+            assert 'Draft · activation locked' not in page.locator('body').inner_text()
             name={'welcome':'Marketing subscribers','post_purchase':'Paid orders','win_back':'Inactive purchasers'}[flow]
             page.get_by_text(name,exact=True).click()
             table=page.frame_locator('iframe[title$=".crm_checkout_table"]').get_by_role('table')

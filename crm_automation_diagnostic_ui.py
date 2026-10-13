@@ -35,6 +35,11 @@ def control(shop,store,user,kind,key,automation=None):
         st.caption('Required webhook API version · 2026-04')
         st.caption('Last checked · '+str(state.get('checked_at') or 'Never'))
         st.caption('Optional app pixel · '+state.get('pixel','UNVERIFIED')+' · checked '+str(state.get('pixel_checked_at') or 'not recorded'))
+        if automation and kind!='abandoned':
+            from crm_automation_readiness import blockers
+            requirements=blockers(store,automation)
+            st.caption('Publication prerequisites · '+('NEEDS ATTENTION' if requirements else 'Verified; saved content is validated before confirmation and again by the worker'))
+            for reason in requirements:st.caption(reason)
 
 
 def operational_status(store,automation):

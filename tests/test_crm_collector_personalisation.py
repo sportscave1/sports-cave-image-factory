@@ -198,10 +198,10 @@ class CollectorTests(unittest.TestCase):
 
     def test_existing_flows_and_email_four_are_unchanged_by_library(self):
         from crm_lifecycle_definition import expanded_flow
-        from crm_lifecycle_runtime import DRAFT_ONLY
+        from crm_lifecycle_runtime import locked
         flow=expanded_flow('win_back');before=deepcopy(flow)
         for key in DESIGNS:document(key)
-        self.assertTrue(DRAFT_ONLY);self.assertFalse(flow['emails'][3]['enabled']);self.assertEqual(flow,before)
+        self.assertTrue(locked({'config':{'draft':flow}}));self.assertFalse(flow['emails'][3]['enabled']);self.assertEqual(flow,before)
 
     def test_image_selector_applies_settings_without_catalogue_requests(self):
         from streamlit.testing.v1 import AppTest

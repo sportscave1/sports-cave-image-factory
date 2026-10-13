@@ -9,7 +9,7 @@ from crm_store import StoreUnavailable
 
 def row():
     flow=new_flow('abandoned')
-    return dict(id='fixture',name='Original name',status='DRAFT',steps=[],updated_at='now',
+    return dict(id='fixture',trigger_type='abandoned',name='Original name',status='DRAFT',steps=[],updated_at='now',
                 config=dict(draft=flow,revision=7,published_version=0))
 
 
@@ -25,12 +25,23 @@ class InlineTests(unittest.TestCase):
         r['config']['archived_at']='then';self.assertEqual(step_state(r,s),'DRAFT')
         self.assertEqual(status_options(r,s),['DRAFT'])
 
-    def test_new_step_in_live_flow_is_still_draft_and_locks_remove_publish_resume(self):
+    def test_new_step_in_live_flow_is_still_draft_and_lifecycle_can_publish_resume(self):
         r=row();s=r['config']['draft']['emails'][0];r['status']='ACTIVE';r['config']['published_version']=1
         self.assertEqual(step_state(r,s),'DRAFT')
         r['config']['draft']['lifecycle_version']=1
-        self.assertNotIn('Publish flow',status_options(r,s))
-        r['status']='PAUSED';self.assertNotIn('Resume flow',status_options(r,s))
+        self.assertIn('Publish flow',status_options(r,s))
+        r['status']='PAUSED';self.assertIn('Resume flow',status_options(r,s))
+        r['config']['publication']={'state':'PUBLISHING'}
+        self.assertNotIn('Publish flow',status_options(r,s));self.assertNotIn('Resume flow',status_options(r,s))
+
+    def test_lifecycle_inline_publish_requests_confirmation_without_creating_job(self):
+        r=row();r['trigger_type']='welcome';s=r['config']['draft']['emails'][0]
+        store=Mock();store.flow.return_value=r;state={'action':'Publish flow'}
+        with patch('crm_flow_inline.st') as ui,patch('crm_campaign_recovery.flush_current',return_value=True),patch('crm_automation_ui.changed'):
+            ui.session_state=state
+            status_action(store,{},r,s,'action')
+        self.assertEqual(state['automation-confirm-publication'],('fixture',7))
+        store.request_publish.assert_not_called()
 
     def test_failed_status_action_is_consumed_without_replay(self):
         r=row();s=r['config']['draft']['emails'][0];store=Mock();store.flow.return_value=r

@@ -34,9 +34,13 @@ def run(store,owner,stop,*,interval=1.0):
         from crm_automation_store import AutomationStore
         connection=Connection(connect);store=AutomationStore(connection)
     try:
+        heartbeat=0
         while not stop.is_set():
             try:
                 worked=tick(store,owner)
+                if perf_counter()-heartbeat>=30:
+                    store.set_state('automation_publication_health',{'checked_at':now().isoformat(),'status':'ok'})
+                    heartbeat=perf_counter()
             except Exception as exc:
                 LOG.warning('automation_publication_poll_failed error_class=%s',type(exc).__name__)
                 stop.wait(5)
@@ -85,9 +89,6 @@ def approved(flow):
 
 
 def preflight(row,revision):
-    from crm_lifecycle_runtime import locked
-    if row and locked(row):
-        raise ValueError('Lifecycle expansion is draft-only. Publication and live sending are disabled.')
     if not row or not native(row) or row['config'].get('deleted_at') or status(row)=='ARCHIVED':
         raise ValueError('Automation is not publishable.')
     if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
@@ -108,6 +109,9 @@ def request(store,user,identity,revision):
         conn.execute("SET LOCAL lock_timeout='2s'")
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
         flow=preflight(row,revision)
+        if flow['trigger']!='abandoned':
+            from crm_automation_readiness import require_ready
+            require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},conn=conn)
         active=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND state IN ('QUEUED','RUNNING')",(identity,)).fetchone()
         if active:
             if active['revision']!=revision:raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
@@ -135,11 +139,19 @@ def prepare(store,identity,flow,version,name,env=None):
     from crm_abandoned_checkout import publication_document
     from crm_automation_capabilities import require as require_trigger
     flow=validate(migrate_flow(flow));cfg=store.render_settings(env)
+    if flow['trigger']!='abandoned':
+        from crm_automation_readiness import require_ready
+        require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},env)
     require_trigger(store,flow['trigger']);bundles=[];steps=[]
     for index,step in enumerate(flow['emails']):
         if not step.get('enabled',True):continue
         doc=with_email_defaults(production_document(step['document']),cfg)
         validation_doc=publication_document(doc,flow['trigger'])
+        if flow['trigger']!='abandoned':
+            # Offline authoring validation only. Persist the untouched bindings;
+            # delivery resolves verified recipient artwork and checks final size.
+            from crm_collector_images import render as render_artwork,sample_facts
+            validation_doc=render_artwork(validation_doc,sample_facts(validation_doc))
         template_id=str(uuid.uuid5(uuid.UUID(str(identity)),step['step_id']))
         email_size=validate_rendered_email(validate_tracking(validation_doc,cfg,template_id))
         failures=[k for k,v in production_checks(validation_doc,cfg,env,reviewed_audience=True,email_size=email_size).items() if not v]
@@ -212,6 +224,7 @@ def publish_direct(store,user,identity,revision,env=None):
 def safe_reason(exc):
     # Persist only allowlisted operator messages; never raw provider/DB errors.
     text=str(exc).lower()
+    if text.startswith('automation publication not ready:'):return str(exc)
     if 'discount_not_selected:' in text:return 'Select a Shopify discount for every email using discount variables, or remove those variables, then publish again.'
     if 'discount_variable_in_url:' in text:return 'Use discount variables in offer text, not links. The recovery button applies the selected code.'
     if 'discount_' in text:return 'Review the selected Shopify discount and its offer text before publishing. The previous live version remains active.'
