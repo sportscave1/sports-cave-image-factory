@@ -2031,7 +2031,7 @@ def _display_rows(rows, *, normalised=False):
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
         display_row["print_jpg"] = print_jpg.state(row, psd_mapping.get(psd_directory.product_id(row)))['label']
         import edition_test
-        if edition_test.eligible(row,psd_mapping.get(psd_directory.product_id(row))):display_row['print_jpg']='/edition-jpg-test#TEST JPG'
+        if edition_test.eligible(row,psd_mapping.get(psd_directory.product_id(row))):display_row['print_jpg']='/edition-jpg-download#Download JPG'
         if display_row.get("order"):
             display_row["order"] = f"{COPY_ORDER_ICON} {display_row['order']}"
         output.append(display_row)
@@ -2221,7 +2221,7 @@ def _column_config():
             display_text=r"(Open PSD|Not linked|Unavailable)$",
             width=82,
         ),
-        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(TEST JPG|Needs Setup|Blocked|Review)$",width=94,help="Only verified SC3284 unit 1 is enabled for a native-resolution TEST JPG. Other units remain disabled; production print approval is separate."),
+        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(Download JPG|Needs Setup|Blocked|Review)$",width=94,help="Only verified SC3284 unit 1 is enabled for a native-resolution TEST JPG. Other units remain disabled; production print approval is separate."),
     }
 
 
@@ -2715,7 +2715,7 @@ def _render_orders_table(rows):
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
                 st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
                 if edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
-                    st.link_button("Generate / Preview TEST JPG", "/edition-jpg-test#TEST JPG")
+                    st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
                 else:
                     st.caption(f"Print JPG — {status['label']}: {status['reason']}")
     with st.container(border=False, key="orders-table"):
@@ -2764,7 +2764,7 @@ def _render_mobile_orders(rows):
             else: st.caption('PSD: Not linked')
             status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
             if edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
-                st.link_button("Generate / Preview TEST JPG", "/edition-jpg-test#TEST JPG")
+                st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
             else:
                 st.caption(f"Print JPG: {status['label']} — {status['reason']}")
     psd_directory.render_missing_link_guard(st)

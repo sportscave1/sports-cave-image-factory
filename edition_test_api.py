@@ -12,7 +12,7 @@ async def page(request):
         user=await run_in_threadpool(files._request_user,request)
         if not files.os_accounts.can_access_page(user,'Orders'):raise ValueError('Orders and Files access are required for this test.')
         return HTMLResponse((Path(__file__).parent/'components/edition_test/index.html').read_text(encoding='utf-8'),headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
-    except Exception as error:return files._psd_error_page(str(error),status=403,title='Edition TEST JPG')
+    except Exception as error:return files._psd_error_page(str(error),status=403,title='Download JPG')
 
 
 async def prepare(request):
@@ -53,4 +53,4 @@ async def context(request):
     except Exception as error:return files._response_error(files.FilesUploadError(str(error) if isinstance(error,(ValueError,files.FilesUploadError)) else 'Test verification is unavailable. Retry or contact the administrator.',code='edition_test_blocked',status_code=403))
 
 
-ROUTES=(('/edition-jpg-test',page,('GET',)),('/api/edition-jpg-test/prepare',prepare,('POST',)),('/api/edition-jpg-test/context',context,('GET',)))
+ROUTES=(('/edition-jpg-download',page,('GET',)),('/edition-jpg-test',page,('GET',)),('/api/edition-jpg-test/prepare',prepare,('POST',)),('/api/edition-jpg-test/context',context,('GET',)))

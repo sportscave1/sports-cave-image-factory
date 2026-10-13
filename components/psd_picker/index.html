@@ -3,32 +3,35 @@ const send=(type,extra={})=>parent.postMessage({isStreamlitMessage:true,type,...
 send('streamlit:componentReady',{apiVersion:1});send('streamlit:setFrameHeight',{height:0});
 const target=window.parent,doc=target.document;
 target.SportsCavePsdPicker?.destroy?.();
-const original=target.open,controller=new target.AbortController();let modal=null,frame=null,focusBefore=null,mode='';
-function close(){try{frame?.contentWindow?.SportsCavePsdDismiss?.();}catch{}modal?.remove();modal=null;frame=null;if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});focusBefore=null;}
+const original=target.open;const bridgeScript=doc.createElement('script');bridgeScript.textContent="window.SportsCaveEditionBridge={send:(recipient,payload,origin)=>recipient.postMessage(payload,origin),open:(open,url,features)=>open.call(window,url,'sports-cave-edition-download',features)};";doc.head.append(bridgeScript);const controller=new target.AbortController();let modal=null,frame=null,focusBefore=null,mode='',editionPopup=null,editionNonce='';
+function close(){editionPopup?.close();editionPopup=null;editionNonce='';try{frame?.contentWindow?.SportsCavePsdDismiss?.();}catch{}modal?.remove();modal=null;frame=null;if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});focusBefore=null;}
 function launch(url){
  close();focusBefore=doc.activeElement;mode=new URL(url).pathname==='/api/files-psd-open'?'open':'picker';modal=doc.createElement('dialog');modal.setAttribute('aria-label',mode==='open'?'Open PSD':'Attach PSD');modal.style.cssText='width:min(680px,90vw);height:min(600px,85vh);padding:0;border:1px solid #ccc;border-radius:8px';
  if(mode==='open')modal.style.cssText='width:min(540px,94vw);max-height:88vh;padding:0;border:1px solid #d5dae2;border-radius:10px;box-shadow:0 18px 65px #0003;overflow:hidden';
- if(new URL(url).pathname==='/edition-jpg-test'){mode='edition-test';modal.setAttribute('aria-label','Edition TEST JPG');modal.style.width='min(680px,94vw)';}
+ if(['/edition-jpg-test','/edition-jpg-download'].includes(new URL(url).pathname)){mode='edition-test';modal.setAttribute('aria-label','Download JPG');modal.style.cssText='width:min(460px,94vw);height:230px;max-height:85vh;padding:0;border:1px solid #d5dae2;border-radius:10px';editionNonce='edition='+Array.from(target.crypto.getRandomValues(new Uint8Array(24)),x=>x.toString(16).padStart(2,'0')).join('');editionPopup=target.SportsCaveEditionBridge.open(original,'http://127.0.0.1:18762/pair#'+editionNonce,'popup,width=380,height=180');}
  const header=doc.createElement('div');header.style.cssText='text-align:right;padding:6px';
  const button=doc.createElement('button');button.textContent=mode==='open'?'×':'Close';button.setAttribute('aria-label','Close');button.style.cssText='font:22px system-ui;border:0;background:transparent;color:#576174;cursor:pointer;padding:0 8px';button.onclick=close;header.append(button);
  frame=doc.createElement('iframe');frame.src=url;frame.title=mode==='open'?'Open PSD':'Attach approved Dropbox PSD';frame.style.cssText='border:0;width:100%;height:calc(100% - 42px)';
- if(mode==='edition-test')frame.title='Edition TEST JPG';
+ if(mode==='edition-test'){frame.title='Download JPG';frame.onload=()=>target.SportsCaveEditionBridge.send(frame.contentWindow,{type:'edition-connect',nonce:editionNonce,popup_available:!!editionPopup},target.location.origin);}
  if(mode==='open'){header.style.cssText='position:absolute;right:4px;top:3px;z-index:1';frame.style.height='265px';}
  modal.append(header,frame);doc.body.append(modal);modal.showModal();modal.addEventListener('cancel',close,{once:true});modal.addEventListener('click',event=>{const box=modal.getBoundingClientRect();if(event.target===modal&&(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom))close();});
 }
-function pickerUrl(value){try{const url=new URL(value,target.location.href);return url.origin===target.location.origin&&['/files-psd-picker','/api/files-psd-open','/edition-jpg-test'].includes(url.pathname)?url.href:null;}catch{return null;}}
+function pickerUrl(value){try{const url=new URL(value,target.location.href);return url.origin===target.location.origin&&['/files-psd-picker','/api/files-psd-open','/edition-jpg-test','/edition-jpg-download'].includes(url.pathname)?url.href:null;}catch{return null;}}
 function disabledLink(value){try{if(['Needs Setup','Blocked','Review'].includes(value))return true;const u=new URL(value,target.location.href);return u.origin===target.location.origin&&['Needs Setup','Blocked','Review'].includes(decodeURIComponent(u.pathname).replace(/^\//,''));}catch{return false;}}
 const wrapper=function(url,...args){if(['Not linked','Unavailable'].includes(url)||disabledLink(url))return null;const href=pickerUrl(url);if(href){launch(href);return null;}return original.call(this,url,...args);};
 target.open=wrapper;
 doc.addEventListener('click',event=>{const anchor=event.target.closest?.('a[href]');if(anchor&&disabledLink(anchor.href)){event.preventDefault();event.stopPropagation();return;}if(anchor&&pickerUrl(anchor.href)){event.preventDefault();event.stopPropagation();launch(anchor.href);}},{capture:true,signal:controller.signal});
 target.addEventListener('message',event=>{
+ if(mode==='edition-test'&&editionPopup&&event.source===editionPopup&&event.origin==='http://127.0.0.1:18762'&&event.data?.studio===1&&event.data.nonce===editionNonce){target.SportsCaveEditionBridge.send(frame.contentWindow,event.data,target.location.origin);return;}
+ if(mode==='edition-test'&&frame&&event.source===frame.contentWindow&&event.origin===target.location.origin&&event.data?.type==='edition-relay'&&event.data.payload?.nonce===editionNonce&&['request','edition-test','edition-download'].includes(event.data.payload.type)){editionPopup&&target.SportsCaveEditionBridge.send(editionPopup,event.data.payload,'http://127.0.0.1:18762');return;}
  if(event.origin!==target.location.origin||!frame||event.source!==frame.contentWindow)return;
  if(event.data?.type==='sports-cave-psd-size'&&(mode==='open'||mode==='picker')){if(mode==='picker')modal.style.height='auto';frame.style.height=Math.max(220,Math.min(Number(event.data.height)||265,target.innerHeight*.88))+'px';}
  if(event.data?.type==='sports-cave-psd-files'&&mode==='open'){mode='files';modal.style.width='min(1100px,94vw)';frame.style.height='min(720px,85vh)';frame.title='Sports Cave Files';modal.setAttribute('aria-label','Sports Cave Files');}
  if(event.data?.type==='sports-cave-psd-saved'){close();send('streamlit:setComponentValue',{value:{product_gid:event.data.product_gid,nonce:Date.now()},dataType:'json'});}
+ if(event.data?.type==='edition-finished'&&mode==='edition-test'){editionPopup?.close();editionPopup=null;}
  if(event.data?.type==='sports-cave-psd-cancel')close();
 },{signal:controller.signal});
-const lifecycle={destroy(){close();style.remove();controller.abort();if(target.open===wrapper)target.open=original;}};
+const lifecycle={destroy(){close();style.remove();bridgeScript.remove();controller.abort();if(target.open===wrapper)target.open=original;}};
 target.SportsCavePsdPicker=lifecycle;
 const style=doc.createElement('style');style.textContent='dialog[aria-label="Open PSD"]::backdrop,dialog[aria-label="Sports Cave Files"]::backdrop{background:rgba(22,30,44,.28)}';doc.head.append(style);
 window.addEventListener('pagehide',()=>{if(target.SportsCavePsdPicker===lifecycle)lifecycle.destroy();},{once:true});

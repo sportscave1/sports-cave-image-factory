@@ -60,4 +60,4 @@ def test_mobile_orders_keeps_psd_and_pilot_action_without_global_name_errors():
     with patch.object(orders,'st',fake),patch.object(orders.psd_directory,'page_directory',return_value=mapping),patch.object(orders.psd_directory,'render_missing_link_guard'):
         orders._render_mobile_orders([row])
     assert any(label=='Open PSD' for label,url in links)
-    assert ('Generate / Preview TEST JPG','/edition-jpg-test#TEST JPG') in links
+    assert ('Download JPG','/edition-jpg-download#Download JPG') in links

@@ -83,7 +83,7 @@ def process(key,grant):
     lease=cache/'processor.lock';lease_owned=False;keep_lease=False
     try:
         fd=__import__('os').open(lease,__import__('os').O_CREAT|__import__('os').O_EXCL|__import__('os').O_WRONLY);__import__('os').close(fd);lease_owned=True
-        identity=hashlib.sha256(json.dumps({'unit':unit,'source':{k:meta[k] for k in ('id','rev','content_hash')},'processor':digest(ROOT/'scripts/photoshop/prove_psd_number_export.jsx'),'actor':context['actor_id']},sort_keys=True).encode()).hexdigest()
+        identity=hashlib.sha256(json.dumps({'unit':unit,'source':{k:meta[k] for k in ('id','rev','content_hash')},'processor_version':'one-click-v2','processor':digest(ROOT/'scripts/photoshop/prove_psd_number_export.jsx'),'actor':context['actor_id']},sort_keys=True).encode()).hexdigest()
         folder=cache/('native-test-'+identity);folder.mkdir(exist_ok=True)
         if not folder.resolve().is_relative_to(cache.resolve()):raise ValueError('Unsafe local output directory.')
         manifest=folder/'job.json'

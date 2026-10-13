@@ -372,5 +372,42 @@
   "warnings": [
     "Storefront Unframed Large is 620 x 450 mm; existing GLOBAL-FAP-A2 description is 594 x 420 mm. No mapping is changed.",
     "No authorised Prodigi SKU-resolution client is available in this codebase. Missing supplier requirements block Print Ready."
-  ]
+  ],
+  "sc3284_readiness": {
+    "checked_on": "2026-10-14",
+    "status": "Blocked supplier certification",
+    "product_gid": "gid://shopify/Product/10465710768435",
+    "allocation_id": 655,
+    "mapped_skus": {
+      "XL": "GLOBAL-FAP-A1",
+      "L": "GLOBAL-FAP-A2",
+      "M": "GLOBAL-FAP-A3",
+      "S": "GLOBAL-FAP-A4"
+    },
+    "sku_source": "Existing os_pages.PRODIGI_REFERENCE_MAPPINGS; SC3284 has no recorded Prodigi dispatch SKU",
+    "verified_general_requirements": {
+      "preferred_file_format": "JPG",
+      "recommended_dpi": 300,
+      "source": "https://www.prodigi.com/download/product-range/Prodigi%20Enhanced%20Matte%20Art.pdf"
+    },
+    "largest_first_guidance": "https://www.prodigi.com/faq/images/",
+    "unverified": [
+      "actual SKU Product Details recommended pixels",
+      "actual SKU physical print-area geometry",
+      "SKU-specific bleed and safe margins",
+      "SKU/profile requirements and approved artwork layout",
+      "XL photographic quality and smaller-size compatibility"
+    ],
+    "one_xl_master_approved": false,
+    "test_output": {
+      "pixels": [
+        2835,
+        2004
+      ],
+      "profile": "sRGB IEC61966-2.1",
+      "native_psd_ppi": 72,
+      "print_ready": false
+    },
+    "note": "No authorised Prodigi Product Details API client exists in the application. Generic 3mm bleed guidance is not accepted as this SKU template. No dimensions, mappings or production status are inferred."
+  }
 }

@@ -1,6 +1,8 @@
 "use strict";
 (() => {
  const $=id=>document.getElementById(id), nonce=location.hash.slice(1), opener=window.opener;
+ const editionOnly=nonce.startsWith('edition=');
+ if(editionOnly){document.title='Sports Cave — Preparing JPG';document.body.classList.add('edition-download');const style=document.createElement('style');style.textContent='body.edition-download main>*{display:none!important}body.edition-download main #status{display:block!important}body.edition-download main:before{content:"Preparing your edition JPG";display:block;font:600 18px system-ui;margin-bottom:12px}';document.head.append(style);}
  const setupTicket=/^\/pair\/setup\/([A-Za-z0-9_-]{43})$/.exec(location.pathname)?.[1]||"";
  history.replaceState(null,"",setupTicket?"/pair":location.pathname);
  const bootstrap=nonce.startsWith("bootstrap=")?nonce.slice(10):"";
@@ -90,7 +92,7 @@
  function renewal(){clearTimeout(timer);timer=setTimeout(renewSession,240000);}
  async function resume(){try{const d=await device("renew");token=d.token;trusted=true;approved=true;$("approve").disabled=true;$("session").disabled=true;$("trust").checked=true;$("trusted-origin").value=origin;try{localStorage.setItem("studio-approved-origin",origin);}catch{}$("revoke").disabled=false;$("forget").disabled=false;$("stop-companion").disabled=false;await catalog();renewal();status("Connected  -  trusted computer. Sensitive actions still require local confirmation.");}catch(e){
     if(!e.status){send("reconnecting");status("Local companion is temporarily unavailable. Reconnecting; saved trust and source are preserved.");clearTimeout(timer);timer=setTimeout(resume,30000);return;}
-    send("disconnected");$("approve").disabled=false;$("approve").textContent="Check saved trust / Connect";status("No usable saved trust. Run Companion.ps1 Open in this browser once, approve Trust This Computer for "+origin+", then return here and click Check saved trust / Connect. Leave the private URL blank; no copying is required. "+e.message);}}
+    send(editionOnly?'edition-result':'disconnected',editionOnly?{error:'This computer is not currently authorised. Ask your administrator to restore the existing companion connection.'}:{});$("approve").disabled=false;$("approve").textContent="Check saved trust / Connect";status("No usable saved trust. Run Companion.ps1 Open in this browser once, approve Trust This Computer for "+origin+", then return here and click Check saved trust / Connect. Leave the private URL blank; no copying is required. "+e.message);}}
  $("approve").onclick=async()=>{if(busy)return;try{busy=true;
   if(setupTicket){origin=exactOrigin($("trusted-origin").value.trim());token="";}
   else if(bootstrap){origin=exactOrigin($("trusted-origin").value.trim());if(origin===location.origin)throw Error("Enter the Sports Cave OS website origin, not this localhost companion address.");token=bootstrap;}
