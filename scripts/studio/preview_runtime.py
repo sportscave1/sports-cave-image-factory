@@ -109,11 +109,12 @@ class Preview:
 
     def _start(self):
         if self.name: raise RuntimeError("Preview already running.")
-        archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture(self.home,self.task,self.owner))
         context=json.loads(boundary.docker("context","inspect").stdout)[0]
         if not context["Endpoints"]["docker"]["Host"].startswith("npipe://"):
             raise RuntimeError("Remote Docker contexts are forbidden.")
         self.docker_context=context['Name']
+        boundary.ready_local_engine(self.docker_context)
+        archive,manifest=(self.source_provider() if self.source_provider else preview_export.capture(self.home,self.task,self.owner))
         image=json.loads(self._docker("image","inspect",IMAGE_TAG).stdout)[0]["Id"]
         name="sc-studio-preview-"+uuid.uuid4().hex[:12]
         self._docker("create",*options(image,name,self.task),"sleep","900")
@@ -151,8 +152,13 @@ class Preview:
             cp=subprocess.run(["docker","--context",self.docker_context,"exec","-i",self.container_id,"python","-B","-c",
                 "import sys,tarfile; tarfile.open(fileobj=sys.stdin.buffer,mode='r|').extractall('/tmp',filter='data')"],input=archive,capture_output=True,timeout=30, **studio.quiet_process())
             if cp.returncode: raise RuntimeError("Source transfer failed: "+cp.stderr.decode()[:500])
+            inspector=(Path(__file__).parent/"isolation/source_inspection.py").read_bytes()
+            transfer=subprocess.run(["docker","--context",self.docker_context,"exec","-i",self.container_id,"python","-B","-c",
+                "import pathlib,sys;p=pathlib.Path('/tmp/studio_runtime');p.mkdir(exist_ok=True);(p/'inspection.py').write_bytes(sys.stdin.buffer.read())"],
+                input=inspector,capture_output=True,timeout=15, **studio.quiet_process())
+            if transfer.returncode:raise RuntimeError("Reviewed inspector transfer failed")
             self._docker("exec","-d",name,"sh","-c",
-                "exec python -B /opt/studio/controller.py > /tmp/controller.log 2>&1")
+                "exec python -B -c \"import sys;sys.path[:0]=['/tmp/studio_runtime','/opt/studio'];import controller\" > /tmp/controller.log 2>&1")
             deadline=time.monotonic()+45
             last=""
             while time.monotonic()<deadline:
@@ -210,37 +216,18 @@ class Preview:
             result=json.loads(r.stdout)
         if len(result.get("image",""))>1500000: raise RuntimeError("Oversized preview frame.")
         if data.get("action")=="inspect":
-            import editor
-            metadata=result.get("inspection",{})
-            key=metadata.get("component")
-            if metadata.get("supported"):
-                if key not in editor.MAPPINGS:raise RuntimeError("Unknown inspection mapping")
-                with studio.locked(self.home) as file:
-                    registry=studio.read(file);draft=next(d for d in registry["drafts"] if d["task_id"]==self.task)
-                try:
-                    root=Path(draft["worktree_path"])
-                    presentation=root/'components/sign_in/presentation.html'
-                    if presentation.exists() and key in {'title','description','brand','panel','mobile_panel'}:
-                        import source_editor
-                        for dependency in ('app.py','signin_presentation.py','components/sign_in/presentation.html','components/sign_in/presentation.css'):
-                            exported=next(f['sha256'] for f in self.manifest['files'] if f['path']==dependency)
-                            if hashlib.sha256(preview_export.source_bytes(root,dependency)[0]).hexdigest()!=exported:
-                                raise ValueError('Preview is behind presentation source; refresh before inspection')
-                        path='signin_presentation.py' if key in {'title','description','brand'} else 'components/sign_in/presentation.css'
-                        opened=source_editor.open_file(self.home,draft['id'],self.owner,path)
-                        anchor={'title':'TITLE =','description':'DESCRIPTION =','brand':'BRAND ='}.get(key,'.sc-login-wrap')
-                        offset=opened['source'].find(anchor)
-                        if offset<0:raise ValueError('Presentation source mapping changed')
-                        metadata['location']={'path':path,'line':opened['source'].count('\n',0,offset)+1}
-                        if result.get('image'):self.last_frame=result
-                        return result
-                    opened=editor.open_file(self.home,draft["id"],self.owner)
-                    exported=next(f["sha256"] for f in self.manifest["files"] if f["path"]==editor.VISUAL_FILE)
-                    root=Path(draft["worktree_path"])
-                    if hashlib.sha256(preview_export.source_bytes(root,editor.VISUAL_FILE)[0]).hexdigest()!=exported:raise ValueError("Preview is behind source; restart before inspection")
-                    metadata["location"]=opened["locations"].get(key)
-                except (ValueError,RuntimeError):
-                    metadata.update(supported=False,reason="Source mapping changed; read-only inspection")
+            import source_navigation
+            with studio.locked(self.home) as file:
+                registry=studio.read(file)
+                draft=next(d for d in registry["drafts"] if d["task_id"]==self.task)
+                root=Path(draft["worktree_path"])
+            hit=source_navigation.resolve(root,result.get("page_key"),result.get("inspection",{}),draft["id"],draft["revision"])
+            for row in hit.get("related",[]):
+                exported=next((f["sha256"] for f in self.manifest["files"] if f["path"]==row["path"]),None)
+                if exported!=hashlib.sha256(preview_export.source_bytes(root,row["path"])[0]).hexdigest():
+                    hit.update(supported=False,exact=False,location=None,related=[],reason="Preview source is stale. Refresh after saving before inspecting.")
+                    break
+            result["inspection"]=hit
         if result.get('image'):self.last_frame=result
         return result
 
