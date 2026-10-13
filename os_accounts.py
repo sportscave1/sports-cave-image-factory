@@ -30,6 +30,7 @@ COUNTRY_TIMEZONES = {
 }
 COUNTRY_OPTIONS = tuple(COUNTRY_TIMEZONES)
 FILES_DELETE_CAPABILITY = "delete_files"
+ATTACH_MISSING_PSD_CAPABILITY = "attach_missing_psd"
 ACTIVITY_LOG_CAPABILITY = "view_activity_log"
 EDIT_PROMPTS_CAPABILITY = "edit_prompts"
 REPORTING_PAGE_KEY = "reporting"
@@ -455,6 +456,12 @@ def can_access_page(user, route_or_key):
     return page["key"] in permission_keys(user)
 
 
+def can_attach_missing_psd(user):
+    """Explicit first-attachment capability; never permits replacement or deletion."""
+    return bool(account_is_active(user) and can_access_page(user,'Files') and
+                (is_admin(user) or ATTACH_MISSING_PSD_CAPABILITY in permission_keys(user)))
+
+
 def can_delete_files(user):
     """Return whether the account may remove items from the shared Files root."""
     if not account_is_active(user):
@@ -507,6 +514,11 @@ def _credential_permission_write_allowed(actor, page_keys):
     if requested and not can_manage_credential_permissions(actor):
         raise PermissionError("Password access can only be changed by an administrator.")
     return bool(requested)
+
+
+def _assert_psd_attachment_grant(actor, page_keys):
+    if ATTACH_MISSING_PSD_CAPABILITY in permission_keys({'page_permissions':page_keys or ()}) and not is_admin(actor):
+        raise PermissionError('Only an administrator can grant Attach Missing PSD access.')
 
 
 def safe_account_label(user):
@@ -933,6 +945,7 @@ class PostgresAccountStore:
     def _replace_permissions(cur, user_id, page_keys, *, allow_credential_permissions=False):
         valid_keys = {page["key"] for page in worker_assignable_pages()}
         valid_keys.add(FILES_DELETE_CAPABILITY)
+        valid_keys.add(ATTACH_MISSING_PSD_CAPABILITY)
         valid_keys.add(ACTIVITY_LOG_CAPABILITY)
         valid_keys.add(EDIT_PROMPTS_CAPABILITY)
         if allow_credential_permissions:
@@ -1497,6 +1510,7 @@ def create_worker_account(
     clean_name = str(display_name or "").strip()
     if not clean_username or not clean_name or not password:
         raise ValueError("Username, display name and password are required.")
+    _assert_psd_attachment_grant(actor, page_keys)
     allow_credential_permissions = _credential_permission_write_allowed(actor, page_keys)
     return (store or DEFAULT_STORE).create_user(
         username=clean_username,
@@ -1528,6 +1542,7 @@ def update_worker_account(
     if not clean_username or not clean_name:
         raise ValueError("Username and display name are required.")
     password_hash = hash_password(new_password) if new_password else ""
+    _assert_psd_attachment_grant(actor, page_keys)
     allow_credential_permissions = _credential_permission_write_allowed(actor, page_keys)
     return (store or DEFAULT_STORE).update_worker(
         user_id,

@@ -1,5 +1,5 @@
-const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const {chromium,webkit}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
+(async()=>{const browser=await (process.env.PSD_BROWSER==='webkit'?webkit:chromium).launch(process.env.PSD_BROWSER==='webkit'?{headless:true}:{channel:'chrome',headless:true});try{
  const page=await browser.newPage();let saves=[],reloads=0,current='';
  const root=`<html><body><a id="file" href="/files-psd-picker?product_gid=gid%3A%2F%2Fshopify%2FProduct%2F1">Add</a><iframe src="/component" style="height:0"></iframe><script>window.addEventListener('message',e=>{if(e.data.type==='streamlit:setComponentValue'){document.querySelector('#file').textContent='Open PSD';document.querySelector('#file').href='/api/files-psd-open?product_gid=1';window.componentSaved=e.data.value;}});</script></body></html>`;
  await page.route('**/*',async route=>{const url=new URL(route.request().url());

@@ -30,7 +30,7 @@ class PsdPickerApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await api.attach_product_psd(request('POST',{'product_gid':PID,'file_id':'id:test'}))).status_code,403)
             cloud.assert_not_called()
         for origin in ('http://evil.test',''):
-            with patch.object(api,'_psd_admin') as auth:
+            with patch.object(api,'_psd_attach_user') as auth:
                 self.assertEqual((await api.attach_product_psd(request('POST',origin=origin))).status_code,403)
                 auth.assert_not_called()
 
@@ -38,14 +38,14 @@ class PsdPickerApiTests(unittest.IsolatedAsyncioTestCase):
         store=Mock();store.get_product.return_value={'product_title':'Art','shopify_handle':'art'};store.read.return_value={}
         entries=[META,{**META,'id':'id:review','path_display':psd.ROOT+'/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/Art.psd'},
                  {**META,'id':'id:jpg','name':'Art.jpg','path_display':psd.ROOT+'/Art.jpg'}]
-        with patch.object(api,'_psd_admin',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake','root_path':psd.ROOT}),patch.object(api,'_directory_entries',return_value=entries) as listing,patch.object(psd_mapping_store,'STORE',store):
+        with patch.object(api,'_psd_attach_user',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake','root_path':psd.ROOT}),patch.object(api,'_directory_entries',return_value=entries) as listing,patch.object(psd_mapping_store,'STORE',store):
             result=await api.psd_picker_options(request())
         body=json.loads(result.body);self.assertEqual(body['product_title'],'Art');self.assertEqual(len(body['files']),1);self.assertFalse(body['files'][0]['mismatch']);listing.assert_called_once()
 
     async def test_confirmed_save_uses_current_server_metadata_and_audited_store(self):
         store=Mock();store.attach.return_value={'verified':True,'state':'Linked','dropbox_file_id':'id:test'}
         payload={'product_gid':PID,'file_id':'id:test','expected_file_id':'','confirm_mismatch':True,'confirm_replace':False}
-        with patch.object(api,'_psd_admin',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=META) as metadata,patch.object(psd_mapping_store,'STORE',store):
+        with patch.object(api,'_psd_attach_user',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=META) as metadata,patch.object(psd_mapping_store,'STORE',store):
             response=await api.attach_product_psd(request('POST',payload))
         self.assertEqual(response.status_code,200);metadata.assert_called_once_with('fake','id:test',include_preview=False)
         self.assertTrue(store.attach.call_args.kwargs['confirm_mismatch']);self.assertTrue(json.loads(response.body)['open_url'])
@@ -53,7 +53,7 @@ class PsdPickerApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_file_current_location_or_duplicate_are_rejected(self):
         payload={'product_gid':PID,'file_id':'id:test'}
         for meta in [{**META,'id':'id:wrong'},{**META,'path_display':psd.ROOT+'/99_PSD_NEEDS_REVIEW_DO_NOT_DELETE/Art.psd'}]:
-            with patch.object(api,'_psd_admin',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=meta),patch.object(psd_mapping_store.STORE,'attach') as save:
+            with patch.object(api,'_psd_attach_user',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=meta),patch.object(psd_mapping_store.STORE,'attach') as save:
                 self.assertEqual((await api.attach_product_psd(request('POST',payload))).status_code,403);save.assert_not_called()
-        with patch.object(api,'_psd_admin',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=META),patch.object(psd_mapping_store.STORE,'attach',side_effect=psd_mapping_store.MappingConflict('already assigned')):
+        with patch.object(api,'_psd_attach_user',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=META),patch.object(psd_mapping_store.STORE,'attach',side_effect=psd_mapping_store.MappingConflict('already assigned')):
             self.assertEqual((await api.attach_product_psd(request('POST',payload))).status_code,409)
