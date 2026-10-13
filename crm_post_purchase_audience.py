@@ -58,16 +58,7 @@ def listing(store,row,*,search='',filter_by='All',sort='Newest',start=None,end=N
     return store.q(ORDER_SQL.replace('__GUARDS__',' AND '.join(guards) or 'true').replace('__SORT__',SORTS[sort]),tuple(args))
 
 
-def selection(state,slot,keys,event):
-    selected=set(state.get(slot+'-selected',[]))
-    if event and event.get('sequence')!=state.get(slot+'-event'):
-        state[slot+'-event']=event.get('sequence')
-        if event.get('clear_selection') is True:selected.clear()
-        else:
-            selected.difference_update(keys);selected.update(k for k in event.get('selected',[]) if k in keys)
-        state[slot+'-selected']=sorted(selected)
-        if event.get('detail') in keys:state[slot+'-detail']=event['detail']
-    return sorted(selected)
+from crm_flow_recipients import selection
 
 
 def add_candidate(record):

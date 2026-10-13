@@ -8,7 +8,7 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
   await p.goto('http://127.0.0.1:18738');
   const exp=p.locator('[data-testid="stExpander"] details').first();
   const start=Date.now();await p.getByText('Orders',{exact:true}).click();
-  const f=p.frameLocator('iframe[title="crm_lifecycle_ui.crm_checkout_table"]');
+  const f=p.frameLocator('iframe[title="crm_flow_recipients.crm_checkout_table"]');
   await f.locator('tbody tr').first().waitFor({timeout:30000});const opening=Date.now()-start;
   await p.screenshot({path:'.tmp-preview-performance/orders-toolbar-'+width+'.png',fullPage:true});
   const names=await f.locator('thead th').allTextContents();
@@ -16,9 +16,9 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
   assert.equal(await p.getByRole('button',{name:'Refresh audience',exact:true}).count(),0);
   assert.equal(await p.getByRole('button',{name:'Clear selection',exact:true}).count(),0);
   assert.equal(await p.getByText(/orders selected/).count(),0);
-  await p.evaluate(()=>{window.panelMonitor={closures:0,remounts:0};window.observedFrame=document.querySelector('iframe[title="crm_lifecycle_ui.crm_checkout_table"]');new MutationObserver(()=>{
+  await p.evaluate(()=>{window.panelMonitor={closures:0,remounts:0};window.observedFrame=document.querySelector('iframe[title="crm_flow_recipients.crm_checkout_table"]');new MutationObserver(()=>{
    if(!document.querySelector('[data-testid="stExpander"] details')?.open)window.panelMonitor.closures++;
-   const frame=document.querySelector('iframe[title="crm_lifecycle_ui.crm_checkout_table"]');if(frame&&frame!==window.observedFrame){window.panelMonitor.remounts++;window.observedFrame=frame;}
+   const frame=document.querySelector('iframe[title="crm_flow_recipients.crm_checkout_table"]');if(frame&&frame!==window.observedFrame){window.panelMonitor.remounts++;window.observedFrame=frame;}
   }).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['open']});});
   const check=f.locator('tbody input').first(),selectedStart=Date.now();await check.check();
   await f.locator('tbody input').nth(1).check();
@@ -44,7 +44,7 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
   await p.keyboard.press('Tab');await p.keyboard.press('Escape');
   await f.getByText('No matching orders',{exact:true}).waitFor();
   await p.getByRole('button',{name:/Date filters/}).click();const year=p.getByRole('spinbutton',{name:'year, From',exact:true});await year.click();for(let n=0;n<10;n++)await year.press('ArrowDown');for(let n=0;n<3;n++)await p.keyboard.press('Tab');
-  await f.locator('tbody tr').nth(49).waitFor();await p.keyboard.press('Escape');
+  await p.keyboard.press('Escape');await f.locator('tbody tr').nth(49).waitFor();
   await f.getByRole('button',{name:'Details Fixture purchaser 0',exact:true}).click();await p.getByText('Order and product history',{exact:true}).waitFor();
   assert.match(await p.locator('body').innerText(),/Marketing consent: SUBSCRIBED/);
   await check.check();await p.getByRole('button',{name:'Add to Flow',exact:true}).click();
@@ -52,7 +52,7 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
   await p.getByRole('button',{name:'Cancel',exact:true}).click();await p.getByRole('dialog').waitFor({state:'hidden'});await f.locator('tbody tr').nth(49).waitFor();
   assert.equal(await exp.getAttribute('open'),'');
   if(width===1440){
-   const positions=await p.locator('.st-key-post-purchase-toolbar').locator('input[aria-label="Search and filter"],[role="combobox"],button').evaluateAll(xs=>xs.filter(x=>x.getClientRects().length).map(x=>({top:x.getBoundingClientRect().top,bottom:x.getBoundingClientRect().bottom})));
+   const positions=await p.locator('.st-key-flow-recipient-toolbar').locator('input[aria-label="Search and filter"],[role="combobox"],button').evaluateAll(xs=>xs.filter(x=>x.getClientRects().length).map(x=>({top:x.getBoundingClientRect().top,bottom:x.getBoundingClientRect().bottom})));
    assert.ok(Math.max(...positions.map(x=>x.top))-Math.min(...positions.map(x=>x.top))<5,JSON.stringify(positions));
    assert.ok(positions.every(x=>x.bottom-x.top<=34),JSON.stringify(positions));
    assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);

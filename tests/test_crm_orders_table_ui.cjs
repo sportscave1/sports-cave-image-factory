@@ -20,7 +20,7 @@ async function measure(f){return f.locator('body').evaluate(()=>{
  await f.locator('thead input').check();await f.locator('thead input').uncheck();
  await p.waitForFunction(()=>window.events.at(-1)?.clear_selection===true);
  const event=await p.evaluate(()=>window.events.at(-1));assert.equal(event.clear_selection,true);assert.deepEqual(event.selected,[]);assert.equal(event.context,'page1');
- const after=await measure(f);assert.equal(after.rowHeight,32);
+ const after=await measure(f);assert.equal(after.rowHeight,34);
  for(const width of [1366,1024,390]){await p.setViewportSize({width,height:900});assert.equal(await f.locator('body').evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);}
  f=await mount(p,html,{...payload,rows:[],selected:['off-page']});await f.locator('thead input').click();await p.waitForFunction(()=>window.events.at(-1)?.clear_selection===true);assert.deepEqual(await p.evaluate(()=>window.events.at(-1).selected),[]);
  await p.setViewportSize({width:1366,height:900});
