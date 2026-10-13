@@ -42,7 +42,7 @@ class Projection(unittest.TestCase):
         self.assertEqual(self.labels(schema=schema)[0],'Disabled')
         self.row['enrollment_id']=None;self.assertEqual(self.labels(schema=schema),['Disabled']*3)
     def test_purchased_preserves_sent_stops_outstanding(self):
-        self.accepted();self.row['order_id']='order';self.assertEqual(self.labels(),['Recovered ✓','Purchased','Purchased'])
+        self.accepted();self.row['order_id']='order';self.assertEqual(self.labels(),['Recovered ✓','Recovered','Recovered'])
     def test_paused_preserves_receipts(self):
         self.accepted();self.row['automation_status']='PAUSED';self.assertEqual(self.labels(),['Sent ✓','Paused','Paused'])
     def test_pending_states_and_evaluated_ineligibility(self):
@@ -61,7 +61,7 @@ class Projection(unittest.TestCase):
     def test_timezone_identity_no_mutation_and_unbounded_columns(self):
         self.row['analytics']['name']='Customer 123';self.row['created_at']=date('2026-10-08T15:05:00Z');before=deepcopy(self.row)
         item=listing([self.row],self.schema,'Australia/Sydney')[0]
-        self.assertEqual(item['customer'],'name@example.test');self.assertEqual(item['created'],'9 Oct');self.assertIn('AEDT',item['created_full'])
+        self.assertEqual(item['customer'],'name@example.test');self.assertEqual(item['created'],'9 Oct · 2:05 am');self.assertIn('AEDT',item['created_full'])
         self.assertEqual(self.row,before);self.assertEqual(len(columns([{'step_id':str(i)} for i in range(60)])),60)
     def test_busy_read_pool_retries_initial_checkout_load(self):
         from types import SimpleNamespace
@@ -96,7 +96,7 @@ class PersistedProgress(unittest.TestCase):
         c['completedAt']=now().isoformat();details(self.store,c)
         from crm_shopify_automation_events import recover
         recover(self.store,key);row=self.read(a,key)
-        self.assertEqual([c['label'] for c in progress(row,schema)],['Recovered ✓','Purchased'])
+        self.assertEqual([c['label'] for c in progress(row,schema)],['Recovered ✓','Recovered'])
         self.engine.send_one();self.provider.send.assert_called_once()
     def test_single_paged_read_search_and_published_snapshot_no_documents(self):
         a,keys,_,_=self.candidates(6)

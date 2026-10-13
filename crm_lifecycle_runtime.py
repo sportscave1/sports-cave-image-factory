@@ -13,7 +13,8 @@ def locked(row):
     return bool(is_lifecycle(row) and not row.get('config',{}).get('published_version'))
 
 def is_lifecycle(row):
-    return bool(row and row.get('config',{}).get('draft',{}).get('lifecycle_version'))
+    config=(row or {}).get('config',{})
+    return any(config.get(key,{}).get('lifecycle_version') for key in ('published_flow','draft','published'))
 
 def verified_plan(engine,row,customer,trigger_id=None,trigger_at=None):
     """Fresh order history before each stage; no dependence on customer.lastOrder."""
@@ -69,11 +70,18 @@ def paid_exit(engine,customer,at):
         conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('lifecycle:'+hashed,))
         cancel(conn,customer['id'],hashed,at,('welcome','win_back'),'paid_order')
 
-def enter(engine,row,customer_id,trigger_id,event_id,at,source_event_id=None):
+def enter(engine,row,customer_id,trigger_id,event_id,at,source_event_id=None,*,approval_key=None):
     if locked(row) or row['status']!='ACTIVE':return None
     at=date(at)
-    if not at or not date(row.get('activated_at')) or at<date(row['activated_at']):return None
+    if not at or not date(row.get('activated_at')):return None
+    if approval_key:
+        from crm_lifecycle_enrollment_requests import approved
+        if not approved(engine.store.state(approval_key),row,customer_id,trigger_id):return None
+    elif at<date(row['activated_at']):return None
     customer=engine.shop.customer(customer_id,fresh=True)
+    if customer and customer.get('id')==customer_id:
+        from crm_lifecycle_audience import cache_customer
+        cache_customer(engine.store,customer,engine.clock())
     if not eligibility(customer,engine.store.suppressed(customer_id,recipient_hash((customer or {}).get('email'))))[0]:return None
     plan=verified_plan(engine,row,customer,trigger_id,at)
     if not plan['eligible']:return None
@@ -84,6 +92,9 @@ def enter(engine,row,customer_id,trigger_id,event_id,at,source_event_id=None):
         conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('lifecycle:'+hashed,))
         fresh=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(row['id'],)).fetchone()
         if not fresh or locked(fresh) or fresh['status']!='ACTIVE' or fresh['config']['published_version']!=row['config']['published_version']:return None
+        if approval_key:
+            approval=conn.execute('SELECT value FROM crm_runtime_state WHERE key=%s FOR UPDATE',(approval_key,)).fetchone()
+            if not approval or not approved(approval['value'],fresh,customer_id,trigger_id):return None
         prior=conn.execute('''SELECT e.* FROM crm_automation_enrollments e JOIN crm_automations a ON a.id=e.automation_id
           WHERE a.trigger_type=%s AND (e.shopify_customer_id=%s OR e.steps->0->>'recipient_hash'=%s)
           ORDER BY e.trigger_at DESC LIMIT 1''',(kind,customer_id,hashed)).fetchone()

@@ -43,6 +43,10 @@ def facts(topic, payload, shop, at):
         if isinstance(state, str): result['consent_state'] = state.upper()
         if changed: result['consent_updated_at'] = changed.isoformat()
     if topic.startswith(('checkouts/', 'orders/')):
+        if topic.startswith('orders/'):
+            result['order_cancelled']=bool(payload.get('cancelled_at')) or topic=='orders/cancelled'
+            status=payload.get('financial_status')
+            if isinstance(status,str):result['financial_status']=status.upper()
         created = date(payload.get('created_at'))
         updated = date(payload.get('updated_at')) or at
         if created: result['created_at'] = created.isoformat()
@@ -60,6 +64,10 @@ def persist(store, event_id, topic, object_id, customer_id, at, normalized,*,dis
     """Commit inbox and completion guard together; no Shopify/Resend work here."""
     key = normalized.get('checkout_key')
     with store.db() as conn:
+        if topic=='orders/paid' and customer_id:
+            # Serialize signed payment visibility with the submission guard,
+            # including orders associated with a different checkout token.
+            conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('checkout-purchase:'+customer_id,))
         inserted = conn.execute('''INSERT INTO crm_webhook_events(provider,event_id,topic,object_id,related_customer_id,occurred_at,normalized)
           VALUES('shopify',%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT DO NOTHING RETURNING event_id''',
           (event_id, topic, object_id, customer_id or '', at, json.dumps(normalized))).fetchone()

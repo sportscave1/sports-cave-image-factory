@@ -149,6 +149,11 @@ class Store:
         args=(request_hash,hashed,row['id'],row['lease_token'])
         if not row.get('enrollment_id'):return self.q(sql,args,True)
         with self.db() as conn:
+            bound=conn.execute('SELECT checkout_key,shopify_customer_id FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],)).fetchone()
+            if bound and bound['checkout_key']:
+                # Same ordering as signed ingestion/enrollment: customer guard
+                # precedes automation, journey and checkout row locks.
+                conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('checkout-purchase:'+bound['shopify_customer_id'],))
             if row.get('_lifecycle'):
                 conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('lifecycle:'+hashed,))
             # Serialize the submission boundary with Pause. A submission already
@@ -178,6 +183,9 @@ class Store:
             # submission boundary; a completed checkout cannot claim transport.
             key=conn.execute('SELECT checkout_key FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],)).fetchone()['checkout_key']
             if key:
+                from crm_checkout_purchase_exit import stop_locked
+                purchase_checkout=conn.execute('SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s',(key,)).fetchone()
+                if stop_locked(conn,journey,purchase_checkout):return None
                 checkout=conn.execute('SELECT status FROM crm_shopify_checkouts WHERE checkout_key=%s FOR UPDATE',(key,)).fetchone()
                 if not checkout or checkout['status']=='RECOVERED':return None
                 duplicate=conn.execute('''SELECT 1 FROM crm_marketing_sends s

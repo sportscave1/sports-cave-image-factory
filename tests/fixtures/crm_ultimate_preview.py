@@ -106,7 +106,7 @@ if slot not in st.session_state:
     store.preview_document=preview_document
     store.default_sections.return_value=section_defaults(CFG)
     shop.customer.side_effect=customer;shop.orders.side_effect=order_history;shop.query.side_effect=query
-    
+
     def products(ids,**kw):
         count('products');time.sleep(.04)
         return [product(i,collections={'nodes':[{'id':'gid://shopify/Collection/1','title':'Motorsport','handle':'motorsport'}]}) for i in ids]

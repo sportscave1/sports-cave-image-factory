@@ -194,8 +194,14 @@ class RequestTests(unittest.TestCase):
     def test_batch_sql_statement_count_is_constant(self):
         a,keys,_,_=self.candidates(12)
         from tests.crm_db_fixture import Connection
+        from threading import get_ident
+        request_thread=get_ident()
         original=Connection.execute;calls=[]
-        def counted(conn,sql,args=()):calls.append(sql);return original(conn,sql,args)
+        def counted(conn,sql,args=()):
+            # Optional thumbnail prewarming uses the same fixture in another
+            # thread; measure this request's SQL, not unrelated background work.
+            if get_ident()==request_thread:calls.append(sql)
+            return original(conn,sql,args)
         with patch.object(Connection,'execute',counted):request(self.store,ADMIN,a['id'],keys)
         statements=[s for s in calls if s not in ('BEGIN','COMMIT')]
         self.assertEqual(len(statements),5)

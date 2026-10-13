@@ -49,9 +49,51 @@ def sync_page(store, shop, at=None):
         verified_at=at.isoformat(),historical_complete=bool(not more or state.get('historical_complete'))))
     return True
 
+
+def enrich_orders(store,shop,at=None):
+    """Bounded priority customer reads, independent of the directory cursor."""
+    at=at or now()
+    rows=store.q('''SELECT COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) AS customer_id,max(o.created_at) AS newest
+      FROM shopify_orders o LEFT JOIN crm_lifecycle_customers c
+      ON c.customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)
+      LEFT JOIN crm_runtime_state r ON r.key='lifecycle-enrich:'||COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)
+      WHERE COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) IS NOT NULL
+      AND (c.customer_id IS NULL OR c.verified_at<o.created_at OR c.verified_at<%s)
+      AND COALESCE((r.value->>'retry_at')::timestamptz,'-infinity')<=%s
+      AND NOT EXISTS(SELECT 1 FROM crm_suppressions s WHERE s.shopify_customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) AND s.reason='redacted')
+      GROUP BY COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) ORDER BY newest DESC LIMIT 5''',(at-timedelta(hours=6),at))
+    for row in rows:
+        key='lifecycle-enrich:'+row['customer_id']
+        with store.db() as conn:
+            claim=conn.execute('''INSERT INTO crm_runtime_state AS prior(key,value) VALUES(%s,%s::jsonb)
+              ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()
+              WHERE COALESCE((prior.value->>'retry_at')::timestamptz,'-infinity')<=%s RETURNING key''',
+              (key,json.dumps({'retry_at':(at+timedelta(minutes=5)).isoformat(),'state':'CHECKING'}),at)).fetchone()
+        if not claim:continue
+        try:
+            customer=shop.customer(row['customer_id'],fresh=True)
+            if not customer or customer.get('id')!=row['customer_id']:raise ValueError('Customer verification unavailable')
+            cache_customer(store,customer,at)
+            store.set_state(key,{'state':'VERIFIED','retry_at':(at+timedelta(minutes=5)).isoformat()})
+        except Exception:
+            store.set_state(key,{'state':'RETRY','retry_at':(at+timedelta(minutes=5)).isoformat()})
+    return bool(rows)
+
+
+def refresh_customers(store,user,customers):
+    require(user,'crm_automations_manage')
+    for customer in set(customers):
+        if not customer or not customer.startswith('gid://shopify/Customer/'):continue
+        store.q('''INSERT INTO crm_runtime_state AS prior(key,value) VALUES(%s,'{"state":"QUEUED"}'::jsonb)
+          ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()
+          WHERE prior.value->>'state'<>'CHECKING' ''',('lifecycle-enrich:'+customer,))
+
 def listing(store, row, *, search='', filter_by='All', sort=None, start=None, end=None, page=0, at=None):
     kind=row['trigger_type'];at=at or now()
     sort=sort or ('Longest inactivity' if kind=='win_back' else 'Newest')
+    if kind=='post_purchase':
+        from crm_post_purchase_audience import listing as orders
+        return orders(store,row,search=search,filter_by=filter_by,sort=sort,start=start,end=end,page=page,at=at)
     if sort not in SORTS or filter_by not in FILTERS:raise ValueError('Invalid audience filter')
     if type(page) is not int or not 0<=page<=20000:raise ValueError('Invalid page')
     order_kind=kind=='post_purchase'

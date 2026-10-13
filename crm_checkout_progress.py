@@ -5,6 +5,7 @@ Never calculates a new schedule, enrolls a customer or submits an email.
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from crm_logic import date, now
 from crm_checkout_identity import display_name, recovered, block_label
+from crm_checkout_purchase_exit import purchased,LABEL
 
 
 def columns(steps):
@@ -19,6 +20,7 @@ def cell(label, tone='muted', reason='', due=None):
 
 
 def pending(row, at):
+    if purchased(row) and not recovered(row):return cell(LABEL)
     if recovered(row):return cell('Purchased','muted','Verified purchase; future reminders stopped')
     if row.get('archived_at'):return cell('Paused','gold','Flow archived')
     if row.get('automation_status')!='ACTIVE':return cell('Paused','gold','Flow is not active')
@@ -88,8 +90,10 @@ def progress(row, schema, at=None):
             value=cell('Not published',reason='Draft stage; publish successfully before it can join the live sequence')
         elif not col['enabled']:
             value=cell('Disabled',reason='Disabled in the published flow; no new delivery is eligible')
-        elif recovered(row) or row.get('flow_status')=='RECOVERED':
-            value=cell('Purchased',reason='Purchase recorded; future reminders stopped')
+        elif recovered(row):
+            value=cell('Recovered',reason='Exact checkout conversion verified; reminders stopped')
+        elif purchased(row):
+            value=cell(LABEL,reason='A newer paid order for this Shopify customer is verified; this checkout did not convert')
         elif not enrollment:
             value=pending(row,at) if col['enabled'] else cell('Disabled',reason='Disabled in the published flow')
         elif status=='FAILED':value=cell('Failed','red',send.get('error'))
@@ -125,7 +129,7 @@ def listing(rows, schema, timezone='Australia/Sydney', at=None):
         stamp=date(row.get('created_at'));local=stamp.astimezone(zone) if stamp else None
         request=row.get('enrollment_request') or {}
         result.append({'key':row['checkout_key'],'customer':display_name(row),
-                       'created':f'{local.day} {local:%b}' if local else '—',
+                       'created':f'{local.day} {local:%b} · '+local.strftime('%I:%M %p').lstrip('0').lower() if local else '—',
                        'created_full':local.strftime('%d %b %Y %H:%M:%S %Z') if local else 'Unavailable',
                        'cells':progress(row,schema,at),
                        'enrollment_progress':{k:request.get(k) for k in ('state','result')}})

@@ -100,6 +100,11 @@ def candidates(store,row):
     if kind=='fulfilled':sql+=" AND upper(o.fulfillment_status)='FULFILLED'"
     sort='p.fulfilled_at,p.paid_at,o.created_at' if kind=='fulfilled' else 'p.paid_at,o.created_at'
     sql+=" ORDER BY COALESCE("+sort+") DESC,o.shopify_order_id DESC LIMIT 50"
+    if kind=='post_purchase':
+        sql=sql.replace('AS key,c.customer_id,c.name,c.email,',"AS key,COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) AS customer_id,COALESCE(NULLIF(c.name,''),o.customer_name) AS name,COALESCE(NULLIF(c.email,''),o.customer_email,o.email) AS email,")
+        sql=sql.replace('FROM shopify_orders o JOIN crm_lifecycle_customers c','FROM shopify_orders o LEFT JOIN crm_lifecycle_customers c')
+        sql=sql.replace("WHERE c.consent='SUBSCRIBED'", "WHERE (c.consent='SUBSCRIBED' OR c.customer_id IS NULL) AND COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) IS NOT NULL")
+        sql=sql.replace('s.shopify_customer_id=c.customer_id',"s.shopify_customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)")
     return store.q(sql,args)
 
 

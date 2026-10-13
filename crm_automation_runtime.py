@@ -13,7 +13,8 @@ LOG=logging.getLogger(__name__)
 def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *, checkout_key=None, source_event_id=None,event_facts=None,manual_checkout=False,recipient=None,checkout_source=None):
     """Serialize re-entry with publication/pause and retain stable stage slots."""
     started=perf_counter();store=engine.store;at=date(occurred_at)
-    if automation.get('config',{}).get('draft',{}).get('lifecycle_version'):
+    from crm_lifecycle_runtime import is_lifecycle
+    if is_lifecycle(automation):
         from crm_lifecycle_runtime import enter as lifecycle_enter
         return lifecycle_enter(engine,automation,customer_id,trigger_id,event_id,at,source_event_id)
     if not at: return None
@@ -24,6 +25,8 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
         if not recovery_eligibility(checkout_source,c,policy(store),suppressed=store.suppressed(customer_id,recipient_hash((c or {}).get('email'))),manual=manual_checkout)[0]:return None
     elif not eligibility(c,store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))[0]:return None
     with store.db() as conn:
+        if checkout_key:
+            conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('checkout-purchase:'+customer_id,))
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(automation['id'],)).fetchone()
         if not row or not native(row) or row['status']!='ACTIVE' or not row['activated_at'] or at<date(row['activated_at']):return None
         flow=row['config']['published']
@@ -35,6 +38,8 @@ def enter(engine, automation, customer_id, trigger_id, event_id, occurred_at, *,
         if checkout_key:
             checkout=conn.execute("SELECT * FROM crm_shopify_checkouts WHERE checkout_key=%s FOR UPDATE",(checkout_key,)).fetchone()
             if not checkout or checkout['status']=='RECOVERED' or checkout['customer_id'] not in ('',customer_id):return None
+            from crm_checkout_purchase_exit import proof
+            if proof(conn,checkout,customer_id):return None
             if not manual_checkout and date(checkout['activity_at'])>at:return None
             if manual_checkout:
                 # Recheck under the same row locks as publication and enrollment;
@@ -95,7 +100,8 @@ def process_event(engine,event,automations):
         order=engine.shop.order(event['object_id'],fresh=True)
         if not order or order.get('cancelledAt') or not order.get('customer'):return
         if topic=='orders/paid' and not order.get('fullyPaid'):return
-        if topic=='orders/paid' and any(a.get('config',{}).get('draft',{}).get('lifecycle_version') for a in candidates):
+        from crm_lifecycle_runtime import is_lifecycle
+        if topic=='orders/paid' and any(is_lifecycle(a) for a in candidates):
             from crm_lifecycle_runtime import paid_exit
             paid_exit(engine,engine.shop.customer(order['customer']['id'],fresh=True),at)
         created=date(order.get('createdAt'))
@@ -110,7 +116,8 @@ def process_event(engine,event,automations):
 
 
 def reconcile(engine,a):
-    if a.get('config',{}).get('draft',{}).get('lifecycle_version'):
+    from crm_lifecycle_runtime import is_lifecycle
+    if is_lifecycle(a):
         from crm_lifecycle_runtime import reconcile as lifecycle_reconcile
         return lifecycle_reconcile(engine,a)
     if a['trigger_type']=='win_back':

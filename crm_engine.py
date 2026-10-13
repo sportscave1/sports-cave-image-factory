@@ -52,6 +52,9 @@ class Engine:
         if self.provider is None:self.provider=Resend(self.config)
         return self.provider
     def validate(self,customer_id,enrollment=None):
+        if enrollment and enrollment.get('checkout_key'):
+            from crm_checkout_purchase_exit import stop_if_purchased,REASON
+            if stop_if_purchased(self.store,enrollment):return None,{},REASON
         c=self.shop.customer(customer_id,fresh=True)
         ok,reason=eligibility(c,self.store.suppressed(customer_id,recipient_hash((c or {}).get('email'))))
         context={'first_name':(c or {}).get('firstName') or 'there','store_url':'https://www.sportscaveshop.com'}
@@ -147,6 +150,9 @@ class Engine:
         try:
             self.config.require_send(row['test_send'])
             enrollment=self.store.q('SELECT * FROM crm_automation_enrollments WHERE id=%s',(row['enrollment_id'],),True) if row['enrollment_id'] else None
+            if enrollment and enrollment.get('checkout_key'):
+                from crm_checkout_purchase_exit import stop_if_purchased
+                if stop_if_purchased(self.store,enrollment):return True
             if enrollment and (enrollment.get('steps') or [{}])[0].get('lifecycle_version'):row['_lifecycle']=True
             if row['test_send']:
                 address=email(row['test_recipient']);context={'first_name':'Collector','store_url':'https://www.sportscaveshop.com','checkout_url':'https://www.sportscaveshop.com','order_name':'Preview'};reason=''
@@ -337,6 +343,9 @@ class Engine:
             logging.getLogger(__name__).info('shopify_automation_processed shopify_topic=%s shopify_event_id=%s processing_ms=%.1f',event['topic'],safe,(perf_counter()-start)*1000)
     def _process_event(self,event):
         topic=event['topic'];customer_id=event['related_customer_id'];at=date(event['occurred_at'])
+        if topic=='orders/paid':
+            from crm_checkout_purchase_exit import stop_customer
+            stop_customer(self.store,customer_id)
         if topic in ('customers/delete','customers/redact'):
             if customer_id:self.store.suppress(hashlib.sha256(customer_id.encode()).hexdigest(),customer_id,'redacted','shopify')
             # New private analytics projection must honor existing redaction.
@@ -402,10 +411,18 @@ class Engine:
         logging.getLogger(__name__).info('crm_due_batch count=%s',len(due))
         for e in due:
             self.hold_lease()
+            from crm_checkout_purchase_exit import stop_if_purchased
+            if stop_if_purchased(self.store,e):continue
             try:self.advance(e)
             except Exception as exc:
                 self.store.q("UPDATE crm_automation_enrollments SET retry_after=now()+interval '5 minutes',stop_reason='verification_unavailable' WHERE id=%s",(e['id'],))
-                logging.getLogger(__name__).warning('checkout_advance_held enrollment_id=%s checkout_key=%s error_class=%s',e['id'],e.get('checkout_key'),type(exc).__name__)
+                # Allowlisted diagnostics only; never log provider bodies or PII.
+                code={ 'Checkout verification unavailable':'checkout_details_unavailable',
+                    'Checkout unavailable.':'checkout_details_unavailable',
+                    'Complete checkout products unavailable.':'checkout_products_unavailable',
+                    'Checkout products changed. Retry verification.':'checkout_products_changed',
+                    'Checkout exceeds supported product bound.':'checkout_product_bound'}.get(str(exc),'verification_unavailable')
+                logging.getLogger(__name__).warning('checkout_advance_held enrollment_id=%s checkout_key=%s error_class=%s verification_code=%s',e['id'],e.get('checkout_key'),type(exc).__name__,code)
 
     def tick(self,owner):
         if not self.store.lease(owner):return {'leader':False}

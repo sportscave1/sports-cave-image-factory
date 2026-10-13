@@ -43,7 +43,7 @@ def receive_shopify(store,topic,event_id,payload,occurred_at,shop_domain=None):
     customer_id=gid(value) if kind=='Customer' else gid((payload.get('customer') or {}).get('id'))
     object_id=gid(value,kind)
     if not object_id:raise ValueError('Missing Shopify object identity.')
-    if topic=='customers_email_marketing_consent/update' or normalized.get('checkout_key'):
+    if topic=='customers_email_marketing_consent/update' or topic.startswith('orders/') or normalized.get('checkout_key'):
         return persist(store,event_id,topic,object_id,customer_id,at,normalized)
     return store.webhook('shopify',event_id,topic,object_id,customer_id,at,normalized=normalized)
 

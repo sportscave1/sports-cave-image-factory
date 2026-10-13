@@ -8,6 +8,8 @@ def time_to_send(row, at=None):
     at = at or now()
     if recovered(row):
         return 'Recovered'
+    from crm_checkout_purchase_exit import purchased,LABEL
+    if purchased(row):return LABEL
     request=row.get('enrollment_request') or {}
     if request.get('manual_dispatch'):
         if request.get('state') in ('SAVING','QUEUED','CHECKING') or request.get('delivery')=='queued':return 'Queued'

@@ -96,7 +96,7 @@ def sync_cache(shop,store,at=None,*,checkpoint=None):
 
 
 LIST_SQL="""WITH selected AS MATERIALIZED (
- SELECT checkout_key,customer_id,created_at,activity_at,status,admin_checkout_id,analytics,order_id,
+ SELECT checkout_key,shop,customer_id,created_at,activity_at,status,admin_checkout_id,analytics,order_id,
  EXISTS(SELECT 1 FROM crm_webhook_events e WHERE e.normalized->>'checkout_key'=crm_shopify_checkouts.checkout_key AND e.normalized->>'completed'='true') AS completion_verified
  FROM crm_shopify_checkouts WHERE analytics->>'shopify_abandoned'='true' AND (%s::timestamptz IS NULL OR created_at>=%s) AND created_at<%s
  AND (%s::text IS NULL OR checkout_key=%s)
@@ -138,6 +138,7 @@ SELECT c.*,v.value AS evaluation,request.value-'history' AS enrollment_request,a
  GREATEST(a.activated_at,(SELECT (value->>'started_at')::timestamptz FROM crm_runtime_state WHERE key='checkout-auto-start-v2')) AS auto_start_at,
  a.config->'published'->>'abandonment_seconds' AS abandonment_seconds,
  j.id AS enrollment_id,j.status AS flow_status,j.stop_reason,j.current_step,j.steps,j.next_due_at,
+ EXISTS(__PURCHASE_EXIT_PROOF__) AS newer_paid_order_verified,
  GREATEST(c.activity_at,j.updated_at,r.last_event) AS last_activity_at,
  COALESCE(r.sends,'[]') AS sends,COALESCE(r.opened,0) AS opened,COALESCE(r.clicked,0) AS clicked
 FROM selected c JOIN crm_automations a ON a.id=%s LEFT JOIN journeys j USING(checkout_key)
@@ -145,6 +146,8 @@ LEFT JOIN receipts r ON r.checkout_key=c.checkout_key
 LEFT JOIN crm_runtime_state v ON v.key='checkout-evaluation:'||c.checkout_key||':'||a.id::text
 LEFT JOIN crm_runtime_state request ON request.key='checkout-enroll:'||a.id::text||':'||c.checkout_key
 ORDER BY c.created_at DESC,c.checkout_key"""
+from crm_checkout_purchase_exit import PROOF_SQL
+LIST_SQL=LIST_SQL.replace('__PURCHASE_EXIT_PROOF__',PROOF_SQL.replace('%s','c.customer_id',1).replace('%s','c.shop',1).replace('%s','c.created_at',1))
 
 def checkouts(store,identity,bounds,key=None,*,page_size=None,after=None,search=''):
     start,end=bounds
@@ -215,6 +218,8 @@ def disabled_reason(checkout,row,at=None):
     at=at or now()
     from crm_checkout_identity import recovered
     if recovered(checkout):return 'Recovered'
+    from crm_checkout_purchase_exit import purchased,LABEL
+    if purchased(checkout):return LABEL
     if checkout.get('enrollment_id'):return 'Already in flow'
     if row['status']!='ACTIVE' or not row.get('steps') or row['config'].get('archived_at') or row['config'].get('deleted_at'):return 'Flow is not live'
     if not checkout.get('admin_checkout_id'):return 'Not eligible: Shopify identity unavailable'

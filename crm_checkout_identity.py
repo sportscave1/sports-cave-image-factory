@@ -33,6 +33,8 @@ def recovered(row):
 
 def recovery_status(row):
     if recovered(row):return 'Recovered'
+    from crm_checkout_purchase_exit import purchased,LABEL
+    if purchased(row):return LABEL
     manual=(row.get('enrollment_request') or {}).get('manual_dispatch')
     if any(s.get('status')=='ACCEPTED' and s.get('provider_id') for s in row.get('sends',[])):return 'Sent' if manual else 'Not recovered'
     if manual:
