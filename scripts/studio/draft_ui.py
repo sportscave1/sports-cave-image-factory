@@ -210,9 +210,14 @@ class DraftServer(HTTPServer):
     def workspace_request(self,data):
         grant=self.workspace_grants.get(data.get("capability"))
         if not grant or grant["expires"]<=time.monotonic():raise ValueError("Local editor permission expired. Confirm the selected draft locally again.")
-        self.catalog()
         with studio.locked(self.home) as file:
-            drafts.draft_by_id(studio.read(file),grant["draft"],self.owner)
+            registry=studio.read(file)
+            # Fresh initiating-owner/worktree and selected immutable-draft validation.
+            # Catalogue revision comparisons are presentation work, not authorization.
+            drafts.assigned(registry,self.task_id,self.owner)
+            _,task,_=drafts.draft_by_id(registry,grant["draft"],self.owner)
+            if task['id']!=grant['task']:
+                raise RuntimeError('Local editor grant task changed. Confirm the draft again.')
         allowed={"workspace-model","editor-reference","editor-files","editor-open","editor-save","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
         command=data.get("command")
         if not isinstance(command,dict) or command.get("action") not in allowed:raise ValueError("Editor operation not allowlisted")

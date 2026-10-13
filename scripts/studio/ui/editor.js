@@ -1,8 +1,13 @@
 let panel, request, showFrame, opened, dirty=false, busy=false, stack=[], selected="title", recoveryKey='';
+let recoveryTimer,highlightFrame,lastSource='',undoBytes=0;
+function scheduleRecovery(){if(!recoveryTimer)recoveryTimer=setTimeout(()=>{recoveryTimer=0;persist();},300);}
+function scheduleHighlight(){if(!highlightFrame)highlightFrame=requestAnimationFrame(()=>{highlightFrame=0;if(panel)highlight();});}
+const flushRecovery=()=>{clearTimeout(recoveryTimer);recoveryTimer=0;persist();};
+const visibilityRecovery=()=>{if(document.visibilityState==='hidden')flushRecovery();};
 function persist(){if(!recoveryKey||!opened)return;try{if(dirty)localStorage.setItem(recoveryKey,JSON.stringify({path:opened.path,hash:opened.hash,revision:opened.revision,selected,value:capture()}));else localStorage.removeItem(recoveryKey);}catch{msg('Browser recovery storage unavailable. Keep this editor open until changes are saved.');}}
-function clearRecovery(){try{if(recoveryKey)localStorage.removeItem(recoveryKey);}catch{}}
+function clearRecovery(){clearTimeout(recoveryTimer);recoveryTimer=0;try{if(recoveryKey)localStorage.removeItem(recoveryKey);}catch{}}
 const $=id=>panel.querySelector("#"+id);
-const beforeUnload=event=>{if(dirty){event.preventDefault();event.returnValue="";}};
+const beforeUnload=event=>{flushRecovery();if(dirty){event.preventDefault();event.returnValue="";}};
 const esc=s=>s.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
 const msg=s=>{$("ed-status").textContent=s;};
 function confirmDiscard(message) {
@@ -35,13 +40,25 @@ function capture() {
   return changes;
 }
 function apply(value) {
-  if(opened.path!=="app.py") { $("ed-source").value=value.source;highlight(); }
+  if(opened.path!=="app.py") { $("ed-source").value=value.source;lastSource=value.source;highlight(); }
   else {
     if($("ed-text")) $("ed-text").value=value.text;
     panel.querySelectorAll("[data-property]").forEach(input=>{input.value=value.properties[input.dataset.property]||"";});
   }
 }
-function modified() { dirty=true;stack.push(capture());if(stack.length>100)stack.splice(1,1);msg("Unsaved changes");persist(); }
+function modified() {
+  dirty=true;
+  if(opened.path!=='app.py'){
+    const value=$("ed-source").value,old=lastSource;let start=0,end=0;
+    while(start<old.length&&start<value.length&&old[start]===value[start])start++;
+    while(end<old.length-start&&end<value.length-start&&old[old.length-1-end]===value[value.length-1-end])end++;
+    const undo={start,removed:old.slice(start,old.length-end),inserted:value.length-start-end};
+    undoBytes+=undo.removed.length*2;stack.push({undo});lastSource=value;
+    // Inverse edits retain keystroke Undo without 100 complete file copies.
+    while(stack.length>100||undoBytes>4*1024*1024&&stack.length>2){const dropped=stack.splice(1,1)[0];undoBytes-=(dropped.undo?.removed.length||0)*2;}
+  }else{stack.push(capture());if(stack.length>100)stack.splice(1,1);}
+  msg("Unsaved changes");scheduleRecovery();
+}
 function component() {
   const model=opened.visual[selected], area=$("ed-fields");
   area.replaceChildren();
@@ -73,7 +90,7 @@ function render() {
       $("ed-component").append(option);
     }
     $("ed-component").value=selected;component();
-  } else { $("ed-source").value=opened.source;highlight();dirty=false;stack=[capture()]; }
+  } else { $("ed-source").value=opened.source;lastSource=opened.source;undoBytes=0;highlight();dirty=false;stack=[capture()]; }
   msg("Revision "+opened.revision+" · "+opened.path);
 }
 async function load(path) {
@@ -120,9 +137,9 @@ export async function mount(target,transport,frameCallback,options={}) {
       clearRecovery();selected=$("ed-component").value;component();msg("Editing "+opened.visual[selected].label);
     };
     $("ed-wrap").onchange=()=>{const on=$("ed-wrap").checked;$("ed-source").wrap=on?'soft':'off';$("ed-source").style.whiteSpace=on?'pre-wrap':'pre';$("ed-highlight").style.whiteSpace=on?'pre-wrap':'pre';$("ed-lines").hidden=false;highlight();};
-    $("ed-source").onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const field=e.currentTarget,start=field.selectionStart,end=field.selectionEnd;field.setRangeText('  ',start,end,'end');highlight();modified();}};
-    $("ed-source").oninput=()=>{highlight();modified();};
-    $("ed-source").onscroll=highlight;
+    $("ed-source").onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const field=e.currentTarget,start=field.selectionStart,end=field.selectionEnd;field.setRangeText('  ',start,end,'end');modified();scheduleHighlight();}};
+    $("ed-source").oninput=()=>{modified();scheduleHighlight();};
+    $("ed-source").onscroll=scheduleHighlight;
     $("ed-find").onclick=()=>{
       const field=$("ed-source"),term=$("ed-search").value;
       let index=field.value.indexOf(term,field.selectionEnd);
@@ -132,7 +149,8 @@ export async function mount(target,transport,frameCallback,options={}) {
     };
     $("ed-save").onclick=()=>act(()=>save());
     $("ed-undo").onclick=()=>act(async()=>{
-      if(dirty&&stack.length>1){stack.pop();apply(stack.at(-1));dirty=stack.length>1;msg(dirty?"Unsaved changes":"Local edits undone.");persist();return;}
+      if(dirty&&stack.length>1){const item=stack.pop();if(item.undo&&stack.length>1){const {start,removed,inserted}=item.undo,value=$("ed-source").value;undoBytes-=removed.length*2;apply({source:value.slice(0,start)+removed+value.slice(start+inserted)});}else{apply(stack.at(-1));undoBytes=0;}dirty=opened.path==='app.py'?stack.length>1:$("ed-source").value!==opened.source;msg(dirty?"Unsaved changes":"Local edits undone.");scheduleRecovery();return;}
+      if(dirty){msg('Unsaved Undo history limit reached. Save or explicitly discard the retained buffer.');return;}
       const undone=new Set(opened.history.filter(h=>h.undo_of).map(h=>h.undo_of));
       const latest=[...opened.history].reverse().find(h=>h.operation!=="undo"&&!undone.has(h.id));
       if(latest)await save({id:latest.id,side:"before"});else msg("Nothing to undo.");
@@ -152,12 +170,13 @@ export async function mount(target,transport,frameCallback,options={}) {
     });
     $("ed-close").onclick=async()=>{if(!dirty||await confirmDiscard("Discard unsaved changes and close?")){dirty=false;clearRecovery();panel.hidden=true;}};
     window.addEventListener("beforeunload",beforeUnload);
+    window.addEventListener('pagehide',flushRecovery);document.addEventListener('visibilitychange',visibilityRecovery);
     panel.dataset.mounted="true";
   }
   panel.hidden=false;
   if(dirty)return;
   await act(async()=>{
-    const listing=await request("/api/action",{action:"editor-files"});
+    const listing=options.files?{files:options.files}:await request("/api/action",{action:"editor-files"});
     $("ed-file").replaceChildren();
     for(const file of listing.files){
       const option=document.createElement("option");option.value=file.path;
@@ -165,7 +184,7 @@ export async function mount(target,transport,frameCallback,options={}) {
       option.disabled=!file.available;option.title=file.reason||"";$("ed-file").append(option);
     }
     let savedPath;try{savedPath=JSON.parse(localStorage.getItem(recoveryKey)||'null')?.path;}catch{}
-    const path=listing.files.find(f=>f.available&&f.path===(savedPath||opened?.path))?.path||listing.files.find(f=>f.available)?.path;
+    const path=listing.files.find(f=>f.available&&f.path===(savedPath||options.path||opened?.path))?.path||listing.files.find(f=>f.available)?.path;
     if(!path)throw Error("No authorised editor files are available in this draft.");
     await load(path);
   });
@@ -175,4 +194,4 @@ export async function canLeave(){if(busy)return false;if(!dirty)return true;if(!
 export async function selectFile(path){if(busy)return false;if(opened?.path===path&&dirty)return true;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{await load(path);loaded=true;});return loaded;}
 export async function selectComponent(key){if(busy)return false;if(dirty&&!await canLeave())return false;let loaded=false;await act(async()=>{if(opened?.path!=="app.py")await load("app.py");if(!opened.visual[key])throw Error("Unmapped component");selected=key;render();loaded=true;});return loaded;}
 export async function command(name){if(!["save","undo","changes","discard"].includes(name))throw Error("Unsupported editor control");await $("ed-"+name).onclick();}
-export function dispose(){persist();window.removeEventListener("beforeunload",beforeUnload);dirty=false;stack=[];opened=null;panel=null;request=null;showFrame=null;}
+export function dispose(){flushRecovery();cancelAnimationFrame(highlightFrame);highlightFrame=0;window.removeEventListener("beforeunload",beforeUnload);window.removeEventListener('pagehide',flushRecovery);document.removeEventListener('visibilitychange',visibilityRecovery);dirty=false;stack=[];undoBytes=0;lastSource='';opened=null;panel=null;request=null;showFrame=null;}
