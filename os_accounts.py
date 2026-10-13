@@ -48,7 +48,7 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
-    {"key": "developer_studio", "route": "Developer Studio", "label": "Developer Studio", "worker_assignable": False, "top_level": True},
+    {"key": "developer_studio", "route": "Developer Studio", "label": "Dev Mode", "worker_assignable": False, "top_level": True},
     {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
     {"key": "orders", "route": "Orders", "label": "Orders", "worker_assignable": True},

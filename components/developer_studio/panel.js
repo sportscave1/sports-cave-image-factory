@@ -1,7 +1,7 @@
 "use strict";
 (() => {
  const $=id=>document.getElementById(id); let popup=null, origin="", nonce="", connected=false, rows=[], expiry, releaseData=null, activeCandidate=null, lastSeen=0, trusted=false, selectedDraft="", heartbeatTimer;
- let verifiedLive=null;
+ let verifiedLive=null,connectingUntil=0;
  let workspace=null,workspaceId=null,workspaceIntent="edit",workspaceModule=null,workspaceSupported=false,workspaceApproved=false,pendingDraft="",restoreAttempted=false,workspaceLoading=null,applicationSupported=false;const workspaceRequests=new Map();
  const message=s=>$("message").textContent=s;
  const selectionKey=()=>"studio-v6-last-draft:"+origin;
@@ -81,7 +81,7 @@
  $("prepare").onclick=()=>releaseRequest("prepare",null,{task_ids:[...document.querySelectorAll("#release-options input:checked")].map(e=>e.value)});
  for(const [id,event] of [["release-desktop",{action:"size",mode:"desktop"}],["release-mobile",{action:"size",mode:"mobile"}],["release-frame",{action:"frame"}]])$(id).onclick=()=>{if(activeCandidate)send("release-frame",{id:activeCandidate.id,event});};
  $("release-stop").onclick=()=>{if(activeCandidate)releaseRequest("preview-stop",activeCandidate);};
- $("connect").onclick=()=>{try{const u=new URL($("origin").value);if(u.protocol!=="http:"||u.hostname!=="127.0.0.1"||!u.port||u.username||u.password||u.search||u.hash||u.pathname!=="/")throw Error("Enter only http://127.0.0.1:port. Never paste a private token here.");if(connected)send("disconnect");offline("Approve this connection in the localhost window.");origin=u.origin;try{localStorage.setItem("studio-companion-origin",origin);}catch{}$("connection").textContent="Reconnecting · awaiting localhost";nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),x=>x.toString(16).padStart(2,"0")).join("");popup=window.open(origin+"/pair#"+nonce,"_blank");clearTimeout(expiry);expiry=setTimeout(()=>{if(!connected)offline("Local device offline. Check that the Windows companion is running, then reconnect.");},15000);if(!popup)throw Error("Popup blocked. Allow this popup or use the private local launcher directly.");}catch(e){message(e.message);}};
+ $("connect").onclick=()=>{if(Date.now()<connectingUntil&&popup&&!popup.closed){popup.focus();return;}connectingUntil=Date.now()+15000;try{const u=new URL($("origin").value);if(u.protocol!=="http:"||u.hostname!=="127.0.0.1"||!u.port||u.username||u.password||u.search||u.hash||u.pathname!=="/")throw Error("Enter only http://127.0.0.1:port. Never paste a private token here.");if(connected)send("disconnect");offline("Approve this connection in the localhost window.");origin=u.origin;try{localStorage.setItem("studio-companion-origin",origin);}catch{}$("connection").textContent="Reconnecting · awaiting localhost";nonce=Array.from(crypto.getRandomValues(new Uint8Array(24)),x=>x.toString(16).padStart(2,"0")).join("");popup=window.open(origin+"/pair#"+nonce,"_blank");clearTimeout(expiry);expiry=setTimeout(()=>{if(!connected)offline("Local device offline. Check that the Windows companion is running, then reconnect.");},15000);if(!popup)throw Error("Popup blocked. Allow this popup or use the private local launcher directly.");}catch(e){message(e.message);}};
  $("resume-editor").onclick=()=>openSelected("edit",true);
  $("disconnect").onclick=()=>{send("disconnect");offline("Disconnected. Local editor work is preserved.");};
  $("refresh").onclick=()=>send("catalog");
@@ -128,6 +128,7 @@
  try{let saved=localStorage.getItem("studio-companion-origin");if(saved){const configured=$("origin").value;if(saved==="http://127.0.0.1:18761"&&configured==="http://127.0.0.1:18762")saved=configured;const u=new URL(saved);if(u.protocol==="http:"&&u.hostname==="127.0.0.1"&&u.port&&!u.username&&!u.password&&!u.search&&!u.hash&&u.pathname==="/"){$("origin").value=u.origin;message("Trusted address remembered. Click Connect to reopen the secure localhost window; approval resumes automatically where permitted.");}}}catch{}
  function heartbeat(){clearTimeout(heartbeatTimer);heartbeatTimer=setTimeout(()=>{if(!connected)return;if(!popup||popup.closed){offline("Local approval window closed. Click Connect; unsaved local editors are preserved.");return;}if(Date.now()-lastSeen>90000)$("connection").textContent="Reconnecting";send("ping");heartbeat();},60000);}
  const advanced=document.createElement('details');advanced.innerHTML='<summary>Advanced · technical task history</summary><p>Internal tasks and archived application drafts. Worktrees, ownership, tests and recovery records are retained.</p><button id="technical-refresh">Load technical records</button><pre id="technical-records"></pre>';$('history').append(advanced);$('technical-refresh').onclick=()=>send('technical-catalog');
- tab("editor");workspaceLoading=mountWorkspace(null).catch(e=>message("Editor could not load: "+e.message));
+ document.title="Sports Cave OS — DEV";tab("editor");workspaceLoading=mountWorkspace(null).catch(e=>message("Editor could not load: "+e.message));
+ try{$("connect").click();}catch{}
  window.addEventListener("pagehide",()=>{if(connected)send("disconnect");});
 })();

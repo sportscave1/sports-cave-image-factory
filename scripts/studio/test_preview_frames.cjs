@@ -2,8 +2,8 @@ const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('nod
 const source=fs.readFileSync(__dirname+'/ui/workspace.js','utf8');
 const fn=source.match(/async function showFrame\(next\)\{[^\n]+\}/)[0];
 const nodes={},pending=[];
-const ctx={frame:{image:'old'},frameSequence:0,disposed:false,information:false,
- $:id=>nodes[id]||=(id==='ws-image'?{src:'old'}:{hidden:false}),controls(){},
+const ctx={frame:{image:'old'},frameSequence:0,disposed:false,information:false,target:{querySelector:()=>({clientWidth:1280,clientHeight:900})},
+ $:id=>nodes[id]||=(id==='ws-image'?{src:'old'}:{hidden:false,style:{}}),controls(){},
  Image:class{decode(){return new Promise((resolve,reject)=>pending.push({resolve,reject}));}},Error};
 vm.createContext(ctx);vm.runInContext(fn,ctx);
 (async()=>{

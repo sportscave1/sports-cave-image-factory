@@ -76,6 +76,7 @@ with sync_playwright() as p:
     page=context.new_page()
     page.goto("http://127.0.0.1:8501")
     page.wait_for_function("() => !!document.querySelector('.sc-login-title')",timeout=20000)
+    route_catalog=pages(Path('/tmp/source'))
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args): pass
         def do_POST(self):
@@ -83,7 +84,7 @@ with sync_playwright() as p:
                 length=int(self.headers.get("Content-Length","0"))
                 if not 0<length<12000: raise ValueError("Oversized event")
                 data=json.loads(self.rfile.read(length))
-                op=data.get("action");inspection=None
+                op=data.get("action");inspection=None;sidebar_click=False
                 if op=='health':
                     body=json.dumps({'alive':app.poll() is None and not page.is_closed(),'synthetic':True}).encode()
                     self.send_response(200);self.send_header('Content-Length',str(len(body)))
@@ -97,7 +98,7 @@ with sync_playwright() as p:
                     page.locator('[data-testid="stAppViewContainer"]').wait_for(timeout=10000)
                 elif op=="navigate":
                     from urllib.parse import quote
-                    selected=next((p for p in pages(Path("/tmp/source")) if p["key"]==data.get("page")),None)
+                    selected=next((p for p in route_catalog if p["key"]==data.get("page")),None)
                     if not selected:raise ValueError("Unknown OS page")
                     if selected["key"]=="__signin__":context.clear_cookies()
                     elif page.get_by_placeholder("Username or email",exact=True).is_visible():
@@ -119,7 +120,8 @@ with sync_playwright() as p:
                     page.get_by_text(re.compile(r"^Synthetic Preview Admin(?:\s*\u00b7\s*Admin)?$")).wait_for(timeout=10000)
                 elif op=="click":
                     x,y=int(data["x"]),int(data["y"])
-                    if not 0<=x<1600 or not 0<=y<1200: raise ValueError("Coordinates")
+                    if not 0<=x<page.viewport_size["width"] or not 0<=y<page.viewport_size["height"]: raise ValueError("Coordinates")
+                    sidebar_click=page.evaluate('({x,y}) => !!document.elementFromPoint(x,y)?.closest(\'[data-testid="stSidebar"] button\')',{'x':x,'y':y})
                     page.mouse.click(x,y)
                 elif op=="text":
                     value=data["text"]
@@ -127,10 +129,15 @@ with sync_playwright() as p:
                     page.keyboard.insert_text(value)
                 elif op=="key":
                     key=data["key"]
-                    if key not in {"Enter","Tab","Backspace","Escape","ArrowDown","ArrowUp"}: raise ValueError("Key")
+                    if key not in {"Enter","Tab","Backspace","Escape","ArrowDown","ArrowUp","ArrowLeft","ArrowRight","Delete","Home","End"}: raise ValueError("Key")
                     page.keyboard.press(key)
                 elif op=="scroll":
+                    page.mouse.move(page.viewport_size["width"]//2,page.viewport_size["height"]//2)
                     page.mouse.wheel(0,max(-900,min(900,int(data["delta"]))))
+                elif op=="viewport":
+                    width,height=data.get('width'),data.get('height')
+                    if type(width) is not int or type(height) is not int or not 320<=width<=1920 or not 480<=height<=1440:raise ValueError('Viewport bounds')
+                    if page.viewport_size!={'width':width,'height':height}:page.set_viewport_size({'width':width,'height':height})
                 elif op=="size":
                     widths={"desktop":1280,"tablet":820,"mobile":390}
                     if data.get("mode") not in widths:raise ValueError("Viewport")
@@ -141,7 +148,7 @@ with sync_playwright() as p:
                     raise ValueError("Unknown event")
                 # Bounded event settling; no unattended screenshot loop.
                 page.wait_for_timeout(200)
-                if op in {"frame","reload-source","navigate","login-synthetic","refresh"}:
+                if sidebar_click or op in {"frame","reload-source","navigate","login-synthetic","refresh"}:
                     # Cookie restoration may schedule a second Streamlit rerun. Wait for
                     # bounded, stable content instead of returning a half-rendered frame.
                     previous=None;stable=0
@@ -153,7 +160,20 @@ with sync_playwright() as p:
                         if stable>=3:break
                         previous=text;page.wait_for_timeout(200)
                     if stable<3:raise RuntimeError("OS screen is still loading. Refresh the preview; no source was discarded.")
-                result={"image":base64.b64encode(page.screenshot(type="jpeg",quality=80)).decode(),
+                    # The synthetic Streamlit host has no production navigation router.
+                    # A completed render can outlive its completion iframe. Use the app's
+                    # guarded completion API with its own current route/epoch, never clear
+                    # the overlay blindly or replay navigation.
+                    page.evaluate('''() => {const root=document.getElementById('sports-cave-os-top-bar');if(!root||document.querySelector('[data-testid="stException"]'))return false;return window.SportsCaveTopBar?.completeNavigation?.({routeKey:root.dataset.currentRouteKey,epoch:Number(root.dataset.navigationEpoch||0),status:'ready'})||false;}''')
+                from urllib.parse import urlparse,parse_qs
+                route=parse_qs(urlparse(page.url).query).get('page',[''])[0]
+                current=next((p['key'] for p in route_catalog if p['route']==route),None)
+                if page.get_by_placeholder('Username or email',exact=True).is_visible():current='__signin__'
+                elif current=='__signin__':current='dashboard'
+                active=page.evaluate('''catalog => {const nodes=[...document.querySelectorAll('[data-testid="stSidebar"] button[kind="primary"]')];return nodes.map(node=>{const text=(node.querySelector('[data-testid="stMarkdownContainer"]')?.innerText||node.innerText||'').trim();return catalog.find(p=>p.route===text||p.label===text)?.key;}).filter(Boolean).at(-1)||null;}''',route_catalog)
+                if active:current=active
+                navigation=page.evaluate('''catalog => {const sidebar=document.querySelector('[data-testid="stSidebar"]');if(!sidebar)return [];return [...sidebar.querySelectorAll('button')].flatMap(node=>{const text=(node.querySelector('[data-testid="stMarkdownContainer"]')?.innerText||node.innerText||'').trim(),row=catalog.find(p=>p.route===text||p.label===text);if(!row)return [];const r=node.getBoundingClientRect();return r.width>0&&r.height>0&&r.y>=0&&r.bottom<=innerHeight?[{page:row.key,x:Math.floor(r.x+r.width/2),y:Math.floor(r.y+r.height/2)}]:[];});}''',route_catalog)
+                result={"page_key":current,"navigation_targets":navigation,"image":base64.b64encode(page.screenshot(type="jpeg",quality=80)).decode(),
                         "text":("\n".join(f.locator("body").inner_text(timeout=1500)[:5000] for f in page.frames if f.url.startswith(("http://127.0.0.1:8501","about:srcdoc"))))[:12000],
                         "width":page.viewport_size["width"],"height":page.viewport_size["height"],
                         "login_visible":page.get_by_placeholder("Username or email",exact=True).is_visible(),

@@ -17,7 +17,7 @@ PROFILE_SHA256="4540a0c176f2bdd83936ef958c0b306dc6ab6ea4310608149d11ac0803c68022
 def profile_digest():
     # Git may normalise CRLF on checkout. Pin identical LF policy bytes.
     return hashlib.sha256(PROFILE.read_bytes().replace(b"\r\n",b"\n")).hexdigest()
-IMAGE_TAG="sports-cave-studio-runtime:v8-silent-perf-01a13216"
+IMAGE_TAG="sha256:5a22bde08670c241dd349f56e374ee5510a58f9f13d077831d1cd9de8746d061"
 RELAY="""import sys,urllib.request,urllib.error
 data=sys.stdin.buffer.read(12000)
 try:
@@ -176,8 +176,12 @@ class Preview:
             config=json.loads(self._docker("inspect",self.name).stdout)[0]
             if config["Config"]["Labels"].get("sports-cave-studio.task")!=self.task:
                 raise RuntimeError("Container ownership mismatch.")
-        allowed={"frame","health","reload-source","login-synthetic","click","inspect","text","key","scroll","size","refresh","navigate"}
+        allowed={"frame","health","reload-source","login-synthetic","click","inspect","text","key","scroll","size","viewport","refresh","navigate"}
         if not isinstance(data,dict) or data.get("action") not in allowed:raise ValueError("Unsupported preview event")
+        if data.get('action')=='viewport':
+            w,h=data.get('width'),data.get('height')
+            if type(w) is not int or type(h) is not int or not 320<=w<=1920 or not 480<=h<=1440:raise ValueError('Unsupported viewport bounds')
+            if self.last_frame and (w,h)==(self.last_frame['width'],self.last_frame['height']):return dict(self.last_frame)
         if data.get("action")=="size" and data.get("mode") not in {"desktop","tablet","mobile"}:raise ValueError("Unsupported viewport")
         if data.get('action')=='size' and self.last_frame and self.last_frame.get('width')=={'desktop':1280,'tablet':820,'mobile':390}[data['mode']]:
             return dict(self.last_frame)

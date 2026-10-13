@@ -1,0 +1,29 @@
+{
+  "status": "Implemented and tested locally; not installed or deployed",
+  "base": "fcb1b6e87f672a5a5fc182dd73d793ffc7183c68",
+  "branch": "codex/task/core-dev-mode-v9-dev",
+  "owner": "codex/v9-01a13216",
+  "image": "sha256:5a22bde08670c241dd349f56e374ee5510a58f9f13d077831d1cd9de8746d061",
+  "files": {
+    "app.py": "f01f7fd14ee0552d8cb5c52255c58dad89d863b6200b6745f660a5695d3e52b1",
+    "os_accounts.py": "583a3282a5b178508a686db728fe4fadf537e5b5c00379f3d23cf4f6afb6ae0f",
+    "developer_studio_page.py": "fc82e8d2ec69f2d6624d334476eacb33cf8ad0b069332bd5fd28c16f122f556c",
+    "components/developer_studio/panel.html": "4c19db5254f70bfd796b7f03f920b4dd2d02c658e8759fced9803ecb1ba8963b",
+    "components/developer_studio/panel.js": "6ad84fa24e6eb956cbc9f64ba4d086d3370e7394e5141e82e28aa894fc9e4269",
+    "components/developer_studio/panel.css": "9e0f301daa8402734619d011b65a7da75499ca6b2a63503fb85e824e72008ba5",
+    "scripts/studio/draft_ui.py": "a6ff62eb02341fe578f6214915d66d879c2d9abd4f7941fdd8640b7d1eccc700",
+    "scripts/studio/dev_sources.py": "a060583a0cd0210a00f3bb3947bab57a776907cb7cf69bd9edaa3863b5e2afd5",
+    "scripts/studio/preview_runtime.py": "fa2318a4d7c86992dd2724c573524db4dcfc4a19c8d6b938d27913d19fff687f",
+    "scripts/studio/isolation/controller.py": "8e234f721441e210af69342036cf27b82103546551fca793bfd216e820d48d3e",
+    "scripts/studio/isolation/DevMode.Dockerfile": "ebce09da7bb3f5065856195b3cbdbc36e2c43b93dd1d529354d965742a5e7326",
+    "scripts/studio/ui/workspace.html": "036e9521e2c9b8d4be69201716a5f90ca2134b224173f320187ee39c0c2e7c5c",
+    "scripts/studio/ui/workspace-local.js": "9078e217015cf4693fcdebde8500277aacfde65c67cba5d4dc24cef3e59fb9de",
+    "scripts/studio/ui/workspace.js": "43b0cb5601027ca536c7b75233fc37a6618dbfcde7ee9f584a8456280add97d0",
+    "scripts/studio/ui/workspace.css": "b8c43287be7681308b1404724876c3b48ea7f2e6cb12bbe886af3ba398974f15",
+    "scripts/studio/ui/editor.js": "ff915ccf6942e2a252c015e55b48dfbd0e09ea48731a076e8910c310a0927c36",
+    "scripts/studio/ui/pair.js": "663201ff5266ba8d00608ffccdfdab2256ce8f53c9faf04cefb19d7459cb18df"
+  },
+  "existing_application_id": "9ca4a85e-b3f4-4c85-b61e-4eb5551d2740",
+  "existing_application_revision": 6,
+  "existing_companion_changed": false
+}
