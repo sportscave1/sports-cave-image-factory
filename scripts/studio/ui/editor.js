@@ -16,9 +16,16 @@ function confirmDiscard(message) {
   });
 }
 function highlight() {
-  const source=$("ed-source").value;
-  $("ed-lines").textContent=source.split("\n").map((_,i)=>i+1).join("\n");
-  $("ed-highlight").innerHTML=esc(source).replace(/(&lt;\/?[\w-]+|\b(?:const|let|function|return|if|else|var|class|import|export|async|await)\b|#[\da-fA-F]{3,8}\b)/g,'<span class="syntax">$1</span>')+"\n";
+  const field=$("ed-source"),lines=field.value.split("\n"),wrap=$("ed-wrap")?.checked;
+  const columns=Math.max(12,Math.floor((field.clientWidth-24)/7.8)),firstRow=Math.max(0,Math.floor(field.scrollTop/20)-10),lastRow=firstRow+Math.ceil(field.clientHeight/20)+30;
+  let row=0,start=0,end=lines.length,top=0,bottom=0;
+  const heights=lines.map(line=>wrap?Math.max(1,Math.ceil(line.replaceAll('\t','  ').length/columns)):1);
+  for(let i=0;i<lines.length;i++){if(row+heights[i]<firstRow){start=i+1;top=row+heights[i];}if(row>lastRow){end=i;break;}row+=heights[i];}
+  bottom=heights.slice(end).reduce((a,b)=>a+b,0);
+  const spacer=n=>'<span style="display:block;height:'+n*20+'px"></span>';
+  $("ed-lines").innerHTML=spacer(top)+lines.slice(start,end).map((line,i)=>String(start+i+1)+(wrap?'\n'.repeat(heights[start+i]-1):'')).join('\n')+spacer(bottom);
+  $("ed-highlight").innerHTML=spacer(top)+esc(lines.slice(start,end).join('\n')).replace(/(&lt;\/?[\w-]+|\b(?:const|let|function|return|if|else|var|class|import|export|async|await)\b|#[\da-fA-F]{3,8}\b)/g,'<span class="syntax">$1</span>')+'\n'+spacer(bottom);
+  $("ed-highlight").scrollTop=field.scrollTop;$("ed-highlight").scrollLeft=field.scrollLeft;$("ed-lines").scrollTop=field.scrollTop;
 }
 function capture() {
   if(opened.path!=="app.py") return {source:$("ed-source").value};
@@ -102,7 +109,7 @@ export async function mount(target,transport,frameCallback,options={}) {
   panel=target;request=transport;showFrame=frameCallback;recoveryKey=options.recoveryKey?'studio-buffer:'+options.recoveryKey:'';
   if(!panel.dataset.mounted) {
     if(!document.querySelector("[data-studio-editor-css]")){const css=document.createElement("link");css.rel="stylesheet";css.href="/editor.css";css.dataset.studioEditorCss="true";document.head.append(css);}
-    panel.innerHTML='<div class="heading"><div><p class="eyebrow">DRAFT EDITOR</p><h2>Make a focused change</h2></div><button id="ed-close">Close editor</button></div><p class="hint">Explicit component mappings only. The selected worktree is the source of truth. Live integrations remain disabled.</p><label>Editing target<select id="ed-file"></select></label><p id="ed-status" role="status"></p><div id="ed-visual"><label>Component<select id="ed-component"></select></label><p class="hint">Properties accept literal hex colours, CSS sizes, and supported alignment/layout values. Empty removes the override. Mobile panel settings apply below 760 px.</p><div id="ed-fields"></div></div><div id="ed-code" hidden><label>Search<input id="ed-search" placeholder="Find source text"></label><button id="ed-find">Find next</button><div class="code-wrap"><pre id="ed-lines" aria-hidden="true"></pre><div class="code-stack"><pre id="ed-highlight" aria-hidden="true"></pre><textarea id="ed-source" wrap="off" spellcheck="false" aria-label="Authorised source code"></textarea></div></div></div><div class="actions"><button class="primary" id="ed-save">Save Draft</button><button id="ed-undo">Undo</button><button id="ed-discard">Discard Unsaved Changes</button><button id="ed-changes">View Changes</button></div><label>Saved editor revision<select id="ed-history"></select></label><button id="ed-restore">Restore Revision</button><pre id="ed-diff" aria-label="Source changes"></pre>';
+    panel.innerHTML='<div class="heading"><div><p class="eyebrow">DRAFT EDITOR</p><h2>Make a focused change</h2></div><button id="ed-close">Close editor</button></div><p class="hint">Explicit component mappings only. The selected worktree is the source of truth. Live integrations remain disabled.</p><label>Editing target<select id="ed-file"></select></label><p id="ed-status" role="status"></p><div id="ed-visual"><label>Component<select id="ed-component"></select></label><p class="hint">Properties accept literal hex colours, CSS sizes, and supported alignment/layout values. Empty removes the override. Mobile panel settings apply below 760 px.</p><div id="ed-fields"></div></div><div id="ed-code" hidden><label>Search<input id="ed-search" placeholder="Find source text"></label><button id="ed-find">Find next</button><label><input id="ed-wrap" type="checkbox"> Word wrap</label><div class="code-wrap"><pre id="ed-lines" aria-hidden="true"></pre><div class="code-stack"><pre id="ed-highlight" aria-hidden="true"></pre><textarea id="ed-source" wrap="off" spellcheck="false" aria-label="Authorised source code"></textarea></div></div></div><div class="actions"><button class="primary" id="ed-save">Save Draft</button><button id="ed-undo">Undo</button><button id="ed-discard">Discard Unsaved Changes</button><button id="ed-changes">View Changes</button></div><label>Saved editor revision<select id="ed-history"></select></label><button id="ed-restore">Restore Revision</button><pre id="ed-diff" aria-label="Source changes"></pre>';
     $("ed-file").onchange=()=>act(async()=>{
       const path=$("ed-file").value;
       if(dirty&&!await confirmDiscard("Discard unsaved editor changes?")){$("ed-file").value=opened.path;return;}clearRecovery();
@@ -112,12 +119,10 @@ export async function mount(target,transport,frameCallback,options={}) {
       if(dirty&&!await confirmDiscard("Discard unsaved component changes?")){$("ed-component").value=selected;return;}
       clearRecovery();selected=$("ed-component").value;component();msg("Editing "+opened.visual[selected].label);
     };
+    $("ed-wrap").onchange=()=>{const on=$("ed-wrap").checked;$("ed-source").wrap=on?'soft':'off';$("ed-source").style.whiteSpace=on?'pre-wrap':'pre';$("ed-highlight").style.whiteSpace=on?'pre-wrap':'pre';$("ed-lines").hidden=false;highlight();};
+    $("ed-source").onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();const field=e.currentTarget,start=field.selectionStart,end=field.selectionEnd;field.setRangeText('  ',start,end,'end');highlight();modified();}};
     $("ed-source").oninput=()=>{highlight();modified();};
-    $("ed-source").onscroll=()=>{
-      $("ed-highlight").scrollTop=$("ed-source").scrollTop;
-      $("ed-highlight").scrollLeft=$("ed-source").scrollLeft;
-      $("ed-lines").scrollTop=$("ed-source").scrollTop;
-    };
+    $("ed-source").onscroll=highlight;
     $("ed-find").onclick=()=>{
       const field=$("ed-source"),term=$("ed-search").value;
       let index=field.value.indexOf(term,field.selectionEnd);

@@ -43,6 +43,9 @@
    if(d.type==='technical-catalog')send('technical-catalog',{result:await api({action:'technical-catalog'})});
    if(d.type==="workspace-begin"){
     const row=rows.find(r=>r.id===d.draft_id&&r.actionable);if(!row)throw Error("Draft is locked to another owner.");
+    if(workspaceGrant?.draft_id===row.id){
+     try{await api({action:'workspace-request',capability:workspaceGrant.capability,command:{action:'workspace-model'}});send('workspace-approved',{draft_id:row.id});return;}catch{workspaceGrant=null;}
+    }
     pending={draft_id:row.id,intent:"edit",kind:"workspace"};
     $("selection").textContent=`Allow this OS window to edit the explicit frontend files and mapped properties of ${row.name}? Owner ${row.owner}; branch ${row.branch}; task ${row.task_id}. Preview stays isolated; publishing is disabled. Permission expires after 15 minutes of editor inactivity or Disconnect.`;
     $("open").textContent="Allow editing this selected draft";$("handoff").hidden=false;$("link").replaceChildren();status("Review the exact draft, then grant its editor session locally.");

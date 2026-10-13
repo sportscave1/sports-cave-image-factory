@@ -24,6 +24,11 @@ BLOCKER = "Full-application preview disabled: OS isolation and safety probes are
 
 class DraftServer(HTTPServer):
     allow_reuse_address = False
+    def get_request(self):
+        client,address=super().get_request()
+        client.settimeout(5)  # Idle browser preconnects cannot block the serial companion.
+        return client,address
+
     def server_bind(self):
         import socket
         if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
@@ -208,7 +213,7 @@ class DraftServer(HTTPServer):
         self.catalog()
         with studio.locked(self.home) as file:
             drafts.draft_by_id(studio.read(file),grant["draft"],self.owner)
-        allowed={"workspace-model","editor-files","editor-open","editor-save","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
+        allowed={"workspace-model","editor-reference","editor-files","editor-open","editor-save","editor-diff","start-preview","stop-preview","restart-preview","preview-event","application-tests"}
         command=data.get("command")
         if not isinstance(command,dict) or command.get("action") not in allowed:raise ValueError("Editor operation not allowlisted")
         if any(k in command for k in ("owner","task_id","draft_id","home","root","url","command")):raise ValueError("Editor scope cannot be overridden")
@@ -241,6 +246,12 @@ class DraftServer(HTTPServer):
             self.workspace_grants.pop(data.get("capability"),None)
             return {"revoked":True}
         if action=="workspace-model":return self.workspace_model()
+        if action=="editor-reference":
+            import dev_sources
+            state=self.state()
+            with studio.locked(self.home) as file:
+                _,_,root=drafts.draft_by_id(studio.read(file),state['draft']['id'],self.owner)
+            return dev_sources.route_sources(root,data.get('page'))
         if action in {"start-preview", "restart-preview", "preview-event", "release-preview"}:
             self.last_preview_activity = time.monotonic()
         if action in {"release-catalog","release-operation","release-preview"}:

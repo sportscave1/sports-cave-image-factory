@@ -1319,7 +1319,7 @@ Return the product link and full validation results.
 
 
 st.set_page_config(
-    page_title="Sports Cave OS",
+    page_title="Sports Cave OS — DEV" if st.query_params.get("dev_mode") == "1" and st.query_params.get("page") == "Developer Studio" else "Sports Cave OS",
     page_icon=str(APP_FAVICON_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
@@ -8996,6 +8996,10 @@ def _sidebar_route_button(
     container = (root if root is not None else st.sidebar).container(
         key=f"sidebar-row-{os_accounts.page_key_for_route(route) or route}"
     )
+    if route == "Developer Studio":
+        # A real link preserves the browser's click gesture and leaves Live untouched.
+        container.markdown('<a style="display:block;padding:10px 12px;color:#ddd6bc;text-decoration:none;font:600 14px Segoe UI,sans-serif" class="sc-dev-mode-entry" href="?page=Developer%20Studio&amp;dev_mode=1" target="_blank" rel="noopener">⌘ &nbsp; Dev Mode ↗</a>', unsafe_allow_html=True)
+        return False
     clicked = container.button(
         label or SIDEBAR_NAV_LABELS.get(route, route),
         key=key or f"sidebar-nav::{route}",
