@@ -2,7 +2,7 @@
 import ast
 from pathlib import Path
 
-MODULES={"os_accounts","social_media","ads_navigation","analytics_navigation","seo_workspace","seo_navigation","crm_navigation"}
+MODULES={"os_accounts","social_media","ads_navigation","analytics_navigation","seo_workspace","crm_navigation"}
 class Static:
     def __init__(self,root):self.root=Path(root);self.cache={}
     def module(self,name):
@@ -21,10 +21,6 @@ class Static:
                     if isinstance(target,ast.Name):env[target.id]=value
         return env
     def value(self,n,env):
-        if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id in {"tuple","list"} and len(n.args)==1 and not n.keywords:
-            value=self.value(n.args[0],env)
-            if not isinstance(value,(list,tuple)) or len(value)>200:raise ValueError("Unsupported static sequence")
-            return tuple(value) if n.func.id=="tuple" else list(value)
         if isinstance(n,ast.Constant):return n.value
         if isinstance(n,ast.Name):return env[n.id]
         if isinstance(n,ast.Attribute) and isinstance(n.value,ast.Name):return self.module(n.value.id)[n.attr]

@@ -60,20 +60,3 @@ body:has(#local-status){padding:0}#local-status{position:absolute;z-index:8;bott
 @media(max-width:760px){.ws-dev .code-first-left{width:95vw;max-width:700px}.ws-dev .ws-bar{gap:2px}.ws-dev .ws-bar #ws-unsaved{flex:1}}
 
 .ws-dev .code-first-left>#ws-editor-error{grid-column:2;grid-row:1/4;align-self:start;margin:0;padding:16px;color:#f5d98b;overflow-wrap:anywhere;min-width:0}
-
-/* Scoped source navigation uses virtual groups; real repository paths stay intact. */
-.ws-dev .code-first-left{grid-template-rows:36px 38px auto minmax(0,1fr)}
-.ws-dev .code-first-left>#ws-list{grid-row:4}
-.ws-dev .code-first-left>#editor-panel,.ws-dev .code-first-left>#ws-editor-error{grid-row:1/5}
-.ws-dev #ws-scope{width:100%;min-width:0;font-size:12px;padding:5px}
-.ws-coverage{grid-column:1;grid-row:3;font-size:11px;padding:5px 8px;color:var(--muted);max-height:160px;overflow:auto;border-bottom:1px solid var(--line)}
-.ws-coverage summary{cursor:pointer}.ws-coverage p{line-height:1.45}
-.ws-dev .ws-list .ws-file{display:grid;grid-template-columns:22px minmax(0,1fr);gap:2px 5px;width:100%;text-align:left;padding:6px;border-radius:3px;font-size:11px;min-height:32px}
-.ws-file>span:nth-child(2){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ws-file-icon{font:10px Consolas,monospace;color:#b9c9c4}.ws-file small{grid-column:2;font-size:9px;color:var(--muted)}
-.ws-list details>summary{font-size:11px;padding:5px 3px;cursor:pointer;overflow-wrap:anywhere}
-.ws-list details details{margin-left:7px;border-left:1px solid var(--line);padding-left:4px}
-.ws-dev .ws-drafts{position:relative}.ws-drafts>div{min-width:240px;max-height:65vh;overflow:auto}
-.ws-drafts button{display:block;width:100%;text-align:left}.ws-drafts small{display:block}
-.ws-dev #ed-copy-package{min-height:160px;max-height:30vh;width:100%;font:12px Consolas,monospace}
-.ws-dev #ed-source::selection{background:#52765988;color:transparent;-webkit-text-fill-color:transparent}
