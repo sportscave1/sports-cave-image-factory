@@ -717,7 +717,7 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
-                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel" } },
+                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openWith", "appDefaults", "openViewer", "folders", "cancel" } },
                 });
                 return;
             }
@@ -728,6 +728,17 @@ internal sealed class DesktopWindow : Window
                 Reply(action, requestId, true, null);
                 return;
             }
+            // Premium files: explicit OS preference UI, no association writes.
+            if (action == "appDefaults")
+            {
+                if (requestId.Length < 8 || requestId.Length > 80 || message.Keys.Any(key => key != "action" && key != "request_id"))
+                    throw new DesktopException("invalid_request", "The desktop request is invalid.");
+                try { Process.Start(NativeFileOpening.DefaultAppsInfo()); }
+                catch (System.ComponentModel.Win32Exception) { throw new DesktopException("settings_unavailable", "Open Windows Settings, then Apps and Default apps to choose or reset your application preference."); }
+                Reply(action, requestId, true, null);
+                return;
+            }
+            // End premium preference UI.
             if (action == "openViewer")
             {
                 if (requestId.Length < 8 || requestId.Length > 80)
@@ -748,7 +759,7 @@ internal sealed class DesktopWindow : Window
                 return;
             }
             if (action != "drag" && action != "copyFile"
-                && action != "copyImage" && action != "openFile")
+                && action != "copyImage" && action != "openFile" && action != "openWith")
             {
                 throw new DesktopException("action_denied", "The desktop action is not allowed.");
             }
@@ -800,6 +811,15 @@ internal sealed class DesktopWindow : Window
                         { "count", paths.Length },
                     });
                 }
+                // Premium files: chooser uses the existing validated transfer/cache path.
+                else if (action == "openWith")
+                {
+                    if (paths.Length != 1) throw new DesktopException("one_file_required", "Select one file for Open With.");
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    NativeFileOpening.OpenWith(paths[0],new System.Windows.Interop.WindowInteropHelper(this).Handle);
+                    Reply(action, requestId, true, new Dictionary<string,object> { { "count",1 } });
+                }
+                // End premium chooser.
                 else if (action == "copyImage")
                 {
                     if (paths.Length != 1 || Directory.Exists(paths[0]))
@@ -1412,5 +1432,28 @@ internal static class DesktopLog
     {
         string clean = Convert.ToString(value);
         return clean.Length > 80 ? clean.Substring(0, 80) : clean.Replace(" ", "_");
+    }
+}
+
+// Additive OS chooser; existing helpers, caches and Photoshop code are untouched.
+internal static class NativeFileOpening
+{
+    [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]
+    internal struct OpenAsInfo { [MarshalAs(UnmanagedType.LPWStr)] public string File; [MarshalAs(UnmanagedType.LPWStr)] public string Class; public uint Flags; }
+    [DllImport("shell32.dll",CharSet=CharSet.Unicode)]
+    private static extern int SHOpenWithDialog(IntPtr owner,ref OpenAsInfo info);
+    private static readonly HashSet<string> Blocked = new HashSet<string>(new[] { ".appref-ms",".application",".bat",".chm",".cmd",".com",".cpl",".dll",".exe",".gadget",".hta",".inf",".ins",".isp",".jar",".js",".jse",".lnk",".msc",".msi",".msp",".mst",".pif",".ps1",".py",".pyw",".reg",".scr",".sct",".shb",".shs",".url",".vbs",".vbe",".website",".ws",".wsc",".wsf" },StringComparer.OrdinalIgnoreCase);
+    internal static OpenAsInfo OptionsFor(string path)
+    {
+        if (!File.Exists(path) || Blocked.Contains(Path.GetExtension(path)))
+            throw new DesktopException("open_with_denied","This file cannot be opened with the application chooser.");
+        return new OpenAsInfo { File=path,Class=null,Flags=4 }; // OAIF_EXEC only; never register/force defaults.
+    }
+    internal static ProcessStartInfo DefaultAppsInfo() { return new ProcessStartInfo("ms-settings:defaultapps") { UseShellExecute=true }; }
+    internal static void OpenWith(string path,IntPtr owner)
+    {
+        OpenAsInfo info=OptionsFor(path);int result=SHOpenWithDialog(owner,ref info);
+        if (result == unchecked((int)0x800704C7) || result == 1) throw new DesktopException("cancelled","Open With cancelled.");
+        if (result < 0) throw new DesktopException("open_with_unavailable","Windows could not show Open With. Download the file or use Open With in File Explorer.");
     }
 }

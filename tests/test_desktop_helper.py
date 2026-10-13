@@ -113,7 +113,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn('action == "openViewer"', self.source)
         self.assertIn("await OpenImageViewer(viewer)", self.source)
         self.assertIn(
-            '"drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel"',
+            '"drag", "copyFile", "copyImage", "openFile", "openWith", "appDefaults", "openViewer", "folders", "cancel"',
             self.source,
         )
         self.assertIn("Settings.AreHostObjectsAllowed = false", self.source)
