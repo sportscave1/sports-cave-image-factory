@@ -2,7 +2,7 @@
 from pathlib import Path
 import sys,os,json
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-os.environ['CRM_FIXTURE_SQL_PORT']='8873'
+os.environ.setdefault('CRM_FIXTURE_SQL_PORT','8873')
 import streamlit as st
 from tests.crm_db_fixture import connect
 from tests.test_crm_lifecycle_publication import LifecyclePublicationTests
@@ -38,8 +38,9 @@ seed_smart()
 if st.query_params.get('offline')=='1':st.session_state['_fixture_offline']=True
 source=Path('tests/fixtures/crm_collection_picker.py').read_text()
 source=source.replace("st.set_page_config(layout='wide')",'')
+source=source.replace('\ninject_styles()','\nstyle_file=__file__;__file__=str(ROOT/"app.py");inject_styles();__file__=style_file')
 source=source.replace('campaign_workspace(shop,CampaignStore(connect),Mock(user=ADMIN))','''
-cat,authority,_=fixture()
+cat,authority,_=fixture(size=12)
 shop.query.side_effect=authority.query.side_effect
 shop.storefront_query.side_effect=authority.storefront_query.side_effect
 if st.session_state.get('_fixture_offline'):

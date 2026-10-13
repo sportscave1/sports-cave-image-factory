@@ -12,13 +12,8 @@ import threading
 import time
 from crm_catalogue import Catalogue, product_id, product_issues
 
-QUERY='''query SportsCaveRelated($product: ID!, $country: CountryCode!)
- @inContext(country: $country) {
- productRecommendations(productId: $product, intent: RELATED) {
- id title availableForSale onlineStoreUrl
- } }'''
-FALLBACK='''query SportsCaveAvailable($country: CountryCode!) @inContext(country: $country) {
- products(first: 24, sortKey: BEST_SELLING) { nodes { id title availableForSale onlineStoreUrl } }
+FALLBACK='''query SportsCaveAvailable($country: CountryCode!, $after:String) @inContext(country: $country) {
+ products(first: 100, after:$after, sortKey: BEST_SELLING) { nodes { id title availableForSale onlineStoreUrl } pageInfo { hasNextPage endCursor } }
 }'''
 MARKET_PRODUCTS='''query SportsCaveMarketProducts($ids: [ID!]!, $country: CountryCode!) @inContext(country: $country) {
  nodes(ids: $ids) { ... on Product { id availableForSale onlineStoreUrl
@@ -34,15 +29,17 @@ def enabled(doc):
                s.get('settings',{}).get('smart') is True for s in doc.get('middle_sections',[]))
 
 
-def storefront(shop,query,variables):
+def storefront(shop,query,variables,*,fresh=False):
     """Existing shop identity; optional existing Storefront token, no Admin token reuse."""
     namespace=str(shop.namespace)
     key=(namespace,query,json.dumps(variables,sort_keys=True))
     with _LOCK:
         hit=_CACHE.get(key)
-        if hit and hit[0]>time.monotonic():
+        if not fresh and hit and hit[0]>time.monotonic():
             _CACHE.move_to_end(key)
             return deepcopy(hit[1])
+    deadline=getattr(shop,'optional_deadline',None)
+    if isinstance(deadline,(int,float)) and time.monotonic()>deadline:return {}
     try:
         adapter=getattr(shop,'storefront_query',None)
         if callable(adapter):data=adapter(query,variables)
@@ -81,127 +78,136 @@ def lines(order):
     return value.get('nodes',[]) if isinstance(value,dict) else value
 
 
-def hydrate(doc,store,shop,customer,*,orders=None,checkout=None,catalogue=None,fresh=False,new_since=None):
+def hydrate(doc,store,shop,customer,*,orders=None,checkout=None,catalogue=None,fresh=False,new_since=None,
+            orders_complete=False,behaviour_data=None):
     if not enabled(doc):return doc
     if not customer.get('id'):raise ValueError('Select a real customer for Smart recommendations.')
     from crm_collector_transport import bounded
-    shop=bounded(shop,seconds=6)
-    orders=history(store,customer) if orders is None else orders
-    owned=set();seeds=[];titles=[]
-    for order in orders:
-        for item in lines(order):
-            identity=product_id((item.get('product') or {}).get('id') or item.get('product_id'))
-            if identity:
-                owned.add(identity)
-                if identity not in seeds:seeds.append(identity)
-            titles.append(str(item.get('title') or ''))
-    # Only a checkout with a verified matching Shopify customer can supply seeds.
-    if checkout and (checkout.get('customer') or {}).get('id')==customer['id']:
-        for item in lines(checkout):
+    from crm_smart_candidates import memberships,collection_products,behaviour,signal_ids,balanced
+    shop=bounded(shop,seconds=8)
+    # Flow context often contains just the triggering order. Merge the complete
+    # local ledger; campaign preparation already supplies its single batch read.
+    orders=list(orders or [])+(history(store,customer) if not orders_complete else [])
+    owned=set()
+    def identities(event):
+        result=[]
+        for item in lines(event):
             variant=item.get('variant') if isinstance(item.get('variant'),dict) else {}
             product=item.get('product') if isinstance(item.get('product'),dict) else variant.get('product') or {}
             identity=product_id(product.get('id') or item.get('product_id'))
-            if identity and identity not in seeds:seeds.append(identity)
-            titles.append(str(item.get('title') or ''))
-    from sports_categories import detect_sport_in_text,normalize_sport_category
-    sports={normalize_sport_category(detect_sport_in_text(t) or '') for t in titles[:12]}-{''}
-    words=set(re.findall(r'[a-z0-9]+',' '.join(titles[:12]).casefold()))-{'art','artwork','sports','cave','edition','limited','frame','framed','wall','the','and'}
-    def related(title):
-        sport=normalize_sport_category(detect_sport_in_text(title or '') or '')
-        return not sports or not sport or sport in sports
+            if identity:result.append(identity)
+        return result
+    for order in orders:owned.update(identities(order))
+    # An order without surviving product IDs is still purchase history. Never
+    # relax the restriction just because its product was deleted from Shopify.
+    purchased=bool(orders) or int(customer.get('numberOfOrders') or 0)>0
     country=(customer.get('defaultAddress') or {}).get('countryCodeV2')
     if not country:
         for event in ([checkout] if checkout else [])+orders:
             address=event.get('shippingAddress') or event.get('shipping_address') or event.get('billingAddress') or event.get('billing_address') or {}
             country=event.get('_country') or address.get('countryCodeV2') or address.get('country_code') or address.get('countryCode')
             if country:break
-    if not country and doc['market']=='Global':
-        result=deepcopy(doc)
-        for s in result['middle_sections']:
-            if s.get('type')=='catalogue' and s['settings'].get('smart'):s['products']=[];s['visible']=False;s['settings']['smart']=False
-        return result  # No invented Australian market for an unknown global recipient.
-    country=country or {
-        'AU':'AU','US':'US','UK':'GB','CA':'CA','NZ':'NZ','Global':'AU'}[doc['market']]
-    if not isinstance(country,str) or len(country)!=2:raise ValueError('Customer market unavailable.')
-    extended_market=country not in ('AU','US','GB','CA','NZ')
-    candidates=[]
-    for seed in seeds[:3]:
-        for p in storefront(shop,QUERY,{'product':seed,'country':country}).get('productRecommendations') or []:
-            if p.get('availableForSale') is True and p.get('onlineStoreUrl') and related(p.get('title')):candidates.append(p['id'])
-    if len(set(candidates)-owned)<3 and seeds:
-        # Reuse the established collection integration before generic fallback.
+    country=country or {'AU':'AU','US':'US','UK':'GB','CA':'CA','NZ':'NZ','Global':None}[doc['market']]
+    result=deepcopy(doc);groups=[];tiers=[];popular=False;products={}
+    if country and re.fullmatch('[A-Z]{2}',country):
         try:
-            from crm_shopify import PRODUCTS
-            from crm_collector_resolver import BESTSELLERS
-            data=shop.query(PRODUCTS,{'ids':seeds[:3]},'smart catalogue interests',300)['nodes']
-            options=[c for p in data if p for c in (p.get('collections') or {}).get('nodes',[])
-                if c.get('handle','').lower() not in ('all','frontpage','best-sellers','new-arrivals')]
-            specific=[c for c in options if normalize_sport_category(detect_sport_in_text(c.get('title','')+' '+c.get('handle','')) or '') in sports]
-            collections=list(dict.fromkeys(c['id'] for c in specific or options))
-            for collection in collections[:2]:
-                page=shop.query(BESTSELLERS,{'id':collection},'smart collection recommendations',300).get('collection') or {}
-                candidates.extend(p['id'] for p in (page.get('products') or {}).get('nodes',[]))
-        except Exception:pass
-    if len(set(candidates)-owned)<3:
-        data=storefront(shop,FALLBACK,{'country':country})
-        candidates.extend(p['id'] for p in (data.get('products') or {}).get('nodes',[])
-                    if p.get('availableForSale') is True and p.get('onlineStoreUrl') and related(p.get('title')))
-    # Existing local catalogue provides a bounded fallback during Storefront outages.
-    if not set(candidates)-owned:
-        from sports_categories import detect_sport_in_text
-        sport=detect_sport_in_text(' '.join(titles)) or ''
-        try:
-            rows=store.q('''SELECT shopify_product_id FROM shopify_products
-                WHERE upper(status)='ACTIVE' AND online_store_url IS NOT NULL AND online_store_url<>''
-                ORDER BY CASE WHEN %s<>'' AND (title ILIKE %s OR product_type ILIKE %s)
-                THEN 0 ELSE 1 END,shopify_product_id LIMIT 24''',(sport,'%'+sport+'%','%'+sport+'%'))
-        except Exception:rows=[]
-        candidates=[product_id(r['shopify_product_id']) for r in rows]
-    ids=list(dict.fromkeys(i for i in candidates if product_id(i)==i and i not in owned))[:24]
-    regional={}
-    if ids and extended_market:
-        # Global recipients outside the editor's named markets use Shopify's
-        # contextual Storefront price, never the Global/Australia display fallback.
-        nodes=storefront(shop,MARKET_PRODUCTS,{'ids':ids,'country':country}).get('nodes') or []
-        regional={p['id']:p for p in nodes if p and p.get('availableForSale') is True and p.get('onlineStoreUrl')}
-        ids=[i for i in ids if i in regional]
-    products=[]
-    if ids:
-        from crm_lifecycle_shopify import PRODUCT_AVAILABILITY
-        try:
-            nodes=shop.query(PRODUCT_AVAILABILITY,{'ids':ids},'smart catalogue availability',60,fresh)['nodes']
-            from crm_logic import date
-            allowed={p['id'] for p in nodes if p and
-                (p.get('tracksInventory') is False or isinstance(p.get('totalInventory'),int) and p['totalInventory']>0)
-                and (not new_since or date(p.get('createdAt')) and date(p['createdAt'])>date(new_since))}
-            # Resolve only live available candidates; one missing node cannot break the rest.
-            ids=[i for i in ids if i in allowed]
+            if purchased:
+                collections=memberships(shop,sorted(owned))
+                groups=[collection_products(shop,c) for c in collections]
+            else:
+                signals=behaviour_data if behaviour_data is not None else behaviour(store,customer)
+                if signals.get('unavailable'):raise ValueError('Customer signals unavailable')
+                viewed=signal_ids(signals,customer['id'],'viewed')
+                carts=signal_ids(signals,customer['id'],'checkout')
+                if checkout and (checkout.get('customer') or {}).get('id')==customer['id']:
+                    carts=identities(checkout)+carts
+                engaged=signal_ids(signals,customer['id'],'engaged')
+                # Each tier has its own collection expansion, in priority order.
+                # Meaningful signals never fall back to unrelated random stock.
+                for seeds in (viewed,carts,engaged):
+                    if not seeds:continue
+                    peers=[collection_products(shop,c) for c in memberships(shop,seeds)]
+                    tiers.append((seeds,peers))
+                    groups.extend([seeds,*peers])
+                if not groups:
+                    popular=True
+                    groups=[[]]
+            def batches():
+                if not popular:
+                    ids=list(dict.fromkeys(i for group in groups for i in group if product_id(i)==i and i not in owned))
+                    for start in range(0,len(ids),50):yield ids[start:start+50]
+                    return
+                cursor=None;seen=set();seen_ids=set()
+                while True:
+                    page=storefront(shop,FALLBACK,{'country':country,'after':cursor},fresh=fresh).get('products') or {}
+                    ids=[]
+                    for p in page.get('nodes',[]):
+                        i=p.get('id')
+                        if product_id(i)==i and i not in seen_ids and p.get('availableForSale') is True and p.get('onlineStoreUrl'):
+                            ids.append(i);seen_ids.add(i)
+                    groups[0].extend(ids)
+                    for start in range(0,len(ids),50):yield ids[start:start+50]
+                    info=page.get('pageInfo') or {}
+                    if not info.get('hasNextPage'):return
+                    cursor=info.get('endCursor')
+                    if not cursor or cursor in seen:return
+                    seen.add(cursor)
             market={'GB':'UK'}.get(country,country)
             if market not in ('AU','US','UK','CA','NZ'):market=doc['market']
-            products=(catalogue or Catalogue(shop,connect=store.connect)).resolve(ids,market,fresh=fresh)
-            if extended_market:
-                from crm_catalogue import amount
-                for p in products:
-                    native=regional[p['id']];price=native['priceRange']['minVariantPrice']
-                    compare=native['compareAtPriceRange']['minVariantPrice']
-                    p.update(price=amount(price['amount']),currency=price['currencyCode'],
-                        compare_at=amount(compare['amount']) if compare['currencyCode']==price['currencyCode'] else '')
+            from crm_lifecycle_shopify import PRODUCT_AVAILABILITY
+            from crm_logic import date
+            from crm_catalogue import amount,edition_available
+            resolver=catalogue or Catalogue(shop,connect=store.connect)
+            for batch in batches():
+                # Contextual Storefront publication/availability applies to EVERY
+                # recipient country, including AU/US/GB, not only extended markets.
+                native=storefront(shop,MARKET_PRODUCTS,{'ids':batch,'country':country},fresh=fresh).get('nodes') or []
+                regional={p['id']:p for p in native if p and p.get('availableForSale') is True and p.get('onlineStoreUrl')}
+                batch=[i for i in batch if i in regional]
+                if new_since and batch:
+                    nodes=shop.query(PRODUCT_AVAILABILITY,{'ids':batch},'smart catalogue availability',60,fresh)['nodes']
+                    allowed={p['id'] for p in nodes if p and date(p.get('createdAt')) and date(p['createdAt'])>date(new_since)}
+                    batch=[i for i in batch if i in allowed]
+                if not batch:continue
+                for p in resolver.resolve(batch,market,fresh=fresh,allow_missing=True):
+                    if not edition_available(p.get('edition')):continue
+                    if popular and not (p['edition'].get('sold') or 0)>0:continue
+                    # Contextual prices also avoid mismatches between market
+                    # availability and the prices rendered in tests/live emails.
+                    native=regional[p['id']]
+                    price=(native.get('priceRange') or {}).get('minVariantPrice') or {}
+                    compare=(native.get('compareAtPriceRange') or {}).get('minVariantPrice') or {}
+                    if price:
+                        p.update(price=amount(price.get('amount')),currency=price.get('currencyCode') or '',
+                                 compare_at=amount(compare.get('amount')) if compare.get('currencyCode')==price.get('currencyCode') else '')
+                    elif country not in ('AU','US','GB','CA','NZ'):continue
+                    products[p['id']]=p
+                if popular and all(sum(not product_issues(p,s['settings']) for p in products.values())>=s['settings'].get('smart_count',4)
+                        for s in doc['middle_sections'] if s.get('type')=='catalogue' and s.get('visible') and s['settings'].get('smart')):break
         except Exception:
-            products=[]  # No fabricated or unverifiable products on an outage.
-    result=deepcopy(doc)
-    # Keep Shopify's order for ties; matching athlete/team words and sport
-    # provide a small local ranking without inferring customer browsing history.
-    products=[p for p in products if related(p['title'])]
-    products.sort(key=lambda p:(-len(words & set(re.findall(r'[a-z0-9]+',p['title'].casefold()))),
-        -int(normalize_sport_category(detect_sport_in_text(p['title']) or '') in sports)))
+            products={}  # Optional section fails closed; never invent fallback facts.
     for section in result['middle_sections']:
         if section.get('type')!='catalogue' or not section.get('visible') or not section['settings'].get('smart'):continue
-        section['products']=[deepcopy(p) for p in products if
-            not product_issues(p,section['settings']) and
-            (p.get('edition') is not None or not any(section['settings']['display'][k] for k in ('limit','next','remaining'))) and
-            (p.get('edition') is None or p['edition'].get('remaining',0)>0)][:3]
-        section['settings']['smart']=False  # Resolved copy only; never saved to the draft.
-        if not section['products']:section['visible']=False
+        count=section['settings'].get('smart_count',4)
+        if type(count) is not int or not 1<=count<=12:raise ValueError('Choose 1 to 12 smart products.')
+        valid={i:p for i,p in products.items() if not product_issues(p,section['settings'])}
+        if purchased:
+            chosen=balanced(groups,valid,count)
+        else:
+            # Viewed/checkout products before their collection peers. Preserve
+            # tier and Shopify bestseller order; no title-based guesswork.
+            ranked=[]
+            for seeds,peers in tiers:
+                ranked.extend(valid[i] for i in seeds if i in valid)
+                ranked.extend(balanced(peers,valid,len(valid)))
+            if popular:ranked=[valid[i] for i in groups[0] if i in valid]
+            chosen=[];seen=set()
+            for p in ranked:
+                if p['id'] not in seen:chosen.append(p);seen.add(p['id'])
+            chosen=chosen[:count]
+        section['products']=deepcopy(chosen)
+        section['settings']['smart']=False
+        if not chosen:section['visible']=False
     return result
 
 
@@ -210,13 +216,13 @@ def histories(store,ids):
     result={i:[] for i in ids}
     # Product facts only, for every locally recorded purchase: an older edition
     # must not become recommendable merely because it falls outside a recent page.
-    rows=store.q('''SELECT shopify_customer_id,jsonb_build_object('_country',COALESCE(
+    rows=store.q('''SELECT COALESCE(NULLIF(shopify_customer_id,''),customer_id) AS shopify_customer_id,jsonb_build_object('_country',COALESCE(
         raw_json->'shipping_address'->>'country_code',raw->'shipping_address'->>'country_code',
         raw_json->'shippingAddress'->>'countryCodeV2',raw_json->'billing_address'->>'country_code'),
         'products',COALESCE(
         raw_json->'line_items',raw->'line_items',raw_json->'lineItems'->'nodes',
         raw->'lineItems'->'nodes',raw_json->'products','[]'::jsonb)) AS raw_json
-        FROM shopify_orders WHERE shopify_customer_id=ANY(%s) AND cancelled_at IS NULL
+        FROM shopify_orders WHERE COALESCE(NULLIF(shopify_customer_id,''),customer_id)=ANY(%s) AND cancelled_at IS NULL
         AND upper(financial_status) IN ('PAID','PARTIALLY_REFUNDED','REFUNDED')
         ORDER BY created_at DESC''',(ids,))
     for row in rows:result[row['shopify_customer_id']].append(row['raw_json'] or {})
@@ -236,6 +242,11 @@ class BatchFacts:
 
     def __getattr__(self,name):return getattr(self.source,name)
 
+    def storefront_query(self,document,variables):
+        key=('storefront',document,json.dumps(variables,sort_keys=True))
+        if key not in self.reads:self.reads[key]=storefront(self.source,document,variables,fresh=True)
+        return deepcopy(self.reads[key])
+
     def query(self,document,variables,capability,*args):
         if capability not in ('smart catalogue availability','smart catalogue interests','smart collection recommendations','catalogue products'):
             return self.source.query(document,variables,capability,*args)
@@ -245,10 +256,13 @@ class BatchFacts:
             self.reads[key]=bounded(self.source,seconds=3).query(document,variables,capability,*args)
         return deepcopy(self.reads[key])
 
-    def resolve(self,ids,market,*,fresh=False):
-        key=(tuple(ids),market)
-        if key not in self.products:self.products[key]=self.catalogue.resolve(ids,market,fresh=fresh)
-        return deepcopy(self.products[key])
+    def resolve(self,ids,market,*,fresh=False,allow_missing=False):
+        missing=[i for i in ids if (i,market) not in self.products]
+        if missing:
+            found={p['id']:p for p in self.catalogue.resolve(missing,market,fresh=fresh,allow_missing=True)}
+            for i in missing:self.products[i,market]=found.get(i)
+        if not allow_missing and any(self.products[i,market] is None for i in ids):raise ValueError('Product unavailable')
+        return deepcopy([self.products[i,market] for i in ids if self.products[i,market] is not None])
 
 
 def preview(state,store,shop,doc,*,customer=None,orders=None,revision=None,new_since=None):
@@ -279,7 +293,7 @@ def preview(state,store,shop,doc,*,customer=None,orders=None,revision=None,new_s
     else:customer=cached[1]
     while len(contexts)>8:contexts.pop(next(iter(contexts)))
     cache=state.setdefault('_smart_preview_products',{})
-    settings=[(s['id'],s['settings']['display']) for s in doc['middle_sections'] if s.get('type')=='catalogue' and s['settings'].get('smart')]
+    settings=[(s['id'],s['settings']['display'],s['settings'].get('smart_count',4)) for s in doc['middle_sections'] if s.get('type')=='catalogue' and s['settings'].get('smart')]
     key=json.dumps([str(shop.namespace),customer_id,contexts[customer_id][0],doc['market'],settings,pin.get('checkout_id'),new_since],sort_keys=True,default=str)
     if key not in cache:
         checkout={'customer':{'id':customer_id},'products':pin.get('items',[])} if pin.get('customer_id')==customer_id else None

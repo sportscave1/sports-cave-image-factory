@@ -43,7 +43,8 @@ def sample(doc):
 def legacy_html(source,markup):
     """Replace recognized cart loops, not the surrounding authored HTML."""
     def clear(value):
-        return re.sub(r'\{[\{%][^<>\n]*(?=<|\n|$)','',TOKENS.sub('',value))
+        value=TOKENS.sub(lambda m:'' if CHECKOUT.search(m[0]) or m[0].startswith('{%') and found else m[0],value)
+        return re.sub(r'\{[\{%][^<>\n]*(?=<|\n|$)',lambda m:'' if CHECKOUT.search(m[0]) else m[0],value)
     found=bool((CHECKOUT.search(source) and re.search(r'\{[\{%]',source)) or 'SC_ABANDONED_CHECKOUT' in source)
     if not found:return clear(source),False
     stack=[];ranges=[]
@@ -70,7 +71,7 @@ def legacy_html(source,markup):
     inserted|=bool(count)
     # Old recovery anchors/images are dynamic content, never retain their unresolved URLs.
     source=re.sub(r'<a\b[^>]*href\s*=\s*[\"\'][^\"\']*\{\{\s*(?:abandoned_checkout|checkout)\.url.*?</a\s*>','',source,flags=re.I|re.S)
-    source=re.sub(r'<img\b[^>]*(?:\{\{|\{%)[^>]*>','',source,flags=re.I|re.S)
+    source=re.sub(r'<img\b[^>]*(?:\{\{|\{%)[^>]*>',lambda m:'' if CHECKOUT.search(m[0]) else m[0],source,flags=re.I|re.S)
     source=clear(source)
     if not inserted:source+=markup
     return source,True
@@ -78,6 +79,7 @@ def legacy_html(source,markup):
 
 def document(doc,data,*,test=False,preview_warnings=None,shop=None):
     """Render-copy substitution; authored sections/IDs and saved content stay intact."""
+    from crm_personalisation import render as personalise,values_from_preview,present
     from crm_checkout_migration import migrate
     result=migrate(doc);warning=False;markup=block_html(data,test=test)
     for section in result.get('middle_sections',[]):
@@ -89,4 +91,5 @@ def document(doc,data,*,test=False,preview_warnings=None,shop=None):
         # Compatibility mirror must follow the substituted source, never render twice.
         result['custom_html']=next((s['html'] for s in result['middle_sections'] if s.get('html_number')==1),'')
     else:result['custom_html'],warning=legacy_html(result.get('custom_html',''),markup)
+    if present(result):result=personalise(result,values_from_preview(data))
     return hydrate(result,data,test=test,preview=True,preview_warnings=preview_warnings,shop=shop),warning

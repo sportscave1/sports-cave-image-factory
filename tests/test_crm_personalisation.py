@@ -97,7 +97,8 @@ class PersonalisationSQLTests(unittest.TestCase):
         with connect() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS shopify_products(shopify_product_id text,product_type text,raw_json jsonb)')
             conn.execute("ALTER TABLE edition_orders ADD COLUMN IF NOT EXISTS shopify_order_id text, ADD COLUMN IF NOT EXISTS shopify_line_item_id text, ADD COLUMN IF NOT EXISTS shopify_product_gid text, ADD COLUMN IF NOT EXISTS shopify_product_id text, ADD COLUMN IF NOT EXISTS allocation_valid boolean, ADD COLUMN IF NOT EXISTS identity_enforced boolean, ADD COLUMN IF NOT EXISTS status text")
-            conn.execute("INSERT INTO shopify_products VALUES('987654321','Formula One','{\"tags\":[\"Best Sellers\"]}')")
+            conn.execute("DELETE FROM shopify_products WHERE shopify_product_id='987654321'")
+            conn.execute("INSERT INTO shopify_products(shopify_product_id,product_type,raw_json) VALUES('987654321','Formula One','{\"tags\":[\"Best Sellers\"]}')")
             conn.execute("INSERT INTO edition_orders(shopify_customer_id,shopify_order_id,shopify_line_item_id,shopify_product_id,edition_number,edition_total,allocation_valid,identity_enforced,status) VALUES('123','456','789','987654321',17,50,true,true,'allocated')")
         with patch('supabase_backend.connect',SQLConnection):
             self.assertEqual(metadata('gid://shopify/Product/987654321')['classifications'],['Formula One','Best Sellers'])

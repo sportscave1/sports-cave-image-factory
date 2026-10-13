@@ -259,13 +259,13 @@ def render(content,row,unsubscribe,context=None):
     discount=(context or {}).get('_recovery_discount')
     if discount_selection(doc) and not discount:raise DiscountHold('discount_verification_required: Revalidate Shopify before sending.')
     doc=substitute(doc,discount)
-    from crm_personalisation import present,resolve,render as personalise,TOKEN
+    from crm_personalisation import present,resolve,render as personalise,wanted as requested_variables
     if present(doc):
         customer=(context or {}).get('_customer') or {}
         source=(context or {}).get('_checkout' if content.get('trigger')=='abandoned' else '_order') or {}
         if customer.get('id')!=row['shopify_customer_id'] or (source and (source.get('customer') or {}).get('id')!=customer.get('id')):
             raise ValueError('Personalisation recipient context mismatch.')
-        wanted=set(TOKEN.findall(doc['content']['subject'])+TOKEN.findall(doc['content']['preheader']))
+        wanted=requested_variables(doc)
         doc=personalise(doc,resolve(source,customer,trigger=content.get('trigger'),wanted=wanted),trigger=content.get('trigger'))
     from crm_abandoned_checkout import dynamic,hydrate,reject_unresolved
     from crm_frame_banner_template import present as has_banner

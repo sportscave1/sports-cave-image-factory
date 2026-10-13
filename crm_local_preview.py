@@ -93,10 +93,30 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
         pin=st.session_state.get('_automation_flow_pin') or {}
         collector=deepcopy(st.session_state.get('_automation_flow_facts',{}).get(artwork_key(doc,customer_data),{}).get('blocks',{}) or pin.get('last_artwork',{}).get(document_key(doc,customer_data),{}))
     else:collector={}
+    from crm_personalisation import values_from_preview,html_values,render as personalise,wanted,resolve as personal_values
+    personal={}
+    if lifecycle:
+        from crm_flow_preview import preview_key
+        value_key=digest([sorted(wanted(doc)),preview_key(customer_data)])
+        personal={**personal,**st.session_state.get('_automation_flow_values',{}).get(value_key,{}),
+                  'first_name':customer_data['_customer'].get('firstName','')}
+    elif getattr(store,'email_mode',None)!='automation':
+        # Campaigns have no implicit checkout/customer. A selected existing
+        # customer supplies name facts; otherwise render the natural fallback.
+        from crm_personalisation import campaign_preview_values
+        personal=campaign_preview_values(st.session_state,store)
+    elif data.get('preview_only'):
+        personal=values_from_preview(data)
+    elif 'personalisation' in data:
+        personal=data['personalisation']
+    else:
+        source=data.get('personalisation_source') or {}
+        personal=personal_values(source,source.get('customer') or {},wanted=wanted(doc))
     base=deepcopy(doc);base.pop('recovery_discount',None)
     base['content']={**base['content'],'subject':'Email preview','preheader':''}
     base['blocks']=[]
     commit_middle(base,[dict(id='preview-slot',type='html',html_number=1,visible=True,html='<div>SC_LOCAL_PREVIEW_SLOT_7D26</div>')])
+    base=personalise(base,personal)
     if lifecycle:
         shell=lifecycle_shell(base,cfg,st.session_state)
         hydrated_sections={s['id']:s for s in middle_sections(hydrated_document)}
@@ -120,13 +140,14 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
             # including tokens in ordinary HTML and hidden sibling creative.
             if doc.get('recovery_discount'):
                 isolated['recovery_discount']=deepcopy(doc['recovery_discount'])
-            token=digest(isolated) if lifecycle else digest([isolated,data])
+            token=digest([isolated,personal]) if lifecycle else digest([isolated,data,personal])
             if token in entries:
                 resolved[s['id']]={'section':s,'html':entries[token]}
                 if s.get('type')=='catalogue' and s['settings'].get('smart'):resolved[s['id']]['products']=deepcopy(current['products'])
                 continue
             from crm_recovery_discount import substitute
-            hydrated=isolated if lifecycle else document(substitute(isolated,preview=True),data,test=True,shop=asset_shop)[0]
+            isolated=substitute(isolated,preview=True)
+            hydrated=personalise(isolated,personal,trigger=getattr(store,'preview_trigger','abandoned') or 'abandoned') if lifecycle else document(isolated,{**data,'personalisation':personal,'preview_only':False},test=True,shop=asset_shop)[0]
             resolved[s['id']]={'section':s,'html':render_middle(hydrated)[0]}
             if s.get('type')=='catalogue' and s['settings'].get('smart'):resolved[s['id']]['products']=deepcopy(current['products'])
             entries[token]=resolved[s['id']]['html']
@@ -161,10 +182,10 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
     replacements['SC_CHECKOUT_RECOVERY_URL']=''
     replacements.update(banner_fragments)
     replacements['SC_FRAME_BANNER_URL']=''
-    context_data=[data,cfg,collector]
+    context_data=[data,cfg,collector,personal]
     if smart_enabled(doc):context_data.append([st.session_state.get('_smart_preview_customer'),hydrated_document])
     return dict(context_token=digest(context_data),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,collector=collector,offer=doc.get('recovery_discount'),association_independent=True,
-                tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
+                personalisation=html_values(personal),tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
 
 
 def canvas(doc,cfg,key,store=None,*,hydrated_document=None):
@@ -176,6 +197,7 @@ def canvas(doc,cfg,key,store=None,*,hydrated_document=None):
     from crm_email_editor_context import current
     version=current(st.session_state,{}).get('version',0)
     token=digest([doc,cfg,(st.session_state.get('_automation_checkout_pin') or {}).get('last_good'),(st.session_state.get('_automation_flow_pin') or {}).get('selected')])
+    token=digest([token,st.session_state.get('_smart_preview_customer')])
     from crm_smart_catalogue import enabled as smart_enabled
     if smart_enabled(doc) and getattr(store,'email_mode',None)!='automation':
         token=digest([token,st.session_state.get('_smart_preview_customer'),st.session_state.get('_smart_preview_revision',0)])

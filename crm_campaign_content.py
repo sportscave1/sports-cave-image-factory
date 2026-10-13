@@ -152,6 +152,8 @@ def render_campaign(doc, cfg=None, *, images_off=False, unsubscribe_url=None, pr
     cfg=settings() if cfg is None else cfg
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)
+    from crm_personalisation import present,render as personalise
+    if present(doc):doc=personalise(doc,{})
     validate_document(doc); c=doc['content']
     e=lambda value: escape(str(value), quote=True)
     blocks=doc.get('blocks') or legacy_blocks(c)
@@ -237,6 +239,8 @@ def preflight(doc, env=None, cfg=None):
     cfg=settings(env) if cfg is None else cfg
     from crm_campaign_sections import with_email_defaults
     doc=with_email_defaults(doc,cfg)
+    from crm_personalisation import present,render as personalise
+    if present(doc):doc=personalise(doc,{})
     validate_document(doc); delivery=get_resend_marketing_config_status(env); c=doc['content']; counts=doc['counts']
     from crm_abandoned_checkout import dynamic
     if dynamic(doc):

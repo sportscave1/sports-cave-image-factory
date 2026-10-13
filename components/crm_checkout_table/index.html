@@ -14,7 +14,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;paddin
 button:focus-visible,input:focus-visible,.wrap:focus-visible{outline:2px solid #9a7937;outline-offset:2px}
 .enrollment-progress{font-size:11px;max-width:260px;white-space:normal;color:#73756d}.enrollment-progress button{text-decoration:underline;color:#a13a32}
 nav{display:flex;gap:16px;justify-content:flex-end;align-items:center;padding:6px}nav button:disabled{opacity:.4;cursor:default}
-.empty{padding:18px;text-align:center;color:#73756d}.freshness{font-size:11px;color:#826222;min-height:16px;padding:2px 0}
+.empty{padding:18px;text-align:center;color:#73756d}.table-status{display:flex;justify-content:space-between;gap:8px;min-height:20px;padding:2px 0;font-size:11px}.freshness{color:#826222}.selection-count{color:#64665f;white-space:nowrap;font-variant-numeric:tabular-nums}
 @media(max-width:600px){td,th{padding:6px 8px}td:nth-child(2),th:nth-child(2){min-width:155px;max-width:190px}.customer{max-width:170px}}
 </style><style id="sc-table-design-v3">
 /* Sports Cave OS tables V3. Explicit table scopes only. */
@@ -127,7 +127,7 @@ let args={},page=0,selected=new Set(),structure='',seq=0,timer=null,inView=true;
 let serverEpoch=0,clockAnchor=0,lastPoll=0,frameHeight=0;
 const nodes=new Map(),root=document.getElementById('root');
 const send=(type,data)=>parent.postMessage({isStreamlitMessage:true,type,...data},'*');
-function event(detail=null,retry=null,refresh=false,clear=false){send('streamlit:setComponentValue',{value:{selected:[...selected],detail,retry,refresh,sequence:Date.now()+':'+(++seq),context:args.selection_context,clear_selection:clear},dataType:'json'});}
+function event(detail=null,retry=null,refresh=false,clear=false,close=false){send('streamlit:setComponentValue',{value:{selected:[...selected],detail,retry,refresh,sequence:Date.now()+':'+(++seq),context:args.selection_context,clear_selection:clear,close_detail:close},dataType:'json'});}
 function cell(tr,text,tag='td'){const el=document.createElement(tag);el.textContent=text;tr.append(el);return el;}
 function text(el,value){if(el.textContent!==value)el.textContent=value;}
 function height(){const h=Math.min(710,root.scrollHeight+5);if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h});}}
@@ -138,7 +138,8 @@ function remaining(due){const seconds=Math.max(0,Math.ceil((Date.parse(due)-serv
  return Math.floor(seconds/86400)+'d '+Math.floor(seconds%86400/3600)+'h';}
 function shownRows(){return (args.rows||[]).slice(page*50,page*50+50);}
 function selection(){const shown=shownRows(),all=root.querySelector('thead input');if(all){all.checked=shown.length>0&&shown.every(r=>selected.has(r.key));all.indeterminate=selected.size>0&&!all.checked;}
- for(const r of shown){const n=nodes.get(r.key);if(n)n.check.checked=selected.has(r.key);}}
+ for(const r of shown){const n=nodes.get(r.key);if(n)n.check.checked=selected.has(r.key);}
+ const status=root.querySelector('.selection-count');if(status)text(status,shown.length+' shown · '+selected.size+' selected');}
 function requestProgress(el,r){const p=r.enrollment_progress||{};
  // Delivery state belongs in its email cell; only actionable request feedback goes here.
  const value=['SAVING','QUEUED','CHECKING','FAILED'].includes(p.state)||p.result==='Already in flow'?p.result||p.state:'';
@@ -150,25 +151,28 @@ function savedScroll(){try{return JSON.parse(sessionStorage.getItem(scrollKey())
 function saveScroll(){const w=root.querySelector('.wrap');if(!w||!scrollKey())return;try{sessionStorage.setItem(scrollKey(),JSON.stringify({left:w.scrollLeft,top:w.scrollTop}))}catch{}}
 function render(){const rows=args.rows||[],cols=args.columns||[],count=Math.ceil(rows.length/50);page=Math.min(page,Math.max(0,count-1));
  const shown=shownRows(),next=JSON.stringify([page,shown.map(r=>r.key),cols]);
- if(next!==structure){const old=root.querySelector('.wrap'),left=old?.scrollLeft??savedScroll().left??0,top=old?.scrollTop??savedScroll().top??0;structure=next;nodes.clear();root.replaceChildren();
+ if(next!==structure){const active=document.activeElement,focused=active?.getAttribute('aria-label'),focusKey=active?.dataset.rowKey,focusTag=active?.tagName;const old=root.querySelector('.wrap'),left=old?.scrollLeft??savedScroll().left??0,top=old?.scrollTop??savedScroll().top??0;structure=next;nodes.clear();root.replaceChildren();
   const wrap=document.createElement('div');wrap.className='wrap';wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',args.table_label||'Checkout email progress');root.append(wrap);
   const table=document.createElement('table');table.setAttribute('aria-label',args.table_label||'Abandoned checkout email flow');wrap.append(table);
   const head=table.createTHead().insertRow(),th=cell(head,'','th'),all=document.createElement('input');all.type='checkbox';all.setAttribute('aria-label',args.table_label?'Select visible records':'Select visible checkouts');
   all.title='Select visible records; uncheck to deselect all records across pages';
   all.onchange=()=>{const clear=!all.checked||!shownRows().length;if(clear)selected.clear();else shownRows().forEach(r=>all.checked?selected.add(r.key):selected.delete(r.key));selection();event(null,null,false,clear)};th.append(all);
   cell(head,'Customer','th');cell(head,args.date_label||'Created','th');for(const col of cols){const h=cell(head,col.label,'th');h.title=col.name+(col.enabled?'':' · Disabled for new enrollments');h.scope='col';h.className='email';}
-  const body=table.createTBody();for(const r of shown){const tr=body.insertRow(),check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Select '+r.customer);
+  const body=table.createTBody();for(const r of shown){const tr=body.insertRow(),check=document.createElement('input');check.type='checkbox';check.dataset.rowKey=r.key;check.setAttribute('aria-label','Select '+r.customer);
    check.onchange=()=>{check.checked?selected.add(r.key):selected.delete(r.key);selection();event()};cell(tr,'').append(check);
-   const customer=cell(tr,''),link=document.createElement('button');link.className='customer';link.onclick=()=>event(r.key);customer.append(link);
+   const customer=cell(tr,''),link=document.createElement('button');link.className='customer';link.dataset.rowKey=r.key;link.onclick=()=>event(args.detail_key===r.key?null:r.key,null,false,false,args.detail_key===r.key);link.setAttribute('aria-label','Details '+r.customer);customer.append(link);
    const request=document.createElement('div');request.className='enrollment-progress';customer.append(request);
    const created=cell(tr,''),cells=cols.map(()=>{const td=cell(tr,'');td.className='email';return td});nodes.set(r.key,{check,link,request,created,cells});
   }
   if(!rows.length){const e=document.createElement('div');e.className='empty';e.textContent=args.empty_label||'No matching abandoned checkouts';wrap.append(e)}
   wrap.scrollLeft=left;wrap.scrollTop=top;wrap.addEventListener('scroll',saveScroll,{passive:true});
   if(count>1){const nav=document.createElement('nav');for(const [label,delta] of [['Previous',-1],['Next',1]]){const b=document.createElement('button');b.textContent=label;b.disabled=delta<0?page===0:page>=count-1;b.onclick=()=>{page+=delta;render()};nav.append(b)}cell(nav,(page+1)+' / '+count,'span');root.append(nav)}
-  const freshness=document.createElement('div');freshness.className='freshness';freshness.setAttribute('role','status');root.append(freshness);
+  const status=document.createElement('div');status.className='table-status';root.append(status);
+  const summary=document.createElement('span');summary.className='selection-count';summary.setAttribute('role','status');summary.setAttribute('aria-live','polite');status.append(summary);
+  const freshness=document.createElement('span');freshness.className='freshness';freshness.setAttribute('role','status');status.append(freshness);
+  if(focused){const target=[...root.querySelectorAll('[aria-label]')].find(el=>focusKey!==undefined?el.dataset.rowKey===focusKey&&el.tagName===focusTag:el.getAttribute('aria-label')===focused);(target||wrap).focus({preventScroll:true});}
  }
- for(const r of shown){const n=nodes.get(r.key);text(n.link,r.customer);n.link.title=r.customer;n.link.setAttribute('aria-label','Details '+r.customer);
+ for(const r of shown){const n=nodes.get(r.key);text(n.link,r.customer);n.link.title=r.customer;n.link.setAttribute('aria-label','Details '+r.customer);n.link.setAttribute('aria-expanded',String(args.detail_key===r.key));
   text(n.created,r.created);n.created.title=r.created_full;requestProgress(n.request,r);
   n.cells.forEach((td,i)=>{const c=(r.cells||[])[i]||{label:'—',tone:'muted'};td.className='email '+(['green','red','gold','muted'].includes(c.tone)?c.tone:'muted');td.title=c.reason||c.label;
    td.dataset.due=c.due_at||'';text(td,c.due_at?remaining(c.due_at):c.label);});
@@ -193,6 +197,8 @@ function message(e){if(e.source!==parent||e.data.type!=='streamlit:render')retur
 }
 const observer=new IntersectionObserver(entries=>{inView=entries.some(e=>e.isIntersecting);if(inView)start();else stop()});observer.observe(root);
 window.addEventListener('message',message);document.addEventListener('visibilitychange',visibility);
-function cleanup(){saveScroll();stop();observer.disconnect();window.removeEventListener('message',message);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',cleanup)}
+function keyboard(e){if(e.key==='Escape'&&args.detail_key){e.preventDefault();event(null,null,false,false,true);}}
+document.addEventListener('keydown',keyboard);
+function cleanup(){saveScroll();stop();observer.disconnect();window.removeEventListener('message',message);document.removeEventListener('visibilitychange',visibility);document.removeEventListener('keydown',keyboard);window.removeEventListener('pagehide',cleanup)}
 window.addEventListener('pagehide',cleanup);send('streamlit:componentReady',{apiVersion:1});
 </script></body></html>

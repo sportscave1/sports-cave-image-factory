@@ -303,7 +303,10 @@ def publication_document(doc,trigger):
         if section['type']==BLOCK:section.update(type='image',html='')
     join_fragments(result)
     result['middle_sections']=[s for s in result.get('middle_sections',[]) if s['id'] not in native_ids]
-    for s in result['middle_sections']:
+    if 'middle_sections' not in doc:result.pop('middle_sections',None)
+    from crm_personalisation import render as personalise,present
+    if present(result):result=personalise(result,{},trigger=trigger)
+    for s in result.get('middle_sections',[]):
         if s['type'] in ('html','image'):
             s['html']=s['html'].replace(MARKER,'');reject_unresolved(s['html'])
     result['custom_html']=result.get('custom_html','').replace(MARKER,'');reject_unresolved(result['custom_html'])

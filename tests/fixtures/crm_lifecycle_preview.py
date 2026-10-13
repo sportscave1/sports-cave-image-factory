@@ -62,3 +62,9 @@ shop.abandoned_preview.return_value={'nodes':[],'pageInfo':{'hasNextPage':False}
 shop.customers.side_effect=AssertionError('Audience pages must not query Shopify')
 shop.orders.side_effect=AssertionError('Audience pages must not query Shopify')
 workspace(shop,AutomationStore(connect),SimpleNamespace(user=ADMIN))
+if st.query_params.get('state')=='1':
+    @st.fragment(run_every=1)
+    def state_metrics():
+        st.text('FIXTURE_STATE '+json.dumps({k:v for k,v in st.session_state.items()
+            if k.endswith(('-panel-open','-search-retained','-selected'))},default=str))
+    state_metrics()

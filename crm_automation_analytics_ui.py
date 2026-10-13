@@ -20,7 +20,7 @@ def read(store,key,fn,ttl=180,*,wait_budget=0):
             if not isinstance(value,list) or len(value)!=1 or not isinstance(value[0],dict) or any(value[0].get(k) is None for k in required):raise ValueError('Incomplete analytics report')
         return value
     future=job(state(),store,key,verified,ttl=ttl)
-    budget=.05 if key[0] in ('analytics-definition','checkout-list') else wait_budget
+    budget=wait_budget or (.05 if key[0] in ('analytics-definition','checkout-list') else 0)
     if budget and future is not None and not future.done():
         try:future.result(timeout=budget)
         except Exception:pass
@@ -95,7 +95,8 @@ def checkout_details(store,user,row,c):
                     from crm_checkout_identity import retry_send
                     if retry_send(store,user,send['id']):st.success('Retry scheduled; the worker will recheck consent and recovery.')
                     else:st.warning('Not eligible for retry.')
-        st.button('Close details',key='checkout-close-'+str(row['id']),on_click=lambda:st.session_state.pop('auto-checkouts-'+str(row['id'])+'-detail',None))
+        from crm_flow_recipients import close_details
+        close_details('auto-checkouts-'+str(row['id']))
 
 
 @isolated
@@ -118,6 +119,8 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     status.selectbox('Checkout status',['Incomplete'],label_visibility='collapsed',key=slot+'-status')
     search_column,actions=st.columns([1.2,1.5],vertical_alignment='center')
     search=search_column.text_input('Search and filter',placeholder='Checkout, customer name or email',label_visibility='collapsed',key=slot+'-search')
+    from crm_flow_recipients import retain
+    retain(slot)
     if paginated:
         criteria=(period,search.strip())
         if st.session_state.get(slot+'-criteria')!=criteria:
@@ -132,7 +135,11 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
             st.caption('Loading abandoned checkouts…' if phase not in ('ERROR','TIMED_OUT') else 'Checkout records temporarily unavailable.')
         elif phase in ('ERROR','TIMED_OUT'):st.caption('Refresh unavailable. Last verified records retained.')
         retry_read(slot,phase)
-    if records is None:return
+    if records is None:
+        with actions.container(horizontal=True):
+            st.button('Refresh checkout details',key=slot+'-reconcile',disabled=True)
+            st.button('Add to flow',key=slot+'-add',disabled=True)
+        return
     more=bool(paginated and len(records)>50)
     if paginated:records=records[:50]
     from crm_checkout_enrollment_ui import progress,begin
@@ -142,11 +149,10 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     keys={c['checkout_key'] for c in visible}
     selected=[k for k in st.session_state.get(slot+'-selected',[]) if k in keys]
     available=[k for k in selected if k not in busy]
-    if paginated and any(k not in keys for k in st.session_state.get(slot+'-selected',[])):
-        st.caption('Selections on other pages are retained. Add to flow applies to this page’s selected checkouts.')
     with actions.container(horizontal=True):
         refresh=st.button('Refresh checkout details',key=slot+'-reconcile',help='Repair Shopify details only; never enrol or send')
-        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='secondary')
+        add=st.button('Add to flow',disabled=not available,key=slot+'-add',type='secondary',
+            help='Applies to selected checkouts on this page. Selections on other pages are retained.')
     if refresh:
         st.session_state.pop(slot+'-timing',None)
         try:
@@ -186,12 +192,11 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-detail')),None)
     if chosen:checkout_details(store,user,row,chosen)
     if paginated:
-        with st.container(horizontal=True):
-            if st.button('Previous checkouts',disabled=len(cursors)==1,key=slot+'-previous'):
-                cursors.pop();st.rerun(scope='fragment')
-            st.caption('Page '+str(len(cursors))+' · '+str(len(visible))+' checkouts')
-            if st.button('Next checkouts',disabled=not more,key=slot+'-next'):
-                last=records[-1];cursors.append((str(last['created_at']),last['checkout_key']));st.rerun(scope='fragment')
+        from crm_flow_recipients import pagination
+        def next_page():
+            last=records[-1];cursors.append((str(last['created_at']),last['checkout_key']))
+        pagination(slot,len(cursors)-1,len(visible),more,cursors.pop,next_page,
+            labels=('Previous checkouts','Next checkouts'),noun='checkouts')
 
 def render(shop,store,user,identity,name=None):
     """Compatibility navigation for callers of the old analytics destination."""

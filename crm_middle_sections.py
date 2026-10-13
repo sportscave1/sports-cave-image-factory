@@ -52,7 +52,8 @@ def validate_middle(sections):
             from crm_catalogue import validate_snapshot
             if set(s) != common | {'products', 'settings'}: raise ValueError('Invalid catalogue section.')
             cfg = s['settings']
-            if not isinstance(cfg, dict) or not {'columns','display','cta'} <= set(cfg) or set(cfg)-{'columns','display','cta','headline','subtext','smart'} or type(cfg['columns']) is not int or cfg['columns'] not in (1, 2): raise ValueError('Choose one or two columns.')
+            if not isinstance(cfg, dict) or not {'columns','display','cta'} <= set(cfg) or set(cfg)-{'columns','display','cta','headline','subtext','smart','smart_count'} or type(cfg['columns']) is not int or cfg['columns'] not in (1, 2): raise ValueError('Choose one or two columns.')
+            if type(cfg.get('smart_count',4)) is not int or not 1<=cfg.get('smart_count',4)<=12:raise ValueError('Choose 1 to 12 smart products.')
             if 'smart' in cfg and type(cfg['smart']) is not bool:raise ValueError('Invalid Smart recommendations setting.')
             if not isinstance(cfg['display'], dict) or set(cfg['display']) != set(DISPLAY) or any(type(v) is not bool for v in cfg['display'].values()): raise ValueError('Invalid catalogue display settings.')
             if not isinstance(cfg['cta'], str) or not 1 <= len(cfg['cta'].strip()) <= 60: raise ValueError('Use a short CTA label.')
@@ -143,7 +144,7 @@ def apply_event(doc, event, *, resolve_insert=None):
             sections.append(section(doc.get('recovery_discount'),identity=identity))
         elif event.get('kind') == 'catalogue':
             sections.append(dict(id=identity, type='catalogue', visible=True, products=[],
-                settings={'headline':'','subtext':'','columns':2, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
+                settings={'headline':'','subtext':'','columns':2,'smart_count':4, 'display':{field:field!='price' for field in DISPLAY}, 'cta':'Claim Your Edition'}))
         else: raise ValueError('Unknown section type.')
     elif kind == 'order':
         ids = event.get('ids')

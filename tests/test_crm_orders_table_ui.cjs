@@ -21,6 +21,11 @@ async function measure(f){return f.locator('body').evaluate(()=>{
  await p.waitForFunction(()=>window.events.at(-1)?.clear_selection===true);
  const event=await p.evaluate(()=>window.events.at(-1));assert.equal(event.clear_selection,true);assert.deepEqual(event.selected,[]);assert.equal(event.context,'page1');
  const after=await measure(f);assert.equal(after.rowHeight,34);
+ const detail=f.locator('.customer[data-row-key="order17"]');await detail.focus();
+ await p.evaluate(args=>document.querySelector('iframe').contentWindow.postMessage({type:'streamlit:render',args},'*'),{...payload,selected:[],detail_key:'order17',rows:[...payload.rows].reverse().map(r=>['order17','order20'].includes(r.key)?{...r,customer:'Same customer'}:r)});
+ await p.waitForFunction(()=>document.querySelector('iframe').contentDocument?.activeElement?.dataset.rowKey==='order17');
+ assert.equal(await detail.getAttribute('aria-expanded'),'true');await detail.press('Escape');
+ await p.waitForFunction(()=>window.events.at(-1)?.close_detail===true);
  for(const width of [1366,1024,390]){await p.setViewportSize({width,height:900});assert.equal(await f.locator('body').evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);}
  f=await mount(p,html,{...payload,rows:[],selected:['off-page']});await f.locator('thead input').click();await p.waitForFunction(()=>window.events.at(-1)?.clear_selection===true);assert.deepEqual(await p.evaluate(()=>window.events.at(-1).selected),[]);
  await p.setViewportSize({width:1366,height:900});

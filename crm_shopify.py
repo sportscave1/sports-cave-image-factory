@@ -28,7 +28,7 @@ UNSUBSCRIBE = '''mutation CrmUnsubscribe($input:CustomerEmailMarketingConsentUpd
  userErrors { field message }
  } }'''
 CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { '+CUSTOMER_FIELDS+' } } }'
-CAMPAIGN_CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { id email validEmailAddress emailMarketingConsent { marketingState } '+EMAIL_ADDRESS_FIELDS+' defaultAddress { countryCodeV2 provinceCode zip timeZone } } } }'
+CAMPAIGN_CUSTOMER_BATCH = 'query CrmCustomerBatch($ids:[ID!]!) { nodes(ids:$ids) { ... on Customer { id firstName email validEmailAddress numberOfOrders emailMarketingConsent { marketingState } '+EMAIL_ADDRESS_FIELDS+' defaultAddress { countryCodeV2 provinceCode zip timeZone } } } }'
 ORDER_FIELDS = '''id name createdAt cancelledAt fullyPaid displayFinancialStatus displayFulfillmentStatus
  customer { id } totalPriceSet { shopMoney { amount currencyCode } }
  lineItems(first:10) { nodes { id title variantTitle quantity product { id } }

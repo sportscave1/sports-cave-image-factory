@@ -91,6 +91,15 @@ STYLE='''<style>
 .st-key-flow-workspace .st-key-flow-title>[data-testid="stElementContainer"]:has(.automation-title){flex:0 1 auto!important;width:auto!important;min-width:0}
 .st-key-flow-rename-input{min-width:130px;width:100%}
 .st-key-flow-rename-cancel{display:none}
+/* Current Streamlit controls use React Aria, alongside older BaseWeb hosts. */
+.st-key-flow-workspace :is(.react-aria-ComboBox>[role="group"],[data-testid="stTextInputRootElement"],[data-testid="stNumberInputContainer"]){min-height:32px;height:32px;border-radius:4px;background:#fffefa;border:1px solid #e4e2da}
+.st-key-flow-workspace :is([role="combobox"],[data-testid="stTextInputField"],[data-testid="stNumberInputField"]){height:30px;min-height:0;padding:3px 6px;font-size:13px}
+.st-key-flow-workspace [class*='st-key-flow-state-'] .react-aria-ComboBox>[role="group"]{height:24px;min-height:24px;background:transparent;border:0}
+.st-key-flow-workspace [class*='st-key-flow-state-'] [role="combobox"]{font-size:10px;height:22px;padding:0 3px}
+.st-key-flow-workspace [class*='st-key-flow-state-'] .react-aria-ComboBox button{width:20px;min-width:20px;padding:0}
+.st-key-flow-workspace [class*='st-key-flow-state-live-'] [role="combobox"]{color:#277344}
+.st-key-flow-workspace [class*='st-key-flow-state-paused-'] [role="combobox"]{color:#8e650e}
+.st-key-flow-workspace [class*='st-key-flow-state-draft-'] [role="combobox"]{color:#72767a}
 @media(max-width:850px){[class*='st-key-flow-row-']{flex-wrap:wrap!important}[class*='st-key-flow-row-']>div:nth-child(2){flex:1 1 calc(100% - 110px)!important;min-width:0!important}[class*='st-key-flow-row-']>div:last-child{margin-left:auto!important;max-width:100%}.sc-flow-metrics{gap:8px}}
 @media(max-width:700px){.sc-flow-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>'''
@@ -205,6 +214,8 @@ def step_performance(store,identity,slots,detail_slots):
 def sequence(shop,store,user,identity,period):
     from crm_automation_toolbar import definition
     row=definition(store,st.session_state,identity);flow=row['config']['draft']
+    version=row['config'].get('published_version')
+    st.caption('Draft sequence · '+('Published version '+str(version)+' remains unchanged until publication.' if version else 'Not published.'))
     slots={};detail_slots={}
     from crm_flow_inline import controls,status_control
     error=st.session_state.pop('flow-inline-error',None)

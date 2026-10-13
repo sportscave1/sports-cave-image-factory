@@ -91,7 +91,7 @@ def validate(flow, *, draft=False):
             from crm_discount_section import validate_presentation
             validate_presentation(step['document'])
         from crm_personalisation import validate as validate_personalisation
-        validate_personalisation(step['document'],flow['trigger'],allow_unselected_discount=draft)
+        validate_personalisation(step['document'],flow['trigger'],allow_unselected_discount=draft,validate_html=not draft)
     return flow
 
 

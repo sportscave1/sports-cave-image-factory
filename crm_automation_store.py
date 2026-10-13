@@ -298,7 +298,7 @@ class AutomationStore(CampaignStore):
         self.preview_warning=''
         personalisation_trigger=getattr(self,'preview_trigger',None)
         if personalisation_trigger is None:
-            personalisation_trigger=self.flow(self.draft_identity)['config']['draft']['trigger'] if has_personalisation(doc) else 'abandoned'
+            personalisation_trigger=self.flow(self.draft_identity)['config']['draft']['trigger'] if has_personalisation(doc) and not needs_checkout(doc) else 'abandoned'
         if has_personalisation(doc) and personalisation_trigger!='abandoned' and not needs_checkout(doc):
             return personalise(doc,values_from_preview(None),trigger=personalisation_trigger),'Sample Preview'
         if not needs_checkout(doc):

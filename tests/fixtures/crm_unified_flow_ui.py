@@ -3,6 +3,10 @@ import sys,os,importlib.util
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT))
+if os.getenv('EMAIL_V2_BASELINE')=='1':
+    baseline=ROOT/'.tmp-email-v2/v1'
+    if not (baseline/'crm_flow_recipients.py').is_file():raise RuntimeError('Prepare the V1 baseline described in docs/EMAIL_AUTOMATION_V2_20261014.md')
+    sys.path.insert(0,str(baseline))
 if os.getenv('UNIFIED_FLOW_BASELINE')=='1':
     for name in ('crm_automation_analytics_ui','crm_flow_page','crm_lifecycle_ui'):
         spec=importlib.util.spec_from_file_location(name,ROOT/'.tmp-unified-flow'/f'{name}.py')
@@ -18,6 +22,9 @@ import crm_lifecycle_ui as lifecycle
 import crm_automation_analytics_ui as checkout
 from crm_flow_page import checkouts
 import crm_flow_page
+if st.query_params.get('profile')=='1':
+    from tests.crm_ui_profile import instrument
+    instrument(lifecycle,'_audience');instrument(crm_flow_page,'_checkouts')
 crm_flow_page.checkout_panel=checkout.checkout_panel.__wrapped__
 
 st.set_page_config(layout='wide')
@@ -69,7 +76,7 @@ else:lifecycle.audience(store,{'role':'admin'},row)
 @st.fragment(run_every=1)
 def counters():
     import json
-    st.text('FIXTURE_METRICS '+json.dumps(dict(reads=backend.calls,samples=backend.samples,state={k:str(v) for k,v in st.session_state.items() if 'search' in k})))
+    st.text('FIXTURE_METRICS '+json.dumps(dict(reads=backend.calls,samples=backend.samples,fragment_ms=st.session_state.get('fixture-fragment-ms',[]),state={k:str(v) for k,v in st.session_state.items() if 'search' in k})))
 counters()
 
 if st.query_params.get('fail')=='1' and st.button('Restore fixture reads'):backend.fail=False

@@ -90,13 +90,13 @@ def document(shop,doc,recipient,customer):
     cart=owned_checkout(shop,recipient,customer)
     from crm_abandoned_checkout import publication_document,render_context,hydrate
     from crm_recovery_discount import prepare,substitute
-    from crm_personalisation import present,resolve,render,TOKEN
+    from crm_personalisation import present,resolve,render,wanted as requested_variables
     from crm_recovery_links import destination
     publication_document(doc,'abandoned') # Reject pasted private links before resolution.
     discount=prepare(shop,doc,cart,customer['id'])
     result=substitute(doc,discount)
     if present(result):
-        wanted=set(TOKEN.findall(result['content']['subject'])+TOKEN.findall(result['content']['preheader']))
+        wanted=requested_variables(result)
         result=render(result,resolve(cart,customer,trigger='abandoned',wanted=wanted),trigger='abandoned')
     data=render_context(cart,result);data['recovery_url']=destination(data,discount)
     return hydrate(result,data,shop=shop)

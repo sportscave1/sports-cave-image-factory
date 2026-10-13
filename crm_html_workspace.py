@@ -87,7 +87,7 @@ def composer_styles():
     @media(max-width:760px){
       .st-key-crm-selected-campaign .st-key-crm-composer-layout{flex-wrap:wrap!important}
       .st-key-crm-selected-campaign .st-key-crm-composer-layout>div{width:100%!important;flex-basis:100%!important;min-width:0!important}
-      .st-key-crm-selected-campaign .st-key-crm-composer-controls{width:100%!important;min-width:0!important;height:auto!important;max-height:none!important;overflow:visible!important}
+      .st-key-crm-selected-campaign .st-key-crm-composer-controls{width:100%!important;min-width:0!important}
       .st-key-crm-selected-campaign .st-key-crm-composer-preview{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
     }
     [data-testid="stMainBlockContainer"]:has(.st-key-crm-composer-layout){max-width:none;padding:calc(var(--sc-topbar-height, 64px) + 8px) 18px 10px !important}
@@ -96,21 +96,23 @@ def composer_styles():
     .st-key-crm-workspace:has(.st-key-crm-composer-layout) h3{padding:0;margin:0;font-size:20px}
     .st-key-crm-composer-layout{--crm-panel-height:calc(100dvh - var(--sc-topbar-height, 64px) - 120px);align-items:stretch}
     .st-key-crm-composer-layout > div:has(>.st-key-crm-composer-controls){width:360px !important;flex:0 0 360px !important;height:var(--crm-panel-height) !important}
-    .st-key-crm-composer-controls{width:100% !important;flex:1 1 auto !important;height:var(--crm-panel-height) !important;min-height:440px;background:#faf9f6;border:1px solid #e5e2da;border-radius:10px;padding:16px;overflow-y:auto}
+    .st-key-crm-composer-controls{width:100% !important;flex:1 1 auto !important;height:var(--crm-panel-height) !important;min-height:440px;background:#faf9f6;border:1px solid #e5e2da;border-radius:10px;padding:0 16px 16px;overflow-y:auto;isolation:isolate;scroll-padding-top:60px}
     .st-key-crm-composer-controls [data-testid="stVerticalBlock"]{gap:8px}
+    .st-key-crm-composer-controls [data-testid="stTabs"]>div>div:has(>[role="tablist"]){position:sticky;top:0;z-index:20;background:#111111;isolation:isolate}
     .st-key-crm-composer-controls label p{font-size:12px}
-    .st-key-crm-composer-controls [role="tablist"]{gap:22px;border-bottom:1px solid #e5e2da;margin-bottom:8px}
+    .st-key-crm-composer-controls [role="tablist"]{position:sticky;top:0;z-index:20;isolation:isolate;display:flex;gap:2px;box-sizing:border-box;height:50px;min-height:50px;width:calc(100% + 32px);max-width:none;margin:0 -16px 8px;padding:0 10px;background:#111111!important;border-bottom:1px solid #34312b;border-radius:9px 9px 0 0;overflow:hidden}
     .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"],
-    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"]{height:36px;padding:0 0 8px;background:transparent !important;border:0 !important;border-radius:0;box-shadow:none !important;color:#706f69 !important;transition:color 140ms}
-    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"] p{font-size:14px;font-weight:500}
-    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"],
-    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"]:hover{color:#22231f !important}
-    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"] p{font-weight:600}
-    .st-key-crm-composer-controls .react-aria-SelectionIndicator,.st-key-crm-composer-controls [data-baseweb="tab-highlight"]{background:var(--sc-gold,#c9a33f) !important;height:2px}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"]{height:49px;min-height:49px;min-width:0;flex:1 1 0;padding:0 8px;background:transparent !important;border:0 !important;border-bottom:2px solid transparent!important;border-radius:0;box-shadow:none !important;color:#f5f5f5 !important;transition:background-color 100ms,color 100ms}
+    html body .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"] p{font:500 13px/1.2 'Segoe UI',Arial,sans-serif;color:#f5f5f5!important;white-space:nowrap}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"]{color:#C6A044 !important;border-bottom-color:#C6A044!important;background:#1c1b18!important}
+    .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"]:hover{background:#242321 !important}
+    html body .st-key-crm-composer-controls [data-testid="stTabs"] [role="tab"][aria-selected="true"] p{font-weight:600;color:#C6A044!important}
+    .st-key-crm-composer-controls .react-aria-SelectionIndicator,.st-key-crm-composer-controls [data-baseweb="tab-highlight"]{display:none}
     .st-key-crm-composer-controls [data-baseweb="tab-border"]{background:transparent}
     .st-key-crm-composer-controls [role="tab"]:focus-visible,
     .st-key-crm-composer-controls button:focus-visible,
     .st-key-crm-composer-controls summary:focus-visible{outline:2px solid var(--sc-gold,#c9a33f) !important;outline-offset:2px}
+    .st-key-crm-composer-controls [role="tab"]:focus-visible{outline-offset:-4px!important}
     .st-key-crm-composer-controls textarea{font:13px/1.6 Consolas,monospace !important;background:#f6f6f3 !important;padding:10px !important;resize:vertical;border-radius:6px}
     .st-key-crm-composer-controls [data-baseweb="input"],
     .st-key-crm-composer-controls [data-baseweb="select"]>div{border-radius:6px}
@@ -176,7 +178,8 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
         with st.container(horizontal=True,vertical_alignment='center'):
             st.markdown('**Email Preview**')
             from crm_smart_catalogue import enabled as smart_enabled,control as smart_control
-            if store is not None and smart_enabled(doc):smart_control(st.session_state,store)
+            from crm_personalisation import present
+            if store is not None and (smart_enabled(doc) or present(doc)):smart_control(st.session_state,store)
             with st.container(horizontal=True,horizontal_alignment='right',gap='small',key='crm-live-preview-devices' if live else 'crm-preview-devices'):
                 mode=st.session_state.get(key+'preview_device','Desktop')
                 for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
@@ -204,6 +207,8 @@ def _composer_canvas(doc,cfg,key,store=None,*,live=False):
                     preview_doc=document(doc,sample(doc),test=True)[0]
                     from crm_lifestyle_images import present as lifestyle_present,NO_CONTEXT
                     st.caption(NO_CONTEXT if lifestyle_present(doc) else 'Sample checkout · sending requires a checkout recovery automation.')
+                from crm_personalisation import render as personalise,campaign_preview_values
+                preview_doc=personalise(preview_doc,campaign_preview_values(st.session_state,store))
             if getattr(store,'email_mode',None)=='automation':
                 preview_doc,note=store.preview_document(doc)
                 if note:st.caption(note)

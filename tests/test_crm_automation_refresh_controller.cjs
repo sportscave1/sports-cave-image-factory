@@ -7,7 +7,7 @@ for key in ('auto-list-refresh','auto-kpi-refresh','auto-publication-refresh'):
  app=AppTest.from_string('from crm_automation_home import arm_section\narm_section('+repr(key)+',1)').run()
  scripts[key]=next(e.proto.body for e in app.get('html') if 'scAutoTimers' in e.proto.body)
 print(json.dumps(scripts))`;
-const result=spawnSync('.venv/Scripts/python.exe',['-c',code],{encoding:'utf8',env:{...process.env,PYTHONUTF8:'1'}});assert.equal(result.status,0,result.stderr);
+const result=spawnSync(process.env.PYTHON||'.venv/Scripts/python.exe',['-c',code],{encoding:'utf8',env:{...process.env,PYTHONUTF8:'1'}});assert.equal(result.status,0,result.stderr);
 const scripts=JSON.parse(result.stdout);let time=0,next=0,modal=false,mounted=true;const queue=new Map(),clicks=[];
 const window={};const document={addEventListener:()=>{},hidden:false,activeElement:null,getElementById:()=>mounted?{}:null,
  querySelectorAll:()=>[{getClientRects:()=>[],closest:()=>null} , ...(modal?[{getClientRects:()=>[{}],closest:()=>null}]:[])],
@@ -20,5 +20,6 @@ arm('auto-list-refresh');advance(1000);assert.equal(clicks.length,2,'Acknowledge
 queue.clear();window.scAutoRequest=null;clicks.length=0;modal=true;
 arm('auto-publication-refresh');advance(35000);assert.equal(clicks.length,0);modal=false;advance(2000);assert.equal(clicks.length,1,'Refresh did not resume after a long dialog');
 queue.clear();window.scAutoRequest=null;clicks.length=0;arm('auto-publication-refresh');mounted=false;advance(10000);assert.equal(clicks.length,0);assert.equal(queue.size,0);
+assert.equal(window.scAutoTimers['auto-publication-refresh'],undefined,'Detached timer registry entry leaked');
 mounted=true;modal=true;clicks.length=0;arm('auto-publication-refresh');advance(65000);assert.equal(clicks.length,1,'Terminal settlement was stranded by a long dialog');advance(65000);assert.equal(clicks.length,1,'Terminal settlement repeated indefinitely');
 console.log('Controller: serialization, acknowledgement, long-dialog resume and navigation disposal PASS');

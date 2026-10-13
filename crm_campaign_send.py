@@ -208,6 +208,12 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
             from crm_smart_catalogue import enabled as smart_enabled,histories,BatchFacts
             smart_history=histories(store,list(profiles)) if smart_enabled(doc) else {}
             smart_facts=BatchFacts(shop,store.connect) if smart_enabled(doc) else None
+            smart_signals={}
+            if smart_facts:
+                from crm_smart_candidates import behaviours
+                new_customers=[cid for cid,c in profiles.items() if not smart_history[cid] and not int(c.get('numberOfOrders') or 0)]
+                try:smart_signals=behaviours(store,new_customers)
+                except Exception:smart_signals={cid:{'unavailable':True} for cid in new_customers}
             smart_messages={}
             for recipient in batch:
                 customer=profiles.get(recipient['id'])
@@ -235,8 +241,13 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
                     else:
                         frozen={'address':normalized_email(customer['email']),'unsubscribe_url':optout}
                         from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
+                        from crm_personalisation import present,render as personalise,resolve,wanted
+                        personalized=doc
                         if smart_enabled(doc):
-                            personalized=smart_hydrate(doc,store,smart_facts.shop,customer,catalogue=smart_facts,orders=smart_history[customer['id']],fresh=True)
+                            personalized=smart_hydrate(doc,store,smart_facts.shop,customer,catalogue=smart_facts,orders=smart_history[customer['id']],orders_complete=True,behaviour_data=smart_signals.get(customer['id']),fresh=True)
+                        if present(personalized):
+                            personalized=personalise(personalized,resolve({},customer,wanted=wanted(personalized)))
+                        if smart_enabled(doc) or present(doc):
                             from crm_campaign_content import fingerprint
                             render_key=fingerprint(personalized,cfg)
                             if render_key not in smart_messages:

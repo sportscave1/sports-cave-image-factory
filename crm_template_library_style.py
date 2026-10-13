@@ -4,9 +4,6 @@ import streamlit as st
 
 def styles():
     st.html('''<style>
-    html body [data-testid="stMain"]:has(.st-key-automation-toolbar) .st-key-crm-composer-controls{padding:8px!important}
-    [data-testid="stMain"]:has(.st-key-automation-toolbar) .st-key-crm-composer-controls div:has(>[role="tablist"]){position:sticky;top:0;z-index:5;background:#faf9f6!important}
-    [data-testid="stMain"]:has(.st-key-automation-toolbar) .st-key-crm-composer-controls [role="tablist"]{background:#faf9f6!important;padding-top:4px;margin-bottom:4px!important}
     .st-key-crm-compact-library [data-testid="stVerticalBlock"]{gap:4px!important}
     .st-key-crm-compact-library [data-testid="stHorizontalBlock"]{flex-wrap:nowrap!important;gap:4px!important;min-width:0}
     .st-key-crm-compact-library [class*="st-key-compact-row-"]>div:first-child,.st-key-compact-library-heading>div:first-child{flex:1 1 0!important;min-width:0!important}

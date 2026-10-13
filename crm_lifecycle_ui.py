@@ -63,10 +63,14 @@ def _audience(store,user,row):
         sorts=adapter.sorts
         sort=sort_col.selectbox('Sort',sorts,index=sorts.index(adapter.default_sort),key=slot+'-sort',label_visibility='collapsed')
         with controls[3]:
-            dates=st.popover('Date filters',icon=':material/calendar_month:',help='Filter '+adapter.date_label.lower())
+            with st.container(key='flow-recipient-dates'):
+                dates=st.popover('Date filters',icon=':material/calendar_month:',help='Filter '+adapter.date_label.lower())
         with dates:
             start=st.date_input('From',value=None,key=slot+'-from')
             end=st.date_input('Through',value=None,key=slot+'-through')
+        st.html('<style>.st-key-flow-recipient-dates button{box-shadow:'+('inset 0 0 0 2px #9a7937' if start or end else 'none')+'!important}</style>')
+        from crm_flow_recipients import retain
+        retain(slot)  # Preserve user input even while its new page is still loading.
         criteria=(search,filter_by,sort,start,end)
         if st.session_state.get(slot+'-criteria')!=criteria:
             st.session_state[slot+'-criteria']=criteria;st.session_state[slot+'-page']=0
@@ -84,7 +88,9 @@ def _audience(store,user,row):
             elif phase in ('ERROR','TIMED_OUT'):
                 st.caption('Refresh failed; last verified records shown.')
             retry_read(slot,phase)
-        if records is None:return
+        if records is None:
+            if adapter.enrollment:controls[4].button('Add to Flow',key=slot+'-add',disabled=True)
+            return
         visible=records[:50];at=now()
         st.session_state[slot+'-customers']=list({r['customer_id'] for r in visible if r['customer_id']})
         keys={r['key'] for r in visible}
@@ -109,13 +115,12 @@ def _audience(store,user,row):
             read_at=read_at,refresh_seconds=15,
             table_label=adapter.title,date_label=adapter.date_label,
             empty_label='No matching '+adapter.title.lower(),phase=phase)
-        previous,next_col=st.columns(2)
-        if previous.button('Previous',disabled=page==0,key=slot+'-previous'):
-            st.session_state[slot+'-page']=page-1;st.rerun(scope='fragment')
-        if next_col.button('Next',disabled=len(records)<=50,key=slot+'-next'):
-            st.session_state[slot+'-page']=page+1;st.rerun(scope='fragment')
-        st.caption('Page '+str(page+1))
+        from crm_flow_recipients import pagination,close_details
+        pagination(slot,page,len(visible),len(records)>50,
+            lambda:st.session_state.update({slot+'-page':page-1}),
+            lambda:st.session_state.update({slot+'-page':page+1}),noun=adapter.title.lower())
         chosen=next((r for r in visible if r['key']==st.session_state.get(slot+'-detail')),None)
+        if chosen:close_details(slot)
         if chosen and native:
             st.subheader(chosen['name'] or chosen['customer_id'])
             st.dataframe(chosen.get('sends') or [],hide_index=True,width='stretch')

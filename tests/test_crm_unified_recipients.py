@@ -10,6 +10,46 @@ from crm_logic import now
 
 
 class SharedStateTests(unittest.TestCase):
+    def test_panel_restores_disclosure_without_overwriting_retained_filters(self):
+        from crm_flow_recipients import panel
+        state={'flow-panel-open':True,'flow-search':'','flow-search-retained':'new search'}
+        with patch('crm_flow_recipients.st') as ui:
+            ui.session_state=state
+            ui.expander.return_value.__enter__.return_value.open=True
+            body=Mock()
+            panel.__wrapped__('Recipients','flow',body)
+            self.assertTrue(state['flow-panel']);self.assertEqual(state['flow-search'],'new search')
+            state['flow-panel']=False
+            ui.expander.call_args.kwargs['on_change']()
+            self.assertFalse(state['flow-panel-open'])
+            body.assert_called_once()
+
+    def test_detail_escape_does_not_clear_selection_or_accept_stale_context(self):
+        state={'flow-selected':['x'],'flow-detail':'x','flow-visible':['x'],'flow-table-context':'current'}
+        state['flow-table']=dict(context='old',sequence=1,close_detail=True,selected=['x'])
+        with patch('crm_flow_recipients.st.session_state',state):table_event('flow')
+        self.assertEqual(state['flow-detail'],'x')
+        state['flow-table'].update(context='current',sequence=2)
+        with patch('crm_flow_recipients.st.session_state',state):table_event('flow')
+        self.assertNotIn('flow-detail',state);self.assertEqual(state['flow-selected'],['x'])
+
+    def test_pagination_uses_callback_without_extra_rerun(self):
+        from crm_flow_recipients import pagination
+        previous=Mock();next_page=Mock()
+        with patch('crm_flow_recipients.st') as ui:
+            pagination('fixture',0,50,True,previous,next_page)
+            self.assertEqual(ui.button.call_args_list[0].kwargs['on_click'],previous)
+            self.assertTrue(ui.button.call_args_list[0].kwargs['disabled'])
+            self.assertEqual(ui.button.call_args_list[1].kwargs['on_click'],next_page)
+            ui.rerun.assert_not_called();previous.assert_not_called();next_page.assert_not_called()
+
+    def test_checkout_honours_explicit_shared_wait_budget(self):
+        from crm_automation_analytics_ui import read
+        future=Mock();future.done.return_value=False
+        with patch('crm_automation_analytics_ui.job',return_value=future),patch('crm_automation_analytics_ui.state',return_value={}),patch('crm_automation_analytics_ui.resolve',return_value=([], 'READY')):
+            read(Mock(),('checkout-list','fixture'),lambda:[],wait_budget=.15)
+            future.result.assert_called_once_with(timeout=.15)
+
     def test_checkout_read_does_not_install_a_second_settlement_timer(self):
         from crm_flow_page import _checkouts
         with patch('crm_flow_page.st') as ui,patch('crm_flow_page.checkout_panel') as panel,patch('crm_flow_page.arm') as arm:

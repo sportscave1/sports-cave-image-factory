@@ -214,7 +214,7 @@ def detail(shop,store,actions,identity,*,row=None):
     @media(max-width:760px){
     .st-key-crm-automation-editor .st-key-crm-composer-layout{flex-wrap:wrap!important}
     .st-key-crm-automation-editor .st-key-crm-composer-layout>div:has(>.st-key-crm-composer-controls){width:100%!important;flex-basis:100%!important}
-    .st-key-crm-automation-editor .st-key-crm-composer-controls{width:100%!important;min-width:0!important;height:auto!important;max-height:none!important;overflow:visible!important}
+    .st-key-crm-automation-editor .st-key-crm-composer-controls{width:100%!important;min-width:0!important}
     .st-key-crm-automation-editor .st-key-crm-composer-layout>div:has(>.st-key-crm-composer-preview){width:100%!important;flex-basis:100%!important;min-width:0!important}
     .st-key-crm-automation-editor .st-key-crm-composer-preview{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
     }

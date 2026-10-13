@@ -10,6 +10,7 @@ from crm_tracking import public_https, campaign_link
 
 FACTS_QUERY = '''query CrmCatalogueFacts($ids:[ID!]!,$country:CountryCode!) {
  nodes(ids:$ids) { ... on Product { id handle title status onlineStoreUrl
+ editionMetafields:metafields(first:30,namespace:"sports_cave") { nodes { key value } }
  featuredMedia { ... on MediaImage { image { url(transform:{maxWidth:1000,preferredContentType:JPG}) altText } } }
  contextualPricing(context:{country:$country}) { minVariantPricing { price { amount currencyCode } compareAtPrice { amount currencyCode } } }
  } } }'''
@@ -78,23 +79,58 @@ def validate_snapshot(p):
     if p['currency'] and not re.fullmatch('[A-Z]{3}', p['currency']): raise ValueError('Invalid currency.')
     edition = p['edition']
     if edition is not None and (not isinstance(edition, dict) or set(edition) != {'limit','next','sold','remaining','status'} or
-            any(type(edition[k]) is not int or edition[k] < 0 for k in ('limit','next','sold','remaining')) or
-            not 1 <= edition['next'] <= edition['limit']+1 or not 0 <= edition['remaining'] <= edition['limit'] or
+            any(type(edition[k]) is not int or edition[k] < 0 for k in ('limit','next')) or
+            any(edition[k] is not None and (type(edition[k]) is not int or not 0<=edition[k]<=edition['limit']) for k in ('sold','remaining')) or
+            not 1 <= edition['next'] <= edition['limit']+1 or
             not isinstance(edition['status'], str) or len(edition['status']) > 100): raise ValueError('Invalid edition snapshot.')
 
 
-def edition_for(p, rows):
+UNAVAILABLE_EDITIONS = frozenset(('sold_out','sold out','closed','archived','expired','allocation_blocked','unavailable','exhausted','paused'))
+
+
+def edition_available(ed):
+    return bool(ed and ed['status'].lower() not in UNAVAILABLE_EDITIONS and
+                1<=ed['next']<=ed['limit'] and ed.get('remaining')!=0 and ed.get('sold')!=ed['limit'])
+
+
+def edition_for(p, rows, metafields=None):
     exact = [r for r in rows if product_id(r.get('shopify_product_gid') or r.get('shopify_product_id')) == p['id']]
     candidates = exact or [r for r in rows if r.get('shopify_handle') == p['handle'] and
                            not product_id(r.get('shopify_product_gid') or r.get('shopify_product_id'))]
     if len(candidates) != 1: return None
     r = candidates[0]
-    if r.get('allocation_blocked') or r.get('active') is False: return None
-    values = {'limit':r.get('edition_total'), 'next':r.get('run_next_edition_number') or r.get('next_edition_number'),
+    if r.get('allocation_blocked') or r.get('active') is False or r.get('is_archived'): return None
+    values = {'limit':r.get('run_edition_total') if r.get('run_edition_total') is not None else r.get('edition_total'),
+              'next':r.get('run_next_edition_number') if r.get('run_next_edition_number') is not None else r.get('next_edition_number'),
               'sold':r.get('sold_count'), 'remaining':r.get('remaining_count')}
-    if any(type(v) is not int or v < 0 for v in values.values()): return None
-    if not 1 <= values['next'] <= values['limit']+1 or values['remaining'] > values['limit']: return None
-    return {**values, 'status':str(r.get('run_status') or r.get('status') or '')[:100]}
+    if any(type(values[k]) is not int or values[k]<1 for k in ('limit','next')):return None
+    if values['next']>values['limit']+1:return None
+    status=str(r.get('run_status') or r.get('status') or '')[:100]
+    if (r.get('sold_out') or r.get('is_sold_out') or values['next']>values['limit'] or
+            type(values['remaining']) is int and values['remaining']<=0 or
+            type(values['sold']) is int and values['sold']>=values['limit']):status='sold_out'
+    if status.lower() in UNAVAILABLE_EDITIONS:values['remaining']=0
+    for key in ('sold','remaining'):
+        if type(values[key]) is not int or not 0<=values[key]<=values['limit']:values[key]=None
+    # Sales and numbering are independent. Do not manufacture remaining from
+    # the cursor, nor publish more editions than can still be allocated.
+    remaining=values['remaining'];sold=values['sold']
+    if remaining is not None and remaining>0 and (remaining>values['limit']-values['next']+1 or
+            sold is not None and remaining+sold!=values['limit']):values['remaining']=None
+    if r.get('next_edition_number') is not None and r['next_edition_number']!=values['next']:return None
+    mirrors={m['key']:m.get('value') for m in (metafields or [])}
+    if mirrors.get('edition_enabled')=='false' or mirrors.get('is_sold_out')=='true' or mirrors.get('edition_status','').lower() in UNAVAILABLE_EDITIONS:
+        status='sold_out';values['remaining']=0
+    # Read both canonical and existing legacy mirrors. A conflict is not fixed
+    # by choosing whichever value looks nicer; exclude until reconciled.
+    for field,keys in {'limit':('edition_total',),'next':('edition_next_number','next_edition_number'),
+                       'sold':('edition_sold_count','sold_count'),'remaining':('edition_remaining','remaining_count')}.items():
+        for key in keys:
+            if key not in mirrors:continue
+            try:value=int(mirrors[key])
+            except (ValueError,TypeError):return None
+            if values[field] is not None and value!=values[field]:return None
+    return {**values,'status':status}
 
 
 class Catalogue:
@@ -166,12 +202,16 @@ class Catalogue:
         for row in result['rows']: row['image'] = picker_thumbnail(row['image'])
         return result
 
-    def resolve(self, ids, market='AU', *, fresh=False):
+    def resolve(self, ids, market='AU', *, fresh=False, allow_missing=False):
         ids = list(dict.fromkeys(ids))
         if not ids: return []
         if len(ids)>50 or any(product_id(i)!=i for i in ids): raise ValueError('Invalid catalogue selection.')
         country = {'AU':'AU','US':'US','UK':'GB','Global':'AU','CA':'CA','NZ':'NZ'}[market]
-        nodes = self.shop.query(FACTS_QUERY, {'ids':ids,'country':country}, 'catalogue products', 60, fresh)['nodes']
+        # The edition metafield connection adds nested cost. Keep each Admin
+        # query below its cost limit without reducing the selected product set.
+        nodes = []
+        for start in range(0,len(ids),20):
+            nodes.extend(self.shop.query(FACTS_QUERY, {'ids':ids[start:start+20],'country':country}, 'catalogue products', 60, fresh)['nodes'])
         products = []
         for n in nodes:
             if not n or n.get('id') not in ids: continue
@@ -188,10 +228,13 @@ class Catalogue:
         except Exception as exc:
             logging.getLogger(__name__).warning('crm_catalogue_editions_unavailable type=%s',type(exc).__name__)
             rows = []
-        for p in products: p['edition'] = edition_for(p, rows); validate_snapshot(p)
+        by_node={n['id']:n for n in nodes if n}
+        for p in products:
+            p['edition'] = edition_for(p, rows, (by_node[p['id']].get('editionMetafields') or {}).get('nodes',[]))
+            validate_snapshot(p)
         by_id = {p['id']:p for p in products}
-        if set(by_id) != set(ids): raise ValueError('A selected product is no longer available. Remove it or refresh the catalogue.')
-        return [by_id[i] for i in ids]
+        if not allow_missing and set(by_id) != set(ids): raise ValueError('A selected product is no longer available. Remove it or refresh the catalogue.')
+        return [by_id[i] for i in ids if i in by_id]
 
 
 def product_issues(p, cfg):
@@ -244,10 +287,10 @@ def catalogue_html(section, *, campaign_key=''):
         ed=p['edition']
         if ed:
             if display['limit']:info.append(paragraph('LIMITED TO '+str(ed['limit'])+(' WORLDWIDE' if single else ''),'color:#d4b77d;font-size:11px;line-height:16px'))
-            next_ok=display['next'] and ed['remaining']>0 and 1<=ed['next']<=ed['limit']
+            next_ok=display['next'] and edition_available(ed)
             if next_ok:info.append(paragraph('#'+format(ed['next'],'03d')+' / '+str(ed['limit']),'color:#faf6eb;font-size:'+('24' if single else '16')+'px;line-height:28px;font-weight:700'))
             status=['NEXT AVAILABLE'] if next_ok and single else []
-            if display['remaining']:status.append(str(ed['remaining'])+' REMAINING' if ed['remaining'] else 'SOLD OUT')
+            if display['remaining'] and ed['remaining'] is not None:status.append(str(ed['remaining'])+' REMAINING' if ed['remaining'] else 'SOLD OUT')
             if status:info.append(paragraph(' · '.join(status),'color:#d6d0c4;font-size:11px;line-height:16px'))
         if display['price']:
             price='From '+e(price_label(p))

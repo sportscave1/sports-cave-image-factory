@@ -153,6 +153,9 @@ class CampaignStore(WorkspaceRecords):
         if automation:
             self.draft_identity=identity
             render_doc=self.test_document(render_doc,operation,recipient=recipient,customer=customer,shop=shop)
+        else:
+            from crm_personalisation import present,render as personalise,resolve,wanted
+            if present(render_doc):render_doc=personalise(render_doc,resolve({},customer or {},wanted=wanted(render_doc)))
         checks=preflight(render_doc,env,cfg)
         from crm_smart_catalogue import enabled as smart_enabled,hydrate as smart_hydrate
         if smart_enabled(render_doc):

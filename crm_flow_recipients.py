@@ -22,6 +22,7 @@ def selection(state,slot,keys,event):
             selected.update(k for k in event.get('selected',[]) if k in keys)
         state[slot+'-selected']=sorted(selected)
         if event.get('detail') in keys:state[slot+'-detail']=event['detail']
+        if event.get('close_detail') is True:state.pop(slot+'-detail',None)
         if event.get('retry') in keys:state[slot+'-retry']=event['retry']
     return sorted(selected)
 
@@ -55,8 +56,13 @@ def restore(slot):
 @st.fragment
 def panel(title,slot,body,*args,panel_key=None,**kwargs):
     """Only user toggles rerun this shell; reads/events rerun its child body."""
-    retain(slot)
-    with st.expander(title,key=panel_key or slot+'-panel',on_change='rerun') as disclosure:
+    key=panel_key or slot+'-panel'
+    retained=slot+'-panel-open'
+    if retained in st.session_state:st.session_state[key]=st.session_state[retained]
+    def remember():
+        if not st.session_state[key]:retain(slot)
+        st.session_state[retained]=bool(st.session_state[key])
+    with st.expander(title,key=key,on_change=remember) as disclosure:
         if disclosure.open:
             restore(slot)
             body(*args,**kwargs)
@@ -73,6 +79,7 @@ def table(slot,context,*,rows,columns,**kwargs):
     return render_component(component,rows=rows,columns=columns,
         selected=st.session_state.get(slot+'-selected',[]),
         selection_context=st.session_state[slot+'-table-context'],state_key=slot,
+        detail_key=st.session_state.get(slot+'-detail'),
         on_change=lambda:table_event(slot),key=slot+'-table',default=None,**kwargs)
 
 
@@ -113,6 +120,19 @@ def retry_read(slot,phase,label='Retry recipients'):
         st.rerun(scope='fragment')
 
 
+def close_details(slot):
+    st.button('Close details',key=slot+'-close-details',
+        on_click=lambda:st.session_state.pop(slot+'-detail',None))
+
+
+def pagination(slot,page,count,more,previous,next_page,*,labels=('Previous','Next'),noun='records'):
+    """One native event per page change; no second fragment rerun."""
+    with st.container(horizontal=True,key=slot+'-pagination'):
+        st.button(labels[0],disabled=page==0,key=slot+'-previous',on_click=previous)
+        st.caption('Page '+str(page+1)+' · '+str(count)+' '+noun)
+        st.button(labels[1],disabled=not more,key=slot+'-next',on_click=next_page)
+
+
 STYLE='''<style>
     div[role="dialog"]:has(.st-key-checkout-compact)>div:first-child{padding:12px 24px 4px!important}
     div[role="dialog"]:has(.st-key-checkout-compact)>div:nth-child(2){padding:4px 24px 16px!important}
@@ -129,5 +149,8 @@ STYLE='''<style>
     .st-key-checkout-compact :is([data-testid="stTextInputRootElement"],.react-aria-ComboBox>[role="group"]){height:32px;min-height:32px;background:#fffefa;border:1px solid #e4e2da;border-radius:4px}
     .st-key-checkout-compact :is([data-testid="stTextInputField"],[role="combobox"]){height:30px;min-height:0;padding:.2rem .55rem;font-size:13px}
     .st-key-flow-recipient-toolbar [data-testid="stPopover"] button{height:32px;min-height:32px}
+    .st-key-checkout-compact [class*="-pagination"]{align-items:center;gap:.5rem}
+    .st-key-checkout-compact [class*="-pagination"] p{margin:0;font-size:12px;font-variant-numeric:tabular-nums}
+    .st-key-checkout-compact button:focus-visible{outline:2px solid #9a7937;outline-offset:2px}
     .st-key-flow-recipient-toolbar [data-testid="stPopover"] button [data-testid="stMarkdownContainer"]{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
     </style>'''

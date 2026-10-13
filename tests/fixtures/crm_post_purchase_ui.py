@@ -2,6 +2,10 @@
 import sys,os
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+if os.getenv('EMAIL_V2_BASELINE')=='1':
+    baseline=Path(__file__).resolve().parents[2]/'.tmp-email-v2/v1'
+    if not (baseline/'crm_flow_recipients.py').is_file():raise RuntimeError('Prepare the V1 baseline described in docs/EMAIL_AUTOMATION_V2_20261014.md')
+    sys.path.insert(0,str(baseline))
 import streamlit as st
 st.set_page_config(layout='wide')
 from copy import deepcopy
@@ -11,6 +15,9 @@ from tests.test_crm_post_purchase_audience import OrderAudienceTests
 from tests.test_crm import ADMIN
 from tests.test_crm_lifecycle_expansion import order
 from crm_lifecycle_ui import audience
+from tests.crm_ui_profile import instrument
+import crm_lifecycle_ui
+if st.query_params.get('profile')=='1':instrument(crm_lifecycle_ui,'_audience')
 
 if 'fixture' not in st.session_state:
     case=OrderAudienceTests();case.setUpClass();case.setUp()
@@ -52,4 +59,8 @@ st.caption('Synthetic local fixture · no production connection or delivery work
 if st.button('Fixture background order update'):
     case.store.q('UPDATE shopify_orders SET fulfillment_status=%s WHERE customer_email LIKE %s',('FULFILLED',case.prefix+'%'))
 import json
-with st.container(key='fixture-metrics'):st.text(json.dumps(st.session_state['fixture_metrics']))
+@st.fragment(run_every=1)
+def metrics():
+    with st.container(key='fixture-metrics'):
+        st.text(json.dumps(dict(**st.session_state['fixture_metrics'],fragment_ms=st.session_state.get('fixture-fragment-ms',[]))))
+metrics()

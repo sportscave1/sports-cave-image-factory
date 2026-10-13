@@ -60,7 +60,8 @@ if os.getenv('EMAIL_V4_BACKGROUND_PUBLICATION')=='1':
 def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False):
     store=AutomationStore(connect)
     from crm_logic import now
-    store.set_state('shopify_automation_capabilities',{'checked_at':now().isoformat(),'triggers':{k:'AVAILABLE' for k in ('welcome','post_purchase','abandoned','fulfilled')}})
+    from tests.crm_publication_fixture import ready
+    ready(store)
     identities=[]
     for kind,name,state in (('welcome','Welcome series · local fixture','ACTIVE'),('abandoned','Abandoned checkout · local fixture','DRAFT'),('post_purchase','Collector follow-up · local fixture','PAUSED')):
         row=store.create(ADMIN,kind,name);flow=deepcopy(row['config']['draft'])

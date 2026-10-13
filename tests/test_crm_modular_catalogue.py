@@ -149,7 +149,7 @@ class ModularTests(unittest.TestCase):
         self.assertEqual(edition_for(p,[{**edition(), 'shopify_product_id':''}]),p['edition'])
         for rows in ([],[edition(99)], [edition(),edition()], [{**edition(),'allocation_blocked':True}], [{**edition(),'next_edition_number':None}]):
             self.assertIsNone(edition_for(p,rows))
-        self.assertNotIn('metafield',FACTS_QUERY)
+        self.assertIn('namespace:"sports_cave"',FACTS_QUERY)
 
     def test_fresh_resolution_missing_editions_market_and_secret_url(self):
         svc=service();n=node();n['onlineStoreUrl']='https://example.com/p?token=PRIVATE'

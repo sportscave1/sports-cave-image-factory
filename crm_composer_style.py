@@ -36,10 +36,9 @@ def polished_styles():
     html body .st-key-crm-campaign-actions button:hover{filter:brightness(.97)}
     html body .st-key-crm-campaign-actions button:focus-visible{outline:2px solid var(--sc-gold,#c9a33f);outline-offset:3px}
     html body .st-key-crm-composer-layout{--crm-panel-height:clamp(440px,calc(100dvh - var(--sc-topbar-height,64px) - 165px),740px);gap:14px}
-    html body .st-key-crm-composer-controls{padding:14px !important;background:#faf9f6;border-radius:10px;border-color:#e3dfd5}
+    html body .st-key-crm-composer-controls{padding:0 16px 16px!important;background:#faf9f6;border-radius:10px;border-color:#e3dfd5}
     html body .st-key-crm-composer-controls [data-testid="stWidgetLabel"]{margin-bottom:3px}
     html body .st-key-crm-composer-controls [data-testid="stWidgetLabel"] p{font-size:12px;font-weight:500;color:#55584f}
-    html body .st-key-crm-composer-controls [role="tablist"]{gap:20px;margin-bottom:10px}
     html body .st-key-crm-composer-preview{background:#f5f4ef;border-radius:10px;padding:12px 14px;border-color:#e3dfd5}
     html body .st-key-crm-composer-preview > div{gap:8px}
     html body .st-key-crm-preview-devices{gap:4px}

@@ -349,10 +349,10 @@ def hydrate(state,store,doc,*,fresh=False):
         if pin.get('render_error',(None,))[0]==identity:pin.pop('render_error',None)
     if token in cache:return _hydrate(state,store,doc,data=data)
     from crm_collector_images import configurations
-    from crm_personalisation import TOKEN
+    from crm_personalisation import wanted as requested_variables
     from crm_lifecycle_products import selected as recommendations
     from crm_checkout_preview import needs_checkout
-    configs=configurations(doc);wanted=set(TOKEN.findall(doc['content']['subject'])+TOKEN.findall(doc['content']['preheader']))
+    configs=configurations(doc);wanted=requested_variables(doc)
     rec=recommendations(doc)
     rec_ready=not rec or digest([rec.get('products'),doc['market'],preview_key(data)]) in state.get('_automation_flow_recommendations',{})
     ready=(not configs or artwork_key(doc,data) in state.get('_automation_flow_facts',{})) and rec_ready and not needs_checkout(doc)
@@ -404,7 +404,7 @@ def hydrate(state,store,doc,*,fresh=False):
 def _hydrate(state,store,doc,*,fresh=False,data=None):
     from crm_collector_resolver import resolve
     from crm_collector_images import render,configurations,marker
-    from crm_personalisation import resolve as values,render as personalise,present,TOKEN
+    from crm_personalisation import resolve as values,render as personalise,present,wanted as requested_variables
     from crm_lifecycle_products import selected as recommendations,recommend,hydrate as hydrate_products
     from crm_recovery_discount import substitute
     data=selected(state,store,fresh=fresh) if data is None else data
@@ -471,7 +471,7 @@ def _hydrate(state,store,doc,*,fresh=False,data=None):
             result=smart_preview(state,store,state.get('_automation_flow_visual_shop',store.preview_shop),result,
                 customer=data['_customer'],orders=data.get('_lifecycle_orders'),revision=preview_key(data),new_since=new_since)
     if present(result):
-        wanted=set(TOKEN.findall(result['content']['subject'])+TOKEN.findall(result['content']['preheader']))
+        wanted=requested_variables(result)
         values_key=digest([sorted(wanted),preview_key(data)]);values_cache=state.setdefault('_automation_flow_values',{})
         personal=None if fresh else values_cache.get(values_key)
         if personal is None:

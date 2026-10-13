@@ -21,7 +21,11 @@
   };
   const retry = delay => { if (Date.now() < deadline) window.scAutoTimers[key] = setTimeout(tick, delay); };
   const tick = () => {
-    if (!document.getElementById(key + '-controller')) return;
+    delete window.scAutoTimers[key];
+    if (!document.getElementById(key + '-controller')) {
+      if (window.scAutoRequest?.key === key) window.scAutoRequest = null;
+      return;
+    }
     const button = document.querySelector('.st-key-' + CSS.escape(key) + ' button');
     // One final settlement consumes the server's terminal read deadline even
     // when a dialog has stayed open throughout the normal refresh budget.

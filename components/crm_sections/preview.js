@@ -57,7 +57,7 @@ function catalogue(s){
  const money=v=>v.price==null?'':`${v.currency==='AUD'?'A$':v.currency==='USD'?'US$':v.currency==='GBP'?'£':v.currency+' '}${Number(v.price).toFixed(2)}`;
  const cards=products.map(v=>{let info='',image='';if(d.image)image=`<tr><td align="center" bgcolor="#151515" style="padding:0"><img src="${esc(v.image)}" alt="${esc(v.image_alt||v.title)}" width="${single?552:260}" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></td></tr>`;
   if(d.title)info+=p(esc(v.title),`color:#faf6eb;font-size:${single?(v.title.length<80?21:18):14}px;line-height:${single?27:19}px;font-weight:700;word-wrap:break-word`);
-  const e=v.edition;if(e){if(d.limit)info+=p('LIMITED TO '+e.limit+(single?' WORLDWIDE':''),'color:#d4b77d;font-size:11px;line-height:16px');const next=d.next&&e.remaining>0&&e.next>=1&&e.next<=e.limit;if(next)info+=p('#'+String(e.next).padStart(3,'0')+' / '+e.limit,`color:#faf6eb;font-size:${single?24:16}px;line-height:28px;font-weight:700`);const status=next&&single?['NEXT AVAILABLE']:[];if(d.remaining)status.push(e.remaining?e.remaining+' REMAINING':'SOLD OUT');if(status.length)info+=p(status.join(' · '),'color:#d6d0c4;font-size:11px;line-height:16px');}
+  const e=v.edition;if(e){if(d.limit)info+=p('LIMITED TO '+e.limit+(single?' WORLDWIDE':''),'color:#d4b77d;font-size:11px;line-height:16px');const next=d.next&&e.remaining!==0&&e.sold!==e.limit&&e.next>=1&&e.next<=e.limit&&!['sold_out','sold out','closed','archived','expired','allocation_blocked','unavailable','exhausted','paused'].includes((e.status||'').toLowerCase());if(next)info+=p('#'+String(e.next).padStart(3,'0')+' / '+e.limit,`color:#faf6eb;font-size:${single?24:16}px;line-height:28px;font-weight:700`);const status=next&&single?['NEXT AVAILABLE']:[];if(d.remaining&&e.remaining!=null)status.push(e.remaining?e.remaining+' REMAINING':'SOLD OUT');if(status.length)info+=p(status.join(' · '),'color:#d6d0c4;font-size:11px;line-height:16px');}
   if(d.price)info+=p('From '+esc(money(v))+(Number(v.compare_at)>Number(v.price)?' <s>'+esc(money({...v,price:v.compare_at}))+'</s>':''),'color:#d6d0c4;font-size:13px;line-height:18px');
   if(d.cta)info+=`<span style="display:inline-block;background:${single?'#d4b77d;color:#111111':'#151515;color:#eed9ad'};border:1px solid #d4b77d;padding:${single?'12px 18px':'10px 6px'};font-size:${single?13:11}px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">${esc(c.cta)}</span>`;
   const card=`<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;table-layout:fixed">${image}<tr><td align="${single?'center':'left'}" bgcolor="#151515" style="padding:${single?'20px 16px':'12px 8px'};font-family:Arial,Helvetica,sans-serif">${info}</td></tr></table>`;
@@ -78,10 +78,11 @@ function sectionHtml(s,model,sections=[]){
  if(s.type==='catalogue'){
   if(!s.settings.smart)return sanitize(catalogue(s),model);
   const verified=model.resolved[s.id];
-  return verified?.section?.settings?.smart&&Array.isArray(verified.products)?sanitize(catalogue({...s,products:verified.products}),model):'';
+  return verified?.section?.settings?.smart&&Array.isArray(verified.products)?sanitize(catalogue({...s,products:verified.products.slice(0,s.settings.smart_count??4)}),model):'';
  }
  if(s.type==='abandoned_checkout_products')return sanitize(model.replacements['<!--SC_ABANDONED_CHECKOUT-->']||'',model);
  let source=s.html||'';
+ source=source.replace(/{{\s*([a-z_]+)\s*}}/g,(token,name)=>model.personalisation?.[name]??token);
  if(s.type==='discount'){
   source=source.replace(/{{\s*discount_(code|value)\s*}}/g,(_,k)=>esc(offer?.[k]||('[Discount '+k+']')));
  }

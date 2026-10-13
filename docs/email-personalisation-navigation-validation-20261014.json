@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-14",
+  "task": "20261011-54d8ff88",
+  "status": "Implemented and tested locally; uncommitted",
+  "functionality": [
+    "The existing subject/preheader personalisation engine now discovers and substitutes approved variables in custom HTML, middle sections, headers and footers. No independent replacement engine was introduced.",
+    "Missing or invalid HTML first names render as there. Existing subject and preview-text fallback rules are preserved. Customer values are HTML-escaped; authored source is retained.",
+    "Unsupported and malformed variables remain explicit preview/send errors. Invalid in-progress HTML remains saveable as a draft. Existing legacy checkout preview conversion preserves personalisation variables and personalised image alt text.",
+    "Campaign preparation freezes personalised messages per verified recipient in the existing dispatch snapshot; campaign tests use the verified test recipient. Automation runtime and test paths use the same engine and existing recipient identity checks.",
+    "Customer-specific browser previews use server-generated escaped substitutions and recipient-scoped caches. Existing campaign preview customer selection is reused. The existing Shopify customer batch now includes firstName, without adding API requests.",
+    "Shared Settings / Editor / Templates navigation is 50px high, near-black with white labels and a gold active underline. It remains above the editor panel's own scrolling content; the preview retains its independent scroll area.",
+    "Native tab controls, keyboard navigation, autosave, draft state and lazy panel behaviour are retained. Conflicting automation-only navigation/mobile scrolling overrides were removed."
+  ],
+  "changed_production_files": {
+    "crm_personalisation.py": "Shared HTML token discovery, validation, escaping, fallbacks and bounded campaign preview name cache; compatible next-edition handling when remaining quantity is unknown.",
+    "crm_campaign_content.py": "Shared render and preflight handling of approved HTML variables and context-free fallbacks.",
+    "crm_campaign_send.py": "Personalised per-recipient message snapshots through the existing preparation path.",
+    "crm_campaign_store.py": "Recipient-specific campaign test rendering.",
+    "crm_shopify.py": "firstName in the existing campaign profile batch query.",
+    "crm_automation_runtime.py": "Discover HTML variables before resolving verified recipient facts.",
+    "crm_flow_preview.py": "HTML-aware fact requirements and recipient-specific preview/test cache keys.",
+    "crm_test_checkout.py": "HTML-aware recipient-owned checkout test personalisation.",
+    "crm_automation_definition.py": "Retain editable draft HTML while enforcing variables during publication/rendering.",
+    "crm_automation_store.py": "Retain legacy checkout preview context handling.",
+    "crm_abandoned_checkout.py": "Offline publication checks resolve approved variables without changing saved source.",
+    "crm_checkout_preview.py": "Preserve personalisation through legacy cart conversion and use the shared engine.",
+    "crm_local_preview.py": "Server-generated substitutions, selected-customer cache isolation and immediate browser preview support.",
+    "components/crm_sections/preview.js": "Apply the shared server-generated substitution map during browser edits.",
+    "crm_html_workspace.py": "Universal navigation styling, sticky tab wrapper, responsive panel scrolling and existing preview customer control reuse.",
+    "crm_composer_style.py": "Shared panel padding compatible with the opaque sticky navigation.",
+    "crm_template_library_style.py": "Remove obsolete automation-only tab styling overrides.",
+    "crm_automation_ui.py": "Remove the mobile overflow override that prevented shared panel scrolling."
+  },
+  "changed_validation_files": [
+    "tests/test_crm_html_personalisation.py",
+    "tests/test_crm_email_navigation_ui.cjs",
+    "tests/test_crm_personalisation.py",
+    "tests/fixtures/crm_automation_preview.py"
+  ],
+  "validation": {
+    "final_focused_python": "41 tests passed with disposable loopback SQL. Includes verified campaign manual test, campaign dispatch, all five automation render paths, hostile values, missing names, unsupported variables, selected-customer isolation, legacy checkout HTML and source preservation. Log: .tmp-preview-performance/personalisation-final-focused.log.",
+    "broader_python": "203 tests executed: 202 passed, one pre-existing discount-version expectation failed. Log: .tmp-preview-performance/personalisation-verified-python.log. Subsequent legacy-image preservation and campaign manual-test additions passed in the final focused run.",
+    "browser": "Campaign and Abandoned Checkout automation editors passed at both 1440px and 390px. Verified 50px height, dark background/gold active state, sticky positioning under real section overflow, layering, keyboard navigation, draft/subject preservation across Settings/Editor/Templates, personalised HTML and no horizontal overflow. Campaign Alice/Bob preview switching passed. Tests use actual shared components and block external requests.",
+    "screenshots": [
+      ".tmp-preview-performance/email-navigation-campaign-1440.png",
+      ".tmp-preview-performance/email-navigation-campaign-390.png",
+      ".tmp-preview-performance/email-navigation-automation-1440.png",
+      ".tmp-preview-performance/email-navigation-automation-390.png"
+    ],
+    "static": "20 changed Python files parsed, JavaScript syntax checks and git diff --check passed.",
+    "shopify": "Updated profile batch query validated against Shopify Admin schema. Existing deprecated email compatibility fields were left unchanged."
+  },
+  "remaining_limitations": [
+    "The pre-existing test tests.test_crm_discount_delivery.DiscountDeliveryTests.test_email_three_only_frozen_versions_tracking_and_no_duplicates expects a frozen older discount subject after republishing; existing live reconciliation uses New future version. The identical failure was reproduced using HEAD versions of all changed rendering/publication modules. Baseline log: .tmp-preview-performance/discount-baseline.log. No scheduling, publication or live reconciliation policy was changed.",
+    "Product/edition variables require an existing verified product/order context; without one, the shared renderer uses neutral fallback text rather than inventing recipient facts.",
+    "Provider delivery was mocked; no real email or production deployment was used for validation."
+  ],
+  "preserved": "Existing catalogue recommendations, authored templates/designs, flow triggers and delays, activation states, dispatch transport and unrelated workspace changes.",
+  "safety": "No commits, pushes, deployment, real email sends, campaign publication, live flow activation or live customer-data writes. Synthetic publication/dispatch tests operate only on disposable loopback fixtures."
+}

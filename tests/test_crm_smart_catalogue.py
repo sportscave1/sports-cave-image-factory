@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import os
 import unittest
 import uuid
-from crm_smart_catalogue import hydrate,preview,enabled,QUERY,FALLBACK,MARKET_PRODUCTS,_CACHE
+from crm_smart_catalogue import hydrate,preview,enabled,FALLBACK,MARKET_PRODUCTS,_CACHE
 from crm_middle_sections import apply_event,middle_sections,validate_middle
 from crm_campaign_content import render_campaign,settings
 from crm_email_size import analyze_rendered_email,REPRESENTATIVE_UNSUBSCRIBE
@@ -14,17 +14,23 @@ from tests.test_crm_modular_catalogue import catalogue_doc,service
 from tests.test_crm_resend_marketing import ENV
 
 
-def fixture():
+def fixture(size=4):
+    from crm_smart_candidates import MEMBERSHIPS,COLLECTION_PRODUCTS
     cat=service()
     shop=Mock(namespace='smart-fixture-'+uuid.uuid4().hex)
     def query(q,v,*a):
+        if q==MEMBERSHIPS:
+            return {'nodes':[dict(id=i,collections={'nodes':[dict(id='gid://shopify/Collection/'+('8' if int(i.rsplit('/',1)[-1])>=8 else '1'),handle='nba' if int(i.rsplit('/',1)[-1])>=8 else 'v8-supercars-wall-art')]}) for i in v['ids']]}
+        if q==COLLECTION_PRODUCTS:
+            seed=int(v['id'].rsplit('/',1)[-1])
+            return {'collection':{'products':{'nodes':[dict(id=f'gid://shopify/Product/{i}') for i in range(seed,seed+size+1)]}}}
         if 'Availability' in q:return {'nodes':[dict(id=i,tracksInventory=True,totalInventory=5) for i in v['ids']]}
         return {'nodes':[]}
     shop.query.side_effect=query
     def storefront(q,v):
-        seed=int(v.get('product','gid://shopify/Product/1').rsplit('/',1)[-1])
-        nodes=[dict(id=f'gid://shopify/Product/{i}',availableForSale=True,onlineStoreUrl='https://shop.example/products/art') for i in range(seed+1,seed+5)]
-        return {'productRecommendations':nodes} if q==QUERY else {'products':{'nodes':nodes}}
+        ids=v.get('ids') or [f'gid://shopify/Product/{i}' for i in range(2,6)]
+        nodes=[dict(id=i,availableForSale=True,onlineStoreUrl='https://shop.example/products/art') for i in ids]
+        return {'nodes':nodes} if q==MARKET_PRODUCTS else {'products':{'nodes':nodes}}
     shop.storefront_query.side_effect=storefront
     store=Mock(connect=None);store.q.return_value=[]
     return cat,shop,store
@@ -41,11 +47,11 @@ class SmartTests(unittest.TestCase):
         orders=kw.pop('orders',[{'lineItems':{'nodes':[{'product':{'id':f'gid://shopify/Product/{seed}'},'title':'Motorsport artwork'}]}}])
         return hydrate(self.doc,self.store,self.shop,self.customer,orders=orders,catalogue=self.cat,**kw)
 
-    def test_per_recipient_three_exclusions_and_saved_document_untouched(self):
+    def test_per_recipient_four_exclusions_and_saved_document_untouched(self):
         original=deepcopy(self.doc);a=self.resolve(1);b=self.resolve(8)
         ids=lambda d:[p['id'] for p in d['middle_sections'][-1]['products']]
-        self.assertEqual(ids(a),[f'gid://shopify/Product/{i}' for i in (2,3,4)])
-        self.assertEqual(ids(b),[f'gid://shopify/Product/{i}' for i in (9,10,11)])
+        self.assertEqual(ids(a),[f'gid://shopify/Product/{i}' for i in (2,3,4,5)])
+        self.assertEqual(ids(b),[f'gid://shopify/Product/{i}' for i in (9,10,11,12)])
         self.assertEqual(self.doc,original);self.assertTrue(enabled(self.doc));self.assertFalse(enabled(a))
         self.assertNotEqual(render_campaign(a)['html'],render_campaign(b)['html'])
 
@@ -58,9 +64,13 @@ class SmartTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_middle(self.doc['middle_sections'])
 
     def test_owned_unavailable_duplicate_and_sold_out_editions(self):
-        self.shop.storefront_query.side_effect=lambda q,v:{'productRecommendations':[
-            {'id':f'gid://shopify/Product/{i}','availableForSale':i!=5,'onlineStoreUrl':'https://shop.example/products/a'} for i in (1,2,2,3,4,5,6)]}
-        self.shop.query.side_effect=lambda q,v,*a:{'nodes':[dict(id=i,tracksInventory=True,totalInventory=0 if i.endswith('/4') else 1) for i in v['ids']]}
+        wire=self.shop.storefront_query.side_effect
+        def regional(q,v):
+            result=wire(q,v)
+            for row in result.get('nodes',[]):
+                if row['id'].endswith('/4'):row['availableForSale']=False
+            return result
+        self.shop.storefront_query.side_effect=regional
         resolve=self.cat.resolve
         def products(*a,**kw):
             rows=resolve(*a,**kw)
@@ -69,29 +79,26 @@ class SmartTests(unittest.TestCase):
             return rows
         self.cat.resolve=products
         ids=[p['id'] for p in self.resolve()['middle_sections'][-1]['products']]
-        self.assertEqual(ids,['gid://shopify/Product/2','gid://shopify/Product/6'])
+        self.assertEqual(ids,['gid://shopify/Product/2','gid://shopify/Product/5'])
 
-    def test_cache_and_api_failure_safe_local_fallback(self):
+    def test_cache_and_api_failure_never_fills_with_unrelated_local_products(self):
         self.resolve();self.resolve();self.assertEqual(self.shop.storefront_query.call_count,1)
         _CACHE.clear();self.shop.storefront_query.side_effect=RuntimeError('offline')
-        self.store.q.return_value=[{'shopify_product_id':'9'},{'shopify_product_id':'10'}]
-        self.assertEqual(len(self.resolve()['middle_sections'][-1]['products']),2)
-        self.shop.query.side_effect=RuntimeError('offline')
         self.assertFalse(self.resolve()['middle_sections'][-1]['visible'])
 
     def test_checkout_seeds_require_same_customer(self):
         checkout={'customer':{'id':'other'},'lineItems':{'nodes':[{'product':{'id':'gid://shopify/Product/8'}}]}}
-        self.resolve(orders=[],checkout=checkout)
-        self.assertEqual(self.shop.storefront_query.call_args.args[0],FALLBACK)
-        _CACHE.clear();checkout['customer']['id']=self.customer['id'];self.resolve(orders=[],checkout=checkout)
-        self.assertEqual(self.shop.storefront_query.call_args.args[1]['product'],'gid://shopify/Product/8')
+        result=self.resolve(orders=[],checkout=checkout)
+        self.assertEqual(result['middle_sections'][-1]['products'][0]['id'],'gid://shopify/Product/2')
+        _CACHE.clear();checkout['customer']['id']=self.customer['id']
+        result=self.resolve(orders=[],checkout=checkout)
+        self.assertEqual(result['middle_sections'][-1]['products'][0]['id'],'gid://shopify/Product/8')
 
     def test_existing_checkout_visual_variant_string_and_fresh_delivery_facts(self):
         checkout={'customer':{'id':self.customer['id']},'products':[{'product_id':'8','variant':'Framed'}]}
-        hydrate(self.doc,self.store,self.shop,self.customer,orders=[],checkout=checkout,catalogue=self.cat,fresh=True)
-        self.assertEqual(self.shop.storefront_query.call_args.args[1]['product'],'gid://shopify/Product/8')
-        availability=[c for c in self.shop.query.call_args_list if 'Availability' in c.args[0]][0]
-        self.assertTrue(availability.args[-1])
+        result=hydrate(self.doc,self.store,self.shop,self.customer,orders=[],checkout=checkout,catalogue=self.cat,fresh=True)
+        self.assertEqual(result['middle_sections'][-1]['products'][0]['id'],'gid://shopify/Product/8')
+        self.shop.storefront_query.assert_called_once()
 
     def test_session_visual_facts_survive_copy_edits_without_product_refetch(self):
         from unittest.mock import patch
@@ -120,7 +127,7 @@ class SmartTests(unittest.TestCase):
                     with self.assertRaises(NoPreviewCustomer):preview(state,self.store,self.shop,self.doc,customer=self.customer,orders=orders,revision='same')
                 hold.set();next(iter(state['campaign_home_cache'].values()))[1].result(timeout=3)
                 result=preview(state,self.store,self.shop,self.doc,customer=self.customer,orders=orders,revision='same')
-                self.assertEqual(work.call_count,1);self.assertEqual(len(result['middle_sections'][-1]['products']),3)
+                self.assertEqual(work.call_count,1);self.assertEqual(len(result['middle_sections'][-1]['products']),4)
         finally:hold.set()
 
     def test_preparation_batch_reuses_product_facts_without_caching_customer_authority(self):
@@ -137,22 +144,22 @@ class SmartTests(unittest.TestCase):
         self.assertEqual(self.shop.customer.call_count,2)
 
     def test_win_back_new_edition_constraint_is_not_relaxed_by_smart_mode(self):
-        self.shop.query.side_effect=lambda q,v,*a:{'nodes':[dict(id=i,tracksInventory=False,
-            createdAt='2026-02-01T00:00:00Z' if i.endswith('/2') else '2025-01-01T00:00:00Z') for i in v['ids']]}
+        original=self.shop.query.side_effect
+        def query(q,v,*a):
+            if 'Availability' in q:return {'nodes':[dict(id=i,createdAt='2026-02-01T00:00:00Z' if i.endswith('/2') else '2025-01-01T00:00:00Z') for i in v['ids']]}
+            return original(q,v,*a)
+        self.shop.query.side_effect=query
         result=self.resolve(new_since='2026-01-01T00:00:00Z')
         self.assertEqual([p['id'] for p in result['middle_sections'][-1]['products']],['gid://shopify/Product/2'])
 
-    def test_sport_and_athlete_ranking_does_not_mix_basketball_into_motorsport(self):
+    def test_collection_membership_not_title_guessing_controls_sports(self):
         original=self.cat.resolve
         def products(*a,**kw):
             rows=original(*a,**kw)
-            titles={'2':'Michael Jordan Basketball','3':'Peter Brock Motorsport','4':'Motorsport artwork','5':'Related edition'}
-            for p in rows:p['title']=titles[p['id'].rsplit('/',1)[-1]]
+            for p in rows:p['title']='A design with no sport in the title'
             return rows
         self.cat.resolve=products
-        orders=[{'lineItems':{'nodes':[{'product':{'id':'gid://shopify/Product/1'},'title':'Peter Brock Motorsport'}]}}]
-        result=self.resolve(orders=orders)
-        self.assertEqual([p['id'] for p in result['middle_sections'][-1]['products']],[f'gid://shopify/Product/{i}' for i in (3,4,5)])
+        self.assertEqual(len(self.resolve()['middle_sections'][-1]['products']),4)
 
     def test_global_unknown_market_does_not_fabricate_australian_prices(self):
         self.doc['market']='Global';self.customer['defaultAddress']={}
@@ -181,7 +188,7 @@ class SmartTests(unittest.TestCase):
                 compareAtPriceRange={'minVariantPrice':{'amount':'65.00','currencyCode':'EUR'}}) for i in v['ids']]}
         self.shop.storefront_query.side_effect=wire
         products=self.resolve()['middle_sections'][-1]['products']
-        self.assertEqual(len(products),3)
+        self.assertEqual(len(products),4)
         self.assertTrue(all(p['currency']=='EUR' and p['price']=='55.00' for p in products))
 
 
@@ -191,6 +198,30 @@ class PersistenceTests(unittest.TestCase):
     def setUpClass(cls):
         from tests.test_crm_lifecycle_publication import LifecyclePublicationTests
         LifecyclePublicationTests.setUpClass()
+
+    def test_signed_checkout_signals_are_customer_specific_and_not_browser_views(self):
+        from tests.crm_db_fixture import connect
+        from crm_campaign_store import CampaignStore
+        from crm_smart_candidates import behaviour
+        import json
+        store=CampaignStore(connect);cid='gid://shopify/Customer/'+str(uuid.uuid4().int%100000000000)
+        # Mirror schema used by the existing click lookup; no production DB.
+        store.q('''CREATE TABLE IF NOT EXISTS shopify_products(shopify_product_id text PRIMARY KEY,
+            online_store_url text)''')
+        event=str(uuid.uuid4())
+        store.q('''INSERT INTO crm_webhook_events(provider,event_id,topic,related_customer_id,occurred_at,normalized)
+            VALUES('shopify',%s,'checkouts/update',%s,now(),%s::jsonb)''',
+            (event,cid,json.dumps({'product_ids':['gid://shopify/Product/8'],'completed':False})))
+        try:
+            signals=behaviour(store,{'id':cid})
+            self.assertEqual(signals['checkout'],['gid://shopify/Product/8'])
+            self.assertEqual(signals['viewed'],[])
+            self.assertEqual(behaviour(store,{'id':cid+'1'})['checkout'],[])
+            doc=catalogue_doc();doc['middle_sections'][-1]['settings']['smart']=True
+            cat,shop,_=fixture()
+            result=hydrate(doc,store,shop,{'id':cid,'defaultAddress':{'countryCodeV2':'AU'}},catalogue=cat)
+            self.assertEqual(result['middle_sections'][-1]['products'][0]['id'],'gid://shopify/Product/8')
+        finally:store.q("DELETE FROM crm_webhook_events WHERE provider='shopify' AND event_id=%s",(event,))
 
     def test_smart_and_manual_save_reopen_and_duplicate(self):
         from tests.crm_db_fixture import connect
@@ -202,6 +233,11 @@ class PersistenceTests(unittest.TestCase):
         doc['middle_sections'][-1]['settings']['smart']=True
         row=store.save(ADMIN,'Smart persistence fixture',doc,row['id'],row['version'])
         saved=store.draft(row['id']);self.assertTrue(enabled(saved['document']))
+        for count in (1,4,8,12):
+            doc['middle_sections'][-1]['settings']['smart_count']=count
+            row=store.save(ADMIN,'Smart persistence fixture',doc,row['id'],row['version'])
+            saved=store.draft(row['id'])
+            self.assertEqual(saved['document']['middle_sections'][-1]['settings']['smart_count'],count)
         duplicate=store.save(ADMIN,'Smart duplicate fixture',saved['document'])
         self.assertEqual(store.draft(duplicate['id'])['document']['middle_sections'],doc['middle_sections'])
 
