@@ -11185,6 +11185,14 @@ def _account_permission_fields(prefix, selected=()):
                 key=f"{prefix}::{page['key']}",
             ):
                 chosen.append(page["key"])
+    with columns[0]:
+        if st.checkbox(
+            "Attach Missing PSD",
+            value=os_accounts.ATTACH_MISSING_PSD_CAPABILITY in selected,
+            key=f"{prefix}::{os_accounts.ATTACH_MISSING_PSD_CAPABILITY}",
+            help="With Files access, allow first-time links to approved PSDs only. Replacement remains administrator-only; Dropbox masters are not modified.",
+        ):
+            chosen.append(os_accounts.ATTACH_MISSING_PSD_CAPABILITY)
     with columns[1]:
         if st.checkbox(
             "Delete files",

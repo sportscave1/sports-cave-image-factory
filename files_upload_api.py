@@ -853,8 +853,17 @@ def _request_user(request):
             user = os_accounts.DEFAULT_STORE.get_user(payload.get("sub"))
         except Exception:
             user = {}
-        if user and os_accounts.can_access_page(user, "Files"):
+        # Match the Streamlit sign-in policy: revoked or mismatched sessions fail closed.
+        def version(value):
+            try: return max(1,int(value or 1))
+            except (TypeError,ValueError): return 1
+        reason = ('account_unavailable' if not user else
+                  'session_revoked' if str(user.get('id') or '') != str(payload.get('sub') or '') or version(user.get('session_version')) != version(payload.get('sv')) else
+                  'files_permission_denied' if not os_accounts.can_access_page(user,'Files') else '')
+        if not reason:
             return user
+        logging.getLogger(__name__).warning('FILES_AUTH denied reason=%s',reason)
+        raise FilesUploadError('Sign in again with the same authorised Sports Cave OS account. Files access must be approved for that account.',status_code=403,code='access_denied')
     legacy_valid, _legacy_reason = sc_auth.validate_auth_token(
         token,
         password=password,
@@ -870,7 +879,8 @@ def _request_user(request):
             "is_active": True,
             "page_permissions": [],
         }
-    raise FilesUploadError("Access not approved.", status_code=403, code="access_denied")
+    logging.getLogger(__name__).warning('FILES_AUTH denied reason=%s','cookie_missing' if not token else 'cookie_invalid_or_expired')
+    raise FilesUploadError('Sign in to Sports Cave OS with Files access, then retry. This browser must use the same Sports Cave OS address and account.',status_code=403,code='access_denied')
 
 
 def _request_files_delete_user(request):
@@ -1362,21 +1372,10 @@ async def files_window_page(request: Request):
             },
         )
     except Exception as error:
-        if isinstance(error, FilesUploadError):
-            return HTMLResponse(
-                "<!doctype html><title>Files unavailable</title>"
-                "<p style='font:14px Segoe UI,sans-serif;padding:24px'>"
-                "Files access is not approved for this account.</p>",
-                status_code=error.status_code,
-                headers={"Cache-Control": "no-store"},
-            )
-        return HTMLResponse(
-            "<!doctype html><title>Files unavailable</title>"
-            "<p style='font:14px Segoe UI,sans-serif;padding:24px'>"
-            "Files could not be opened right now.</p>",
-            status_code=503,
-            headers={"Cache-Control": "no-store"},
-        )
+        reference = secrets.token_hex(8)
+        _psd_failure(error,'files_page',reference)
+        return _psd_error_page(str(error) if isinstance(error,FilesUploadError) else 'Files could not be opened right now. Retry or contact an administrator.',
+                               reference,error.status_code if isinstance(error,FilesUploadError) else 503,title='Files access')
 
 
 async def files_image_viewer_page(request: Request):
@@ -2261,30 +2260,35 @@ async def paste_files(request: Request):
         return _response_error(error)
 
 
-def _psd_admin(request):
+def _psd_attach_user(request):
     user = _request_user(request)
-    if not user or not os_accounts.is_admin(user) or not os_accounts.can_access_page(user, 'Files'):
-        raise FilesUploadError('Administrator access required.', status_code=403)
+    if not os_accounts.can_attach_missing_psd(user):
+        logging.getLogger(__name__).warning('PSD_ACCESS denied action=attach reason=attach_permission_required')
+        raise FilesUploadError("You don't have permission to attach PSD files. Contact your administrator.",status_code=403,code='psd_attach_denied')
     return user
 
 
 async def psd_picker_page(request: Request):
     try:
-        await run_in_threadpool(_psd_admin, request)
+        await run_in_threadpool(_psd_attach_user, request)
         content = (Path(__file__).resolve().parent / 'components' / 'psd_picker' / 'picker.html').read_text(encoding='utf-8')
         return HTMLResponse(content, headers={'Cache-Control':'no-store','X-Frame-Options':'SAMEORIGIN'})
     except Exception as error:
-        return _response_error(error)
+        reference=secrets.token_hex(8)
+        _psd_failure(error,'picker_page',reference)
+        return _psd_error_page(str(error) if isinstance(error,FilesUploadError) else 'The PSD attachment picker is unavailable. Retry or contact an administrator.',reference,error.status_code if isinstance(error,FilesUploadError) else 503)
 
 
 async def psd_picker_options(request: Request):
     try:
-        user = await run_in_threadpool(_psd_admin, request)
+        user = await run_in_threadpool(_psd_attach_user, request)
         import psd_directory as psd
         from psd_mapping_store import STORE
         pid = psd.product_id({'shopify_product_gid':request.query_params.get('product_gid')})
         product = await run_in_threadpool(STORE.get_product, pid)
         mapping = await run_in_threadpool(STORE.read)
+        if pid in mapping and not os_accounts.is_admin(user):
+            raise FilesUploadError('Only an administrator can replace an existing PSD mapping.',status_code=403,code='psd_replace_denied')
         context = await run_in_threadpool(_dropbox_context)
         entries = await run_in_threadpool(_directory_entries, context['access_token'], psd.ROOT,
                                          root_path=context['root_path'],user_id=str(user.get('id') or ''))
@@ -2299,7 +2303,7 @@ async def psd_picker_options(request: Request):
                           'assigned_other':entry['id'] in owners and owners[entry['id']] != pid,
                           'thumbnail_url':'/api/files-thumbnail?path='+quote(path,safe='')})
         return JSONResponse({'product_title':product['product_title'],'product_gid':pid,
-                             'current_file_id':(mapping.get(pid) or {}).get('dropbox_file_id',''),'files':files},headers={'Cache-Control':'no-store'})
+                             'current_file_id':(mapping.get(pid) or {}).get('dropbox_file_id',''),'can_replace':os_accounts.is_admin(user),'files':files},headers={'Cache-Control':'no-store'})
     except ValueError as error:
         return _response_error(FilesUploadError(str(error),status_code=400))
     except Exception as error:
@@ -2310,10 +2314,12 @@ async def attach_product_psd(request: Request):
     try:
         if not request.headers.get('origin') or not _same_origin(request):
             raise FilesUploadError('PSD attachment request is not allowed.',status_code=403)
-        user = await run_in_threadpool(_psd_admin, request)
+        user = await run_in_threadpool(_psd_attach_user, request)
         import psd_directory as psd
         from psd_mapping_store import STORE
         payload = await _json_body(request)
+        if not os_accounts.is_admin(user) and (payload.get('expected_file_id') or payload.get('confirm_replace')):
+            raise FilesUploadError('Only an administrator can replace an existing PSD mapping.',status_code=403,code='psd_replace_denied')
         pid = psd.product_id({'shopify_product_gid':payload.get('product_gid')})
         if not pid or not psd.re.fullmatch(r'id:[A-Za-z0-9_-]+',str(payload.get('file_id') or '')):
             raise FilesUploadError('Invalid product or file identity.',status_code=400)
@@ -2369,11 +2375,14 @@ def _psd_provider_problem(error):
     return 'psd_open_unavailable','The linked PSD could not be prepared. Retry; if it persists, ask an administrator to check Dropbox and the PSD support reference.',503
 
 
-def _psd_error_page(message, reference='', status=503):
-    content = '<!doctype html><html><head><meta charset="utf-8"><title>Open PSD</title></head><body style="font:16px system-ui;padding:24px"><h2>Open PSD</h2><p>' + html.escape(message) + '</p>'
+def _psd_error_page(message, reference='', status=503, title='PSD access'):
+    content = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+               '<title>'+html.escape(title)+'</title><style>body{font:14px system-ui;margin:0;padding:18px;color:#20242c;overflow-wrap:anywhere}h2{font-size:18px;margin:0 0 12px}p{line-height:1.5}button{font:inherit;padding:7px 12px;border:1px solid #d5dae2;border-radius:6px;background:white;cursor:pointer}</style>'
+               '</head><body><h2>'+html.escape(title)+'</h2><p role="alert">'+html.escape(message)+'</p>')
     if reference:
-        content += '<p>Support reference: ' + html.escape(reference) + '</p>'
-    return HTMLResponse(content+'</body></html>',status_code=status,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+        content += '<p style="font-size:12px;color:#576174">Support reference: '+html.escape(reference)+'</p>'
+    content += '<button onclick="location.reload()">Retry</button> <button id="close" hidden>Close</button><script>const embedded=parent!==window;function send(type,extra={}){if(embedded)parent.postMessage({type,...extra},location.origin);}document.getElementById(\'close\').hidden=!embedded;document.getElementById(\'close\').onclick=()=>send(\'sports-cave-psd-cancel\');addEventListener(\'keydown\',e=>{if(e.key===\'Escape\')send(\'sports-cave-psd-cancel\');});send(\'sports-cave-psd-size\',{height:document.body.scrollHeight});</script></body></html>'
+    return HTMLResponse(content,status_code=status,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
 
 
 async def open_product_psd(request: Request):

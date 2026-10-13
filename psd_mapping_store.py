@@ -89,8 +89,10 @@ class PostgresMappings:
     def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False):
         import psd_directory as psd
         import os_accounts
-        if not os_accounts.is_admin(actor) or not os_accounts.can_access_page(actor, 'Files'):
-            raise PermissionError('Administrator access required.')
+        if not os_accounts.can_attach_missing_psd(actor):
+            raise PermissionError("You don't have permission to attach PSD files. Contact your administrator.")
+        if not os_accounts.is_admin(actor) and (expected_file_id or confirm_replace):
+            raise PermissionError('Only an administrator can replace an existing PSD mapping.')
         if not psd.product_id({'shopify_product_gid': pid}) or not psd.approved_file(metadata):
             raise ValueError('An approved main-folder PSD and valid product are required.')
         fid = metadata['id']
@@ -101,6 +103,9 @@ class PostgresMappings:
                 raise ValueError('Filename differs from the product title; explicit confirmation required.')
             existing = self._all(cur)
             before = existing.get(pid)
+            # Check after the existing table lock: no VA overwrite, including stale/racing picks.
+            if before is not None and not os_accounts.is_admin(actor):
+                raise PermissionError('Only an administrator can replace an existing PSD mapping.')
             if (before or {}).get('dropbox_file_id', '') != expected_file_id:
                 raise MappingConflict('Mapping changed while selecting. Reopen the picker.')
             if before and before['dropbox_file_id'] == fid and before.get('source') == 'manual':
@@ -111,7 +116,7 @@ class PostgresMappings:
                 raise MappingConflict('This PSD is already attached to another product.')
             actor_id = str(actor.get('id') or actor.get('username') or '')
             if not actor_id:
-                raise PermissionError('An identified administrator is required.')
+                raise PermissionError('An identified account is required.')
             cur.execute("INSERT INTO public.product_psd_mappings(shopify_product_gid,dropbox_file_id,file_path,namespace_path,source,actor_id) VALUES(%s,%s,%s,%s,'manual',%s) ON CONFLICT(shopify_product_gid) DO UPDATE SET dropbox_file_id=EXCLUDED.dropbox_file_id,file_path=EXCLUDED.file_path,namespace_path=EXCLUDED.namespace_path,source='manual',actor_id=EXCLUDED.actor_id,updated_at=now() RETURNING *",
                         (pid, fid, metadata.get('path_display') or metadata.get('path_lower'), metadata.get('namespace_path') or '', actor_id))
             after = _record(cur.fetchone())

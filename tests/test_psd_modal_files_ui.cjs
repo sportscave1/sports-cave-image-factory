@@ -1,5 +1,5 @@
-const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
-(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+const {chromium,webkit}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
+(async()=>{const browser=await (process.env.PSD_BROWSER==='webkit'?webkit:chromium).launch(process.env.PSD_BROWSER==='webkit'?{headless:true}:{channel:'chrome',headless:true});try{
 const base='http://psd-modal.local.test',folder='/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED';let scenarios=0;
 for(const screen of ['Orders','Edition Ops'])for(const mobile of [false,true]){
  const context=await browser.newContext({viewport:{width:mobile?390:1100,height:800}}),page=await context.newPage();let loads=0,actions=[],lists=0;

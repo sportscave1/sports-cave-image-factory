@@ -20,7 +20,7 @@ target.open=wrapper;
 doc.addEventListener('click',event=>{const anchor=event.target.closest?.('a[href]');if(anchor&&pickerUrl(anchor.href)){event.preventDefault();event.stopPropagation();launch(anchor.href);}},{capture:true,signal:controller.signal});
 target.addEventListener('message',event=>{
  if(event.origin!==target.location.origin||!frame||event.source!==frame.contentWindow)return;
- if(event.data?.type==='sports-cave-psd-size'&&mode==='open'){frame.style.height=Math.max(220,Math.min(Number(event.data.height)||265,target.innerHeight*.88))+'px';}
+ if(event.data?.type==='sports-cave-psd-size'&&(mode==='open'||mode==='picker')){if(mode==='picker')modal.style.height='auto';frame.style.height=Math.max(220,Math.min(Number(event.data.height)||265,target.innerHeight*.88))+'px';}
  if(event.data?.type==='sports-cave-psd-files'&&mode==='open'){mode='files';modal.style.width='min(1100px,94vw)';frame.style.height='min(720px,85vh)';frame.title='Sports Cave Files';modal.setAttribute('aria-label','Sports Cave Files');}
  if(event.data?.type==='sports-cave-psd-saved'){close();send('streamlit:setComponentValue',{value:{product_gid:event.data.product_gid,nonce:Date.now()},dataType:'json'});}
  if(event.data?.type==='sports-cave-psd-cancel')close();
