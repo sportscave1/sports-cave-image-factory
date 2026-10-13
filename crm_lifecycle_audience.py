@@ -15,20 +15,21 @@ def cache_customer(store, customer, at):
     changed=date(customer.get('updatedAt'))
     if not customer.get('id') or not changed:return
     # Signed privacy events remain authoritative across reconciliation retries.
-    if store.q("SELECT 1 FROM crm_suppressions WHERE shopify_customer_id=%s AND reason='redacted' LIMIT 1",(customer['id'],),True):return
+    if store.q("SELECT 1 FROM crm_suppressions WHERE (shopify_customer_id=%s OR recipient_hash=%s) AND reason='redacted' LIMIT 1",(customer['id'],recipient_hash(customer.get('email'))),True):return
     state=consent(customer)
     subscription=date((customer.get('emailMarketingConsent') or {}).get('consentUpdatedAt'))
-    store.q('''INSERT INTO crm_lifecycle_customers(customer_id,email,recipient_hash,name,subscribed_at,
+    saved=store.q('''INSERT INTO crm_lifecycle_customers(customer_id,email,recipient_hash,name,subscribed_at,
       created_at,source_updated_at,verified_at,consent,profile)
       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
       ON CONFLICT(customer_id) DO UPDATE SET email=excluded.email,recipient_hash=excluded.recipient_hash,
       name=excluded.name,subscribed_at=CASE WHEN crm_lifecycle_customers.consent='SUBSCRIBED' AND excluded.consent='SUBSCRIBED'
       THEN COALESCE(crm_lifecycle_customers.subscribed_at,excluded.subscribed_at) ELSE excluded.subscribed_at END,
       source_updated_at=excluded.source_updated_at,verified_at=excluded.verified_at,consent=excluded.consent,profile=excluded.profile
-      WHERE crm_lifecycle_customers.source_updated_at<=excluded.source_updated_at''',
+      WHERE crm_lifecycle_customers.source_updated_at<=excluded.source_updated_at RETURNING customer_id''',
       (customer['id'],str(customer.get('email') or '').lower(),recipient_hash(customer.get('email')),
        ' '.join(filter(None,[customer.get('firstName'),customer.get('lastName')])),subscription,
        date(customer.get('createdAt')),changed,at,state,json.dumps(customer)))
+    return bool(saved)
 
 def sync_page(store, shop, at=None):
     """One 50-customer page through the existing adapter, with incremental watermark.
@@ -58,10 +59,11 @@ def enrich_orders(store,shop,at=None):
       ON c.customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)
       LEFT JOIN crm_runtime_state r ON r.key='lifecycle-enrich:'||COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)
       WHERE COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) IS NOT NULL
-      AND (c.customer_id IS NULL OR c.verified_at<o.created_at OR c.verified_at<%s)
+      AND (c.customer_id IS NULL OR c.verified_at<GREATEST(o.created_at,o.remote_updated_at) OR c.verified_at<%s OR r.value->>'state'='QUEUED')
       AND COALESCE((r.value->>'retry_at')::timestamptz,'-infinity')<=%s
       AND NOT EXISTS(SELECT 1 FROM crm_suppressions s WHERE s.shopify_customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) AND s.reason='redacted')
-      GROUP BY COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) ORDER BY newest DESC LIMIT 5''',(at-timedelta(hours=6),at))
+      GROUP BY COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)
+      ORDER BY max(CASE WHEN r.value->>'state'='QUEUED' THEN 1 ELSE 0 END) DESC,newest DESC LIMIT 5''',(at-timedelta(hours=6),at))
     for row in rows:
         key='lifecycle-enrich:'+row['customer_id']
         with store.db() as conn:
@@ -73,7 +75,7 @@ def enrich_orders(store,shop,at=None):
         try:
             customer=shop.customer(row['customer_id'],fresh=True)
             if not customer or customer.get('id')!=row['customer_id']:raise ValueError('Customer verification unavailable')
-            cache_customer(store,customer,at)
+            if not cache_customer(store,customer,at):raise ValueError('Verified profile could not be cached')
             store.set_state(key,{'state':'VERIFIED','retry_at':(at+timedelta(minutes=5)).isoformat()})
         except Exception:
             store.set_state(key,{'state':'RETRY','retry_at':(at+timedelta(minutes=5)).isoformat()})

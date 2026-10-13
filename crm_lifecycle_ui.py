@@ -44,7 +44,8 @@ def audience(store,user,row):
         search=search_col.text_input('Search and filter',key=slot+'-search',placeholder='Customer, email or Shopify ID')
         from crm_post_purchase_audience import FILTERS as ORDER_FILTERS,selection,email_cells
         filter_by=filter_col.selectbox('Status',ORDER_FILTERS if kind=='post_purchase' else FILTERS,key=slot+'-filter')
-        sort=sort_col.selectbox('Sort',list(SORTS),index=2 if kind=='win_back' else 0,key=slot+'-sort')
+        sorts=[s for s in SORTS if kind!='post_purchase' or s in ('Newest','Oldest','Customer value','Sequence stage')]
+        sort=sort_col.selectbox('Sort',sorts,index=2 if kind=='win_back' else 0,key=slot+'-sort')
         with st.popover('Date filters'):
             start=st.date_input('From',value=None,key=slot+'-from')
             end=st.date_input('Through',value=None,key=slot+'-through')
@@ -62,7 +63,17 @@ def audience(store,user,row):
                 refresh_customers(store,user,st.session_state.get(slot+'-customers',[]))
             st.session_state[slot+'-refresh']=generation+1;st.rerun(scope='fragment')
         key=('lifecycle-audience',str(row['id']),criteria,page,generation)
-        records,phase=read(store,key,lambda:listing(store,row,search=search,filter_by=filter_by,sort=sort,start=begin,end=until,page=page),30)
+        records,phase=read(store,key,lambda:listing(store,row,search=search,filter_by=filter_by,sort=sort,start=begin,end=until,page=page),30,
+            wait_budget=.15 if kind=='post_purchase' else 0)
+        last=st.session_state.setdefault(slot+'-rows',{})
+        page_key=(criteria,page)
+        if records is not None:
+            last[page_key]=(now(),records)
+            while len(last)>8:last.pop(next(iter(last)))
+        elif page_key in last:
+            records=last[page_key][1]
+            if phase in ('LOADING','REFRESHING'):phase='REFRESHING'
+        if phase in ('LOADING','REFRESHING'):arm('lifecycle-audience',1)
         if records is None:
             st.caption('Loading audience…' if phase not in ('ERROR','TIMED_OUT') else 'Audience unavailable. Apply the audience migration and check background sync, then refresh.')
             if phase in ('LOADING','REFRESHING'):arm('lifecycle-audience',1)
@@ -81,7 +92,8 @@ def audience(store,user,row):
                 st.session_state['lifecycle-enroll-confirm']=(str(row['id']),list(selected))
             if actions[1].button('Clear selection',key=slot+'-clear',disabled=not selected):
                 st.session_state[slot+'-selected']=[];st.rerun(scope='fragment')
-            actions[2].caption(str(len(selected))+' orders selected'+(' · Draft selection does not send' if not can_add else ' · fresh eligibility checked by worker'))
+            actions[2].caption(str(len(selected))+' orders selected'+(' · Draft selection does not send' if row['status']=='DRAFT'
+                else ' · administrator approval required' if not os_accounts.is_admin(user) else ' · publish/resume before enrolling' if not can_add else ' · fresh eligibility checked by worker'))
             pending=st.session_state.get('lifecycle-enroll-confirm')
             if pending and pending[0]==str(row['id']):confirm_enrollment(store,user,*pending)
         labels=['Email','Consent','Flow','Stage','Last email','Next email']
@@ -106,9 +118,10 @@ def audience(store,user,row):
                     'Pending verification' if r['consent']=='UNVERIFIED' else r['consent'],
                     'Suppressed' if r['suppressed'] else r['flow_state'] or {'QUEUED':'Awaiting verification','CHECKING':'Verifying eligibility','FAILED':'Not eligible'}.get(r.get('enrollment_request_state'),'Not enrolled')]
                 cells=[dict(label=str(v or '—'),tone='muted',reason=r.get('enrollment_request_result') or '') for v in values]+email_cells({**r,'automation_status':row['status']},active_flow,at)
+                cells[4]['reason']='Shopify profile checked '+display(r['verified_at']) if r['verified_at'] else 'Awaiting authoritative Shopify marketing-consent verification'
             rows.append(dict(key=r['key'],customer=r['name'] or r['email'] or r['customer_id'] or 'Guest',created=display(r['audience_at']),created_full=display(r['audience_at']),cells=cells))
         component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
-        event=render_component(component,rows=rows,columns=columns,selected=selected,server_now=at,read_at=at,refresh_seconds=15,
+        event=render_component(component,rows=rows,columns=columns,selected=selected,server_now=at,read_at=last.get(page_key,(at,))[0],refresh_seconds=15,
             table_label=titles[kind],date_label={'welcome':'Subscribed','post_purchase':'Order date','win_back':'Last purchase'}[kind],
             empty_label='No matching '+titles[kind].lower(),phase=phase,key=slot+'-table',default=None)
         new_event=bool(event and event.get('sequence')!=st.session_state.get(slot+'-event'))

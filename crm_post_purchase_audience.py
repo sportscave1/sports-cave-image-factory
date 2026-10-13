@@ -18,11 +18,14 @@ ORDER_SQL="""WITH audience AS (
  FROM shopify_orders o LEFT JOIN crm_lifecycle_customers c ON c.customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id)
  LEFT JOIN LATERAL(SELECT COALESCE(bool_or(x.reason='redacted'),false) AS redacted,
    COALESCE(bool_or(x.active),false) AS suppressed FROM crm_suppressions x
-   WHERE x.shopify_customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) OR x.recipient_hash=c.recipient_hash) privacy ON true
+   WHERE x.shopify_customer_id=COALESCE(NULLIF(o.shopify_customer_id,''),o.customer_id) OR x.recipient_hash=c.recipient_hash
+     OR (COALESCE(NULLIF(o.customer_email,''),o.email,'')<>'' AND
+       x.recipient_hash=encode(sha256(convert_to(lower(trim(COALESCE(NULLIF(o.customer_email,''),o.email,''))),'UTF8')),'hex'))) privacy ON true
  LEFT JOIN LATERAL(SELECT id,status,stop_reason,current_step,steps,next_due_at FROM crm_automation_enrollments
    WHERE automation_id=%s AND trigger_shopify_id=o.shopify_order_id ORDER BY created_at DESC LIMIT 1) j ON true
 ), picked AS MATERIALIZED (SELECT * FROM audience WHERE __GUARDS__ ORDER BY __SORT__,key DESC LIMIT 51 OFFSET %s)
- SELECT p.*,0 AS order_count,
+ SELECT p.*,(SELECT count(*) FROM shopify_orders known WHERE COALESCE(NULLIF(known.shopify_customer_id,''),known.customer_id)=p.customer_id
+   AND upper(known.financial_status) IN ('PAID','PARTIALLY_REFUNDED') AND known.cancelled_at IS NULL) AS order_count,
  COALESCE(messages.sends,'[]'::jsonb) AS sends,request.value->>'state' AS enrollment_request_state,request.value->>'result' AS enrollment_request_result
  FROM picked p LEFT JOIN LATERAL(SELECT jsonb_agg(jsonb_build_object(
    'enrollment_id',s.enrollment_id,'step',s.step_index,'step_id',p.steps->s.step_index->>'step_id',
@@ -70,10 +73,16 @@ def email_cells(record,flow,at=None):
     schema=columns(flow.get('emails',[]));at=at or now()
     row={**record,'checkout_key':record['key'],'flow_status':record.get('flow_state'),
         'automation_status':record.get('automation_status','ACTIVE'),'analytics':{'email':record.get('email'),'shopify_abandoned':True}}
-    if record.get('enrollment_id'):return progress(row,schema,at)
+    if record.get('enrollment_id'):
+        values=progress(row,schema,at)
+        for index,col in enumerate(schema):
+            if values[index]['label']=='Suppressed' and not record['suppressed'] and record.get('stop_reason') in (
+                    'order_ineligible','superseded_by_latest_order','recent_purchase'):
+                values[index]=cell('Not eligible',reason=record['stop_reason'])
+        return values
     reason='Pending consent verification' if record['consent']=='UNVERIFIED' else 'Marketing consent required' if record['consent']!='SUBSCRIBED' else 'Not enrolled'
     if record['suppressed']:reason='Suppressed'
-    elif record.get('cancelled_at') or str(record.get('financial_status','')).upper()!='PAID':reason='Order not eligible for marketing'
+    elif record.get('cancelled_at') or str(record.get('financial_status','')).upper() not in ('PAID','PARTIALLY_REFUNDED'):reason='Order not eligible for marketing'
     if record.get('enrollment_request_state')=='FAILED':reason=record.get('enrollment_request_result') or 'Not eligible'
     return [cell('Disabled' if not col['enabled'] else 'Not eligible' if reason not in ('Not enrolled','Pending consent verification') else reason,
         reason=reason) for col in schema]

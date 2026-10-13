@@ -12,7 +12,7 @@ from crm_logic import now
 
 def state():return st.session_state.setdefault('automation_analytics_reads',{})
 
-def read(store,key,fn,ttl=180):
+def read(store,key,fn,ttl=180,*,wait_budget=0):
     def verified():
         value=fn()
         if key[0] in ('analytics-report','flow-summary'):
@@ -20,8 +20,9 @@ def read(store,key,fn,ttl=180):
             if not isinstance(value,list) or len(value)!=1 or not isinstance(value[0],dict) or any(value[0].get(k) is None for k in required):raise ValueError('Incomplete analytics report')
         return value
     future=job(state(),store,key,verified,ttl=ttl)
-    if key[0] in ('analytics-definition','checkout-list') and future is not None and not future.done():
-        try:future.result(timeout=.05)
+    budget=.05 if key[0] in ('analytics-definition','checkout-list') else wait_budget
+    if budget and future is not None and not future.done():
+        try:future.result(timeout=budget)
         except Exception:pass
     data,phase=resolve(state(),store,key,future)
     if phase in ('LOADING','REFRESHING') or (key[0]=='checkout-list' and phase=='NOT_STARTED'):

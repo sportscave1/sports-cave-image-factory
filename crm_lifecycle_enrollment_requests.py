@@ -30,18 +30,20 @@ def request(store,user,identity,orders,*,confirmed=False):
         require_ready(store,row,conn=conn,published=True)
         records=conn.execute('SELECT shopify_order_id,COALESCE(NULLIF(shopify_customer_id,\'\'),customer_id) AS customer_id FROM shopify_orders WHERE shopify_order_id=ANY(%s)',(orders,)).fetchall()
         if len(records)!=len(orders):raise ValueError('Selected orders changed; refresh the table')
-        results=[]
+        payload=[]
         for order in records:
             if not order['customer_id']:raise ValueError('Selected order has no Shopify customer; cannot verify marketing eligibility')
             key=PREFIX+str(identity)+':'+order['shopify_order_id']
             value=dict(automation_id=str(identity),order_id=order['shopify_order_id'],customer_id=order['customer_id'],
                 published_version=row['config']['published_version'],actor=str(user.get('id') or 'administrator'),
                 confirmed=True,requested_at=now().isoformat(),state='QUEUED',result='Awaiting fresh eligibility verification')
-            saved=conn.execute('''INSERT INTO crm_runtime_state AS prior(key,value) VALUES(%s,%s::jsonb)
-              ON CONFLICT(key) DO UPDATE SET value=excluded.value||jsonb_build_object('previous',prior.value),updated_at=now()
-              WHERE prior.value->>'state'='FAILED' RETURNING value''',(key,json.dumps(value))).fetchone()
-            results.append((saved or conn.execute('SELECT value FROM crm_runtime_state WHERE key=%s',(key,)).fetchone())['value'])
-        return results
+            payload.append({'key':key,'value':value})
+        results=conn.execute('''INSERT INTO crm_runtime_state AS prior(key,value)
+          SELECT key,value FROM jsonb_to_recordset(%s::jsonb) AS input(key text,value jsonb)
+          ON CONFLICT(key) DO UPDATE SET
+            value=CASE WHEN prior.value->>'state'='FAILED' THEN excluded.value||jsonb_build_object('previous',prior.value) ELSE prior.value END,
+            updated_at=CASE WHEN prior.value->>'state'='FAILED' THEN now() ELSE prior.updated_at END RETURNING value''',(json.dumps(payload),)).fetchall()
+        return [r['value'] for r in results]
 
 
 def tick(store,shop,at=None):

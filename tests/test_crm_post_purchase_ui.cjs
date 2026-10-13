@@ -1,0 +1,54 @@
+// Actual Streamlit lifecycle UI + shared iframe + disposable PostgreSQL.
+const {chromium}=require('playwright'),assert=require('node:assert/strict');
+(async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
+ const page=await browser.newPage({viewport:{width:1366,height:900}});
+ await page.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ const start=performance.now();await page.goto('http://127.0.0.1:18735');
+ await page.getByText('Orders',{exact:true}).waitFor({timeout:40000});const ready=performance.now();
+ await page.getByText('Orders',{exact:true}).click({timeout:40000});
+ const frame=page.frameLocator('iframe').first();await frame.locator('tbody tr').first().waitFor({timeout:40000});
+ const firstPaint=performance.now()-start;
+ const audiencePaint=performance.now()-ready;
+ assert.equal(await frame.locator('tbody tr').count(),50);
+ const headers=await frame.locator('th').allTextContents();
+ for(const label of ['Order date','Order','Email','Payment','Fulfilment','Marketing consent','Flow','Email 1','Email 2','Email 3'])assert.ok(headers.includes(label),label);
+ await frame.locator('tbody input[type=checkbox]').first().check();
+ await page.getByText('1 orders selected',{exact:false}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Add to Flow',exact:true}).isEnabled(),true);
+ assert.equal(await frame.locator('thead input[type=checkbox]').evaluate(e=>e.indeterminate),true);
+ await frame.locator('thead input[type=checkbox]').check();
+ await page.getByText('50 orders selected',{exact:false}).waitFor();
+ await frame.locator('tbody input[type=checkbox]').first().uncheck();
+ await page.getByText('49 orders selected',{exact:false}).waitFor();
+ await page.getByRole('button',{name:'Next',exact:true}).click();
+ await page.getByText('Page 2',{exact:false}).waitFor();assert.equal(await frame.locator('tbody tr').count(),5);
+ await frame.locator('tbody input[type=checkbox]').first().check();
+ await page.getByText('50 orders selected',{exact:false}).waitFor();
+ const warmStart=performance.now();await page.getByRole('button',{name:'Previous',exact:true}).click();
+ await page.getByText('Page 1',{exact:false}).waitFor();
+ assert.equal(await frame.locator('tbody input[type=checkbox]:checked').count(),49);
+ const warmPage=performance.now()-warmStart;
+ const search=page.getByRole('textbox',{name:'Search and filter'}),prefix=await search.inputValue();
+ await search.fill(prefix+'-0');await search.press('Enter');
+ await frame.locator('tbody tr').first().waitFor();
+ await page.waitForFunction(()=>document.querySelector('iframe')?.contentDocument?.querySelectorAll('tbody tr').length===1);
+ await frame.locator('tbody input[type=checkbox]').first().check();await page.getByText('51 orders selected',{exact:false}).waitFor();
+ await search.fill(prefix);await search.press('Enter');
+ await page.getByRole('combobox').first().click();await page.getByRole('option',{name:'Paid',exact:true}).click();
+ await page.getByText('51 orders selected',{exact:false}).waitFor();
+ await page.getByRole('button',{name:'Add to Flow',exact:true}).click();
+ await page.getByRole('button',{name:'Confirm Add to Flow',exact:true}).waitFor();
+ assert.ok((await page.getByText('original verified payment time',{exact:false}).textContent()).includes('configured delays'));
+ await page.getByRole('button',{name:'Confirm Add to Flow',exact:true}).click();
+ await page.getByText('0 orders selected',{exact:false}).waitFor();
+ for(const width of [390,320]){await page.setViewportSize({width,height:900});
+  assert.equal(await frame.locator('body').evaluate(()=>document.documentElement.scrollWidth>document.documentElement.clientWidth),false);}
+ const draft=await browser.newPage();await draft.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
+ await draft.goto('http://127.0.0.1:18735?mode=draft');await draft.getByText('Orders',{exact:true}).click({timeout:40000});
+ const draftTable=draft.frameLocator('iframe').first();await draftTable.locator('tbody tr').first().waitFor({timeout:40000});
+ await draftTable.locator('tbody input[type=checkbox]').first().check();await draft.getByText('1 orders selected',{exact:false}).waitFor();
+ assert.equal(await draft.getByRole('button',{name:'Add to Flow',exact:true}).isDisabled(),true);
+ await draft.close();
+ console.log(JSON.stringify({fixture_startup_and_first_table_ms:Math.round(firstPaint),audience_first_table_ms:Math.round(audiencePaint),warm_page_ms:Math.round(warmPage),rows:55,
+  passed:'individual/header/indeterminate/deselect/search/filter/page persistence/explicit confirmed durable request/mobile'}));
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});
