@@ -120,13 +120,23 @@ html[data-sc-table-host="uploads"] .upload-row { background: var(--sc-table-pape
 html[data-sc-table-host="uploads"] .upload-row:hover { background: var(--sc-table-hover); }
 html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
 </style>
+<style>
+/* Order-only overrides: the working checkout table retains its original geometry. */
+html[data-orders] .wrap :is(td,th){height:32px;padding:5px 7px;font-size:12px}
+html[data-orders] .wrap :is(td,th):first-child{padding:4px 6px}
+html[data-orders] .wrap :is(td,th):nth-child(2){min-width:140px;max-width:210px}
+html[data-orders] .customer{max-width:190px}
+html[data-orders] .email{min-width:78px}
+html[data-orders] .wrap :is(td,th):nth-child(3){min-width:132px;width:132px}
+html[data-orders] .freshness:empty{display:none}
+</style>
 </head><body><div id="root"></div><script>
 'use strict';
 let args={},page=0,selected=new Set(),structure='',seq=0,timer=null,inView=true;
 let serverEpoch=0,clockAnchor=0,lastPoll=0,frameHeight=0;
 const nodes=new Map(),root=document.getElementById('root');
 const send=(type,data)=>parent.postMessage({isStreamlitMessage:true,type,...data},'*');
-function event(detail=null,retry=null,refresh=false){send('streamlit:setComponentValue',{value:{selected:[...selected],detail,retry,refresh,sequence:Date.now()+':'+(++seq)},dataType:'json'});}
+function event(detail=null,retry=null,refresh=false,clear=false){send('streamlit:setComponentValue',{value:{selected:[...selected],detail,retry,refresh,sequence:Date.now()+':'+(++seq),...(args.presentation==='orders'?{context:args.selection_context,clear_selection:clear}:{})},dataType:'json'});}
 function cell(tr,text,tag='td'){const el=document.createElement(tag);el.textContent=text;tr.append(el);return el;}
 function text(el,value){if(el.textContent!==value)el.textContent=value;}
 function height(){const h=Math.min(710,root.scrollHeight+5);if(h!==frameHeight){frameHeight=h;send('streamlit:setFrameHeight',{height:h});}}
@@ -136,7 +146,7 @@ function remaining(due){const seconds=Math.max(0,Math.ceil((Date.parse(due)-serv
  if(seconds<86400)return Math.floor(seconds/3600)+'h '+Math.floor(seconds%3600/60)+'m';
  return Math.floor(seconds/86400)+'d '+Math.floor(seconds%86400/3600)+'h';}
 function shownRows(){return (args.rows||[]).slice(page*50,page*50+50);}
-function selection(){const shown=shownRows(),all=root.querySelector('thead input');if(all){all.checked=shown.length>0&&shown.every(r=>selected.has(r.key));all.indeterminate=shown.some(r=>selected.has(r.key))&&!all.checked;}
+function selection(){const shown=shownRows(),all=root.querySelector('thead input');if(all){all.checked=shown.length>0&&shown.every(r=>selected.has(r.key));all.indeterminate=(args.presentation==='orders'?selected.size>0:shown.some(r=>selected.has(r.key)))&&!all.checked;}
  for(const r of shown){const n=nodes.get(r.key);if(n)n.check.checked=selected.has(r.key);}}
 function requestProgress(el,r){const p=r.enrollment_progress||{};
  // Delivery state belongs in its email cell; only actionable request feedback goes here.
@@ -150,7 +160,8 @@ function render(){const rows=args.rows||[],cols=args.columns||[],count=Math.ceil
   const wrap=document.createElement('div');wrap.className='wrap';wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',args.table_label||'Checkout email progress');root.append(wrap);
   const table=document.createElement('table');table.setAttribute('aria-label',args.table_label||'Abandoned checkout email flow');wrap.append(table);
   const head=table.createTHead().insertRow(),th=cell(head,'','th'),all=document.createElement('input');all.type='checkbox';all.setAttribute('aria-label',args.table_label?'Select visible records':'Select visible checkouts');
-  all.onchange=()=>{shownRows().forEach(r=>all.checked?selected.add(r.key):selected.delete(r.key));selection();event()};th.append(all);
+  all.title=args.presentation==='orders'?'Select visible orders; uncheck to deselect all orders across pages':'';
+  all.onchange=()=>{const clear=args.presentation==='orders'&&(!all.checked||!shownRows().length);if(clear)selected.clear();else shownRows().forEach(r=>all.checked?selected.add(r.key):selected.delete(r.key));selection();event(null,null,false,clear)};th.append(all);
   cell(head,'Customer','th');cell(head,args.date_label||'Created','th');for(const col of cols){const h=cell(head,col.label,'th');h.title=col.name+(col.enabled?'':' · Disabled for new enrollments');h.scope='col';h.className='email';}
   const body=table.createTBody();for(const r of shown){const tr=body.insertRow(),check=document.createElement('input');check.type='checkbox';check.setAttribute('aria-label','Select '+r.customer);
    check.onchange=()=>{check.checked?selected.add(r.key):selected.delete(r.key);selection();event()};cell(tr,'').append(check);
@@ -173,7 +184,7 @@ function render(){const rows=args.rows||[],cols=args.columns||[],count=Math.ceil
 function tick(poll=true){if(document.hidden||!inView)return;
  for(const n of nodes.values())for(const td of n.cells)if(td.dataset.due)text(td,remaining(td.dataset.due));
  const fresh=root.querySelector('.freshness'),age=serverTime()-Date.parse(args.read_at||args.server_now);
- if(fresh)text(fresh,args.phase==='ERROR'||(args.refresh_seconds!==0&&age>45000)?(args.table_label?'Status update delayed — last verified records shown. Refresh audience to retry.':'Status update delayed — last verified records shown. Refresh checkout details to retry.'):'');
+ if(fresh)text(fresh,args.phase==='ERROR'||(args.refresh_seconds!==0&&age>45000)?(args.presentation==='orders'?'Status update delayed — saved records shown; background retry continues.':args.table_label?'Status update delayed — last verified records shown. Refresh audience to retry.':'Status update delayed — last verified records shown. Refresh checkout details to retry.'):'');
  if(poll&&args.refresh_seconds!==0&&args.server_now&&performance.now()-lastPoll>=Math.max(15,Number(args.refresh_seconds)||15)*1000){lastPoll=performance.now();event(null,null,true)}
  height();
 }
@@ -183,7 +194,8 @@ function visibility(){stop();if(!document.hidden)start();}
 function message(e){if(e.source!==parent||e.data.type!=='streamlit:render')return;
  const first=!args.server_now,oldKeys=JSON.stringify((args.rows||[]).map(r=>r.key));args=e.data.args;
  if(oldKeys!==JSON.stringify((args.rows||[]).map(r=>r.key)))page=0;
- selected=new Set((args.selected||[]).filter(k=>(args.rows||[]).some(r=>r.key===k)));
+ document.documentElement.toggleAttribute('data-orders',args.presentation==='orders');
+ selected=new Set(args.presentation==='orders'?(args.selected||[]):(args.selected||[]).filter(k=>(args.rows||[]).some(r=>r.key===k)));
  serverEpoch=Date.parse(args.server_now)||Date.now();clockAnchor=performance.now();if(first)lastPoll=performance.now();render();start();
 }
 const observer=new IntersectionObserver(entries=>{inView=entries.some(e=>e.isIntersecting);if(inView)start();else stop()});observer.observe(root);

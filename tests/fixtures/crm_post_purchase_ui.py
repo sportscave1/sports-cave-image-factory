@@ -3,6 +3,7 @@ import sys,os
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import streamlit as st
+st.set_page_config(layout='wide')
 from copy import deepcopy
 from datetime import timedelta
 from crm_logic import now
@@ -29,8 +30,26 @@ if 'fixture' not in st.session_state:
             normalized={'shop':'fixture.myshopify.com','payload_version':'2026-04'})
     case.shop.customer.side_effect=lambda identity,**_:deepcopy(customers.get(identity))
     case.shop.orders.side_effect=lambda identity,**_:dict(nodes=deepcopy(orders.get(identity,[])),pageInfo={'hasNextPage':False})
+    from crm_lifecycle_audience import cache_customer
+    for cid,profile in list(customers.items())[:5]:cache_customer(case.store,profile,now())
+    for i,identity in enumerate(ids):case.store.q('UPDATE shopify_orders SET order_name=%s WHERE shopify_order_id=%s',('#Fixture'+str(3285+i),identity))
+    st.session_state['fixture_metrics']={'reads':0,'elapsed_ms':[]}
+    original=case.store.q
+    def measured(sql,*args,**kwargs):
+        from time import perf_counter
+        at=perf_counter();result=original(sql,*args,**kwargs)
+        if 'WITH audience AS' in sql:
+            metrics=measurement
+            metrics['reads']+=1;metrics['elapsed_ms'].append(round((perf_counter()-at)*1000,2))
+        return result
+    measurement=st.session_state['fixture_metrics']
+    case.store.q=measured
     st.session_state['fixture']=(case,active)
     st.session_state['lifecycle-'+str(active['id'])+'-search']=case.prefix
 case,active=st.session_state['fixture']
 audience(case.store,ADMIN,case.store.flow(active['id']))
 st.caption('Synthetic local fixture · no production connection or delivery worker')
+if st.button('Fixture background order update'):
+    case.store.q('UPDATE shopify_orders SET fulfillment_status=%s WHERE customer_email LIKE %s',('FULFILLED',case.prefix+'%'))
+import json
+with st.container(key='fixture-metrics'):st.text(json.dumps(st.session_state['fixture_metrics']))

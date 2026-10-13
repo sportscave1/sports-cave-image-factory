@@ -62,10 +62,20 @@ def selection(state,slot,keys,event):
     selected=set(state.get(slot+'-selected',[]))
     if event and event.get('sequence')!=state.get(slot+'-event'):
         state[slot+'-event']=event.get('sequence')
-        selected.difference_update(keys);selected.update(k for k in event.get('selected',[]) if k in keys)
+        if event.get('clear_selection') is True:selected.clear()
+        else:
+            selected.difference_update(keys);selected.update(k for k in event.get('selected',[]) if k in keys)
         state[slot+'-selected']=sorted(selected)
         if event.get('detail') in keys:state[slot+'-detail']=event['detail']
     return sorted(selected)
+
+
+def add_candidate(record):
+    """Local presentation hint only; the confirmed worker rechecks authority."""
+    return bool(record.get('customer_id') and record.get('consent')=='SUBSCRIBED'
+        and not record.get('suppressed') and not record.get('cancelled_at')
+        and str(record.get('financial_status','')).upper() in ('PAID','PARTIALLY_REFUNDED')
+        and not record.get('enrollment_id') and record.get('enrollment_request_state') not in ('QUEUED','CHECKING','COMPLETE'))
 
 
 def email_cells(record,flow,at=None):
