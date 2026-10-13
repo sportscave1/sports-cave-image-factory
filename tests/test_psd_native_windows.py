@@ -79,6 +79,6 @@ class NativePhotoshopWindowsTests(unittest.TestCase):
             result=json.loads(run.stdout)
             self.assertTrue(result['defaultApp']);self.assertEqual(result['verified'],'verified');self.assertEqual(result['unavailablePhotoshop'],'photoshop_unavailable')
             self.assertEqual(result['stale'],'master_sync_pending');self.assertEqual(result['missing'],'master_not_synced');self.assertEqual(result['review'],'master_scope_denied');self.assertEqual(result['traversal'],'unsafe_path');self.assertEqual(result['untrustedGrant'],'master_required')
-            self.assertEqual(result['launchSpec']['executable'],'Photoshop.exe');self.assertEqual(result['launchSpec']['arguments'],'"'+str(target)+'"');self.assertFalse(result['launchSpec']['shell']);self.assertEqual(result['launchSpec']['version'],10)
+            self.assertEqual(result['launchSpec']['executable'],'Photoshop.exe');self.assertEqual(result['launchSpec']['arguments'],'"'+str(target)+'"');self.assertFalse(result['launchSpec']['shell']);self.assertEqual(result['launchSpec']['version'],11)
             self.assertEqual(target.read_bytes(),data)
             print('Actual Windows helper: compiled, >4MB content hash verified, Photoshop.exe launch specification validated; no Photoshop process or real master was opened.')

@@ -44,3 +44,11 @@ or credentials.
 ## Uninstall
 
 Run `%LOCALAPPDATA%\SportsCaveFilesHelper\Uninstall.ps1` with PowerShell.
+
+## Native opening V2 (helper 11)
+
+Normal Windows Edge/Chrome can invoke the existing registered `sports-cave-files` protocol with an account-bound single-use code. Refresh the existing helper with `Install.cmd` to register version 11; no new desktop application or local HTTP listener is added. Browser permission prompts cannot be bypassed. Sign in to Desktop with the same Files-authorised account; browser cookies are never copied into Desktop. A compact helper window shows progress/errors and offers cancellation.
+
+Native Open uses Windows file associations; Open With uses the genuine Windows chooser. Verified local Dropbox files are read/hydrated and never modified. When unavailable or stale, the existing managed cache streams the pinned Dropbox ID/revision and verifies its content hash before opening. Repeated valid files are not downloaded again. No association is changed automatically. Legacy Photoshop v10 operations and the existing WebView2 bridge remain available.
+
+The code expires in two minutes, is single-use, and is never a transfer credential. It is passed in a URL fragment, removed from the helper page history, and not logged by the server. Redemption requires the same active account/session version and Files permission. Helper origins are allowlisted, server paths are derived from current Dropbox metadata, redirects are refused, unsafe paths and executable types are denied. No Dropbox write-back occurs.

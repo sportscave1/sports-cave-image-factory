@@ -22,12 +22,12 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("10.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("10.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("11.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("11.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 10;
+    internal const int HelperVersion = 11;
     internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
     private const string MutexName = @"Local\SportsCaveOSDesktop-v9";
     private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v9";
@@ -60,6 +60,18 @@ internal static class Program
             if (Uri.IsWellFormedUriString(protocol, UriKind.Absolute))
             {
                 Uri request = new Uri(protocol);
+                if (request.Scheme == "sports-cave-files" && request.Host == "launch")
+                {
+                    var launchConfig = DesktopConfig.Load();
+                    string launchUrl = BrowserFileLaunch.Resolve(request, launchConfig);
+                    var launchApp = new System.Windows.Application();
+                    var launchWindow = new DesktopWindow(launchConfig, launchUrl, false);
+                    launchWindow.Title = "Sports Cave — Open file";
+                    launchWindow.Width = 580; launchWindow.Height = 360;
+                    launchWindow.MinWidth = 420; launchWindow.MinHeight = 300;
+                    launchApp.Run(launchWindow);
+                    return 0;
+                }
                 if ((request.Scheme == "sports-cave-files" || request.Scheme == "sports-cave-photoshop")
                     && request.Host == "open")
                 {
@@ -717,7 +729,7 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
-                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openWith", "appDefaults", "openPhotoshop", "openPsdApp", "openViewer", "folders", "cancel" } },
+                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openWith", "verifiedOpen", "appDefaults", "openPhotoshop", "openPsdApp", "openViewer", "folders", "cancel" } },
                 });
                 return;
             }
@@ -855,7 +867,10 @@ internal sealed class DesktopWindow : Window
                 {
                     foreach (string path in paths)
                     {
-                        Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                        if (File.Exists(path)) NativeFileOpening.CheckType(path);
+                        cancellation.Token.ThrowIfCancellationRequested();
+                        try { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
+                        catch (System.ComponentModel.Win32Exception) { throw new DesktopException("application_unavailable", "Windows could not open the file. Use Open With to choose an installed application, or check file permissions."); }
                     }
                     Reply(action, requestId, true, new Dictionary<string, object>
                     {
@@ -1034,7 +1049,7 @@ internal sealed class NativeCache
     private readonly string root;
     private readonly string localRoot;
     private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
-    private readonly HttpClient client = new HttpClient();
+    private readonly HttpClient client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
 
     internal NativeCache(string configuredRoot = "")
     {
@@ -1045,6 +1060,7 @@ internal sealed class NativeCache
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "SportsCaveOS", "FileCache")
             : Path.GetFullPath(testRoot);
+        client.Timeout = Timeout.InfiniteTimeSpan; // Large streams remain cancellable; never buffer a master.
         localRoot = ResolveConfiguredRoot(configuredRoot);
         Directory.CreateDirectory(root);
         CleanupExpired();
@@ -1101,6 +1117,8 @@ internal sealed class NativeCache
                 + Uri.EscapeDataString(grant.Ticket),
             grant.Secret,
             cancellation);
+        if (manifest.ContainsKey("purpose") && Convert.ToString(manifest["purpose"]) == "native_open")
+            return await MaterializeNativeOpenAsync(grant, manifest, cancellation, progress);
         string[] localPaths = ResolveLocalRoots(manifest);
         if (localPaths.Length > 0)
         {
@@ -1186,6 +1204,99 @@ internal sealed class NativeCache
             try { File.Delete(Path.Combine(lease, ".active")); } catch { }
             throw;
         }
+    }
+
+    internal async Task<string[]> MaterializeNativeOpenAsync(TransferGrant grant,
+        Dictionary<string,object> manifest, CancellationToken cancellation, Action<long,long,string> progress)
+    {
+        var items = manifest.ContainsKey("items") ? manifest["items"] as IList : null;
+        var entries = manifest.ContainsKey("roots") ? manifest["roots"] as IList : null;
+        if (items == null || entries == null || items.Count != 1 || entries.Count != 1)
+            throw new DesktopException("manifest_invalid", "Select one verified file for native opening.");
+        var item = items[0] as Dictionary<string,object>;
+        var entry = entries[0] as Dictionary<string,object>;
+        if (item == null || entry == null || Convert.ToBoolean(item["is_directory"]) || Convert.ToBoolean(entry["is_directory"])
+            || !item.ContainsKey("content_hash") || !item.ContainsKey("dropbox_id")
+            || !System.Text.RegularExpressions.Regex.IsMatch(Convert.ToString(item["dropbox_id"]), "^id:[A-Za-z0-9_-]+$")
+            || !IsHex(Convert.ToString(item["content_hash"]),64) || !IsHex(Convert.ToString(item["cache_key"]),64)
+            || String.IsNullOrEmpty(Convert.ToString(item["revision"]))
+            || !String.Equals(Convert.ToString(entry["revision"]),Convert.ToString(item["revision"]),StringComparison.Ordinal))
+            throw new DesktopException("manifest_invalid", "The file identity/revision cannot be verified.");
+        string name = SafeLocalRelativePath(Convert.ToString(item["name"]));
+        string relative = SafeLocalRelativePath(Convert.ToString(entry["source_relative_path"]));
+        if (name.IndexOf(Path.DirectorySeparatorChar) >= 0 || !Path.GetFileName(relative).Equals(name,StringComparison.Ordinal))
+            throw new DesktopException("unsafe_path", "The selected file location is invalid.");
+        foreach (string segment in relative.Split(Path.DirectorySeparatorChar))
+            if (segment.EndsWith(".") || segment.EndsWith(" "))
+                throw new DesktopException("unsafe_path", "This filename cannot be safely opened on Windows. Use browser Download.");
+        NativeFileOpening.CheckType(name);
+        long size = Convert.ToInt64(item["size"]);
+        if (size < 0) throw new DesktopException("manifest_invalid", "Invalid file size.");
+        string hash = Convert.ToString(item["content_hash"]);
+        if (progress != null) progress(0,size,name);
+        if (!String.IsNullOrWhiteSpace(localRoot))
+        {
+            string synced = Path.GetFullPath(Path.Combine(localRoot,relative));
+            EnsureInside(localRoot,synced);
+            if (File.Exists(synced))
+            {
+                try {
+                    await NativePhotoshop.VerifyMasterAsync(synced,localRoot,size,hash,cancellation);
+                    if (progress != null) progress(size,size,name);
+                    return new[] {synced};
+                }
+                catch (DesktopException error) {
+                    // A stale/missing/cloud-offline local revision is never opened or changed.
+                    if (error.Code != "master_sync_pending" && error.Code != "master_hydration_failed") throw;
+                }
+            }
+        }
+        string cacheKey = Convert.ToString(item["cache_key"]);
+        string folder = Path.Combine(root,"objects",cacheKey.Substring(0,2),cacheKey);
+        string target = Path.Combine(folder,name);
+        Directory.CreateDirectory(folder); EnsureInside(root,target);
+        // Validate the resolved directory before any cache write (reject reparse/symlink escape).
+        string directory = folder;
+        while (directory.Length >= root.Length) {
+            if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                throw new DesktopException("unsafe_path", "The cache folder is not safe.");
+            if (directory.Equals(root,StringComparison.OrdinalIgnoreCase)) break;
+            directory = Path.GetDirectoryName(directory);
+        }
+        if (!File.Exists(target))
+        {
+            // Filename changes do not invalidate an immutable ID/revision cache object.
+            foreach (string prior in Directory.GetFiles(folder))
+            {
+                if (!Path.GetExtension(prior).Equals(Path.GetExtension(name),StringComparison.OrdinalIgnoreCase)) continue;
+                try {
+                    await NativePhotoshop.VerifyMasterAsync(prior,root,size,hash,cancellation);
+                    if (!NativeMethods.CreateHardLink(target,prior,IntPtr.Zero)) target = prior;
+                    break;
+                } catch (DesktopException error) {if (error.Code != "master_sync_pending") throw;}
+            }
+        }
+        if (File.Exists(target))
+        {
+            try {
+                await NativePhotoshop.VerifyMasterAsync(target,root,size,hash,cancellation);
+                if (progress != null) progress(size,size,name);
+                return new[] {target};
+            } catch (DesktopException error) {
+                if (error.Code != "master_sync_pending") throw;
+            }
+        }
+        string partial = target+".partial-"+Guid.NewGuid().ToString("N");
+        try {
+            await Download(grant.BaseUrl+"/api/files-native-transfer/content?ticket="+Uri.EscapeDataString(grant.Ticket)
+                +"&item="+Uri.EscapeDataString(Convert.ToString(item["token"])),grant.Secret,partial,cancellation,
+                delegate(long done) {if (progress != null) progress(done,size,name);});
+            await NativePhotoshop.VerifyMasterAsync(partial,root,size,hash,cancellation);
+            cancellation.ThrowIfCancellationRequested();
+            if (File.Exists(target)) File.Delete(target);
+            File.Move(partial,target);
+            return new[] {target};
+        } finally {if (File.Exists(partial)) File.Delete(partial);}
     }
 
     private static string ResolveConfiguredRoot(string value)
@@ -1587,9 +1698,14 @@ internal static class NativeFileOpening
     [DllImport("shell32.dll",CharSet=CharSet.Unicode)]
     private static extern int SHOpenWithDialog(IntPtr owner,ref OpenAsInfo info);
     private static readonly HashSet<string> Blocked = new HashSet<string>(new[] { ".appref-ms",".application",".bat",".chm",".cmd",".com",".cpl",".dll",".exe",".gadget",".hta",".inf",".ins",".isp",".jar",".js",".jse",".lnk",".msc",".msi",".msp",".mst",".pif",".ps1",".py",".pyw",".reg",".scr",".sct",".shb",".shs",".url",".vbs",".vbe",".website",".ws",".wsc",".wsf" },StringComparer.OrdinalIgnoreCase);
+    internal static void CheckType(string path)
+    {
+        if (Blocked.Contains(Path.GetExtension(path.TrimEnd(' ','.'))))
+            throw new DesktopException("file_type_denied", "This file type cannot be opened by the desktop helper.");
+    }
     internal static OpenAsInfo OptionsFor(string path)
     {
-        if (!File.Exists(path) || Blocked.Contains(Path.GetExtension(path)))
+        if (!File.Exists(path) || Blocked.Contains(Path.GetExtension(path.TrimEnd(' ','.'))))
             throw new DesktopException("open_with_denied","This file cannot be opened with the application chooser.");
         return new OpenAsInfo { File=path,Class=null,Flags=4 }; // OAIF_EXEC only; never register/force defaults.
     }
@@ -1599,5 +1715,30 @@ internal static class NativeFileOpening
         OpenAsInfo info=OptionsFor(path);int result=SHOpenWithDialog(owner,ref info);
         if (result == unchecked((int)0x800704C7) || result == 1) throw new DesktopException("cancelled","Open With cancelled.");
         if (result < 0) throw new DesktopException("open_with_unavailable","Windows could not show Open With. Download the file or use Open With in File Explorer.");
+    }
+}
+
+// Browser launch contains only a short-lived, account-bound one-use code; never paths or grant secrets.
+internal static class BrowserFileLaunch
+{
+    internal static string Resolve(Uri uri, DesktopConfig config)
+    {
+        if (uri.Scheme != "sports-cave-files" || uri.Host != "launch" || uri.AbsolutePath != ""
+            && uri.AbsolutePath != "/" || !String.IsNullOrEmpty(uri.UserInfo) || uri.Port != -1)
+            throw new DesktopException("invalid_launch", "The desktop launch is invalid.");
+        string query = uri.Query.TrimStart('?');
+        if (!query.StartsWith("origin=",StringComparison.Ordinal) || query.IndexOf('&') >= 0)
+            throw new DesktopException("invalid_launch", "The desktop launch is invalid.");
+        string origin = Uri.UnescapeDataString(query.Substring(7));
+        Uri source;
+        if (!Uri.TryCreate(origin,UriKind.Absolute,out source) || !config.Allows(origin)
+            || !String.IsNullOrEmpty(source.UserInfo) || source.AbsolutePath != "/"
+            || !String.IsNullOrEmpty(source.Query) || !String.IsNullOrEmpty(source.Fragment)
+            || !(source.Scheme == "https" || source.IsLoopback && source.Scheme == "http"))
+            throw new DesktopException("launch_origin_denied", "This desktop launch origin is not authorised.");
+        string code = uri.Fragment.TrimStart('#');
+        if (!System.Text.RegularExpressions.Regex.IsMatch(code,"^[A-Za-z0-9_-]{43}$"))
+            throw new DesktopException("invalid_launch", "The desktop launch is invalid or expired.");
+        return source.GetLeftPart(UriPartial.Authority)+"/files-native-launch#"+code;
     }
 }

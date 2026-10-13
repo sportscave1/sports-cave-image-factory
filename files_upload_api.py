@@ -1969,13 +1969,22 @@ async def native_transfer_content(request: Request):
                 status_code=400,
                 code="transfer_item_invalid",
             )
-        metadata, upstream = await run_in_threadpool(
-            dropbox_integration.get_file_response,
-            record.access_token,
-            item["dropbox_path"],
-        )
+        if record.purpose == "native_open":
+            metadata, upstream = await run_in_threadpool(dropbox_integration.get_psd_file_response,
+                record.access_token, item["dropbox_id"], item["revision"])
+        else:
+            metadata, upstream = await run_in_threadpool(
+                dropbox_integration.get_file_response,
+                record.access_token,
+                item["dropbox_path"],
+            )
         current_id = str(metadata.get("id") or "")
         current_revision = str(metadata.get("rev") or metadata.get("content_hash") or "")
+        if record.purpose == "native_open" and (current_id != item["dropbox_id"] or current_revision != item["revision"]
+                or str(metadata.get("content_hash") or "") != item["content_hash"]):
+            upstream.close()
+            upstream = None
+            raise FilesUploadError("The exact selected revision could not be verified. Refresh Files and retry.", status_code=409, code="item_changed")
         if (
             item["dropbox_id"]
             and current_id
@@ -2502,6 +2511,8 @@ async def download_product_psd(request: Request):
         return _psd_error_page(message,reference,status)
 
 
+from files_native_launch import prepare as prepare_native_open, claim as claim_native_open, page as native_open_page
+
 FILES_UPLOAD_ROUTES = (
     ("/files-psd-picker", psd_picker_page, ("GET",)),
     ("/api/files-psd-options", psd_picker_options, ("GET",)),
@@ -2509,6 +2520,10 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-psd-open", open_product_psd, ("GET", "POST")),
     ("/api/files-psd-original", download_product_psd, ("GET",)),
     ("/files-window", files_window_page, ("GET",)),
+    ("/files-native-launch", native_open_page, ("GET",)),
+    ("/api/files-native-open", prepare_native_open, ("POST",)),
+    ("/api/files-native-launch", prepare_native_open, ("POST",)),
+    ("/api/files-native-launch/claim", claim_native_open, ("POST", "DELETE")),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),
     ("/api/files-list", list_files, ("GET",)),
     ("/api/files-folder", create_files_folder, ("POST",)),

@@ -1719,16 +1719,17 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         })).filter(item => item.path);
       }
 
-      async function createDesktopTransfer(items) {
+      async function createDesktopTransfer(items, action = "") {
         const selected = transferSelection(items);
         if (!selected.length || selected.length > 100) {
           showToast("Select between 1 and 100 items for Windows Copy.", { kind: "error", duration: 5000 });
           throw desktopError("Select between 1 and 100 items.", "invalid_selection");
         }
-        const grant = await apiJson("/api/files-native-transfer", {
+        const verifiedOpen = hasDesktopCapability("verifiedOpen") && ["openFile","openWith"].includes(action) && items.length === 1 && items[0].tag !== "folder";
+        const grant = await apiJson(verifiedOpen ? "/api/files-native-open" : "/api/files-native-transfer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items: selected }),
+          body: JSON.stringify(verifiedOpen ? {action, item:{id:selected[0].id,revision:selected[0].revision}} : { items: selected }),
         });
         return {
           base_url: location.origin,
@@ -1741,7 +1742,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         if (!hasDesktopCapability(action)) {
           throw desktopError("Open in Sports Cave Desktop to drag or copy files.");
         }
-        const transfer = await createDesktopTransfer(items);
+        const transfer = await createDesktopTransfer(items, action);
         return new Promise((resolve, reject) => {
           state.desktopPending.set(requestId, { resolve, reject, action });
           try {
@@ -1783,7 +1784,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           return;
         }
         if (!hasDesktopCapability("openFile")) {
-          showDesktopHelperProblem(desktopError("Open in Sports Cave Desktop to use native file actions."), item);
+          if (kind === "file") browserNativeOpen(item,"openFile");
+          else showToast("Use Sports Cave Desktop to open a folder in the operating system.",{duration:5000});
           return;
         }
         const application = kind === "folder" ? "your desktop file manager" : desktopApplication(item);
@@ -2461,7 +2463,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       // Premium opening additions: existing openItem and native transfers stay intact.
       function openPreferredItem(item) {
-        if (item?.kind === 'image' && hasDesktopCapability('openFile')) {
+        if (item?.kind === 'image' && (hasDesktopCapability('openFile') || isWindowsPlatform())) {
           const now=Date.now();if(state.openStamp.path===item.path&&now-state.openStamp.time<650)return;
           state.openStamp={path:item.path,time:now};invokeDesktopHelper(item,'file');
         } else openItem(item);
@@ -2481,9 +2483,54 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           try {await desktopRequest('openWith',[item]);}
           catch(error){showDesktopTransferError(error,item);}return;
         }
+        if (isWindowsPlatform()) { browserNativeOpen(item,'openWith'); return; }
         openModal(modal=>{
           modalHeading(modal,'Open With','This browser cannot select installed applications. Download the file, then use your device’s Open With or Share action. Sports Cave Desktop can provide the Windows chooser when its existing helper supports Open With.');
           modalActions(modal,'Download',()=>{closeModal();startDownload([item]);});
+        });
+      }
+
+      let nativeBrowserAttempt = null;
+      function cancelBrowserNativeOpen() {
+        const attempt=nativeBrowserAttempt;
+        nativeBrowserAttempt=null;
+        if (!attempt) return;
+        attempt.cancelled=true;
+        if (attempt.code) apiJson('/api/files-native-launch/claim',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:attempt.code})}).catch(()=>{});
+      }
+
+      function browserNativeOpen(item,action) {
+        if (!item || item.tag==='folder') return;
+        if (!isWindowsPlatform()) {
+          openModal(modal=>{
+            modalHeading(modal,'Open file','This browser cannot launch an arbitrary installed app. Use the existing Mac helper where configured, or download and use your device’s Open With / Share action. Preview remains available from the file menu.');
+            modalActions(modal,'Download',()=>{closeModal();startDownload([item]);});
+          });return;
+        }
+        cancelBrowserNativeOpen();
+        const attempt={cancelled:false,code:'',opener:document.activeElement}; nativeBrowserAttempt=attempt;
+        openModal(modal=>{
+          modalHeading(modal,action==='openWith'?'Open With':'Open file','Preparing the exact authorised file. Windows helper version 11 or later is required. Edge/Chrome may ask you to allow Sports Cave Desktop to open.');
+          const status=document.createElement('p');status.setAttribute('role','status');status.textContent='Checking file identity and access…';modal.append(status);
+          const primary=modalActions(modal,'Preparing…',()=>{});primary.disabled=true;
+          const fallback=document.createElement('button');fallback.className='dialog-button';fallback.textContent='Download instead';fallback.onclick=()=>{closeModal();startDownload([item]);};modal.append(fallback);
+          const refresh=document.createElement('button');refresh.className='dialog-button';refresh.textContent='Get helper update';refresh.onclick=downloadHelper;modal.append(refresh);
+          apiJson('/api/files-native-launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,item:{id:String(item.id||''),revision:String(item.revision||'')}})}).then(data=>{
+            attempt.code=data.code;
+            if(attempt.cancelled){apiJson('/api/files-native-launch/claim',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:data.code})}).catch(()=>{});return;}
+            const launch=()=>{
+              status.textContent='Allow the browser’s Open Sports Cave Desktop prompt. Continue in its compact window for progress, cancellation or sign-in. If nothing opens, refresh/install the helper using Get helper update, then retry. This browser cannot detect whether the helper is installed.';
+              elements.protocolLink.href=data.launch_url;elements.protocolLink.click();
+              primary.disabled=true;primary.textContent='Request sent — retry from Files if needed';
+            };
+            primary.textContent='Open desktop helper';primary.disabled=false;primary.onclick=launch;
+            status.textContent='Ready. Open desktop helper within two minutes. Sign in there with the same Sports Cave OS account. No file has been downloaded.';
+            if(navigator.userActivation?.isActive) launch();
+          }).catch(error=>{
+            if(attempt.cancelled)return;
+            status.textContent=error.status ? error.message : 'File preparation failed. Check your network or sign in again, then retry.';
+            primary.textContent='Retry';primary.disabled=false;primary.onclick=()=>{closeModal();browserNativeOpen(item,action);};
+          });
         });
       }
 
@@ -2573,8 +2620,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function closeModal() {
+        const nativeOpener=nativeBrowserAttempt?.opener;
+        cancelBrowserNativeOpen();
         elements.modalBackdrop.classList.remove("open");
         elements.modal.replaceChildren();
+        if(nativeOpener?.isConnected) nativeOpener.focus();
       }
 
       function modalHeading(modal, title, message = "") {
@@ -3219,7 +3269,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           else clearSelection();
           return;
         }
-        if (typing) return;
+        if (typing || elements.modalBackdrop.classList.contains("open")) return;
         const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey;
         const key = event.key.toLocaleLowerCase();
         if (shortcut && key === "c" && state.selection.size) {
@@ -3264,6 +3314,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       });
 
       window.addEventListener("beforeunload", () => {
+        cancelBrowserNativeOpen();
         hideFileTooltip();
         stopThumbnailLoading();
         abortStaleFolderRequests();
