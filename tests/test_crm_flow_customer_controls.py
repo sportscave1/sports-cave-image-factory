@@ -4,6 +4,7 @@ from streamlit.testing.v1 import AppTest
 
 SCRIPT='''
 import streamlit as st
+import time
 from unittest.mock import Mock,patch
 from crm_flow_preview import control
 if 'pin' not in st.session_state:
@@ -11,6 +12,12 @@ if 'pin' not in st.session_state:
 store=Mock()
 store.preview_row={'id':'fixture','config':{'draft':{'trigger':'post_purchase'}}}
 store.preview_flow=store.preview_row['config']['draft']
+store.preview_shop.namespace='fixture'
+from crm_automation_preview_cache import digest
+st.session_state.pin['scope']=digest(['fixture','post_purchase',None,None,'fixture'])
+st.session_state.pin['loaded_at']=time.monotonic()
+st.session_state.pin['verified']={'one':(time.monotonic(),{'key':'one','label':'Fixture Ada'}),'two':(time.monotonic(),{'key':'two','label':'Fixture Grace'})}
+st.session_state['_automation_flow_pin']=st.session_state.pin
 with patch('crm_flow_preview.context',return_value=st.session_state.pin),patch('crm_flow_preview.verify',side_effect=lambda store,shop,row,c:{'key':c['key'],'label':c['name']}):
     control(st.session_state,store,'fixture_')
 st.caption('Selected: '+(st.session_state.pin['selected'] or {}).get('label','none'))

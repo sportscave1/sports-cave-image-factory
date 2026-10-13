@@ -7,12 +7,62 @@ from crm_template_modal import template_modal
 
 
 def automation_canvas(doc,cfg,key,store,*,current_document=True):
+    if current_document and getattr(store,'preview_trigger','abandoned')!='abandoned':
+        _lifecycle_canvas(doc,cfg,key,store)
+        return
     # Only a genuinely pending initial checkout lookup gets a completion timer.
     # The completion app rerun mounts the same native iframe without a timer.
     pin=st.session_state.get('_automation_checkout_pin')
     flow_pin=st.session_state.get('_automation_flow_pin') or {}
     pending=bool(pin and not pin['future'].done() or flow_pin.get('future'))
     st.fragment(run_every=1 if pending else None)(_automation_canvas)(doc,cfg,key,store,current_document=current_document,loading=pending)
+
+
+@st.fragment
+def _lifecycle_canvas(doc,cfg,key,store,*,current_document=True):
+    from crm_flow_preview import context,pending,control,NoPreviewCustomer
+    from crm_preview_toolbar import toolbar,arm,details
+    from crm_email_editor_context import current
+    from crm_automation_preview_cache import output
+    editor=current(st.session_state,{})
+    if current_document:doc=editor.get('document',doc)
+    pin=context(st.session_state,store);cache=None;problem='';renderable=False
+    try:
+        cache,_,warning=output(st.session_state,store,doc,cfg,editor.get('id'))
+        renderable=True
+    except NoPreviewCustomer as exc:
+        problem='' if pending(st.session_state) else str(exc)
+        warning=''
+    except ValueError as exc:problem=str(exc);warning=''
+    pin=context(st.session_state,store);data=pin.get('selected')
+    with st.container(key='crm-composer-preview' if current_document else 'crm-readonly-preview-'+key):
+        def refresh():context(st.session_state,store,refresh=True)
+        toolbar(key,data['label'] if data else 'Loading…' if pending(st.session_state) else 'No example',
+                select=lambda:control(st.session_state,store,key),refresh=refresh,
+                busy=pending(st.session_state),size=cache['size'] if cache else None,
+                warning=problem or pin.get('error','') or warning,
+                details=details(cache,doc)+(['Cached example · fresh consent and delivery checks still apply.'] if (data or {}).get('_cached') else []))
+        if renderable:
+            from crm_local_preview import canvas
+            try:canvas(doc,cfg,key,store)
+            except NoPreviewCustomer:pass  # Retained iframe survives background work.
+        elif not pending(st.session_state):st.caption(problem or 'No eligible customer example is available.')
+        if pending(st.session_state):
+            import time
+            fast=not data or data.get('_cached') or any(not f.done() for f in pin.get('renders',{}).values())
+            fast=fast and time.monotonic()<pin.get('paint_until',0)
+            arm(key,seconds=.05 if fast else 1)
+
+
+def _checkout_refresh(store):
+    # Existing Abandoned Checkout refresh path, unchanged arguments and waiting.
+    preview_context(st.session_state,store.preview_shop,refresh=True,auto_refresh=False,slot='_automation_checkout_pin')
+    from concurrent.futures import TimeoutError
+    pin=st.session_state.get('_automation_checkout_pin')
+    if pin:
+        try:pin['future'].result(timeout=10)
+        except TimeoutError:st.rerun(scope='app')
+        except Exception:pass
 
 
 def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
@@ -31,22 +81,9 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
         st.html('''<style>
         :is(.st-key-crm-composer-preview,.st-key-crm-checkout-master-preview) [data-testid="stElementContainer"][data-stale="true"]:has(iframe[data-testid="stIFrame"]){opacity:1!important;transition:none!important}
         </style>''')
-        with st.container(horizontal=True,vertical_alignment='center'):
-            st.markdown('**Email Preview**')
-            with st.container(horizontal=True,gap='small',key='crm-preview-devices' if current_document else 'crm-master-preview-devices'):
-                mode=st.session_state.get(key+'preview_device','Desktop')
-                for label,icon in [('Desktop',':material/desktop_windows:'),('Mobile',':material/smartphone:')]:
-                    st.button('',icon=icon,help=label,key=key+'device_'+label,type='primary' if mode==label else 'secondary',on_click=_preview_device,args=(key,label))
-                if (needs_checkout(doc) or header_checkout) and st.button('',icon=':material/refresh:',help='Refresh checkout preview',key=key+'checkout_refresh'):
-                    preview_context(st.session_state,store.preview_shop,refresh=True,auto_refresh=False,slot='_automation_checkout_pin')
-                    # Wait only for this explicit refresh, retaining the browser's
-                    # last-good iframe. Never fetch on typing or device changes.
-                    from concurrent.futures import TimeoutError
-                    pin=st.session_state.get('_automation_checkout_pin')
-                    if pin:
-                        try:pin['future'].result(timeout=10)
-                        except TimeoutError:st.rerun(scope='app')
-                        except Exception:pass # preview_context retains last-good.
+        from crm_preview_toolbar import toolbar,details
+        mode=st.session_state.get(key+'preview_device','Desktop')
+        refresh=lambda:_checkout_refresh(store)
         if current_document:
             if getattr(store,'preview_trigger','abandoned')!='abandoned':
                 from crm_flow_preview import control,NoPreviewCustomer
@@ -55,7 +92,7 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
             # longer depend on a successful whole-document production render.
             try:
                 _,label=store.preview_document(doc)
-                st.caption(label or 'Draft preview')
+                pass
             except ValueError as exc:
                 from crm_flow_preview import NoPreviewCustomer
                 if isinstance(exc,NoPreviewCustomer):
@@ -63,23 +100,17 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                     flow_pin=st.session_state.get('_automation_flow_pin') or {}
                     if bool(flow_pin.get('future'))!=loading:st.rerun(scope='app')
                     return
-                st.caption('Draft preview · section errors appear beside their content.')
-            offer_slot=st.empty();header_slot=st.empty();warning_slot=st.empty()
-            if doc.get('recovery_discount'):
-                offer=doc['recovery_discount']
-                offer_slot.caption('Discount: '+offer['code']+' — '+offer['value']+' · Shopify validates eligibility at checkout; not yet applied.')
-            if getattr(store,'preview_warning',''):warning_slot.caption(store.preview_warning)
+                label='Draft preview'
+            size_cache=None;diagnostic=getattr(store,'preview_warning','')
             try:
-                from crm_email_size_ui import automation_size_meter
                 size_cache,_,_=output(st.session_state,store,doc,cfg,editor.get('id'))
-                if size_cache.get('personalised_headers'):
-                    from html import escape
-                    headers=size_cache['personalised_headers']
-                    header_slot.html('<div class="sc-personalised-headers" style="font-size:13px;line-height:1.4"><strong>'+escape(headers['subject'])+'</strong><br><span style="color:#646464">'+escape(headers['preheader'])+'</span></div>')
-                automation_size_meter(size_cache)
             except Exception as exc:
-                st.html('<div class="sc-email-size" style="height:32px;font-size:11px">Email size · Correct section errors to calculate</div>')
-                if isinstance(exc,ValueError):st.caption(str(exc))
+                diagnostic=str(exc) if isinstance(exc,ValueError) else 'Email size unavailable. Correct section errors to calculate.'
+            pin=st.session_state.get('_automation_checkout_pin') or {}
+            name=(pin.get('last_good') or {}).get('label') or label.removeprefix('Previewing: ').split(' · ')[0]
+            toolbar(key,name,refresh=refresh,refresh_enabled=needs_checkout(doc) or header_checkout,
+                    size=size_cache['size'] if size_cache else None,warning=diagnostic,
+                    details=details(size_cache,doc))
             from crm_local_preview import canvas
             canvas(doc,cfg,key,store)
             pin=st.session_state.get('_automation_checkout_pin')
@@ -107,21 +138,11 @@ def _automation_canvas(doc,cfg,key,store,*,current_document=True,loading=False):
                 if loading and pin and pin['future'].done():st.rerun(scope='app')
                 return
             return
-        if label:st.caption(label)
-        if doc.get('recovery_discount'):
-            offer=doc['recovery_discount']
-            st.caption('Discount: '+offer['code']+' — '+offer['value']+' · Shopify validates eligibility at checkout; not yet applied.')
-        if cache.get('personalised_headers'):
-            from html import escape
-            headers=cache['personalised_headers']
-            st.html('<div class="sc-personalised-headers" style="font-size:13px;line-height:1.4"><strong>'+escape(headers['subject'])+'</strong><br><span style="color:#646464">'+escape(headers['preheader'])+'</span></div>')
-        if warning:
-            from html import escape
-            st.html('<small style="color:#96732e">'+escape(warning)+'</small>')
+        name=label.removeprefix('Previewing: ').split(' · ')[0] or 'Draft preview'
+        toolbar(key,name,refresh=refresh,refresh_enabled=needs_checkout(doc) or header_checkout,size=cache['size'],warning=warning,
+                details=details(cache,doc))
         pending=st.session_state.get('_automation_checkout_pin')
         pending=bool(needs_checkout(doc) and pending and not pending['future'].done())
-        from crm_email_size_ui import automation_size_meter
-        automation_size_meter(cache)
         components.html(cache['message']['html'],width=600 if mode=='Desktop' else 390,height=520,scrolling=True)
         if loading and not pending:st.rerun(scope='app')
         elif pending and not loading:st.rerun(scope='app')

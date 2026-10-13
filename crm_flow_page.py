@@ -260,21 +260,8 @@ def sequence(shop,store,user,identity,period):
 
 
 def lifecycle_preview(store,doc,cfg,key):
-    from crm_flow_preview import context
-    pending=bool(context(st.session_state,store).get('future'))
-    st.fragment(run_every=1 if pending else None)(_lifecycle_preview)(store,doc,cfg,key,loading=pending)
-
-
-def _lifecycle_preview(store,doc,cfg,key,*,loading=False):
-    from crm_flow_preview import control,NoPreviewCustomer
-    from crm_html_workspace import flow_preview
-    control(st.session_state,store,key)
-    try:
-        hydrated,label=store.preview_document(doc)
-        st.caption(label);flow_preview(hydrated,cfg,key)
-        if loading:st.rerun(scope='app')
-    except NoPreviewCustomer as exc:
-        st.info(str(exc))
+    from crm_abandoned_checkout_ui import _lifecycle_canvas
+    _lifecycle_canvas(doc,cfg,key,store,current_document=False)
 
 
 @st.fragment

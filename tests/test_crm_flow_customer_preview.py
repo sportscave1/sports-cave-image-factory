@@ -208,10 +208,13 @@ class PreviewTests(TestCase):
             with self.assertRaisesRegex(ValueError,'eligible'):verify(store,shop,row,candidate)
 
     def test_preview_and_fresh_test_same_personalised_production_render(self):
+        from concurrent.futures import Future
+        def complete(load):
+            future=Future();future.set_result(load());return future
         store,shop,row,candidate,operational=preview_wire();doc=document();state={}
         with patch('crm_lifecycle_shopify.order_facts',return_value=operational),patch('crm_flow_preview.now',return_value=AT):
             data=verify(store,shop,row,candidate);pin={'selected':data,'options':[candidate]}
-            with patch('crm_flow_preview.context',return_value=pin),patch('crm_personalisation_data.allocation',return_value=None):
+            with patch('crm_flow_preview.context',return_value=pin),patch('crm_personalisation_data.allocation',return_value=None),patch('crm_campaign_home_cache.POOL.submit',side_effect=complete):
                 preview=hydrate(state,store,doc)[0];tested=hydrate(state,store,doc,fresh=True)[0]
                 self.assertEqual(preview,tested)
                 url='https://www.sportscaveshop.com/account/unsubscribe?token=fixture'

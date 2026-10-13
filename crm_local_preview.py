@@ -142,6 +142,10 @@ def canvas(doc,cfg,key,store=None):
     from crm_email_editor_context import current
     version=current(st.session_state,{}).get('version',0)
     token=digest([doc,cfg,(st.session_state.get('_automation_checkout_pin') or {}).get('last_good'),(st.session_state.get('_automation_flow_pin') or {}).get('selected')])
+    if getattr(store,'email_mode',None)=='automation' and getattr(store,'preview_trigger','abandoned')!='abandoned':
+        # Background artwork completion can leave customer/order identity
+        # unchanged. Rebuild transient section errors when those facts arrive.
+        token=digest([token,(st.session_state.get('_automation_flow_pin') or {}).get('render_revision',0)])
     cached=st.session_state.get(key+'local_preview_model')
     if not cached or cached[0]!=token:
         cached=(token,model(doc,cfg,store));st.session_state[key+'local_preview_model']=cached
