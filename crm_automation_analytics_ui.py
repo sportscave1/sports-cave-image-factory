@@ -101,32 +101,19 @@ def checkout_details(store,user,row,c):
 @isolated
 def checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     # Scope every override to this panel or the dialog containing it.
-    st.html('''<style>
-    div[role="dialog"]:has(.st-key-checkout-compact)>div:first-child{padding:12px 24px 4px!important}
-    div[role="dialog"]:has(.st-key-checkout-compact)>div:nth-child(2){padding:4px 24px 16px!important}
-    div[role="dialog"]:has(.st-key-checkout-compact) [data-testid="stVerticalBlock"]{gap:.5rem}
-    .st-key-checkout-compact [data-testid="stVerticalBlock"]{gap:.5rem}
-    .st-key-checkout-compact h3{padding:0;font-size:1.2rem;line-height:2rem}
-    .st-key-checkout-compact [data-testid="stHorizontalBlock"]{gap:.5rem;align-items:center}
-    .st-key-checkout-compact [data-baseweb="select"]>div{min-height:32px;height:32px}
-    .st-key-checkout-compact [data-baseweb="input"]{height:32px;min-height:32px}
-    .st-key-checkout-compact [data-testid="stButton"] button{min-height:32px;padding:.2rem .65rem}
-    .st-key-checkout-compact [data-testid="stButton"] button p{font-size:13px}
-    .st-key-checkout-compact [data-testid="stCustomComponentV1"]{min-width:0;max-width:100%}
-    .st-key-checkout-compact iframe{width:100%!important;max-width:100%;min-width:0}
-    </style>''')
+    from crm_flow_recipients import STYLE
+    st.html(STYLE)
     with st.container(key='checkout-compact'):
         _checkout_panel(shop,store,user,row,bounds,period,paginated=paginated)
 
 
 def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
-    from pathlib import Path
-    import streamlit.components.v1 as components
-    from crm_component_json import render_component
     from crm_checkout_identity import display_name,reference
     from crm_checkout_progress import columns,listing
     from os_accounts import timezone_for_user
-    slot='auto-checkouts-'+str(row['id']);key=('checkout-list',str(row['id']),period)
+    from crm_flow_recipients import table,retry_read,read_page,current_definition
+    row=current_definition(row)
+    slot='auto-checkouts-'+str(row['id']);key=('checkout-list',str(row['id']),period,st.session_state.get('auto-checkouts-'+str(row['id'])+'-refresh',0))
     heading,status=st.columns([4,1]);heading.subheader('Abandoned checkouts')
     status.selectbox('Checkout status',['Incomplete'],label_visibility='collapsed',key=slot+'-status')
     search_column,actions=st.columns([1.2,1.5],vertical_alignment='center')
@@ -137,11 +124,15 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
             st.session_state[slot+'-criteria']=criteria;st.session_state[slot+'-cursors']=[None]
         cursors=st.session_state.setdefault(slot+'-cursors',[None]);cursor=cursors[-1]
         key+=('page',search.strip(),cursor)
-        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period),page_size=51,after=cursor,search=search),12)
+        records,phase,read_at=read_page(store,slot,key,lambda:checkouts(store,row['id'],window(period),page_size=51,after=cursor,search=search),12)
     else:
-        records,phase=read(store,key,lambda:checkouts(store,row['id'],window(period)),12)
-    if records is None:
-        st.caption('Loading abandoned checkouts…' if phase!='ERROR' else 'Checkout records temporarily unavailable.');return
+        records,phase,read_at=read_page(store,slot,key,lambda:checkouts(store,row['id'],window(period)),12)
+    with st.container(key=slot+'-read-notice'):
+        if records is None:
+            st.caption('Loading abandoned checkouts…' if phase not in ('ERROR','TIMED_OUT') else 'Checkout records temporarily unavailable.')
+        elif phase in ('ERROR','TIMED_OUT'):st.caption('Refresh unavailable. Last verified records retained.')
+        retry_read(slot,phase)
+    if records is None:return
     more=bool(paginated and len(records)>50)
     if paginated:records=records[:50]
     from crm_checkout_enrollment_ui import progress,begin
@@ -173,8 +164,8 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     if add:
         begin(store,user,str(row['id']),available,slot)
         st.rerun(scope='fragment')
-    if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True, row_height=TABLE_ROW_HEIGHT)
-    if phase=='ERROR':st.caption('Refresh unavailable. Last verified records retained.')
+    with st.container(key=slot+'-enrollment-results'):
+        if st.session_state.get(slot+'-results'):st.dataframe(st.session_state[slot+'-results'],hide_index=True, row_height=TABLE_ROW_HEIGHT)
     for checkout in visible:
         if checkout['checkout_key'] in enrollment_results:
             checkout['enrollment_request']=enrollment_results[checkout['checkout_key']]
@@ -185,19 +176,13 @@ def _checkout_panel(shop,store,user,row,bounds,period,*,paginated=False):
     if published is None:published=(row.get('config',{}).get('published_flow') or {}).get('emails',row.get('steps',[]))
     schema=columns(published)
     rows=listing(visible,schema,timezone_for_user(user),timing_now)
-    component=components.declare_component('crm_checkout_table',path=str(Path(__file__).parent/'components/crm_checkout_table'))
-    event=render_component(component,rows=rows,columns=schema,selected=selected,
-      server_now=timing_now,read_at=records[0].get('read_at') if records else timing_now,
-      refresh_seconds=15,phase=phase,key=slot+'-table',default=None)
-    if event and event.get('sequence')!=st.session_state.get(slot+'-event'):
-        st.session_state[slot+'-event']=event['sequence']
-        elsewhere=[k for k in st.session_state.get(slot+'-selected',[]) if k not in keys] if paginated else []
-        st.session_state[slot+'-selected']=elsewhere+[k for k in event.get('selected',[]) if k in keys]
-        if event.get('detail') in keys:st.session_state[slot+'-detail']=event['detail']
-        retry=event.get('retry')
-        if retry in keys and retry not in busy and enrollment_results.get(retry,{}).get('state')=='FAILED':
-            begin(store,user,str(row['id']),[retry],slot)
-        if not event.get('refresh'):st.rerun(scope='fragment')
+    table(slot,(period,search.strip(),cursor if paginated else None),rows=rows,columns=schema,
+      server_now=timing_now,read_at=read_at,
+      refresh_seconds=15,phase=phase)
+    retry=st.session_state.pop(slot+'-retry',None)
+    if retry in keys and retry not in busy and enrollment_results.get(retry,{}).get('state')=='FAILED':
+        begin(store,user,str(row['id']),[retry],slot)
+        st.rerun(scope='fragment')
     chosen=next((c for c in visible if c['checkout_key']==st.session_state.get(slot+'-detail')),None)
     if chosen:checkout_details(store,user,row,chosen)
     if paginated:

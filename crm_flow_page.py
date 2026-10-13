@@ -278,20 +278,18 @@ def recent(store,row,user,period):
     elif phase in ('ERROR','TIMED_OUT') and st.button('Retry activity'):
         refresh_reads(store,row['id']);st.rerun(scope='fragment')
 
-@st.fragment
 def checkouts(shop,store,user,row):
+    from crm_flow_recipients import panel
+    panel('Abandoned checkouts','auto-checkouts-'+str(row['id']),_checkouts,shop,store,user,row,
+          panel_key='flow-checkout-panel-'+str(row['id']))
+
+
+@st.fragment
+def _checkouts(shop,store,user,row):
     slot='auto-checkouts-'+str(row['id'])
-    for suffix in ('-search','-status'):
-        key=slot+suffix
-        if key not in st.session_state and key+'-retained' in st.session_state:
-            st.session_state[key]=st.session_state[key+'-retained']
     st.session_state['automation-analytics-pending']=False
     st.session_state['checkout-enrollment-pending']=False
-    with st.expander('Abandoned checkouts',on_change='rerun',key='flow-checkout-panel-'+str(row['id'])) as panel:
-        if panel.open:checkout_panel(shop,store,user,row,window('All time'),'All time',paginated=True)
-        for suffix in ('-search','-status'):
-            key=slot+suffix
-            if key in st.session_state:st.session_state[key+'-retained']=st.session_state[key]
+    checkout_panel(shop,store,user,row,window('All time'),'All time',paginated=True)
     enrollment=st.session_state.get(slot+'-enrollment',{})
     batch=[(k,enrollment.get('results',{}).get(k,{})) for k in enrollment.get('batch',())]
     signature=tuple((k,v.get('state'),v.get('delivery'),v.get('enrolled')) for k,v in batch)
@@ -300,7 +298,7 @@ def checkouts(shop,store,user,row):
             and st.session_state.get(slot+'-metrics-receipt')!=signature):
         st.session_state[slot+'-metrics-receipt']=signature
         refresh_control('flow-analytics-refresh')
-    if panel.open and (st.session_state.get('automation-analytics-pending') or st.session_state.get('checkout-enrollment-pending')):arm('flow-checkouts',1)
+    if st.session_state.get('checkout-enrollment-pending'):arm('flow-checkouts',1)
 
 def flow_page(shop,store,user,row):
     st.html(STYLE)
@@ -315,7 +313,7 @@ def flow_page(shop,store,user,row):
             st.session_state.pop('flow-operational-diagnostics',None);st.rerun(scope='app')
         st.subheader('Operational diagnostics')
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
-        elif row['config']['draft'].get('lifecycle_version'):
+        else:
             from crm_lifecycle_ui import audience
             audience(store,user,row)
         return
@@ -327,7 +325,7 @@ def flow_page(shop,store,user,row):
         analytics_controls(store,row['id'])
         sequence(shop,store,user,row['id'],'All time')
         if row['trigger_type']=='abandoned':checkouts(shop,store,user,row)
-        elif row['config']['draft'].get('lifecycle_version'):
+        else:
             from crm_lifecycle_ui import audience
             audience(store,user,row)
     from crm_flow_thumbnail import SCRIPT

@@ -125,20 +125,29 @@ def listing(store, row, *, search='', filter_by='All', sort=None, start=None, en
       FROM shopify_orders o LEFT JOIN paid_events e ON e.object_id=o.shopify_order_id
       WHERE upper(financial_status) IN ('PAID','PARTIALLY_REFUNDED') AND cancelled_at IS NULL
       GROUP BY COALESCE(NULLIF(shopify_customer_id,''),customer_id))
-      SELECT '''+identity+''' AS key,c.customer_id,c.name,c.email,c.consent,c.verified_at,c.source,
+      ,picked AS MATERIALIZED (SELECT '''+identity+''' AS key,c.customer_id,c.name,c.email,c.consent,c.verified_at,c.source,
       '''+audience_at+''' AS audience_at,p.last_paid_at,COALESCE(p.order_count,0) AS order_count,
       CASE WHEN c.profile->'amountSpent'->>'amount' ~ '^[0-9]+([.][0-9]+)?$'
            THEN (c.profile->'amountSpent'->>'amount')::numeric ELSE NULL END AS lifetime_value,
       c.profile->'amountSpent'->>'currencyCode' AS currency,
-      j.id AS enrollment_id,j.status AS flow_state,j.current_step+1 AS stage,j.next_due_at,
+      j.id AS enrollment_id,j.status AS flow_state,j.current_step+1 AS stage,j.next_due_at,j.current_step,j.steps,j.stop_reason,
       s.status AS last_email,s.first_submitted_at,
       EXISTS(SELECT 1 FROM crm_suppressions x WHERE x.shopify_customer_id=c.customer_id OR x.recipient_hash=c.recipient_hash) AS suppressed
       '''+order_fields+''' FROM crm_lifecycle_customers c LEFT JOIN purchases p ON p.customer_id=c.customer_id
-      '''+extra+''' LEFT JOIN LATERAL(SELECT id,status,current_step,next_due_at FROM crm_automation_enrollments
+      '''+extra+''' LEFT JOIN LATERAL(SELECT id,status,current_step,next_due_at,steps,stop_reason FROM crm_automation_enrollments
       WHERE automation_id=%s AND shopify_customer_id=c.customer_id '''+("AND trigger_shopify_id=o.shopify_order_id " if order_kind else '')+'''ORDER BY created_at DESC LIMIT 1) j ON true
       LEFT JOIN LATERAL(SELECT status,first_submitted_at FROM crm_marketing_sends WHERE enrollment_id=j.id
       AND NOT test_send ORDER BY created_at DESC LIMIT 1) s ON true
-      WHERE '''+' AND '.join(guards)+' ORDER BY '+SORTS[sort]+',key LIMIT 51 OFFSET %s'
+      WHERE '''+' AND '.join(guards)+' ORDER BY '+SORTS[sort]+''',key LIMIT 51 OFFSET %s)
+      SELECT picked.*,COALESCE(receipts.sends,'[]'::jsonb) AS sends FROM picked
+      LEFT JOIN LATERAL(SELECT jsonb_agg(jsonb_build_object(
+        'enrollment_id',s.enrollment_id,'step',s.step_index,'status',s.status,
+        'provider_id',s.provider_email_id,'submitted_at',s.first_submitted_at,'due_at',s.due_at,'error',s.error_code,
+        'opened',EXISTS(SELECT 1 FROM crm_delivery_events e WHERE e.send_id=s.id AND e.event_type='email.opened'),
+        'clicked',EXISTS(SELECT 1 FROM crm_delivery_events e WHERE e.send_id=s.id AND e.event_type='email.clicked'))
+        ORDER BY s.step_index) AS sends FROM crm_marketing_sends s
+        WHERE s.enrollment_id=picked.enrollment_id AND NOT s.test_send) receipts ON true
+      ORDER BY '''+SORTS[sort]+',key'
     args.append(page*50)
     return store.q(sql,tuple(args))
 

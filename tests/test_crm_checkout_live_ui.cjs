@@ -4,7 +4,7 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict');
  const context=await browser.newContext({viewport:{width:1366,height:900}});await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  const page=await context.newPage();await page.goto('http://127.0.0.1:8539');
  await page.getByText('Abandoned checkouts',{exact:true}).click();
- const frame=page.frameLocator('iframe[title="crm_automation_analytics_ui.crm_checkout_table"]');
+ const frame=page.frameLocator('iframe[title="crm_flow_recipients.crm_checkout_table"]');
  await frame.getByRole('button',{name:'Details Customer A 0',exact:true}).waitFor();
  assert.equal(await frame.locator('tbody tr').count(),50);
  const first=frame.locator('tbody tr').first(),clock=first.locator('td').nth(3);

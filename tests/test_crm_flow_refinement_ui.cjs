@@ -11,8 +11,8 @@ const {chromium}=require('playwright'), fs=require('fs'), assert=require('node:a
  async function measure(name,fn){const old=await count();await page.evaluate(()=>{window.flowThumb=document.querySelector('.sc-flow-thumbnail');window.flowFrames=[];window.flowSampling=true;function sample(){if(!window.flowSampling)return;window.flowFrames.push(!!document.querySelector('.sc-flow-thumbnail'));requestAnimationFrame(sample)}sample()});const t=Date.now();await fn();const latest=await count();result[name]={ms:Date.now()-t,queries:latest.queries-old.queries,flowRenders:latest.flow_renders-old.flow_renders,fullRuns:latest.full_runs-old.full_runs,thumbnailRetained:await page.evaluate(()=>window.flowThumb===document.querySelector('.sc-flow-thumbnail')),missingThumbnailFrames:await page.evaluate(()=>{window.flowSampling=false;return window.flowFrames.filter(v=>!v).length})};}
  if(before) await measure('settingsOpen',async()=>{await page.getByText('Trigger and flow settings',{exact:true}).click();await page.getByRole('textbox',{name:'Flow name',exact:true}).waitFor();});
  await measure('settingsEdit',async()=>{await page.getByRole('textbox',{name:'Flow name',exact:true}).fill('Compact fixture');await page.getByRole('textbox',{name:'Flow name',exact:true}).press('Tab');});
- await measure('checkoutsOpen',async()=>{await page.getByText('Abandoned checkouts',{exact:true}).last().click();await page.frameLocator('iframe[title="crm_automation_analytics_ui.crm_checkout_table"]').locator('tbody tr').first().waitFor();});
- await measure('checkoutSearch',async()=>{const input=page.getByRole('textbox',{name:'Search and filter',exact:true});await input.fill('local1@example.test');await input.press('Enter');await page.frameLocator('iframe[title="crm_automation_analytics_ui.crm_checkout_table"]').getByText('Local Collector 1',{exact:true}).first().waitFor();});
+ await measure('checkoutsOpen',async()=>{await page.getByText('Abandoned checkouts',{exact:true}).last().click();await page.frameLocator('iframe[title="crm_flow_recipients.crm_checkout_table"]').locator('tbody tr').first().waitFor();});
+ await measure('checkoutSearch',async()=>{const input=page.getByRole('textbox',{name:'Search and filter',exact:true});await input.fill('local1@example.test');await input.press('Enter');await page.frameLocator('iframe[title="crm_flow_recipients.crm_checkout_table"]').getByText('Local Collector 1',{exact:true}).first().waitFor();});
  await measure('stepMenu',async()=>{await page.locator('[class*="st-key-flow-row-"]').first().getByRole('button',{name:'⋮',exact:true}).click();await page.getByTestId('stPopoverBody').getByRole('textbox',{name:'Email name',exact:true}).waitFor();});
  await page.keyboard.press('Escape');
  await measure('dateFilter',async()=>{await page.locator('[class*="st-key-auto-analytics-period-"]').getByRole('combobox').click();await page.getByRole('option',{name:'Last 7 days',exact:true}).click();});
@@ -45,7 +45,7 @@ const {chromium}=require('playwright'), fs=require('fs'), assert=require('node:a
   if(!await page.getByRole('textbox',{name:'Search and filter',exact:true}).isVisible())await disclosure.click();
   const search=page.getByRole('textbox',{name:'Search and filter',exact:true});
   await search.fill('local1@example.test');await search.press('Enter');
-  const frame=page.frameLocator('iframe[title="crm_automation_analytics_ui.crm_checkout_table"]');
+  const frame=page.frameLocator('iframe[title="crm_flow_recipients.crm_checkout_table"]');
   await frame.getByRole('checkbox').nth(1).check();
   await page.getByRole('button',{name:'Add to flow',exact:true}).waitFor({state:'visible'});
   await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Add to flow'&&!b.disabled));

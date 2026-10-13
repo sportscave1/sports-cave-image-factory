@@ -39,9 +39,9 @@ def setup():
                   VALUES(%s,%s,%s,'PAID','FULFILLED','120','AUD',%s,%s::jsonb) ON CONFLICT DO NOTHING''',
                   (oid,c['id'],'#'+str(1000+i),at-timedelta(days=100),json.dumps({'fulfillments':[{'status':'SUCCESS','createdAt':(at-timedelta(days=95)).isoformat()}], 'lineItems':{'nodes':[{'title':'Fabricated test artwork'}]}})))
                 store.webhook('shopify','fixture-paid-'+str(i),'orders/paid',oid,c['id'],at-timedelta(days=100))
-    for kind in ('abandoned','welcome','post_purchase','win_back'):
-        args={} if kind=='abandoned' or os.getenv('LIFECYCLE_BASELINE')=='1' else {'lifecycle':True}
-        rows[kind]=store.create(ADMIN,kind,{'abandoned':'Abandoned Cart','welcome':'Welcome Series','post_purchase':'Post Purchase','win_back':'Win Back'}[kind],**args)
+    for kind in ('abandoned','welcome','post_purchase','win_back','fulfilled'):
+        args={} if kind in ('abandoned','fulfilled') or os.getenv('LIFECYCLE_BASELINE')=='1' else {'lifecycle':True}
+        rows[kind]=store.create(ADMIN,kind,{'abandoned':'Abandoned Cart','welcome':'Welcome Series','post_purchase':'Post Purchase','win_back':'Win Back','fulfilled':'Fulfilment Follow-up'}[kind],**args)
     # Prewarm only synthetic thumbnails, so timing excludes browser-install jobs.
     from crm_thumbnail_cache import cache_dir,selection
     from tests.test_crm_flow_v4 import webp

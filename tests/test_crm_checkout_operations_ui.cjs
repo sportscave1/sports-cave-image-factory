@@ -4,7 +4,7 @@ const {chromium}=require('playwright');const assert=require('node:assert/strict'
  const context=await browser.newContext();await context.route('**/*',r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());
  const page=await context.newPage();await page.setViewportSize({width:1366,height:900});await page.goto('http://127.0.0.1:8538');
  const add=page.getByRole('button',{name:'Add to flow',exact:true});await add.waitFor();assert.equal(await add.isDisabled(),true);
- const table=page.frameLocator('iframe[title="crm_automation_analytics_ui.crm_checkout_table"]');
+ const table=page.frameLocator('iframe[title="crm_flow_recipients.crm_checkout_table"]');
  await table.getByText('Joanne Lawrence').waitFor();
  assert.deepEqual(await table.locator('th').allTextContents(),['','Customer','Created','Email 1','Email 2','Email 3','Email 4','Email 5']);
  assert.ok(await table.locator('tbody tr').first().evaluate(el=>el.getBoundingClientRect().height)<=42);
