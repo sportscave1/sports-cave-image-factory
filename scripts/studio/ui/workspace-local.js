@@ -11,7 +11,7 @@ async function request(path,data,retried=false){
 }
 try{
  const identity=await request('/api/action',{action:'workspace-model'});
- const view=await mount(document.getElementById('workspace'),request,{initialModel:identity,storageKey:()=>location.origin+':'+identity.draft.id,loadEditor:()=>import('/editor.js'),drafts:()=>catalog.rows,
+ const view=await mount(document.getElementById('workspace'),request,{initialModel:identity,storageKey:()=>location.origin+':'+identity.draft.id,loadEditor:()=>import('/code-editor.js'),drafts:()=>catalog.rows,
   selectDraft:async id=>{if(!await view.canLeave())return;try{const result=await request('/api/action',{action:'handoff',draft_id:id,intent:'edit'});const u=new URL(result.url);if(u.protocol!=='http:'||u.hostname!=='127.0.0.1'||u.pathname!=='/workspace'||u.search||u.username||u.password)throw Error('Invalid local handoff');location.replace(result.url);}catch(e){status(e.message);}},
   back:()=>{location.replace('/#token='+encodeURIComponent(token));}});
  request('/api/action',{action:'catalog'}).then(next=>{catalog=next;view.refreshCatalog();}).catch(e=>status(e.message));

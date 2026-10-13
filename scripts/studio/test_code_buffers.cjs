@@ -1,0 +1,10 @@
+const fs=require('fs'),assert=require('node:assert/strict');
+(async()=>{const source=fs.readFileSync(__dirname+'/ui/code-editor.js','utf8');const {Buffers}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));const b=new Buffers();
+const model=path=>({path,source:'original '+path,hash:'hash-'+path,revision:6,editable:true,history:[],language:'html'});
+b.open(model('a.html'));b.update('pending a');b.open(model('b.css'));b.update('pending b');b.open(model('c.js'));b.update('pending c');b.open(model('a.html'));
+assert.equal(b.current().value,'pending a');assert.equal(b.dirty().length,3);b.undo();assert.equal(b.current().value,'original a.html');b.redo();assert.equal(b.current().value,'pending a');
+b.updateFile('b.css','history b');assert.equal(b.active,'a.html');assert.equal(b.current().value,'pending a');assert.equal(b.files.get('b.css').value,'history b');
+b.open({...model('windows.html'),source:'one\r\ntwo\r\n'});assert.equal(b.current().value,'one\ntwo\n');assert.equal(b.current().eol,'\r\n');
+const recovered=new Buffers();recovered.open(model('a.html'),{hash:'hash-a.html',revision:6,base:'original a.html',value:'pending a'});assert.equal(recovered.dirty().length,1);assert.equal(recovered.current().conflict,false);
+const stale=new Buffers();stale.open(model('a.html'),{hash:'other',revision:5,base:'old',value:'keep me'});assert.equal(stale.current().conflict,true);assert.equal(stale.current().value,'keep me');
+const large='x'.repeat(200000);b.open({...model('large.html'),source:large});const start=performance.now();for(let i=0;i<200;i++)b.update(large+'x'.repeat(i+1));assert.ok(b.current().undo.length<=100);assert.ok(b.current().bytes<4*1024*1024);console.log(JSON.stringify({passed:true,largeInput200EventsMs:performance.now()-start,undoBytes:b.current().bytes}));})();

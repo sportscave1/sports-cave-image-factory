@@ -13,9 +13,10 @@ import studio
 ASSETS = {"assets/sports-cave-os-app-icon.webp",
           "assets/sports-cave-logo-landscape-gold-transparent.webp",
           "assets/sports-cave-sc-gold-favicon.svg"}
-STUDIO_UI = {"scripts/studio/ui/"+name for name in ("workspace.js","workspace.css","editor.js","editor.css")}
+STUDIO_UI = {"scripts/studio/ui/"+name for name in ("workspace.js","workspace.css","editor.js","editor.css","code-editor.js")}
 DEVELOPMENT_ADDITIONS = STUDIO_UI | {"developer_studio_page.py", "components/developer_studio/panel.html",
-                         "components/developer_studio/panel.css", "components/developer_studio/panel.js"}
+                         "components/developer_studio/panel.css", "components/developer_studio/panel.js",
+                         "signin_presentation.py", "components/sign_in/presentation.html", "components/sign_in/presentation.css"}
 SOURCE_DIRS = {"components", "ui_components"}
 DENIED_MODULES = {"run_migrations.py", "sports_cave_server.py"}
 SYNTHETIC_PASSWORD = "StudioOnly-2026"
@@ -128,8 +129,8 @@ def capture_objects(repo,record):
 
 def capture_delta(home,task_id,owner,paths,previous):
     """Refresh only a verified editor save; full refresh remains available for external edits."""
-    import editor
-    if not paths or any(p not in (editor.VISUAL_FILE,*editor.CODE_FILES) for p in paths):raise ValueError("Unapproved incremental source")
+    import editor, source_editor
+    if not paths or len(paths)>32 or any(p not in (editor.VISUAL_FILE,*source_editor.EDITABLE) for p in paths):raise ValueError("Unapproved incremental source")
     with studio.locked(home) as file:
         _,root=drafts.assigned(studio.read(file),task_id,owner)
         if studio.git(root,"rev-parse","HEAD")!=previous["commit"]:raise ValueError("Draft commit changed; restart or fully refresh preview")

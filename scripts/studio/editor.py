@@ -134,6 +134,9 @@ def scope(registry,draft_id,owner,path):
     return draft,root,drafts.safe_file(root,path)
 
 def finish_pending(home,file,registry,draft,root):
+    if draft.get('editor_batch_pending'):
+        import source_editor
+        source_editor.finish_batch(home,file,registry,draft,root)
     pending=draft.get("editor_pending")
     if not pending: return
     path=pending["path"]

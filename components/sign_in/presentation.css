@@ -1,0 +1,32 @@
+.sc-login-wrap {
+            max-width: 440px;
+            margin: 12vh auto 0;
+            padding: 1.6rem 1.7rem;
+            background: #FFFFFF;
+            border: 1px solid #D9D3C4;
+            border-top: 4px solid var(--sc-gold);
+            border-radius: 12px;
+            box-shadow: 0 18px 50px rgba(11, 11, 13, 0.08);
+        }
+
+.sc-login-kicker {
+            color: #8A6828 !important;
+            font-size: 0.75rem;
+            font-weight: 760;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+.sc-login-title {
+            margin: 0.2rem 0 0.15rem;
+            color: #0B0B0D;
+            font-size: 1.85rem;
+            font-weight: 820;
+            line-height: 1.05;
+        }
+
+.sc-login-copy {
+            color: #58524A !important;
+            font-size: 0.92rem;
+            margin-bottom: 0.9rem;
+        }

@@ -1329,6 +1329,7 @@ log_startup_stage("SET PAGE CONFIG DONE")
 
 
 def inject_styles():
+    signin_presentation_css = (Path(__file__).resolve().parent / "components" / "sign_in" / "presentation.css").read_text(encoding="utf-8")
     st.markdown(
         """
         <style>
@@ -2052,38 +2053,7 @@ def inject_styles():
             padding: 1rem 1.15rem;
         }
 
-        .sc-login-wrap {
-            max-width: 440px;
-            margin: 12vh auto 0;
-            padding: 1.6rem 1.7rem;
-            background: #FFFFFF;
-            border: 1px solid #D9D3C4;
-            border-top: 4px solid var(--sc-gold);
-            border-radius: 12px;
-            box-shadow: 0 18px 50px rgba(11, 11, 13, 0.08);
-        }
-
-        .sc-login-kicker {
-            color: #8A6828 !important;
-            font-size: 0.75rem;
-            font-weight: 760;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-
-        .sc-login-title {
-            margin: 0.2rem 0 0.15rem;
-            color: #0B0B0D;
-            font-size: 1.85rem;
-            font-weight: 820;
-            line-height: 1.05;
-        }
-
-        .sc-login-copy {
-            color: #58524A !important;
-            font-size: 0.92rem;
-            margin-bottom: 0.9rem;
-        }
+        {signin_presentation_css}
 
         .sc-section-title {
             color: #0B0B0D;
@@ -3750,7 +3720,7 @@ def inject_styles():
             }
         }
         </style>
-        """,
+        """.replace("{signin_presentation_css}", signin_presentation_css),
         unsafe_allow_html=True,
     )
     from table_design import inject_table_styles
@@ -10220,18 +10190,16 @@ def is_app_authenticated():
 
 
 def render_login_gate():
-    _left, center, _right = st.columns([1, 1.1, 1])
+    import importlib, signin_presentation
+    presentation = importlib.reload(signin_presentation)
+    _left, center, _right = st.columns(presentation.COLUMNS)
     with center:
-        st.markdown(
-            """
-            <div class="sc-login-wrap">
-                <div class="sc-login-kicker">Sports Cave</div>
-                <div class="sc-login-title">Welcome back</div>
-                <div class="sc-login-copy">Sign in to open Sports Cave.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        import html as presentation_html
+        presentation_root = Path(__file__).resolve().parent / "components" / "sign_in"
+        fragment = (presentation_root / "presentation.html").read_text(encoding="utf-8")
+        for name, value in (("brand", presentation.BRAND), ("title", presentation.TITLE), ("description", presentation.DESCRIPTION)):
+            fragment = fragment.replace("{{" + name + "}}", presentation_html.escape(value))
+        st.markdown(fragment, unsafe_allow_html=True)
         auth_notice = str(st.session_state.pop("sports_cave_auth_notice", "") or "").strip()
         if auth_notice:
             st.warning(auth_notice)

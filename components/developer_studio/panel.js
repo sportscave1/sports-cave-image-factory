@@ -43,7 +43,7 @@
    const timer=setTimeout(()=>{workspaceRequests.delete(request_id);reject(Error("Local operation timed out. Reopen and compare before retrying a save."));},120000);
    workspaceRequests.set(request_id,{resolve,reject,timer,draftId});send("workspace-call",{request_id,draft_id:draftId,command});
   });
-  workspace=await workspaceModule.mount($("workspace-v6"),transport,{empty:!draftId,connected:()=>connected&&(!draftId||workspaceApproved),selectedDraft:()=>selectedDraft,loadEditor:()=>moduleFrom(bundle["editor.js"]),drafts:()=>rows,storageKey:()=>origin+':'+draftId,applications:()=>applicationSupported,
+  workspace=await workspaceModule.mount($("workspace-v6"),transport,{empty:!draftId,connected:()=>connected&&(!draftId||workspaceApproved),selectedDraft:()=>selectedDraft,loadEditor:()=>moduleFrom(bundle["code-editor.js"]),drafts:()=>rows,storageKey:()=>origin+':'+draftId,applications:()=>applicationSupported,
    manage:async(operation,name)=>{if(workspace&&!await workspace.canLeave())return;send('application-request',{request:{operation,name,draft_id:selectedDraft}});message('Review this draft operation in the secure local window.');popup.focus();},
    selectDraft:async id=>{if(!rows.some(r=>r.id===id&&r.actionable))return;selectedDraft=id;syncSelection();draw();await openSelected("edit");}});
  }
