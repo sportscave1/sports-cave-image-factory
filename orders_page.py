@@ -1,5 +1,6 @@
 import psd_directory
 import print_jpg
+import edition_test
 import hashlib
 import html
 from table_design import TABLE_ROW_HEIGHT

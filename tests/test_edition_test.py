@@ -46,3 +46,18 @@ def test_only_exact_verified_unit_gets_link():
     assert case.eligible(row,mapping)
     for edit in ({'edition_number':3},{'allocation_index':2},{'shopify_product_gid':'gid://shopify/Product/1'}):assert not case.eligible({**row,**edit},mapping)
     assert not case.eligible(row,None)
+
+
+def test_mobile_orders_keeps_psd_and_pilot_action_without_global_name_errors():
+    import orders_page as orders
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    row={'shopify_product_gid':case.PRODUCT,'shopify_order_id':case.ORDER,'shopify_line_item_id':case.LINE,'allocation_index':1,'edition_number':2,'edition_total':100}
+    mapping={case.PRODUCT:{'verified':True,'dropbox_file_id':case.FILE,'state':'Linked'}}
+    links=[]
+    fake=SimpleNamespace(session_state={},container=lambda **_:nullcontext(),checkbox=lambda *a,**k:None,
+                         markdown=lambda *a:None,caption=lambda *a:None,link_button=lambda *a:links.append(a))
+    with patch.object(orders,'st',fake),patch.object(orders.psd_directory,'page_directory',return_value=mapping),patch.object(orders.psd_directory,'render_missing_link_guard'):
+        orders._render_mobile_orders([row])
+    assert any(label=='Open PSD' for label,url in links)
+    assert ('Generate / Preview TEST JPG','/edition-jpg-test#TEST JPG') in links
