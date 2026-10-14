@@ -16,15 +16,35 @@ const restorePickerFocus=()=>{
 const withParent=fn=>{try{return fn(parent);}catch{return undefined;}};
 const signalPending=detail=>withParent(p=>p.dispatchEvent(new CustomEvent('sc-campaign-pending',{detail:{...detail,local_editor:true}})));
 const pendingCopyInputs=new Map();
+const revealSection=id=>{
+ if(!args.sections.some(s=>s.id===id))return false;
+ // The section component stays mounted across tabs. Revealing it is local
+ // navigation, so pending source edits need not wait for a save round trip.
+ withParent(p=>{
+  const tab=[...p.document.querySelectorAll('.st-key-crm-composer-controls [role="tab"]')].find(t=>t.textContent.trim()==='Editor');
+  if(tab&&tab.getAttribute('aria-selected')!=='true'){
+   const replay=replayNavigation;replayNavigation=true;
+   try{tab.focus({preventScroll:true});tab.click();}finally{replayNavigation=replay;}
+  }
+ });
+ opened[id]=true;render();
+ let attempts=0;
+ const reveal=()=>{
+  const card=[...root.children].find(c=>c.dataset.id===id);
+  const frame=withParent(p=>[...p.document.querySelectorAll('iframe')].find(f=>f.contentWindow===window));
+  if(!frame?.getClientRects().length&&attempts++<60){requestAnimationFrame(reveal);return;}
+  if(SCPreview.channel(args.preview_scope).selected!==id)return;
+  card?.scrollIntoView({block:'nearest',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+  card?.classList.add('preview-highlight');setTimeout(()=>card?.classList.remove('preview-highlight'),1000);
+  (card?.querySelector('textarea:not([readonly])')||card?.querySelector('.title'))?.focus({preventScroll:true});
+ };requestAnimationFrame(reveal);return true;
+};
 const goToSection=id=>{
  if(!args.sections.some(s=>s.id===id))return false;
- opened[id]=true;render();
- requestAnimationFrame(()=>{
-  const card=[...root.children].find(c=>c.dataset.id===id);
-  card?.scrollIntoView({block:'center'});
-  card?.querySelector('.title')?.focus({preventScroll:true});
- });return true;
+ const state=SCPreview.channel(args.preview_scope);state.selected=id;
+ for(const fn of state.selectionListeners||[])fn(id);return true;
 };
+addEventListener('pagehide',()=>{if(args.preview_scope)SCPreview.channel(args.preview_scope).selectionListeners?.delete(revealSection);});
 withParent(p=>p.scCampaignGoToSection=goToSection);
 addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignGoToSection===goToSection)delete p.scCampaignGoToSection;});});
 const areas=new Map(),histories=new Map();let historyScope='',deleted=null,deleteTimer=null;
@@ -253,7 +273,7 @@ function render(){renderTemplates();renderDiscountPicker(document.getElementById
  for(const warning of (args.warnings||{})[s.id]||[])content.append(el('div',warning,'warning'));
  }
  card.append(content);}if(existing)existing.replaceWith(card);else root.append(card);
- });placeCards(args.sections.map(s=>s.id));if(label&&document.activeElement!==focus){const next=[...root.querySelectorAll('[aria-label]')].find(n=>(action?n.dataset.action===action:n.getAttribute('aria-label')===label)&&n.closest('.section')?.dataset.id===sectionId&&(!dragId||n.dataset.drag===dragId));if(next){next.focus({preventScroll:true});if(start!==null&&start!==undefined&&['TEXTAREA','INPUT'].includes(next.tagName)){next.setSelectionRange(start,end);next.scrollTop=scroll;}}}height();}
+ });for(const card of root.children)card.classList.toggle('preview-selected',card.dataset.id===SCPreview.channel(args.preview_scope).selected);placeCards(args.sections.map(s=>s.id));if(label&&document.activeElement!==focus){const next=[...root.querySelectorAll('[aria-label]')].find(n=>(action?n.dataset.action===action:n.getAttribute('aria-label')===label)&&n.closest('.section')?.dataset.id===sectionId&&(!dragId||n.dataset.drag===dragId));if(next){next.focus({preventScroll:true});if(start!==null&&start!==undefined&&['TEXTAREA','INPUT'].includes(next.tagName)){next.setSelectionRange(start,end);next.scrollTop=scroll;}}}height();}
 document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{document.getElementById('add').open=false;emit('add',{kind:b.dataset.add,reserved_html_number:deleted?.section.html_number||0});});
 const addMenu=document.getElementById('add'),addTrigger=addMenu.querySelector('summary');
  addMenu.ontoggle=()=>{addTrigger.setAttribute('aria-expanded',String(addMenu.open));height();};
@@ -285,7 +305,10 @@ addEventListener('message',e=>{
  if(changedScope){
   pendingCopyInputs.clear();for(const area of areas.values())clearTimeout(area.saveTimer);
   histories.clear();areas.clear();drafts={};queue=[];settingsDrafts={};opened={};pending=false;deleted=null;changes=[];sent=[];unpersisted=[];external=[];saveError='';clearTimeout(saveTimer);clearTimeout(deleteTimer);root.replaceChildren();
+  if(args.preview_scope)SCPreview.channel(args.preview_scope).selectionListeners?.delete(revealSection);
   historyScope=incoming.history_scope;args=incoming;
+  const selectionState=SCPreview.channel(args.preview_scope);selectionState.selectionListeners??=new Set();selectionState.selectionListeners.add(revealSection);
+  if(selectionState.selected)opened[selectionState.selected]=true;
   let recovery;try{recovery=JSON.parse(sessionStorage.getItem('sc-local-draft:'+historyScope));}catch{}
   if(recovery?.changes?.length){
    if(recovery.version===incoming.draft_version){args.sections=recovery.sections;changes=recovery.changes;dirty();}
@@ -303,7 +326,7 @@ addEventListener('message',e=>{
   for(const section of args.sections)if(!localSections.some(old=>old.id===section.id))opened[section.id]=true;
  }
  if(args.clipboard_script&&!window.scCopyText){const script=document.createElement('script');script.textContent=args.clipboard_script;document.head.appendChild(script);}
- if(!drag){if(args.picker_focus&&args.picker_focus.event!==pickerFocusEvent)opened[args.picker_focus.section]=true;render();restorePickerFocus();}localPreview();
+ if(!drag){if(args.picker_focus&&args.picker_focus.event!==pickerFocusEvent)opened[args.picker_focus.section]=true;render();restorePickerFocus();if(changedScope&&SCPreview.channel(args.preview_scope).selected)revealSection(SCPreview.channel(args.preview_scope).selected);}localPreview();
  if(saveError){saveStatus('Save failed · '+saveError);rememberDraft();if(!incoming.edit_error&&saveAttempts++<3){clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,Math.min(1000*2**saveAttempts,8000));}}
  else if(changes.length){saveStatus('Unsaved · Unpublished changes');if(!pending){clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,650);}}
  else if(!pending){saveStatus('Saved · Draft');withParent(p=>{const size=p.document.querySelector('[data-email-size-editor] .sc-email-size');if(size?.dataset.lastMeasured){size.innerHTML=size.dataset.lastMeasured;delete size.dataset.lastMeasured;}});if(external.length)sendChanges();}

@@ -76,7 +76,7 @@ const assert=require('node:assert/strict');const fs=require('node:fs');
   await select(status,'Resume flow');await rows.first().locator('[class*="st-key-flow-state-live-"]').waitFor();
   const liveDelay=rows.first().getByRole('spinbutton');await liveDelay.fill('17');await liveDelay.press('Enter');
   await rows.first().getByText(/17 minutes after/).waitFor();
-  await select(status,'Publish email');await p.getByRole('dialog').getByRole('button',{name:'Publish',exact:true}).click();await p.locator('.automation-publishing').waitFor();
+  await select(status,'Publish flow');await p.getByRole('dialog').getByRole('button',{name:'Publish All',exact:true}).click();await p.locator('.automation-publishing').waitFor();
   assert.equal(await rows.first().locator('[class*="st-key-flow-state-live-"]').count(),1,'pending publication keeps the previous live version');
   await p.getByRole('button',{name:'+ Add Email',exact:true}).click();await rows.nth(2).waitFor();
   assert.equal(await rows.last().locator('[class*="st-key-flow-state-draft-"]').count(),1);
@@ -85,7 +85,7 @@ const assert=require('node:assert/strict');const fs=require('node:fs');
   await p.getByRole('button',{name:'Pause',exact:true}).click();await rows.first().locator('[class*="st-key-flow-state-paused-"]').waitFor();
   await p.goto(base+'?fixture_empty=welcome&fixture_inline=1&fixture_run=locked-'+Date.now());await p.getByRole('button',{name:'+ Add Email',exact:true}).click();await rows.first().waitFor();
   await rows.first().locator('[class*="st-key-flow-state-"]').getByRole('combobox').click();
-  assert.equal(await p.getByRole('option',{name:'Publish email',exact:true}).count(),0);await p.keyboard.press('Escape');
+  assert.equal(await p.getByRole('option',{name:'Publish flow',exact:true}).count(),0);await p.keyboard.press('Escape');
   await p.getByText('Draft only: publishing is locked for this flow.',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);fs.writeFileSync('.tmp-flow-v3/interaction-results.json',JSON.stringify(timings,null,2));console.log('PASS inline flow contracts',JSON.stringify(timings));
  }catch(e){if(p){console.log((await p.locator('body').innerText()).slice(0,2500));await p.screenshot({path:'.tmp-flow-v3/failure.png',fullPage:true});}throw e;}finally{await b.close()}

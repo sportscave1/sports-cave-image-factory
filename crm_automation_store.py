@@ -127,9 +127,9 @@ class AutomationStore(CampaignStore):
             cfg.update(draft=deepcopy(flow),revision=revision+1)
             return conn.execute('UPDATE crm_automations SET name=%s,config=%s::jsonb,updated_at=now() WHERE id=%s RETURNING *',(name,json.dumps(cfg),identity)).fetchone()
 
-    def request_publish(self,user,identity,revision,step_id=None):
+    def request_publish(self,user,identity,revision,step_id=None,*,enable_ids=()):
         from crm_automation_publication import request
-        return request(self,user,identity,revision,step_id=step_id)
+        return request(self,user,identity,revision,step_id=step_id,enable_ids=enable_ids)
 
     def prepare_lifecycle(self,user,identity):
         """One reversible draft upgrade; no publication, enrollment or history deletion."""

@@ -118,12 +118,42 @@ function sectionHtml(s,model,sections=[]){
  for(const n of parsed.querySelectorAll('[class]'))for(const cls of n.classList)for(const [key,v]of Object.entries(theme[cls]||{}))if(!n.style.getPropertyValue(key)||v[1])n.style.setProperty(key,v[0]);
  return sanitize(template.innerHTML,model,s.css_version===1);
 }
+function select(scope,id){
+ const state=channel(scope);if(!state.sections?.some(s=>s.id===id&&s.visible)||state.model?.loading)return false;
+ state.selected=id;for(const fn of state.selectionListeners||[])fn(id);return true;
+}
 function mount(payload){
  const {scope}=payload,state=channel(scope);if(!state.model){setTimeout(()=>mount(payload),25);return;}let model=state.model;
  document.open();document.write(model.shell);document.close();
  // No forms, scripts or active links are installed into the email canvas.
  document.querySelectorAll('a').forEach(n=>{n.removeAttribute('href');n.removeAttribute('target')});
  let root=document.getElementById('sc-local-sections'),shell=model.shell;if(!root)return;
+ const style=document.createElement('style');style.textContent=`
+ #sc-local-sections>div[data-editable]{cursor:pointer;outline-offset:-2px}
+ #sc-local-sections>div[data-editable]:hover{outline:1px solid #b49450}
+ #sc-local-sections>div[data-editable][data-selected],#sc-local-sections>div[data-editable]:focus-visible{outline:2px solid #b49450}
+ #sc-local-sections>div[data-editable] *{cursor:pointer!important}`;document.head.append(style);
+ const selection=id=>{for(const node of root.children)node.toggleAttribute('data-selected',node.dataset.sectionId===id);};
+ state.selectionListeners??=new Set();state.selectionListeners.add(selection);
+ const choose=event=>{
+  if(event.type==='keydown'&&!['Enter',' '].includes(event.key))return;
+  let node=event.target instanceof Element?event.target:null;
+  while(node&&node.parentElement!==root)node=node.parentElement;
+  if(node?.hasAttribute('data-editable')){
+   event.preventDefault();event.stopImmediatePropagation();
+   select(scope,node.dataset.sectionId);
+  }else if(event.type==='click'){
+   event.preventDefault();event.stopImmediatePropagation();
+   let feedback=document.getElementById('sc-preview-fixed-feedback');
+   if(!feedback){feedback=document.createElement('div');feedback.id='sc-preview-fixed-feedback';feedback.setAttribute('role','status');feedback.style.cssText='position:fixed;bottom:8px;left:8px;right:8px;padding:6px;background:#171717;color:#dfc986;font:12px Arial;z-index:9999;pointer-events:none';document.body.append(feedback);}
+   feedback.textContent=model.loading?'Preview is loading.':'Fixed Header / Footer — edit permitted settings in Templates → Email defaults.';
+   clearTimeout(feedback.timer);feedback.timer=setTimeout(()=>feedback.remove(),2500);
+  }
+ };
+ document.addEventListener('click',choose,true);document.addEventListener('keydown',choose,true);
+ // Inert preview only: even modified clicks must never open live email links.
+ document.addEventListener('auxclick',e=>{e.preventDefault();e.stopImmediatePropagation();},true);
+ addEventListener('pagehide',()=>state.selectionListeners.delete(selection),{once:true});
  const render=sections=>{
   const started=performance.now();model=state.model;if(model.loading)sections=[model.loading_section];
   if(shell!==model.shell){shell=model.shell;const parsed=new DOMParser().parseFromString(shell,'text/html');document.body.innerHTML=parsed.body.innerHTML;document.querySelectorAll('a').forEach(n=>n.removeAttribute('href'));root=document.getElementById('sc-local-sections');}
@@ -136,11 +166,12 @@ function mount(payload){
    if(node._signature!==signature){let html;try{html=sectionHtml(s,model,sections);node.removeAttribute('role');}catch(error){html='<div style="padding:14px;border:1px solid #b94a32;color:#8d2918">'+esc(s.name||'Section')+': '+esc(error.message)+'</div>';node.setAttribute('role','alert');}
     if(node._html!==html){node.innerHTML=html;node._html=html;}node._signature=signature;
    }
+   node.toggleAttribute('data-editable',!model.loading);node.tabIndex=model.loading?-1:0;if(!node.hasAttribute('role'))node.setAttribute('role','group');node.setAttribute('aria-keyshortcuts','Enter Space');node.setAttribute('aria-label','Edit '+(s.name||s.type+' section'));node.toggleAttribute('data-selected',state.selected===s.id);
    if(root.children[position]!==node){if(root.moveBefore)root.moveBefore(node,root.children[position]||null);else root.insertBefore(node,root.children[position]||null);}position++;
   }
   state.lastRenderMs=performance.now()-started;state.renderedRevision=state.revision;
  };
  state.listeners.add(render);addEventListener('pagehide',()=>state.listeners.delete(render),{once:true});render(state.sections);
 }
-global.SCPreview={channel,publish,mount,sectionHtml,sanitize,clone};
+global.SCPreview={channel,publish,select,mount,sectionHtml,sanitize,clone};
 })(globalThis);

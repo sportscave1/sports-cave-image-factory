@@ -2,7 +2,7 @@
 from html import escape
 import inspect
 import streamlit as st
-from crm_automation_publish_state import has_changes,label,email_has_changes
+from crm_automation_publish_state import has_changes,label
 
 def period_changed():
     st.session_state['flow-period-dirty']=True
@@ -12,8 +12,10 @@ def request_confirmation(identity,revision,selected,flow_status):
     from crm_campaign_recovery import flush_current
     if not flush_current(force=True):return
     editor=st.session_state.get('automation_editor')
-    if selected and editor and str(editor['id'])==str(identity):revision=editor['version']
-    st.session_state['automation-confirm-publication']=(str(identity),revision,selected,flow_status)
+    if editor and str(editor['id'])==str(identity):revision=editor['version']
+    cached=st.session_state.get('_automation_toolbar_definition')
+    row=cached[1] if cached and str(cached[1]['id'])==str(identity) else None
+    st.session_state['automation-confirm-publication']=(str(identity),revision,None,flow_status,row)
 
 
 def definition(store,state,identity):
@@ -45,8 +47,8 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
     requested=st.session_state.get('automation-confirm-publication')
     if requested and requested[0]==str(identity):
         from crm_automation_publish_confirm import confirm
-        _,revision,selected,flow_status=requested
-        confirm(store,user,identity,revision,selected,flow_status)
+        _,revision,selected,flow_status,*context=requested
+        confirm(store,user,identity,revision,selected,flow_status,context[0] if context else None)
     try:
         row=definition(store,st.session_state,identity)
         from crm_automation_publication import overdue,expire
@@ -70,15 +72,17 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         from crm_automation_ui import request_email
         if flush_current(force=True):
             changed();request_email(None);st.rerun(scope='app')
-    if flow_view and st.session_state.pop('automation-publication-toast',False):st.toast('Email published successfully.')
+    if flow_view and st.session_state.pop('automation-publication-toast',False):st.toast('Flow published successfully.')
     dirty=bool(editor and (editor['document']!=st.session_state.get('automation_saved',{}).get('document') or editor['name']!=st.session_state.get('automation_saved',{}).get('name')))
     # Saved draft vs live is separate from editor vs saved. One session-local
     # comparison is reused until the authoritative definition changes.
     token=(str(identity),row.get('updated_at'),row['config']['revision'],row['config']['published_version'],selected)
     comparison=st.session_state.get('_automation_published_comparison')
     if not comparison or comparison[0]!=token:
-        comparison=(token,email_has_changes(store,row,selected) if selected else has_changes(store,row));st.session_state['_automation_published_comparison']=comparison
+        comparison=(token,has_changes(store,row));st.session_state['_automation_published_comparison']=comparison
     pending=comparison[1];version=row['config']['published_version']
+    excluded=[s for s in row['config']['draft']['emails'] if not s.get('enabled',True)]
+    st.session_state['_automation_toolbar_definition']=((str(identity),row.get('updated_at')),row)
     badge_label=label(row,pending)
     current_label='Published · Up to date' if version else 'Up to date'
     if selected:
@@ -88,19 +92,21 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         live_step=next((s for s in row['steps'] if s['step_id']==selected),None)
         badge_label=email_state.title()+(' · v'+str(live_step['template_version']) if live_step else '')
         if live_step and pending:badge_label+=' · Unpublished changes'
-        current_label={'LIVE':'Published · Up to date','PAUSED':'Published · Paused','DRAFT':'Draft','DISABLED':'Disabled · Up to date'}[email_state]
+        current_label={'LIVE':'Published · Up to date','PAUSED':'Published · Paused','DRAFT':'Draft','DISABLED':'Disabled · Excluded from publication'}[email_state]
     elif row['status']=='PAUSED' and version:current_label='Published · Paused'
+    if excluded:current_label='Published · '+str(len(excluded))+' disabled / excluded' if version else 'Draft · Disabled emails excluded'
     publication=row['config'].get('publication',{});busy=publication.get('state')=='PUBLISHING';archived=status(row)=='ARCHIVED'
     blockers=[];resume_blockers=[]
     if row['trigger_type']!='abandoned' and not busy and (pending or row['status']=='PAUSED'):
         from crm_automation_readiness import blockers as readiness_blockers
         from crm_automation_publication import preflight
         from crm_automation_publish_state import publication_flow
-        scoped=publication_flow(store,row,selected)
+        scoped=publication_flow(store,row)
         blockers=readiness_blockers(store,{'trigger_type':scoped['trigger'],'config':{'draft':scoped}})
         resume_blockers=readiness_blockers(store,row,published=True) if row['status']=='PAUSED' else []
         try:preflight(row,row['config']['revision'],scoped)
-        except ValueError as exc:blockers.append(str(exc))
+        except ValueError as exc:
+            if str(exc)!='Enable at least one email before publishing.':blockers.append(str(exc))
     st.html('''<style>
     .st-key-automation-toolbar{gap:8px!important;align-items:center!important;flex-wrap:wrap!important;margin:0 0 8px!important}
     .st-key-automation-toolbar>[data-testid="stElementContainer"]{width:auto!important;flex:0 0 auto!important}
@@ -166,9 +172,10 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                         from crm_shopify import Shopify
                         control(Shopify(),store,user,row['trigger_type'],key+'flow_',automation=row)
             if busy:st.html('<span class="automation-current automation-publishing" role="status">Publishing changes…</span>')
-            elif not pending and not dirty:st.html('<span class="automation-current" role="status">'+current_label+'</span>')
+            elif not pending and not dirty and not excluded:st.html('<span class="automation-current" role="status">'+current_label+'</span>')
             else:
-                st.button('Retry Publish' if publication.get('state')=='FAILED' else 'Publish changes' if version else 'Publish now',type='primary',disabled=archived or bool(blockers),key='toolbar-publish',help='; '.join(blockers) if blockers else 'Publish the selected email; use the flow overview to publish the whole flow.',on_click=request_confirmation,args=(identity,editor['version'] if editor else row['config']['revision'],selected,row['status']))
+                if excluded:st.caption(current_label)
+                st.button('Retry Publish' if publication.get('state')=='FAILED' else 'Publish changes' if version else 'Publish now',type='primary',disabled=archived or bool(blockers),key='toolbar-publish',help='; '.join(blockers) if blockers else 'Publish the complete eligible sequence. Disabled emails require explicit inclusion.',on_click=request_confirmation,args=(identity,editor['version'] if editor else row['config']['revision'],selected,row['status']))
             if row['status'] in ('ACTIVE','PAUSED') and not archived:
                 action='pause' if row['status']=='ACTIVE' else 'resume'
                 if st.button(action.title(),key='toolbar-lifecycle',disabled=action=='resume' and bool(resume_blockers),help='; '.join(resume_blockers) if action=='resume' and resume_blockers else None):

@@ -29,24 +29,24 @@ class InlineTests(unittest.TestCase):
         r=row();s=r['config']['draft']['emails'][0];r['status']='ACTIVE';r['config']['published_version']=1
         self.assertEqual(step_state(r,s),'DRAFT')
         r['config']['draft']['lifecycle_version']=1
-        self.assertIn('Publish email',status_options(r,s))
+        self.assertIn('Publish flow',status_options(r,s))
         r['status']='PAUSED';self.assertIn('Resume flow',status_options(r,s))
         r['config']['publication']={'state':'PUBLISHING'}
-        self.assertNotIn('Publish email',status_options(r,s));self.assertNotIn('Resume flow',status_options(r,s))
+        self.assertNotIn('Publish flow',status_options(r,s));self.assertNotIn('Resume flow',status_options(r,s))
 
     def test_lifecycle_inline_publish_requests_confirmation_without_creating_job(self):
         r=row();r['trigger_type']='welcome';s=r['config']['draft']['emails'][0]
-        store=Mock();store.flow.return_value=r;state={'action':'Publish email'}
+        store=Mock();store.flow.return_value=r;state={'action':'Publish flow'}
         with patch('crm_flow_inline.st') as ui,patch('crm_campaign_recovery.flush_current',return_value=True),patch('crm_automation_ui.changed'):
             ui.session_state=state
             status_action(store,{},r,s,'action')
-        self.assertEqual(state['automation-confirm-publication'],('fixture',7,s['step_id'],'DRAFT'))
+        self.assertEqual(state['automation-confirm-publication'],('fixture',7,None,'DRAFT',r))
         store.request_publish.assert_not_called()
 
     def test_failed_status_action_is_consumed_without_replay(self):
         r=row();s=r['config']['draft']['emails'][0];store=Mock();store.flow.return_value=r
         store.flow.side_effect=ValueError('Activation locked')
-        state={'action':'Publish email'}
+        state={'action':'Publish flow'}
         with patch('crm_flow_inline.st') as ui,patch('crm_campaign_recovery.flush_current',return_value=True):
             ui.session_state=state
             status_action(store,{},r,s,'action');status_action(store,{},r,s,'action')

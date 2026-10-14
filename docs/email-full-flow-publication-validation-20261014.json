@@ -1,0 +1,111 @@
+{
+  "fixture": "Loopback synthetic data only; external requests blocked",
+  "results": [
+    {
+      "mode": "enabled",
+      "paused": false,
+      "modal_ms": 1380,
+      "modal_width": 400,
+      "states": [
+        "live",
+        "live",
+        "live"
+      ],
+      "cancel": true,
+      "automatic_return": true,
+      "reload": true
+    },
+    {
+      "mode": "disabled",
+      "paused": false,
+      "modal_ms": 140,
+      "modal_width": 400,
+      "states": [
+        "live",
+        "live",
+        "live"
+      ],
+      "cancel": true,
+      "automatic_return": true,
+      "reload": true
+    },
+    {
+      "mode": "paused",
+      "paused": true,
+      "modal_ms": 138,
+      "modal_width": 400,
+      "states": [
+        "paused",
+        "paused",
+        "paused"
+      ],
+      "cancel": true,
+      "automatic_return": true,
+      "reload": true
+    },
+    {
+      "mode": "overview",
+      "paused": false,
+      "modal_ms": 237,
+      "modal_width": 400,
+      "states": [
+        "live",
+        "live",
+        "live"
+      ],
+      "cancel": true,
+      "automatic_return": true,
+      "reload": true
+    },
+    {
+      "failure_preserves_editor": true,
+      "failure_preserves_draft_after_reload": true,
+      "false_success": false
+    }
+  ],
+  "root_cause": [
+    "The recent editor toolbar selected store.step_id, so Publish Changes submitted an email-scoped snapshot and compared only that email against live state.",
+    "Whole-flow publication already included enabled emails but skipped every persisted enabled=False email. Snapshot equality could report Up to date while those emails remained excluded.",
+    "Abandoned Checkout creates all three reminders enabled; current Post Checkout lifecycle defaults also enable its three emails. No production database was accessed, so the origin of the reported disabled flags and the historical production job outcome are unverified."
+  ],
+  "repair": [
+    "Toolbar and inline actions submit the complete eligible flow using the existing durable worker and transaction.",
+    "Cached confirmation lists included and excluded emails; disabled emails require explicit Include and enable selection. No automatic reinterpretation of legacy false values.",
+    "Explicit enablement is frozen in the job and committed atomically with all template versions and runtime steps. Concurrent draft revisions reject inclusion rather than overwrite administrator changes. Lifecycle draft history is retained.",
+    "Success navigation verifies every expected persisted runtime step, then refreshes the overview. Disabled exclusions replace misleading Up to date text.",
+    "Fixed the save-barrier observer so a dialog mounted outside the editor clears its opening feedback."
+  ],
+  "production_files": [
+    "crm_automation_publication.py",
+    "crm_automation_publish_confirm.py",
+    "crm_automation_store.py",
+    "crm_automation_toolbar.py",
+    "crm_flow_inline.py",
+    "components/crm_sections/automation_publish.js"
+  ],
+  "test_files": [
+    "tests/test_crm_flow_publication.py",
+    "tests/test_crm_email_publication_ui.cjs",
+    "tests/test_crm_flow_inline.py",
+    "tests/test_crm_flow_inline_ui.cjs",
+    "tests/test_crm_lifecycle_publication.py",
+    "tests/fixtures/crm_automation_preview.py"
+  ],
+  "validation": [
+    "109-test regression suite passed: full-flow and scoped publication compatibility, lifecycle publication, timing, native automation delivery, readiness, inline controls.",
+    "After the final no-op reconciliation edge-case fix, all six focused full-flow publication tests passed.",
+    "Browser tests passed for enabled drafts, explicit disabled inclusion, paused flow, overview publication, cancellation, repeated clicks, automatic navigation, reload and worker failure.",
+    "All five triggers verified through the shared SQL-backed publication tests: abandoned, welcome, post_purchase, win_back, fulfilled.",
+    "Post Checkout fixture preserves configured 10800s payment, 604800s delivery and 3888000s payment delays, fulfilment fallback and requirement; no publication-created enrolments.",
+    "Injected failure after publication writes rolls back the entire transaction, including all versions and enablement.",
+    "JavaScript save-barrier regression, syntax and git diff checks passed. Compact dialog visually inspected with readable white names on dark panel."
+  ],
+  "limitations": [
+    "Legacy disabled flags carry no reason/provenance; they stay excluded without explicit confirmation.",
+    "Production rows and previous publication outcomes were not inspected. No migration or automatic live-data repair runs.",
+    "Browser timing is synthetic local evidence, not a production latency guarantee. Final modal samples: 138\u20131380ms; previous run: 118\u2013189ms.",
+    "Tests emitted existing thumbnail-runtime-unavailable warnings; runtime publication, rendering validation and status assertions passed.",
+    "Changes are local and uncommitted. Existing click-to-edit changes were preserved. Deployment requires separate authorization."
+  ],
+  "safety": "No commits, pushes, deployment, real publication, customer automation activation, enrolments or customer messages. No delivery/runtime scheduling code changed."
+}

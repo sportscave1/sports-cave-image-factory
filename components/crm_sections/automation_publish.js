@@ -46,7 +46,7 @@
      if(!note.isConnected||document.querySelector('[role="dialog"], .automation-current, [data-testid="stAlert"]')){observer.disconnect();note.remove();clearTimeout(timer);}
     });
     const timer=setTimeout(()=>{observer.disconnect();if(note.isConnected){note.textContent='Confirmation not yet available. Checking saved status…';document.querySelector('.st-key-toolbar-refresh button')?.click();}},15000);
-    observer.observe(document.querySelector('.st-key-crm-automation-editor')||document.body,{childList:true,subtree:true});
+    observer.observe(document.body,{childList:true,subtree:true}); // Dialog is mounted outside the editor.
    }
    allowed=true;try{current.click();}finally{allowed=false;}
   }catch{note.textContent='Save your latest edits, then retry publishing.';}

@@ -67,7 +67,7 @@ if os.getenv('EMAIL_V4_BACKGROUND_PUBLICATION')=='1':
     local_publisher()
 
 @st.cache_resource
-def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False,email_publication=False,paused=False):
+def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False,email_publication=False,paused=False,click_edit=False,disabled=False):
     store=AutomationStore(connect)
     from crm_logic import now
     from tests.crm_publication_fixture import ready
@@ -83,6 +83,11 @@ def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False,email_pub
                 from tests.test_crm_checkout_preview_fallback import LEGACY
                 doc=flow['emails'][0]['document'];doc['middle_sections'].pop(1)
                 doc['middle_sections'][0]['html']=LEGACY;doc['custom_html']=LEGACY
+        if click_edit and kind=='abandoned':
+            from tests.test_crm_modular_catalogue import catalogue_doc
+            from crm_middle_sections import middle_sections,commit_middle
+            for email in flow['emails']:
+                commit_middle(email['document'],middle_sections(email['document'])+[catalogue_doc()['middle_sections'][-1]])
         row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
         if email_publication and kind=='post_purchase':
             from crm_automation_publication import tick
@@ -94,12 +99,16 @@ def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False,email_pub
                 tick(store,'local-seed-publication',env=LIVE)
                 sleep(.01);row=store.flow(row['id'])
             if row['status']!='ACTIVE':raise RuntimeError('Local seed publication did not complete')
+            if disabled:
+                flow=deepcopy(row['config']['draft'])
+                for email in flow['emails'][1:]:email['enabled']=False
+                row=store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
         elif state!='DRAFT' or (kind=='abandoned' and checkout_live):row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
         if state=='PAUSED' and (not email_publication or paused):store.lifecycle(ADMIN,row['id'],'pause')
         identities.append(str(row['id']))
     return identities
 
-identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')),bool(st.query_params.get('fixture_email_publication')),bool(st.query_params.get('fixture_paused')))
+identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')),bool(st.query_params.get('fixture_email_publication')),bool(st.query_params.get('fixture_paused')),bool(st.query_params.get('fixture_click_edit')),bool(st.query_params.get('fixture_disabled')))
 @st.cache_resource
 def empty_setup(kind,run,mode='empty'):
     from tests.test_crm_lifecycle_expansion import DatabaseTests

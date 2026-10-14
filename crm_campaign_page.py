@@ -207,11 +207,12 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                     else:
                         market_control(shop,drafts,doc,key)
                         timing_control(doc,key)
+            # Keep the section component mounted: preview selection and unsaved
+            # HTML remain local while Settings/Templates render lazily.
             with html_tab:
-                if html_tab.open:
-                    from crm_email_prompt_ui import email_prompt_control
-                    if mode!='automation':email_prompt_control(shop,editor,key)
-                    section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
+                from crm_email_prompt_ui import email_prompt_control
+                if mode!='automation':email_prompt_control(shop,editor,key)
+                section_editor(doc,cfg,key,drafts if available else None,actions.user,choices if available else None,shop)
             with templates_tab:
                 if templates_tab.open and available:
                     if mode=='automation':
