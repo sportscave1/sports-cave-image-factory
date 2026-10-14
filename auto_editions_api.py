@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 import tempfile
+import time
 
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
@@ -45,15 +46,21 @@ async def page(request):
 
 
 async def start(request):
+    started=time.monotonic();timings={}
     try:
         import files_upload_api as files
         user=await actor(request,write=True)
+        timings['authentication_ms']=round((time.monotonic()-started)*1000,3);phase=time.monotonic()
         if await files._json_body(request)!={}:raise ValueError('Edition numbers are read from the saved allocation.')
         job,_=await run_in_threadpool(runtime.job_for,allocation(request))
+        timings['request_identity_ms']=round((time.monotonic()-phase)*1000,3);phase=time.monotonic()
+        job['request_timings']=timings.copy()
         _,jobs=runtime.stores()
         row=await run_in_threadpool(jobs.enqueue,job,str(user['id']))
+        timings['enqueue_ms']=round((time.monotonic()-phase)*1000,3)
         runtime.start_worker()
-        return JSONResponse({'ok':True,'job_id':row['id'],'status':row['status'],'test_only':True},headers=HEADERS)
+        timings['request_total_ms']=round((time.monotonic()-started)*1000,3)
+        return JSONResponse({'ok':True,'job_id':row['id'],'status':row['status'],'test_only':True,'timings':timings},headers=HEADERS)
     except Exception as error:return failure(error)
 
 
@@ -79,6 +86,7 @@ async def status(request):
 
 async def download(request):
     folder=None
+    started=time.monotonic();timings={}
     try:
         job,assets,row=await stored_current(request)
         if row['status']!='Ready':raise ValueError('The JPG is not ready yet.')
@@ -89,6 +97,16 @@ async def download(request):
         folder=tempfile.TemporaryDirectory(prefix='sc-edition-download-')
         path=Path(folder.name)/'output.jpg'
         def fetch():
+            from auto_editions_asset_cache import output_assets
+            phase=time.monotonic()
+            # A cache hit is not permission to serve a missing/changed archive.
+            assets.verify_output(output)
+            timings['archive_identity_ms']=round((time.monotonic()-phase)*1000,3);phase=time.monotonic()
+            if output_assets.copy(output['sha256'],path):
+                timings['output_cache_hit']=1
+                timings['output_fetch_ms']=round((time.monotonic()-phase)*1000,3)
+                return
+            timings['output_cache_hit']=0
             metadata,response=assets.output_response(output)
             try:
                 if (metadata.get('id')!=output['file_id'] or metadata.get('rev')!=output['revision']
@@ -102,11 +120,16 @@ async def download(request):
                         target.write(block)
                 if count!=output['bytes'] or ae.file_hash(path)!=output['sha256']:
                     raise ValueError('Cached output checksum failed.')
+                try:output_assets.remember(output['sha256'],path)
+                except OSError:pass
             finally:response.close()
+            timings['output_fetch_ms']=round((time.monotonic()-phase)*1000,3)
         await run_in_threadpool(fetch)
         # Permissions/source are rechecked after the potentially slow transfer.
         await stored_current(request)
-        return FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=HEADERS,
+        timings['download_prepare_ms']=round((time.monotonic()-started)*1000,3)
+        headers={**HEADERS,'Server-Timing':', '.join(f'{k};dur={v}' for k,v in timings.items())}
+        return FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=headers,
                             background=BackgroundTask(folder.cleanup))
     except Exception as error:
         if folder:folder.cleanup()
@@ -138,15 +161,28 @@ async def stored_current(request):
     if row and (row.get('result') or {}).get('retained') is True:
         unit,_=await run_in_threadpool(registry.unit,allocation(request))
         if not same_allocation(unit,row['payload']['identity']):raise PermissionError('Artwork does not match this allocation.')
-        return row['payload'],runtime.storage(),row
+        return row['payload'],await run_in_threadpool(runtime.storage),row
     return await current(request)
 
 
 async def state(request):
     try:
         await actor(request)
-        job,assets=await run_in_threadpool(runtime.job_for,allocation(request))
-        _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
+        saved_id=request.query_params.get('job_id','')
+        if saved_id:
+            if not re.fullmatch(r'[a-f0-9]{64}',saved_id):raise ValueError('Invalid job identity.')
+            registry,jobs=runtime.stores()
+            row=await run_in_threadpool(jobs.read,saved_id)
+            if not row:raise ValueError('Generation request is unavailable.')
+            unit,_=await run_in_threadpool(registry.unit,allocation(request))
+            job=row['payload']
+            if not same_allocation(unit,job['identity']):raise PermissionError('Artwork does not match this allocation.')
+            # Status never serves pixels. The worker fences current source and
+            # approval before and after rendering; downloads recheck access.
+            assets=await run_in_threadpool(runtime.storage) if row['status']=='Ready' else None
+        else:
+            job,assets=await run_in_threadpool(runtime.job_for,allocation(request))
+            _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
         if row and row['status']=='Ready':
             await run_in_threadpool(assets.verify_output,row['result']['output'])
         runtime.start_worker()

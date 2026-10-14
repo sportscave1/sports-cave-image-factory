@@ -122,13 +122,15 @@ def test_archive_idempotency_revision_checks_and_master_history(tmp_path):
         def ensure_folder_path(self,*args,**kwargs):pass
         def get_metadata_if_exists(self,token,path):return self.records.get(path)
         def psd_open_metadata(self,token,file_id,include_preview=False):return self.records.get(file_id)
-        def upload_local_file(self,token,destination,path,conflict):
+        def upload_local_file(self,token,destination,path,conflict,simple_limit):
             assert conflict=='cancel'
+            assert simple_limit==cloud.MAX_OUTPUT_BYTES
             meta=dict(id='id:'+str(len(self.writes)),rev='123',path_display=destination,size=path.stat().st_size,content_hash=ae.file_hash(path,dropbox=True))
             self.records[destination]=self.records[meta['id']]=meta;self.writes.append(destination)
             return meta
     integration=Integration();storage=cloud.DropboxAssets('test',integration)
     first=storage.publish_output(job,path)
+    assert first['path'].rsplit('/',1)[1].startswith('002-of-2 - ')
     assert '/Generated JPGs/SC3287/TEST/' in first['path']
     assert storage.publish_output(job,path)==first and len(integration.writes)==1
     changed=deepcopy(job);changed['id']='f'*64;changed['preparation_hash']='e'*64

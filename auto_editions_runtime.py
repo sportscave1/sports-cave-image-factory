@@ -37,25 +37,45 @@ def context(allocation_id):
 
 
 def job_for(allocation_id):
-    unit,mapping,metadata,assets=context(allocation_id)
+    from concurrent.futures import ThreadPoolExecutor
     registry,_=stores()
-    return confirmed_job(unit,mapping,metadata,registry.for_unit(unit)),assets
+    # Independent authenticated reads may overlap; all identity/approval checks
+    # still complete before a job can be enqueued or an output accepted.
+    with ThreadPoolExecutor(max_workers=2,thread_name_prefix='edition-identity') as pool:
+        allocation=pool.submit(registry.unit,allocation_id)
+        assets=storage()
+        unit,mapping=allocation.result()
+        if not mapping:raise PreparationBlocked('Link the PSD using the existing Add workflow first.')
+        preparation=pool.submit(registry.for_unit,unit)
+        metadata=assets.integration.psd_open_metadata(assets.token,mapping['dropbox_file_id'],include_preview=False)
+        return confirmed_job(unit,mapping,metadata,preparation.result()),assets
 
 
 def run_one(jobs,resolver=job_for):
+    started=time.monotonic()
     record=jobs.claim()
     if not record:return False
     result=None
     saved=False
+    timings={'claim_database_ms':round((time.monotonic()-started)*1000,3)}
+    if record.get('attempts')==1 and record.get('created_at') and record.get('updated_at'):
+        timings['initial_queue_wait_ms']=round(max(0,(record['updated_at']-record['created_at']).total_seconds()*1000),3)
     try:
+        phase=time.monotonic()
         current,assets=resolver(record['payload']['identity']['allocation_id'])
+        timings['worker_identity_ms']=round((time.monotonic()-phase)*1000,3)
         if current['id']!=record['id']:raise PreparationBlocked('source_changed')
         current['archive_labels']=record['payload'].get('archive_labels',current.get('archive_labels',{}))
         result=execute(current,assets)
         # Fence changes made while image transfer/rendering was in progress.
-        verified,_=resolver(current['identity']['allocation_id'])
+        phase=time.monotonic();verified,_=resolver(current['identity']['allocation_id'])
+        timings['final_identity_ms']=round((time.monotonic()-phase)*1000,3)
         if verified['id']!=current['id']:raise PreparationBlocked('source_changed')
-        jobs.finish(record['id'],record['lease_token'],result=result)
+        result['timings'].update(timings)
+        result['timings'].update(record['payload'].get('request_timings',{}))
+        phase=time.monotonic();jobs.finish(record['id'],record['lease_token'],result=result)
+        LOG.info('AUTO_EDITIONS_TIMINGS job=%s finish_database_ms=%.3f elapsed_ms=%.3f stages=%s',
+                 record['id'],(time.monotonic()-phase)*1000,(time.monotonic()-started)*1000,result['timings'])
         saved=True
     except PreparationBlocked:
         jobs.finish(record['id'],record['lease_token'],error_code='source_changed')
