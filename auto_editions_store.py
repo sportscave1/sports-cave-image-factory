@@ -152,7 +152,8 @@ def resolve_layouts(rows):
             and hashes=={row['preparation_hash']}),None)
         for row in approved:
             value=dict(row)
-            if common:
+            if (state=='Cloud Ready' and first.get('current_hash') in hashes
+                    and row['manifest']['source']==first.get('current_source')):
                 value['approval']={k:v for k,v in row['approval'].items() if k!='allocation_ids'}
             result[(product,variant_id(row['variant_id']))]=value
         if common:

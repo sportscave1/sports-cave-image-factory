@@ -52,6 +52,7 @@ def test_multiple_layouts_keep_exact_variant_approval_and_reject_unknown(databas
     sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES(%s,%s::jsonb,'[]','{}','admin')",('b'*64,json.dumps(other)))
     sql.execute("INSERT INTO auto_edition_layouts(product_gid,variant_id,preparation_hash,approval) VALUES(%s,'different',%s,'{}')",(unit['shopify_product_gid'],'b'*64))
     assert registry.for_unit(unit)['manifest']==manifest
+    assert registry.for_unit(dict(unit,id=43))['manifest']==manifest
     with pytest.raises(ValueError):registry.for_unit(dict(unit,id=43,shopify_variant_id='unknown'))
 
 
