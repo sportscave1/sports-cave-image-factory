@@ -21,7 +21,7 @@ def unpack(archive,root,source,number,total):
         manifest=ae.validate_manifest(json.loads(package.read('manifest.json')))
         if manifest['source']!=source or manifest['edition_total']!=total:
             raise ValueError('Prepared source or edition total differs from the current linked allocation.')
-        if manifest['dimensions'][0]*manifest['dimensions'][1]>12_000_000:
+        if manifest['dimensions'][0]*manifest['dimensions'][1]>ae.WORKER_MAX_PIXELS:
             raise ValueError('This layout needs a separately verified production worker budget.')
         refs=sorted({1,number,total})
         allowed={'manifest.json','original.png'}|{f'reference-{n}.png' for n in refs}

@@ -44,7 +44,16 @@ async def details(request):
         current=''
         try:current=ae.fingerprint((await run_in_threadpool(registry.for_unit,unit))['manifest'])
         except cloud.PreparationBlocked:pass
-        return JSONResponse(dict(product_gid=unit['shopify_product_gid'],product_title=unit.get('product_title',''),
+        candidate=request.query_params.get('preparation_hash','')
+        candidate_info=None
+        if candidate:
+            if not re.fullmatch(r'[a-f0-9]{64}',candidate):raise ValueError('Invalid preparation identity.')
+            row=await run_in_threadpool(registry.read,candidate)
+            if not row or row['manifest']['source']['product_gid']!=unit['shopify_product_gid']:
+                raise ValueError('Preparation does not belong to this product.')
+            candidate_info=dict(hash=candidate,dimensions=row['manifest']['dimensions'],
+                source_dimensions=row['manifest']['source_dimensions'],upscaled=row['manifest']['upscaled'])
+        return JSONResponse(dict(candidate=candidate_info,product_gid=unit['shopify_product_gid'],product_title=unit.get('product_title',''),
             variant_title=unit.get('variant_title',''),variant_id=unit.get('shopify_variant_id'),
             number=unit['edition_number'],total=unit['edition_total'],linked=bool(mapping),
             current_hash=current,template_name=ae.reference_template().get('name','SC_Auto_Editions_Base_Template_V1.psd'),

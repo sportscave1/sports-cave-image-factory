@@ -51,6 +51,15 @@ var SCAutoEditionsPreparation = (function () {
             if (layer.parent !== doc || plaque.parent !== doc)
                 throw Error("nested_roles_require_transform_review");
             var inspection = SCPSDInspector.inspect(doc, {smart_object_depth:0,smart_object_limit:0});
+            var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
+            var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
+            if (scale !== 1 && scale !== 2 && scale !== 3) throw Error("unsupported_preparation_scale");
+            if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 60000000)
+                throw Error("canvas_exceeds_worker_limit");
+            // Resize the layered staged document, never the source or another template.
+            // Photoshop rerenders editable text/shapes; raster layers use bicubic smoother.
+            if (scale !== 1) doc.resizeImage(UnitValue(sourceDimensions[0]*scale,"px"),
+                UnitValue(sourceDimensions[1]*scale,"px"), null, ResampleMethod.BICUBICSMOOTHER);
             // Keep the untouched composite as an independent outside-number proof.
             savePNG(doc, "original.png");
             app.fonts.getByName(layer.textItem.font);
@@ -89,7 +98,10 @@ var SCAutoEditionsPreparation = (function () {
                     savePNG(patch, "number-" + number + ".png");
                 } finally { patch.close(SaveOptions.DONOTSAVECHANGES); app.activeDocument = doc; }
             }
-            write({dimensions:[w,h],source_dimensions:[w,h],upscaled:false,
+            write({dimensions:[w,h],source_dimensions:sourceDimensions,upscaled:scale!==1,
+                preparation_geometry:{scale:scale,method:scale===1?"native":"photoshop_layered_bicubic_smoother",
+                    supplier_verified:false,aspect_preserved:true,quality_approval_required:scale!==1},
+                source_plaque_bounds:sourcePlaqueBounds,
                 edition_total:total,number_region:region,original_number_bounds:originalBounds,
                 plaque_bounds:plaqueBounds,original_text:text,number_layer_name:r.number_layer_name,
                 plaque_layer_name:r.plaque_layer_name,font:layer.textItem.font,

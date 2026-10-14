@@ -38,7 +38,7 @@
   if(busy)return;
   if(d.type==='edition-prepare-inspect'||d.type==='edition-prepare-build'){
    busy=true;
-   try{const command=d.type==='edition-prepare-inspect'?{action:d.type,grant:d.grant}:{action:d.type,job_id:d.job_id,roles:d.roles};
+   try{const command=d.type==='edition-prepare-inspect'?{action:d.type,grant:d.grant}:{action:d.type,job_id:d.job_id,roles:d.roles,scale:d.scale??1};
     const job=await api(command);send('edition-prepare-progress',{status:'Working'});
     for(let i=0;i<900;i++){await new Promise(r=>setTimeout(r,1000));const current=await api({action:'edition-prepare-status',job_id:job.job_id});
      if(current.status==='Blocked')throw Error(current.error);

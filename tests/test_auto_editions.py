@@ -100,3 +100,28 @@ def test_duplicate_or_nested_number_never_guessed():
     layers=deepcopy(reference['layers']); layers[0]['smart_object_chain']=[{'layer_id':99}]
     with pytest.raises(ValueError,match='nested'):
         ae.inspect_layout(dict(document=reference['document'],layers=layers))
+
+
+@pytest.mark.parametrize('scale',[2,3])
+def test_enlarged_master_retains_full_export_dimensions(tmp_path,scale):
+    m=package(tmp_path)
+    m.update(dimensions=[200*scale,100*scale],upscaled=True,
+        number_region=[70*scale,60*scale,90*scale,70*scale],
+        preparation_geometry=dict(scale=scale,method='photoshop_layered_bicubic_smoother',
+                                  supplier_verified=False,quality_approval_required=True))
+    for asset in [m['master']]+list(m['patches'].values()):
+        path=tmp_path/asset['name']
+        with Image.open(path) as image:
+            enlarged=image.resize((image.width*scale,image.height*scale))
+        enlarged.save(path);enlarged.close();asset['sha256']=ae.file_hash(path)
+    result=ae.render_jpg(m,tmp_path,2,tmp_path/'large.jpg')
+    with Image.open(tmp_path/'large.jpg') as image:
+        assert list(image.size)==m['dimensions']==result['dimensions']
+    assert result['print_ready'] is False
+    m['dimensions'][0]+=1
+    with pytest.raises(ValueError,match='proportional'):ae.validate_manifest(m)
+
+
+def test_enlargement_requires_disclosed_method_and_review(tmp_path):
+    m=package(tmp_path);m.update(source_dimensions=[100,50],upscaled=True)
+    with pytest.raises(ValueError,match='quality review'):ae.validate_manifest(m)

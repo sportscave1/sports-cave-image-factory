@@ -14,7 +14,9 @@ sys.path.insert(0, str(ROOT))
 import auto_editions as ae
 
 
-def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number):
+def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1):
+    if type(scale) is not int or scale not in (1,2,3):
+        raise ValueError('Choose native, 2x or 3x TEST preparation.')
     from scripts.photoshop_dispatch import run
     source, output = Path(source).resolve(), Path(output).resolve()
     if output.exists():
@@ -27,7 +29,7 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     staged = stage / 'input.psd'; shutil.copyfile(source, staged)
     request = dict(stage_root=str(stage),input=str(staged),output_root=str(output),
                    report=str(output/'preparation.json'),number_layer_name=number_layer,
-                   plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number)
+                   plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale)
     script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
     script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
     script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')

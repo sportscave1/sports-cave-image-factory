@@ -10,10 +10,22 @@ import hashlib
 import json
 import math
 import re
+import threading
+from functools import wraps
 from pathlib import Path
 
 REQUIRED_LAYERS = ('SC_EDITION_NUMBER', 'SC_EDITION_PLAQUE', 'SC_EDITION_MATTING')
 MAX_PIXELS = 110_000_000
+WORKER_MAX_PIXELS = 60_000_000
+_RENDER_LOCK = threading.RLock()
+
+
+def serial_render(function):
+    @wraps(function)
+    def call(*args, **kwargs):
+        with _RENDER_LOCK:
+            return function(*args, **kwargs)
+    return call
 
 
 def fingerprint(value):
@@ -143,6 +155,15 @@ def validate_manifest(manifest):
     dimensions(manifest.get('source_dimensions'))
     if manifest.get('source_dimensions') != canvas and manifest.get('upscaled') is not True:
         raise ValueError('Resampling must be disclosed explicitly.')
+    if manifest.get('upscaled') is True:
+        geometry = manifest.get('preparation_geometry') or {}
+        scale = geometry.get('scale')
+        if (type(scale) is not int or scale not in (2, 3)
+                or geometry.get('method') != 'photoshop_layered_bicubic_smoother'
+                or geometry.get('supplier_verified') is not False
+                or geometry.get('quality_approval_required') is not True
+                or canvas != [n*scale for n in manifest['source_dimensions']]):
+            raise ValueError('Enlargement needs explicit proportional TEST geometry and quality review.')
     return manifest
 
 
@@ -173,6 +194,7 @@ def compose(manifest, root, number):
     return result
 
 
+@serial_render
 def render_jpg(manifest, root, number, destination):
     """Worker primitive. Caller must enforce auth/allocation/approval on each job."""
     destination = Path(destination)
@@ -184,6 +206,7 @@ def render_jpg(manifest, root, number, destination):
             'preparation_hash': fingerprint(manifest), 'print_ready': False}
 
 
+@serial_render
 def compare_reference(manifest, root, number, photoshop_png):
     """Pixel-exact lossless proof, including the area outside the number.
 
@@ -218,6 +241,7 @@ def status(manifest=None, approval=None):
     return 'TEST READY'
 
 
+@serial_render
 def compare_original_outside_number(manifest, root, number, original_png):
     """Prove preparation did not alter the source composition beyond its number."""
     from PIL import Image, ImageChops

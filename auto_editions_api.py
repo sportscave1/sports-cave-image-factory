@@ -88,7 +88,7 @@ async def download(request):
             metadata,response=assets.integration.get_file_response(assets.token,assets.path(job['id'],'output.jpg',cache=True))
             try:
                 if (metadata.get('id')!=output['file_id'] or metadata.get('rev')!=output['revision']
-                        or metadata.get('size')!=output['bytes'] or not 0<output['bytes']<=32*1024*1024):
+                        or metadata.get('size')!=output['bytes'] or not 0<output['bytes']<=cloud.MAX_OUTPUT_BYTES):
                     raise ValueError('Cached output changed; download blocked.')
                 count=0
                 with path.open('wb') as target:

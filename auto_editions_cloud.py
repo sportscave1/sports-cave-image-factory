@@ -10,6 +10,8 @@ import tempfile
 
 import auto_editions as ae
 
+MAX_OUTPUT_BYTES=64*1024*1024
+
 
 class PreparationBlocked(ValueError):
     pass
@@ -147,11 +149,11 @@ class DropboxAssets:
         self.integration.delete_path_recoverable(self.token,destination,root_path=self.ROOT+'/Cache')
 
 
-def execute(job, assets, *, max_pixels=12_000_000):
+def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
     """Run one bounded worker job, reading only one master and requested patch.
 
-    The default budget handles native VA canvases. Larger supplier layouts need
-    measured memory headroom or a streaming renderer before increasing it.
+    The bounded budget supports up to 60 MP TEST layouts on the existing standard
+    service. Rendering and reference checks share a process-wide memory lock.
     Temporary disk is scratch only; inputs and results use persistent storage.
     """
     manifest = ae.validate_manifest(job['manifest'])
@@ -173,6 +175,8 @@ def execute(job, assets, *, max_pixels=12_000_000):
             assets.fetch(job['preparation_hash'],asset,root/name)
         path=root/'output.jpg'
         rendered=ae.render_jpg(manifest,root,job['number'],path)
+        if path.stat().st_size>MAX_OUTPUT_BYTES:
+            raise PreparationBlocked('Rendered output exceeds the verified download limit.')
         output=assets.publish_output(job['id'],path)
         if output.get('sha256') != rendered['sha256']:
             raise PreparationBlocked('Persistent output verification failed.')

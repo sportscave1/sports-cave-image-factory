@@ -85,7 +85,8 @@ def inspect(key):
         if lease:lease.unlink(missing_ok=True)
 
 
-def prepare(key,roles):
+def prepare(key,roles,scale=1):
+    if type(scale) is not int or scale not in (1,2,3):raise ValueError("Unsupported TEST enlargement.")
     with LOCK:
         row=JOBS.get(key)
         if not row or row['status']!='Inspected':raise ValueError('Inspect this design before preparation.')
@@ -98,11 +99,11 @@ def prepare(key,roles):
         if selected['number'].get('kind')!='text' or selected['number'].get('editable') is not True:
             raise ValueError('Select editable edition text.')
         row['status']='Working'
-        threading.Thread(target=prepare_worker,args=(key,roles),daemon=True).start()
+        threading.Thread(target=prepare_worker,args=(key,roles,scale),daemon=True).start()
     return dict(job_id=key,status='Working')
 
 
-def prepare_worker(key,roles):
+def prepare_worker(key,roles,scale=1):
     lease=None
     try:
         from scripts.prepare_auto_editions import prepare as build
@@ -112,7 +113,7 @@ def prepare_worker(key,roles):
         lease=processor_lease()
         output=row['folder']/'prepared'
         build(row['folder']/'input.psd',output,ctx['source'],number_layer=roles['number'],
-              plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'])
+              plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'],scale=scale)
         manifest=json.loads((output/'manifest.json').read_text())
         manifest['confirmed_roles']=roles
         # Adding reviewed role metadata changes the package identity. Server
@@ -146,7 +147,7 @@ def prepare_worker(key,roles):
 def action(data):
     kind=data.get('action')
     if kind=='edition-prepare-inspect' and set(data)=={'action','grant'}:return start(data['grant'])
-    if kind=='edition-prepare-build' and set(data)=={'action','job_id','roles'}:return prepare(data['job_id'],data['roles'])
+    if kind=='edition-prepare-build' and set(data) in ({'action','job_id','roles'},{'action','job_id','roles','scale'}):return prepare(data['job_id'],data['roles'],data.get('scale',1))
     if kind=='edition-prepare-status' and set(data)=={'action','job_id'}:
         row=JOBS.get(data['job_id'])
         if not row or time.monotonic()-row['created']>1800:raise ValueError('Preparation session expired.')
