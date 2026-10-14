@@ -16,7 +16,7 @@ class PreservationTests(unittest.TestCase):
         for name in ['pasteFiles','showDeleteDialog','uploadChunk','runUpload','setSingleSelection','selectByIndex']:
             self.assertEqual(fn(source,name),fn(baseline,name),name)
         for name in ['auto_editions_api.py','dropbox_integration.py','supabase_backend.py','desktop_helper_macos/SportsCaveFilesHelper.py','desktop_helper/Install.ps1']:
-            self.assertEqual((ROOT/name).read_bytes(),subprocess.check_output(['git','show','823a1966:'+name],cwd=ROOT),name)
+            self.assertEqual((ROOT/name).read_bytes(),subprocess.check_output(['git','show','c07119e4:'+name],cwd=ROOT),name)
 
     def test_existing_native_transfer_and_cache_implementations_are_unchanged(self):
         source=(ROOT/'desktop_helper/SportsCaveFilesDesktop.cs').read_text(encoding='utf-8')

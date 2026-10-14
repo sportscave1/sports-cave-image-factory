@@ -159,6 +159,8 @@
         folderController: null,
         folderGeneration: 0,
         original: false,
+        previewTier: 0,
+        requestedTier: 0,
         revision: query.get("rev") || "",
         navigationFolder: null,
         index: -1,
@@ -202,7 +204,7 @@
         return Math.min(
           Math.max(40, elements.stage.clientWidth - 40) / width,
           Math.max(40, elements.stage.clientHeight - 40) / height,
-          1
+          state.previewTier === 0 ? Infinity : 1
         );
       }
 
@@ -234,6 +236,7 @@
         state.sizingMode = "custom";
         state.scale = Math.max(0.05, Math.min(12, state.scale * multiplier));
         applyTransform();
+        scheduleDetail();
       }
 
       function clearImage() {
@@ -247,6 +250,7 @@
       }
 
       function showImageError(message) {
+        elements.stage.setAttribute("aria-busy", "false");
         clearImage();
         elements.imageErrorDetail.textContent = String(
           message || "Refresh Files and try again."
@@ -254,7 +258,23 @@
         elements.imageError.classList.add("visible");
       }
 
-      async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true, original = false, revision = path === state.path ? state.revision : "" } = {}) {
+      function desiredTier() {
+        const dpr = Math.min(3, window.devicePixelRatio || 1);
+        const width = state.naturalWidth ? state.naturalWidth * state.scale : Math.max(40, elements.stage.clientWidth - 40);
+        const height = state.naturalHeight ? state.naturalHeight * state.scale : Math.max(40, elements.stage.clientHeight - 40);
+        return width*dpr <= 1024 && height*dpr <= 768 ? 1024 : width*dpr <= 1600 && height*dpr <= 1200 ? 1600 : 2048;
+      }
+
+      function scheduleDetail() {
+        clearTimeout(state.detailTimer);
+        if (state.original || state.suspended || !/\.(jpe?g|png|webp|psd)$/i.test(state.path)) return;
+        state.detailTimer = setTimeout(() => {
+          const tier = desiredTier();
+          if (tier > state.requestedTier) void loadImage(state.path, {name:state.name, tier});
+        }, 160);
+      }
+
+      async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true, original = false, revision = path === state.path ? state.revision : "", tier = null } = {}) {
         const relativePath = String(path || "");
         if (!relativePath) { showImageError("No image was selected."); return; }
         state.suspended = false;
@@ -265,11 +285,16 @@
         state.path = relativePath; state.folder = String(folder || "");
         state.name = String(name || fileNameFromPath(relativePath));
         state.revision = revision; state.original = original;
-        state.rotation = 0; state.panX = 0; state.panY = 0;
+        clearTimeout(state.detailTimer);
+        if (!sameImage) {
+          state.rotation = 0; state.panX = 0; state.panY = 0;
+          state.previewTier = 0; state.sizingMode = "fit";
+        }
         elements.fileName.textContent = state.name; elements.fileName.title = state.name;
         document.title = `${state.name} - Sports Cave Image Viewer`;
         if (!sameImage) { clearImage(); elements.image.removeAttribute("src"); }
-        elements.dimensions.textContent = original ? "Opening full-resolution original…" : "Opening preview…";
+        if (!sameImage) elements.dimensions.textContent = "";
+        elements.stage.setAttribute("aria-busy", "true");
         if (replaceHistory && !embedded) {
           const params = new URLSearchParams({ path: state.path, folder: state.folder, name: state.name });
           history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
@@ -290,9 +315,11 @@
           showImageError("Unsupported Preview. Use Download to save this file."); syncNavigation(); return;
         }
         try {
-          const key = `${relativePath}|${revision}`;
+          const targetTier = tier || Math.max(sameImage ? state.requestedTier : 0, desiredTier());
+          state.requestedTier = targetTier;
+          const key = `${relativePath}|${revision}|${targetTier}`;
           if (extension === "pdf") {
-            clearImage(); elements.dimensions.textContent = "Opening PDF…";
+            clearImage(); elements.dimensions.textContent = "";
             let blob = state.pdfCache?.key === key && state.pdfCache.expires > Date.now() ? state.pdfCache.blob : null;
             const rendererPromise = import("/files-preview-assets/6.4.299/build/pdf.min.mjs");
             rendererPromise.catch(() => {});
@@ -330,16 +357,15 @@
           } else if (cached) {
             if (sameImage && elements.image.src === cached.url && elements.image.complete) {
               elements.dimensions.textContent = `Preview · ${state.naturalWidth} x ${state.naturalHeight} pixels`;
-              fitToScreen(); syncNavigation(); return;
+              elements.stage.setAttribute("aria-busy", "false"); syncNavigation(); return;
             }
             url = cached.url;
           }
           else {
             let response;
             for (let attempt = 0; attempt < 90; attempt++) {
-              response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
+              response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&tier=${targetTier}&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
               if (response.status !== 202) break;
-              elements.dimensions.textContent = "Preparing a lightweight preview…";
               await response.body?.cancel();
               await new Promise((resolve, reject) => {
                 const abort = () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); };
@@ -363,14 +389,30 @@
             }
           }
           if (generation !== state.loadGeneration) return;
+          // Decode off the displayed element: keep the current pixels visible until
+          // the new representation is ready, including during an explicit Original.
+          const decoded = new Image(); decoded.decoding = "async";
+          const abortDecode = () => { decoded.src = ""; };
+          controller.signal.addEventListener("abort", abortDecode, {once:true});
+          try { decoded.src = url; await decoded.decode(); }
+          finally { controller.signal.removeEventListener("abort", abortDecode); }
+          if (generation !== state.loadGeneration) return;
+          const oldWidth = state.naturalWidth;
+          const oldScale = state.scale;
           elements.image.onload = () => {
             if (generation !== state.loadGeneration) return;
             state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+            state.previewTier = targetTier;
+            elements.stage.setAttribute("aria-busy", "false");
             elements.previewPlaceholder.hidden = true;
             elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
             elements.image.alt = state.name; elements.image.style.display = "block";
             elements.dimensions.textContent = `${original ? "Original" : "Preview"} · ${state.naturalWidth} x ${state.naturalHeight} pixels`;
-            if (original) actualSize(); else fitToScreen();
+            if (original) actualSize();
+            else if (oldWidth && state.sizingMode !== "fit") {
+              state.scale = oldScale * oldWidth / state.naturalWidth;
+              state.fitScale = calculateFitScale(); applyTransform();
+            } else fitToScreen();
             syncNavigation();
           };
           elements.image.onerror = () => {
@@ -386,6 +428,7 @@
         } catch (error) {
           if (generation !== state.loadGeneration || error.name === "AbortError") return;
           state.original = false;
+          elements.stage.setAttribute("aria-busy", "false");
           if ((sameImage || state.naturalWidth) && !error.message.includes("access expired")) { elements.dimensions.textContent = error.message; }
           else showImageError(error.message);
         }
@@ -421,6 +464,7 @@
           await render.promise;
           if (generation !== state.pdfPageGeneration) return;
           elements.pdf.replaceChildren(canvas); elements.pdf.dataset.renderedPage=String(number);
+          elements.stage.setAttribute("aria-busy", "false");
           elements.dimensions.textContent = `PDF · Page ${number} of ${pdf.numPages}`;
           elements.zoomStatus.textContent = `${Math.round(state.pdfZoom*100)}%`;
         } catch (error) {
@@ -438,7 +482,7 @@
           elements.previewPlaceholder.hidden = true;
           elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
           elements.image.style.display = "block"; elements.image.alt = state.name;
-          elements.dimensions.textContent = "Small preview · loading larger preview…"; fitToScreen();
+          elements.dimensions.textContent = ""; fitToScreen();
         };
         elements.image.src = url;
       }
@@ -570,6 +614,7 @@
       window.addEventListener("resize", () => {
         state.fitScale = calculateFitScale();
         if (state.sizingMode === "fit") fitToScreen();
+        scheduleDetail();
       });
       function validRelativeValue(value, { required = false, maxLength = 1024 } = {}) {
         if (typeof value !== "string" || value.length > maxLength) return false;
@@ -621,6 +666,8 @@
       }
 
       function suspendPreview() {
+        clearTimeout(state.detailTimer);
+        elements.stage.setAttribute("aria-busy", "false");
         state.loadGeneration += 1; state.folderGeneration += 1;
         state.imageController?.abort(); state.folderController?.abort();
         elements.image.removeAttribute("src"); stopPdf();

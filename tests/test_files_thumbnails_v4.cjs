@@ -44,7 +44,7 @@ const {chromium}=require('playwright');
   });assert.equal(changed,null,'a different revision never borrows the old thumbnail');
   await page.locator('.file-item').first().dblclick();
   const view=await page.locator('#previewFrame').elementHandle().then(e=>e.contentFrame());
-  await view.waitForFunction(()=>elements.dimensions.textContent.startsWith('Small preview'));
+  await view.waitForFunction(()=>state.naturalWidth>0 && state.previewTier===0);
   await view.waitForFunction(()=>elements.dimensions.textContent.startsWith('Preview'));
   await view.locator('#closeButton').click();
   await page.locator('#previewPanel').waitFor({state:'hidden'});

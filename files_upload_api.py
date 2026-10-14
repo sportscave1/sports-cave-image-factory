@@ -956,12 +956,17 @@ def _stream_original_with_preview(upstream, *, access_token, user_id, path, meta
                 # decoding is also skipped; the explicit original still streams.
                 if original.format not in {"JPEG", "PNG", "WEBP"} or original.width * original.height > 40_000_000:
                     return
-                original.draft("RGB", (1024, 768))
-                original.thumbnail((1024, 768))
-                screen = ImageOps.exif_transpose(original).convert("RGB")
+                original.draft("RGB", (2048, 1536))
+                original.thumbnail((2048, 1536))
+                screen = ImageOps.exif_transpose(original)
+                if original.info.get("icc_profile"):
+                    from PIL import ImageCms
+                    screen = ImageCms.profileToProfile(screen, io.BytesIO(original.info["icc_profile"]),
+                        ImageCms.createProfile("sRGB"), outputMode="RGB")
+                screen = screen.convert("RGB")
                 scope = hashlib.sha256((str(user_id) + "\0" + access_token).encode()).hexdigest()
                 revision = str(metadata.get("rev") or "")
-                for dimension, bounds in [("w1024h768", (1024, 768)), ("w256h256", (256, 256))]:
+                for dimension, bounds in [("w2048h1536", (2048, 1536)), ("w1024h768", (1024, 768)), ("w256h256", (256, 256))]:
                     screen.thumbnail(bounds)
                     output = io.BytesIO(); screen.save(output, "JPEG", quality=88)
                     content = output.getvalue()
@@ -2002,6 +2007,9 @@ async def image_preview(request: Request):
         )
         extension = PurePosixPath(path).suffix.casefold()
         representation = request.query_params.get("representation")
+        tier = str(request.query_params.get("tier") or "1024")
+        if tier not in {"1024", "1600", "2048"}:
+            raise FilesUploadError("Invalid preview resolution.")
         if representation not in {None, "screen", "small"}:
             raise FilesUploadError("Invalid preview representation.")
         if representation in {"screen", "small"}:
@@ -2013,7 +2021,7 @@ async def image_preview(request: Request):
             content = await run_in_threadpool(
                 _preview_bytes, context["access_token"], path,
                 user_id=str(user.get("id") or ""),
-                size="w1024h768" if representation == "screen" else "w256h256",
+                size=("w1024h768" if tier == "1024" else "w2048h1536") if representation == "screen" else "w256h256",
                 revision=str(request.query_params.get("rev") or "")[:128],
             )
             return Response(content, media_type="image/jpeg", headers={
@@ -2065,7 +2073,7 @@ async def _persistent_preview(context, user, path, request, representation):
         content, timing = await run_in_threadpool(files_preview_cache.request_preview,
             context["access_token"], path, root=context["root_path"],
             user_id=str(user.get("id") or ""), revision=str(request.query_params.get("rev") or "")[:128],
-            representation=representation)
+            representation=representation, tier=str(request.query_params.get("tier") or "1600"))
         headers = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
                    "Server-Timing": timing, "X-Files-Representation": representation,
                    "X-Files-Preview-Cache": ("provider-preview" if content is not None and "provider;dur=" in timing

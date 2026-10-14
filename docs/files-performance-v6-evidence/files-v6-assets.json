@@ -1,0 +1,24 @@
+[
+  {
+    "noise": false,
+    "bytes": {
+      "small": 168,
+      "screen1024": 1482,
+      "screen": 3498,
+      "screen2048": 5678
+    },
+    "encrypted_bytes": 19468,
+    "prepare_ms": 623.1745999975828
+  },
+  {
+    "noise": true,
+    "bytes": {
+      "small": 346,
+      "screen1024": 232500,
+      "screen": 706996,
+      "screen2048": 1288664
+    },
+    "encrypted_bytes": 3962020,
+    "prepare_ms": 1740.433099999791
+  }
+]

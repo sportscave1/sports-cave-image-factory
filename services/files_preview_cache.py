@@ -19,7 +19,7 @@ from pathlib import PurePosixPath
 
 import dropbox_integration as dbx
 
-VERSION = "v4-webp-1600x1200-256x256-1"
+VERSION = "v6-srgb-q88-2048-1600-1024-256-1"
 PREFIX = "files-previews/"
 MAX_OBJECT = 4 * 1024 * 1024
 MAX_SOURCE = 100 * 1024 * 1024
@@ -81,6 +81,13 @@ class Store:
 
     def write(self, key, value):
         data = self.cipher.encrypt(json.dumps(value, separators=(",", ":")).encode())
+        if len(data) > MAX_OBJECT and value.get("assets", {}).get("screen2048"):
+            # Detailed artwork can exceed the bundle budget when all three sizes
+            # are retained. Keep the sharp master derivative and grid thumbnail;
+            # missing intermediate sizes can be derived without reading Dropbox.
+            value = {**value, "assets": {name: content for name, content in value["assets"].items()
+                                       if name in {"screen2048", "small"}}}
+            data = self.cipher.encrypt(json.dumps(value, separators=(",", ":")).encode())
         if len(data) > MAX_OBJECT:
             raise PreviewError("Prepared preview exceeds its size limit.")
         self.client.put_object(Bucket=self.bucket, Key=self.prefix + key, Body=data,
@@ -192,7 +199,7 @@ def _same_revision(actual, expected):
         raise PreviewError("The source changed during preparation.", 409)
 
 
-def _provider_preview(token, meta, size="w1024h768"):
+def _provider_preview(token, meta, size="w2048h1536"):
     sdk = dbx._dropbox_sdk()
     actual, response = dbx.team_space_client(token).files_get_thumbnail(
         meta["id"], format=sdk.files.ThumbnailFormat("jpeg"),
@@ -244,45 +251,69 @@ def prepare(token, meta, allow_original, prefetched=None, skip_provider=False, *
             limit = 80_000_000 if original.format == "JPEG" else 32_000_000
             if original.format not in {"JPEG", "PNG", "WEBP"} or original.width * original.height > limit:
                 raise PreviewError("This artwork exceeds safe preview decoding limits. Use Download.")
-            bounds = (256, 256) if thumbnail_only else (1600, 1200)
+            bounds = (256, 256) if thumbnail_only else (2048, 1536)
             original.draft("RGB", bounds)
             original.thumbnail(bounds)
-            screen = ImageOps.exif_transpose(original).convert("RGBA")
+            screen = ImageOps.exif_transpose(original)
+            profile = original.info.get("icc_profile")
+            if profile:
+                # Convert tagged artwork to display sRGB; do not relabel its pixels.
+                from PIL import ImageCms
+                alpha = screen.getchannel("A") if "A" in screen.getbands() else None
+                screen = ImageCms.profileToProfile(screen, io.BytesIO(profile),
+                    ImageCms.createProfile("sRGB"), outputMode="RGB")
+                if alpha is not None:
+                    screen.putalpha(alpha)
+            screen = screen.convert("RGBA")
             background = Image.new("RGB", screen.size, "white")
             background.paste(screen, mask=screen.getchannel("A"))
             result = {}
-            outputs = [("small", (256, 256))] if thumbnail_only else [("screen", (1600, 1200)), ("small", (256, 256))]
+            encoded = {}
+            outputs = [("small", (256, 256))] if thumbnail_only else [
+                ("screen2048", (2048, 1536)), ("screen", (1600, 1200)),
+                ("screen1024", (1024, 768)), ("small", (256, 256))]
             for name, bounds in outputs:
-                background.thumbnail(bounds)
+                rendition = background.copy()
+                rendition.thumbnail(bounds, Image.Resampling.LANCZOS)
+                quality = 76 if name == "small" else 88
+                identity = (rendition.size, quality)
+                if identity in encoded:
+                    result[name] = encoded[identity]
+                    continue
                 output = io.BytesIO()
                 # A deterministic JPEG fallback keeps deployments without a WebP
                 # encoder functional. Originals are never altered.
                 from PIL import features
-                background.save(output, "WEBP" if features.check("webp") else "JPEG",
-                                quality=80 if name == "screen" else 76)
+                rendition.save(output, "WEBP" if features.check("webp") else "JPEG",
+                                quality=quality)
                 result[name] = base64.b64encode(output.getvalue()).decode()
+                encoded[identity] = result[name]
             return result
     finally:
         source.close()
 
 
-def _job(store, key, token, meta, allow_original, prefetched=None, skip_provider=False):
+def _job(store, key, token, meta, allow_original, prefetched=None, skip_provider=False, tier=2048, source_allowed=True):
     etag = None
     try:
         etag = store.lease()
         if not etag:
             return
         existing = store.read(key)
-        if existing and not (existing.get("thumbnail_only") and allow_original):
+        if existing and not (allow_original and (existing.get("thumbnail_only") or existing.get("max_tier", 2048) < tier)):
             return
         started = time.monotonic()
         try:
-            assets = prepare(token, meta, allow_original, prefetched, skip_provider,
+            # A lower provider representation can be upgraded via the provider,
+            # but never trigger a second original download for the same bundle.
+            can_download = source_allowed and allow_original and not (existing and existing.get("assets", {}).get("screen"))
+            assets = prepare(token, meta, can_download, prefetched, skip_provider,
                              thumbnail_only=not allow_original)
             if not allow_original:
                 assets = {"small": assets["small"]}
             value = {"assets": assets, "expires": time.time() + TTL,
                      "thumbnail_only": not allow_original,
+                     "max_tier": 2048 if prefetched is None else tier,
                      "preparation_ms": round((time.monotonic()-started)*1000, 1)}
         except Exception:
             # Short negative cache; no source details or credentials persisted.
@@ -334,15 +365,31 @@ def _remember(store, key, representation, data, expires=None):
             _fast.pop(next(iter(_fast)))
 
 
-def request_preview(token, path, *, root, user_id, revision, representation):
+def _cached_representation(assets, asset):
+    if asset in assets:
+        return base64.b64decode(assets[asset], validate=True)
+    if asset not in {"screen", "screen1024"} or "screen2048" not in assets:
+        raise PreviewError("Prepared representation is unavailable.")
+    from PIL import Image, features
+    with Image.open(io.BytesIO(base64.b64decode(assets["screen2048"], validate=True))) as image:
+        image.thumbnail((1024, 768) if asset == "screen1024" else (1600, 1200), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        image.save(output, "WEBP" if features.check("webp") else "JPEG", quality=88)
+        return output.getvalue()
+
+
+def request_preview(token, path, *, root, user_id, revision, representation, tier="1600"):
     """Called only after current session/Files authorization. Recheck source on every read."""
     started = time.perf_counter()
     meta = verified(token, path, root, revision)
     metadata_ms = (time.perf_counter() - started) * 1000
     store = current_store()
     key = asset_key(user_id, root, meta)
+    asset = {"1024": "screen1024", "1600": "screen", "2048": "screen2048"}.get(str(tier)) if representation == "screen" else "small"
+    if asset is None:
+        raise PreviewError("Invalid preview resolution.", 400)
     with _lock:
-        fast = _fast.get((store, key, representation))
+        fast = _fast.get((store, key, asset))
         if fast and fast[0] > time.monotonic():
             return fast[1], f'metadata;dur={metadata_ms:.1f}, storage;dur=0, memory;desc="hit"'
         if _failed.get(key, 0) > time.monotonic():
@@ -351,13 +398,15 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     cached = store.read(key)
     storage_ms = (time.perf_counter() - started) * 1000
     timing = f'metadata;dur={metadata_ms:.1f}, storage;dur={storage_ms:.1f}'
-    if cached and representation == "screen" and cached.get("screen_unavailable_until",0) > time.time():
+    if cached and representation == "screen" and cached.get("screen_unavailable_until",0) > time.time() and (cached.get("thumbnail_only") or cached.get("max_tier",2048) < int(tier)):
         raise PreviewError("A screen preview is unavailable. Use Download.")
-    if cached and not (cached.get("thumbnail_only") and representation == "screen"):
+    if cached and not (representation == "screen" and (cached.get("thumbnail_only") or cached.get("max_tier",2048) < int(tier))):
         if cached.get("unavailable"):
             raise PreviewError("A lightweight preview is unavailable. Use Download.")
-        data = base64.b64decode(cached["assets"][representation], validate=True)
-        _remember(store, key, representation, data, cached["expires"])
+        started = time.perf_counter()
+        data = _cached_representation(cached["assets"], asset)
+        timing += f', resize;dur={(time.perf_counter()-started)*1000:.1f}'
+        _remember(store, key, asset, data, cached["expires"])
         return data, timing
     with _lock:
         if key in _pending or not _slots.acquire(blocking=False):
@@ -367,14 +416,17 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     # already has a representation. Pass those same bytes to the persistence job.
     started = time.perf_counter()
     try:
-        prefetched = _provider_preview(token, meta, "w256h256" if representation == "small" else "w1024h768")
+        prefetched = _provider_preview(token, meta, "w256h256" if representation == "small" else
+            "w1024h768" if str(tier) == "1024" else "w2048h1536")
     except Exception:
         prefetched = None
     timing += f', provider;dur={(time.perf_counter()-started)*1000:.1f}'
     if prefetched:
-        _remember(store, key, representation, prefetched)
+        _remember(store, key, asset, prefetched)
     try:
-        _pool.submit(_job, store, key, token, meta, representation == "screen", prefetched, True)
+        _pool.submit(_job, store, key, token, meta, representation == "screen", prefetched, True,
+                     1024 if str(tier) == "1024" else 2048,
+                     int(meta.get("size", 0)) < 35_000_000)
     except Exception:
         with _lock:
             _pending.discard(key)
