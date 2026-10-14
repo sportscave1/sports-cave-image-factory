@@ -9,12 +9,18 @@ from crm_resend import Config,Resend,MarketingDisabled
 from crm_templates import render
 from crm_recovery_discount import DiscountHold
 
+class WorkerStopping(BaseException):
+    """Cancellation, not a delivery failure; bypass retry/error handlers safely."""
+
+
 class Engine:
     def __init__(self,store,shop,provider=None,config=None,clock=now):
         self.store,self.shop,self.config,self.clock=store,shop,config or Config(),clock
         self.provider=provider;self.owner=None
         self._schedule_checkpoint=None;self._delivery_checkpoint=None
+        self.stop_requested=lambda:False
     def hold_lease(self):
+        if self.stop_requested():raise WorkerStopping('CRM worker is stopping.')
         if self.owner and not self.store.lease(self.owner):raise RuntimeError('CRM worker lease changed.')
         if self.owner:
             at=self.clock()

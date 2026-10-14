@@ -27,8 +27,9 @@ def main(argv=None):
     store=Store()
     if args.seed:store.seed();return 0
     from crm_shopify import Shopify
-    from crm_engine import Engine
+    from crm_engine import Engine,WorkerStopping
     engine=Engine(store,Shopify());stop=threading.Event();owner=str(uuid.uuid4())
+    engine.stop_requested=stop.is_set
     signal.signal(signal.SIGTERM,lambda *_:stop.set());signal.signal(signal.SIGINT,lambda *_:stop.set())
     # Durable manual enrollment validation shares this worker process, but a
     # slow Shopify lookup must not block either its peers or the email cycle.
@@ -92,6 +93,7 @@ def main(argv=None):
             review_import_tick()
         except Exception as exc:logging.getLogger(__name__).warning('review_worker_cycle_failed type=%s',type(exc).__name__)
         try:engine.tick(owner)
+        except WorkerStopping:break
         except Exception as exc:logging.getLogger(__name__).warning('crm_worker_cycle_failed type=%s',type(exc).__name__)
         try:
             from crm_flow_tests import tick as flow_test_tick

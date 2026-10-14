@@ -52,14 +52,21 @@ def blockers(store,row,env=None,*,conn=None,published=False):
     for scope in sorted(scopes-set(state.get('scopes',[]))):
         reasons.append('Shopify permission missing: '+scope)
     for topic in required_topics(kind,flow):
-        if not state.get('webhooks',{}).get(topic):reasons.append('Verify Shopify webhook: '+topic)
+        if not state.get('webhooks',{}).get(topic):
+            detail=state.get('webhook_details',{}).get(topic,{}).get('status') or state.get('checks',{}).get(topic,'UNVERIFIED')
+            reasons.append('Verify Shopify webhook: '+topic+' — '+detail)
     at=now()
     for key,label in (('worker_health','CRM delivery worker'),('automation_publication_health','CRM publication worker')):
         # A full cycle includes slow analytics/maintenance. Only completed,
         # lease-protected delivery work can supply the more recent evidence.
         health=(read('automation_delivery_health') or read(key)) if key=='worker_health' else read(key)
         if not recent_health(health,at):
-            reasons.append(label+' unavailable or stale; start the existing CRM worker and rerun Diagnostics')
+            checked=date(health.get('checked_at'))
+            if not checked:detail='no completed-work checkpoint recorded'
+            elif checked>at+timedelta(minutes=1):detail='checkpoint timestamp is in the future'
+            elif health.get('status')!='ok':detail='last checkpoint did not report successful work'
+            else:detail='last completed work '+str(max(0,int((at-checked).total_seconds())))+'s ago (limit 300s)'
+            reasons.append(label+' unavailable or stale: '+detail+'. Check the existing worker deployment and lease; a process heartbeat alone cannot clear this check.')
         elif key=='worker_health' and not all(health.get(k) for k in ('marketing_enabled','provider_configured','sender_configured')):
             reasons.append('CRM delivery worker marketing/provider/sender configuration is incomplete')
     config=Config(env)

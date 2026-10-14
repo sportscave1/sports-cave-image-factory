@@ -10,7 +10,8 @@ QUERY='''query CrmWebhooks($after:String) { webhookSubscriptions(first:100,after
  nodes { id topic apiVersion { handle } endpoint { ... on WebhookHttpEndpoint { callbackUrl } } } pageInfo { hasNextPage endCursor } } }'''
 
 def main(argv=None):
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--apply',action='store_true');parser.add_argument('--orders-only',action='store_true');parser.add_argument('--automation-only',action='store_true');parser.add_argument('--abandoned-only',action='store_true',help='Inspect/create only the four abandoned-checkout trigger topics.');args=parser.parse_args(argv)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--apply',action='store_true');parser.add_argument('--orders-only',action='store_true');parser.add_argument('--automation-only',action='store_true');parser.add_argument('--abandoned-only',action='store_true',help='Inspect/create only the four abandoned-checkout trigger topics.');parser.add_argument('--topic',choices=sorted(set(SHOPIFY_TOPICS.values())),help='Inspect or explicitly apply one topic only; never touches other subscriptions.');args=parser.parse_args(argv)
+    if args.topic and (args.orders_only or args.automation_only or args.abandoned_only):parser.error('--topic cannot be combined with group filters.')
     import shopify_sync
     from crm_shopify_webhook_config import base_url,callbacks
     if not base_url():raise SystemExit('Configure the existing HTTPS webhook service base URL.')
@@ -20,7 +21,7 @@ def main(argv=None):
         raise SystemExit('CRM webhook setup requires Shopify API version 2026-04.')
     from crm_automation_capabilities import CONNECTION,TOPICS
     required=set(TOPICS['abandoned']) if args.abandoned_only else {t for ts in TOPICS.values() for t in ts}
-    if args.apply and (args.automation_only or args.abandoned_only):
+    if args.apply:
         import tomllib
         data,_=shopify_sync.graphql_request(CONNECTION,{})
         canonical=tomllib.loads((Path(__file__).resolve().parents[1]/'shopify_customer_account/shopify.app.toml').read_text())['client_id']
@@ -36,6 +37,7 @@ def main(argv=None):
         if not after or after in seen:raise SystemExit('Webhook pagination did not advance.')
         seen.add(after)
     for topic,enum in SHOPIFY_TOPICS.items():
+        if args.topic and enum!=args.topic:continue
         if (args.automation_only or args.abandoned_only) and enum not in required:continue
         if args.orders_only and enum not in ('ORDERS_CREATE','ORDERS_UPDATED','ORDERS_PAID','ORDERS_FULFILLED'):continue
         destination=targets['paid'] if enum=='ORDERS_PAID' else target
