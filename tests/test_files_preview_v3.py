@@ -117,8 +117,15 @@ class PreviewV3Tests(unittest.TestCase):
                 with self.assertRaises(cache.PreviewError): self.request()
 
     def test_thumbnail_miss_does_not_queue_original_preparation(self):
-        with patch.object(cache.dbx,"get_file_metadata",return_value=META), patch.object(cache._pool,"submit") as submit:
-            self.assertIsNone(self.request("small")[0]); submit.assert_not_called()
+        key=cache.asset_key("worker","/Synthetic",META)
+        with patch.object(cache.dbx,"get_file_metadata",return_value=META), patch.object(cache,"_provider_preview",return_value=b"small-jpeg") as provider, patch.object(cache._pool,"submit") as submit:
+            try:
+                self.assertEqual(self.request("small")[0], b"small-jpeg")
+                self.assertFalse(submit.call_args.args[5], "Grid preparation must forbid original retrieval")
+                self.assertEqual(provider.call_args.args[-1], "w256h256")
+            finally:
+                with cache._lock: cache._pending.discard(key)
+                cache._slots.release()
 
     def test_pending_requests_are_deduplicated(self):
         key = cache.asset_key("worker", "/Synthetic", META)
@@ -175,7 +182,7 @@ class PreviewV3Tests(unittest.TestCase):
     def test_large_jpg_prepared_once_without_original_in_asset(self):
         payload=self.raster(); payload+=b"\0"*(META["size"]-len(payload))
         upstream=Upstream(payload)
-        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("no thumbnail")), patch.object(cache.dbx,"get_psd_file_response",return_value=(META,upstream)) as download:
+        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("no thumbnail")), patch.object(cache,"_download_source",return_value=(META,upstream)) as download:
             value=cache.prepare("test-token",META,True)
             self.assertEqual(download.call_count,1); self.assertTrue(upstream.closed)
         self.assertLess(sum(len(v) for v in value.values()),100_000)
@@ -184,20 +191,20 @@ class PreviewV3Tests(unittest.TestCase):
                 self.assertLessEqual(image.width,bounds[0]); self.assertLessEqual(image.height,bounds[1])
 
     def test_psd_and_unselected_raster_never_download_original(self):
-        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("no thumbnail")), patch.object(cache.dbx,"get_psd_file_response") as download:
+        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("no thumbnail")), patch.object(cache,"_download_source") as download:
             for meta,allowed in [({**META,"name":"Master.psd","size":300*1024*1024},True),(META,False),({**META,"size":cache.MAX_SOURCE+1},True)]:
                 with self.assertRaises(cache.PreviewError): cache.prepare("test-token",meta,allowed)
             download.assert_not_called()
 
     def test_provider_psd_representation_is_pinned_and_closed(self):
         upstream=Upstream(self.raster()); client=Mock(); client.files_get_thumbnail.return_value=(META,upstream)
-        with patch.object(cache.dbx,"team_space_client",return_value=client), patch.object(cache.dbx,"_metadata_to_dict",side_effect=lambda m:m), patch.object(cache.dbx,"get_psd_file_response") as original:
+        with patch.object(cache.dbx,"team_space_client",return_value=client), patch.object(cache.dbx,"_metadata_to_dict",side_effect=lambda m:m), patch.object(cache,"_download_source") as original:
             self.assertIn("screen",cache.prepare("test-token",{**META,"name":"Master.psd"},True))
             original.assert_not_called(); self.assertTrue(upstream.closed)
 
     def test_wrong_revision_in_transfer_fails_closed(self):
         upstream=Upstream(self.raster())
-        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("no thumbnail")), patch.object(cache.dbx,"get_psd_file_response",return_value=({**META,"rev":"other"},upstream)):
+        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("no thumbnail")), patch.object(cache,"_download_source",return_value=({**META,"rev":"other"},upstream)):
             with self.assertRaises(cache.PreviewError): cache.prepare("test-token",META,True)
             self.assertTrue(upstream.closed)
 
@@ -217,7 +224,7 @@ class PreviewV3Tests(unittest.TestCase):
     def test_persistent_worker_reuse_and_safe_fixture_benchmark(self):
         payload=self.raster(); payload+=b"\0"*(META["size"]-len(payload))
         key=cache.asset_key("worker","/Synthetic",META)
-        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("unsupported thumbnail")), patch.object(cache.dbx,"get_psd_file_response",side_effect=lambda *args:(META,Upstream(payload))) as download, patch.object(cache.dbx,"get_file_metadata",return_value=META) as metadata:
+        with patch.object(cache.dbx,"team_space_client",side_effect=RuntimeError("unsupported thumbnail")), patch.object(cache,"_download_source",side_effect=lambda *args:(META,Upstream(payload))) as download, patch.object(cache.dbx,"get_file_metadata",return_value=META) as metadata:
             cache._slots.acquire()
             start=time.perf_counter(); cache._job(self.store,key,"test-token",META,True)
             preparation_ms=(time.perf_counter()-start)*1000

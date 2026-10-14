@@ -73,6 +73,7 @@ class ChunkUploadRecord:
     name: str
     size: int
     user: dict
+    root_path: str = ""
     created_at: float = field(default_factory=time.monotonic)
     updated_at: float = field(default_factory=time.monotonic)
     offset: int = 0
@@ -137,6 +138,7 @@ class DropboxChunkUploadManager:
             name=PurePosixPath(clean_relative).name,
             size=total_size,
             user=dict(user or {}),
+            root_path=clean_root,
         )
         with self._lock:
             self._cleanup()
@@ -230,6 +232,11 @@ class DropboxChunkUploadManager:
                     record.metadata = dict(metadata or {})
                     record.state = "completed"
                     record.updated_at = time.monotonic()
+                # Optional preparation cannot change the confirmed upload result.
+                with suppress(Exception):
+                    files_preview_cache.queue_saved_file(record.access_token, record.destination,
+                        root=record.root_path, user_id=str(record.user.get("id") or ""),
+                        revision=str(record.metadata.get("rev") or ""))
                 return self.public_status(record, just_completed=True)
 
             if not record.dropbox_session_id:
@@ -2063,15 +2070,11 @@ async def _persistent_preview(context, user, path, request, representation):
                    "Server-Timing": timing, "X-Files-Representation": representation,
                    "X-Files-Preview-Cache": ("provider-preview" if content is not None and "provider;dur=" in timing
                                              else "hit" if content is not None else "preparing")}
-        if content is None and representation == "small":
-            headers["X-Files-Preview-Cache"] = "provider-thumbnail"
-            content = await run_in_threadpool(_preview_bytes, context["access_token"], path,
-                user_id=str(user.get("id") or ""), size="w256h256",
-                revision=str(request.query_params.get("rev") or "")[:128])
         if content is None:
             return JSONResponse({"state": "preparing", "message": "Preparing a lightweight preview."},
                                 status_code=202, headers={**headers, "Retry-After": "1"})
-        return Response(content, media_type="image/jpeg", headers=headers)
+        media_type = "image/webp" if content[:4] == b"RIFF" and content[8:12] == b"WEBP" else "image/jpeg"
+        return Response(content, media_type=media_type, headers=headers)
     except files_preview_cache.PreviewError as error:
         return _response_error(FilesUploadError(str(error), status_code=error.status))
 

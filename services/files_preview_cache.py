@@ -19,7 +19,7 @@ from pathlib import PurePosixPath
 
 import dropbox_integration as dbx
 
-VERSION = "v3-jpeg-1600x1200-256x256-1"
+VERSION = "v4-webp-1600x1200-256x256-1"
 PREFIX = "files-previews/"
 MAX_OBJECT = 4 * 1024 * 1024
 MAX_SOURCE = 100 * 1024 * 1024
@@ -27,6 +27,8 @@ MAX_OBJECTS = 256  # <= 1 GiB, including encrypted bundles; one serial writer
 TTL = 30 * 86400
 _pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="files-preview")
 _slots = threading.BoundedSemaphore(8)
+_upload_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="files-upload-preview")
+_upload_slots = threading.BoundedSemaphore(4)
 _pending = set()
 _fast = {}  # Brief provider representations while the durable job is pending.
 _failed = {}  # Stop browser polling from repeating a source download after storage failure.
@@ -190,11 +192,11 @@ def _same_revision(actual, expected):
         raise PreviewError("The source changed during preparation.", 409)
 
 
-def _provider_preview(token, meta):
+def _provider_preview(token, meta, size="w1024h768"):
     sdk = dbx._dropbox_sdk()
     actual, response = dbx.team_space_client(token).files_get_thumbnail(
         meta["id"], format=sdk.files.ThumbnailFormat("jpeg"),
-        size=sdk.files.ThumbnailSize("w1024h768"), mode=sdk.files.ThumbnailMode("bestfit"))
+        size=sdk.files.ThumbnailSize(size), mode=sdk.files.ThumbnailMode("bestfit"))
     try:
         _same_revision(dbx._metadata_to_dict(actual), meta)
     except Exception:
@@ -205,6 +207,13 @@ def _provider_preview(token, meta):
     if not output.tell():
         raise PreviewError("A lightweight preview is unavailable.")
     return output.getvalue()
+
+
+def _download_source(token, meta):
+    # Current Dropbox API pins revisions in the path; the separate SDK rev
+    # argument is deprecated. The caller still verifies the returned ID and rev.
+    actual, response = dbx.team_space_client(token).files_download("rev:" + meta["rev"])
+    return dbx._metadata_to_dict(actual), response
 
 
 def prepare(token, meta, allow_original, prefetched=None, skip_provider=False):
@@ -221,7 +230,7 @@ def prepare(token, meta, allow_original, prefetched=None, skip_provider=False):
             if not allow_original or extension not in {".jpg", ".jpeg", ".png", ".webp"} or not 0 < int(meta.get("size", 0)) <= MAX_SOURCE:
                 raise PreviewError("A lightweight preview is unavailable. Use Download.")
             source.seek(0); source.truncate()
-            actual, response = dbx.get_psd_file_response(token, meta["id"], meta["rev"])
+            actual, response = _download_source(token, meta)
             try:
                 _same_revision(actual, meta)
             except Exception:
@@ -244,7 +253,11 @@ def prepare(token, meta, allow_original, prefetched=None, skip_provider=False):
             for name, bounds in [("screen", (1600, 1200)), ("small", (256, 256))]:
                 background.thumbnail(bounds)
                 output = io.BytesIO()
-                background.save(output, "JPEG", quality=86)
+                # A deterministic JPEG fallback keeps deployments without a WebP
+                # encoder functional. Originals are never altered.
+                from PIL import features
+                background.save(output, "WEBP" if features.check("webp") else "JPEG",
+                                quality=80 if name == "screen" else 76)
                 result[name] = base64.b64encode(output.getvalue()).decode()
             return result
     finally:
@@ -263,12 +276,18 @@ def _job(store, key, token, meta, allow_original, prefetched=None, skip_provider
         started = time.monotonic()
         try:
             assets = prepare(token, meta, allow_original, prefetched, skip_provider)
+            if not allow_original:
+                assets = {"small": assets["small"]}
             value = {"assets": assets, "expires": time.time() + TTL,
+                     "thumbnail_only": not allow_original,
                      "preparation_ms": round((time.monotonic()-started)*1000, 1)}
         except Exception:
             # Short negative cache; no source details or credentials persisted.
-            value = {"unavailable": True, "thumbnail_only": not allow_original,
-                     "expires": time.time() + 30}
+            if existing and existing.get("assets", {}).get("small"):
+                value = {**existing, "screen_unavailable_until": time.time()+30}
+            else:
+                value = {"unavailable": True, "thumbnail_only": not allow_original,
+                         "expires": time.time() + 30}
         if time.monotonic() - started > 480:
             return  # Never publish past the lease's safety margin.
         def renew():
@@ -305,8 +324,8 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     store = current_store()
     key = asset_key(user_id, root, meta)
     with _lock:
-        fast = _fast.get(key)
-        if representation == "screen" and fast and fast[0] > time.monotonic():
+        fast = _fast.get((key, representation))
+        if fast and fast[0] > time.monotonic():
             return fast[1], f'metadata;dur={metadata_ms:.1f}, storage;dur=0'
         if _failed.get(key, 0) > time.monotonic():
             raise PreviewError("Preview preparation failed. Retry shortly or use Download.", 503)
@@ -314,14 +333,12 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     cached = store.read(key)
     storage_ms = (time.perf_counter() - started) * 1000
     timing = f'metadata;dur={metadata_ms:.1f}, storage;dur={storage_ms:.1f}'
+    if cached and representation == "screen" and cached.get("screen_unavailable_until",0) > time.time():
+        raise PreviewError("A screen preview is unavailable. Use Download.")
     if cached and not (cached.get("thumbnail_only") and representation == "screen"):
         if cached.get("unavailable"):
             raise PreviewError("A lightweight preview is unavailable. Use Download.")
         return base64.b64decode(cached["assets"][representation], validate=True), timing
-    if representation == "small":
-        # Do not fill the preparation queue by scrolling. The caller uses V2's
-        # visible-first provider thumbnail path until a selected file is prepared.
-        return None, timing
     with _lock:
         if key in _pending or not _slots.acquire(blocking=False):
             return None, timing
@@ -330,21 +347,44 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     # already has a representation. Pass those same bytes to the persistence job.
     started = time.perf_counter()
     try:
-        prefetched = _provider_preview(token, meta)
+        prefetched = _provider_preview(token, meta, "w256h256" if representation == "small" else "w1024h768")
     except Exception:
         prefetched = None
     timing += f', provider;dur={(time.perf_counter()-started)*1000:.1f}'
     if prefetched:
         with _lock:
-            _fast.pop(key, None)
-            _fast[key] = (time.monotonic()+30, prefetched)
+            _fast.pop((key, representation), None)
+            _fast[(key, representation)] = (time.monotonic()+30, prefetched)
             while len(_fast)>128 or sum(len(v[1]) for v in _fast.values())>32*1024*1024:
                 _fast.pop(next(iter(_fast)))
     try:
-        _pool.submit(_job, store, key, token, meta, True, prefetched, True)
+        _pool.submit(_job, store, key, token, meta, representation == "screen", prefetched, True)
     except Exception:
         with _lock:
             _pending.discard(key)
         _slots.release()
         raise
+    if representation == "small" and prefetched is None:
+        raise PreviewError("A lightweight thumbnail is unavailable.")
     return prefetched, timing
+
+
+def queue_saved_file(token, path, *, root, user_id, revision):
+    """Best-effort provider-only warmup after a confirmed save; never fetch an original."""
+    if not configured() or not root or not user_id or not revision or PurePosixPath(path).suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
+        return False
+    if not _upload_slots.acquire(blocking=False):
+        return False
+    def warm():
+        try:
+            request_preview(token, path, root=root, user_id=user_id, revision=revision, representation="small")
+        except Exception:
+            logging.getLogger(__name__).info("FILES_PREVIEW upload warmup unavailable")
+        finally:
+            _upload_slots.release()
+    try:
+        _upload_pool.submit(warm)
+    except Exception:
+        _upload_slots.release()
+        return False
+    return True

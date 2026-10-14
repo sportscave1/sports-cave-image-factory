@@ -100,6 +100,8 @@
       #pdf { width:100%; height:100%; overflow:auto; padding:12px; text-align:center; box-sizing:border-box; }
       #pdf canvas { background:white; display:block; margin:auto; }
       #pdf[hidden] { display:none; }
+      .preview-placeholder { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:180px; padding:42px 12px; border:1px solid #3c4247; border-radius:4px; background:#252a2e; color:#b9c0c5; text-align:center; pointer-events:none; }
+      .preview-placeholder[hidden] { display:none; }
     </style>
   </head>
   <body>
@@ -122,6 +124,7 @@
         <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
       </div>
       <section class="stage" id="stage">
+        <div class="preview-placeholder" id="previewPlaceholder" role="status" hidden>Loading preview…</div>
         <img class="image" id="image" alt="" decoding="async" fetchpriority="high" draggable="false">
         <div id="pdf" role="region" aria-label="PDF preview" hidden></div>
         <div class="image-error" id="imageError" role="alert">
@@ -138,7 +141,7 @@
       const elements = Object.fromEntries([
         "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
         "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "downloadButton", "closeButton",
-        "stage", "image", "pdf", "imageError", "imageErrorDetail", "dimensions", "zoomStatus",
+        "stage", "image", "pdf", "previewPlaceholder", "imageError", "imageErrorDetail", "dimensions", "zoomStatus",
         "downloadFrame"
       ].map(id => [id, document.getElementById(id)]));
       const query = new URLSearchParams(location.search);
@@ -234,6 +237,7 @@
       }
 
       function clearImage() {
+        elements.previewPlaceholder.hidden = true;
         state.naturalWidth = 0;
         state.naturalHeight = 0;
         elements.image.style.display = "none";
@@ -257,7 +261,7 @@
         const generation = ++state.loadGeneration;
         state.imageController?.abort();
         const controller = new AbortController(); state.imageController = controller;
-        const sameImage = state.path === relativePath && state.naturalWidth > 0;
+        const sameImage = state.path === relativePath && state.revision === revision && state.naturalWidth > 0;
         state.path = relativePath; state.folder = String(folder || "");
         state.name = String(name || fileNameFromPath(relativePath));
         state.revision = revision; state.original = original;
@@ -272,6 +276,7 @@
         }
         const extension = relativePath.split(".").pop().toLowerCase();
         const isImage = ["jpg","jpeg","png","webp","psd"].includes(extension);
+        elements.previewPlaceholder.hidden = !isImage || sameImage;
         for (const [key,label] of [["previousButton","Previous"],["nextButton","Next"]]) {
           elements[key].title = `${label} ${extension === "pdf" ? "page" : "image"}`;
           elements[key].setAttribute("aria-label",elements[key].title);
@@ -361,6 +366,7 @@
           elements.image.onload = () => {
             if (generation !== state.loadGeneration) return;
             state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+            elements.previewPlaceholder.hidden = true;
             elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
             elements.image.alt = state.name; elements.image.style.display = "block";
             elements.dimensions.textContent = `${original ? "Original" : "Preview"} · ${state.naturalWidth} x ${state.naturalHeight} pixels`;
@@ -375,6 +381,7 @@
             } else showImageError("The image is unavailable or could not be decoded.");
           };
           elements.image.decoding = "async";
+          state.screenAssignedGeneration = generation;
           elements.image.src = url;
         } catch (error) {
           if (generation !== state.loadGeneration || error.name === "AbortError") return;
@@ -423,11 +430,12 @@
       }
 
       function showQuickPreview(url) {
-        if (state.naturalWidth || typeof url !== "string" || !url.startsWith(`blob:${location.origin}/`)) return;
+        if (state.naturalWidth || state.screenAssignedGeneration === state.loadGeneration || typeof url !== "string" || !url.startsWith(`blob:${location.origin}/`)) return;
         const generation = state.loadGeneration;
         elements.image.onload = () => {
           if (generation !== state.loadGeneration) return;
           state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+          elements.previewPlaceholder.hidden = true;
           elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
           elements.image.style.display = "block"; elements.image.alt = state.name;
           elements.dimensions.textContent = "Small preview · loading larger preview…"; fitToScreen();
@@ -657,7 +665,7 @@
           if (acceptNavigation(message.images, message.folder)) {
             state.folderGeneration += 1; state.folderController?.abort();
           }
-          showQuickPreview(message.thumbnail);
+          if (message.path === state.path && message.revision === state.revision) showQuickPreview(message.thumbnail);
           state.openerReadyAcknowledged = true;
           window.clearTimeout(state.openerReadyTimer);
           state.openerReadyTimer = 0;
@@ -684,6 +692,7 @@
           type: "sports-cave-image-viewer-ready",
           version: IMAGE_VIEWER_PROTOCOL_VERSION,
           path: state.path,
+          revision: state.revision,
           folder: state.folder,
           name: state.name,
         });

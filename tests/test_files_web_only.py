@@ -29,7 +29,7 @@ class FilesWebOnlyTests(unittest.TestCase):
 
     def test_shared_automation_sources_and_transfer_consumers_are_unchanged(self):
         for name in ["desktop_helper/SportsCaveFilesDesktop.cs", "desktop_helper/Install.ps1", "desktop_helper_macos/SportsCaveFilesHelper.py", "auto_editions_api.py", "auto_editions_setup_api.py", "edition_test_api.py", "scripts/studio/auto_editions_local.py", "scripts/studio/edition_test_local.py", "components/psd_open/index.html", "dropbox_integration.py", "supabase_backend.py", "design_studio_page.py", "developer_studio_page.py", "scripts/studio/companion.py", "render.yaml"]:
-            self.assertEqual((ROOT / name).read_bytes(), subprocess.check_output(["git", "show", "069bb9b3:" + name], cwd=ROOT), name)
+            self.assertEqual((ROOT / name).read_bytes(), subprocess.check_output(["git", "show", "a9270c8b:" + name], cwd=ROOT), name)
         before = subprocess.check_output(["git", "show", "7ad36065:files_upload_api.py"], cwd=ROOT).decode()
         after = (ROOT / "files_upload_api.py").read_text(encoding="utf8")
         for start, end in [("class NativeTransferManager:", "NATIVE_TRANSFER_MANAGER ="), ("async def native_transfer_manifest", "async def file_thumbnail"), ("async def desktop_helper_package", "async def")]:

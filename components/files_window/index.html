@@ -247,6 +247,13 @@
       .file-icon > img.thumbnail { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
       .file-icon > img.thumbnail:not([src]) { visibility: hidden; }
       .file-icon.has-thumbnail > svg { visibility: hidden; }
+      .file-icon.thumbnail-capable:not(.thumbnail-failed) > svg { visibility: hidden; }
+      .thumbnail-skeleton { position:absolute; inset:4%; border-radius:3px; background:#e8ecef; border:1px solid #dce2e6; pointer-events:none; }
+      .file-icon.has-thumbnail .thumbnail-skeleton, .file-icon.thumbnail-failed .thumbnail-skeleton { display:none; }
+      .file-icon > img.thumbnail { opacity:0; transition:opacity 90ms ease-out; }
+      .file-icon.has-thumbnail > img.thumbnail { opacity:1; }
+      .file-icon.thumbnail-cached > img.thumbnail { transition:none; }
+      @media (prefers-reduced-motion: reduce) { .file-icon > img.thumbnail { transition:none; } }
       .items { min-height: 100%; }
       .items.virtual { display: block !important; min-height: 0; position: relative; }
       .items.virtual > .file-item { position: absolute; box-sizing: border-box; overflow: hidden; }
@@ -842,6 +849,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         thumbnailTasks: new Map(),
         thumbnailInFlight: new Set(),
         thumbnailCache: new Map(),
+        thumbnailFailures: new Map(),
         thumbnailGeneration: 0,
         dragDepth: 0,
         uploadRows: [],
@@ -1057,7 +1065,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           return `<svg viewBox="0 0 112 92" aria-hidden="true"><path d="M5 19h42l10 11h50v54H5z" fill="#ffd35a" stroke="#d7a821" stroke-width="3"/><path d="M5 19V9h39l10 11" fill="#ffe484" stroke="#d7a821" stroke-width="3"/><path d="M5 30h102" stroke="#ecc149" stroke-width="3"/></svg>`;
         }
         if (thumbnail && item.thumbnail_url) {
-          return `${itemIcon(item, {thumbnail:false})}<img class="thumbnail" alt="" data-thumbnail-url="${escapeHtml(item.thumbnail_url)}" data-thumbnail-key="${escapeHtml(item.thumbnail_key || item.thumbnail_url)}">`;
+          return `${itemIcon(item, {thumbnail:false})}<span class="thumbnail-skeleton" aria-hidden="true"></span><img class="thumbnail" alt="" decoding="async" data-thumbnail-url="${escapeHtml(item.thumbnail_url)}" data-thumbnail-key="${escapeHtml(item.thumbnail_key || item.thumbnail_url)}">`;
         }
         const colors = {
           image: ["#287a4b", "IMG"], pdf: ["#b3261e", "PDF"], document: ["#185abd", ext || "DOC"],
@@ -1150,6 +1158,14 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         const icon = document.createElement("span");
         icon.className = "file-icon";
         icon.innerHTML = itemIcon(item);
+        const thumbnailImage = item.thumbnail_url && item.kind !== "photoshop" && item.kind !== "folder" ? icon.querySelector("img.thumbnail") : null;
+        if (thumbnailImage) icon.classList.add("thumbnail-capable");
+        if (thumbnailImage && (state.thumbnailFailures.get(thumbnailImage.dataset.thumbnailKey) || 0) > Date.now()) icon.classList.add("thumbnail-failed");
+        const thumbnailEntry = thumbnailImage && state.thumbnailCache.get(thumbnailImage.dataset.thumbnailKey);
+        if (thumbnailEntry && thumbnailEntry.expires > Date.now()) {
+          icon.classList.add("thumbnail-cached");
+          installThumbnail(thumbnailImage, thumbnailImage.dataset.thumbnailKey, thumbnailEntry.url);
+        }
         const name = document.createElement("span");
         name.className = "item-name";
         name.textContent = item.name;
@@ -1515,6 +1531,13 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function applyFolderPayload(payload) {
+        if (state.cacheNamespace && payload.cache_namespace && state.cacheNamespace !== String(payload.cache_namespace)) {
+          stopThumbnailLoading();
+          state.thumbnailCache.forEach(value => URL.revokeObjectURL(value.url));
+          state.thumbnailCache.clear(); state.thumbnailFailures.clear(); state.folderCache.clear();
+          closePreview(); elements.previewFrame?.remove(); elements.previewFrame = null;
+          state.imageViewerWindow = null; state.imageViewerReady = false;
+        }
         state.rootPath = String(payload.root_path || "");
         state.rootName = String(payload.root_name || "Files");
         state.cacheNamespace = String(payload.cache_namespace || state.cacheNamespace || "");
@@ -2437,14 +2460,29 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       function installThumbnail(image, key, objectUrl) {
         if (
           image
-          && image.isConnected
           && image.dataset.thumbnailKey === key
         ) {
           image.style.visibility = "";
-          image.onload = () => image.parentElement?.classList.add("has-thumbnail");
-          image.onerror = () => { image.removeAttribute("src"); image.parentElement?.classList.remove("has-thumbnail"); };
+          image.onload = () => {
+            if (image.dataset.thumbnailKey !== key || image.getAttribute("src") !== objectUrl) return;
+            image.parentElement?.classList.remove("thumbnail-failed");
+            state.thumbnailFailures.delete(key);
+            image.parentElement?.classList.add("has-thumbnail");
+          };
+          image.onerror = () => {
+            if (image.getAttribute("src") !== objectUrl) return;
+            image.removeAttribute("src"); image.parentElement?.classList.remove("has-thumbnail");
+            thumbnailUnavailable(image, key);
+          };
           image.src = objectUrl;
+          if (image.complete && image.naturalWidth) image.onload();
         }
+      }
+
+      function thumbnailUnavailable(image, key) {
+        image.parentElement?.classList.add("thumbnail-failed");
+        state.thumbnailFailures.set(key, Date.now()+10000);
+        while(state.thumbnailFailures.size>256) state.thumbnailFailures.delete(state.thumbnailFailures.keys().next().value);
       }
 
       async function fetchThumbnail(task) {
@@ -2453,18 +2491,31 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.thumbnailTasks.set(controller, task);
         task.image.dataset.thumbnailPending = "1";
         try {
-          const response = await fetch(task.url, { credentials: "same-origin", signal: controller.signal });
+          let response;
+          for (let attempt=0; attempt<15; attempt++) {
+            response = await fetch(task.url, { credentials: "same-origin", signal: controller.signal });
+            if (response.status !== 202) break;
+            await response.body?.cancel();
+            await new Promise((resolve,reject)=>{
+              const abort=()=>{clearTimeout(timer);reject(new DOMException("Aborted","AbortError"));};
+              const timer=setTimeout(()=>{controller.signal.removeEventListener("abort",abort);resolve();},1000);
+              controller.signal.addEventListener("abort",abort,{once:true});
+              if(controller.signal.aborted)abort();
+            });
+          }
+          if(response.status===202){ thumbnailUnavailable(task.image,task.key); return; }
           if (!response.ok || task.generation !== state.thumbnailGeneration) {
-            if (!response.ok && task.image.isConnected) task.image.style.visibility = "hidden";
+            if (!response.ok && task.image.isConnected) thumbnailUnavailable(task.image,task.key);
             return;
           }
           const blob = await response.blob();
-          if (!blob.type.startsWith("image/") || task.generation !== state.thumbnailGeneration) return;
+          if (task.generation !== state.thumbnailGeneration) return;
+          if (!blob.type.startsWith("image/") || blob.size > 4*1024*1024) { thumbnailUnavailable(task.image,task.key); return; }
           const objectUrl = URL.createObjectURL(blob);
           rememberThumbnail(task.key, objectUrl);
           installThumbnail(task.image, task.key, objectUrl);
         } catch (error) {
-          if (error.name !== "AbortError") console.warn("Thumbnail unavailable", task.key);
+          if (error.name !== "AbortError") thumbnailUnavailable(task.image,task.key);
         } finally {
           state.thumbnailControllers.delete(controller);
           state.thumbnailTasks.delete(controller);
@@ -2502,6 +2553,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
               return;
             }
             if (image.getAttribute("src") || image.dataset.thumbnailPending) return;
+            if ((state.thumbnailFailures.get(key)||0)>Date.now()) {image.parentElement?.classList.add("thumbnail-failed");return;}
+            image.parentElement?.classList.remove("thumbnail-failed");
             const cached = state.thumbnailCache.get(key);
             if (cached && cached.expires > Date.now()) {
               installThumbnail(image,key,cached.url); return;
@@ -2965,6 +3018,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
               type: "sports-cave-image-viewer-parent-ready",
               version: 1,
               folder: relativeFolderPath(), images: viewerNavigation(),
+              path: event.data.path, revision: event.data.revision || "",
               thumbnail: viewerThumbnail(event.data.path),
             }, location.origin);
           } catch (_) {
