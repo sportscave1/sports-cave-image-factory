@@ -11,6 +11,7 @@ import json
 import math
 import re
 import threading
+import time
 from functools import wraps
 from pathlib import Path
 
@@ -167,7 +168,7 @@ def validate_manifest(manifest):
     return manifest
 
 
-def compose(manifest, root, number):
+def compose(manifest, root, number, *, timings=None):
     """Exact RGB composition before JPEG compression; no font substitution/upscale."""
     from PIL import Image
     validate_manifest(manifest)
@@ -175,11 +176,14 @@ def compose(manifest, root, number):
         raise ValueError('Edition is outside the prepared range.')
     canvas = manifest['dimensions']
     x0, y0, x1, y1 = manifest['number_region']
+    started=time.monotonic()
     with Image.open(asset_path(root, manifest['master'])) as source:
         if source.format != 'PNG' or source.mode != 'RGB' or list(source.size) != canvas:
             raise ValueError('Master must be a lossless RGB PNG at the prepared size.')
         result = source.copy()
         profile = source.info.get('icc_profile', b'')
+    if timings is not None:timings['master_decode_copy_ms']=round((time.monotonic()-started)*1000,3)
+    started=time.monotonic()
     try:
         with Image.open(asset_path(root, manifest['patches'][str(number)])) as patch:
             if patch.format != 'PNG' or patch.mode != 'RGB' or patch.size != (x1-x0, y1-y0):
@@ -191,6 +195,7 @@ def compose(manifest, root, number):
         result.close()
         raise
     result.info['icc_profile'] = profile
+    if timings is not None:timings['number_patch_ms']=round((time.monotonic()-started)*1000,3)
     return result
 
 
@@ -198,9 +203,13 @@ def compose(manifest, root, number):
 def render_jpg(manifest, root, number, destination):
     """Worker primitive. Caller must enforce auth/allocation/approval on each job."""
     destination = Path(destination)
-    with compose(manifest, root, number) as image:
+    timings={}
+    with compose(manifest, root, number,timings=timings) as image:
+        started=time.monotonic()
         image.save(destination, format='JPEG', quality=100, subsampling=0,
                    icc_profile=image.info.get('icc_profile', b''), dpi=(300, 300))
+        timings['jpg_encode_ms']=round((time.monotonic()-started)*1000,3)
+    started=time.monotonic()
     from PIL import Image, ImageCms
     with Image.open(destination) as verified:
         if verified.format != 'JPEG' or list(verified.size) != manifest['dimensions']:
@@ -209,7 +218,9 @@ def render_jpg(manifest, root, number, destination):
         profile = verified.info.get('icc_profile', b'')
         import io
         profile_name = ImageCms.getProfileName(ImageCms.ImageCmsProfile(io.BytesIO(profile))).strip() if profile else 'Unspecified'
-    return {'sha256': file_hash(destination), 'dimensions': manifest['dimensions'],
+    digest=file_hash(destination)
+    timings['jpg_integrity_ms']=round((time.monotonic()-started)*1000,3)
+    return {'sha256': digest, 'dimensions': manifest['dimensions'],'render_timings':timings,
             'ppi_metadata': [300, 300], 'colour_profile': profile_name,
             'icc_sha256': hashlib.sha256(profile).hexdigest() if profile else None,
             'edition_number': number, 'edition_total': manifest['edition_total'],

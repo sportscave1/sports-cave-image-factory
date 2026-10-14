@@ -55,3 +55,7 @@ class AssetCache:
 
 
 prepared_assets = AssetCache()
+
+# Disposable validated bytes only; Dropbox remains the durable archive. Every
+# download still checks its current account, allocation and archived revision.
+output_assets = AssetCache(max_bytes=256 * 1024 * 1024)

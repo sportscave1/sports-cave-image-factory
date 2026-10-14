@@ -4,6 +4,7 @@
  script.textContent='('+function(){
   if(window.SportsCaveAutoEditions)return;
   const jobs=new Map();
+  const trace=(stage,id,ms,extra={})=>console.info('AUTO_EDITIONS_CLIENT_TIMINGS',JSON.stringify({stage,allocation:id,ms:Math.round(ms*10)/10,...extra}));
   const textHits=new WeakMap(),immediate=new Map();let clickedText=null;
   const gridSignature=canvas=>[...canvas.querySelectorAll('[role=gridcell]')].map(cell=>cell.textContent).join('|');
   function clearImmediate(id){immediate.get(id)?.remove();immediate.delete(id);}
@@ -26,7 +27,7 @@
   // A scrolled/sorted table must never leave an indicator over a different unit.
   document.addEventListener('scroll',()=>{for(const id of immediate.keys())clearImmediate(id);},true);
   const url=(path,id,job)=>path+'?allocation_id='+encodeURIComponent(id)+(job?'&job_id='+encodeURIComponent(job):'');
-  async function api(path,id,post=false,job){const r=await fetch(url(path,id,job),post?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});const d=await r.json();if(!r.ok)throw Error(d.error||'Unavailable');return d;}
+  async function api(path,id,post=false,job){const began=performance.now();const r=await fetch(url(path,id,job),post?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});const d=await r.json();trace(path.split('/').pop(),id,performance.now()-began,{status:r.status,server:d.timings});if(!r.ok)throw Error(d.error||'Unavailable');return d;}
   function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&['/auto-editions/download','/auto-editions/open','/auto-editions/view'].includes(u.pathname)&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
   function paint(id,row){const marker=immediate.get(id);if(marker&&!['Generating','Queued'].includes(row.status)){
    marker.classList.remove('sc-edition-generating');const markerLabel=row.status==='Ready'?'Open':'Retry';if(marker.textContent!==markerLabel)marker.textContent=markerLabel;
@@ -46,9 +47,9 @@
    const message=document.createElement('span');message.textContent=row.error||'Saved JPG unavailable. Retry Open.';box.append(message);
    const close=document.createElement('button');close.textContent='Dismiss';close.onclick=()=>box.remove();box.append(close);document.body.append(box);
   }
-  function navigateSaved(id,row){if(!window.SportsCaveFilesWindow)throw Error('Files navigation is loading. Retry Open.');window.SportsCaveFilesWindow.open({allocation:id,job:row.job_id});}
+  function navigateSaved(id,row){if(!window.SportsCaveFilesWindow)throw Error('Files navigation is loading. Retry Open.');const began=performance.now();window.SportsCaveFilesWindow.open({allocation:id,job:row.job_id});trace('popup_handoff',id,performance.now()-began);}
   function initiateDownload(id,row){const key='sc-edition-attempt:'+row.job_id;if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,'1');
-   const a=document.createElement('a');a.href=url('/api/auto-editions/file',id,row.job_id);a.download=row.filename||'edition-TEST-NOT-PRINT-READY.jpg';document.body.append(a);a.click();a.remove();
+   const a=document.createElement('a');a.href=url('/api/auto-editions/file',id,row.job_id);a.download=row.filename||'edition-TEST-NOT-PRINT-READY.jpg';document.body.append(a);a.click();a.remove();if(row.clickedAt)trace('download_initiated',id,performance.now()-row.clickedAt);
   }
   async function openSaved(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id'),job=u.searchParams.get('job_id');
    const row={status:'Ready',job_id:job};jobs.set(id,row);
@@ -56,7 +57,7 @@
    catch(e){row.status='Unavailable';row.error=e.message;paint(id,row);showError(id,row);}
   }
   async function poll(id){const row=jobs.get(id);if(!row||row.polling)return;row.polling=true;
-   try{const d=await api('/api/auto-editions/state',id);Object.assign(row,d);paint(id,row);
+   try{const d=await api('/api/auto-editions/state',id,false,row.job_id);Object.assign(row,d);paint(id,row);
     if(d.status==='Ready'){if(sessionStorage.getItem('sc-edition-pending:'+id)){initiateDownload(id,row);navigateSaved(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}}
     else if(d.status==='Blocked'){sessionStorage.removeItem('sc-edition-pending:'+id);}
    }catch(e){row.status=row.job_id?'Unavailable':'Blocked';row.error=e.message;paint(id,row);showError(id,row);}finally{row.polling=false;}
@@ -64,8 +65,9 @@
   async function start(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id');if(!/^\d+$/.test(id||''))return;
    const old=jobs.get(id);if(old?.status==='Generating'||old?.status==='Queued')return;
    if(old?.status==='Ready'){openSaved(url('/auto-editions/open',id,old.job_id));return;}
-   const row={status:'Generating'};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
+   const row={status:'Generating',clickedAt:performance.now()};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
    immediateProgress(id);
+   trace('inline_feedback',id,performance.now()-row.clickedAt);
    try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);await poll(id);}
    catch(e){row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
   }

@@ -78,6 +78,7 @@ class DropboxAssets:
 
     def __init__(self, token, integration):
         self.token,self.integration=token,integration
+        self.timings={}
 
     @classmethod
     def path(cls, digest, name, *, cache=False):
@@ -121,7 +122,7 @@ class DropboxAssets:
         variant=size.group(1) if size else slug(variant_text,24)
         # Full immutable job identity prevents collisions across line items,
         # master versions, edition assets and concurrent requests.
-        name=f"{order}-{title}-Unit{job['identity']['ordinal']}-{job['number']:03}-of-{job['total']}-{variant}-TEST-{job['id']}.jpg"
+        name=f"{job['number']:03}-of-{job['total']} - {title} - {order} - Unit {job['identity']['ordinal']} - {variant} - TEST - {job['id']}.jpg"
         return f"{cls.GENERATED_ROOT}/{order}/TEST/{name}"
 
     def verify_output(self,output):
@@ -144,16 +145,28 @@ class DropboxAssets:
         return self.integration._metadata_to_dict(metadata),response
 
     def publish_output(self,job,path):
+        phase=time.monotonic()
         destination=self.output_path(job)
-        self.integration.ensure_folder_path(self.token,destination.rsplit('/',1)[0],root_path='/Sportscave Team Folder')
+        folder=destination.rsplit('/',1)[0]
+        # Most order folders already exist. Avoid recreating every ancestor.
+        if not self.integration.get_metadata_if_exists(self.token,folder):
+            self.integration.ensure_folder_path(self.token,folder,root_path='/Sportscave Team Folder')
+        self.timings['archive_folder_ms']=round((time.monotonic()-phase)*1000,3)
+        phase=time.monotonic()
         metadata=self.integration.get_metadata_if_exists(self.token,destination)
+        self.timings['archive_lookup_ms']=round((time.monotonic()-phase)*1000,3)
+        phase=time.monotonic()
         if not metadata:
             try:
-                metadata=self.integration.upload_local_file(self.token,destination,path,conflict='cancel')
+                # Output is bounded at 64 MiB, below Dropbox's single-upload
+                # limit. Keep immutable add/cancel semantics and SDK auth reuse.
+                metadata=self.integration.upload_local_file(self.token,destination,path,conflict='cancel',simple_limit=MAX_OUTPUT_BYTES)
             except Exception:
                 # A concurrent/retried worker may have completed the same save.
                 metadata=self.integration.get_metadata_if_exists(self.token,destination)
                 if not metadata:raise
+        self.timings['archive_upload_ms']=round((time.monotonic()-phase)*1000,3)
+        phase=time.monotonic()
         digest=ae.file_hash(path,dropbox=True)
         if (not metadata or not metadata.get('id') or not metadata.get('rev')
                 or metadata.get('size') != Path(path).stat().st_size
@@ -164,6 +177,7 @@ class DropboxAssets:
                 'archive_status':'TEST','master_version':job['preparation_hash'],
                 'identity':job['identity'],'labels':job.get('archive_labels',{})}
         self.verify_output(output)
+        self.timings['archive_checksum_verify_ms']=round((time.monotonic()-phase)*1000,3)
         return output
 
     def publish_preparation(self,manifest,root):
@@ -245,6 +259,13 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
         timings['archive_and_verify_ms']=round((time.monotonic()-step)*1000)
         if output.get('sha256') != rendered['sha256']:
             raise PreparationBlocked('Persistent output verification failed.')
+        from auto_editions_asset_cache import output_assets
+        step=time.monotonic()
+        try:output_assets.remember(rendered['sha256'],path)
+        except OSError:pass
+        timings['output_cache_ms']=round((time.monotonic()-step)*1000,3)
+        timings.update(getattr(assets,'timings',{}))
+        timings.update(rendered.pop('render_timings',{}))
     from auto_editions_print import describe
     print_spec=describe(job.get('archive_labels',{}).get('variant_title',''),manifest)
     timings['worker_total_ms']=round((time.monotonic()-started)*1000)
