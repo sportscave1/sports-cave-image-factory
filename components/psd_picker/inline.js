@@ -92,6 +92,15 @@
     indicator.style.cssText='position:absolute;pointer-events:none;background:white;font:12px system-ui;white-space:nowrap;z-index:2;left:'+(rect.left-box.left+point.x*rect.width/canvas.width)+'px;top:'+(rect.top-box.top+point.y*rect.height/canvas.height-9)+'px';
    }return result;
   };
-  window.SportsCaveAutoEditions={start,openSaved,connect(fn){notify=fn;hydrate();}};
+  // Streamlit can retire the bridge iframe while a cloud job is running.
+  // Keep cloud link handling in this document and treat its refresh callback
+  // as optional; a stale iframe must not turn a saved JPG into an error.
+  function cloudAction(value){try{const u=new URL(value,location.href);if(u.origin!==location.origin)return false;
+   if(u.pathname==='/auto-editions/download'){start(u.href);return true;}
+   if(['/auto-editions/open','/auto-editions/view'].includes(u.pathname)){openSaved(u.href);return true;}
+  }catch{}return false;}
+  const nativeOpen=window.open;window.open=function(value,...args){if(cloudAction(value))return null;return nativeOpen.call(this,value,...args);};
+  document.addEventListener('click',event=>{const link=event.target.closest?.('a[href]');if(link&&cloudAction(link.href)){event.preventDefault();event.stopImmediatePropagation();}},true);
+  window.SportsCaveAutoEditions={start,openSaved,connect(fn){notify=()=>{try{fn();}catch{}};hydrate();}};
  }.toString()+')();';parent.document.head.append(script);script.remove();
 })();
