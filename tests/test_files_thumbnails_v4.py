@@ -32,7 +32,7 @@ class ThumbnailV4Tests(unittest.TestCase):
             small=self.run_job(False,self.raster())
             self.assertTrue(small['thumbnail_only']); self.assertEqual(set(small['assets']),{'small'})
             screen=self.run_job(True,self.raster((1600,1200)))
-            self.assertFalse(screen['thumbnail_only']);self.assertEqual(set(screen['assets']),{'screen','small'})
+            self.assertFalse(screen['thumbnail_only']);self.assertEqual(set(screen['assets']),{'screen','small','screen1024','screen2048'})
             download.assert_not_called()
         with Image.open(io.BytesIO(base64.b64decode(screen['assets']['screen']))) as image:
             self.assertEqual(image.size,(1600,1200))

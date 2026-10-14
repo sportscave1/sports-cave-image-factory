@@ -1,0 +1,16 @@
+{
+  "settings_present": {
+    "FILES_PREVIEW_PRIVATE_BUCKET_CONFIRMED": false,
+    "FILES_PREVIEW_BUCKET": false,
+    "FILES_PREVIEW_NAMESPACE": false,
+    "FILES_PREVIEW_ENCRYPTION_KEY": false,
+    "R2_ACCESS_KEY_ID": false,
+    "R2_SECRET_ACCESS_KEY": false,
+    "R2_ENDPOINT": false,
+    "R2_ACCOUNT_ID": false
+  },
+  "feature_gate_enabled": false,
+  "encryption_key_valid": false,
+  "r2_connection_settings_present": false,
+  "provider_validation": "NOT PERFORMED; configuration alone does not establish safe activation"
+}

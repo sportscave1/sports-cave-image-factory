@@ -145,7 +145,7 @@ class PreviewV3Tests(unittest.TestCase):
                 self.assertEqual(self.request()[0],b"small-jpeg")
                 self.assertEqual(provider.call_count,1)
                 self.assertEqual(metadata.call_count,2)
-                self.assertEqual(submit.call_args.args[-2:],(b"small-jpeg",True))
+                self.assertEqual(submit.call_args.args[-4:],(b"small-jpeg",True,2048,False))
             finally:
                 with cache._lock: cache._pending.discard(key)
                 cache._slots.release()

@@ -1835,7 +1835,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.openStamp = { path: item.path, time: now };
         closeMenus();
         if (item.kind === "folder") {
-          showToast(`Opening ${item.name}...`, { duration: 1200 });
           navigateTo(item.path);
         } else {
           openImageViewer(item);

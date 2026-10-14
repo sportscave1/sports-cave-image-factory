@@ -166,6 +166,10 @@ class FilesPerformanceV2Tests(unittest.TestCase):
             with Image.open(io.BytesIO(preview)) as image:
                 self.assertLessEqual(image.width,1024);self.assertLessEqual(image.height,768)
             self.assertLess(len(preview),len(content))
+            sharp=api._preview_bytes("synthetic",ROOT+"/Large.jpg",user_id=USER["id"],revision="r1",size="w2048h1536")
+            with Image.open(io.BytesIO(sharp)) as image:
+                self.assertEqual(image.size,(1800,1200))
+            self.assertEqual(download.call_count,1)
             api.invalidate_thumbnail_cache(ROOT+"/Large.jpg")
             self.assertFalse(api._PREVIEW_CACHE)
 
