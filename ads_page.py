@@ -147,8 +147,8 @@ ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V7"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
 ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V10 THREE PREMIUM ROOMS"
 ADS_INSTANT_EXPERIENCE_WIRING_VERSION = "IE THREE-FORMAT WIRING V1"
-INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS = 6
-INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS = 28
+INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS = None  # Visual fit, not word count.
+INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS = None  # Retained API name; no character cap.
 INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_WORDS = 12
 INSTANT_EXPERIENCE_ON_IMAGE_SUPPORTING_MAX_CHARACTERS = 70
 INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_WORDS = 4
@@ -3856,14 +3856,14 @@ INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
 These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
 
 HEADLINE
-- Use no more than six words and no more than 28 characters including spaces and punctuation.
+- Assess rendered glyph width, not character or word count: all six approved headline templates are recognised, including the longer options.
 - Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the existing Instant Experience headline scale.
 - Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
 - Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
-- If proposed wording exceeds either limit, shorten it before returning the standalone image-generation prompt while preserving the same emotional angle. Never solve overflow by shrinking typography.
-- Valid: ONLY 100 WILL EVER EXIST
-- Reject and shorten any longer product-specific scarcity wording before it reaches an image-generation prompt.
+- Measure the selected premium serif headline on the 1024 x 1024 canvas within the existing 64–72 px safe margins (880–896 px usable width). Preserve headline prominence and the three-line hierarchy.
+- Allow only subtle font-size or letter-spacing adjustments where needed. Never use cramped tracking, stretching, distortion or an excessively small font.
+- Check readability at 256 x 256 mobile preview size. If the selected headline cannot fit attractively, choose an unused factually eligible approved headline; use this route's assigned truthful fit fallback only if no approved alternative fits. Never repeat a sibling headline or invent a claim.
 
 SUPPORTING LINE
 - Use no more than 12 words and no more than 70 characters including spaces and punctuation.
@@ -3897,9 +3897,9 @@ def _instant_experience_on_image_line_errors(
         return errors
     if "\n" in raw or "\r" in raw:
         errors.append(f"{label} must remain on one line.")
-    if len(clean.split()) > max_words:
+    if max_words is not None and len(clean.split()) > max_words:
         errors.append(f"{label} exceeds {max_words} words.")
-    if len(clean) > max_characters:
+    if max_characters is not None and len(clean) > max_characters:
         errors.append(f"{label} exceeds {max_characters} characters.")
     return errors
 
@@ -3927,14 +3927,6 @@ def shorten_instant_experience_on_image_headline(
     clean = _normalise_instant_experience_on_image_line(headline)
     if instant_experience_on_image_headline_is_valid(clean):
         return clean
-    quantities = re.findall(r"\b\d[\d,]*\b", clean)
-    if quantities:
-        for candidate in (
-            f"ONLY {quantities[-1]} WILL EVER EXIST",
-            f"ONLY {quantities[-1]} EXIST",
-        ):
-            if instant_experience_on_image_headline_is_valid(candidate):
-                return candidate
     clean_fallback = _normalise_instant_experience_on_image_line(fallback)
     if instant_experience_on_image_headline_is_valid(clean_fallback):
         return clean_fallback
@@ -4011,7 +4003,7 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
 - the on-image CTA is not exactly CLAIM YOUR EDITION
 - a CTA field is outside the approved direct edition-acquisition family
-- another route's supporting wording appears; the shared headline and CLAIM YOUR EDITION CTA are allowed
+- a sibling headline or supporting line is repeated; only the CLAIM YOUR EDITION CTA and banner styling are shared
 - typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as a deterministic flat post-production layer inside the fixed footer
 - mobile readability, safe margins, visual hierarchy or product dominance is weak
 - essential wording is not immediately readable in an approximately 256 x 256 preview
@@ -4023,7 +4015,7 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it
 - the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold separator
 - the fixed black footer falls outside approximately 24–28% of the canvas height
-- the on-image headline exceeds six words or 28 characters, wraps, is squeezed, is stretched or is abnormally reduced
+- the on-image headline exceeds the measured safe width, fails mobile readability, wraps, is squeezed, is stretched or is abnormally reduced
 - the supporting line exceeds 12 words or 70 characters, wraps or becomes too small
 - the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family
 - any footer wording approaches or crosses the 64–72 px safe margins
@@ -5080,6 +5072,9 @@ def resolve_standard_instant_experience_visuals(
         product_metadata=product_metadata,
         campaign_moment=campaign_moment,
     )
+    # Image scarcity requires product evidence, not the legacy category default.
+    if context.get("edition_limit_source") == "approved Baseball Instant Experience claim path":
+        context = {**context, "edition_limit": None, "edition_limit_source": ""}
     seed = _instant_experience_seed(
         product_name,
         category,
@@ -5132,6 +5127,13 @@ def resolve_standard_instant_experience_visuals(
         )
         ie_visuals.resolve_visual_system(visual, index, {**context, "product_metadata": product_metadata or {}}, variation_token)
         resolved.append(visual)
+    ie_visuals.resolve_set_copy(resolved, {
+        **context,
+        "worldwide_verified": _metadata_bool(product_metadata or {}, "worldwide_edition_verified", "worldwide_policy_approved"),
+        "no_second_run_verified": _metadata_bool(product_metadata or {}, "no_second_run_verified", "no_reprint_verified", "no_second_run", "no_reprint"),
+        "remaining_editions": _positive_int_or_none((product_metadata or {}).get("remaining_editions")),
+        "editions_sold": (product_metadata or {}).get("editions_sold"),
+    }, instant_experience_on_image_headline_is_valid)
     sibling_summaries = [
         {
             "route": visual["route"],
@@ -5143,6 +5145,8 @@ def resolve_standard_instant_experience_visuals(
             "secondary_cue": visual["secondary_cue"],
             "lighting": visual["lighting"],
             "supporting_line": visual["supporting_line"],
+            "headline_text": visual["headline_text"],
+            "headline_fit_fallback": visual["headline_fit_fallback"],
         }
         for visual in resolved
     ]
@@ -5205,6 +5209,7 @@ INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 - Add promotional typography as a deterministic post-production layer inside the fixed opaque footer after the room/product photograph is composed. Do not rely on the image model to invent text organically inside the room.
 - Use the fixed footer geometry and opacity contract exactly. Keep its one thin 1-pixel muted-gold top separator. No glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture.
 - Use a premium Sports Cave editorial serif for the headline, Montserrat Regular or Medium for the supporting line and Montserrat SemiBold or Bold for the CTA.
+- Subtly polish serif weight, kerning and baseline alignment while preserving existing proportions and hierarchy. Keep the supporting sans clean and mobile-readable; no decorative flourishes or luxury-magazine styling.
 - Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. Supporting text is warm off-white. CTA is muted antique gold.
 - Exact resolved headline: {visual.get("headline_text")}.
 - Exact resolved supporting line: {visual.get("supporting_line")}.
@@ -5218,7 +5223,7 @@ MEANINGFUL SPORTS CAVE GOLD UNDERLINE
 - Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 5-7 px. Thickness is 2 px. Colour is close to #C7A15A.
 - Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
 - The underline must move automatically when the edition limit changes.
-- If exact number-level positioning cannot be guaranteed, underline approximately 96-100% of the complete measured headline. Never place an arbitrary decorative line beneath empty space.
+- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; for a safe non-scarcity fallback underline COLLECTOR when present, otherwise COLLECTION, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
 - No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text."""
 
 
@@ -5233,7 +5238,7 @@ Permitted on-image words for this cover:
 - Supporting line: {visual.get("supporting_line")}
 - CTA: {visual.get("cta_text")}
 
-These are the only permitted advertising words for this cover. Never place Primary Text on the image.
+These are the only permitted advertising words for this cover, except its explicitly assigned factually eligible headline fit alternatives when measured fit fails. Never place Primary Text on the image.
 
 If edition limit used is "not verified", the supporting FOMO line for this route must not be used. Use the resolved safe fallback line above. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
 
@@ -5603,7 +5608,7 @@ HEADLINE: {visual.get("headline_text")}
 SUPPORTING LINE: {visual.get("supporting_line")}
 CTA: {visual.get("cta_text")}
 
-Use this image’s assigned supporting line exactly. The other two images must use their own different supporting lines. Only the headline, CTA and banner styling may be shared. Never copy description text onto the image.
+Use this image’s assigned supporting line exactly. The other two images must use their own different supporting lines. Keep the exact selected headline per route. Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
 
 Typography:
 - Headline: premium Sports Cave editorial serif, warm ivory.
@@ -5620,7 +5625,7 @@ Meaningful gold underline:
 - Use clean or subtly tapered ends.
 - No floating centred dash, bright yellow, orange, glitter, metallic gradient or strong glow.
 - The underline must move automatically when the edition limit changes.
-- If exact number-level positioning cannot be guaranteed, underline approximately 96-100% of the complete measured headline. Never place an arbitrary decorative line beneath empty space.
+- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; for a safe non-scarcity fallback underline COLLECTOR when present, otherwise COLLECTION, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
 
 INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 

@@ -3380,10 +3380,8 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(contract.count("Fixed opaque black footer: approximately the bottom 24–28%"), 3)
         self.assertEqual(contract.count("Selected camera:"), 3)
         self.assertNotIn("Permissible camera families", contract)
-        self.assertIn("Once they’re claimed, this edition retires forever.", contract)
-        self.assertIn("Once they’re claimed, this edition retires forever.", contract)
-        self.assertIn("Once they’re claimed, this edition retires forever.", contract)
-        self.assertIn("ONLY 100 WILL EVER EXIST", contract)
+        self.assertTrue(any("HEADLINE: " + h in contract for h in ads_page.ie_visuals.HEADLINES))
+        self.assertTrue(any(line in contract for line in ads_page.ie_visuals.APPROVED_SUPPORT_LINES))
         self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
         self.assertIn("horizontal wall lines", contract)
         self.assertIn("Do not rely on the image model to invent text organically inside the room.", contract)
@@ -3734,9 +3732,9 @@ PRIMARY TEXT VARIATIONS
             variation_token="description-image-separation",
         )
 
-        self.assertEqual(visual_prompts.count("- Headline: ONLY 100 WILL EVER EXIST"), 3)
+        self.assertEqual(sum(visual_prompts.count("- Headline: " + h) for h in ads_page.ie_visuals.HEADLINES), 3)
         self.assertEqual(visual_prompts.count("- CTA: CLAIM YOUR EDITION"), 3)
-        self.assertIn("Once they’re claimed, this edition retires forever.", visual_prompts)
+        self.assertTrue(any(line in visual_prompts for line in ads_page.ie_visuals.APPROVED_SUPPORT_LINES))
         self.assertNotIn("This isn't wall art.", visual_prompts)
         self.assertNotIn("Greatness doesn't fade. It gets framed.", visual_prompts)
         self.assertNotIn("No middle ground.", visual_prompts)
@@ -5927,14 +5925,14 @@ PRIMARY TEXT VARIATIONS
         ]
 
         expected = (
-            ("premium_scarcity_right", "Once they’re claimed, this edition retires forever."),
+            ("premium_scarcity_right", "A statement for your collection."),
             ("premium_scarcity_front", "Made for serious collectors."),
             ("premium_scarcity_left", "For collectors who know why it matters."),
         )
         for section, (route_key, fomo) in zip(sections, expected):
             self.assertIn(f"Route key: {route_key}", section)
             self.assertIn(fomo, section)
-            self.assertIn("ONLY 100 WILL EVER EXIST", section)
+            self.assertTrue(any("HEADLINE: " + h in section for h in ads_page.ie_visuals.eligible_headlines({})))
             self.assertIn("Exact resolved CTA: CLAIM YOUR EDITION", section)
             self.assertIn("place the gold underline directly beneath the measured glyph bounds", section)
             self.assertIn("Never place Primary Text on the image.", section)
@@ -5956,9 +5954,9 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Upper photographed residential room scene: approximately 72–76%", front_prompt)
         self.assertIn("Fixed opaque black footer: approximately the bottom 24–28%", front_prompt)
         self.assertIn("one 1-pixel muted-gold boundary line", front_prompt)
-        self.assertIn("approximately 72-78% of the canvas", front_prompt)
-        self.assertIn("ONLY 100 WILL EVER EXIST", front_prompt)
-        self.assertIn("Once they’re claimed, this edition retires forever.", front_prompt)
+        self.assertIn("approximately 79-86% of the canvas", front_prompt)
+        self.assertTrue(any("HEADLINE: " + h in front_prompt for h in ads_page.ie_visuals.eligible_headlines({})))
+        self.assertIn("A statement for your collection.", front_prompt)
         self.assertIn("CLAIM YOUR EDITION", front_prompt)
         self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", front_prompt)
         self.assertIn("FRAME REALISM:", front_prompt)

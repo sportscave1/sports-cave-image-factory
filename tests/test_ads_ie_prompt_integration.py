@@ -42,15 +42,18 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         self.assertEqual(text.count(footer), 3)
         for i, (_, _, prompt) in enumerate(groups):
             self.assertIn(footer, prompt)
-            self.assertIn(f"ONLY {limit} WILL EVER EXIST", prompt)
-            self.assertIn("SUPPORTING LINE: " + ads_page.ie_visuals.SUPPORT_LINES[i], prompt)
-            self.assertIn(("hallway / gallery", "man cave / home office / collector den", "bar / lounge")[i], prompt)
+            if limit == 100:
+                self.assertTrue(any("HEADLINE: " + h in prompt for h in ads_page.ie_visuals.HEADLINES))
+            else:
+                self.assertTrue(any("HEADLINE: " + h.replace("100", str(limit)) in prompt for h in ads_page.ie_visuals.HEADLINES))
+            self.assertTrue(any("SUPPORTING LINE: " + line in prompt for line in ads_page.ie_visuals.APPROVED_SUPPORT_LINES))
+            self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))
             self.assertIn("VARIANT PRECEDENCE — MANDATORY", prompt)
             self.assertIn("CLAIM YOUR EDITION", prompt)
             self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
             self.assertIn(f"Room {i+1}", prompt)
             self.assertIn("PRODUCT LOCK — ABSOLUTE", prompt)
-            self.assertNotRegex(prompt, r"(?i)LIMITED TO \d+ (?:WORLDWIDE|WORLD WIDE)")
+            self.assertIn("Do not append geographic scope to any other claim", prompt)
         self.assertEqual(grouped.count("\nAD COPY\n"), 3)
         self.assertNotIn("COPY VARIATIONS", grouped)
         self.assertNotRegex(text.casefold(), r"\b(?:motorsport|basketball|football|cricket|baseball|sports|racing) collectors\b")
