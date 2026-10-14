@@ -80,7 +80,7 @@ class Queue:
             result=dict(cur.fetchone());self.audit(cur,row['product_gid'],actor,'claimed',{'lease':token})
             return result
 
-    def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None):
+    def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None, metrics=None):
         if status not in ('Preparing','Needs PSD Repair','Blocked','Cloud Ready'):
             raise ValueError('Unsupported preparation status.')
         with self.connect() as conn,conn.cursor() as cur:
@@ -92,6 +92,28 @@ class Queue:
                 (status,reason,json.dumps(source) if source else None,total,digest,pid,token))
             if not cur.fetchone():raise ValueError('Preparation lease expired or was superseded.')
             self.audit(cur,pid,actor,status,{'reason':reason,'preparation_hash':digest})
+            if metrics is not None:
+                self.audit(cur,pid,actor,'preparation_metrics',dict(metrics,preparation_hash=digest))
+
+    def completed_receipt(self,pid,token,actor):
+        """Recover an acknowledged import only for its original owner and lease."""
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""SELECT q.preparation_hash,p.manifest->'source' AS source,
+                COALESCE((SELECT detail FROM auto_edition_onboarding_audit a
+                    WHERE a.product_gid=q.product_gid AND a.event='preparation_metrics'
+                    AND a.detail->>'preparation_hash'=q.preparation_hash
+                    ORDER BY a.created_at DESC LIMIT 1),'{}'::jsonb) AS timings
+                FROM auto_edition_onboarding q
+                JOIN auto_edition_preparations p ON p.hash=q.preparation_hash
+                JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
+                WHERE q.product_gid=%s AND q.lease_token=%s
+                AND q.status IN ('Blocked','Cloud Ready')
+                AND m.dropbox_file_id=p.manifest->'source'->>'file_id'
+                AND EXISTS (SELECT 1 FROM auto_edition_onboarding_audit a
+                    WHERE a.product_gid=q.product_gid AND a.actor_id=%s
+                    AND a.event='claimed' AND a.detail->>'lease'=%s)""",(pid,token,actor,token))
+            row=cur.fetchone()
+            return dict(row) if row else None
 
     def retry(self,pid,actor):
         with self.connect() as conn,conn.cursor() as cur:

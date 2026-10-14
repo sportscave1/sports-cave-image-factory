@@ -81,3 +81,50 @@ def test_failed_upload_keeps_recoverable_package(tmp_path):
         local.upload_prepared('job',archive)
         assert row['status']=='Blocked' and archive.read_bytes()==b'retained'
         cleanup.assert_not_called()
+
+
+def test_receipt_failure_never_deletes_recovery_assets(tmp_path):
+    folder=tmp_path/'Documents'/'SportsCaveAutoEditions'/('d'*48);folder.mkdir(parents=True)
+    archive=folder/'prepared.zip';archive.write_bytes(b'recovery')
+    row=dict(folder=folder,preparation_hash='e'*64,context={'source':{'file_id':'id:source'}})
+    with patch.object(Path,'home',return_value=tmp_path),patch.object(local.os,'replace',side_effect=OSError('disk failure')):
+        with pytest.raises(OSError):local.release_verified_temporary_files(row)
+    assert archive.read_bytes()==b'recovery'
+    assert not (folder/'receipt.json').exists()
+
+
+def test_cleanup_resumes_after_restart_and_preserves_unconfirmed_packages(tmp_path):
+    root=tmp_path/'Documents'/'SportsCaveAutoEditions';folder=root/('e'*48);folder.mkdir(parents=True)
+    archive=folder/'prepared.zip';archive.write_bytes(b'verified package')
+    unconfirmed=root/('f'*48);unconfirmed.mkdir();(unconfirmed/'prepared.zip').write_bytes(b'pending upload')
+    row=dict(folder=folder,preparation_hash='a'*64,context={'source':{'file_id':'id:source'}},
+             timings={'prepare_validate_seconds':42},server_timings={'dropbox_upload_seconds':7})
+    original_unlink=Path.unlink
+    def fail_archive(path,*args,**kwargs):
+        if path==archive:raise PermissionError('temporarily locked')
+        return original_unlink(path,*args,**kwargs)
+    with patch.object(Path,'home',return_value=tmp_path),patch.object(Path,'unlink',fail_archive):
+        with pytest.raises(PermissionError):local.release_verified_temporary_files(row)
+    receipt=json.loads((folder/'receipt.json').read_text())
+    assert receipt['cleanup_complete'] is False and receipt['timings']['prepare_validate_seconds']==42
+    with patch.object(Path,'home',return_value=tmp_path),patch.object(local,'HOST_FILE',root/'host.dpapi'):
+        local.retry_verified_cleanup()
+    assert not archive.exists()
+    assert (unconfirmed/'prepared.zip').read_bytes()==b'pending upload'
+    final=json.loads((folder/'receipt.json').read_text())
+    assert final['cleanup_complete'] is True and final['confirmed_at']==receipt['confirmed_at']
+    assert final['server_timings']=={'dropbox_upload_seconds':7}
+
+
+def test_lost_success_response_uses_receipt_without_second_upload(tmp_path):
+    import requests
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'recovery')
+    row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
+             context={'automatic':True},status='Working')
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.Timeout()) as post,\
+         patch.object(local,'reconnect',return_value={'preparation_hash':'c'*64,'timings':{'validation_seconds':5}}),\
+         patch.object(local,'release_verified_temporary_files') as cleanup:
+        local.upload_prepared('job',archive)
+    assert row['status']=='Prepared' and post.call_count==1
+    assert row['server_timings']['validation_seconds']==5
+    cleanup.assert_called_once_with(row)

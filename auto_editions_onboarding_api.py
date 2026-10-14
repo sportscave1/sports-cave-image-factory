@@ -295,6 +295,14 @@ async def reconnect(request):
             cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit WHERE product_gid=%s AND actor_id=%s
                 AND event='claimed' AND detail->>'lease'=%s""",(body['product_gid'],str(user['id']),body['lease_token']))
             if not cur.fetchone():raise PermissionError('Preparation lease belongs to another operator.')
+        completed=await run_in_threadpool(store.completed_receipt,body['product_gid'],body['lease_token'],str(user['id']))
+        if completed:
+            auth=await run_in_threadpool(files._dropbox_context)
+            meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,
+                auth['access_token'],completed['source']['file_id'],include_preview=False)
+            if ae.source_identity(body['product_gid'],meta)!=completed['source']:
+                raise ValueError('Source changed; completed receipt cannot acknowledge this package.')
+            return JSONResponse(dict(completed=completed),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,body['product_gid'],body['lease_token'])
         auth=await run_in_threadpool(files._dropbox_context)
         meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,auth['access_token'],ctx['source']['file_id'],include_preview=False)

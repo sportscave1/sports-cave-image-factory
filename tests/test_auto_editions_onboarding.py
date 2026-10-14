@@ -67,3 +67,35 @@ def test_replaced_mapping_invalidates_old_preparation_lease(database):
     with pytest.raises(ValueError):queue.enqueue('p','f','admin')
     queue.enqueue('p','new','admin')
     with pytest.raises(ValueError):queue.checkpoint('p',first['lease_token'],'admin','Cloud Ready')
+
+
+def test_preparation_metrics_commit_with_checkpoint_or_not_at_all(database):
+    from unittest.mock import patch
+    queue,sql=setup_queue(database);queue.enqueue('p','f','admin');row=queue.claim('admin')
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES(%s,'{}','[]','{}','admin')",('a'*64,))
+    original=queue.audit
+    def fail_metrics(cur,pid,actor,event,detail=None):
+        if event=='preparation_metrics':raise RuntimeError('receipt failed')
+        return original(cur,pid,actor,event,detail)
+    with patch.object(queue,'audit',side_effect=fail_metrics):
+        with pytest.raises(RuntimeError):
+            queue.checkpoint('p',row['lease_token'],'admin','Blocked','Review',digest='a'*64,metrics={'validation_seconds':4})
+    sql.execute("SELECT status FROM auto_edition_onboarding WHERE product_gid='p'")
+    assert sql.fetchone()['status']=='Preparing'
+    queue.checkpoint('p',row['lease_token'],'admin','Blocked','Review',digest='a'*64,metrics={'validation_seconds':4})
+    sql.execute("SELECT detail FROM auto_edition_onboarding_audit WHERE event='preparation_metrics'")
+    receipt=sql.fetchone()['detail']
+    assert receipt['validation_seconds']==4 and receipt['preparation_hash']=='a'*64
+
+
+def test_completed_receipt_fences_actor_lease_and_mapping(database):
+    queue,sql=setup_queue(database);queue.enqueue('p','f','admin');row=queue.claim('admin')
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES(%s,%s::jsonb,'[]','{}','admin')",
+                ('b'*64,'{"source":{"product_gid":"p","file_id":"f","revision":"r1"}}'))
+    queue.checkpoint('p',row['lease_token'],'admin','Blocked','Review',digest='b'*64,metrics={'validation_seconds':7})
+    found=queue.completed_receipt('p',row['lease_token'],'admin')
+    assert found['preparation_hash']=='b'*64 and found['timings']['validation_seconds']==7
+    assert queue.completed_receipt('p',row['lease_token'],'other') is None
+    assert queue.completed_receipt('p','00000000-0000-0000-0000-000000000000','admin') is None
+    sql.execute("UPDATE product_psd_mappings SET dropbox_file_id='changed'")
+    assert queue.completed_receipt('p',row['lease_token'],'admin') is None

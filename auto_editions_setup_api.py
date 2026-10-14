@@ -145,16 +145,16 @@ async def package(request):
             await run_in_threadpool(grant_context,request)
             registry,_=runtime.stores()
             digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])
+            timings['database_save_seconds']=round(time.monotonic()-phase,3)
+            timings['total_before_checkpoint_seconds']=round(time.monotonic()-started,3)
+            phase=time.monotonic()
             if ctx.get('automatic'):
                 from auto_editions_onboarding_api import queue,host_account
                 await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
-                    'Blocked','Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest)
+                    'Blocked','Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
             setup['imported']=digest
             timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
             timings['total_seconds']=round(time.monotonic()-started,3)
-            if ctx.get('automatic'):
-                with queue().connect() as conn,conn.cursor() as cur:
-                    queue().audit(cur,ctx['product_gid'],setup['actor_id'],'preparation_metrics',timings)
         return JSONResponse(dict(preparation_hash=digest,status='Awaiting visual approval',print_ready=False,timings=timings),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
     finally:
