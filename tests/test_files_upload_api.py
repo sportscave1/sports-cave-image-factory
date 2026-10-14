@@ -6,7 +6,7 @@ import json
 import unittest
 import zipfile
 from urllib.parse import urlencode
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import files_upload_api
 
@@ -269,7 +269,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "access_denied")
 
-    def test_explicit_download_route_authenticates_and_redirects_to_temporary_link(self):
+    def test_explicit_download_route_authenticates_and_streams_original(self):
         query = urlencode({"path": f"{TEAM_ROOT}/collector-art.psd"}).encode("ascii")
         request = files_upload_api.Request(
             {
@@ -292,20 +292,20 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
             return_value={"access_token": "short-lived-token", "root_path": TEAM_ROOT},
         ), patch.object(
             files_upload_api.dropbox_integration,
-            "get_temporary_link",
-            return_value="https://dropbox.test/temporary/collector-art.psd",
-        ) as temporary_link, patch.object(
+            "get_file_response",
+            return_value=({"size": 3}, Mock()),
+        ) as original_response, patch.object(
             files_upload_api,
             "record_activity_log",
         ) as record_activity:
             response = asyncio.run(files_upload_api.download_file(request))
 
-        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(
-            response.headers["location"],
-            "https://dropbox.test/temporary/collector-art.psd",
+            response.headers["content-length"],
+            "3",
         )
-        temporary_link.assert_called_once_with(
+        original_response.assert_called_once_with(
             "short-lived-token",
             f"{TEAM_ROOT}/collector-art.psd",
         )
@@ -719,7 +719,7 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertIn('async def download_file', api_source)
         self.assertIn('await run_in_threadpool(_request_user, request)', api_source)
         self.assertIn('path_is_within_root(path, context["root_path"])', api_source)
-        self.assertIn('dropbox_integration.get_temporary_link', api_source)
+        self.assertIn('dropbox_integration.get_file_response', api_source)
         self.assertIn('("/api/files-download", download_file, ("GET",))', api_source)
         self.assertNotIn("Download and open", preview)
 

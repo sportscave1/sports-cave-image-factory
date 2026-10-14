@@ -777,6 +777,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       <header><span id="previewTitle">Preview</span><button id="previewClose" type="button">Close preview</button></header>
       <div id="previewMount"></div>
     </section>
+    <script src="/files-original-actions.js"></script>
     <script>
       const STORAGE_KEY = "sports-cave-files-state-v2";
       const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1";
@@ -1372,8 +1373,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         elements.itemCount.textContent = currentSearch()
           ? `${visible} of ${state.items.length} items`
           : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
-        if (state.loadingMore) elements.itemCount.textContent += " · loading more…";
-        else if (state.incomplete) elements.itemCount.textContent += " · incomplete — Refresh to retry";
+        if (state.loadingMore) elements.itemCount.textContent += " Â· loading moreâ€¦";
+        else if (state.incomplete) elements.itemCount.textContent += " Â· incomplete â€” Refresh to retry";
         const clipboardCount = state.clipboard.items.length;
         elements.selectionCount.textContent = state.selection.size
           ? `${state.selection.size} selected`
@@ -1851,6 +1852,23 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         else revealItem(state.focusedPath, true);
       }
 
+      function originalDownloadUrl(item) {
+        return savedEditionId === item.id
+          ? '/api/auto-editions/file?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job'))
+          : `/api/files-download?path=${encodeURIComponent(item.path)}`;
+      }
+
+      async function copyOriginalImage(item) {
+        try {
+          await FilesOriginal.copy(originalDownloadUrl(item));
+          showToast("Original image copied at native dimensions (PNG clipboard).", {kind:"success"});
+        } catch (error) {
+          showToast(`${error.message || "Image copy failed."} Use Download Original.`, {
+            kind:"error", duration:0, actionLabel:"Download Original", action:() => startDownload([item]),
+          });
+        }
+      }
+
       function openItem(item) {
         if (!item) return;
         const now = Date.now();
@@ -1875,7 +1893,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.downloadStamp = {identity, time:Date.now()};
         showToast(files.length === 1 ? `Downloading ${files[0].name}...` : `Starting ${files.length} downloads. Your browser may ask to allow multiple downloads.`, { duration: 5000 });
         files.forEach((item, index) => {
-          const downloadUrl = savedEditionId===item.id ? '/api/auto-editions/file?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')) : `/api/files-download?path=${encodeURIComponent(item.path)}`;
+          const downloadUrl = originalDownloadUrl(item);
           window.setTimeout(() => {
             const frame = document.createElement("iframe");
             frame.hidden = true;
@@ -2073,6 +2091,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.clipboard = { mode, items: chosen, createdAt: Date.now() };
         persistClipboard();
         updateSelectionUi();
+        if (mode === "copy" && items.length === 1 && items[0].kind === "image") {
+          void copyOriginalImage(items[0]);
+          return;
+        }
         const count = chosen.length;
         showToast(mode === "cut"
           ? `${count} item${count === 1 ? "" : "s"} ready to move inside Sports Cave Files`
@@ -2229,6 +2251,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           ];
           definitions.push(
             { label: "Preview", disabled: !single, action: () => previewItem(item) },
+            { label: "Copy Image", disabled: !single || item.kind !== "image", action: () => copyOriginalImage(item) },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
             { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
