@@ -123,6 +123,7 @@ def report_failure(row):
 def inspect(key):
     lease=None
     automatic=False
+    phase='PSD transfer'
     try:
         from scripts.photoshop_dispatch import run
         row=JOBS[key];grant=row['grant'];meta=row['context']['metadata'];folder=row['folder']
@@ -142,6 +143,7 @@ def inspect(key):
                 if count>meta['size']:raise ValueError('Source exceeded its verified size.')
                 output.write(block)
         if count!=meta['size'] or transfer.digest(source,True)!=meta['content_hash']:raise ValueError('Source checksum failed.')
+        phase='Photoshop inspection'
         lease=processor_lease()
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
                      entries=[dict(work_path=str(source),product_gid=row['context']['source']['product_gid'],
@@ -155,7 +157,7 @@ def inspect(key):
         automatic=bool(row['context'].get('automatic'))
         row.update(status='Working' if automatic else 'Inspected',inspection=result['inspection'])
     except Exception as error:
-        JOBS[key].update(status='Blocked',error='Preparation inspection failed: '+type(error).__name__+'. Check Photoshop and retry.')
+        JOBS[key].update(status='Blocked',error=phase+' failed: '+type(error).__name__+'. Retry after checking '+('the connection' if phase=='PSD transfer' else 'Photoshop')+'.')
     finally:
         if lease:lease.unlink(missing_ok=True)
     if automatic:
