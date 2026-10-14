@@ -86,7 +86,7 @@ def inspect(key):
 
 
 def prepare(key,roles,scale=1):
-    if type(scale) is not int or scale not in (1,2,3):raise ValueError("Unsupported TEST enlargement.")
+    if type(scale) is not int or scale not in (1,2,3,4):raise ValueError("Unsupported TEST enlargement.")
     with LOCK:
         row=JOBS.get(key)
         if not row or row['status']!='Inspected':raise ValueError('Inspect this design before preparation.')

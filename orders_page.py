@@ -2225,7 +2225,7 @@ def _column_config():
             display_text=r"(Open PSD|Not linked|Unavailable)$",
             width=82,
         ),
-        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(Download JPG|View|Generating|Retry|Needs Setup|Blocked|Review)$",width=94,help="Download an approved edition JPG or view its saved full-resolution file. Supplier print certification remains separate."),
+        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(Download JPG|Retry Open|Open|View|Generating|Retry|Needs Setup|Blocked|Review)$",width=94,help="Download an approved edition JPG or open its saved Dropbox location. Supplier print certification remains separate."),
     }
 
 

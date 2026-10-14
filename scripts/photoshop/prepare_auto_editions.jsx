@@ -53,8 +53,8 @@ var SCAutoEditionsPreparation = (function () {
             var inspection = SCPSDInspector.inspect(doc, {smart_object_depth:0,smart_object_limit:0});
             var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
             var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
-            if (scale !== 1 && scale !== 2 && scale !== 3) throw Error("unsupported_preparation_scale");
-            if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 60000000)
+            if (scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
+            if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 95000000)
                 throw Error("canvas_exceeds_worker_limit");
             // Resize the layered staged document, never the source or another template.
             // Photoshop rerenders editable text/shapes; raster layers use bicubic smoother.

@@ -15,8 +15,8 @@ import auto_editions as ae
 
 
 def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1):
-    if type(scale) is not int or scale not in (1,2,3):
-        raise ValueError('Choose native, 2x or 3x TEST preparation.')
+    if type(scale) is not int or scale not in (1,2,3,4):
+        raise ValueError('Choose native, 2x, 3x or 4x TEST preparation.')
     from scripts.photoshop_dispatch import run
     source, output = Path(source).resolve(), Path(output).resolve()
     if output.exists():

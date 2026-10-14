@@ -53,7 +53,8 @@ def confirmed_job(unit, mapping, metadata, preparation):
                     line_id=unit['shopify_line_item_id'],ordinal=ordinal,variant_id=variant,
                     number=number,total=total,source=source,preparation=ae.fingerprint(manifest))
     return dict(id=ae.fingerprint(identity),identity=identity,number=number,total=total,
-                manifest=manifest,preparation_hash=identity['preparation'])
+                manifest=manifest,preparation_hash=identity['preparation'],
+                archive_labels={k:unit.get(k,'') for k in ('order_name','shopify_order_name','product_title','variant_title')})
 
 
 def require_access(actor, *, setup=False):
@@ -100,18 +101,64 @@ class DropboxAssets:
         finally:
             response.close()
 
-    def publish_output(self,job_id,path):
-        destination=self.path(job_id,'output.jpg',cache=True)
+    GENERATED_ROOT='/Sportscave Team Folder/03_ASSETS/Auto Editions/Generated JPGs'
+
+    @classmethod
+    def output_path(cls,job):
+        labels=job.get('archive_labels',{})
+        def slug(value,limit=60):
+            return re.sub(r'[^A-Za-z0-9-]+','-',str(value)).strip('-')[:limit] or 'Artwork'
+        order=slug(labels.get('order_name') or labels.get('shopify_order_name') or job['identity']['order_id'],40)
+        title=slug(labels.get('product_title') or 'Artwork')
+        variant_text=str(labels.get('variant_title') or job['identity']['variant_id'])
+        size=re.search(r'\b(XL|L|M|S)\b',variant_text)
+        variant=size.group(1) if size else slug(variant_text,24)
+        # Full immutable job identity prevents collisions across line items,
+        # master versions, edition assets and concurrent requests.
+        name=f"{order}-{title}-Unit{job['identity']['ordinal']}-{job['number']:03}-of-{job['total']}-{variant}-TEST-{job['id']}.jpg"
+        return f"{cls.GENERATED_ROOT}/{order}/TEST/{name}"
+
+    def verify_output(self,output):
+        metadata=self.integration.psd_open_metadata(self.token,output['file_id'],include_preview=False)
+        if (not metadata or metadata.get('id')!=output['file_id']
+                or metadata.get('rev')!=output['revision'] or metadata.get('size')!=output['bytes']
+                or (output.get('dropbox_content_hash') and metadata.get('content_hash')!=output['dropbox_content_hash'])):
+            raise PreparationBlocked('Saved JPG is unavailable or changed. Retry Open; ask an administrator to restore the archived revision if this persists.')
+        path=metadata.get('path_display') or metadata.get('path_lower') or ''
+        if not path.lower().startswith('/sportscave team folder/03_assets/auto editions/'):
+            raise PreparationBlocked('Saved JPG is outside the approved Auto Editions location.')
+        return metadata
+
+    def output_response(self,output):
+        # Dropbox now requires revision paths; the SDK rev argument is deprecated.
+        # Reuse the authenticated team client and pin the archived bytes directly.
+        if not re.fullmatch(r'[a-f0-9]+',str(output.get('revision',''))):
+            raise PreparationBlocked('Invalid archived revision.')
+        metadata,response=self.integration.team_space_client(self.token).files_download('rev:'+output['revision'])
+        return self.integration._metadata_to_dict(metadata),response
+
+    def publish_output(self,job,path):
+        destination=self.output_path(job)
         self.integration.ensure_folder_path(self.token,destination.rsplit('/',1)[0],root_path='/Sportscave Team Folder')
-        # Only this derived cache key can be overwritten. The source and master
-        # namespaces are never accepted by this method.
-        metadata=self.integration.upload_local_file(self.token,destination,path,conflict='overwrite')
+        metadata=self.integration.get_metadata_if_exists(self.token,destination)
+        if not metadata:
+            try:
+                metadata=self.integration.upload_local_file(self.token,destination,path,conflict='cancel')
+            except Exception:
+                # A concurrent/retried worker may have completed the same save.
+                metadata=self.integration.get_metadata_if_exists(self.token,destination)
+                if not metadata:raise
+        digest=ae.file_hash(path,dropbox=True)
         if (not metadata or not metadata.get('id') or not metadata.get('rev')
                 or metadata.get('size') != Path(path).stat().st_size
-                or metadata.get('content_hash') != ae.file_hash(path,dropbox=True)):
-            raise PreparationBlocked('Persistent Dropbox output was not confirmed.')
-        return {'file_id':metadata['id'],'revision':metadata.get('rev'),
-                'sha256':ae.file_hash(path),'bytes':Path(path).stat().st_size}
+                or metadata.get('content_hash') != digest):
+            raise PreparationBlocked('Archived Dropbox output differs; nothing was overwritten.')
+        output={'file_id':metadata['id'],'revision':metadata['rev'],'path':metadata.get('path_display') or destination,
+                'sha256':ae.file_hash(path),'dropbox_content_hash':digest,'bytes':Path(path).stat().st_size,
+                'archive_status':'TEST','master_version':job['preparation_hash'],
+                'identity':job['identity'],'labels':job.get('archive_labels',{})}
+        self.verify_output(output)
+        return output
 
     def publish_preparation(self,manifest,root):
         """Upload only immutable generated PNGs, resuming interrupted transfers.
@@ -141,6 +188,7 @@ class DropboxAssets:
         return dict(preparation_hash=digest,assets=records)
 
     def discard_cache(self,job_id,output):
+        if output.get('archive_status'):return # Immutable archives are never expired or removed.
         destination=self.path(job_id,'output.jpg',cache=True)
         metadata=self.integration.get_metadata_if_exists(self.token,destination)
         if metadata is None:return
@@ -152,7 +200,7 @@ class DropboxAssets:
 def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
     """Run one bounded worker job, reading only one master and requested patch.
 
-    The bounded budget supports up to 60 MP TEST layouts on the existing standard
+    The bounded budget supports up to 95 MP TEST layouts on the existing standard
     service. Rendering and reference checks share a process-wide memory lock.
     Temporary disk is scratch only; inputs and results use persistent storage.
     """
@@ -177,8 +225,11 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
         rendered=ae.render_jpg(manifest,root,job['number'],path)
         if path.stat().st_size>MAX_OUTPUT_BYTES:
             raise PreparationBlocked('Rendered output exceeds the verified download limit.')
-        output=assets.publish_output(job['id'],path)
+        output=assets.publish_output(job,path)
         if output.get('sha256') != rendered['sha256']:
             raise PreparationBlocked('Persistent output verification failed.')
+    from auto_editions_print import describe
+    print_spec=describe(job.get('archive_labels',{}).get('variant_title',''),manifest)
     return {**rendered,'output':output,'status':'Ready','test_only':True,
-            'filename':f"edition-{job['number']:03}-of-{job['total']}-TEST-NOT-PRINT-READY.jpg"}
+            'print_spec':print_spec,
+            'retained':True, 'filename':Path(output.get('path') or f"edition-{job['number']:03}-of-{job['total']}-TEST-NOT-PRINT-READY.jpg").name}

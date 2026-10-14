@@ -56,18 +56,33 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code,403)
             jobs.retain.assert_not_called()
 
-    async def test_saved_view_reuses_full_file_without_generation(self):
-        manifest=dict(dimensions=[8505,6012],source_dimensions=[2835,2004])
-        job=dict(id='a'*64,number=5,total=100,manifest=manifest)
-        registry=Mock();registry.unit.return_value=(dict(product_title='<design>',shopify_order_name='#SC3287',variant_title='Unframed / XL'),None)
-        jobs=Mock();jobs.for_allocation.return_value=[]
-        with patch.object(api,'stored_current',return_value=(job,None,dict(status='Ready'))),patch.object(api.runtime,'stores',return_value=(registry,jobs)),patch.object(api.runtime,'start_worker') as worker:
+    async def test_saved_view_resolves_location_without_generation(self):
+        job=dict(id='a'*64)
+        assets=Mock();assets.verify_output.return_value=dict(id='id:jpg',rev='123',path_display='/Sportscave Team Folder/03_ASSETS/Auto Editions/Generated JPGs/SC3287/TEST/file.jpg')
+        with patch.object(api,'stored_current',return_value=(job,assets,dict(status='Ready',result={'output':{}}))),patch.object(api.runtime,'start_worker') as worker:
             response=await api.view(request(query='allocation_id=42&job_id='+'a'*64))
-            self.assertEqual(response.status_code,200)
-            self.assertIn(b'&inline=1',response.body)
-            self.assertIn(b'Download Again',response.body)
-            self.assertIn(b'#SC3287',response.body)
-            self.assertIn(b'005/100',response.body)
-            self.assertNotIn(b'<design>',response.body)
-            self.assertNotIn(b'      loadFolderImages();',response.body)
+            self.assertEqual(response.status_code,307)
+            self.assertIn('/files-window?edition_allocation=42',response.headers['location'])
             worker.assert_not_called()
+
+    async def test_missing_archive_never_returns_an_open_location(self):
+        assets=Mock();assets.verify_output.side_effect=ValueError('Saved JPG is unavailable')
+        with patch.object(api,'stored_current',return_value=({},assets,dict(status='Ready',result={'output':{}}))):
+            response=await api.location(request(query='allocation_id=42&job_id='+'a'*64))
+            self.assertEqual(response.status_code,409)
+            self.assertNotIn('location',response.headers)
+
+    async def test_download_streams_only_pinned_checked_bytes(self):
+        import hashlib
+        data=b'full resolution bytes';output=dict(file_id='id:exact',revision='abc',bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+        stream=Mock();stream.iter_content.return_value=[data]
+        assets=Mock();assets.output_response.return_value=(dict(id='id:exact',rev='abc',size=len(data)),stream)
+        row=dict(status='Ready',result=dict(output=output,filename='SC3287-005-TEST.jpg'))
+        jobs=Mock()
+        with patch.object(api,'stored_current',return_value=({'id':'a'*64},assets,row)),patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'stores',return_value=(None,jobs)):
+            response=await api.download(request(query='allocation_id=42&job_id='+'a'*64))
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(__import__('pathlib').Path(response.path).read_bytes(),data)
+            assets.output_response.assert_called_once_with(output)
+            stream.close.assert_called_once()
+            await response.background()

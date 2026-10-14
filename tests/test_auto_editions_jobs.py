@@ -128,3 +128,16 @@ def test_download_retention_prevents_expiry_and_keeps_exact_output(database):
     assert jobs.expired()==[]
     assert jobs.read(j['id'])['result']['output']==result['output']
     assert jobs.read(j['id'])['result']['retained'] is True
+
+
+def test_new_master_does_not_advertise_previous_output(database):
+    jobs,sql=database;j=job()
+    j['identity'].update(allocation_id=42,source={'product_gid':'gid://shopify/Product/123'},variant_id='v1')
+    j['preparation_hash']='a'*64;j['id']=ae.fingerprint(j['identity'])
+    jobs.enqueue(j,'admin');claimed=jobs.claim()
+    jobs.finish(j['id'],claimed['lease_token'],result={'output':{'file_id':'id:old'},'retained':True})
+    assert jobs.summaries(['42'])['42']['id']==j['id']
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES (%s,'{}','[]','{}','admin')",('b'*64,))
+    sql.execute("INSERT INTO auto_edition_layouts(product_gid,variant_id,preparation_hash,approval) VALUES (%s,'v1',%s,'{}')",('gid://shopify/Product/123','b'*64))
+    assert jobs.summaries(['42'])=={}
+    assert jobs.read(j['id'])['result']['output']['file_id']=='id:old'

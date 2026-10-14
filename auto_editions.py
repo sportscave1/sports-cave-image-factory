@@ -16,7 +16,7 @@ from pathlib import Path
 
 REQUIRED_LAYERS = ('SC_EDITION_NUMBER', 'SC_EDITION_PLAQUE', 'SC_EDITION_MATTING')
 MAX_PIXELS = 110_000_000
-WORKER_MAX_PIXELS = 60_000_000
+WORKER_MAX_PIXELS = 95_000_000
 _RENDER_LOCK = threading.RLock()
 
 
@@ -158,7 +158,7 @@ def validate_manifest(manifest):
     if manifest.get('upscaled') is True:
         geometry = manifest.get('preparation_geometry') or {}
         scale = geometry.get('scale')
-        if (type(scale) is not int or scale not in (2, 3)
+        if (type(scale) is not int or scale not in (2, 3, 4)
                 or geometry.get('method') != 'photoshop_layered_bicubic_smoother'
                 or geometry.get('supplier_verified') is not False
                 or geometry.get('quality_approval_required') is not True
@@ -200,8 +200,18 @@ def render_jpg(manifest, root, number, destination):
     destination = Path(destination)
     with compose(manifest, root, number) as image:
         image.save(destination, format='JPEG', quality=100, subsampling=0,
-                   icc_profile=image.info.get('icc_profile', b''))
+                   icc_profile=image.info.get('icc_profile', b''), dpi=(300, 300))
+    from PIL import Image, ImageCms
+    with Image.open(destination) as verified:
+        if verified.format != 'JPEG' or list(verified.size) != manifest['dimensions']:
+            raise ValueError('Encoded JPG geometry changed.')
+        verified.load()
+        profile = verified.info.get('icc_profile', b'')
+        import io
+        profile_name = ImageCms.getProfileName(ImageCms.ImageCmsProfile(io.BytesIO(profile))).strip() if profile else 'Unspecified'
     return {'sha256': file_hash(destination), 'dimensions': manifest['dimensions'],
+            'ppi_metadata': [300, 300], 'colour_profile': profile_name,
+            'icc_sha256': hashlib.sha256(profile).hexdigest() if profile else None,
             'edition_number': number, 'edition_total': manifest['edition_total'],
             'preparation_hash': fingerprint(manifest), 'print_ready': False}
 

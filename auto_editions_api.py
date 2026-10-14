@@ -6,7 +6,7 @@ import tempfile
 
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import HTMLResponse,JSONResponse,FileResponse
+from starlette.responses import HTMLResponse,JSONResponse,FileResponse,RedirectResponse
 import auto_editions as ae
 import auto_editions_cloud as cloud
 import auto_editions_runtime as runtime
@@ -89,7 +89,7 @@ async def download(request):
         folder=tempfile.TemporaryDirectory(prefix='sc-edition-download-')
         path=Path(folder.name)/'output.jpg'
         def fetch():
-            metadata,response=assets.integration.get_file_response(assets.token,assets.path(job['id'],'output.jpg',cache=True))
+            metadata,response=assets.output_response(output)
             try:
                 if (metadata.get('id')!=output['file_id'] or metadata.get('rev')!=output['revision']
                         or metadata.get('size')!=output['bytes'] or not 0<output['bytes']<=cloud.MAX_OUTPUT_BYTES):
@@ -147,6 +147,9 @@ async def state(request):
         await actor(request)
         job,assets=await run_in_threadpool(runtime.job_for,allocation(request))
         _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
+        if row and row['status']=='Ready':
+            await run_in_threadpool(assets.verify_output,row['result']['output'])
+        runtime.start_worker()
         return JSONResponse(dict(ok=True,job_id=job['id'],status=row['status'] if row else 'Not generated',
             error_code=row.get('error_code') if row else None,filename=(row.get('result') or {}).get('filename') if row else None),headers=HEADERS)
     except Exception as error:return failure(error)
@@ -167,40 +170,26 @@ async def retry(request):
     except Exception as error:return failure(error)
 
 
-async def view(request):
+async def location(request):
     try:
-        job,_,row=await stored_current(request)
-        if row['status']!='Ready':raise ValueError('The saved file has expired. Return to Orders to regenerate.')
-        registry,jobs=runtime.stores();unit,_=await run_in_threadpool(registry.unit,allocation(request))
-        from auto_editions_print import describe
-        title=f"{unit.get('product_title','Artwork')} | {unit.get('order_name') or unit.get('shopify_order_name') or 'Order '+str(unit.get('shopify_order_id','')).split('/')[-1]} | {job['number']:03}/{job['total']} | TEST / NOT PRINT READY"
-        url='/api/auto-editions/file?allocation_id='+str(allocation(request))+'&job_id='+job['id']
-        history=await run_in_threadpool(jobs.for_allocation,allocation(request))
-        versions=[dict(id=r['id'],label=str(r['created_at'])[:16]+' | '+str(r['payload']['manifest']['dimensions']))
-            for r in history if r['status']=='Ready' and (r.get('result') or {}).get('retained') is True
-            and same_allocation(unit,r['payload']['identity'])]
-        context=dict(title=title,url=url,job_id=job['id'],versions=versions,
-            print_spec=describe(unit.get('variant_title',''),job['manifest']))
-        html=(Path(__file__).parent/'components/files_image_viewer/index.html').read_text(encoding='utf-8')
-        html=html.replace('const query = new URLSearchParams(location.search);','const editionContext = '+json.dumps(context).replace('<',r'\u003c')+'; const query = new URLSearchParams(location.search);')
-        html=html.replace('path: query.get("path") || "",','path: "edition.jpg",').replace('name: query.get("name") || "",','name: editionContext.title,')
-        html=html.replace('elements.image.src = `/api/files-image-preview?path=${encodeURIComponent(state.path)}`;', 'elements.image.src = editionContext.url+"&inline=1";')
-        html=html.replace('elements.downloadFrame.src = `/api/files-download?relative_path=${encodeURIComponent(state.path)}&download=${Date.now()}`;', 'elements.downloadFrame.src = editionContext.url;')
-        html=html.replace('      loadFolderImages();','      syncNavigation();').replace('      notifyOpenerReady();','')
-        html=html.replace('      loadImage(state.path,', """      for(const id of ['previousButton','nextButton','desktopButton','copyFileButton','copyImageButton','rotateLeftButton','rotateRightButton'])elements[id].style.display='none';
-      elements.downloadButton.querySelector('.tool-label').textContent='Download Again';
-      elements.closeButton.onclick=()=>parent.postMessage({type:'sports-cave-psd-cancel'},location.origin);
-      if(editionContext.versions.length>1){
-        const select=document.createElement('select');select.setAttribute('aria-label','Saved edition versions');
-        for(const version of editionContext.versions)select.add(new Option(version.label,version.id));
-        select.value=editionContext.job_id;
-        select.onchange=()=>{const u=new URL(location.href);u.searchParams.set('job_id',select.value);location.href=u.href;};
-        elements.downloadButton.before(select);
-      }
-      loadImage(state.path,""")
-        return HTMLResponse(html,headers=HEADERS)
+        job,assets,row=await stored_current(request)
+        if row['status']!='Ready':raise ValueError('The saved JPG is not ready. Return to Orders and retry.')
+        metadata=await run_in_threadpool(assets.verify_output,row['result']['output'])
+        path=metadata.get('path_display') or metadata['path_lower']
+        return JSONResponse(dict(ok=True,file_id=metadata['id'],revision=metadata['rev'],path=path,
+            folder_path=path.rsplit('/',1)[0],filename=metadata.get('name') or path.rsplit('/',1)[-1],
+            test_only=True),headers=HEADERS)
     except Exception as error:return failure(error)
 
 
+async def view(request):
+    # Old bookmarked View URLs now resolve the saved location, never a preview.
+    response=await location(request)
+    if response.status_code!=200:return response
+    from urllib.parse import urlencode
+    return RedirectResponse('/files-window?'+urlencode(dict(edition_allocation=allocation(request),
+        edition_job=request.query_params['job_id'])),headers=HEADERS)
+
+
 ROUTES=(('/auto-editions/download',page,('GET',)),('/api/auto-editions/start',start,('POST',)),
-        ('/api/auto-editions/status',status,('GET',)),('/api/auto-editions/file',download,('GET',)),('/api/auto-editions/state',state,('GET',)),('/api/auto-editions/retry',retry,('POST',)),('/auto-editions/view',view,('GET',)))
+        ('/api/auto-editions/status',status,('GET',)),('/api/auto-editions/file',download,('GET',)),('/api/auto-editions/state',state,('GET',)),('/api/auto-editions/retry',retry,('POST',)),('/auto-editions/view',view,('GET',)),('/auto-editions/open',view,('GET',)),('/api/auto-editions/location',location,('GET',)))

@@ -50,6 +50,7 @@ def run_one(jobs,resolver=job_for):
     try:
         current,assets=resolver(record['payload']['identity']['allocation_id'])
         if current['id']!=record['id']:raise PreparationBlocked('source_changed')
+        current['archive_labels']=record['payload'].get('archive_labels',current.get('archive_labels',{}))
         result=execute(current,assets)
         # Fence changes made while image transfer/rendering was in progress.
         verified,_=resolver(current['identity']['allocation_id'])
@@ -114,8 +115,13 @@ def download_links(rows):
                      variant(r.get('shopify_variant_id') or r.get('variant_id'))) in index}
         _,jobs=stores()
         summaries=jobs.summaries(list(links)) if jobs else {}
+        saved_assets=storage() if any(r['status']=='Ready' for r in summaries.values()) else None
         for key,row in summaries.items():
-            if row['status']=='Ready':links[key]='/auto-editions/view?allocation_id='+key+'&job_id='+row['id']+'#View'
+            if row['status']=='Ready':
+                try:
+                    saved_assets.verify_output(row['result']['output']);label='Open'
+                except Exception:label='Retry Open'
+                links[key]='/auto-editions/open?allocation_id='+key+'&job_id='+row['id']+'#'+label
             elif row['status'] in ('Queued','Generating'):links[key]='/auto-editions/download?allocation_id='+key+'#Generating'
             elif row['status']=='Blocked':links[key]='/auto-editions/download?allocation_id='+key+'#Retry'
         return links
@@ -124,4 +130,4 @@ def download_links(rows):
 
 
 def link_label(url):
-    return {'View':'View','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')
+    return {'Retry Open':'Retry Open','Open':'Open','View':'Open','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')

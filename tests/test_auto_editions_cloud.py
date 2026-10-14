@@ -48,7 +48,7 @@ def test_worker_fetches_only_master_and_requested_patch(tmp_path):
         fetched=[]
         def fetch(self,digest,asset,destination):
             self.fetched.append(asset['name']);shutil.copyfile(tmp_path/asset['name'],destination)
-        def publish_output(self,job_id,path):
+        def publish_output(self,job,path):
             with Image.open(path) as im:assert im.size==(200,100)
             return dict(sha256=ae.file_hash(path))
     storage=Storage(); result=cloud.execute(job,storage)
@@ -86,6 +86,7 @@ def test_dropbox_preparation_resumes_without_overwriting_existing_assets(tmp_pat
         writes=[]
         def ensure_folder_path(self,*args,**kwargs):pass
         def get_metadata_if_exists(self,token,path):return self.records.get(path)
+        def psd_open_metadata(self,token,file_id,include_preview=False):return self.records.get(file_id)
         def upload_local_file(self,token,path,local,conflict):
             assert conflict=='cancel' and path.endswith('.png') and '/Masters/' in path
             self.writes.append(path)
@@ -110,3 +111,49 @@ def test_dropbox_download_closes_stream_on_checksum_failure(tmp_path):
     with pytest.raises(ValueError,match='checksum'):
         storage.fetch('a'*64,dict(name='master.png',sha256='b'*64),tmp_path/'input.png')
     stream.close.assert_called_once()
+
+
+def test_archive_idempotency_revision_checks_and_master_history(tmp_path):
+    job=cloud.confirmed_job(*prepared(tmp_path))
+    job['archive_labels']=dict(order_name='#SC3287',product_title='Kostecki & Hazelwood',variant_title='Unframed / XL')
+    path=tmp_path/'output.jpg';ae.render_jpg(job['manifest'],tmp_path,2,path)
+    class Integration:
+        records={};writes=[]
+        def ensure_folder_path(self,*args,**kwargs):pass
+        def get_metadata_if_exists(self,token,path):return self.records.get(path)
+        def psd_open_metadata(self,token,file_id,include_preview=False):return self.records.get(file_id)
+        def upload_local_file(self,token,destination,path,conflict):
+            assert conflict=='cancel'
+            meta=dict(id='id:'+str(len(self.writes)),rev='123',path_display=destination,size=path.stat().st_size,content_hash=ae.file_hash(path,dropbox=True))
+            self.records[destination]=self.records[meta['id']]=meta;self.writes.append(destination)
+            return meta
+    integration=Integration();storage=cloud.DropboxAssets('test',integration)
+    first=storage.publish_output(job,path)
+    assert '/Generated JPGs/SC3287/TEST/' in first['path']
+    assert storage.publish_output(job,path)==first and len(integration.writes)==1
+    changed=deepcopy(job);changed['id']='f'*64;changed['preparation_hash']='e'*64
+    other=storage.publish_output(changed,path)
+    assert other['file_id']!=first['file_id'] and len(integration.writes)==2
+    storage.discard_cache(job['id'],first)
+    integration.records[first['file_id']]['rev']='456'
+    with pytest.raises(ValueError,match='unavailable or changed'):storage.verify_output(first)
+    integration.records[first['file_id']]['content_hash']='b'*64
+    with pytest.raises(ValueError,match='nothing was overwritten'):storage.publish_output(job,path)
+
+
+def test_encoded_jpg_has_actual_pixels_and_300_ppi(tmp_path):
+    manifest=package(tmp_path);result=ae.render_jpg(manifest,tmp_path,2,tmp_path/'out.jpg')
+    with Image.open(tmp_path/'out.jpg') as im:
+        assert im.size==(200,100) and im.info['dpi']==(300,300)
+    assert result['colour_profile']=='Unspecified' and result['print_ready'] is False
+
+
+def test_archive_download_uses_supported_revision_path():
+    from unittest.mock import Mock
+    integration=Mock();raw=object();stream=Mock()
+    integration.team_space_client.return_value.files_download.return_value=(raw,stream)
+    integration._metadata_to_dict.return_value={'id':'id:exact','rev':'abc123'}
+    assets=cloud.DropboxAssets('test',integration)
+    assert assets.output_response({'revision':'abc123'})==({'id':'id:exact','rev':'abc123'},stream)
+    integration.team_space_client.return_value.files_download.assert_called_once_with('rev:abc123')
+    with pytest.raises(ValueError):assets.output_response({'revision':'../../bad'})

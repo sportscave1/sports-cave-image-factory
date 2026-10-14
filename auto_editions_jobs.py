@@ -116,8 +116,13 @@ class Jobs:
     def summaries(self,allocation_ids):
         if not allocation_ids:return {}
         with self.connect() as conn,conn.cursor() as cur:
-            cur.execute("""SELECT DISTINCT ON (payload->'identity'->>'allocation_id')
-                payload->'identity'->>'allocation_id' allocation_id,id,status
-                FROM public.auto_edition_jobs WHERE payload->'identity'->>'allocation_id'=ANY(%s)
-                ORDER BY payload->'identity'->>'allocation_id',created_at DESC""",(list(allocation_ids),))
+            cur.execute("""SELECT DISTINCT ON (j.payload->'identity'->>'allocation_id')
+                j.payload->'identity'->>'allocation_id' allocation_id,j.id,j.status,j.result
+                FROM public.auto_edition_jobs j
+                LEFT JOIN public.auto_edition_layouts l ON
+                  l.product_gid=j.payload->'identity'->'source'->>'product_gid'
+                  AND l.variant_id=j.payload->'identity'->>'variant_id'
+                WHERE j.payload->'identity'->>'allocation_id'=ANY(%s)
+                  AND (l.preparation_hash IS NULL OR l.preparation_hash=j.payload->>'preparation_hash')
+                ORDER BY j.payload->'identity'->>'allocation_id',j.created_at DESC""",(list(allocation_ids),))
             return {r['allocation_id']:dict(r) for r in cur.fetchall()}
