@@ -1,5 +1,6 @@
 """Cookie-authenticated cloud downloads. No companion or allocation mutations."""
 import json
+import re
 from pathlib import Path
 import tempfile
 
@@ -79,8 +80,11 @@ async def status(request):
 async def download(request):
     folder=None
     try:
-        job,assets,row=await current(request)
+        job,assets,row=await stored_current(request)
         if row['status']!='Ready':raise ValueError('The JPG is not ready yet.')
+        user=await actor(request)
+        _,jobs=runtime.stores()
+        await run_in_threadpool(jobs.retain,job['id'],str(user['id']))
         result=row['result'];output=result['output']
         folder=tempfile.TemporaryDirectory(prefix='sc-edition-download-')
         path=Path(folder.name)/'output.jpg'
@@ -101,13 +105,102 @@ async def download(request):
             finally:response.close()
         await run_in_threadpool(fetch)
         # Permissions/source are rechecked after the potentially slow transfer.
-        await current(request)
-        return FileResponse(path,media_type='image/jpeg',filename=result['filename'],headers=HEADERS,
+        await stored_current(request)
+        return FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=HEADERS,
                             background=BackgroundTask(folder.cleanup))
     except Exception as error:
         if folder:folder.cleanup()
         return failure(error)
 
 
+
+def same_allocation(unit,identity):
+    return (unit.get('allocation_valid') is True and unit.get('identity_enforced') is True
+        and not unit.get('invalidated_at') and not unit.get('cancelled_at')
+        and not unit.get('duplicate_allocation_warning')
+        and unit.get('status') in ('assigned','completed','fulfilled')
+        and (unit.get('allocation_index') or unit.get('unit_ordinal'))==identity.get('ordinal')
+        and unit.get('id')==identity.get('allocation_id')
+        and unit.get('shopify_order_id')==identity.get('order_id')
+        and unit.get('shopify_line_item_id')==identity.get('line_id')
+        and unit.get('edition_number')==identity.get('number')
+        and unit.get('edition_total')==identity.get('total')
+        and str(unit.get('shopify_variant_id') or '')==identity.get('variant_id')
+        and unit.get('shopify_product_gid')==identity.get('source',{}).get('product_gid'))
+
+
+async def stored_current(request):
+    # Retained historical output is bound to its exact allocation, not today's PSD.
+    await actor(request)
+    if not re.fullmatch(r'[a-f0-9]{64}',request.query_params.get('job_id','')):raise ValueError('Invalid saved artwork identity.')
+    registry,jobs=runtime.stores()
+    row=await run_in_threadpool(jobs.read,request.query_params.get('job_id',''))
+    if row and (row.get('result') or {}).get('retained') is True:
+        unit,_=await run_in_threadpool(registry.unit,allocation(request))
+        if not same_allocation(unit,row['payload']['identity']):raise PermissionError('Artwork does not match this allocation.')
+        return row['payload'],runtime.storage(),row
+    return await current(request)
+
+
+async def state(request):
+    try:
+        await actor(request)
+        job,assets=await run_in_threadpool(runtime.job_for,allocation(request))
+        _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
+        return JSONResponse(dict(ok=True,job_id=job['id'],status=row['status'] if row else 'Not generated',
+            error_code=row.get('error_code') if row else None,filename=(row.get('result') or {}).get('filename') if row else None),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+async def retry(request):
+    try:
+        user=await actor(request,write=True)
+        job,_=await run_in_threadpool(runtime.job_for,allocation(request))
+        _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
+        if row and row['status']=='Blocked' and row['error_code']=='worker_unavailable':
+            await run_in_threadpool(jobs.retry,job['id'],str(user['id']))
+        elif row and row['status']=='Blocked' and row['error_code']=='cache_expired':
+            await run_in_threadpool(jobs.enqueue,job,str(user['id']))
+        else:raise ValueError('This file needs artwork review before retrying.')
+        runtime.start_worker()
+        return JSONResponse(dict(ok=True,job_id=job['id'],status='Queued'),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+async def view(request):
+    try:
+        job,_,row=await stored_current(request)
+        if row['status']!='Ready':raise ValueError('The saved file has expired. Return to Orders to regenerate.')
+        registry,jobs=runtime.stores();unit,_=await run_in_threadpool(registry.unit,allocation(request))
+        from auto_editions_print import describe
+        title=f"{unit.get('product_title','Artwork')} | {unit.get('order_name') or unit.get('shopify_order_name') or 'Order '+str(unit.get('shopify_order_id','')).split('/')[-1]} | {job['number']:03}/{job['total']} | TEST / NOT PRINT READY"
+        url='/api/auto-editions/file?allocation_id='+str(allocation(request))+'&job_id='+job['id']
+        history=await run_in_threadpool(jobs.for_allocation,allocation(request))
+        versions=[dict(id=r['id'],label=str(r['created_at'])[:16]+' | '+str(r['payload']['manifest']['dimensions']))
+            for r in history if r['status']=='Ready' and (r.get('result') or {}).get('retained') is True
+            and same_allocation(unit,r['payload']['identity'])]
+        context=dict(title=title,url=url,job_id=job['id'],versions=versions,
+            print_spec=describe(unit.get('variant_title',''),job['manifest']))
+        html=(Path(__file__).parent/'components/files_image_viewer/index.html').read_text(encoding='utf-8')
+        html=html.replace('const query = new URLSearchParams(location.search);','const editionContext = '+json.dumps(context).replace('<',r'\u003c')+'; const query = new URLSearchParams(location.search);')
+        html=html.replace('path: query.get("path") || "",','path: "edition.jpg",').replace('name: query.get("name") || "",','name: editionContext.title,')
+        html=html.replace('elements.image.src = `/api/files-image-preview?path=${encodeURIComponent(state.path)}`;', 'elements.image.src = editionContext.url+"&inline=1";')
+        html=html.replace('elements.downloadFrame.src = `/api/files-download?relative_path=${encodeURIComponent(state.path)}&download=${Date.now()}`;', 'elements.downloadFrame.src = editionContext.url;')
+        html=html.replace('      loadFolderImages();','      syncNavigation();').replace('      notifyOpenerReady();','')
+        html=html.replace('      loadImage(state.path,', """      for(const id of ['previousButton','nextButton','desktopButton','copyFileButton','copyImageButton','rotateLeftButton','rotateRightButton'])elements[id].style.display='none';
+      elements.downloadButton.querySelector('.tool-label').textContent='Download Again';
+      elements.closeButton.onclick=()=>parent.postMessage({type:'sports-cave-psd-cancel'},location.origin);
+      if(editionContext.versions.length>1){
+        const select=document.createElement('select');select.setAttribute('aria-label','Saved edition versions');
+        for(const version of editionContext.versions)select.add(new Option(version.label,version.id));
+        select.value=editionContext.job_id;
+        select.onchange=()=>{const u=new URL(location.href);u.searchParams.set('job_id',select.value);location.href=u.href;};
+        elements.downloadButton.before(select);
+      }
+      loadImage(state.path,""")
+        return HTMLResponse(html,headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
 ROUTES=(('/auto-editions/download',page,('GET',)),('/api/auto-editions/start',start,('POST',)),
-        ('/api/auto-editions/status',status,('GET',)),('/api/auto-editions/file',download,('GET',)))
+        ('/api/auto-editions/status',status,('GET',)),('/api/auto-editions/file',download,('GET',)),('/api/auto-editions/state',state,('GET',)),('/api/auto-editions/retry',retry,('POST',)),('/auto-editions/view',view,('GET',)))

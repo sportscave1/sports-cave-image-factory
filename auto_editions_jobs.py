@@ -86,7 +86,7 @@ class Jobs:
             cur.execute('''UPDATE public.auto_edition_jobs SET status='Blocked',error_code='cache_expired'
                 WHERE id IN (SELECT id FROM public.auto_edition_jobs WHERE
                     (status='Ready' OR (status='Blocked' AND error_code='cache_expired'))
-                    AND result IS NOT NULL AND updated_at<now()-interval '24 hours'
+                    AND result IS NOT NULL AND COALESCE((result->>'retained')::boolean,false)=false AND updated_at<now()-interval '24 hours'
                     ORDER BY updated_at FOR UPDATE SKIP LOCKED LIMIT 10) RETURNING id,result''')
             return [dict(row) for row in cur.fetchall()]
 
@@ -95,3 +95,29 @@ class Jobs:
             cur.execute('''UPDATE public.auto_edition_jobs SET result=NULL,updated_at=now()
                 WHERE id=%s AND status='Blocked' AND error_code='cache_expired' RETURNING id''',(job_id,))
             if cur.fetchone():self.audit(cur,job_id,'cloud-worker','cache_expired')
+
+
+    def retain(self,job_id,actor):
+        """Pin the exact object before serving it; expiry and this write serialize."""
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""UPDATE public.auto_edition_jobs SET
+                result=jsonb_set(result,'{retained}','true'::jsonb),updated_at=now()
+                WHERE id=%s AND status='Ready' AND result IS NOT NULL RETURNING id""",(job_id,))
+            if not cur.fetchone():raise ValueError('File expired before download. Generate again.')
+            self.audit(cur,job_id,actor,'file_retained_for_reprint')
+
+    def for_allocation(self,allocation_id):
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""SELECT * FROM public.auto_edition_jobs
+                WHERE payload->'identity'->>'allocation_id'=%s
+                ORDER BY created_at DESC LIMIT 20""",(str(allocation_id),))
+            return [dict(r) for r in cur.fetchall()]
+
+    def summaries(self,allocation_ids):
+        if not allocation_ids:return {}
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""SELECT DISTINCT ON (payload->'identity'->>'allocation_id')
+                payload->'identity'->>'allocation_id' allocation_id,id,status
+                FROM public.auto_edition_jobs WHERE payload->'identity'->>'allocation_id'=ANY(%s)
+                ORDER BY payload->'identity'->>'allocation_id',created_at DESC""",(list(allocation_ids),))
+            return {r['allocation_id']:dict(r) for r in cur.fetchall()}

@@ -107,10 +107,21 @@ def download_links(rows):
         registry,_=stores()
         def variant(value):return str(value or '').removeprefix('gid://shopify/ProductVariant/')
         index={(product,variant(v)) for product,v in registry.index()}
-        return {str(r.get('edition_order_id') or r.get('id')):
+        links={str(r.get('edition_order_id') or r.get('id')):
                 '/auto-editions/download?allocation_id='+str(r.get('edition_order_id') or r.get('id'))+'#Download JPG'
                 for r in rows if str(r.get('edition_order_id') or r.get('id') or '').isdigit()
                 and (psd_directory.product_id(r),
                      variant(r.get('shopify_variant_id') or r.get('variant_id'))) in index}
+        _,jobs=stores()
+        summaries=jobs.summaries(list(links)) if jobs else {}
+        for key,row in summaries.items():
+            if row['status']=='Ready':links[key]='/auto-editions/view?allocation_id='+key+'&job_id='+row['id']+'#View'
+            elif row['status'] in ('Queued','Generating'):links[key]='/auto-editions/download?allocation_id='+key+'#Generating'
+            elif row['status']=='Blocked':links[key]='/auto-editions/download?allocation_id='+key+'#Retry'
+        return links
     except Exception:
         return {} # Existing V4 availability remains intact if V6 storage is down.
+
+
+def link_label(url):
+    return {'View':'View','Generating':'Generating...','Retry':'Retry'}.get(url.rsplit('#',1)[-1],'Download JPG')

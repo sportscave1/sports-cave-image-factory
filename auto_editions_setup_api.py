@@ -41,8 +41,12 @@ async def details(request):
         await api.actor(request,setup=True)
         registry,_=runtime.stores()
         unit,mapping=await run_in_threadpool(registry.unit,api.allocation(request))
-        current=''
-        try:current=ae.fingerprint((await run_in_threadpool(registry.for_unit,unit))['manifest'])
+        current='';print_spec=None
+        try:
+            manifest=(await run_in_threadpool(registry.for_unit,unit))['manifest']
+            current=ae.fingerprint(manifest)
+            from auto_editions_print import describe
+            print_spec=describe(unit.get('variant_title',''),manifest)
         except cloud.PreparationBlocked:pass
         candidate=request.query_params.get('preparation_hash','')
         candidate_info=None
@@ -57,7 +61,7 @@ async def details(request):
             variant_title=unit.get('variant_title',''),variant_id=unit.get('shopify_variant_id'),
             number=unit['edition_number'],total=unit['edition_total'],linked=bool(mapping),
             current_hash=current,template_name=ae.reference_template().get('name','SC_Auto_Editions_Base_Template_V1.psd'),
-            print_status='NOT CONFIGURED'),headers=api.HEADERS)
+            print_status='TEST / NOT PRINT READY' if current else 'NOT CONFIGURED',print_spec=print_spec),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

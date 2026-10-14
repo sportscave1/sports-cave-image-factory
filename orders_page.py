@@ -2225,7 +2225,7 @@ def _column_config():
             display_text=r"(Open PSD|Not linked|Unavailable)$",
             width=82,
         ),
-        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(Download JPG|Needs Setup|Blocked|Review)$",width=94,help="Only verified SC3284 unit 1 is enabled for a native-resolution TEST JPG. Other units remain disabled; production print approval is separate."),
+        "print_jpg": st.column_config.LinkColumn("Edition JPG",display_text=r"(Download JPG|View|Generating|Retry|Needs Setup|Blocked|Review)$",width=94,help="Download an approved edition JPG or view its saved full-resolution file. Supplier print certification remains separate."),
     }
 
 
@@ -2722,7 +2722,7 @@ def _render_orders_table(rows):
                 st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
                 allocation_id=str(selected.get('edition_order_id') or '')
                 if allocation_id in cloud_links:
-                    st.link_button("Download JPG",cloud_links[allocation_id])
+                    st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
                 elif edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
                     st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
                 else:
@@ -2778,7 +2778,7 @@ def _render_mobile_orders(rows):
             status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
             allocation_id=str(row.get('edition_order_id') or '')
             if allocation_id in cloud_links:
-                st.link_button('Download JPG',cloud_links[allocation_id])
+                st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
             elif edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
                 st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
             else:

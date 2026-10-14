@@ -3,6 +3,7 @@
 <h1>Auto Editions setup</h1><p id="design"></p><p id="variant"></p><p id="allocation"></p>
 <p><a id="link" hidden>Link PSD using Add</a> <button id="refresh">Refresh mapping</button></p>
 <p><strong>Layout: original composition · TEST only</strong><br><small>The design’s own plaque position is retained. Prodigi dimensions, bleed, colour and safe areas are not certified. No high-resolution detail is claimed.</small></p>
+<p id="savedGeometry"></p>
 <button id="inspect" disabled>Inspect linked PSD</button><p id="state" role="status">Loading…</p>
 <section id="roles" hidden><p>Confirm the layer roles in this design. Ambiguous layers are never selected automatically.</p>
 <label>Edition number <select id="number"></select></label><label>Plaque <select id="plaque"></select></label><label>Matting <select id="matting"></select></label>
@@ -18,6 +19,7 @@ const local='http://127.0.0.1:18762';let details,popup,nonce,grant,connected=fal
 const state=text=>$('state').textContent=text;
 async function api(path,body){const r=await fetch(path+query+(path==='/api/auto-editions/details'&&requested?'&preparation_hash='+encodeURIComponent(requested):''),body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw Error(data.error||'Setup is unavailable.');return data;}
 async function load(){try{details=await api('/api/auto-editions/details');$('design').textContent=details.product_title;$('variant').textContent=details.variant_title+' · Variant '+details.variant_id;$('allocation').textContent='Assigned edition '+String(details.number).padStart(3,'0')+' / '+details.total;
+if(details.print_spec){const p=details.print_spec;$('savedGeometry').textContent='Source '+p.source_dimensions.join(' x ')+' px | Approved master / output '+p.output_dimensions.join(' x ')+' px | Effective print PPI: '+(p.effective_ppi?p.effective_ppi.join(' / '):'unverified for this variant')+' | TEST / NOT PRINT READY';}
 $('link').href='/files-psd-picker?product_gid='+encodeURIComponent(details.product_gid);$('link').target='_blank';$('link').hidden=details.linked;$('inspect').disabled=!details.linked;state(details.linked?'Linked PSD ready for inspection.':'Use the existing Add picker to link the PSD, then refresh.');if(details.candidate){digest=details.candidate.hash;$('review').hidden=false;$('preview').src='/api/auto-editions/preview'+query+'&preparation_hash='+encodeURIComponent(digest);state('Review '+details.candidate.dimensions.join(' × ')+' pixels · TEST enlargement.');}}catch(e){state(e.message);}}
 function send(type,extra={}){popup?.postMessage({studio:1,nonce,type,...extra},local);}
 function begin(){if(connected&&grant){clearInterval(timer);send('edition-prepare-inspect',{grant});grant=null;state('Inspecting the linked PSD in Photoshop…');}}

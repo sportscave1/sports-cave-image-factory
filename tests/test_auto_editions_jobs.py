@@ -116,3 +116,15 @@ def test_preparations_are_additive_and_approval_checks_expected_layout(database,
     assert registry.for_unit(unit)['manifest']==manifest
     with pytest.raises(ValueError,match='changed'):registry.approve(digest,unit,'admin',expected='wrong')
     assert registry.index()=={(unit['shopify_product_gid'],'v1')}
+
+
+
+def test_download_retention_prevents_expiry_and_keeps_exact_output(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin');claim=jobs.claim()
+    result={'output':{'file_id':'id:exact','sha256':'a'*64}}
+    jobs.finish(j['id'],claim['lease_token'],result=result)
+    jobs.retain(j['id'],'va')
+    sql.execute("UPDATE auto_edition_jobs SET updated_at=now()-interval '100 days'")
+    assert jobs.expired()==[]
+    assert jobs.read(j['id'])['result']['output']==result['output']
+    assert jobs.read(j['id'])['result']['retained'] is True
