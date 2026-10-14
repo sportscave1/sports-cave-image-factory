@@ -2528,6 +2528,7 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-psd-open", open_product_psd, ("GET", "POST")),
     ("/api/files-psd-original", download_product_psd, ("GET",)),
     ("/files-window", files_window_page, ("GET",)),
+    ("/files-component", files_window_page, ("GET",)),
     ("/files-native-launch", native_open_page, ("GET",)),
     ("/api/files-native-open", prepare_native_open, ("POST",)),
     ("/api/files-native-launch", prepare_native_open, ("POST",)),

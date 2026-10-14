@@ -1144,7 +1144,8 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertNotIn("files_window_launcher.render", self.app)
         source = (ROOT / "components" / "sports_cave_top_bar" / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="sc-os-files"', source)
-        self.assertIn('parentWindow.open("/files-window", "sports-cave-files-window"', source)
+        self.assertIn('parentWindow.SportsCaveInternalFiles.open()', source)
+        self.assertNotIn('parentWindow.open("/files-window"', source)
 
     def test_files_window_opens_validated_relative_folder_directly(self):
         self.assertIn('query.get("relative_path")', self.client)

@@ -33,6 +33,9 @@ class Preparations:
                 (unit['shopify_product_gid'],str(unit.get('shopify_variant_id') or '')))
             row=cur.fetchone()
             if not row:raise PreparationBlocked('This variant needs Auto Editions setup.')
+            allowed=row['approval'].get('allocation_ids')
+            if allowed is not None and unit['id'] not in allowed:
+                raise PreparationBlocked('This unit is outside the approved TEST rollout.')
             return dict(manifest=row['manifest'],approval=row['approval'],variant_ids=[row['variant_id']])
 
     def save(self,manifest,proofs,receipts,actor):
@@ -51,11 +54,15 @@ class Preparations:
                 VALUES(%s,%s,'prepared','{}'::jsonb)''',(actor,digest))
         return digest
 
-    def approve(self,digest,unit,actor,expected=''):
+    def approve(self,digest,unit,actor,expected='',allocation_ids=None):
         row=self.read(digest)
         if not row or row['manifest']['source']['product_gid']!=unit['shopify_product_gid']:
             raise PreparationBlocked('Preparation does not belong to this product.')
         approval=dict(actor_id=actor,preparation_hash=digest,visual_approved=True,pixel_exact=True,test_only=True)
+        if allocation_ids is not None:
+            if not allocation_ids or any(type(x) is not int or x<=0 for x in allocation_ids) or unit['id'] not in allocation_ids:
+                raise PreparationBlocked('Exact verified allocation IDs are required.')
+            approval['allocation_ids']=sorted(set(allocation_ids))
         if ae.status(row['manifest'],approval)!='TEST READY':raise PreparationBlocked('Preparation is invalid.')
         variant=str(unit.get('shopify_variant_id') or '')
         if not actor or not variant:raise PreparationBlocked('Exact variant and administrator are required.')
@@ -77,5 +84,5 @@ class Preparations:
 
     def index(self):
         with self.connect() as conn,conn.cursor() as cur:
-            cur.execute('SELECT product_gid,variant_id FROM public.auto_edition_layouts')
-            return {(r['product_gid'],r['variant_id']) for r in cur.fetchall()}
+            cur.execute('SELECT product_gid,variant_id,approval FROM public.auto_edition_layouts')
+            return {(r['product_gid'],r['variant_id']):r['approval'].get('allocation_ids') for r in cur.fetchall()}

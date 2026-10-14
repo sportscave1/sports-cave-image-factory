@@ -59,10 +59,10 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_saved_view_resolves_location_without_generation(self):
         job=dict(id='a'*64)
         assets=Mock();assets.verify_output.return_value=dict(id='id:jpg',rev='123',path_display='/Sportscave Team Folder/03_ASSETS/Auto Editions/Generated JPGs/SC3287/TEST/file.jpg')
-        with patch.object(api,'stored_current',return_value=(job,assets,dict(status='Ready',result={'output':{}}))),patch.object(api.runtime,'start_worker') as worker:
+        with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'start_worker') as worker:
             response=await api.view(request(query='allocation_id=42&job_id='+'a'*64))
             self.assertEqual(response.status_code,307)
-            self.assertIn('/files-window?edition_allocation=42',response.headers['location'])
+            self.assertIn('/?page=orders&workspace=files&edition_allocation=42',response.headers['location'])
             worker.assert_not_called()
 
     async def test_missing_archive_never_returns_an_open_location(self):

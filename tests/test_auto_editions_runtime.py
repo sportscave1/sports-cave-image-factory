@@ -17,3 +17,10 @@ def test_changed_source_after_render_blocks_and_discards_unapproved_output():
         assert runtime.run_one(jobs,resolver)
     jobs.finish.assert_called_once_with('first','lease',error_code='source_changed')
     assets.discard_cache.assert_called_once_with('first',{'file_id':'generated'})
+
+
+def test_scoped_rollout_links_only_verified_units():
+    registry=Mock();registry.index.return_value={('gid://shopify/Product/123','gid://shopify/ProductVariant/456'):[7]}
+    rows=[dict(edition_order_id=i,shopify_product_id=123,variant_id=456) for i in (7,8)]
+    with patch.object(runtime,'enabled',return_value=True),patch.object(runtime,'stores',return_value=(registry,None)):
+        assert set(runtime.download_links(rows))=={'7'}

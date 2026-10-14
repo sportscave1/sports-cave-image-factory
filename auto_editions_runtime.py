@@ -105,15 +105,17 @@ def download_links(rows):
     if not enabled():return {}
     try:
         import psd_directory
-        registry,_=stores()
+        registry,jobs=stores()
         def variant(value):return str(value or '').removeprefix('gid://shopify/ProductVariant/')
-        index={(product,variant(v)) for product,v in registry.index()}
-        links={str(r.get('edition_order_id') or r.get('id')):
-                '/auto-editions/download?allocation_id='+str(r.get('edition_order_id') or r.get('id'))+'#Download JPG'
-                for r in rows if str(r.get('edition_order_id') or r.get('id') or '').isdigit()
-                and (psd_directory.product_id(r),
-                     variant(r.get('shopify_variant_id') or r.get('variant_id'))) in index}
-        _,jobs=stores()
+        raw_index=registry.index()
+        index={(product,variant(v)):(raw_index[(product,v)] if isinstance(raw_index,dict) else None) for product,v in raw_index}
+        links={}
+        for row in rows:
+            allocation=str(row.get('edition_order_id') or row.get('id') or '')
+            key=(psd_directory.product_id(row),variant(row.get('shopify_variant_id') or row.get('variant_id')))
+            if not allocation.isdigit() or key not in index:continue
+            if index[key] is not None and int(allocation) not in index[key]:continue
+            links[allocation]='/auto-editions/download?allocation_id='+allocation+'#Download JPG'
         summaries=jobs.summaries(list(links)) if jobs else {}
         saved_assets=storage() if any(r['status']=='Ready' for r in summaries.values()) else None
         for key,row in summaries.items():

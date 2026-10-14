@@ -115,7 +115,20 @@ def test_preparations_are_additive_and_approval_checks_expected_layout(database,
     registry.approve(digest,unit,'admin')
     assert registry.for_unit(unit)['manifest']==manifest
     with pytest.raises(ValueError,match='changed'):registry.approve(digest,unit,'admin',expected='wrong')
-    assert registry.index()=={(unit['shopify_product_gid'],'v1')}
+    assert registry.index()=={(unit['shopify_product_gid'],'v1'):None}
+
+
+def test_scoped_layout_does_not_enable_other_allocations(database,tmp_path):
+    from auto_editions_store import Preparations
+    from test_auto_editions import package
+    jobs,sql=database;registry=Preparations(jobs.connect)
+    manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    unit=dict(id=42,shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
+    registry.save(manifest,[dict(preparation_hash=digest,pixel_exact=True,outside_number_exact=True)],{},'admin')
+    registry.approve(digest,unit,'admin',allocation_ids=[42,43])
+    assert registry.for_unit(unit)['manifest']==manifest
+    assert registry.index()[(unit['shopify_product_gid'],'v1')]==[42,43]
+    with pytest.raises(ValueError,match='outside'):registry.for_unit({**unit,'id':44})
 
 
 

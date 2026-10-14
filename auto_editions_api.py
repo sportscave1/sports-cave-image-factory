@@ -184,10 +184,12 @@ async def location(request):
 
 async def view(request):
     # Old bookmarked View URLs now resolve the saved location, never a preview.
-    response=await location(request)
-    if response.status_code!=200:return response
+    try:
+        await actor(request)
+        allocation(request)
+    except Exception as error:return failure(error)
     from urllib.parse import urlencode
-    return RedirectResponse('/files-window?'+urlencode(dict(edition_allocation=allocation(request),
+    return RedirectResponse('/?page=orders&workspace=files&'+urlencode(dict(edition_allocation=allocation(request),
         edition_job=request.query_params['job_id'])),headers=HEADERS)
 
 

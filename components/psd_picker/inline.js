@@ -4,7 +4,6 @@
  script.textContent='('+function(){
   if(window.SportsCaveAutoEditions)return;
   const jobs=new Map();let notify=()=>{};
-  const nativeOpen=window.open.bind(window);
   const url=(path,id,job)=>path+'?allocation_id='+encodeURIComponent(id)+(job?'&job_id='+encodeURIComponent(job):'');
   async function api(path,id,post=false,job){const r=await fetch(url(path,id,job),post?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});const d=await r.json();if(!r.ok)throw Error(d.error||'Unavailable');return d;}
   function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&u.pathname.startsWith('/auto-editions/')&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
@@ -21,28 +20,27 @@
    const message=document.createElement('span');message.textContent=row.error||'Saved JPG unavailable. Retry Open.';box.append(message);
    const close=document.createElement('button');close.textContent='Dismiss';close.onclick=()=>box.remove();box.append(close);document.body.append(box);
   }
-  function reserve(id){try{return nativeOpen('about:blank','sc-edition-file-'+id);}catch{return null;}}
-  function navigateSaved(id,row){if(row.popup&&!row.popup.closed){row.popup.location.replace(url('/auto-editions/open',id,row.job_id));row.popup=null;}}
+  function navigateSaved(id,row){if(!window.SportsCaveInternalFiles)throw Error('Files navigation is loading. Retry Open.');window.SportsCaveInternalFiles.open({allocation:id,job:row.job_id});}
   function initiateDownload(id,row){const key='sc-edition-attempt:'+row.job_id;if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,'1');
    const a=document.createElement('a');a.href=url('/api/auto-editions/file',id,row.job_id);a.download=row.filename||'edition-TEST-NOT-PRINT-READY.jpg';document.body.append(a);a.click();a.remove();
   }
   async function openSaved(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id'),job=u.searchParams.get('job_id');
-   const row={status:'Ready',job_id:job,popup:reserve(id)};jobs.set(id,row);
-   try{await api('/api/auto-editions/location',id,false,job);if(!row.popup||row.popup.closed){location.assign(url('/auto-editions/open',id,row.job_id));return;}navigateSaved(id,row);paint(id,row);}
-   catch(e){row.popup?.close();row.popup=null;row.status='Unavailable';row.error=e.message;paint(id,row);showError(id,row);}
+   const row={status:'Ready',job_id:job};jobs.set(id,row);
+   try{navigateSaved(id,row);paint(id,row);}
+   catch(e){row.status='Unavailable';row.error=e.message;paint(id,row);showError(id,row);}
   }
   async function poll(id){const row=jobs.get(id);if(!row||row.polling)return;row.polling=true;
    try{const d=await api('/api/auto-editions/state',id);Object.assign(row,d);paint(id,row);
     if(d.status==='Ready'){if(sessionStorage.getItem('sc-edition-pending:'+id)){initiateDownload(id,row);navigateSaved(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}notify();}
-    else if(d.status==='Blocked'){row.popup?.close();row.popup=null;sessionStorage.removeItem('sc-edition-pending:'+id);notify();}
-   }catch(e){row.popup?.close();row.popup=null;row.status=row.job_id?'Unavailable':'Blocked';row.error=e.message;paint(id,row);showError(id,row);}finally{row.polling=false;}
+    else if(d.status==='Blocked'){sessionStorage.removeItem('sc-edition-pending:'+id);notify();}
+   }catch(e){row.status=row.job_id?'Unavailable':'Blocked';row.error=e.message;paint(id,row);showError(id,row);}finally{row.polling=false;}
   }
   async function start(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id');if(!/^\d+$/.test(id||''))return;
    const old=jobs.get(id);if(old?.status==='Generating'||old?.status==='Queued')return;
-   const row={status:'Generating',popup:reserve(id)};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
+   const row={status:'Generating'};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
    notify();
    try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);notify();await poll(id);}
-   catch(e){row.popup?.close();row.popup=null;row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
+   catch(e){row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
   }
   function hydrate(){for(const cell of document.querySelectorAll('canvas [role=gridcell]')){const value=cell.textContent;if(!value.startsWith('/auto-editions/download?')||!value.endsWith('#Generating'))continue;const id=new URL(value,location.href).searchParams.get('allocation_id');if(id&&!jobs.has(id)){jobs.set(id,{status:'Generating'});poll(id);}}
    for(const a of document.querySelectorAll('a[href*="/auto-editions/"]')){const u=new URL(a.href),id=u.searchParams.get('allocation_id');if(!id||jobs.has(id))continue;

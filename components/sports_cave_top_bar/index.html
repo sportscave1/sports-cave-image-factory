@@ -11,6 +11,27 @@
   const config = __SPORTS_CAVE_TOP_BAR_CONFIG__;
   const parentWindow = window.parent || window;
   const doc = parentWindow.document;
+  // Files is a shallow internal route. Keep the underlying Orders DOM mounted
+  // so its search, grid filters, selection and scroll survive the round trip.
+  if (!parentWindow.SportsCaveInternalFiles) {
+    const installer = doc.createElement('script');
+    installer.textContent = '(' + function () {
+      const w=window,d=document;let host,frame,active=false,returnUrl='',loaded=false,pending=null;
+      const style=d.createElement('style');style.textContent='.sc-files-internal [data-testid="stMainBlockContainer"]{visibility:hidden;pointer-events:none}#sc-internal-files{position:fixed;z-index:50;background:#fff;display:flex;flex-direction:column}#sc-internal-files[hidden]{display:none}#sc-internal-files header{display:flex;align-items:center;gap:16px;padding:8px 16px;border-bottom:1px solid #ddd;font:14px system-ui}#sc-internal-files button{padding:7px 12px;background:white;border:1px solid #ccc;border-radius:6px;cursor:pointer}#sc-internal-files iframe{width:100%;flex:1;min-height:0;border:0}';d.head.append(style);
+      function layout(){if(!active||!host)return;const main=d.querySelector('[data-testid="stMain"]');if(!main)return;const r=main.getBoundingClientRect(),bar=d.getElementById('sports-cave-os-top-bar')?.getBoundingClientRect();host.style.left=r.left+'px';host.style.right=Math.max(0,w.innerWidth-r.right)+'px';host.style.top=Math.max(r.top,bar?.bottom||0)+'px';host.style.bottom='0';}
+      function hide(){active=false;host?.setAttribute('hidden','');d.body.classList.remove('sc-files-internal');}
+      function ensure(){if(host)return;host=d.createElement('section');host.id='sc-internal-files';host.setAttribute('aria-label','Files workspace');host.hidden=true;const header=d.createElement('header'),back=d.createElement('button');back.textContent='Back to Orders';back.onclick=()=>{if(history.state?.filesPushed)history.back();else{hide();history.replaceState({...history.state,scInternalFiles:false},'',returnUrl);}};header.append(back);const title=d.createElement('strong');title.textContent='Files';header.append(title);frame=d.createElement('iframe');frame.title='Sports Cave Files';frame.onload=()=>{loaded=true;if(pending){frame.contentWindow.postMessage({type:'sc-files-navigate',...pending},location.origin);pending=null;}};host.append(header,frame);d.body.append(host);}
+      function show(target, push=true){ensure();const wasActive=active;active=true;host.hidden=false;d.body.classList.add('sc-files-internal');layout();
+        if(push){if(!wasActive)returnUrl=location.href;const u=new URL(location.href);u.searchParams.set('workspace','files');u.searchParams.delete('edition_allocation');u.searchParams.delete('edition_job');if(target?.allocation){u.searchParams.set('edition_allocation',target.allocation);u.searchParams.set('edition_job',target.job);}history.pushState({...history.state,scInternalFiles:true,filesPushed:true,filesTarget:target,filesReturn:returnUrl},'',u);}
+        if(!frame.getAttribute('src')){const q=new URLSearchParams({embedded:'1'});if(target?.allocation){q.set('edition_allocation',target.allocation);q.set('edition_job',target.job);}frame.src='/files-component?'+q;}
+        else if(loaded)frame.contentWindow.postMessage({type:'sc-files-navigate',...target},location.origin);else pending=target;
+      }
+      w.addEventListener('resize',layout);new ResizeObserver(layout).observe(d.body);
+      d.addEventListener('click',e=>{if(!active||!e.target.closest?.('[data-testid="stSidebar"] button'))return;hide();if(returnUrl)history.replaceState({...history.state,scInternalFiles:false},'',returnUrl);},true);
+      w.SportsCaveInternalFiles={open(target={}){show(target);},handlePop(){if(history.state?.scInternalFiles){returnUrl=history.state.filesReturn||returnUrl;show(history.state.filesTarget,false);return true;}if(active){hide();return location.href===returnUrl;}return false;}};
+      const initial=new URL(location.href);if(initial.searchParams.get('workspace')==='files'){const target={allocation:initial.searchParams.get('edition_allocation'),job:initial.searchParams.get('edition_job')};for(const key of ['workspace','edition_allocation','edition_job'])initial.searchParams.delete(key);returnUrl=initial.href;history.replaceState({...history.state,scInternalFiles:true,filesPushed:false,filesTarget:target,filesReturn:returnUrl},'');show(target,false);}
+    }.toString()+')();';doc.head.append(installer);installer.remove();
+  }
   const STYLE_ID = "sports-cave-os-top-bar-styles";
   const ROOT_ID = "sports-cave-os-top-bar";
   const LOADER_ID = "sports-cave-navigation-loader";
@@ -1419,6 +1440,7 @@
       root.dataset.lastHistoryRoute = routeKey;
     };
     const handleHistoryNavigation = () => {
+      if (parentWindow.SportsCaveInternalFiles?.handlePop()) return;
       const historyUrl = new URL(parentWindow.location.href);
       const visibleRoute = historyUrl.searchParams.get("page") || "dashboard";
       const automationMarker = doc.querySelector('[data-automation-route]');
@@ -1469,10 +1491,7 @@
     };
     filesButton.addEventListener("click", () => {
       if (!state.config.filesEnabled) return;
-      const popup = parentWindow.open("/files-window", "sports-cave-files-window",
-        "popup=yes,width=1280,height=860,left=80,top=40,resizable=yes,scrollbars=yes,noopener=no");
-      if (popup) popup.focus();
-      else parentWindow.open("/files-window", "_blank");
+      parentWindow.SportsCaveInternalFiles.open();
     }, listenerOptions);
     const sendPlannerAuth = (plannerWindow, {focusActive = false} = {}) => {
       try {

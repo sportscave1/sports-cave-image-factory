@@ -3437,20 +3437,36 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       async function openSavedEdition() {
+        const selectionRequest=++editionSelectionRequest;
+        clearSelection();savedEditionId=null;
         try {
           const response=await fetch('/api/auto-editions/location?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')||''));
           const target=await response.json();
+          if(selectionRequest!==editionSelectionRequest)return;
           if(!response.ok)throw new Error(target.error||'The archived JPG is unavailable. Retry Open from Orders.');
           state.searchByPath[target.folder_path]='';
-          if(!await loadFolder(target.folder_path,{refresh:true}))return;
-          const matches=state.items.filter(item=>item.id===target.file_id&&item.tag==='file');
+          if(!await loadFolder(target.folder_path))return;
+          if(selectionRequest!==editionSelectionRequest)return;
+          let matches=state.items.filter(item=>item.id===target.file_id&&item.tag==='file');
+          if(matches.length!==1){if(!await loadFolder(target.folder_path,{refresh:true}))return;matches=state.items.filter(item=>item.id===target.file_id&&item.tag==='file');}
+          if(selectionRequest!==editionSelectionRequest)return;
           if(state.currentPath!==target.folder_path||matches.length!==1)throw new Error('The exact saved JPG is not available in this folder. Retry Open from Orders.');
           const item=matches[0];savedEditionId=item.id;setSingleSelection(item.path);
           const row=Array.from(elements.items.querySelectorAll('.file-item')).find(node=>node.dataset.path===item.path);
           row?.scrollIntoView({block:'nearest'});row?.focus({preventScroll:true});
+          document.body.dataset.editionSelected=target.file_id;
           showToast('Saved edition JPG selected - TEST / NOT PRINT READY. Use Download for the full-resolution file.',{duration:7000});
         }catch(error){clearSelection();showToast(error.message||'Retry Open from Orders.',{kind:'error',duration:10000});}
       }
+
+      let editionSelectionRequest=0;
+      window.addEventListener('message',event=>{
+        if(event.origin!==location.origin||event.source!==parent||event.data?.type!=='sc-files-navigate')return;
+        const {allocation,job}=event.data;
+        if(!/^\d+$/.test(String(allocation||''))||! /^[a-f0-9]{64}$/.test(String(job||'')))return;
+        query.set('edition_allocation',allocation);query.set('edition_job',job);
+        delete document.body.dataset.editionSelected;void openSavedEdition();
+      });
 
       async function initialise() {
         document.title = "Sports Cave Files";
