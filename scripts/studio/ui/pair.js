@@ -36,6 +36,10 @@
    });return;
   }
   if(busy)return;
+  if(d.type==='edition-prepare-host'){
+   busy=true;try{send('edition-prepare-host-result',{result:await api({action:d.type,config:d.config})});}
+   catch(e){send('edition-prepare-host-result',{error:e.message});}finally{busy=false;}return;
+  }
   if(d.type==='edition-prepare-inspect'||d.type==='edition-prepare-build'){
    busy=true;
    try{const command=d.type==='edition-prepare-inspect'?{action:d.type,grant:d.grant}:{action:d.type,job_id:d.job_id,roles:d.roles,scale:d.scale??1};

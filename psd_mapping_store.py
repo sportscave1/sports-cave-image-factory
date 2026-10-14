@@ -121,6 +121,17 @@ class PostgresMappings:
                         (pid, fid, metadata.get('path_display') or metadata.get('path_lower'), metadata.get('namespace_path') or '', actor_id))
             after = _record(cur.fetchone())
             self._audit(cur, pid, 'replace' if before else 'attach', actor_id, before, after)
+            # Add and its preparation checkpoint commit together. Older schemas
+            # keep the existing mapping behavior during a rolling deployment.
+            cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")
+            if cur.fetchone()['name']:
+                cur.execute("""INSERT INTO public.auto_edition_onboarding(product_gid,file_id,priority)
+                    VALUES(%s,%s,10) ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,
+                    source=NULL,preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=10,
+                    lease_token=NULL,lease_until=NULL,updated_at=now()
+                    WHERE auto_edition_onboarding.file_id<>excluded.file_id""",(pid,fid))
+                cur.execute("""INSERT INTO public.auto_edition_onboarding_audit(product_gid,actor_id,event)
+                    VALUES(%s,%s,'mapping_confirmed')""",(pid,actor_id))
         self._revision = None
         return after
 

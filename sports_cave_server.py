@@ -25,6 +25,7 @@ from auth_cookie_cleanup import ROUTES as AUTH_COOKIE_CLEANUP_ROUTES
 from static_asset_compression import StaticAssetCompression
 from auto_editions_api import ROUTES as AUTO_EDITIONS_ROUTES
 from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
+from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
 
 
 routes = [
@@ -33,6 +34,7 @@ routes = [
         *FILES_UPLOAD_ROUTES,
         *AUTO_EDITIONS_ROUTES,
         *AUTO_EDITIONS_SETUP_ROUTES,
+        *AUTO_EDITIONS_ONBOARDING_ROUTES,
         *COLLECTOR_VAULT_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,

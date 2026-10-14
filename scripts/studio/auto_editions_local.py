@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import threading
 import time
 from urllib.parse import urlencode
@@ -13,6 +14,58 @@ import edition_test_local as transfer
 
 JOBS={}
 LOCK=threading.Lock()
+HOST_THREAD=None
+HOST_STOP=threading.Event()
+HOST_FILE=Path.home()/'Documents'/'SportsCaveAutoEditions'/'preparation-host.dpapi'
+
+
+def configure_host(config):
+    """Opt-in preparation-only capability; never a Dropbox or Shopify credential."""
+    import re
+    from device_trust import protect
+    if (not isinstance(config,dict) or set(config)!={'base_url','token'}
+            or config['base_url'] not in transfer.ALLOWED_ORIGINS
+            or not re.fullmatch(r'[A-Za-z0-9_-]{43}',str(config['token']))):
+        raise ValueError('A scoped Sports Cave preparation host capability is required.')
+    HOST_FILE.parent.mkdir(parents=True,exist_ok=True)
+    temporary=HOST_FILE.with_suffix('.tmp')
+    temporary.write_bytes(protect(json.dumps(config).encode()))
+    os.replace(temporary,HOST_FILE)
+    restore_host()
+    return dict(status='Connected for background master preparation')
+
+
+def restore_host():
+    global HOST_THREAD
+    with LOCK:
+        if not HOST_FILE.exists() or HOST_THREAD and HOST_THREAD.is_alive():return
+        HOST_STOP.clear()
+        HOST_THREAD=threading.Thread(target=host_loop,name='auto-editions-preparation-host',daemon=True)
+        HOST_THREAD.start()
+
+
+def host_loop():
+    from device_trust import protect
+    import requests
+    while not HOST_STOP.is_set():
+        try:
+            config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
+            if config['base_url'] not in transfer.ALLOWED_ORIGINS:return
+            if shutil.disk_usage(HOST_FILE.parent).free<8*1024**3:
+                HOST_STOP.wait(30);continue
+            # Other authorised Photoshop operations share this existing lease.
+            if any(r['status']=='Working' for r in list(JOBS.values())) or (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
+                HOST_STOP.wait(30);continue
+            response=requests.post(config['base_url']+'/api/auto-editions/onboarding/claim',json={},
+                headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=90)
+            if response.status_code==403:return
+            response.raise_for_status();data=response.json()
+            if data.get('grant'):start(data['grant'])
+        except Exception:
+            # No credentials or private transport data in logs. Durable leases
+            # make interrupted work recoverable on the next authorised session.
+            pass
+        HOST_STOP.wait(30)
 
 
 def context(grant):
@@ -47,8 +100,24 @@ def processor_lease():
     return lease
 
 
+def report_failure(row):
+    if not row['context'].get('automatic') or row.get('status')!='Blocked':return
+    try:
+        import requests
+        grant=row['grant']
+        response=requests.post(grant['base_url']+'/api/auto-editions/onboarding/fail?'+urlencode({'ticket':grant['ticket']}),
+            json=dict(reason=row['error'][:500],repair=bool(row.get('repair'))),
+            headers={'X-Sports-Cave-Transfer-Secret':grant['secret']},allow_redirects=False,timeout=30)
+        response.raise_for_status()
+    except Exception:
+        # The durable lease expires into an explicit retryable state; never
+        # invent completion when a checkpoint cannot reach the service.
+        row['error']+=' The server checkpoint needs reconnection.'
+
+
 def inspect(key):
     lease=None
+    automatic=False
     try:
         from scripts.photoshop_dispatch import run
         row=JOBS[key];grant=row['grant'];meta=row['context']['metadata'];folder=row['folder']
@@ -78,11 +147,21 @@ def inspect(key):
         run(script)
         result=json.loads((folder/'inspection.json').read_text(encoding='utf-8-sig'))['documents'][0]
         if 'error' in result:raise ValueError('Photoshop could not inspect the linked source.')
-        row.update(status='Inspected',inspection=result['inspection'])
+        automatic=bool(row['context'].get('automatic'))
+        row.update(status='Working' if automatic else 'Inspected',inspection=result['inspection'])
     except Exception as error:
         JOBS[key].update(status='Blocked',error='Preparation inspection failed: '+type(error).__name__+'. Check Photoshop and retry.')
     finally:
         if lease:lease.unlink(missing_ok=True)
+    if automatic:
+        try:
+            from auto_editions_onboarding import detect,preparation_scale
+            roles=detect(row['inspection'],row['context']['total'])
+            prepare_worker(key,dict(number=roles['number_layer'],plaque=roles['plaque_layer']),
+                           preparation_scale(roles['source_dimensions']))
+        except Exception as error:
+            row.update(status='Blocked',error=str(error),repair=True)
+    report_failure(JOBS[key])
 
 
 def prepare(key,roles,scale=1):
@@ -138,18 +217,42 @@ def prepare_worker(key,roles,scale=1):
         result=response.json()
         if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
         row.update(status='Prepared',preparation_hash=result['preparation_hash'])
+        if ctx.get('automatic'):
+            try:release_verified_temporary_files(row)
+            except (OSError,ValueError):row['cleanup_pending']=True
     except Exception as error:
-        JOBS[key].update(status='Blocked',error='Preparation failed: '+type(error).__name__+'. Existing PSD and mapping are preserved.')
+        JOBS[key].update(status='Blocked',error='Preparation failed: '+(str(error)[:350] if isinstance(error,ValueError) else type(error).__name__)+'. Existing PSD and mapping are preserved.')
     finally:
         if lease:lease.unlink(missing_ok=True)
 
 
+def release_verified_temporary_files(row):
+    """Keep the retry package/receipt; release only this job's staged copies."""
+    import re
+    folder=row['folder'].resolve()
+    owned=(Path.home()/'Documents'/'SportsCaveAutoEditions').resolve()
+    if folder.parent!=owned or not re.fullmatch(r'[a-f0-9]{48}',folder.name):
+        raise ValueError('Temporary preparation directory is outside its owned root.')
+    (folder/'receipt.json').write_text(json.dumps(dict(preparation_hash=row['preparation_hash'],
+        source=row['context']['source'],status='Cloud assets independently verified')),encoding='utf-8')
+    prepared=folder/'prepared'
+    if prepared.exists():
+        if prepared.is_symlink() or any(p.is_symlink() or not p.resolve().is_relative_to(folder) for p in prepared.rglob('*')):
+            raise ValueError('Temporary preparation contains an unexpected link.')
+        shutil.rmtree(prepared)
+    source=folder/'input.psd'
+    if source.exists():
+        if source.is_symlink() or source.resolve().parent!=folder:raise ValueError('Unexpected staged source path.')
+        source.unlink()
+
+
 def action(data):
     kind=data.get('action')
+    if kind=='edition-prepare-host' and set(data)=={'action','config'}:return configure_host(data['config'])
     if kind=='edition-prepare-inspect' and set(data)=={'action','grant'}:return start(data['grant'])
     if kind=='edition-prepare-build' and set(data) in ({'action','job_id','roles'},{'action','job_id','roles','scale'}):return prepare(data['job_id'],data['roles'],data.get('scale',1))
     if kind=='edition-prepare-status' and set(data)=={'action','job_id'}:
         row=JOBS.get(data['job_id'])
         if not row or time.monotonic()-row['created']>1800:raise ValueError('Preparation session expired.')
-        return dict(job_id=data['job_id'],**{k:row[k] for k in ('status','error','inspection','preparation_hash') if k in row})
+        return dict(job_id=data['job_id'],**{k:row[k] for k in ('status','error','inspection','preparation_hash','repair') if k in row})
     raise ValueError('Unsupported preparation action.')

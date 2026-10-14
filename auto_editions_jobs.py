@@ -119,9 +119,10 @@ class Jobs:
             cur.execute("""SELECT DISTINCT ON (j.payload->'identity'->>'allocation_id')
                 j.payload->'identity'->>'allocation_id' allocation_id,j.id,j.status,j.result
                 FROM public.auto_edition_jobs j
-                LEFT JOIN public.auto_edition_layouts l ON
-                  l.product_gid=j.payload->'identity'->'source'->>'product_gid'
-                  AND l.variant_id=j.payload->'identity'->>'variant_id'
+                LEFT JOIN LATERAL (SELECT preparation_hash FROM public.auto_edition_layouts
+                  WHERE product_gid=j.payload->'identity'->'source'->>'product_gid'
+                  AND variant_id IN (j.payload->'identity'->>'variant_id','*')
+                  ORDER BY (variant_id='*') ASC LIMIT 1) l ON true
                 WHERE j.payload->'identity'->>'allocation_id'=ANY(%s)
                   AND (l.preparation_hash IS NULL OR l.preparation_hash=j.payload->>'preparation_hash')
                 ORDER BY j.payload->'identity'->>'allocation_id',j.created_at DESC""",(list(allocation_ids),))

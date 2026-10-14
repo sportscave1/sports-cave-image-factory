@@ -22,9 +22,16 @@ class Cursor:
     def fetchall(self):
         if 'FROM edition_products' in self.last:return [{'product_title':'Art','shopify_handle':'art'}]
         return list(self.rows.values())
-    def fetchone(self):return self.write
+    def fetchone(self):
+        if 'to_regclass' in self.last:return {'name':getattr(self,'onboarding_schema',None)}
+        return self.write
 
 class VaAttachmentTests(unittest.TestCase):
+    def test_va_add_queues_preparation_in_the_mapping_transaction_when_schema_exists(self):
+        store=self.store();self.cur.onboarding_schema='auto_edition_onboarding'
+        store.attach(PID,META,VA)
+        queue_writes=[args for sql,args in self.cur.calls if 'INSERT INTO public.auto_edition_onboarding(' in sql]
+        self.assertEqual(queue_writes,[(PID,META['id'])])
     def store(self,rows=None):
         self.cur=Cursor(rows);connection=Mock();connection.cursor.return_value=self.cur
         return PostgresMappings(connect=lambda:nullcontext(connection))
