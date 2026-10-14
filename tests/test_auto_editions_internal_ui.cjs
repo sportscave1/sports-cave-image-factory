@@ -23,7 +23,16 @@ for(const width of [1280,390]){
  });
  const page=await context.newPage();await page.goto('https://edition-v9.local.test/?page=orders');await page.waitForFunction(()=>!!window.SportsCaveAutoEditions&&!!window.SportsCaveInternalFiles);
  await page.locator('.grid').evaluate(e=>e.scrollTop=125);
- const download=page.waitForEvent('download');await page.getByRole('link',{name:'Download JPG',exact:true}).click();
+ // Real Streamlit links use canvas/window.open rather than DOM anchors.
+ await page.evaluate(()=>{
+  const host=document.createElement('div');host.dataset.testid='stDataFrame';host.style.position='relative';
+  const canvas=document.createElement('canvas');canvas.width=200;canvas.height=40;host.append(canvas);
+  document.querySelector('[data-testid=stMainBlockContainer]').prepend(host);
+  const context=canvas.getContext('2d');context.font='12px system-ui';context.fillText('Download JPG',10,20);
+  canvas.onclick=()=>window.open('/auto-editions/download?allocation_id=652#Download JPG');
+ });
+ const download=page.waitForEvent('download');const clicked=Date.now();await page.locator('canvas').click({position:{x:30,y:16}});
+ await page.locator('.sc-edition-generating[role=status]').waitFor();assert(Date.now()-clicked<300,'Canvas feedback must precede the delayed start response');
  await page.getByRole('link',{name:'Generating…',exact:true}).waitFor();await page.getByRole('button',{name:'Other row',exact:true}).click();await page.getByRole('link',{name:'Generating…',exact:true}).click();
  const transfer=await download;assert.equal(transfer.suggestedFilename(),item.name);
  const frame=page.frameLocator('#sc-internal-files iframe');await frame.locator('.file-item.selected').waitFor();

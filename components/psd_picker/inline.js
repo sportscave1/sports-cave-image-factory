@@ -4,10 +4,31 @@
  script.textContent='('+function(){
   if(window.SportsCaveAutoEditions)return;
   const jobs=new Map();let notify=()=>{};
+  const textHits=new WeakMap(),immediate=new Map();let clickedText=null;
+  const gridSignature=canvas=>[...canvas.querySelectorAll('[role=gridcell]')].map(cell=>cell.textContent).join('|');
+  function clearImmediate(id){immediate.get(id)?.remove();immediate.delete(id);}
+  function immediateProgress(id){
+   if(!clickedText?.canvas.isConnected)return;
+   const {canvas,left,top}=clickedText,parent=canvas.parentElement,box=parent.getBoundingClientRect();
+   const indicator=document.createElement('span');indicator.className='sc-edition-generating';indicator.textContent='Generating\u2026';indicator.setAttribute('role','status');
+   indicator.style.cssText='position:absolute;pointer-events:none;background:white;font:12px system-ui;white-space:nowrap;z-index:2;left:'+(left-box.left)+'px;top:'+(top-box.top)+'px';
+   indicator.editionCanvas=canvas;indicator.editionSignature=gridSignature(canvas);
+   parent.append(indicator);immediate.set(id,indicator);clickedText=null;
+  }
+  document.addEventListener('pointerdown',event=>{
+   clickedText=null;const canvas=event.target.closest?.('canvas');if(!canvas)return;
+   const rect=canvas.getBoundingClientRect();
+   for(const hit of (textHits.get(canvas)?.values()||[])){
+    const left=rect.left+hit.x*rect.width/canvas.width,top=rect.top+hit.y*rect.height/canvas.height-10;
+    if(event.clientX>=left-4&&event.clientX<=left+hit.width*rect.width/canvas.width+4&&event.clientY>=top-4&&event.clientY<=top+20)clickedText={canvas,left,top};
+   }
+  },true);
+  // A scrolled/sorted table must never leave an indicator over a different unit.
+  document.addEventListener('scroll',()=>{for(const id of immediate.keys())clearImmediate(id);},true);
   const url=(path,id,job)=>path+'?allocation_id='+encodeURIComponent(id)+(job?'&job_id='+encodeURIComponent(job):'');
   async function api(path,id,post=false,job){const r=await fetch(url(path,id,job),post?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});const d=await r.json();if(!r.ok)throw Error(d.error||'Unavailable');return d;}
   function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&u.pathname.startsWith('/auto-editions/')&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
-  function paint(id,row){for(const a of anchors(id)){
+  function paint(id,row){if(!['Generating','Queued'].includes(row.status))clearImmediate(id);for(const a of anchors(id)){
    const saved=['Ready','Unavailable'].includes(row.status),busy=['Generating','Queued'].includes(row.status);
    const label=row.status==='Ready'?'Open':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?'Retry':busy?'Generating\u2026':'Download JPG';
    if(a.textContent!==label)a.textContent=label;a.classList.toggle('sc-edition-generating',busy);
@@ -38,11 +59,12 @@
   async function start(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id');if(!/^\d+$/.test(id||''))return;
    const old=jobs.get(id);if(old?.status==='Generating'||old?.status==='Queued')return;
    const row={status:'Generating'};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
-   notify();
+   immediateProgress(id);
    try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);notify();await poll(id);}
    catch(e){row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
   }
-  function hydrate(){for(const cell of document.querySelectorAll('canvas [role=gridcell]')){const value=cell.textContent;if(!value.startsWith('/auto-editions/download?')||!value.endsWith('#Generating'))continue;const id=new URL(value,location.href).searchParams.get('allocation_id');if(id&&!jobs.has(id)){jobs.set(id,{status:'Generating'});poll(id);}}
+  function hydrate(){for(const [id,node] of immediate)if(!node.isConnected||gridSignature(node.editionCanvas)!==node.editionSignature)clearImmediate(id);
+   for(const cell of document.querySelectorAll('canvas [role=gridcell]')){const value=cell.textContent;if(!value.startsWith('/auto-editions/download?')||!value.endsWith('#Generating'))continue;const id=new URL(value,location.href).searchParams.get('allocation_id');if(id&&!jobs.has(id)){jobs.set(id,{status:'Generating'});poll(id);}}
    for(const a of document.querySelectorAll('a[href*="/auto-editions/"]')){const u=new URL(a.href),id=u.searchParams.get('allocation_id');if(!id||jobs.has(id))continue;
     if(['/auto-editions/open','/auto-editions/view'].includes(u.pathname)){jobs.set(id,{status:'Ready',job_id:u.searchParams.get('job_id')});}
     else if(u.hash==='#Generating'||sessionStorage.getItem('sc-edition-pending:'+id)){jobs.set(id,{status:'Generating'});poll(id);}}
@@ -57,8 +79,12 @@
   // No column widths, row offsets or allocation identities are guessed.
   const context=CanvasRenderingContext2D.prototype,originalFill=context.fillText,originalClear=context.clearRect;
   const indicators=new WeakMap();
-  context.clearRect=function(...args){const items=indicators.get(this.canvas);if(items){for(const item of items.values())item.remove();items.clear();}return originalClear.apply(this,args);};
+  context.clearRect=function(...args){textHits.delete(this.canvas);const items=indicators.get(this.canvas);if(items){for(const item of items.values())item.remove();items.clear();}return originalClear.apply(this,args);};
   context.fillText=function(text,x,y,...args){const result=originalFill.call(this,text,x,y,...args);if(text!=='Generating'){const old=indicators.get(this.canvas);old?.get(x+':'+y)?.remove();old?.delete(x+':'+y);}
+   if(['Download JPG','Retry','Generating'].includes(text)&&this.canvas.closest('[data-testid="stDataFrame"]')){
+    const transform=this.getTransform(),point=transform.transformPoint(new DOMPoint(x,y));let hits=textHits.get(this.canvas);if(!hits){hits=new Map();textHits.set(this.canvas,hits);}
+    hits.set(x+':'+y,{x:point.x,y:point.y,width:this.measureText(text).width*transform.a});
+   }
    if(text==='Generating'&&this.canvas.closest('[data-testid="stDataFrame"]')){
     const canvas=this.canvas,parent=canvas.parentElement,rect=canvas.getBoundingClientRect(),box=parent.getBoundingClientRect(),point=this.getTransform().transformPoint(new DOMPoint(x,y));
     const key=x+':'+y;let items=indicators.get(canvas);if(!items){items=new Map();indicators.set(canvas,items);}let indicator=items.get(key);
