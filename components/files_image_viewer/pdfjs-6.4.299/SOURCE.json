@@ -1,0 +1,8 @@
+{
+  "package": "pdfjs-dist",
+  "version": "6.4.299",
+  "source": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.4.299.tgz",
+  "archive_sha256": "86269b40170eb41740ea05ad2102d71d33de4f122b34eb2f478be0ea7779c415",
+  "scope": "Browser renderer, worker, fonts, cmaps and image decoders only. No scripting sandbox; PDF JavaScript is not executed.",
+  "packaging": "License text has trailing whitespace normalised. Build modules also have deterministic gzip copies (mtime=0)."
+}

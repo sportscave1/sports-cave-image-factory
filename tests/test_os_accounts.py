@@ -849,7 +849,7 @@ class AccountAccessTests(unittest.TestCase):
         store = FakeAccountStore()
         store.users.append(admin)
         credential_username = "shared-login@example.test"
-        credential_password = "unit-test-credential-password-value"
+        credential_password = "test-only-" + "x" * 32  # Synthetic audit marker, never a service credential.
 
         with patch("activity_log.record_activity_log") as audit_log:
             self.assertEqual(
@@ -1505,7 +1505,7 @@ class AccountAccessTests(unittest.TestCase):
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
         self.assertIn("collector.pdf", text)
-        self.assertIn("Open original", text)
+        self.assertIn("Download", text)
         self.assertNotIn("Connect Files", text)
         self.assertNotIn("Test Connection", text)
         self.assertNotIn("Reconnect Files", text)
@@ -1769,7 +1769,7 @@ class AccountAccessTests(unittest.TestCase):
             )
         ]
         preview = source[
-            source.index("def _files_open_strategy") : source.index(
+            source.index("def _render_files_preview") : source.index(
                 "\n\ndef _files_clear_directory_cache"
             )
         ]
@@ -1781,16 +1781,16 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn('addEventListener("contextmenu"', component)
         self.assertIn('emitCommand("selection_changed"', component)
         self.assertIn('function openItem(item)', component)
-        self.assertIn('sports-cave-files://open?path=', component)
+        self.assertNotIn("sports-cave-files://", component)
         self.assertIn('contextAction(menu, "Open"', component)
         self.assertIn('contextAction(menu, "Preview"', component)
         self.assertIn('contextAction(menu, "Rename"', component)
         self.assertIn('contextAction(menu, "Download"', component)
         self.assertIn('contextAction(menu, "Properties"', component)
-        self.assertIn('window.parent.open(url, "_blank"', component)
-        self.assertIn('desktop_available=_files_desktop_open_available', preview)
-        self.assertIn('return "desktop"', preview)
-        self.assertIn('return "details"', preview)
+        self.assertNotIn("window.parent.open", component)
+        self.assertIn("/files-image-viewer?legacy=1&path=", preview)
+        self.assertNotIn("_files_desktop", preview)
+        self.assertIn("Download", preview)
         self.assertNotIn("Download and open", preview)
 
     def test_files_explorer_styles_are_compact_neutral_and_scoped(self):

@@ -451,38 +451,13 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
       function explicitDownload(item) {
         if (!item || item.kind === "folder") return;
         const url = `/api/files-download?path=${encodeURIComponent(item.path)}`;
-        window.parent.open(url, "_blank", "noopener,noreferrer");
-      }
-
-      function closeDesktopHelperNotice() {
-        let parentDocument;
-        try { parentDocument = window.parent.document; } catch (_) { return; }
-        const notice = parentDocument.querySelector(".sc-files-helper-notice");
-        if (notice) notice.remove();
-      }
-
-      function invokeDesktopHelper(item, { kind="file" } = {}) {
-        if (!item || !item.desktop_relative_path) {
-          return;
-        }
-        closeDesktopHelperNotice();
-        const protocolUrl = `sports-cave-files://open?path=${encodeURIComponent(item.desktop_relative_path)}&kind=${encodeURIComponent(kind)}`;
-        const protocolLink = window.parent.document.createElement("a");
-        protocolLink.hidden = true;
-        protocolLink.setAttribute("aria-hidden", "true");
-        protocolLink.href = protocolUrl;
-        window.parent.document.body.appendChild(protocolLink);
-        protocolLink.click();
-        protocolLink.remove();
+        const frame = document.createElement("iframe");
+        frame.hidden = true; frame.src = url; document.body.appendChild(frame);
+        setTimeout(() => frame.remove(), 120000);
       }
 
       function openItem(item) {
-        if (!item) return;
-        if (item.kind === "folder") {
-          emitTarget("open_requested", item);
-          return;
-        }
-        invokeDesktopHelper(item, { kind: "file" });
+        if (item) emitTarget("open_requested", item);
       }
       function render() {
         uploads.innerHTML = state.rows.map(row => {
@@ -946,9 +921,6 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         menu.className = "sc-files-context-menu";
         menu.setAttribute("role", "menu");
         if (chosen.length === 1) contextAction(menu, "Open", () => openItem(item));
-        if (chosen.length === 1 && item.kind === "folder" && item.desktop_relative_path) {
-          contextAction(menu, "Open in File Explorer", () => invokeDesktopHelper(item, { kind: "folder" }));
-        }
         if (chosen.length === 1 && item.kind !== "folder") {
           if (item.preview_supported) contextAction(menu, "Preview", () => emitTarget("preview_requested", item));
         }
@@ -1231,7 +1203,6 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         }
         unbindFileRows();
         stopThumbnailLoading();
-        closeDesktopHelperNotice();
         closeContextMenu();
         closeDeleteConfirmation();
         if (state.selectionRect && state.selectionRect.element) state.selectionRect.element.remove();

@@ -33,6 +33,7 @@
       const listenerController = new AbortController();
       const listenerOptions = {signal: listenerController.signal};
       let launchPending = false;
+      let filesWindow = null;
 
       function send(type, data) {
         window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
@@ -68,9 +69,11 @@
           "scrollbars=yes",
           "noopener=no"
         ].join(",");
+        if (!relativePath && filesWindow && !filesWindow.closed) { filesWindow.focus(); return; }
         const href = filesUrl(relativePath);
         const popup = window.open(href, "sports-cave-files-window", features);
         if (popup) {
+          filesWindow = popup;
           popup.focus();
           return;
         }

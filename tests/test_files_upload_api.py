@@ -494,7 +494,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
             return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
         ), patch.object(
             files_upload_api,
-            "_thumbnail_bytes",
+            "_preview_bytes",
             return_value=b"small-jpeg",
         ) as thumbnail:
             response = asyncio.run(files_upload_api.file_thumbnail(request))
@@ -503,7 +503,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
         self.assertEqual(response.media_type, "image/jpeg")
         self.assertEqual(response.body, b"small-jpeg")
         self.assertNotIn("secret-token", str(response.headers))
-        thumbnail.assert_called_once_with("secret-token", path, "revision-7")
+        thumbnail.assert_called_once_with("secret-token", path, revision="revision-7", user_id=self.user["id"], size="w256h256")
 
     def test_desktop_helper_package_is_an_explicit_authenticated_download(self):
         request = files_upload_api.Request(
@@ -703,7 +703,7 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertNotIn("download", details.casefold())
         self.assertIn('emitCommand("selection_changed"', self.component_source)
         self.assertIn('function openItem(item)', self.component_source)
-        self.assertIn('invokeDesktopHelper(item, { kind: "file" })', self.component_source)
+        self.assertIn('emitTarget("open_requested", item)', self.component_source)
         self.assertIn('addEventListener("dblclick"', self.component_source)
         self.assertIn('event.key === "Enter"', self.component_source)
 
@@ -756,7 +756,7 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
     def test_opening_and_deleting_are_separate_deliberate_paths(self):
         component = self.component_source
         open_handler = component[
-            component.index("function invokeDesktopHelper") : component.index("function render()")
+            component.index("function openItem") : component.index("function render()")
         ]
         delete_handler = component[
             component.index("async function confirmDelete") : component.index(
@@ -765,24 +765,16 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         ]
         self.assertNotIn("files-download", open_handler)
         self.assertNotIn("download", open_handler.casefold())
-        self.assertIn("sports-cave-files://open?path=", open_handler)
+        self.assertIn('emitTarget("open_requested", item)', open_handler)
         self.assertIn('/api/files-delete', delete_handler)
         self.assertIn('emitCommand("delete_completed"', delete_handler)
 
-    def test_desktop_open_uses_only_relative_protocol_path_without_banner(self):
-        component = self.component_source
-        open_handler = component[
-            component.index("function invokeDesktopHelper") : component.index("function render()")
-        ]
-
-        self.assertIn("item.desktop_relative_path", open_handler)
-        self.assertIn("sports-cave-files://open?path=", open_handler)
-        self.assertNotIn("item.path}", open_handler)
-        self.assertIn("protocolLink.click()", open_handler)
-        self.assertNotIn("Sports Cave desktop helper is required", open_handler)
-        self.assertNotIn('/api/files-desktop-helper', open_handler)
-        self.assertNotIn('emitTarget("preview_requested", item)', open_handler)
-        self.assertNotIn("/api/files-download", open_handler)
+    def test_legacy_files_open_has_no_desktop_protocol_or_helper(self):
+        self.assertIn('emitTarget("open_requested", item)', self.component_source)
+        for obsolete in ["invokeDesktopHelper", "sports-cave-files://", "closeDesktopHelperNotice"]:
+            self.assertNotIn(obsolete, self.component_source)
+        self.assertIn('/files-image-viewer?legacy=1&path=', self.app_source)
+        self.assertNotIn('_files_desktop_open_available', self.app_source)
 
     def test_thumbnail_loading_is_viewport_lazy_bounded_and_non_blocking(self):
         component = self.component_source
