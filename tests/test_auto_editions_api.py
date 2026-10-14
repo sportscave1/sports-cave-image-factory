@@ -79,7 +79,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
         assets=Mock();assets.output_response.return_value=(dict(id='id:exact',rev='abc',size=len(data)),stream)
         row=dict(status='Ready',result=dict(output=output,filename='SC3287-005-TEST.jpg'))
         jobs=Mock()
-        with patch.object(api,'stored_current',return_value=({'id':'a'*64},assets,row)),patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'stores',return_value=(None,jobs)):
+        with patch.object(api,'stored_current',return_value=(VA,{'id':'a'*64},assets,row)),patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'stores',return_value=(None,jobs)):
             response=await api.download(request(query='allocation_id=42&job_id='+'a'*64))
             self.assertEqual(response.status_code,200)
             self.assertEqual(__import__('pathlib').Path(response.path).read_bytes(),data)

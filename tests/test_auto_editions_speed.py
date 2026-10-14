@@ -34,7 +34,7 @@ async def test_validated_download_reuses_bytes_but_checks_archive(tmp_path,retai
     assets=Mock();jobs=Mock()
     output={'sha256':digest,'bytes':source.stat().st_size,'file_id':'id:archive','revision':'abc'}
     row={'status':'Ready','result':{'output':output,'filename':'002-of-100 - TEST.jpg','retained':retained}}
-    with patch.object(api,'actor',return_value=VA),patch.object(api,'stored_current',return_value=({'id':'a'*64},assets,row)),\
+    with patch.object(api,'actor',return_value=VA),patch.object(api,'stored_current',return_value=(VA,{'id':'a'*64},assets,row)),\
          patch.object(api.runtime,'stores',return_value=(None,jobs)),patch('auto_editions_asset_cache.output_assets',cache):
         response=await api.download(request())
         assert response.status_code==200
@@ -103,7 +103,24 @@ async def test_download_final_fence_rejects_revoked_permission_even_with_cached_
     source=tmp_path/'source';source.write_bytes(b'validated')
     digest=ae.file_hash(source);cache=AssetCache(1024);cache.remember(digest,source)
     assets=Mock();row={'status':'Ready','result':{'retained':True,'filename':'x.jpg','output':{'sha256':digest}}}
-    with patch.object(api,'actor',return_value=VA),patch.object(api,'stored_current',side_effect=[({'id':'a'*64},assets,row),PermissionError('revoked')]),patch.object(api.runtime,'stores',return_value=(None,Mock())),patch('auto_editions_asset_cache.output_assets',cache):
+    with patch.object(api,'actor',return_value=VA),patch.object(api,'stored_current',side_effect=[(VA,{'id':'a'*64},assets,row),PermissionError('revoked')]),patch.object(api.runtime,'stores',return_value=(None,Mock())),patch('auto_editions_asset_cache.output_assets',cache):
         response=await api.download(request())
         assert response.status_code==403
         assets.output_response.assert_not_called()
+
+@async_test
+async def test_real_download_path_rechecks_account_and_allocation_twice(tmp_path):
+    source=tmp_path/'source';source.write_bytes(b'validated')
+    digest=ae.file_hash(source);cache=AssetCache(1024);cache.remember(digest,source)
+    assets=Mock();job={'id':'a'*64,'identity':{'allocation_id':42}}
+    row={'payload':job,'status':'Ready','result':{'retained':True,'filename':'x.jpg','output':{'sha256':digest}}}
+    jobs=Mock();jobs.read_bound.return_value=(row,{'id':42})
+    with patch.object(api,'actor',return_value=VA) as auth,patch.object(api,'same_allocation',return_value=True) as identity,patch.object(api.runtime,'storage',return_value=assets),patch.object(api.runtime,'stores',return_value=(None,jobs)),patch('auto_editions_asset_cache.output_assets',cache):
+        response=await api.download(request(query='allocation_id=42&job_id='+'a'*64))
+        assert response.status_code==200
+        assert auth.await_count==2
+        assert jobs.read_bound.call_count==2
+        assert identity.call_count==2
+        assets.verify_output.assert_called_once()
+        assert response.chunk_size==1024*1024
+        await response.background()

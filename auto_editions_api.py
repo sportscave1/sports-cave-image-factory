@@ -90,10 +90,8 @@ async def download(request):
     folder=None
     started=time.monotonic();timings={}
     try:
-        user=await actor(request)
-        timings['download_auth_ms']=round((time.monotonic()-started)*1000,3);phase=time.monotonic()
-        job,assets,row=await stored_current(request,authenticated=user)
-        timings['download_identity_ms']=round((time.monotonic()-phase)*1000,3);phase=time.monotonic()
+        user,job,assets,row=await stored_current(request,with_user=True)
+        timings['download_auth_identity_ms']=round((time.monotonic()-started)*1000,3);phase=time.monotonic()
         if row['status']!='Ready':raise ValueError('The JPG is not ready yet.')
         _,jobs=runtime.stores()
         # Permanent archives are already pinned. Older expiring outputs still
@@ -166,7 +164,7 @@ def same_allocation(unit,identity):
         and unit.get('shopify_product_gid')==identity.get('source',{}).get('product_gid'))
 
 
-async def bound_snapshot(request,*,authenticated=None):
+async def bound_snapshot(request,*,authenticated=None,with_user=False):
     """Overlap independent reads, never return data before authorization passes."""
     saved_id=request.query_params.get('job_id','')
     if not re.fullmatch(r'[a-f0-9]{64}',saved_id):
@@ -175,19 +173,22 @@ async def bound_snapshot(request,*,authenticated=None):
     unit_id=allocation(request)
     _,jobs=runtime.stores()
     if authenticated is not None:
-        return await run_in_threadpool(jobs.read_bound,saved_id,unit_id)
+        snapshot=await run_in_threadpool(jobs.read_bound,saved_id,unit_id)
+        return (authenticated,snapshot) if with_user else snapshot
     # Both operations are read-only. No permission or row data is cached.
-    _,snapshot=await asyncio.gather(actor(request),run_in_threadpool(jobs.read_bound,saved_id,unit_id))
-    return snapshot
+    user,snapshot=await asyncio.gather(actor(request),run_in_threadpool(jobs.read_bound,saved_id,unit_id))
+    return (user,snapshot) if with_user else snapshot
 
 
-async def stored_current(request,*,authenticated=None,assets=None):
+async def stored_current(request,*,authenticated=None,assets=None,with_user=False):
     # Retained historical output is bound to its exact allocation, not today's PSD.
-    row,unit=await bound_snapshot(request,authenticated=authenticated)
+    user,(row,unit)=await bound_snapshot(request,authenticated=authenticated,with_user=True)
     if row and (row.get('result') or {}).get('retained') is True:
         if not same_allocation(unit,row['payload']['identity']):raise PermissionError('Artwork does not match this allocation.')
-        return row['payload'],assets or await run_in_threadpool(runtime.storage),row
-    return await current(request)
+        resolved=(row['payload'],assets or await run_in_threadpool(runtime.storage),row)
+    else:
+        resolved=await current(request)
+    return (user,*resolved) if with_user else resolved
 
 
 async def state(request):
