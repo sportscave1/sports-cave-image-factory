@@ -8,6 +8,16 @@ import auto_editions_local as local
 import device_trust
 
 
+def test_completed_bulk_jobs_do_not_exhaust_interactive_slots(tmp_path):
+    completed={str(i):dict(created=local.time.monotonic(),status='Blocked' if i%2 else 'Prepared',
+                           context={'automatic':True}) for i in range(8)}
+    with patch.object(local,'JOBS',completed),patch.object(local,'context',return_value={'automatic':True}),\
+         patch.object(Path,'home',return_value=tmp_path),patch.object(local.threading,'Thread'):
+        result=local.start({})
+        assert result['status']=='Working'
+        assert list(completed)==[result['job_id']]
+
+
 def test_host_config_is_exact_and_dpapi_encrypted(tmp_path):
     target=tmp_path/'host.dpapi';config={'base_url':'https://sports-cave-image-factory.onrender.com','token':'a'*43}
     with patch.object(local,'HOST_FILE',target),patch.object(local,'restore_host') as restore:

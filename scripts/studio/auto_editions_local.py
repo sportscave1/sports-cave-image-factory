@@ -83,6 +83,11 @@ def start(grant):
     with LOCK:
         for key,row in list(JOBS.items()):
             if time.monotonic()-row['created']>1800 and row['status']!='Working':JOBS.pop(key,None)
+        # Durable server checkpoints retain completed automatic jobs. They must
+        # not exhaust the eight interactive-session slots during a fast batch.
+        for key,row in list(JOBS.items()):
+            if row['context'].get('automatic') and row['status'] in ('Prepared','Blocked'):
+                JOBS.pop(key,None)
         if any(row['status']=='Working' for row in JOBS.values()):raise ValueError('A preparation is already running.')
         if len(JOBS)>=8:raise ValueError('Too many preparation sessions. Retry later.')
         key=secrets.token_hex(24)
@@ -131,7 +136,7 @@ def inspect(key):
         req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),
                     headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
         count=0
-        with build_opener(transfer.NoRedirect()).open(req,timeout=90) as response,source.open('xb') as output:
+        with build_opener(transfer.NoRedirect()).open(req,timeout=300) as response,source.open('xb') as output:
             while block:=response.read(4*1024*1024):
                 count+=len(block)
                 if count>meta['size']:raise ValueError('Source exceeded its verified size.')
