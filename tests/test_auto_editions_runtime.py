@@ -24,3 +24,12 @@ def test_scoped_rollout_links_only_verified_units():
     rows=[dict(edition_order_id=i,shopify_product_id=123,variant_id=456) for i in (7,8)]
     with patch.object(runtime,'enabled',return_value=True),patch.object(runtime,'stores',return_value=(registry,None)):
         assert set(runtime.download_links(rows))=={'7'}
+
+
+def test_archived_order_listing_does_not_scan_dropbox():
+    registry=Mock();registry.index.return_value={('gid://shopify/Product/123','456'):[7]}
+    jobs=Mock();jobs.summaries.return_value={'7':{'id':'a'*64,'status':'Ready'}}
+    with patch.object(runtime,'enabled',return_value=True),patch.object(runtime,'stores',return_value=(registry,jobs)),patch.object(runtime,'storage') as storage:
+        links=runtime.download_links([dict(edition_order_id=7,shopify_product_id=123,variant_id=456)])
+        assert links['7'].endswith('#Open')
+        storage.assert_not_called()

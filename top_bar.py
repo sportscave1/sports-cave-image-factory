@@ -148,6 +148,9 @@ def _component_source():
 
 def component_html(config):
     source = _component_source()
+    # Install the cloud click owner with the shell, before the Orders links.
+    inline = (COMPONENT_PATH.parent.parent / 'psd_picker' / 'inline.js').read_text(encoding='utf-8')
+    source = source.replace('<script>', '<script>' + inline + '\n', 1)
     return source.replace(
         "__SPORTS_CAVE_TOP_BAR_CONFIG__",
         json.dumps(config, ensure_ascii=True).replace("</", "<\\/"),

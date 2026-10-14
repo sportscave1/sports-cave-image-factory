@@ -18,7 +18,7 @@ function launch(url){
  if(mode==='open'){header.style.cssText='position:absolute;right:4px;top:3px;z-index:1';frame.style.height='265px';}
  modal.append(header,frame);doc.body.append(modal);modal.showModal();modal.addEventListener('cancel',close,{once:true});modal.addEventListener('click',event=>{const box=modal.getBoundingClientRect();if(event.target===modal&&(event.clientX<box.left||event.clientX>box.right||event.clientY<box.top||event.clientY>box.bottom))close();});
 }
-function pickerUrl(value){try{const url=new URL(value,target.location.href);return url.origin===target.location.origin&&['/files-psd-picker','/api/files-psd-open','/edition-jpg-test','/edition-jpg-download','/auto-editions/download','/auto-editions/view','/auto-editions/open'].includes(url.pathname)?url.href:null;}catch{return null;}}
+function pickerUrl(value){try{const url=new URL(value,target.location.href);return url.origin===target.location.origin&&['/files-psd-picker','/api/files-psd-open','/edition-jpg-test','/edition-jpg-download'].includes(url.pathname)?url.href:null;}catch{return null;}}
 function disabledLink(value){try{if(['Needs Setup','Blocked','Review'].includes(value))return true;const u=new URL(value,target.location.href);return u.origin===target.location.origin&&['Needs Setup','Blocked','Review'].includes(decodeURIComponent(u.pathname).replace(/^\//,''));}catch{return false;}}
 const wrapper=function(url,...args){if(['Not linked','Unavailable'].includes(url)||disabledLink(url))return null;const href=pickerUrl(url);if(href){launch(href);return null;}return original.call(this,url,...args);};
 target.open=wrapper;

@@ -3461,7 +3461,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       let editionSelectionRequest=0;
       window.addEventListener('message',event=>{
-        if(event.origin!==location.origin||event.source!==parent||event.data?.type!=='sc-files-navigate')return;
+        if(event.origin!==location.origin||(event.source!==parent&&event.source!==opener)||event.data?.type!=='sc-files-navigate')return;
         const {allocation,job}=event.data;
         if(!/^\d+$/.test(String(allocation||''))||! /^[a-f0-9]{64}$/.test(String(job||'')))return;
         query.set('edition_allocation',allocation);query.set('edition_job',job);
@@ -3470,6 +3470,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       async function initialise() {
         document.title = "Sports Cave Files";
+        document.body.dataset.filesReady="1";
         initialiseDesktopBridge();
         if(query.has('edition_allocation')){await openSavedEdition();return;}
         if (linkedProduct !== null) { await openLinkedProduct(); return; }

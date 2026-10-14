@@ -3,7 +3,7 @@
  const script=parent.document.createElement('script');
  script.textContent='('+function(){
   if(window.SportsCaveAutoEditions)return;
-  const jobs=new Map();let notify=()=>{};
+  const jobs=new Map();
   const textHits=new WeakMap(),immediate=new Map();let clickedText=null;
   const gridSignature=canvas=>[...canvas.querySelectorAll('[role=gridcell]')].map(cell=>cell.textContent).join('|');
   function clearImmediate(id){immediate.get(id)?.remove();immediate.delete(id);}
@@ -28,7 +28,12 @@
   const url=(path,id,job)=>path+'?allocation_id='+encodeURIComponent(id)+(job?'&job_id='+encodeURIComponent(job):'');
   async function api(path,id,post=false,job){const r=await fetch(url(path,id,job),post?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});const d=await r.json();if(!r.ok)throw Error(d.error||'Unavailable');return d;}
   function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&['/auto-editions/download','/auto-editions/open','/auto-editions/view'].includes(u.pathname)&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
-  function paint(id,row){if(!['Generating','Queued'].includes(row.status))clearImmediate(id);for(const a of anchors(id)){
+  function paint(id,row){const marker=immediate.get(id);if(marker&&!['Generating','Queued'].includes(row.status)){
+   marker.classList.remove('sc-edition-generating');const markerLabel=row.status==='Ready'?'Open':'Retry';if(marker.textContent!==markerLabel)marker.textContent=markerLabel;
+   marker.style.pointerEvents='auto';marker.style.cursor='pointer';marker.setAttribute('role','link');marker.tabIndex=0;
+   const activate=()=>row.status==='Ready'?openSaved(url('/auto-editions/open',id,row.job_id)):start(url('/auto-editions/download',id)+'#Retry');
+   marker.onclick=activate;marker.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();activate();}};
+  }for(const a of anchors(id)){
    const saved=['Ready','Unavailable'].includes(row.status),busy=['Generating','Queued'].includes(row.status);
    const label=row.status==='Ready'?'Open':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?'Retry':busy?'Generating\u2026':'Download JPG';
    if(a.textContent!==label)a.textContent=label;a.classList.toggle('sc-edition-generating',busy);
@@ -41,7 +46,7 @@
    const message=document.createElement('span');message.textContent=row.error||'Saved JPG unavailable. Retry Open.';box.append(message);
    const close=document.createElement('button');close.textContent='Dismiss';close.onclick=()=>box.remove();box.append(close);document.body.append(box);
   }
-  function navigateSaved(id,row){if(!window.SportsCaveInternalFiles)throw Error('Files navigation is loading. Retry Open.');window.SportsCaveInternalFiles.open({allocation:id,job:row.job_id});}
+  function navigateSaved(id,row){if(!window.SportsCaveFilesWindow)throw Error('Files navigation is loading. Retry Open.');window.SportsCaveFilesWindow.open({allocation:id,job:row.job_id});}
   function initiateDownload(id,row){const key='sc-edition-attempt:'+row.job_id;if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,'1');
    const a=document.createElement('a');a.href=url('/api/auto-editions/file',id,row.job_id);a.download=row.filename||'edition-TEST-NOT-PRINT-READY.jpg';document.body.append(a);a.click();a.remove();
   }
@@ -52,15 +57,16 @@
   }
   async function poll(id){const row=jobs.get(id);if(!row||row.polling)return;row.polling=true;
    try{const d=await api('/api/auto-editions/state',id);Object.assign(row,d);paint(id,row);
-    if(d.status==='Ready'){if(sessionStorage.getItem('sc-edition-pending:'+id)){initiateDownload(id,row);navigateSaved(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}notify();}
-    else if(d.status==='Blocked'){sessionStorage.removeItem('sc-edition-pending:'+id);notify();}
+    if(d.status==='Ready'){if(sessionStorage.getItem('sc-edition-pending:'+id)){initiateDownload(id,row);navigateSaved(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}}
+    else if(d.status==='Blocked'){sessionStorage.removeItem('sc-edition-pending:'+id);}
    }catch(e){row.status=row.job_id?'Unavailable':'Blocked';row.error=e.message;paint(id,row);showError(id,row);}finally{row.polling=false;}
   }
   async function start(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id');if(!/^\d+$/.test(id||''))return;
    const old=jobs.get(id);if(old?.status==='Generating'||old?.status==='Queued')return;
+   if(old?.status==='Ready'){openSaved(url('/auto-editions/open',id,old.job_id));return;}
    const row={status:'Generating'};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
    immediateProgress(id);
-   try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);notify();await poll(id);}
+   try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);await poll(id);}
    catch(e){row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
   }
   function hydrate(){for(const [id,node] of immediate)if(!node.isConnected||gridSignature(node.editionCanvas)!==node.editionSignature)clearImmediate(id);
@@ -101,6 +107,6 @@
   }catch{}return false;}
   const nativeOpen=window.open;window.open=function(value,...args){if(cloudAction(value))return null;return nativeOpen.call(this,value,...args);};
   document.addEventListener('click',event=>{const link=event.target.closest?.('a[href]');if(link&&cloudAction(link.href)){event.preventDefault();event.stopImmediatePropagation();}},true);
-  window.SportsCaveAutoEditions={start,openSaved,connect(fn){notify=()=>{try{fn();}catch{}};hydrate();}};
+  window.SportsCaveAutoEditions={start,openSaved,connect(){hydrate();}};
  }.toString()+')();';parent.document.head.append(script);script.remove();
 })();

@@ -118,13 +118,12 @@ def download_links(rows):
             if index[key] is not None and int(allocation) not in index[key]:continue
             links[allocation]='/auto-editions/download?allocation_id='+allocation+'#Download JPG'
         summaries=jobs.summaries(list(links)) if jobs else {}
-        saved_assets=storage() if any(r['status']=='Ready' for r in summaries.values()) else None
         for key,row in summaries.items():
             if row['status']=='Ready':
-                try:
-                    saved_assets.verify_output(row['result']['output']);label='Open'
-                except Exception:label='Retry Open'
-                links[key]='/auto-editions/open?allocation_id='+key+'&job_id='+row['id']+'#'+label
+                # Opening performs current permission/allocation and exact saved
+                # revision checks. Listing Orders must not serially query Dropbox
+                # once for every archived row before the table becomes usable.
+                links[key]='/auto-editions/open?allocation_id='+key+'&job_id='+row['id']+'#Open'
             elif row['status'] in ('Queued','Generating'):links[key]='/auto-editions/download?allocation_id='+key+'#Generating'
             elif row['status']=='Blocked':links[key]='/auto-editions/download?allocation_id='+key+'#Retry'
         return links

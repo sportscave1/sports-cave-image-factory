@@ -7,6 +7,7 @@ enabled on production until hosted/role acceptance passes.
 from pathlib import Path
 import re
 import tempfile
+import time
 
 import auto_editions as ae
 
@@ -85,7 +86,10 @@ class DropboxAssets:
         return f"{cls.ROOT}/{'Cache' if cache else 'Masters'}/{digest}/{name}"
 
     def fetch(self, preparation_hash, asset, destination):
-        metadata,response=self.integration.get_file_response(self.token,self.path(preparation_hash,asset['name']))
+        from auto_editions_asset_cache import prepared_assets
+        source_path=self.path(preparation_hash,asset['name'])
+        if prepared_assets.copy(asset['sha256'],destination):return
+        metadata,response=self.integration.get_file_response(self.token,source_path)
         try:
             size=metadata.get('size')
             if type(size) is not int or not 0<size<=self.MAX_ASSET_BYTES:
@@ -100,6 +104,7 @@ class DropboxAssets:
                 raise PreparationBlocked('Prepared Dropbox asset checksum changed.')
         finally:
             response.close()
+        prepared_assets.remember(asset['sha256'],destination)
 
     GENERATED_ROOT='/Sportscave Team Folder/03_ASSETS/Auto Editions/Generated JPGs'
 
@@ -204,6 +209,7 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
     service. Rendering and reference checks share a process-wide memory lock.
     Temporary disk is scratch only; inputs and results use persistent storage.
     """
+    started=time.monotonic();timings={}
     manifest = ae.validate_manifest(job['manifest'])
     if ae.fingerprint(manifest) != job['preparation_hash']:
         raise PreparationBlocked('Preparation changed while queued.')
@@ -215,21 +221,28 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
         raise PreparationBlocked('Queued edition changed.')
     with tempfile.TemporaryDirectory(prefix='sc-edition-') as folder:
         root = Path(folder)
+        step=time.monotonic()
         for asset in (manifest['master'],manifest['patches'][str(job['number'])]):
             name = asset['name']
             # Validate before giving the storage adapter a destination.
             if not re.fullmatch(r'[A-Za-z0-9_-]+\.png',name):
                 raise PreparationBlocked('Invalid prepared filename.')
             assets.fetch(job['preparation_hash'],asset,root/name)
+        timings['prepared_assets_ms']=round((time.monotonic()-step)*1000)
         path=root/'output.jpg'
+        step=time.monotonic()
         rendered=ae.render_jpg(manifest,root,job['number'],path)
+        timings['compose_encode_validate_ms']=round((time.monotonic()-step)*1000)
         if path.stat().st_size>MAX_OUTPUT_BYTES:
             raise PreparationBlocked('Rendered output exceeds the verified download limit.')
-        output=assets.publish_output(job,path)
+        step=time.monotonic();output=assets.publish_output(job,path)
+        timings['archive_and_verify_ms']=round((time.monotonic()-step)*1000)
         if output.get('sha256') != rendered['sha256']:
             raise PreparationBlocked('Persistent output verification failed.')
     from auto_editions_print import describe
     print_spec=describe(job.get('archive_labels',{}).get('variant_title',''),manifest)
+    timings['worker_total_ms']=round((time.monotonic()-started)*1000)
     return {**rendered,'output':output,'status':'Ready','test_only':True,
+            'timings':timings,
             'print_spec':print_spec,
             'retained':True, 'filename':Path(output.get('path') or f"edition-{job['number']:03}-of-{job['total']}-TEST-NOT-PRINT-READY.jpg").name}
