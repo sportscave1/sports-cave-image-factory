@@ -6,6 +6,24 @@ import orders_page as orders
 
 
 class CompactOrdersTests(unittest.TestCase):
+    def test_initial_layout_waits_for_client_instead_of_exposing_wrong_actions(self):
+        class WaitingForClient(Exception): pass
+        fake=SimpleNamespace(__name__='streamlit',session_state={},caption=lambda *a:None,
+                             stop=lambda: (_ for _ in ()).throw(WaitingForClient()))
+        with patch.object(orders,'st',fake),patch.object(orders.components,'declare_component') as declare:
+            declare.return_value.return_value=None
+            with self.assertRaises(WaitingForClient):orders._responsive_orders_mode()
+            self.assertIsNone(declare.return_value.call_args.kwargs['default'])
+            self.assertNotIn('orders-narrow-view',fake.session_state)
+
+    def test_layout_survives_component_initialisation_during_rerender(self):
+        for previous in (True,False):
+            fake=SimpleNamespace(__name__='streamlit',session_state={'orders-narrow-view':previous})
+            with patch.object(orders,'st',fake),patch.object(orders.components,'declare_component') as declare:
+                declare.return_value.side_effect=lambda **kwargs:kwargs['default']
+                orders._responsive_orders_mode()
+                self.assertIs(fake.session_state['orders-narrow-view'],previous)
+
     def setUp(self):
         self.directory_patch=patch.object(orders.psd_directory,'directory',return_value={})
         self.directory_patch.start()

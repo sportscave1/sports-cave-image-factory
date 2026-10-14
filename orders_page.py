@@ -2791,8 +2791,13 @@ def _render_mobile_orders(rows):
 def _responsive_orders_mode():
     if getattr(st, '__name__', '') != 'streamlit': return
     widget = components.declare_component('orders_viewport', path=str(BASE_DIR / 'components/orders_viewport'))
-    prior = bool(st.session_state.get('orders-narrow-view'))
-    narrow = widget(prior=prior, default=False, key='orders-viewport-mode')
+    prior = st.session_state.get('orders-narrow-view')
+    narrow = widget(prior=prior, default=prior, key='orders-viewport-mode')
+    if narrow is None:
+        # Do not expose a desktop action and replace it under the first click
+        # when the initial client measurement selects the compact layout.
+        st.caption('Preparing Orders view…')
+        st.stop()
     st.session_state['orders-narrow-view'] = narrow is True
 
 
