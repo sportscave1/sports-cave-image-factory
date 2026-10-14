@@ -59,6 +59,20 @@ class LifecyclePublicationTests(unittest.TestCase):
                 old=self.store.q("SELECT content FROM crm_template_versions WHERE version=1 AND content->>'automation_id'=%s ORDER BY template_id",(str(row['id']),))
                 self.assertEqual(old,versions)
 
+    def test_selected_post_purchase_stage_retains_fulfilment_contract(self):
+        from crm_flow_inline import step_state
+        row=self.expanded('post_purchase');steps=row['config']['draft']['emails']
+        self.store.request_publish(ADMIN,row['id'],row['config']['revision'],step_id=steps[0]['step_id']);self.run_job()
+        first=self.state(row);original=deepcopy(first['steps'][0])
+        self.store.request_publish(ADMIN,row['id'],row['config']['revision'],step_id=steps[1]['step_id']);self.run_job()
+        live=self.state(row)
+        self.assertEqual([step_state(live,s) for s in steps],['LIVE','LIVE','DRAFT'])
+        self.assertEqual(live['steps'][0],original)
+        self.assertEqual(live['steps'][1]['anchor'],'delivery')
+        self.assertTrue(live['config']['published_flow']['emails'][1]['requires_fulfilment'])
+        self.assertEqual(live['config']['draft'],row['config']['draft'])
+        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(row['id'],),True)['n'],0)
+
     def test_missing_history_worker_and_delivery_fail_without_job(self):
         row=self.expanded('win_back')
         caps=self.store.state('shopify_automation_capabilities');caps['scopes'].remove('read_all_orders')
@@ -192,7 +206,7 @@ toolbar(store,ADMIN,st.session_state['fixture_flow'])
         app.button(key='toolbar-publish').click().run()
         self.assertFalse(app.exception)
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_publish_jobs WHERE automation_id=%s',(identity,),True)['n'],0)
-        self.assertTrue(any('Future eligible customers' in item.value for item in app.markdown))
+        self.assertTrue(any('Publish all enabled emails and saved flow settings?' in item.value for item in app.markdown))
         app.button(key='automation-publication-confirm').click().run()
         self.assertFalse(app.exception)
         queued=self.store.flow(identity)

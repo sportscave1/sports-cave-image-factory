@@ -38,7 +38,7 @@ class EmailPublicationTests(unittest.TestCase):
                 saved=self.store.save_flow(ADMIN,row['id'],row['name'],draft,first['config']['revision'])
                 job=self.publish_email(saved,1)
                 self.assertEqual(self.publish_email(saved,1)['id'],job['id'])
-                with self.assertRaisesRegex(ValueError,'already publishing'):self.publish_email(saved,2)
+                with self.assertRaisesRegex(ValueError,'already publishing'):self.publish_email(saved,0)
                 self.assertEqual([step_state(self.state(row),s) for s in draft['emails']],['LIVE','DRAFT','DRAFT'])
                 self.run_job();live=self.state(row)
                 self.assertEqual([step_state(live,s) for s in draft['emails']],['LIVE','LIVE','DRAFT'])
@@ -103,5 +103,5 @@ class ConfirmationTests(unittest.TestCase):
     def test_dialog_open_performs_no_store_calls(self):
         from crm_automation_publish_confirm import confirm
         button=Mock();button.button.return_value=False
-        with patch('crm_automation_publish_confirm.st.html'),patch('crm_automation_publish_confirm.st.write'),patch('crm_automation_publish_confirm.st.columns',return_value=[button,button]):
+        with patch('crm_automation_publish_confirm.st.session_state',{}),patch('crm_automation_publish_confirm.st.html'),patch('crm_automation_publish_confirm.st.write'),patch('crm_automation_publish_confirm.st.columns',return_value=[button,button]):
             store=Mock();confirm.__wrapped__(store,ADMIN,'fixture',1,'email','DRAFT');self.assertEqual(store.mock_calls,[])

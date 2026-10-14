@@ -39,13 +39,13 @@
    const current=button(requested);if(requested==='Save draft'&&current?.disabled){note.remove();return;}if(!current||current.disabled)throw new Error('Command changed');
    if(requested==='Save draft')note.remove();
    else{
-    note.textContent='Submitting publication…';
-    // Keep immediate feedback painted until a persisted backend state replaces
-    // it. A slow/unknown response is never presented as a successful publish.
+    note.textContent='Opening publish confirmation…';
+    // Keep immediate feedback until the confirmation appears. Publication
+    // progress and success are owned by the persisted backend state.
     const observer=new MutationObserver(()=>{
-     if(!note.isConnected||document.querySelector('.automation-current, [data-testid="stAlert"]')){observer.disconnect();note.remove();clearTimeout(timer);}
+     if(!note.isConnected||document.querySelector('[role="dialog"], .automation-current, [data-testid="stAlert"]')){observer.disconnect();note.remove();clearTimeout(timer);}
     });
-    const timer=setTimeout(()=>{observer.disconnect();if(note.isConnected){note.textContent='Publication not yet confirmed. Checking saved status…';document.querySelector('.st-key-toolbar-refresh button')?.click();}},15000);
+    const timer=setTimeout(()=>{observer.disconnect();if(note.isConnected){note.textContent='Confirmation not yet available. Checking saved status…';document.querySelector('.st-key-toolbar-refresh button')?.click();}},15000);
     observer.observe(document.querySelector('.st-key-crm-automation-editor')||document.body,{childList:true,subtree:true});
    }
    allowed=true;try{current.click();}finally{allowed=false;}

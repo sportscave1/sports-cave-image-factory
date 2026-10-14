@@ -18,7 +18,7 @@ class InlineTests(unittest.TestCase):
         r=row();s=r['config']['draft']['emails'][0]
         for enabled in (True,False):
             s['enabled']=enabled
-            self.assertEqual(step_state(r,s),'DRAFT')
+            self.assertEqual(step_state(r,s),'DRAFT' if enabled else 'DISABLED')
         r['config']['published_version']=2;r['steps']=[deepcopy(s)];r['steps'][0]['enabled']=True
         r['status']='ACTIVE';self.assertEqual(step_state(r,s),'LIVE')
         r['status']='PAUSED';self.assertEqual(step_state(r,s),'PAUSED')
@@ -29,28 +29,29 @@ class InlineTests(unittest.TestCase):
         r=row();s=r['config']['draft']['emails'][0];r['status']='ACTIVE';r['config']['published_version']=1
         self.assertEqual(step_state(r,s),'DRAFT')
         r['config']['draft']['lifecycle_version']=1
-        self.assertIn('Publish flow',status_options(r,s))
+        self.assertIn('Publish email',status_options(r,s))
         r['status']='PAUSED';self.assertIn('Resume flow',status_options(r,s))
         r['config']['publication']={'state':'PUBLISHING'}
-        self.assertNotIn('Publish flow',status_options(r,s));self.assertNotIn('Resume flow',status_options(r,s))
+        self.assertNotIn('Publish email',status_options(r,s));self.assertNotIn('Resume flow',status_options(r,s))
 
     def test_lifecycle_inline_publish_requests_confirmation_without_creating_job(self):
         r=row();r['trigger_type']='welcome';s=r['config']['draft']['emails'][0]
-        store=Mock();store.flow.return_value=r;state={'action':'Publish flow'}
+        store=Mock();store.flow.return_value=r;state={'action':'Publish email'}
         with patch('crm_flow_inline.st') as ui,patch('crm_campaign_recovery.flush_current',return_value=True),patch('crm_automation_ui.changed'):
             ui.session_state=state
             status_action(store,{},r,s,'action')
-        self.assertEqual(state['automation-confirm-publication'],('fixture',7))
+        self.assertEqual(state['automation-confirm-publication'],('fixture',7,s['step_id'],'DRAFT'))
         store.request_publish.assert_not_called()
 
     def test_failed_status_action_is_consumed_without_replay(self):
         r=row();s=r['config']['draft']['emails'][0];store=Mock();store.flow.return_value=r
-        store.request_publish.side_effect=ValueError('Activation locked')
-        state={'action':'Publish flow'}
+        store.flow.side_effect=ValueError('Activation locked')
+        state={'action':'Publish email'}
         with patch('crm_flow_inline.st') as ui,patch('crm_campaign_recovery.flush_current',return_value=True):
             ui.session_state=state
             status_action(store,{},r,s,'action');status_action(store,{},r,s,'action')
-        store.request_publish.assert_called_once_with({},'fixture',7)
+        store.flow.assert_called_once_with('fixture')
+        store.request_publish.assert_not_called()
         self.assertEqual(state['action'],'DRAFT');self.assertEqual(state['flow-inline-error'],'Activation locked')
         store.lifecycle.assert_not_called()
 

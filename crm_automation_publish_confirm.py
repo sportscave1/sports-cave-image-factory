@@ -5,12 +5,27 @@ from crm_store import StoreUnavailable
 
 def dismiss():
     st.session_state.pop('automation-confirm-publication',None)
+    st.session_state.pop('automation-publication-submitting',None)
+    st.session_state.pop('automation-publication-submit-error',None)
+
+
+def submit():
+    st.session_state['automation-publication-submitting']=True
 
 
 def completed(store,row,state):
     """Only a committed job and its persisted delivery version permit navigation."""
     waiting=state.get('automation-publication-waiting')
     if not waiting or waiting['identity']!=str(row['id']):return False
+    if waiting.get('unchanged'):
+        from crm_automation_publish_state import email_has_changes,has_changes
+        selected=waiting.get('step_id')
+        if row['config']['published_version']<waiting['version']:return False
+        changed=email_has_changes(store,row,selected) if selected else has_changes(store,row)
+        if changed:return False
+        state.pop('automation-publication-waiting',None)
+        state['automation-publication-toast']=True
+        return True
     publication=row['config'].get('publication',{})
     if publication.get('state')=='PUBLISHING':return False
     job=store.q('SELECT state,error,publication_version,snapshot FROM crm_automation_publish_jobs WHERE id=%s AND automation_id=%s',
@@ -37,21 +52,29 @@ def confirm(store,user,identity,revision,step_id=None,flow_status='DRAFT'):
     # retain every publication safeguard and revalidate authoritative state.
     st.html("""<style>
     [role="dialog"]:has(.sc-publication-confirm){width:min(400px,calc(100vw - 32px))!important;background:#161616;color:#fff;border:1px solid #75602e;border-radius:10px;padding:20px!important}
-    [role="dialog"]:has(.sc-publication-confirm) h2{font-size:19px;color:#fff;padding:0 0 8px}
+    [role="dialog"]:has(.sc-publication-confirm) :is(h2,h3){font-size:19px;color:#fff;padding:0 0 8px}
     [role="dialog"]:has(.sc-publication-confirm) p{font-size:13px;color:#eee}
     [role="dialog"]:has(.sc-publication-confirm) button{min-height:34px;padding:4px 14px}
+    [role="dialog"]:has(.sc-publication-confirm) button p{color:inherit!important}
+    [role="dialog"]:has(.sc-publication-confirm) button[kind="secondary"]{background:#272727;color:#fff;border-color:#626262}
     [role="dialog"]:has(.sc-publication-confirm) button[kind="primary"]{background:#c8a346;color:#141414;border-color:#c8a346}
     </style><span class="sc-publication-confirm"></span>""")
     st.write('Publish this email for future eligible customers?' if step_id else 'Publish all enabled emails and saved flow settings?')
     if flow_status=='PAUSED':st.caption('This flow will remain paused.')
+    submitting=st.session_state.get('automation-publication-submitting',False)
+    error=st.session_state.pop('automation-publication-submit-error',None)
+    if error:st.error(error)
     cancel,publish=st.columns(2)
-    if cancel.button('Cancel',key='automation-publication-cancel',use_container_width=True):
+    if cancel.button('Cancel',key='automation-publication-cancel',disabled=submitting,use_container_width=True):
         dismiss();st.rerun(scope='app')
-    if publish.button('Publish',type='primary',key='automation-publication-confirm',use_container_width=True):
+    publish.button('Publishing…' if submitting else 'Publish',type='primary',key='automation-publication-confirm',disabled=submitting,on_click=submit,use_container_width=True)
+    if submitting:
         try:
             with st.spinner('Publishing…'):
                 job=store.request_publish(user,identity,revision,step_id=step_id)
-            if job.get('id'):
+            if job.get('unchanged'):
+                st.session_state['automation-publication-waiting']={'identity':str(identity),'unchanged':True,'version':job['publication_version'],'step_id':step_id}
+            elif job.get('id'):
                 st.session_state['automation-publication-waiting']={'identity':str(identity),'job_id':str(job['id'])}
             if not job.get('unchanged'):
                 from crm_automation_home import accepted_publication
@@ -60,4 +83,6 @@ def confirm(store,user,identity,revision,step_id=None,flow_status='DRAFT'):
             from crm_automation_ui import changed
             changed();st.rerun(scope='app')
         except (ValueError,PermissionError,StoreUnavailable,RuntimeError) as exc:
-            st.error(str(exc))
+            st.session_state.pop('automation-publication-submitting',None)
+            st.session_state['automation-publication-submit-error']=str(exc)
+            st.rerun(scope='fragment')

@@ -32,6 +32,16 @@ if st.query_params.get('fixture_empty') or st.query_params.get('fixture_existing
 os.environ.update(LIVE)
 requests.sessions.Session.request=lambda *a,**k:(_ for _ in ()).throw(AssertionError('External network forbidden'))
 AutomationStore.render_settings=lambda self,env=None:deepcopy(CFG)
+# Synthetic worker failure for publication UI regression; never imported by the app.
+import crm_automation_publication as fixture_publication
+if not hasattr(fixture_publication,'_fixture_prepare'):
+    fixture_publication._fixture_prepare=fixture_publication.prepare
+    def fixture_prepare(store,identity,flow,*args,**kwargs):
+        if any(s['document']['content']['subject']=='Fixture worker rejection' for s in flow['emails']):
+            raise ValueError('Email tracking validation failed in local fixture')
+        return fixture_publication._fixture_prepare(store,identity,flow,*args,**kwargs)
+    fixture_publication.prepare=fixture_prepare
+
 from crm_local_preview import javascript
 javascript.cache_clear()  # Hot-reload current browser assets in this test app.
 
@@ -57,7 +67,7 @@ if os.getenv('EMAIL_V4_BACKGROUND_PUBLICATION')=='1':
     local_publisher()
 
 @st.cache_resource
-def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False):
+def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False,email_publication=False,paused=False):
     store=AutomationStore(connect)
     from crm_logic import now
     from tests.crm_publication_fixture import ready
@@ -74,12 +84,22 @@ def setup(legacy_preview=False,test_run='',steps=2,checkout_live=False):
                 doc=flow['emails'][0]['document'];doc['middle_sections'].pop(1)
                 doc['middle_sections'][0]['html']=LEGACY;doc['custom_html']=LEGACY
         row=store.save_flow(ADMIN,row['id'],row['name'],flow,1)
-        if state!='DRAFT' or (kind=='abandoned' and checkout_live):row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
-        if state=='PAUSED':store.lifecycle(ADMIN,row['id'],'pause')
+        if email_publication and kind=='post_purchase':
+            from crm_automation_publication import tick
+            store.request_publish(ADMIN,row['id'],row['config']['revision'],step_id=flow['emails'][0]['step_id'])
+            from time import monotonic,sleep
+            deadline=monotonic()+10
+            row=store.flow(row['id'])
+            while row['config']['publication']['state']=='PUBLISHING' and monotonic()<deadline:
+                tick(store,'local-seed-publication',env=LIVE)
+                sleep(.01);row=store.flow(row['id'])
+            if row['status']!='ACTIVE':raise RuntimeError('Local seed publication did not complete')
+        elif state!='DRAFT' or (kind=='abandoned' and checkout_live):row=store.publish(ADMIN,row['id'],row['config']['revision'],env=LIVE)
+        if state=='PAUSED' and (not email_publication or paused):store.lifecycle(ADMIN,row['id'],'pause')
         identities.append(str(row['id']))
     return identities
 
-identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')))
+identities=setup(bool(st.query_params.get('fixture_legacy')),str(st.query_params.get('fixture_run','')),int(st.query_params.get('fixture_steps',2)),bool(st.query_params.get('fixture_checkout_live')),bool(st.query_params.get('fixture_email_publication')),bool(st.query_params.get('fixture_paused')))
 @st.cache_resource
 def empty_setup(kind,run,mode='empty'):
     from tests.test_crm_lifecycle_expansion import DatabaseTests
@@ -99,6 +119,8 @@ if st.query_params.get('fixture_toolbar_live') and not st.session_state.get('fix
     st.session_state['automation_selected']=identities[0];st.session_state['fixture_selected']=True
 if st.query_params.get('fixture_checkout') and not st.session_state.get('fixture_selected'):
     st.session_state['automation_selected']=identities[1];st.session_state['fixture_selected']=True
+if st.query_params.get('fixture_email_publication') and not st.session_state.get('fixture_selected'):
+    st.session_state['automation_selected']=identities[2];st.session_state['fixture_selected']=True
 from tests.test_crm_abandoned_checkout import checkout
 shop=st.session_state.get('fixture_shop')
 if shop is None:shop=Mock();st.session_state['fixture_shop']=shop

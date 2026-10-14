@@ -1,0 +1,88 @@
+{
+  "fixture": "Loopback synthetic data only; external requests blocked",
+  "results": [
+    {
+      "paused": false,
+      "modal_ms": 134,
+      "modal_width": 400,
+      "states": [
+        "live",
+        "live",
+        "draft"
+      ],
+      "cancel": true,
+      "automatic_return": true,
+      "reload": true
+    },
+    {
+      "paused": true,
+      "modal_ms": 132,
+      "modal_width": 400,
+      "states": [
+        "paused",
+        "paused",
+        "draft"
+      ],
+      "cancel": true,
+      "automatic_return": true,
+      "reload": true
+    },
+    {
+      "failure_preserves_editor": true,
+      "failure_preserves_draft_after_reload": true,
+      "false_success": false
+    }
+  ],
+  "date": "2026-10-14",
+  "unit_tests": {
+    "command": "python -m unittest tests.test_crm_automation_publication tests.test_crm_email_publication tests.test_crm_lifecycle_publication tests.test_crm_flow_inline",
+    "passed": 53,
+    "disposable_postgresql": true
+  },
+  "browser_test": "node tests/test_crm_email_publication_ui.cjs",
+  "automation_types": [
+    "abandoned",
+    "welcome",
+    "post_purchase",
+    "win_back",
+    "fulfilled"
+  ],
+  "findings": [
+    "The editor submitted a whole-flow publication without a selected step identity.",
+    "The header compared whole-flow snapshots while individual badges used persisted delivery steps, allowing an up-to-date header above missing or disabled delivery steps.",
+    "The previous confirmation read the flow and ran full prepare/provider validation before displaying."
+  ],
+  "changes": [
+    "Email-scoped jobs overlay one draft onto the published sequence; unrelated draft content and immutable delivery references remain unchanged.",
+    "Job idempotency distinguishes email scopes at the same saved revision. Existing worker leases, revision fences, readiness checks and atomic version transactions remain in force.",
+    "The shared modal opens from click context before freshness/readiness reads; it is 400px wide and keyboard accessible.",
+    "Confirmed job success and persisted delivery references govern automatic overview navigation and toast. Failure preserves the editor and draft.",
+    "Selected-email headers, overview badges and paused/disabled labels use authoritative persisted data."
+  ],
+  "modified_shared_files": [
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\crm_automation_publication.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\crm_automation_publish_state.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\crm_automation_publish_confirm.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\crm_automation_toolbar.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\crm_automation_store.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\crm_flow_inline.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\components\\crm_sections\\automation_publish.js"
+  ],
+  "validation_files": [
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\test_crm_automation_publication.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\test_crm_email_publication.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\test_crm_email_publication_ui.cjs",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\test_crm_lifecycle_publication.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\test_crm_flow_inline.py",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\test_crm_flow_inline_ui.cjs",
+    "C:\\Dev\\SportsCaveWorktrees\\sports-cave-email-email-automation-flow-page-fix-20261011-54d8ff88\\tests\\fixtures\\crm_automation_preview.py"
+  ],
+  "limitations": [
+    "The previous production Email 2 publication result was not inspected and cannot be established from this local workspace.",
+    "Publication tests use synthetic readiness evidence and no real provider or customer data. The optional thumbnail subprocess renderer was unavailable in the fixture; publication and UI tests passed."
+  ],
+  "external_repository_change": "HEAD moved externally from 7f872ebd to 17bcfc96 during work, capturing some publishing edits. This task issued no commit, push or deployment command.",
+  "local_only": true,
+  "fixture_services_stopped": true,
+  "studio_status": "Tested. Ready for Review requires a clean committed revision and current passing Verify; no commit was authorized or made by this task."
+}
