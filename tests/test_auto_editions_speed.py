@@ -2,6 +2,7 @@
 from pathlib import Path
 from unittest.mock import Mock,patch
 import asyncio
+import pytest
 from functools import wraps
 
 def async_test(f):
@@ -25,13 +26,14 @@ def test_instrumented_encoder_keeps_exact_existing_bytes(tmp_path):
     assert set(result['render_timings'])=={'master_decode_copy_ms','number_patch_ms','jpg_encode_ms','jpg_integrity_ms'}
 
 
+@pytest.mark.parametrize('retained',[False,True])
 @async_test
-async def test_validated_download_reuses_bytes_but_checks_archive(tmp_path):
+async def test_validated_download_reuses_bytes_but_checks_archive(tmp_path,retained):
     source=tmp_path/'source.jpg';source.write_bytes(b'exact-validated-jpg')
     digest=ae.file_hash(source);cache=AssetCache(1024);cache.remember(digest,source)
     assets=Mock();jobs=Mock()
     output={'sha256':digest,'bytes':source.stat().st_size,'file_id':'id:archive','revision':'abc'}
-    row={'status':'Ready','result':{'output':output,'filename':'002-of-100 - TEST.jpg'}}
+    row={'status':'Ready','result':{'output':output,'filename':'002-of-100 - TEST.jpg','retained':retained}}
     with patch.object(api,'actor',return_value=VA),patch.object(api,'stored_current',return_value=({'id':'a'*64},assets,row)),\
          patch.object(api.runtime,'stores',return_value=(None,jobs)),patch('auto_editions_asset_cache.output_assets',cache):
         response=await api.download(request())
@@ -39,6 +41,7 @@ async def test_validated_download_reuses_bytes_but_checks_archive(tmp_path):
         assert Path(response.path).read_bytes()==source.read_bytes()
         assets.verify_output.assert_called_once_with(output)
         assets.output_response.assert_not_called()
+        assert jobs.retain.call_count==(0 if retained else 1)
         assert 'output_cache_hit;dur=1' in response.headers['server-timing']
         await response.background()
         assets.verify_output.side_effect=ValueError('Archived revision changed')
@@ -52,7 +55,7 @@ async def test_progress_poll_checks_allocation_without_repeated_psd_fetch():
     identity={'allocation_id':42}
     row={'status':'Generating','payload':{'id':'a'*64,'identity':identity},'error_code':None}
     registry=Mock();registry.unit.return_value=({'id':42},None)
-    jobs=Mock();jobs.read.return_value=row
+    jobs=Mock();jobs.read_bound.return_value=(row,{'id':42})
     with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'stores',return_value=(registry,jobs)),\
          patch.object(api,'same_allocation',return_value=True) as checked,patch.object(api.runtime,'job_for') as resolver,\
          patch.object(api.runtime,'start_worker'):

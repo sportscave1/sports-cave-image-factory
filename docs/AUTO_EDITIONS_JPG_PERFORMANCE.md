@@ -80,3 +80,55 @@ acceptance and deployment revision are recorded separately after release.
 
 No new infrastructure, schema, mapping, PSD, master, allocation, Shopify,
 fulfilment, V11 host/queue or Prodigi changes are part of this patch.
+
+## Follow-up: live latency beyond rendering
+
+First release: `bdf1e252`, Render `dep-db7l1kugekts73e16icg` live.
+Actual Orders click generated SC3294 Kostecki #011, one attempt:
+35,688,525 bytes, 11340 x 8016,
+SHA-256 `ae77f23a843c538a28fcf20ac6a66e7fb4535fb4de7920284bcb5a90ea8d523e`.
+The browser-downloaded file matched; visual inspection confirmed 011/100 and the
+original right-hand plaque, border and composition. Existing #001-#007 untouched.
+
+Live worker: 14.226 s (new folder, cold prepared assets). Durable request-to-ready:
+23.555 s, excluding start authentication and browser transfer. The connected
+browser-control call timed out and lost its click-timing handle; do not claim an
+exact click-to-download duration from this run. The automatic file request reached
+the server (retention audit); full browser download was then independently verified
+through the existing Files Download button. Saved-edition popup route correctly
+selected the file; popup creation itself remains blocked by the in-app browser.
+
+Actual stages in milliseconds: authentication 992.917; request identity 2901.987;
+first queue wait 1917.010; claim transaction 1710.302; worker identity 2837.274;
+master retrieval 3218; decode/copy 2819.984; number patch 2.961; encoding 575.699;
+JPG validation 928.832; folder 2221.232; destination lookup 282.330;
+upload 3650.754; archive checksum/verification 339.733;
+final source/approval identity 2856.692. Totals contain nested stages.
+
+Repeat download through the saved-edition Files route took 21.113 s despite the
+byte cache. This exposed remaining database/authentication round trips. Separate
+ordinary Files download of the 39.8 MB SC3293 file took 7.593 s; this uses a different
+endpoint and is not a before/after cache comparison.
+
+Follow-up implementation (preserving newer Files V5 `c07119e4`):
+- Supported Psycopg pool for Auto Editions only: max 3 connections, bounded wait,
+  existing SSL/timeouts, health check, transaction rollback and broken-connection
+  replacement. No cached permissions or allocation data; V11 queue unchanged.
+- Reuse the existing Files 25-minute authenticated Dropbox context.
+- Fetch saved job and current allocation in one SQL statement. Full allocation
+  identity checks remain; no PSD mapping query is needed for historical archives.
+- Remove one duplicate account lookup during download and reuse the same Dropbox
+  context for the final identity fence. Account/allocation are still rechecked
+  after bytes are prepared.
+- Already-retained permanent archives no longer repeat the retention write/audit;
+  older expiring files retain the atomic pin operation.
+
+Real read-only Render probe: fresh database connection/query 1396.616 ms;
+pooled cold 1429.290 ms; pooled warm 566.401 ms. Identity check cold 2274.549 ms,
+warm 1507.010 ms. Intentional SELECT division-by-zero rolled back successfully;
+closed connection was discarded and a replacement succeeded. No data was written.
+66 focused Auto Editions/PGlite tests passed. Latest Files V5 regression and Edge
+popup/Orders preservation checks passed. Studio's full old-base static comparison
+still reports inherited unrelated whitespace; this patch's diff check is clean.
+
+Pool semantics: https://www.psycopg.org/psycopg3/docs/api/pool.html

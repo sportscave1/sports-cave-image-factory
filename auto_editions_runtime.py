@@ -18,13 +18,14 @@ def enabled():return os.getenv('SPORTS_CAVE_AUTO_EDITIONS_V6','').lower()=='true
 
 
 def stores():
-    import supabase_backend
-    return Preparations(supabase_backend.connect),Jobs(supabase_backend.connect)
+    from auto_editions_connections import connect
+    return Preparations(connect),Jobs(connect)
 
 
 def storage():
     import dropbox_integration as dbx
-    return DropboxAssets(dbx.resolve_server_auth()['access_token'],dbx)
+    from files_upload_api import _dropbox_context
+    return DropboxAssets(_dropbox_context()['access_token'],dbx)
 
 
 def context(allocation_id):

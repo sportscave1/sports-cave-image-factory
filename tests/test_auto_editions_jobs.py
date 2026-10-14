@@ -175,3 +175,15 @@ def test_product_test_layout_preserves_variant_override_and_history(database,tmp
     sql.execute("UPDATE auto_edition_layouts SET preparation_hash=%s WHERE variant_id='*'",('b'*64,))
     assert jobs.summaries(['43'])=={}
     assert jobs.read(j['id'])['result']['output']['file_id']=='original'
+
+
+def test_bound_read_observes_current_allocation_without_mapping_queries(database):
+    jobs,sql=database;j=job();jobs.enqueue(j,'admin')
+    sql.execute('CREATE TABLE edition_orders (id bigint PRIMARY KEY, edition_number integer, allocation_valid boolean)')
+    sql.execute('INSERT INTO edition_orders VALUES (42,5,true),(99,6,true)')
+    saved,unit=jobs.read_bound(j['id'],42)
+    assert saved['id']==j['id'] and unit=={'id':42,'edition_number':5,'allocation_valid':True}
+    sql.execute('UPDATE edition_orders SET allocation_valid=false WHERE id=42')
+    assert jobs.read_bound(j['id'],42)[1]['allocation_valid'] is False
+    assert jobs.read_bound(j['id'],99)[1]['id']==99  # API must reject mismatched identity.
+    assert jobs.read_bound(j['id'],100)==(None,None)

@@ -50,7 +50,7 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_retained_history_cannot_cross_allocation_identity(self):
         row=dict(payload=dict(identity=dict(allocation_id=99)),result=dict(retained=True))
         registry=Mock();registry.unit.return_value=(dict(id=42,allocation_valid=True,identity_enforced=True),None)
-        jobs=Mock();jobs.read.return_value=row
+        jobs=Mock();jobs.read_bound.return_value=(row,dict(id=42,allocation_valid=True,identity_enforced=True))
         with patch.object(api,'actor',return_value=VA),patch.object(api.runtime,'stores',return_value=(registry,jobs)):
             response=await api.download(request(query='allocation_id=42&job_id='+'a'*64))
             self.assertEqual(response.status_code,403)

@@ -81,6 +81,15 @@ class Jobs:
             row=cur.fetchone()
             return dict(row) if row else None
 
+    def read_bound(self,job_id,allocation_id):
+        """One current statement snapshot; caller still checks the full identity."""
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute('''SELECT to_jsonb(j) AS job,to_jsonb(e) AS unit
+                FROM public.auto_edition_jobs j CROSS JOIN public.edition_orders e
+                WHERE j.id=%s AND e.id=%s''',(job_id,allocation_id))
+            row=cur.fetchone()
+            return (row['job'],row['unit']) if row else (None,None)
+
     def expired(self):
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('''UPDATE public.auto_edition_jobs SET status='Blocked',error_code='cache_expired'

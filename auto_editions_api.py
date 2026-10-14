@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 import tempfile
 import time
+import logging
 
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
@@ -88,11 +89,17 @@ async def download(request):
     folder=None
     started=time.monotonic();timings={}
     try:
-        job,assets,row=await stored_current(request)
-        if row['status']!='Ready':raise ValueError('The JPG is not ready yet.')
         user=await actor(request)
+        timings['download_auth_ms']=round((time.monotonic()-started)*1000,3);phase=time.monotonic()
+        job,assets,row=await stored_current(request,authenticated=user)
+        timings['download_identity_ms']=round((time.monotonic()-phase)*1000,3);phase=time.monotonic()
+        if row['status']!='Ready':raise ValueError('The JPG is not ready yet.')
         _,jobs=runtime.stores()
-        await run_in_threadpool(jobs.retain,job['id'],str(user['id']))
+        # Permanent archives are already pinned. Older expiring outputs still
+        # require the atomic retention fence before bytes can be served.
+        if row['result'].get('retained') is not True:
+            await run_in_threadpool(jobs.retain,job['id'],str(user['id']))
+        timings['retain_database_ms']=round((time.monotonic()-phase)*1000,3)
         result=row['result'];output=result['output']
         folder=tempfile.TemporaryDirectory(prefix='sc-edition-download-')
         path=Path(folder.name)/'output.jpg'
@@ -126,8 +133,11 @@ async def download(request):
             timings['output_fetch_ms']=round((time.monotonic()-phase)*1000,3)
         await run_in_threadpool(fetch)
         # Permissions/source are rechecked after the potentially slow transfer.
-        await stored_current(request)
+        phase=time.monotonic()
+        await stored_current(request,assets=assets)
+        timings['download_final_identity_ms']=round((time.monotonic()-phase)*1000,3)
         timings['download_prepare_ms']=round((time.monotonic()-started)*1000,3)
+        logging.getLogger(__name__).info('AUTO_EDITIONS_DOWNLOAD_TIMINGS job=%s stages=%s',job['id'],timings)
         headers={**HEADERS,'Server-Timing':', '.join(f'{k};dur={v}' for k,v in timings.items())}
         return FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=headers,
                             background=BackgroundTask(folder.cleanup))
@@ -152,16 +162,15 @@ def same_allocation(unit,identity):
         and unit.get('shopify_product_gid')==identity.get('source',{}).get('product_gid'))
 
 
-async def stored_current(request):
+async def stored_current(request,*,authenticated=None,assets=None):
     # Retained historical output is bound to its exact allocation, not today's PSD.
-    await actor(request)
+    if authenticated is None:await actor(request)
     if not re.fullmatch(r'[a-f0-9]{64}',request.query_params.get('job_id','')):raise ValueError('Invalid saved artwork identity.')
-    registry,jobs=runtime.stores()
-    row=await run_in_threadpool(jobs.read,request.query_params.get('job_id',''))
+    _,jobs=runtime.stores()
+    row,unit=await run_in_threadpool(jobs.read_bound,request.query_params.get('job_id',''),allocation(request))
     if row and (row.get('result') or {}).get('retained') is True:
-        unit,_=await run_in_threadpool(registry.unit,allocation(request))
         if not same_allocation(unit,row['payload']['identity']):raise PermissionError('Artwork does not match this allocation.')
-        return row['payload'],await run_in_threadpool(runtime.storage),row
+        return row['payload'],assets or await run_in_threadpool(runtime.storage),row
     return await current(request)
 
 
@@ -171,10 +180,9 @@ async def state(request):
         saved_id=request.query_params.get('job_id','')
         if saved_id:
             if not re.fullmatch(r'[a-f0-9]{64}',saved_id):raise ValueError('Invalid job identity.')
-            registry,jobs=runtime.stores()
-            row=await run_in_threadpool(jobs.read,saved_id)
+            _,jobs=runtime.stores()
+            row,unit=await run_in_threadpool(jobs.read_bound,saved_id,allocation(request))
             if not row:raise ValueError('Generation request is unavailable.')
-            unit,_=await run_in_threadpool(registry.unit,allocation(request))
             job=row['payload']
             if not same_allocation(unit,job['identity']):raise PermissionError('Artwork does not match this allocation.')
             # Status never serves pixels. The worker fences current source and
