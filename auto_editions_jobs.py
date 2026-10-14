@@ -126,7 +126,8 @@ class Jobs:
         if not allocation_ids:return {}
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("""SELECT DISTINCT ON (j.payload->'identity'->>'allocation_id')
-                j.payload->'identity'->>'allocation_id' allocation_id,j.id,j.status,j.result
+                j.payload->'identity'->>'allocation_id' allocation_id,j.id,j.status,j.result,
+                j.payload->>'preparation_hash' preparation_hash
                 FROM public.auto_edition_jobs j
                 LEFT JOIN LATERAL (SELECT preparation_hash FROM public.auto_edition_layouts
                   WHERE product_gid=j.payload->'identity'->'source'->>'product_gid'

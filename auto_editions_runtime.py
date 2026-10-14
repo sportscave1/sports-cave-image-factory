@@ -130,16 +130,26 @@ def download_links(rows):
         def variant(value):return str(value or '').removeprefix('gid://shopify/ProductVariant/')
         raw_index=registry.index()
         index={(product,variant(v)):(raw_index[(product,v)] if isinstance(raw_index,dict) else None) for product,v in raw_index}
-        links={}
+        links={};expected={}
+        reasons=getattr(raw_index,'reasons',{})
+        hashes=getattr(raw_index,'hashes',{})
         for row in rows:
+            if (row.get('allocation_valid') is False or row.get('identity_enforced') is False
+                    or row.get('invalidated_at') or row.get('cancelled_at') or row.get('duplicate_allocation_warning')):continue
             allocation=str(row.get('edition_order_id') or row.get('id') or '')
             key=(psd_directory.product_id(row),variant(row.get('shopify_variant_id') or row.get('variant_id')))
             if key not in index:key=(key[0],'*')
-            if not allocation.isdigit() or key not in index:continue
+            if not allocation.isdigit():continue
+            if key not in index:
+                if key[0] in reasons:links[allocation]=reasons[key[0]]
+                continue
             if index[key] is not None and int(allocation) not in index[key]:continue
             links[allocation]='/auto-editions/download?allocation_id='+allocation+'#Download JPG'
-        summaries=jobs.summaries(list(links)) if jobs else {}
+            expected[allocation]=hashes.get(key)
+        summaries=jobs.summaries(list(expected)) if jobs else {}
         for key,row in summaries.items():
+            if key not in expected:continue
+            if expected.get(key) and row.get('preparation_hash')!=expected[key]:continue
             if row['status']=='Ready':
                 # Opening performs current permission/allocation and exact saved
                 # revision checks. Listing Orders must not serially query Dropbox

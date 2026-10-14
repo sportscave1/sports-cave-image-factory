@@ -2722,7 +2722,10 @@ def _render_orders_table(rows):
                 st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
                 allocation_id=str(selected.get('edition_order_id') or '')
                 if allocation_id in cloud_links:
-                    st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                    if cloud_links[allocation_id].startswith('/auto-editions/'):
+                        st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                    else:
+                        st.caption('Edition JPG: '+cloud_links[allocation_id])
                 elif edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
                     st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
                 else:
@@ -2778,7 +2781,10 @@ def _render_mobile_orders(rows):
             status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
             allocation_id=str(row.get('edition_order_id') or '')
             if allocation_id in cloud_links:
-                st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                if cloud_links[allocation_id].startswith('/auto-editions/'):
+                    st.link_button(auto_editions_runtime.link_label(cloud_links[allocation_id]),cloud_links[allocation_id])
+                else:
+                    st.caption('Edition JPG: '+cloud_links[allocation_id])
             elif edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
                 st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
             else:

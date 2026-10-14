@@ -109,6 +109,7 @@ def test_preparations_are_additive_and_approval_checks_expected_layout(database,
     from test_auto_editions import package
     jobs,sql=database;registry=Preparations(jobs.connect)
     manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    eligibility_tables(sql,manifest)
     unit=dict(shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
     proofs=[dict(preparation_hash=digest,pixel_exact=True),dict(preparation_hash=digest,outside_number_exact=True)]
     registry.save(manifest,proofs,{},'admin')
@@ -123,6 +124,7 @@ def test_scoped_layout_does_not_enable_other_allocations(database,tmp_path):
     from test_auto_editions import package
     jobs,sql=database;registry=Preparations(jobs.connect)
     manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    eligibility_tables(sql,manifest)
     unit=dict(id=42,shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
     registry.save(manifest,[dict(preparation_hash=digest,pixel_exact=True,outside_number_exact=True)],{},'admin')
     registry.approve(digest,unit,'admin',allocation_ids=[42,43])
@@ -161,6 +163,7 @@ def test_product_test_layout_preserves_variant_override_and_history(database,tmp
     from test_auto_editions import package
     jobs,sql=database;registry=Preparations(jobs.connect)
     manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    eligibility_tables(sql,manifest)
     unit=dict(id=42,shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
     registry.save(manifest,[dict(preparation_hash=digest,pixel_exact=True,outside_number_exact=True)],{},'admin')
     registry.approve(digest,{**unit,'shopify_variant_id':'*'},'admin')
@@ -187,3 +190,9 @@ def test_bound_read_observes_current_allocation_without_mapping_queries(database
     assert jobs.read_bound(j['id'],42)[1]['allocation_valid'] is False
     assert jobs.read_bound(j['id'],99)[1]['id']==99  # API must reject mismatched identity.
     assert jobs.read_bound(j['id'],100)==(None,None)
+
+
+def eligibility_tables(sql,manifest):
+    sql.execute('CREATE TABLE product_psd_mappings(shopify_product_gid text PRIMARY KEY,dropbox_file_id text)')
+    sql.execute('CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text)')
+    sql.execute('INSERT INTO product_psd_mappings VALUES(%s,%s)',(manifest['source']['product_gid'],manifest['source']['file_id']))
