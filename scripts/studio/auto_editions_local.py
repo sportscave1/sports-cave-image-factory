@@ -60,11 +60,14 @@ def host_loop():
                 headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=90)
             if response.status_code==403:return
             response.raise_for_status();data=response.json()
+            (HOST_FILE.parent/'host-status.json').write_text(json.dumps(dict(last_poll=time.time(),
+                status='Preparing' if data.get('grant') else 'Waiting for eligible work')))
             if data.get('grant'):start(data['grant'])
-        except Exception:
+        except Exception as error:
             # No credentials or private transport data in logs. Durable leases
             # make interrupted work recoverable on the next authorised session.
-            pass
+            try:(HOST_FILE.parent/'host-status.json').write_text(json.dumps(dict(last_poll=time.time(),status='Retrying',error_type=type(error).__name__)))
+            except OSError:pass
         HOST_STOP.wait(30)
 
 
@@ -94,8 +97,73 @@ def start(grant):
         folder=Path.home()/'Documents'/'SportsCaveAutoEditions'/key
         folder.mkdir(parents=True,exist_ok=False)
         JOBS[key]=dict(grant=grant,context=verified,folder=folder,created=time.monotonic(),status='Working')
-        threading.Thread(target=inspect,args=(key,),daemon=True).start()
+        package=find_reusable_package(verified)
+        if package:
+            JOBS[key]['reused_package']=str(package)
+            threading.Thread(target=upload_prepared,args=(key,package),daemon=True).start()
+        else:threading.Thread(target=inspect,args=(key,),daemon=True).start()
         return dict(job_id=key,status='Working')
+
+
+def find_reusable_package(ctx):
+    """Only reuse exact source/edition identities. The server revalidates pixels."""
+    if not ctx.get('automatic'):return None
+    root=HOST_FILE.parent.resolve()
+    for package in sorted(root.glob('*/prepared.zip'),key=lambda p:p.stat().st_mtime,reverse=True):
+        if package.is_symlink() or package.parent.is_symlink():continue
+        try:
+            with zipfile.ZipFile(package) as archive:
+                if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
+                manifest=json.loads(archive.read('manifest.json'))
+            from auto_editions_onboarding import preparation_scale
+            expected=preparation_scale(manifest.get('source_dimensions',manifest.get('dimensions',[])))
+            if (manifest.get('source')==ctx['source'] and manifest.get('edition_total')==ctx['total']
+                    and manifest.get('preparation_geometry',{}).get('scale',1)==expected):
+                return package
+        except (OSError,ValueError,KeyError,zipfile.BadZipFile):continue
+    return None
+
+
+def reconnect(row):
+    from device_trust import protect
+    import requests
+    config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
+    if config['base_url']!=row['grant']['base_url']:raise ValueError('Preparation origin changed.')
+    ctx=row['context']
+    response=requests.post(config['base_url']+'/api/auto-editions/onboarding/reconnect',
+        json={k:ctx[k] for k in ('product_gid','lease_token')},
+        headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=90)
+    response.raise_for_status();row['grant']=response.json()['grant']
+    if context(row['grant'])!=ctx:raise ValueError('Preparation identity changed.')
+
+
+def upload_prepared(key,archive):
+    """Retry transfer after deploy without repeating Photoshop or source download."""
+    import requests
+    row=JOBS[key];started=time.monotonic()
+    try:
+        for attempt in range(3):
+            try:
+                grant=row['grant']
+                with archive.open('rb') as content:
+                    response=requests.post(grant['base_url']+'/api/auto-editions/package?'+urlencode({'ticket':grant['ticket']}),
+                        data=content,headers={'X-Sports-Cave-Transfer-Secret':grant['secret'],'Content-Type':'application/zip'},
+                        allow_redirects=False,timeout=600)
+                response.raise_for_status();result=response.json()
+                if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
+                row.update(status='Prepared',preparation_hash=result['preparation_hash'])
+                row.setdefault('timings',{})['upload_validate_seconds']=round(time.monotonic()-started,3)
+                row['server_timings']=result.get('timings',{})
+                if row['context'].get('automatic'):
+                    try:release_verified_temporary_files(row)
+                    except (OSError,ValueError):row['cleanup_pending']=True
+                return
+            except requests.RequestException:
+                if attempt==2 or not row['context'].get('automatic'):raise
+                reconnect(row)
+    except Exception as error:
+        row.update(status='Blocked',error='Prepared package retained; upload/checkpoint failed: '+type(error).__name__)
+        report_failure(row)
 
 
 def processor_lease():
@@ -143,6 +211,7 @@ def inspect(key):
                 if count>meta['size']:raise ValueError('Source exceeded its verified size.')
                 output.write(block)
         if count!=meta['size'] or transfer.digest(source,True)!=meta['content_hash']:raise ValueError('Source checksum failed.')
+        row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
         phase='Photoshop inspection'
         lease=processor_lease()
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
@@ -153,6 +222,7 @@ def inspect(key):
         script+=(transfer.ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
         run(script)
         result=json.loads((folder/'inspection.json').read_text(encoding='utf-8-sig'))['documents'][0]
+        row['timings']['inspection_seconds']=round(time.monotonic()-row['created']-row['timings']['psd_retrieval_seconds'],3)
         if 'error' in result:raise ValueError('Photoshop could not inspect the linked source.')
         automatic=bool(row['context'].get('automatic'))
         row.update(status='Working' if automatic else 'Inspected',inspection=result['inspection'])
@@ -198,8 +268,11 @@ def prepare_worker(key,roles,scale=1):
         if ctx!=row['context']:raise ValueError('Preparation identity changed.')
         lease=processor_lease()
         output=row['folder']/'prepared'
+        build_started=time.monotonic()
         build(row['folder']/'input.psd',output,ctx['source'],number_layer=roles['number'],
               plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'],scale=scale)
+        row.setdefault('timings',{})['prepare_validate_seconds']=round(time.monotonic()-build_started,3)
+        if (output/'timings.json').exists():row['timings'].update(json.loads((output/'timings.json').read_text()))
         manifest=json.loads((output/'manifest.json').read_text())
         manifest['confirmed_roles']=roles
         # Adding reviewed role metadata changes the package identity. Server
@@ -212,21 +285,9 @@ def prepare_worker(key,roles,scale=1):
         with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED) as package:
             for name in names:package.write(output/name,name)
         if archive.stat().st_size>MAX_PACKAGE_BYTES:raise ValueError('Prepared package exceeds the cloud transfer limit.')
-        grant=row['grant']
-        # Stream the package with the scoped existing transfer secret. It has
-        # only generated assets; no PSD or credentials are included.
-        import requests
-        with archive.open('rb') as content:
-            response=requests.post(grant['base_url']+'/api/auto-editions/package?'+urlencode({'ticket':grant['ticket']}),
-                data=content,headers={'X-Sports-Cave-Transfer-Secret':grant['secret'],'Content-Type':'application/zip'},
-                allow_redirects=False,timeout=600)
-        if response.status_code!=200:raise ValueError('Cloud preparation validation failed.')
-        result=response.json()
-        if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
-        row.update(status='Prepared',preparation_hash=result['preparation_hash'])
-        if ctx.get('automatic'):
-            try:release_verified_temporary_files(row)
-            except (OSError,ValueError):row['cleanup_pending']=True
+        # Photoshop is finished; independent uploads must not occupy its lease.
+        lease.unlink(missing_ok=True);lease=None
+        upload_prepared(key,archive)
     except Exception as error:
         JOBS[key].update(status='Blocked',error='Preparation failed: '+(str(error)[:350] if isinstance(error,ValueError) else type(error).__name__)+'. Existing PSD and mapping are preserved.')
     finally:
@@ -234,14 +295,15 @@ def prepare_worker(key,roles,scale=1):
 
 
 def release_verified_temporary_files(row):
-    """Keep the retry package/receipt; release only this job's staged copies."""
+    """After cloud confirmation keep the receipt, release this job's staged copies."""
     import re
     folder=row['folder'].resolve()
     owned=(Path.home()/'Documents'/'SportsCaveAutoEditions').resolve()
     if folder.parent!=owned or not re.fullmatch(r'[a-f0-9]{48}',folder.name):
         raise ValueError('Temporary preparation directory is outside its owned root.')
     (folder/'receipt.json').write_text(json.dumps(dict(preparation_hash=row['preparation_hash'],
-        source=row['context']['source'],status='Cloud assets independently verified')),encoding='utf-8')
+        source=row['context']['source'],status='Cloud assets independently verified',
+        timings=row.get('timings',{}),server_timings=row.get('server_timings',{}))),encoding='utf-8')
     prepared=folder/'prepared'
     if prepared.exists():
         if prepared.is_symlink() or any(p.is_symlink() or not p.resolve().is_relative_to(folder) for p in prepared.rglob('*')):
@@ -251,6 +313,10 @@ def release_verified_temporary_files(row):
     if source.exists():
         if source.is_symlink() or source.resolve().parent!=folder:raise ValueError('Unexpected staged source path.')
         source.unlink()
+    archive=folder/'prepared.zip'
+    if archive.exists():
+        if archive.is_symlink() or archive.resolve().parent!=folder:raise ValueError('Unexpected package path.')
+        archive.unlink()
 
 
 def action(data):

@@ -181,8 +181,8 @@ class DropboxAssets:
             raise PreparationBlocked('Prepared asset exceeds the transfer limit.')
         folder=self.path(digest,'master.png').rsplit('/',1)[0]
         self.integration.ensure_folder_path(self.token,folder,root_path='/Sportscave Team Folder')
-        records=[]
-        for asset,path in zip(assets,paths):
+        def publish(pair):
+            asset,path=pair
             destination=self.path(digest,asset['name'])
             existing=self.integration.get_metadata_if_exists(self.token,destination)
             metadata=existing or self.integration.upload_local_file(self.token,destination,path,conflict='cancel')
@@ -190,7 +190,12 @@ class DropboxAssets:
                     or metadata.get('content_hash')!=ae.file_hash(path,dropbox=True)
                     or metadata.get('size')!=path.stat().st_size):
                 raise PreparationBlocked('Existing or uploaded asset differs; it was not overwritten.')
-            records.append(dict(name=asset['name'],file_id=metadata['id'],revision=metadata['rev']))
+            return dict(name=asset['name'],file_id=metadata['id'],revision=metadata['rev'],
+                        bytes=metadata['size'])
+        # Bounded network concurrency only. Photoshop and pixel checks remain serial.
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3,thread_name_prefix='edition-assets') as pool:
+            records=list(pool.map(publish,zip(assets,paths)))
         return dict(preparation_hash=digest,assets=records)
 
     def discard_cache(self,job_id,output):

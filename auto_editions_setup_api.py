@@ -119,6 +119,8 @@ async def context(request):
 
 async def package(request):
     acquired=False
+    import time
+    started=time.monotonic();timings={}
     try:
         setup=await run_in_threadpool(grant_context,request)
         acquired=IMPORT_LOCK.acquire(blocking=False)
@@ -133,10 +135,13 @@ async def package(request):
                     if size>MAX_PACKAGE_BYTES:raise ValueError('Preparation transfer exceeds its limit.')
                     output.write(block)
             assets_root=root/'assets';assets_root.mkdir()
+            timings['receive_seconds']=round(time.monotonic()-started,3);phase=time.monotonic()
             ctx=setup['context']
             manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
+            timings['validation_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
             assets=runtime.storage()
             receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
+            timings['dropbox_upload_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
             await run_in_threadpool(grant_context,request)
             registry,_=runtime.stores()
             digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])
@@ -145,7 +150,12 @@ async def package(request):
                 await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
                     'Blocked','Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest)
             setup['imported']=digest
-        return JSONResponse(dict(preparation_hash=digest,status='Awaiting visual approval',print_ready=False),headers=api.HEADERS)
+            timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
+            timings['total_seconds']=round(time.monotonic()-started,3)
+            if ctx.get('automatic'):
+                with queue().connect() as conn,conn.cursor() as cur:
+                    queue().audit(cur,ctx['product_gid'],setup['actor_id'],'preparation_metrics',timings)
+        return JSONResponse(dict(preparation_hash=digest,status='Awaiting visual approval',print_ready=False,timings=timings),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
     finally:
         if acquired:IMPORT_LOCK.release()

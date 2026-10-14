@@ -203,7 +203,9 @@ async def summary(request):
         await api.actor(request,setup=True)
         rows=await run_in_threadpool(queue().rows)
         # Transfer secrets and active lease capabilities never enter the UI listing.
-        public=[{k:r[k] for k in ('product_gid','product_title','status','reason','preparation_hash','attempts')} for r in rows]
+        public=[{**{k:r[k] for k in ('product_gid','product_title','status','reason','preparation_hash','attempts')},
+                 'priority':r['priority'],
+                 'status':'Deferred' if r['status']=='Awaiting preparation' and r['priority']==0 else r['status']} for r in rows]
         with queue().connect() as conn,conn.cursor() as cur:
             cur.execute('SELECT count(*) AS total FROM product_psd_mappings')
             mapped=cur.fetchone()['total']
@@ -221,6 +223,8 @@ async def resume(request):
         user=await api.actor(request,setup=True,write=True)
         if await files._json_body(request)!={}:raise ValueError('Resume uses existing verified mappings only.')
         count=await run_in_threadpool(queue().seed,str(user['id']))
+        from auto_editions_priority import refresh
+        await run_in_threadpool(refresh,queue(),str(user['id']))
         return JSONResponse(dict(mapped=count),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
@@ -231,7 +235,10 @@ async def claim(request):
         import files_upload_api as files
         user=await preparation_actor(request)
         if await files._json_body(request)!={}:raise ValueError('Preparation reads authoritative product identities.')
-        store=queue();row=await run_in_threadpool(store.claim,str(user['id']))
+        from auto_editions_priority import refresh
+        store=queue()
+        await run_in_threadpool(refresh,store,str(user['id']))
+        row=await run_in_threadpool(store.claim,str(user['id']))
         if not row:return JSONResponse(dict(grant=None),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,row['product_gid'],str(row['lease_token']))
         await run_in_threadpool(store.checkpoint,row['product_gid'],str(row['lease_token']),str(user['id']),
@@ -265,7 +272,44 @@ async def retry(request):
     except Exception as error:return api.failure(error)
 
 
+async def prepare_now(request):
+    try:
+        import files_upload_api as files
+        user=await api.actor(request,setup=True,write=True)
+        body=await files._json_body(request)
+        if set(body)!={'product_gid'}:raise ValueError('Select one mapped product.')
+        await run_in_threadpool(queue().prepare_now,body['product_gid'],str(user['id']))
+        return JSONResponse(dict(ok=True),headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
+async def reconnect(request):
+    """Reissue only the same owned preparation lease after a web-service restart."""
+    try:
+        import files_upload_api as files
+        if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
+        user=await preparation_actor(request);body=await files._json_body(request)
+        if set(body)!={'product_gid','lease_token'}:raise ValueError('Exact active preparation lease required.')
+        store=queue()
+        with store.connect() as conn,conn.cursor() as cur:
+            cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit WHERE product_gid=%s AND actor_id=%s
+                AND event='claimed' AND detail->>'lease'=%s""",(body['product_gid'],str(user['id']),body['lease_token']))
+            if not cur.fetchone():raise PermissionError('Preparation lease belongs to another operator.')
+        ctx=await run_in_threadpool(product_context,body['product_gid'],body['lease_token'])
+        auth=await run_in_threadpool(files._dropbox_context)
+        meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,auth['access_token'],ctx['source']['file_id'],include_preview=False)
+        if ae.source_identity(body['product_gid'],meta)!=ctx['source']:raise ValueError('Source changed; retained package cannot be reused.')
+        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta)
+        record.expires_at=time.monotonic()+45*60
+        record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
+            host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())
+        return JSONResponse(dict(grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 ROUTES=(('/api/auto-editions/onboarding',summary,('GET',)),
+        ('/api/auto-editions/onboarding/prepare-now',prepare_now,('POST',)),
+        ('/api/auto-editions/onboarding/reconnect',reconnect,('POST',)),
         ('/api/auto-editions/onboarding/host',register_host,('POST',)),
         ('/api/auto-editions/onboarding/host/revoke',revoke_hosts,('POST',)),
         ('/auto-editions/onboarding',page,('GET',)),

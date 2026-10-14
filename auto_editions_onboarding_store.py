@@ -14,7 +14,7 @@ class Queue:
         cur.execute('''INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail)
                     VALUES(%s,%s,%s,%s::jsonb)''', (pid,actor,event,json.dumps(detail or {})))
 
-    def enqueue(self, pid, file_id, actor):
+    def enqueue(self, pid, file_id, actor, *, newly_linked=True):
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute('SELECT dropbox_file_id FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
             mapping = cur.fetchone()
@@ -38,11 +38,11 @@ class Queue:
                     VALUES(%s,%s,'Blocked','Prepared assets retained; review current source and visual quality.',%s::jsonb,%s)
                     ON CONFLICT DO NOTHING""",(pid,file_id,json.dumps(prepared['manifest']['source']),prepared['hash']))
                 return
-            cur.execute('''INSERT INTO auto_edition_onboarding(product_gid,file_id) VALUES(%s,%s)
+            cur.execute('''INSERT INTO auto_edition_onboarding(product_gid,file_id,priority) VALUES(%s,%s,%s)
                 ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
-                preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,
+                preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=excluded.priority,
                 lease_token=NULL,lease_until=NULL,updated_at=now()
-                WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id))
+                WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 0))
             if cur.fetchone():
                 self.audit(cur,pid,actor,'queued')
 
@@ -55,7 +55,7 @@ class Queue:
                  ORDER BY max(o.id) DESC NULLS LAST,count(o.id) DESC''')
             rows = cur.fetchall()
         for row in rows:
-            self.enqueue(row['shopify_product_gid'],row['dropbox_file_id'],actor)
+            self.enqueue(row['shopify_product_gid'],row['dropbox_file_id'],actor,newly_linked=False)
         return len(rows)
 
     def claim(self, actor):
@@ -70,7 +70,7 @@ class Queue:
                 lease_token=NULL,lease_until=NULL,updated_at=now()
                 WHERE status='Preparing' AND lease_until<now() AND attempts>=3""")
             cur.execute("""SELECT * FROM auto_edition_onboarding WHERE attempts<3 AND
-                (status='Awaiting preparation' OR (status='Preparing' AND lease_until<now()))
+                ((status='Awaiting preparation' AND priority>0) OR (status='Preparing' AND lease_until<now()))
                 ORDER BY priority DESC,created_at FOR UPDATE SKIP LOCKED LIMIT 1""")
             row=cur.fetchone()
             if not row:return None
@@ -97,7 +97,7 @@ class Queue:
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("""UPDATE auto_edition_onboarding SET status='Awaiting preparation',reason='',
                 attempts=0,priority=10,lease_token=NULL,lease_until=NULL,source=NULL,preparation_hash=NULL,updated_at=now()
-                WHERE product_gid=%s AND status IN ('Blocked','Needs PSD Repair')
+                WHERE product_gid=%s AND status IN ('Blocked','Needs PSD Repair') AND preparation_hash IS NULL
                 RETURNING product_gid""",(pid,))
             if not cur.fetchone():raise ValueError('Only a failed preparation can be retried.')
             self.audit(cur,pid,actor,'retry')
@@ -108,3 +108,10 @@ class Queue:
                 JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
                 ORDER BY q.created_at''')
             return [dict(r) for r in cur.fetchall()]
+
+    def prepare_now(self,pid,actor):
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""UPDATE auto_edition_onboarding SET priority=10,reason='Administrator Prepare Now',updated_at=now()
+                WHERE product_gid=%s AND status='Awaiting preparation' RETURNING product_gid""",(pid,))
+            if not cur.fetchone():raise ValueError('Only an awaiting or deferred product can be prioritised. Review failed or prepared artwork separately.')
+            self.audit(cur,pid,actor,'prepare_now')

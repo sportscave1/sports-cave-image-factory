@@ -38,7 +38,9 @@ var SCAutoEditionsPreparation = (function () {
             try { f.write(SCPSDInspector.encode(value)); } finally { f.close(); }
         }
         try {
+            var tick = new Date().getTime(), timings = {};
             doc = app.open(new File(r.input));
+            timings.photoshop_open_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }
             if (doc.mode !== DocumentMode.RGB || doc.bitsPerChannel !== BitsPerChannelType.EIGHT)
                 throw Error("colour_conversion_requires_approval");
@@ -53,6 +55,7 @@ var SCAutoEditionsPreparation = (function () {
             var inspection = SCPSDInspector.inspect(doc, {smart_object_depth:0,smart_object_limit:0});
             var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
             var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
+            timings.layer_inspection_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
             if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 95000000)
                 throw Error("canvas_exceeds_worker_limit");
@@ -88,6 +91,7 @@ var SCAutoEditionsPreparation = (function () {
                 || (region[2]-region[0])*(region[3]-region[1]) > w*h/10)
                 throw Error("number_region_requires_review");
             layer.visible = false; savePNG(doc, "master.png"); layer.visible = true;
+            timings.master_preparation_ms = new Date().getTime()-tick; tick = new Date().getTime();
             for (var number = 1; number <= total; number++) {
                 replace(number);
                 if (number === 1 || number === r.reference_number || number === total)
@@ -98,7 +102,8 @@ var SCAutoEditionsPreparation = (function () {
                     savePNG(patch, "number-" + number + ".png");
                 } finally { patch.close(SaveOptions.DONOTSAVECHANGES); app.activeDocument = doc; }
             }
-            write({dimensions:[w,h],source_dimensions:sourceDimensions,upscaled:scale!==1,
+            timings.numbering_assets_ms = new Date().getTime()-tick;
+            write({timings:timings,dimensions:[w,h],source_dimensions:sourceDimensions,upscaled:scale!==1,
                 preparation_geometry:{scale:scale,method:scale===1?"native":"photoshop_layered_bicubic_smoother",
                     supplier_verified:false,aspect_preserved:true,quality_approval_required:scale!==1},
                 source_plaque_bounds:sourcePlaqueBounds,

@@ -39,6 +39,9 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
         raise ValueError('Photoshop did not confirm preparation.')
     report=json.loads((output/'preparation.json').read_text(encoding='utf-8-sig'))
+    # Measurements must never change the reusable artwork identity.
+    timings=report.pop('timings',{})
+    (output/'timings.json').write_text(json.dumps(timings))
     def asset(name):
         return dict(name=name,sha256=ae.file_hash(output/name))
     manifest={**report,'schema_version':1,'strategy':'photoshop_number_patches','source':identity,

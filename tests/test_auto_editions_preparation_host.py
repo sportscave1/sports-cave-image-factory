@@ -36,7 +36,48 @@ def test_only_owned_verified_temp_copies_released(tmp_path):
     row={'folder':folder,'preparation_hash':'c'*64,'context':{'source':{'file_id':'id:original'}}}
     with patch.object(Path,'home',return_value=tmp_path):local.release_verified_temporary_files(row)
     assert not prepared.exists() and not (folder/'input.psd').exists()
-    assert (folder/'prepared.zip').read_bytes()==b'recovery package'
+    assert not (folder/'prepared.zip').exists()
     assert json.loads((folder/'receipt.json').read_text())['preparation_hash']=='c'*64
     with patch.object(Path,'home',return_value=tmp_path):
         with pytest.raises(ValueError):local.release_verified_temporary_files({**row,'folder':tmp_path})
+
+
+def test_recovery_package_requires_exact_revision_and_settings(tmp_path):
+    import zipfile
+    root=tmp_path/'host';folder=root/('a'*48);folder.mkdir(parents=True)
+    ctx={'automatic':True,'source':{'file_id':'id:a','revision':'rev1'},'total':100}
+    manifest={'source':ctx['source'],'edition_total':100,'source_dimensions':[2835,2004],
+              'preparation_geometry':{'scale':4}}
+    archive=folder/'prepared.zip'
+    with zipfile.ZipFile(archive,'w') as z:z.writestr('manifest.json',json.dumps(manifest))
+    with patch.object(local,'HOST_FILE',root/'host.dpapi'):
+        assert local.find_reusable_package(ctx)==archive
+        assert local.find_reusable_package({**ctx,'source':{'file_id':'id:a','revision':'rev2'}}) is None
+        assert local.find_reusable_package({**ctx,'total':200}) is None
+
+
+def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):
+    import requests
+    from unittest.mock import Mock
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'validated test package')
+    row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
+             context={'automatic':True},status='Working')
+    failed=Mock();failed.raise_for_status.side_effect=requests.HTTPError('expired transfer')
+    success=Mock();success.json.return_value={'preparation_hash':'c'*64}
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=[failed,success]) as post,\
+         patch.object(local,'reconnect') as reconnect,patch.object(local,'release_verified_temporary_files') as cleanup:
+        local.upload_prepared('job',archive)
+        assert row['status']=='Prepared' and post.call_count==2
+        reconnect.assert_called_once_with(row);cleanup.assert_called_once_with(row)
+
+
+def test_failed_upload_keeps_recoverable_package(tmp_path):
+    import requests
+    archive=tmp_path/'prepared.zip';archive.write_bytes(b'retained')
+    row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
+             context={'automatic':True},status='Working')
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.ConnectionError()),\
+         patch.object(local,'reconnect'),patch.object(local,'report_failure'),patch.object(local,'release_verified_temporary_files') as cleanup:
+        local.upload_prepared('job',archive)
+        assert row['status']=='Blocked' and archive.read_bytes()==b'retained'
+        cleanup.assert_not_called()

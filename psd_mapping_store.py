@@ -126,8 +126,8 @@ class PostgresMappings:
             cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")
             if cur.fetchone()['name']:
                 cur.execute("""INSERT INTO public.auto_edition_onboarding(product_gid,file_id,priority)
-                    VALUES(%s,%s,10) ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,
-                    source=NULL,preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=10,
+                    VALUES(%s,%s,2) ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,
+                    source=NULL,preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=2,
                     lease_token=NULL,lease_until=NULL,updated_at=now()
                     WHERE auto_edition_onboarding.file_id<>excluded.file_id""",(pid,fid))
                 cur.execute("""INSERT INTO public.auto_edition_onboarding_audit(product_gid,actor_id,event)
