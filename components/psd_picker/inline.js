@@ -27,7 +27,7 @@
   document.addEventListener('scroll',()=>{for(const id of immediate.keys())clearImmediate(id);},true);
   const url=(path,id,job)=>path+'?allocation_id='+encodeURIComponent(id)+(job?'&job_id='+encodeURIComponent(job):'');
   async function api(path,id,post=false,job){const r=await fetch(url(path,id,job),post?{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}:{});const d=await r.json();if(!r.ok)throw Error(d.error||'Unavailable');return d;}
-  function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&u.pathname.startsWith('/auto-editions/')&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
+  function anchors(id){return [...document.querySelectorAll('a[href]')].filter(a=>{try{const u=new URL(a.href);return u.origin===location.origin&&['/auto-editions/download','/auto-editions/open','/auto-editions/view'].includes(u.pathname)&&u.searchParams.get('allocation_id')===id;}catch{return false;}});}
   function paint(id,row){if(!['Generating','Queued'].includes(row.status))clearImmediate(id);for(const a of anchors(id)){
    const saved=['Ready','Unavailable'].includes(row.status),busy=['Generating','Queued'].includes(row.status);
    const label=row.status==='Ready'?'Open':row.status==='Unavailable'?'Retry Open':row.status==='Blocked'?'Retry':busy?'Generating\u2026':'Download JPG';
