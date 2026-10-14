@@ -1,0 +1,249 @@
+{
+  "environment": "Synthetic 2000-item folder; actual Chrome. No provider network.",
+  "layouts": {
+    "before": [
+      {
+        "width": 320,
+        "columns": 2,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 12,
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "bodyWidth": 320,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 375,
+        "columns": 2,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 12,
+        "scrollWidth": 375,
+        "clientWidth": 375,
+        "bodyWidth": 375,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 768,
+        "columns": 5,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 35,
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "bodyWidth": 768,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1024,
+        "columns": 6,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 42,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "bodyWidth": 1024,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1280,
+        "columns": 8,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 56,
+        "scrollWidth": 1280,
+        "clientWidth": 1280,
+        "bodyWidth": 1280,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1440,
+        "columns": 9,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 63,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "bodyWidth": 1440,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1920,
+        "columns": 12,
+        "icon": 90,
+        "cell": 142,
+        "gap": 8,
+        "rows": 84,
+        "scrollWidth": 1920,
+        "clientWidth": 1920,
+        "bodyWidth": 1920,
+        "overlap": false,
+        "namesClamped": true
+      }
+    ],
+    "after": [
+      {
+        "width": 320,
+        "columns": 3,
+        "icon": 40,
+        "cell": 92,
+        "gap": 6,
+        "rows": 24,
+        "scrollWidth": 320,
+        "clientWidth": 320,
+        "bodyWidth": 320,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 375,
+        "columns": 3,
+        "icon": 40,
+        "cell": 92,
+        "gap": 6,
+        "rows": 24,
+        "scrollWidth": 375,
+        "clientWidth": 375,
+        "bodyWidth": 375,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 768,
+        "columns": 6,
+        "icon": 48,
+        "cell": 100,
+        "gap": 6,
+        "rows": 54,
+        "scrollWidth": 768,
+        "clientWidth": 768,
+        "bodyWidth": 768,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1024,
+        "columns": 8,
+        "icon": 48,
+        "cell": 100,
+        "gap": 6,
+        "rows": 72,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "bodyWidth": 1024,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1280,
+        "columns": 10,
+        "icon": 48,
+        "cell": 100,
+        "gap": 6,
+        "rows": 90,
+        "scrollWidth": 1280,
+        "clientWidth": 1280,
+        "bodyWidth": 1280,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1440,
+        "columns": 11,
+        "icon": 48,
+        "cell": 100,
+        "gap": 6,
+        "rows": 99,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "bodyWidth": 1440,
+        "overlap": false,
+        "namesClamped": true
+      },
+      {
+        "width": 1920,
+        "columns": 15,
+        "icon": 48,
+        "cell": 100,
+        "gap": 6,
+        "rows": 135,
+        "scrollWidth": 1920,
+        "clientWidth": 1920,
+        "bodyWidth": 1920,
+        "overlap": false,
+        "namesClamped": true
+      }
+    ]
+  },
+  "render": {
+    "before": [
+      1.4000000059604645,
+      0.7999999970197678,
+      0.7000000029802322,
+      0.699999988079071,
+      0.6000000089406967,
+      1,
+      0.5999999940395355,
+      0.7000000029802322,
+      0.800000011920929,
+      1.3999999910593033,
+      1.4000000059604645,
+      1.7999999970197678,
+      1.2000000029802322,
+      0.8999999910593033,
+      0.699999988079071,
+      0.7000000029802322,
+      1,
+      0.7000000029802322,
+      0.7999999970197678,
+      0.7000000029802322
+    ],
+    "after": [
+      2,
+      1,
+      0.8999999910593033,
+      0.9000000059604645,
+      0.7999999970197678,
+      1,
+      0.9000000059604645,
+      0.7999999970197678,
+      1.699999988079071,
+      1.699999988079071,
+      2.7000000029802322,
+      1.5,
+      1.5,
+      0.9000000059604645,
+      0.7999999970197678,
+      0.7000000029802322,
+      1.2999999970197678,
+      0.9000000059604645,
+      0.9000000059604645,
+      0.7999999970197678
+    ]
+  },
+  "scroll": {
+    "p50": 16.599999994039536,
+    "p95": 17.700000002980232
+  },
+  "before": {
+    "renderP50": 0.7999999970197678,
+    "renderP95": 1.4000000059604645
+  },
+  "after": {
+    "renderP50": 0.9000000059604645,
+    "renderP95": 2
+  }
+}

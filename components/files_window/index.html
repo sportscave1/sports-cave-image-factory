@@ -237,7 +237,8 @@
         overflow-x: hidden;
         overflow-y: auto;
         overscroll-behavior: contain;
-        padding: 8px 10px 22px;
+        padding: 8px 10px 10px;
+        container-type: inline-size;
         position: relative;
         scrollbar-color: #b9bdc1 #f4f5f6;
         scrollbar-width: auto;
@@ -260,10 +261,10 @@
       .items.view-large, .items.view-medium {
         align-content: start;
         display: grid;
-        gap: 12px 8px;
-        grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+        gap: 6px;
+        grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
       }
-      .items.view-large { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+      .items.view-large { grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); }
       .file-item {
         background: transparent;
         border: 1px solid transparent;
@@ -278,11 +279,12 @@
         align-items: center;
         display: flex;
         flex-direction: column;
-        min-height: 142px;
-        padding: 9px 6px 8px;
+        height: 100px;
+        padding: 6px;
+        gap: 6px;
         text-align: center;
       }
-      .view-large .file-item { min-height: 174px; }
+      .view-large .file-item { height: 112px; padding: 8px; }
       .file-item:hover { background: #f0f6fa; border-color: #dbe8f1; }
       .file-item.selected { background: var(--accent-selected); border-color: #9cc7e4; }
       .file-item.focused { box-shadow: inset 0 0 0 1px var(--accent); }
@@ -291,12 +293,12 @@
         align-items: center;
         display: flex;
         flex: 0 0 auto;
-        height: 90px;
+        height: 48px;
         justify-content: center;
         pointer-events: none;
-        width: 90px;
+        width: 48px;
       }
-      .view-large .file-icon { height: 118px; width: 118px; }
+      .view-large .file-icon { height: 56px; width: 56px; }
       .file-icon svg, .file-icon img { display: block; height: 100%; max-width: 100%; object-fit: contain; width: 100%; }
       .thumbnail { border-radius: 3px; object-fit: contain; }
       .item-name {
@@ -309,26 +311,26 @@
         text-overflow: ellipsis;
         word-break: break-word;
         -webkit-box-orient: vertical;
-        -webkit-line-clamp: 3;
+        -webkit-line-clamp: 2;
       }
-      .view-large .item-name { font-size: 14px; }
+      .view-large .item-name { font-size: 13px; }
       .items.view-small {
         align-content: start;
         display: grid;
         gap: 2px 6px;
-        grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
       }
       .items.view-list { display: grid; gap: 1px; grid-template-columns: 1fr; }
       .view-small .file-item, .view-list .file-item {
         align-items: center;
         display: grid;
         gap: 7px;
-        grid-template-columns: 34px minmax(0, 1fr);
-        height: 39px;
+        grid-template-columns: 28px minmax(0, 1fr);
+        height: 36px;
         padding: 2px 7px;
       }
-      .view-list .file-item { grid-template-columns: 38px minmax(0, 1fr) 170px 100px; }
-      .view-small .file-icon, .view-list .file-icon { height: 32px; width: 32px; }
+      .view-list .file-item { grid-template-columns: 28px minmax(0, 1fr) 160px 80px; }
+      .view-small .file-icon, .view-list .file-icon { height: 24px; width: 24px; }
       .view-small .item-name, .view-list .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
       .item-secondary { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .details-header {
@@ -367,17 +369,17 @@
         border-radius: 0;
         display: grid;
         grid-template-columns: minmax(250px, 1fr) 100px 180px 190px 100px;
-        min-height: 42px;
+        height: 36px;
       }
       .view-details .file-item:last-child { border-bottom: 0; }
       .details-name { align-items: center; display: flex; gap: 8px; min-width: 0; padding: 3px 8px; }
-      .view-details .file-icon { height: 32px; width: 32px; }
+      .view-details .file-icon { height: 24px; width: 24px; }
       .view-details .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
       .detail-cell { color: #42464a; min-width: 0; overflow: hidden; padding: 0 8px; text-overflow: ellipsis; white-space: nowrap; }
       .detail-modified {
         color: #6a7076;
         font-variant-numeric: tabular-nums;
-        line-height: 42px;
+        line-height: 1.3;
       }
       .empty-state {
         align-items: center;
@@ -565,12 +567,25 @@
         .address-row { grid-template-columns: auto minmax(0, 1fr); }
         .search-wrap { grid-column: 1 / -1; }
         .address-row { padding-bottom: 6px; }
-        .command-bar { overflow-x: auto; }
-        .items.view-medium { grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
+        .command-bar { flex-wrap: wrap; }
+        .command-separator { display: none; }
+        .command { min-width: 40px; height: 40px; }
+        .view-list .file-item { grid-template-columns: 28px minmax(0, 1fr); }
+        .view-list .item-secondary { display: none; }
       }
       @media (max-width: 560px) {
-        .details-header, .view-details .file-item { grid-template-columns: minmax(150px, 1fr) 156px; }
+        .details-header, .view-details .file-item { grid-template-columns: minmax(0, 1fr) 124px; }
         .details-header > span:nth-child(5), .view-details .detail-size { display: none; }
+      }
+      @container (max-width: 540px) {
+        .items.view-medium { grid-template-columns: repeat(auto-fill, minmax(94px, 1fr)); }
+        .items.view-large { grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); }
+        .view-medium .file-icon { width: 40px; height: 40px; }
+        .view-medium .file-item { height: 92px; }
+      }
+      @media (pointer: coarse) {
+        .icon-button, .command { min-width: 44px; min-height: 44px; }
+        .view-small .file-item, .view-list .file-item, .view-details .file-item { height: 44px; }
       }
       #previewPanel { position:fixed; inset:0; z-index:100; background:#181818; display:flex; flex-direction:column; }
       #previewPanel[hidden] { display:none; }
@@ -693,13 +708,13 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
 .command:hover:not(:disabled),.icon-button:hover:not(:disabled){background:#e9edf1;box-shadow:inset 0 0 0 1px #ccd3db}
 .command:active:not(:disabled){background:#dfe5eb}.command-icon svg{width:17px;height:17px;display:block}
 .crumb{border-radius:5px}.crumb:hover:not(:disabled){background:#edf0f3}
-.file-item.focused{outline:1px solid #8e9bad;outline-offset:-1px}
+.file-item.focused{outline:2px solid var(--accent);outline-offset:-2px}
 html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.selected{background:#e3ebf4;box-shadow:inset 3px 0 #526f94}
 .menu{border-radius:10px;box-shadow:0 12px 38px #18263424;border-color:#d5dae2;padding:5px}
 .menu-button{border-radius:5px;min-height:32px}.menu-button:hover:not(:disabled){background:#e9edf3}
 .modal{border-radius:12px;box-shadow:0 20px 65px #17212b30;max-width:min(480px,94vw)}
 @media(max-width:600px){.command{min-height:36px;padding:6px 8px}.address-row{gap:5px}.menu{max-width:calc(100vw - 16px)}.modal-backdrop{padding:10px}}
-@media(pointer:coarse){.menu-button{min-height:40px}}
+@media(pointer:coarse){.menu-button{min-height:44px}.command,.icon-button{min-width:44px;min-height:44px}}
 @media(prefers-reduced-motion:reduce){.command,.icon-button{transition:none}}
 </style>
 </head>
@@ -774,7 +789,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       const MAX_CLIENT_FOLDER_CACHE = 24;
       const CLIENT_FOLDER_REVALIDATE_SECONDS = 20;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
-      const VIEW_LABELS = { large: "Large icons", medium: "Medium icons", small: "Small icons", list: "List", details: "Details" };
+      const VIEW_LABELS = { large: "Comfortable icons", medium: "Compact icons", small: "Small icons", list: "List", details: "Details" };
       const SORT_LABELS = { name: "Name", modified: "Date modified", type: "Type", size: "Size" };
 
       const elements = Object.fromEntries([
@@ -785,6 +800,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
         "previewPanel", "previewTitle", "previewClose", "previewFrame", "previewMount"
       ].map(id => [id, document.getElementById(id)]));
+      document.querySelectorAll(".command").forEach(button => {
+        const label = button.querySelector(".command-label")?.textContent.trim();
+        if (label) { button.setAttribute("aria-label", label); button.title = label; }
+      });
 
       function restoredState() {
         try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") || {}; }
@@ -1062,7 +1081,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           return `<svg viewBox="0 0 104 120" role="img" aria-label="${label} Photoshop document"><path d="M8 3h65l23 23v91H8z" fill="#001d35" stroke="#23a8f2" stroke-width="4"/><path d="M73 3v24h23" fill="#0b4f79" stroke="#23a8f2" stroke-width="4"/><text x="52" y="65" text-anchor="middle" fill="#31a8ff" font-family="Segoe UI,Arial,sans-serif" font-size="39" font-weight="700">Ps</text><text x="52" y="96" text-anchor="middle" fill="#ffffff" font-family="Segoe UI,Arial,sans-serif" font-size="18" font-weight="600">${label}</text></svg>`;
         }
         if (item.kind === "folder") {
-          return `<svg viewBox="0 0 112 92" aria-hidden="true"><path d="M5 19h42l10 11h50v54H5z" fill="#ffd35a" stroke="#d7a821" stroke-width="3"/><path d="M5 19V9h39l10 11" fill="#ffe484" stroke="#d7a821" stroke-width="3"/><path d="M5 30h102" stroke="#ecc149" stroke-width="3"/></svg>`;
+          return `<svg viewBox="0 0 56 48" aria-hidden="true"><path d="M4 14V9a3 3 0 0 1 3-3h14l5 6h23a3 3 0 0 1 3 3v24a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="#e5c16a" stroke="#ad8735" stroke-width="1.4"/><path d="M4 17h48v22a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3Z" fill="#f2d58b" stroke="#ad8735" stroke-width="1.4"/></svg>`;
         }
         if (thumbnail && item.thumbnail_url) {
           return `${itemIcon(item, {thumbnail:false})}<span class="thumbnail-skeleton" aria-hidden="true"></span><img class="thumbnail" alt="" decoding="async" data-thumbnail-url="${escapeHtml(item.thumbnail_url)}" data-thumbnail-key="${escapeHtml(item.thumbnail_key || item.thumbnail_url)}">`;
@@ -1169,6 +1188,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         const name = document.createElement("span");
         name.className = "item-name";
         name.textContent = item.name;
+        name.title = item.name;
 
         if (state.view === "details") {
           const nameCell = document.createElement("span");
@@ -1282,7 +1302,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       function reuseItemElement(item, index) {
         const old = state.retainedRows?.get(item.path);
         // Metadata objects are reused within a page/view; changing metadata rebuilds safely.
-        if (old && JSON.stringify(old._item) === JSON.stringify(item)) {
+        if (old && (old._item === item || JSON.stringify(old._item) === JSON.stringify(item))) {
           old.dataset.index = String(index); old.style.cssText = "";
           return old;
         }
@@ -1294,8 +1314,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         if (!v) return;
         const stride = v.height + v.gapY;
         const top = Math.max(0, elements.results.scrollTop - elements.items.offsetTop);
-        const start = Math.max(0, Math.floor(top / stride) - 2) * v.columns;
-        const end = Math.min(v.items.length, (Math.ceil((top + elements.results.clientHeight) / stride) + 2) * v.columns);
+        // Dense icon rows expose more items. One buffered row keeps nearby
+        // content ready without multiplying offscreen DOM/thumbnail work.
+        const overscan = ["medium", "large"].includes(state.view) ? 1 : 2;
+        const start = Math.max(0, Math.floor(top / stride) - overscan) * v.columns;
+        const end = Math.min(v.items.length, (Math.ceil((top + elements.results.clientHeight) / stride) + overscan) * v.columns);
         if (start === v.start && end === v.end) return;
         v.start = start; v.end = end;
         const existing = new Map(Array.from(elements.items.children, row => [Number(row.dataset.index), row]));
@@ -2022,7 +2045,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.view = view;
         renderItems();
         persistState();
-        showToast(`${VIEW_LABELS[view]} view`, { duration: 1600 });
       }
 
       function setUploadConflict(conflict) {
@@ -2814,7 +2836,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         } else if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowLeft") {
           event.preventDefault();
           const direction = event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1;
-          focusVisibleIndex(Math.max(0, Math.min(visibleItems().length - 1, index + direction)), event.shiftKey);
+          const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+          const columns = state.virtual?.columns || getComputedStyle(elements.items).gridTemplateColumns.split(" ").length;
+          const step = vertical && ["large", "medium", "small"].includes(state.view) ? columns : 1;
+          focusVisibleIndex(Math.max(0, Math.min(visibleItems().length - 1, index + direction * step)), event.shiftKey);
         }
       }
 
