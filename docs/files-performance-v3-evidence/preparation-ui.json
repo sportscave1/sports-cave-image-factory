@@ -1,0 +1,14 @@
+{
+  "fixture": "synthetic preparation statuses; actual Chrome/viewer",
+  "warmReopenMs": 0.5,
+  "requests": [
+    "Artwork.jpg",
+    "Artwork.jpg",
+    "Artwork.jpg",
+    "Waiting.jpg",
+    "Next.webp",
+    "Changed.jpg",
+    "Denied.jpg"
+  ],
+  "animationFramesWhilePreparing": 10
+}

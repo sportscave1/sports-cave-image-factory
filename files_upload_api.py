@@ -27,6 +27,7 @@ from activity_log import record_activity_log
 import dropbox_integration
 import os_accounts
 import sc_auth
+from services import files_preview_cache
 
 
 FILES_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
@@ -871,7 +872,7 @@ def _preview_bytes(access_token, path, *, user_id, size="w1024h768", revision=""
             cached = _PREVIEW_CACHE.get(key)
             if cached and cached[0] > time.monotonic():
                 if cached[1] is None:
-                    raise FilesUploadError("A lightweight preview is unavailable. Use Download or Open With.", status_code=404)
+                    raise FilesUploadError("A lightweight preview is unavailable. Use Download.", status_code=404)
                 return cached[1]
             pending = _PREVIEW_PENDING.get(key)
             if pending is None:
@@ -884,7 +885,7 @@ def _preview_bytes(access_token, path, *, user_id, size="w1024h768", revision=""
     try:
         content = dropbox_integration.get_thumbnail_bytes(access_token, path, size=size)
         if not content or len(content) > 4 * 1024 * 1024:
-            raise FilesUploadError("A lightweight preview is unavailable. Use Download or Open With.", status_code=404)
+            raise FilesUploadError("A lightweight preview is unavailable. Use Download.", status_code=404)
         with _PREVIEW_LOCK:
             # Never repopulate an entry invalidated while Dropbox was responding.
             if epoch == _PREVIEW_EPOCH:
@@ -2000,6 +2001,8 @@ async def image_preview(request: Request):
             if extension not in FILES_IMAGE_EXTENSIONS | {".psd"}:
                 raise FilesUploadError("This preview is not available.", status_code=404)
             started = time.perf_counter()
+            if files_preview_cache.configured():
+                return await _persistent_preview(context, user, path, request, representation)
             content = await run_in_threadpool(
                 _preview_bytes, context["access_token"], path,
                 user_id=str(user.get("id") or ""),
@@ -2024,7 +2027,7 @@ async def image_preview(request: Request):
         if int(metadata.get("size") or 0) > FILES_IMAGE_PREVIEW_MAX_BYTES:
             upstream.close()
             raise FilesUploadError(
-                "This image is too large for browser preview. Open it in the desktop app instead.",
+                "This image is too large for browser preview. Use Download.",
                 status_code=413,
             )
         media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
@@ -2048,6 +2051,29 @@ async def image_preview(request: Request):
         )
     except Exception as error:
         return _response_error(error)
+
+
+async def _persistent_preview(context, user, path, request, representation):
+    try:
+        content, timing = await run_in_threadpool(files_preview_cache.request_preview,
+            context["access_token"], path, root=context["root_path"],
+            user_id=str(user.get("id") or ""), revision=str(request.query_params.get("rev") or "")[:128],
+            representation=representation)
+        headers = {"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                   "Server-Timing": timing, "X-Files-Representation": representation,
+                   "X-Files-Preview-Cache": ("provider-preview" if content is not None and "provider;dur=" in timing
+                                             else "hit" if content is not None else "preparing")}
+        if content is None and representation == "small":
+            headers["X-Files-Preview-Cache"] = "provider-thumbnail"
+            content = await run_in_threadpool(_preview_bytes, context["access_token"], path,
+                user_id=str(user.get("id") or ""), size="w256h256",
+                revision=str(request.query_params.get("rev") or "")[:128])
+        if content is None:
+            return JSONResponse({"state": "preparing", "message": "Preparing a lightweight preview."},
+                                status_code=202, headers={**headers, "Retry-After": "1"})
+        return Response(content, media_type="image/jpeg", headers=headers)
+    except files_preview_cache.PreviewError as error:
+        return _response_error(FilesUploadError(str(error), status_code=error.status))
 
 
 async def preview_asset(request: Request):
@@ -2277,6 +2303,8 @@ async def file_thumbnail(request: Request):
             raise FilesUploadError("This preview is not available.", status_code=403)
         if PurePosixPath(path).suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp"}:
             raise FilesUploadError("This preview is not available.", status_code=404)
+        if files_preview_cache.configured():
+            return await _persistent_preview(context, user, path, request, "small")
         content = await run_in_threadpool(
             _preview_bytes,
             context["access_token"],

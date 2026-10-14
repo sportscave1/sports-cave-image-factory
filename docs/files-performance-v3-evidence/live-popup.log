@@ -1,0 +1,5 @@
+{"width":1280,"clientFeedbackMs":3.1000000089406967,"automationRoundTripMs":43}
+{"width":1280,"warmOpenMs":18,"starts":1,"locations":1,"folders":1,"frames":1}
+{"width":390,"clientFeedbackMs":1.9000000059604645,"automationRoundTripMs":32}
+{"width":390,"warmOpenMs":25,"starts":1,"locations":1,"folders":1,"frames":1}
+V12 Edge desktop/mobile popup, exact selection, unchanged Orders, duplicate prevention, download and blocked-popup checks passed.

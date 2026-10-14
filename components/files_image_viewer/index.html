@@ -330,7 +330,22 @@
             url = cached.url;
           }
           else {
-            const response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
+            let response;
+            for (let attempt = 0; attempt < 90; attempt++) {
+              response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
+              if (response.status !== 202) break;
+              elements.dimensions.textContent = "Preparing a lightweight preview…";
+              await response.body?.cancel();
+              await new Promise((resolve, reject) => {
+                const abort = () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); };
+                const timer = setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, Math.min(3000, 1000 + attempt * 250));
+                controller.signal.addEventListener("abort", abort, {once:true});
+                if (controller.signal.aborted) abort();
+              });
+              if (generation !== state.loadGeneration) return;
+            }
+            if (response.status === 202) throw new Error("Preview preparation is still pending. Reopen to retry, or use Download.");
+            if (response.status === 409) throw new Error("This file changed. Refresh the folder to view its current revision.");
             if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "A lightweight preview is unavailable. For images, use 1:1 Actual to load the original; for PSDs, use Download.");
             const blob = await response.blob();
             if (!blob.type.startsWith("image/") || blob.size > 4 * 1024 * 1024) throw new Error("Preview representation is unavailable.");

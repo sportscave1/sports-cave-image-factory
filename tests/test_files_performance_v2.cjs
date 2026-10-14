@@ -116,12 +116,13 @@ async function fixture(browser, html=source, {count=2000,paginate=false,thumbnai
     await page.evaluate(()=>document.querySelector('.file-item').addEventListener('dblclick',()=>window.openClickedAt=Date.now(),true));
     for(const samples of [cold,warm]) {
      let view;
-     if(label==='before') { [view]=await Promise.all([page.waitForEvent('popup'),page.locator('.file-item').first().dblclick()]); }
+     const embedded = html.includes('id="previewPanel"');
+     if(!embedded) { [view]=await Promise.all([page.waitForEvent('popup'),page.locator('.file-item').first().dblclick()]); }
      else { await page.locator('.file-item').first().dblclick();view=await page.locator('#previewFrame').elementHandle().then(el=>el.contentFrame()); }
      await view.waitForFunction(()=>state.naturalWidth>0);samples.push(Date.now()-await page.evaluate(()=>window.openClickedAt));
-     if(label==='before') await view.close();
+     if(!embedded) await view.close();
      else await view.locator('#closeButton').click();
-     if(label==='after')await page.locator('#previewPanel').waitFor({state:'hidden'});
+     if(embedded)await page.locator('#previewPanel').waitFor({state:'hidden'});
      else await delay(650); // Existing duplicate-open guard on the baseline.
     }
     assert.deepEqual(log.errors,[]);await context.close();
@@ -196,16 +197,16 @@ async function fixture(browser, html=source, {count=2000,paginate=false,thumbnai
   }
   {
    const {context,page,log}=await fixture(browser,source,{count:2000,paginate:true,listingDelay:180});
-   // Reuse the unchanged production Orders/Files overlay installer.
+   // Reuse the live shared Files popup installer; Orders remains mounted.
    await page.goto('http://files.synthetic.test/orders');
    const topbar=fs.readFileSync('components/sports_cave_top_bar/index.html','utf8');
-   const installer=topbar.slice(topbar.indexOf('  if (!parentWindow.SportsCaveInternalFiles)'),topbar.indexOf('  const STYLE_ID'));
-   await page.evaluate(code=>{const parentWindow=window,doc=document;eval(code);window.addEventListener("popstate",()=>SportsCaveInternalFiles.handlePop());},installer);
-   const start=Date.now();await page.evaluate(()=>SportsCaveInternalFiles.open({allocation:'7',job:'a'.repeat(64)}));
-   const frame=page.frameLocator('#sc-internal-files iframe');await frame.locator('body[data-edition-selected="id:file1999"]').waitFor();
+   const installer=topbar.slice(topbar.indexOf('  if (!parentWindow.SportsCaveFilesWindow)'),topbar.indexOf('  const STYLE_ID'));
+   await page.evaluate(code=>{const parentWindow=window,doc=document;eval(code);},installer);
+   const start=Date.now();const [frame]=await Promise.all([page.waitForEvent('popup'),page.evaluate(()=>SportsCaveFilesWindow.open({allocation:'7',job:'a'.repeat(64)}))]);
+   await frame.locator('body[data-edition-selected="id:file1999"]').waitFor();
    report.exactEditionSelectionMs=Date.now()-start;assert.equal(await frame.locator('.file-item.selected').textContent().then(x=>x.includes('Artwork 1999.jpg')),true);
    assert(log.lists.length<=1,'exact file usable before pagination');assert.equal(log.previews.length,0);
-   await page.getByRole('button',{name:'Back to Orders'}).click();await page.waitForFunction(()=>!document.body.classList.contains('sc-files-internal'));
+   await frame.close();
    assert.equal(await page.locator('#orderSearch').inputValue(),'keep order filter');assert.deepEqual(log.errors,[]);await context.close();
   }
   {
