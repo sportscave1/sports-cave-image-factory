@@ -30,7 +30,7 @@ _slots = threading.BoundedSemaphore(8)
 _upload_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="files-upload-preview")
 _upload_slots = threading.BoundedSemaphore(4)
 _pending = set()
-_fast = {}  # Brief provider representations while the durable job is pending.
+_fast = {}  # Bounded verified representations, scoped to the storage configuration.
 _failed = {}  # Stop browser polling from repeating a source download after storage failure.
 _lock = threading.Lock()
 
@@ -216,7 +216,7 @@ def _download_source(token, meta):
     return dbx._metadata_to_dict(actual), response
 
 
-def prepare(token, meta, allow_original, prefetched=None, skip_provider=False):
+def prepare(token, meta, allow_original, prefetched=None, skip_provider=False, *, thumbnail_only=False):
     """Provider preview first. PSD layers are never downloaded or interpreted."""
     from PIL import Image, ImageOps
     source = tempfile.SpooledTemporaryFile(max_size=4 * 1024 * 1024)
@@ -244,13 +244,15 @@ def prepare(token, meta, allow_original, prefetched=None, skip_provider=False):
             limit = 80_000_000 if original.format == "JPEG" else 32_000_000
             if original.format not in {"JPEG", "PNG", "WEBP"} or original.width * original.height > limit:
                 raise PreviewError("This artwork exceeds safe preview decoding limits. Use Download.")
-            original.draft("RGB", (1600, 1200))
-            original.thumbnail((1600, 1200))
+            bounds = (256, 256) if thumbnail_only else (1600, 1200)
+            original.draft("RGB", bounds)
+            original.thumbnail(bounds)
             screen = ImageOps.exif_transpose(original).convert("RGBA")
             background = Image.new("RGB", screen.size, "white")
             background.paste(screen, mask=screen.getchannel("A"))
             result = {}
-            for name, bounds in [("screen", (1600, 1200)), ("small", (256, 256))]:
+            outputs = [("small", (256, 256))] if thumbnail_only else [("screen", (1600, 1200)), ("small", (256, 256))]
+            for name, bounds in outputs:
                 background.thumbnail(bounds)
                 output = io.BytesIO()
                 # A deterministic JPEG fallback keeps deployments without a WebP
@@ -275,7 +277,8 @@ def _job(store, key, token, meta, allow_original, prefetched=None, skip_provider
             return
         started = time.monotonic()
         try:
-            assets = prepare(token, meta, allow_original, prefetched, skip_provider)
+            assets = prepare(token, meta, allow_original, prefetched, skip_provider,
+                             thumbnail_only=not allow_original)
             if not allow_original:
                 assets = {"small": assets["small"]}
             value = {"assets": assets, "expires": time.time() + TTL,
@@ -316,6 +319,21 @@ def _job(store, key, token, meta, allow_original, prefetched=None, skip_provider
         _slots.release()
 
 
+def _remember(store, key, representation, data, expires=None):
+    # This is not an authorization cache. request_preview verifies Dropbox access
+    # before consulting it. A rotated encryption key/client gets a separate Store.
+    lifetime = min(30, max(0, expires-time.time())) if expires is not None else 30
+    with _lock:
+        identity = (store, key, representation)
+        _fast.pop(identity, None)
+        _fast[identity] = (time.monotonic()+lifetime, data)
+        now = time.monotonic()
+        for stale in [k for k, v in _fast.items() if v[0] <= now]:
+            _fast.pop(stale, None)
+        while len(_fast)>128 or sum(len(v[1]) for v in _fast.values())>32*1024*1024:
+            _fast.pop(next(iter(_fast)))
+
+
 def request_preview(token, path, *, root, user_id, revision, representation):
     """Called only after current session/Files authorization. Recheck source on every read."""
     started = time.perf_counter()
@@ -324,9 +342,9 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     store = current_store()
     key = asset_key(user_id, root, meta)
     with _lock:
-        fast = _fast.get((key, representation))
+        fast = _fast.get((store, key, representation))
         if fast and fast[0] > time.monotonic():
-            return fast[1], f'metadata;dur={metadata_ms:.1f}, storage;dur=0'
+            return fast[1], f'metadata;dur={metadata_ms:.1f}, storage;dur=0, memory;desc="hit"'
         if _failed.get(key, 0) > time.monotonic():
             raise PreviewError("Preview preparation failed. Retry shortly or use Download.", 503)
     started = time.perf_counter()
@@ -338,7 +356,9 @@ def request_preview(token, path, *, root, user_id, revision, representation):
     if cached and not (cached.get("thumbnail_only") and representation == "screen"):
         if cached.get("unavailable"):
             raise PreviewError("A lightweight preview is unavailable. Use Download.")
-        return base64.b64decode(cached["assets"][representation], validate=True), timing
+        data = base64.b64decode(cached["assets"][representation], validate=True)
+        _remember(store, key, representation, data, cached["expires"])
+        return data, timing
     with _lock:
         if key in _pending or not _slots.acquire(blocking=False):
             return None, timing
@@ -352,11 +372,7 @@ def request_preview(token, path, *, root, user_id, revision, representation):
         prefetched = None
     timing += f', provider;dur={(time.perf_counter()-started)*1000:.1f}'
     if prefetched:
-        with _lock:
-            _fast.pop((key, representation), None)
-            _fast[(key, representation)] = (time.monotonic()+30, prefetched)
-            while len(_fast)>128 or sum(len(v[1]) for v in _fast.values())>32*1024*1024:
-                _fast.pop(next(iter(_fast)))
+        _remember(store, key, representation, prefetched)
     try:
         _pool.submit(_job, store, key, token, meta, representation == "screen", prefetched, True)
     except Exception:

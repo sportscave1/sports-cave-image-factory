@@ -6,7 +6,8 @@ from pathlib import Path
 
 MODULES = ["tests.test_files_window", "tests.test_files_upload_api", "tests.test_files_window_launcher",
            "tests.test_files_performance_v2", "tests.test_files_web_only", "tests.test_files_premium_native",
-           "tests.test_files_premium_preservation", "tests.test_files_preview_v3", "tests.test_files_thumbnails_v4"]
+           "tests.test_files_premium_preservation", "tests.test_files_preview_v3", "tests.test_files_thumbnails_v4",
+           "tests.test_files_preview_v5"]
 if __name__ == "__main__":
     if "--child" not in sys.argv:
         env = {k: v for k, v in os.environ.items() if k.upper() in {

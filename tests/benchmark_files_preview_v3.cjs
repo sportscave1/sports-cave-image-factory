@@ -4,7 +4,8 @@ const {execFileSync}=require('node:child_process'), {chromium}=require('playwrig
 (async()=>{
  const browser=await chromium.launch({channel:'chrome',headless:true});
  try {
-  const versions={before:execFileSync('git',['show','a1058ce0:components/files_image_viewer/index.html'],{encoding:'utf8'}),after:fs.readFileSync('components/files_image_viewer/index.html','utf8')};
+  const baseline=process.env.FILES_BENCHMARK_BASELINE||'a1058ce0';
+  const versions={before:execFileSync('git',['show',baseline+':components/files_image_viewer/index.html'],{encoding:'utf8'}),after:fs.readFileSync('components/files_image_viewer/index.html','utf8')};
   const pages={},samples={before:[],after:[]};let payload;
   for(const label of ['before','after']){
    const page=await browser.newPage();pages[label]=page;await page.setContent('<canvas id="c" width="1024" height="768"></canvas>');
@@ -22,7 +23,7 @@ const {execFileSync}=require('node:child_process'), {chromium}=require('playwrig
     const start=performance.now();elements.image.addEventListener('load',()=>resolve(performance.now()-start),{once:true});void loadImage('Fixture'+i+'.jpg',{name:'Fixture'+i+'.jpg'});
    }),i));
   }
-  const report={environment:'Actual Chrome/viewer, 40 ms synthetic image response; interleaved order; actual image load event'};
+  const report={baseline,environment:'Actual Chrome/viewer, 40 ms synthetic image response; interleaved order; actual image load event'};
   for(const label of ['before','after']){const sorted=[...samples[label]].sort((a,b)=>a-b);report[label]={p50:sorted[10],p95:sorted[18],samples:samples[label]};}
   fs.writeFileSync('test-results/files-preview-v3-interleaved.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));
  }finally{await browser.close();}
