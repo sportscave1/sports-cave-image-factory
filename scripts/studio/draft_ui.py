@@ -243,6 +243,9 @@ class DraftServer(HTTPServer):
     def action(self, data):
         # Validate scope again on EVERY request; never accept owner/home/task from browser.
         action = data.get("action")
+        if str(action).startswith("edition-prepare-"):
+            import auto_editions_local
+            return auto_editions_local.action(data)
         if str(action).startswith("edition-test-"):
             import edition_test_local
             return edition_test_local.action(data)

@@ -1,0 +1,44 @@
+"""Validate a bounded, generated-assets-only preparation archive before storage."""
+import json
+from pathlib import Path
+import zipfile
+import auto_editions as ae
+
+MAX_PACKAGE_BYTES=256*1024*1024
+
+
+def unpack(archive,root,source,number,total):
+    root=Path(root)
+    with zipfile.ZipFile(archive) as package:
+        entries=package.infolist()
+        names=[e.filename for e in entries]
+        if len(names)!=len(set(names)) or len(names)>1010 or sum(e.file_size for e in entries)>MAX_PACKAGE_BYTES:
+            raise ValueError('Preparation package exceeds its bounds or has duplicate entries.')
+        if any('/' in n or '\\' in n or n in ('.','..') for n in names):
+            raise ValueError('Preparation package must contain flat generated files only.')
+        if 'manifest.json' not in names or package.getinfo('manifest.json').file_size>1024*1024:
+            raise ValueError('A bounded preparation manifest is required.')
+        manifest=ae.validate_manifest(json.loads(package.read('manifest.json')))
+        if manifest['source']!=source or manifest['edition_total']!=total:
+            raise ValueError('Prepared source or edition total differs from the current linked allocation.')
+        if manifest['dimensions'][0]*manifest['dimensions'][1]>12_000_000:
+            raise ValueError('This layout needs a separately verified production worker budget.')
+        refs=sorted({1,number,total})
+        allowed={'manifest.json','original.png'}|{f'reference-{n}.png' for n in refs}
+        allowed|={manifest['master']['name']}|{p['name'] for p in manifest['patches'].values()}
+        if set(names)!=allowed:raise ValueError('Only the exact generated assets and pixel references are allowed.')
+        for entry in entries:
+            # No ZipFile.extract; symbolic links/directories cannot change destinations.
+            if entry.is_dir() or entry.file_size>160*1024*1024:raise ValueError('Invalid generated asset.')
+            with package.open(entry) as content,(root/entry.filename).open('xb') as output:
+                length=0
+                while block:=content.read(1024*1024):
+                    length+=len(block)
+                    if length>entry.file_size:raise ValueError('Generated asset length changed.')
+                    output.write(block)
+                if length!=entry.file_size:raise ValueError('Generated asset is truncated.')
+    # Checksums for every numbered patch, not just the sample reference.
+    for asset in [manifest['master']]+list(manifest['patches'].values()):ae.asset_path(root,asset)
+    proofs=[ae.compare_reference(manifest,root,n,root/f'reference-{n}.png') for n in refs]
+    proofs.append(ae.compare_original_outside_number(manifest,root,number,root/'original.png'))
+    return manifest,proofs

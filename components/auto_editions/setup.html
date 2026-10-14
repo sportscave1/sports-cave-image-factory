@@ -1,0 +1,33 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Auto Editions setup</title>
+<style>body{font:14px system-ui;max-width:780px;margin:24px auto;padding:0 16px;color:#243145}h1{font-size:22px}label{display:block;margin:12px 0}select,button,a{font:inherit;padding:8px;border-radius:6px}button{cursor:pointer}img{max-width:100%;border:1px solid #ddd}small{color:#626a78}#state{min-height:24px}[hidden]{display:none!important}</style></head><body>
+<h1>Auto Editions setup</h1><p id="design"></p><p id="variant"></p><p id="allocation"></p>
+<p><a id="link" hidden>Link PSD using Add</a> <button id="refresh">Refresh mapping</button></p>
+<p><strong>Layout: original composition · TEST only</strong><br><small>The design’s own plaque position is retained. Prodigi dimensions, bleed, colour and safe areas are not certified. No high-resolution detail is claimed.</small></p>
+<button id="inspect" disabled>Inspect linked PSD</button><p id="state" role="status">Loading…</p>
+<section id="roles" hidden><p>Confirm the layer roles in this design. Ambiguous layers are never selected automatically.</p>
+<label>Edition number <select id="number"></select></label><label>Plaque <select id="plaque"></select></label><label>Matting <select id="matting"></select></label>
+<button id="prepare">Prepare reusable assets</button><p><small>Photoshop is used once during preparation. Order-time cloud downloads use the prepared assets.</small></p></section>
+<section id="review" hidden><img id="preview" alt="Prepared artwork with the assigned edition number"><label><input id="confirm" type="checkbox"> I have checked the artwork, number, individual plaque position and the exact variant above. Approve for TEST downloads only.</label><button id="approve" disabled>Save TEST READY layout</button></section>
+<a id="download" hidden>Download JPG</a>
+<script>
+const $=id=>document.getElementById(id),query='?allocation_id='+encodeURIComponent(new URLSearchParams(location.search).get('allocation_id'));
+const local='http://127.0.0.1:18762';let details,popup,nonce,grant,connected=false,job,digest,timer;
+const state=text=>$('state').textContent=text;
+async function api(path,body){const r=await fetch(path+query,body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await r.json();if(!r.ok)throw Error(data.error||'Setup is unavailable.');return data;}
+async function load(){try{details=await api('/api/auto-editions/details');$('design').textContent=details.product_title;$('variant').textContent=details.variant_title+' · Variant '+details.variant_id;$('allocation').textContent='Assigned edition '+String(details.number).padStart(3,'0')+' / '+details.total;
+$('link').href='/files-psd-picker?product_gid='+encodeURIComponent(details.product_gid);$('link').target='_blank';$('link').hidden=details.linked;$('inspect').disabled=!details.linked;state(details.linked?'Linked PSD ready for inspection.':'Use the existing Add picker to link the PSD, then refresh.');}catch(e){state(e.message);}}
+function send(type,extra={}){popup?.postMessage({studio:1,nonce,type,...extra},local);}
+function begin(){if(connected&&grant){clearInterval(timer);send('edition-prepare-inspect',{grant});grant=null;state('Inspecting the linked PSD in Photoshop…');}}
+$('refresh').onclick=load;
+$('inspect').onclick=async()=>{try{connected=false;nonce='edition='+Array.from(crypto.getRandomValues(new Uint8Array(24)),x=>x.toString(16).padStart(2,'0')).join('');popup=window.open(local+'/pair#'+nonce,'sports-cave-edition-setup','popup,width=420,height=230');if(!popup)throw Error('Allow the existing companion window for one-time preparation.');$('inspect').disabled=true;grant=(await api('/api/auto-editions/prepare',{})).grant;send('request');let attempts=0;timer=setInterval(()=>{if(++attempts>60){clearInterval(timer);state('The companion is unavailable. Start the installed companion, then retry.');$('inspect').disabled=false;return;}send('request');},500);begin();}catch(e){state(e.message);$('inspect').disabled=false;}};
+addEventListener('message',event=>{if(event.source!==popup||event.origin!==local||event.data?.studio!==1||event.data.nonce!==nonce)return;const d=event.data;
+if(d.type==='catalog'){connected=true;begin();}
+if(d.type==='edition-prepare-result'){if(d.error){state(d.error);$('inspect').disabled=false;return;}const r=d.result;job=r.job_id;
+if(r.status==='Inspected'){$('prepare').disabled=false;const rows=r.inspection.layers.filter(x=>x.path.length===1&&x.visible);for(const role of ['number','plaque','matting']){const select=$(role);select.replaceChildren(new Option('Choose a layer',''));for(const row of rows){if(role==='number'&&row.kind!=='text')continue;const name=row.path[0].name;select.append(new Option(name+' — '+row.bounds_px.join(', '),name));}const approved='SC_EDITION_'+role.toUpperCase();if(rows.filter(x=>x.path[0].name===approved).length===1)select.value=approved;}$('roles').hidden=false;state('Confirm the layer roles and their actual coordinates.');}
+if(r.status==='Prepared'){digest=r.preparation_hash;$('roles').hidden=true;$('review').hidden=false;$('preview').src='/api/auto-editions/preview'+query+'&preparation_hash='+encodeURIComponent(digest);state('Prepared. Review the numbered preview before saving.');popup?.close();popup=null;}}
+});
+$('prepare').onclick=()=>{const roles=Object.fromEntries(['number','plaque','matting'].map(x=>[x,$(x).value]));if(Object.values(roles).some(x=>!x)||new Set(Object.values(roles)).size!==3){state('Choose three distinct layers.');return;}$('prepare').disabled=true;state('Preparing and verifying reusable assets…');send('edition-prepare-build',{job_id:job,roles});};
+$('confirm').onchange=()=>{$('approve').disabled=!$('confirm').checked;};
+$('approve').onclick=async()=>{try{$('approve').disabled=true;const r=await api('/api/auto-editions/approve',{preparation_hash:digest,expected_hash:details.current_hash,confirm_test_layout:$('confirm').checked});state(r.status+' — supplier print approval is still required.');$('download').href='/auto-editions/download'+query;$('download').hidden=false;}catch(e){state(e.message);$('approve').disabled=false;}};
+addEventListener('pagehide',()=>{clearInterval(timer);popup?.close();});load();
+</script></body></html>

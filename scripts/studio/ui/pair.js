@@ -36,6 +36,16 @@
    });return;
   }
   if(busy)return;
+  if(d.type==='edition-prepare-inspect'||d.type==='edition-prepare-build'){
+   busy=true;
+   try{const command=d.type==='edition-prepare-inspect'?{action:d.type,grant:d.grant}:{action:d.type,job_id:d.job_id,roles:d.roles};
+    const job=await api(command);send('edition-prepare-progress',{status:'Working'});
+    for(let i=0;i<900;i++){await new Promise(r=>setTimeout(r,1000));const current=await api({action:'edition-prepare-status',job_id:job.job_id});
+     if(current.status==='Blocked')throw Error(current.error);
+     if(current.status==='Inspected'||current.status==='Prepared'){send('edition-prepare-result',{result:{...current,job_id:job.job_id}});return;}}
+    throw Error('Preparation timed out. Check Photoshop before retrying.');
+   }catch(e){send('edition-prepare-result',{error:e.message});}finally{busy=false;}return;
+  }
   if(d.type==='edition-download'){
    busy=true;try{send('edition-download',{result:await api({action:'edition-test-download',job_id:d.job_id})});}catch(e){send('edition-download',{error:e.message});}finally{busy=false;}return;
   }

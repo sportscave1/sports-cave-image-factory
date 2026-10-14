@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import hashlib
 import mimetypes
 import logging
@@ -2340,7 +2341,11 @@ async def attach_product_psd(request: Request):
                                         expected_file_id=payload.get('expected_file_id') or '',
                                         confirm_replace=payload.get('confirm_replace') is True,
                                         confirm_mismatch=payload.get('confirm_mismatch') is True)
-        return JSONResponse({'ok':True,'mapping':record,'open_url':psd.link({'shopify_product_gid':pid},{pid:record})},headers={'Cache-Control':'no-store'})
+        # PostgreSQL returns datetime values. The mapping transaction has already
+        # committed here; a JSON serialization failure must not report it as an
+        # unsuccessful attachment and encourage a duplicate retry.
+        public_record = json.loads(json.dumps(record, default=str))
+        return JSONResponse({'ok':True,'mapping':public_record,'open_url':psd.link({'shopify_product_gid':pid},{pid:record})},headers={'Cache-Control':'no-store'})
     except PermissionError as error:
         return _response_error(FilesUploadError(str(error),status_code=403))
     except ValueError as error:

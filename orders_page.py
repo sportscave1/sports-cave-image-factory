@@ -2026,12 +2026,16 @@ def _render_ledger_diagnostics():
 def _display_rows(rows, *, normalised=False):
     output = []
     psd_mapping = psd_directory.page_directory(st)
+    import auto_editions_runtime
+    cloud_links = auto_editions_runtime.download_links(rows or [])
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
         display_row["print_jpg"] = print_jpg.state(row, psd_mapping.get(psd_directory.product_id(row)))['label']
         import edition_test
         if edition_test.eligible(row,psd_mapping.get(psd_directory.product_id(row))):display_row['print_jpg']='/edition-jpg-download#Download JPG'
+        cloud_link=cloud_links.get(str(row.get('edition_order_id') or row.get('id')))
+        if cloud_link:display_row['print_jpg']=cloud_link
         if display_row.get("order"):
             display_row["order"] = f"{COPY_ORDER_ICON} {display_row['order']}"
         output.append(display_row)
@@ -2708,16 +2712,23 @@ def _render_orders_table(rows):
     _render_inline_prodigi_actions(rows)
     selected_print_rows = _selected_rows_from_state(rows)
     if selected_print_rows:
+        import auto_editions_runtime
+        cloud_links=auto_editions_runtime.download_links(selected_print_rows)
         with st.expander("Selected unit details / Print JPG", expanded=False):
             mapping = psd_directory.page_directory(st)
             for selected in selected_print_rows:
                 status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
                 st.caption(f"Customer: {selected.get('customer')} · Variant: {selected.get('variant_full')} · Shipping: {selected.get('shipping_method')} · Fulfilment: {selected.get('prodigi')}")
-                if edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
+                allocation_id=str(selected.get('edition_order_id') or '')
+                if allocation_id in cloud_links:
+                    st.link_button("Download JPG",cloud_links[allocation_id])
+                elif edition_test.eligible(selected, mapping.get(psd_directory.product_id(selected))):
                     st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
                 else:
                     st.caption(f"Print JPG — {status['label']}: {status['reason']}")
+                if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
+                    st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
     with st.container(border=False, key="orders-table"):
         st.dataframe(
             _display_table_payload(rows, normalised=True),
@@ -2750,6 +2761,8 @@ def _mobile_toggle(key, unit):
 
 def _render_mobile_orders(rows):
     mapping = psd_directory.page_directory(st)
+    import auto_editions_runtime
+    cloud_links=auto_editions_runtime.download_links(rows)
     for row in rows:
         unit = _mobile_unit_id(row)
         key = 'orders-mobile-check-' + unit
@@ -2763,10 +2776,15 @@ def _render_mobile_orders(rows):
             if link: st.link_button('Open PSD', link + '#Open PSD')
             else: st.caption('PSD: Not linked')
             status = print_jpg.state(row, mapping.get(psd_directory.product_id(row)))
-            if edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
+            allocation_id=str(row.get('edition_order_id') or '')
+            if allocation_id in cloud_links:
+                st.link_button('Download JPG',cloud_links[allocation_id])
+            elif edition_test.eligible(row, mapping.get(psd_directory.product_id(row))):
                 st.link_button("Download JPG", "/edition-jpg-download#Download JPG")
             else:
                 st.caption(f"Print JPG: {status['label']} — {status['reason']}")
+            if auto_editions_runtime.enabled() and allocation_id.isdigit() and os_accounts.is_admin(st.session_state.get('sports_cave_current_user') or {}):
+                st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
     psd_directory.render_missing_link_guard(st)
 
 

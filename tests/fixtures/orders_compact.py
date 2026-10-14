@@ -11,8 +11,9 @@ st.set_page_config(layout='wide')
 # Exercise the actual shared styling without importing the running application.
 tree=ast.parse(Path('app.py').read_text(encoding='utf-8'))
 style=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='inject_styles')
-exec(compile(ast.Module(body=[style],type_ignores=[]),'app.py','exec'),globals())
-inject_styles()
+style_globals={**globals(),'__file__':str(Path('app.py').resolve())}
+exec(compile(ast.Module(body=[style],type_ignores=[]),'app.py','exec'),style_globals)
+style_globals['inject_styles']()
 st.html('<style>.fixture-nav{position:fixed;top:0;left:0;width:100%;height:64px;background:#111;color:white;z-index:10000;padding:18px 24px;box-sizing:border-box}header[data-testid="stHeader"]{display:none}</style><div class="fixture-nav">Sports Cave OS · Orders fixture</div>')
 rows=[dict(order=f'#SC{3000+i}',shopify_order_id=str(3000+i),shopify_line_item_id=str(6000+i),
            allocation_index=u,edition_number=i+u,edition_total=100,customer=f'Collector {i}',

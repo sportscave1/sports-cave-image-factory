@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch,Mock
 from starlette.requests import Request
@@ -43,12 +44,14 @@ class PsdPickerApiTests(unittest.IsolatedAsyncioTestCase):
         body=json.loads(result.body);self.assertEqual(body['product_title'],'Art');self.assertEqual(len(body['files']),1);self.assertFalse(body['files'][0]['mismatch']);listing.assert_called_once()
 
     async def test_confirmed_save_uses_current_server_metadata_and_audited_store(self):
-        store=Mock();store.attach.return_value={'verified':True,'state':'Linked','dropbox_file_id':'id:test'}
+        store=Mock();store.attach.return_value={'verified':True,'state':'Linked','dropbox_file_id':'id:test',
+                                               'created_at':datetime(2026,10,14,tzinfo=timezone.utc)}
         payload={'product_gid':PID,'file_id':'id:test','expected_file_id':'','confirm_mismatch':True,'confirm_replace':False}
         with patch.object(api,'_psd_attach_user',return_value=ADMIN),patch.object(api,'_dropbox_context',return_value={'access_token':'fake'}),patch.object(api.dropbox_integration,'psd_open_metadata',return_value=META) as metadata,patch.object(psd_mapping_store,'STORE',store):
             response=await api.attach_product_psd(request('POST',payload))
         self.assertEqual(response.status_code,200);metadata.assert_called_once_with('fake','id:test',include_preview=False)
         self.assertTrue(store.attach.call_args.kwargs['confirm_mismatch']);self.assertTrue(json.loads(response.body)['open_url'])
+        self.assertEqual(json.loads(response.body)['mapping']['created_at'],'2026-10-14 00:00:00+00:00')
 
     async def test_invalid_file_current_location_or_duplicate_are_rejected(self):
         payload={'product_gid':PID,'file_id':'id:test'}

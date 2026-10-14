@@ -23,12 +23,16 @@ from wall_preview_inbox_api import ROUTES as WALL_PREVIEW_INBOX_ROUTES
 from storefront_protection_api import ROUTES as STOREFRONT_PROTECTION_ROUTES
 from auth_cookie_cleanup import ROUTES as AUTH_COOKIE_CLEANUP_ROUTES
 from static_asset_compression import StaticAssetCompression
+from auto_editions_api import ROUTES as AUTO_EDITIONS_ROUTES
+from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
 
 
 routes = [
     Route(path, endpoint, methods=list(methods))
     for path, endpoint, methods in (
         *FILES_UPLOAD_ROUTES,
+        *AUTO_EDITIONS_ROUTES,
+        *AUTO_EDITIONS_SETUP_ROUTES,
         *COLLECTOR_VAULT_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
@@ -129,6 +133,8 @@ if __name__ == "__main__":
     if os.getenv('RENDER'):
         from crm_thumbnail_cache import warm_renderer
         warm_renderer()
+        from auto_editions_runtime import start_worker
+        start_worker()
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),
