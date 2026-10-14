@@ -177,7 +177,7 @@ class FilesWindowApiTests(unittest.TestCase):
             response = asyncio.run(files_upload_api.files_window_page(request))
 
         self.assertEqual(response.status_code, 403)
-        self.assertIn("Files access is not approved", response.body.decode("utf-8"))
+        self.assertIn("Files access", response.body.decode("utf-8"))
 
     def test_files_view_permission_does_not_grant_delete_permission(self):
         viewer = {**self.user, "id": "worker-view-only"}
@@ -457,7 +457,7 @@ class FilesWindowApiTests(unittest.TestCase):
             self.assertTrue(item["thumbnail_url"].startswith("/api/files-thumbnail?"))
             self.assertNotIn("secret", item["thumbnail_url"])
 
-    def test_webp_and_gif_are_images_but_do_not_request_list_thumbnails(self):
+    def test_webp_has_lightweight_thumbnail_and_gif_retains_icon(self):
         for extension in ("webp", "gif"):
             item = files_upload_api._public_file_item(
                 {
@@ -469,7 +469,7 @@ class FilesWindowApiTests(unittest.TestCase):
                 TEAM_ROOT,
             )
             self.assertEqual(item["kind"], "image")
-            self.assertNotIn("thumbnail_url", item)
+            self.assertEqual("thumbnail_url" in item, extension == "webp")
 
     def test_image_preview_accepts_only_validated_root_relative_image_paths(self):
         relative = "Designs & Uploads/O'Neal & J\u00fcnger.png"
@@ -559,7 +559,7 @@ class FilesWindowApiTests(unittest.TestCase):
 
         payload = json.loads(response.body)
         self.assertEqual([item["path"] for item in payload["images"]], [f"{folder}/One.jpg", f"{folder}/Two.gif"])
-        listing.assert_called_once_with("secret-token", full_folder)
+        listing.assert_called_once_with("secret-token", full_folder, root_path=TEAM_ROOT, user_id=self.user["id"])
 
     def test_relative_download_path_is_root_scoped(self):
         relative = "Designs/O'Neal & Final.pdf"
@@ -1156,8 +1156,8 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
     def test_one_click_open_multi_select_and_keyboard_navigation_have_no_checkboxes(self):
         item_handler = self.client[self.client.index("function createItemElement") : self.client.index("function detailCell")]
         self.assertIn('row.addEventListener("click"', item_handler)
-        self.assertIn("setSingleSelection(item.path, index)", item_handler)
-        self.assertIn("openItem(item)", item_handler)
+        self.assertIn("setSingleSelection(item.path, Number(row.dataset.index))", item_handler)
+        self.assertIn("openPreferredItem(item)", item_handler)
         self.assertNotIn("item-checkbox", self.client)
         self.assertNotIn('document.createElement("input")', item_handler)
         self.assertIn("event.ctrlKey || event.metaKey", item_handler)
@@ -1187,11 +1187,11 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
 
     def test_every_standard_open_action_uses_the_authoritative_open_item(self):
         self.assertEqual(self.client.count("function openItem(item)"), 1)
-        self.assertIn("elements.openButton.onclick = () => openItem(selectedItems()[0])", self.client)
-        self.assertIn('{ label: "Open", disabled: !single, action: () => openItem(item) }', self.client)
+        self.assertIn("elements.openButton.onclick = () => openPreferredItem(selectedItems()[0])", self.client)
+        self.assertIn('{ label: "Open", disabled: !single, action: () => openPreferredItem(item) }', self.client)
         self.assertIn('if (event.key === "Enter")', self.client)
         item_handler = self.client[self.client.index("function createItemElement") : self.client.index("function detailCell")]
-        self.assertIn("openItem(item)", item_handler)
+        self.assertIn("openPreferredItem(item)", item_handler)
 
     def test_toolbar_download_enablement_order_context_menus_and_confirmation(self):
         self.assertIn('id="openButton"', self.client)
@@ -1210,7 +1210,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             self.client.index("function showItemContextMenu") :
             self.client.index("function showEmptyContextMenu")
         ]
-        self.assertNotIn('label: "Open in desktop app"', item_menu)
+        self.assertIn('label: "Open in desktop app"', item_menu)
         for label in ("New folder", "Upload", "Refresh", "Sort by", "View"):
             self.assertIn(f'label: "{label}"', self.client)
         self.assertIn("items.forEach(item =>", self.client)
@@ -1265,14 +1265,14 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         for event_name in ("mouseenter", "mousemove", "mouseleave", "mousedown", "click", "contextmenu", "dragstart"):
             self.assertIn(f'row.addEventListener("{event_name}"', item_handler)
         self.assertIn("pointer-events: none", self.client)
-        self.assertIn("elements.results.addEventListener(\"scroll\", hideFileTooltip", self.client)
+        self.assertIn("elements.results.addEventListener(\"scroll\", () =>", self.client)
 
     def test_results_own_scroll_viewport_and_thumbnail_work_is_bounded(self):
         self.assertIn("grid-template-rows: auto auto auto minmax(0, 1fr) 27px", self.client)
         self.assertIn("overflow-y: auto", self.client)
         self.assertIn("overflow: hidden", self.client)
         self.assertIn("new IntersectionObserver", self.client)
-        self.assertIn('rootMargin: "240px 0px"', self.client)
+        self.assertIn('rootMargin: "120px 0px"', self.client)
         self.assertIn("MAX_THUMBNAIL_CONCURRENT = 4", self.client)
         self.assertIn("state.thumbnailControllers.forEach(controller => controller.abort())", self.client)
         self.assertIn('event.key === "PageDown"', self.client)
@@ -1323,7 +1323,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
     def test_no_inline_image_preview_and_viewer_has_full_interaction_contract(self):
         self.assertNotIn("image-preview", self.client)
         self.assertIn('/api/files-image-preview?path=', self.viewer)
-        self.assertIn('/api/files-image-items?folder=', self.viewer)
+        self.assertIn('/api/files-list?${params}', self.viewer)
         self.assertIn('window.addEventListener("message"', self.viewer)
         self.assertIn('event.key === "ArrowLeft"', self.viewer)
         self.assertIn('event.key === "+"', self.viewer)
@@ -1340,12 +1340,12 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("showImageError", self.viewer)
         self.assertNotIn("Loading image", self.viewer)
         self.assertNotIn('class="spinner"', self.viewer)
-        self.assertNotIn("response.blob()", self.viewer)
-        self.assertNotIn("URL.createObjectURL", self.viewer)
+        self.assertIn("blob.size > 4 * 1024 * 1024", self.viewer)
+        self.assertIn("representation=screen", self.viewer)
         self.assertIn('decoding="async"', self.viewer)
         self.assertIn('fetchpriority="high"', self.viewer)
         self.assertIn("const generation = ++state.loadGeneration", self.viewer)
-        self.assertIn('elements.image.src = `/api/files-image-preview?path=', self.viewer)
+        self.assertIn('elements.image.src = url', self.viewer)
         self.assertIn('elements.image.style.display = "block"', self.viewer)
         self.assertIn("if (generation !== state.loadGeneration) return", self.viewer)
         self.assertIn("function notifyOpenerReady", self.viewer)
@@ -1423,7 +1423,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             "invalidateClientFolderCache(state.currentPath);",
             "invalidateClientFolderCache(state.currentPath, item.path);",
             "invalidateClientFolderCache(state.currentPath, ...items.map(item => item.path));",
-            "invalidateClientFolderCache(row.destinationPath);",
+            "invalidateClientFolderCache();",
         ):
             self.assertIn(snippet, self.client)
 
@@ -1456,7 +1456,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("function startNativeOutboundDrag(items, x, y)", self.client)
         self.assertIn('hasDesktopCapability("drag")', self.client)
         self.assertIn('desktopRequest("drag", items, requestId)', self.client)
-        self.assertIn("window.chrome.webview.postMessage(message)", self.client)
+        self.assertIn("desktopBridge.postMessage(message)", self.client)
         self.assertIn('desktopPost({ action: "cancel", request_id: requestId })', self.client)
         self.assertIn('row.draggable = false', self.client)
         self.assertIn('row.addEventListener("pointerdown"', self.client)
@@ -1480,7 +1480,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             self.assertNotIn(removed, self.client)
         drag_block = self.client[
             self.client.index("function externalDragItems") :
-            self.client.index("function showItemContextMenu")
+            self.client.index("function openPreferredItem")
         ]
         self.assertNotIn("/api/files-delete", drag_block)
         self.assertNotIn("operation: \"move\"", drag_block)
@@ -1510,12 +1510,12 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("ready to move inside Sports Cave Files", self.client)
         self.assertNotIn('invokeDesktopClipboard(chosen, "move")', self.client)
 
-    def test_image_context_menu_omits_redundant_desktop_open_action(self):
+    def test_image_context_menu_keeps_explicit_original_desktop_open_action(self):
         block = self.client[
             self.client.index("function showItemContextMenu") :
             self.client.index("function showEmptyContextMenu")
         ]
-        self.assertNotIn("Open in desktop app", block)
+        self.assertIn("Open in desktop app", block)
         self.assertNotIn(">Open in desktop app<", self.client)
         self.assertIn('{ label: "Open"', block)
         self.assertIn('{ label: "Copy"', block)
@@ -1533,7 +1533,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertNotIn('document.querySelectorAll("img[data-thumbnail-key]")', thumbnail_block)
 
     def test_missing_or_outdated_helper_has_compact_update_fallback(self):
-        self.assertIn('if (!window.chrome || !window.chrome.webview)', self.client)
+        self.assertIn('if (!desktopBridge', self.client)
         self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
         self.assertIn("const MINIMUM_DESKTOP_VERSION = 9", self.client)

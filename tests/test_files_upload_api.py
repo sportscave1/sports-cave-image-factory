@@ -494,7 +494,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
             return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
         ), patch.object(
             files_upload_api,
-            "_thumbnail_bytes",
+            "_preview_bytes",
             return_value=b"small-jpeg",
         ) as thumbnail:
             response = asyncio.run(files_upload_api.file_thumbnail(request))
@@ -503,7 +503,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
         self.assertEqual(response.media_type, "image/jpeg")
         self.assertEqual(response.body, b"small-jpeg")
         self.assertNotIn("secret-token", str(response.headers))
-        thumbnail.assert_called_once_with("secret-token", path, "revision-7")
+        thumbnail.assert_called_once_with("secret-token", path, revision="revision-7", user_id=self.user["id"], size="w256h256")
 
     def test_desktop_helper_package_is_an_explicit_authenticated_download(self):
         request = files_upload_api.Request(

@@ -175,6 +175,13 @@
         folder: query.get("folder") || "",
         name: query.get("name") || "",
         images: [],
+        previewCache: new Map(),
+        imageController: null,
+        folderController: null,
+        folderGeneration: 0,
+        original: false,
+        revision: query.get("rev") || "",
+        navigationFolder: null,
         index: -1,
         naturalWidth: 0,
         naturalHeight: 0,
@@ -244,6 +251,11 @@
       }
 
       function actualSize() {
+        if (!state.original) {
+          if (/\.psd$/i.test(state.path)) { notify("Use Open in desktop app or Download to inspect the original PSD."); return; }
+          loadImage(state.path, { name: state.name, original: true });
+          return;
+        }
         state.sizingMode = "actual";
         state.scale = 1;
         state.panX = 0;
@@ -274,58 +286,134 @@
         elements.imageError.classList.add("visible");
       }
 
-      function loadImage(path, { folder = state.folder, name = "", replaceHistory = true } = {}) {
+      async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true, original = false, revision = path === state.path ? state.revision : "" } = {}) {
         const relativePath = String(path || "");
-        if (!relativePath) {
-          showImageError("No image was selected.");
-          return;
-        }
+        if (!relativePath) { showImageError("No image was selected."); return; }
         const generation = ++state.loadGeneration;
-        state.path = relativePath;
-        state.folder = String(folder || "");
+        state.imageController?.abort();
+        const controller = new AbortController(); state.imageController = controller;
+        const sameImage = state.path === relativePath && state.naturalWidth > 0;
+        state.path = relativePath; state.folder = String(folder || "");
         state.name = String(name || fileNameFromPath(relativePath));
-        state.rotation = 0;
-        state.panX = 0;
-        state.panY = 0;
-        elements.fileName.textContent = state.name;
-        elements.fileName.title = state.name;
+        state.revision = revision; state.original = original;
+        state.rotation = 0; state.panX = 0; state.panY = 0;
+        elements.fileName.textContent = state.name; elements.fileName.title = state.name;
         document.title = `${state.name} - Sports Cave Image Viewer`;
-        clearImage();
+        if (!sameImage) { clearImage(); elements.image.removeAttribute("src"); }
+        elements.dimensions.textContent = original ? "Opening full-resolution original…" : "Opening preview…";
         if (replaceHistory) {
           const params = new URLSearchParams({ path: state.path, folder: state.folder, name: state.name });
           history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
         }
+        try {
+          const key = `${relativePath}|${revision}`;
+          let cached = state.previewCache.get(key);
+          if (cached && cached.expires <= Date.now()) {
+            URL.revokeObjectURL(cached.url); state.previewCache.delete(key); cached = null;
+          }
+          let url;
+          if (original) {
+            // Original transfer is an explicit user action; do not buffer a 35 MB file in JS.
+            url = `/api/files-image-preview?path=${encodeURIComponent(relativePath)}&original=1`;
+          } else if (cached) {
+            if (sameImage && elements.image.src === cached.url && elements.image.complete) {
+              elements.dimensions.textContent = `Preview · ${state.naturalWidth} x ${state.naturalHeight} pixels`;
+              fitToScreen(); syncNavigation(); return;
+            }
+            url = cached.url;
+          }
+          else {
+            const response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
+            if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "A lightweight preview is unavailable. For images, use 1:1 Actual to load the original; for PSDs, use Desktop app or Download.");
+            const blob = await response.blob();
+            if (!blob.type.startsWith("image/") || blob.size > 4 * 1024 * 1024) throw new Error("Preview representation is unavailable.");
+            if (generation !== state.loadGeneration) return;
+            url = URL.createObjectURL(blob);
+            state.previewCache.set(key, {url, bytes:blob.size, expires:Date.now()+30000});
+            while (state.previewCache.size > 12 || Array.from(state.previewCache.values()).reduce((n,c)=>n+c.bytes,0) > 16*1024*1024) {
+              const oldest=state.previewCache.keys().next().value;
+              URL.revokeObjectURL(state.previewCache.get(oldest).url); state.previewCache.delete(oldest);
+            }
+          }
+          if (generation !== state.loadGeneration) return;
+          elements.image.onload = () => {
+            if (generation !== state.loadGeneration) return;
+            state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+            elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
+            elements.image.alt = state.name; elements.image.style.display = "block";
+            elements.dimensions.textContent = `${original ? "Original" : "Preview"} · ${state.naturalWidth} x ${state.naturalHeight} pixels`;
+            if (original) actualSize(); else fitToScreen();
+            syncNavigation();
+          };
+          elements.image.onerror = () => {
+            if (generation !== state.loadGeneration) return;
+            if (original && sameImage) {
+              void loadImage(relativePath, {name:state.name});
+              notify("The original could not be opened. Showing the preview; use Download or retry.");
+            } else showImageError("The image is unavailable or could not be decoded.");
+          };
+          elements.image.decoding = "async";
+          elements.image.src = url;
+        } catch (error) {
+          if (generation !== state.loadGeneration || error.name === "AbortError") return;
+          state.original = false;
+          if ((sameImage || state.naturalWidth) && !error.message.includes("access expired")) { elements.dimensions.textContent = error.message; }
+          else showImageError(error.message);
+        }
+      }
+
+      function showQuickPreview(url) {
+        if (state.naturalWidth || typeof url !== "string" || !url.startsWith(`blob:${location.origin}/`)) return;
+        const generation = state.loadGeneration;
         elements.image.onload = () => {
           if (generation !== state.loadGeneration) return;
-          state.naturalWidth = elements.image.naturalWidth;
-          state.naturalHeight = elements.image.naturalHeight;
-          elements.image.style.width = `${state.naturalWidth}px`;
-          elements.image.style.height = `${state.naturalHeight}px`;
-          elements.image.alt = state.name;
-          elements.image.style.display = "block";
-          elements.dimensions.textContent = `${state.naturalWidth} x ${state.naturalHeight} pixels`;
-          fitToScreen();
-          syncNavigation();
+          state.naturalWidth = elements.image.naturalWidth; state.naturalHeight = elements.image.naturalHeight;
+          elements.image.style.width = `${state.naturalWidth}px`; elements.image.style.height = `${state.naturalHeight}px`;
+          elements.image.style.display = "block"; elements.image.alt = state.name;
+          elements.dimensions.textContent = "Small preview · loading larger preview…"; fitToScreen();
         };
-        elements.image.onerror = () => {
-          if (generation !== state.loadGeneration) return;
-          showImageError("The image is unavailable or could not be decoded.");
-        };
-        elements.image.src = `/api/files-image-preview?path=${encodeURIComponent(state.path)}`;
+        elements.image.src = url;
+      }
+
+      function acceptNavigation(images, folder) {
+        if (!Array.isArray(images) || images.length > 20000 || folder !== state.folder) return false;
+        state.images = images.filter(item => item && validRelativeValue(item.path, {required:true}) && validViewerName(item.name) && item.path.split("/").slice(0,-1).join("/") === folder);
+        state.navigationFolder = folder;
+        state.index = state.images.findIndex(item => item.path === state.path);
+        syncNavigation(); return true;
       }
 
       async function loadFolderImages() {
-        try {
-          const response = await fetch(`/api/files-image-items?folder=${encodeURIComponent(state.folder)}`, { credentials: "same-origin" });
-          const payload = await response.json();
-          if (!response.ok || payload.ok === false) throw new Error(payload.message || "Image navigation is unavailable.");
-          state.images = Array.from(payload.images || []);
-          state.index = state.images.findIndex(item => item.path === state.path);
-        } catch (_) {
-          state.images = [{ path: state.path, name: currentName() }];
-          state.index = 0;
+        const generation = ++state.folderGeneration;
+        state.folderController?.abort();
+        if (state.navigationFolder === state.folder) {
+          state.index = state.images.findIndex(item => item.path === state.path); syncNavigation(); return;
         }
-        syncNavigation();
+        // Allow the existing Files window to deliver metadata it already holds.
+        await new Promise(resolve => setTimeout(resolve, 250));
+        if (generation !== state.folderGeneration || state.navigationFolder === state.folder) return;
+        const folder = state.folder;
+        const controller = new AbortController(); state.folderController = controller;
+        state.images = []; state.index = -1; syncNavigation();
+        try {
+          let next = "";
+          do {
+            const params = new URLSearchParams({page_size:"100"});
+            if (folder) params.set("relative_path",folder);
+            if (next) params.set("page",next);
+            const response = await fetch(`/api/files-list?${params}`, { credentials: "same-origin", signal:controller.signal });
+            const payload = await response.json();
+            if (!response.ok || payload.ok === false) throw new Error(payload.message);
+            if (generation !== state.folderGeneration || folder !== state.folder) return;
+            state.images = Array.from(payload.items || []).filter(item => item.kind === "image" || item.extension === "psd").map(item => ({path:item.desktop_relative_path,name:item.name,revision:item.revision || ""}));
+            state.index = state.images.findIndex(item => item.path === state.path); syncNavigation();
+            next = payload.has_more ? payload.next_page : "";
+          } while (next);
+          state.navigationFolder = folder;
+        } catch (error) {
+          if (generation !== state.folderGeneration || error.name === "AbortError") return;
+          state.images = [{ path: state.path, name: currentName() }]; state.index = 0; syncNavigation();
+        }
       }
 
       function syncNavigation() {
@@ -337,7 +425,7 @@
         const next = state.images[state.index + offset];
         if (!next) return;
         state.index += offset;
-        loadImage(next.path, { name: next.name });
+        loadImage(next.path, { name: next.name, revision: next.revision || "" });
       }
 
       function startDownload() {
@@ -566,7 +654,7 @@
           return false;
         }
         const keys = Object.keys(message);
-        if (keys.some(key => !["type", "version", "requestId", "path", "folder", "name"].includes(key))) {
+        if (keys.some(key => !["type", "version", "requestId", "path", "folder", "name", "images", "revision", "thumbnail"].includes(key))) {
           return false;
         }
         return (
@@ -575,6 +663,7 @@
           && validRelativeValue(message.path, { required: true })
           && validRelativeValue(message.folder)
           && validViewerName(message.name)
+          && (message.revision == null || (typeof message.revision === "string" && message.revision.length <= 128))
         );
       }
 
@@ -605,6 +694,10 @@
           && message.type === "sports-cave-image-viewer-parent-ready"
           && message.version === IMAGE_VIEWER_PROTOCOL_VERSION
         ) {
+          if (acceptNavigation(message.images, message.folder)) {
+            state.folderGeneration += 1; state.folderController?.abort();
+          }
+          showQuickPreview(message.thumbnail);
           state.openerReadyAcknowledged = true;
           window.clearTimeout(state.openerReadyTimer);
           state.openerReadyTimer = 0;
@@ -616,7 +709,10 @@
           return;
         }
         state.lastOpenRequestId = message.requestId;
-        loadImage(message.path, { folder: message.folder, name: message.name });
+        const same = message.path === state.path && message.folder === state.folder;
+        if (!same) loadImage(message.path, { folder: message.folder, name: message.name, revision:message.revision || "" });
+        if (message.images) acceptNavigation(message.images, message.folder);
+        showQuickPreview(message.thumbnail);
         loadFolderImages();
         acknowledgeViewerOpen(message.requestId);
         window.focus();
@@ -685,12 +781,16 @@
       });
       window.addEventListener("beforeunload", () => {
         state.loadGeneration += 1;
+        state.imageController?.abort(); state.folderController?.abort();
+        state.previewCache.forEach(value => URL.revokeObjectURL(value.url));
         window.clearTimeout(state.openerReadyTimer);
       });
 
-      loadImage(state.path, { folder: state.folder, name: state.name, replaceHistory: false });
+      loadImage(state.path, { folder: state.folder, name: state.name, revision: state.revision, replaceHistory: false });
       loadFolderImages();
       notifyOpenerReady();
+      elements.actualButton.title = "Load full-resolution original (may be large)";
+      elements.copyImageButton.title = "Copy displayed image pixels. Use 1:1 Actual for original pixels.";
     </script>
   </body>
 </html>

@@ -243,7 +243,13 @@
         scrollbar-width: auto;
       }
       .results.busy { cursor: progress; }
+      .file-icon { position: relative; }
+      .file-icon > img.thumbnail { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+      .file-icon > img.thumbnail:not([src]) { visibility: hidden; }
+      .file-icon.has-thumbnail > svg { visibility: hidden; }
       .items { min-height: 100%; }
+      .items.virtual { display: block !important; min-height: 0; position: relative; }
+      .items.virtual > .file-item { position: absolute; box-sizing: border-box; overflow: hidden; }
       .items.view-large, .items.view-medium {
         align-content: start;
         display: grid;
@@ -805,6 +811,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       const MAX_THUMBNAIL_CONCURRENT = 4;
       const MAX_CLIENT_THUMBNAILS = 160;
       const FOLDER_PAGE_SIZE = 500;
+      const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
       const MINIMUM_DESKTOP_VERSION = 9;
       const MAX_CLIENT_FOLDER_CACHE = 24;
@@ -867,6 +874,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         loadingMore: false,
         navigationToken: 0,
         folderCache: new Map(),
+        folderPositions: new Map(),
+        virtual: null,
+        scrollFrame: 0,
         folderRequests: new Map(),
         folderControllers: new Map(),
         visibleItemsCache: { items: null, search: "", sortKey: "", sortDir: "", value: [] },
@@ -884,6 +894,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         thumbnailQueue: [],
         thumbnailActive: 0,
         thumbnailControllers: new Set(),
+        thumbnailTasks: new Map(),
         thumbnailInFlight: new Set(),
         thumbnailCache: new Map(),
         thumbnailGeneration: 0,
@@ -1108,7 +1119,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           return `<svg viewBox="0 0 112 92" aria-hidden="true"><path d="M5 19h42l10 11h50v54H5z" fill="#ffd35a" stroke="#d7a821" stroke-width="3"/><path d="M5 19V9h39l10 11" fill="#ffe484" stroke="#d7a821" stroke-width="3"/><path d="M5 30h102" stroke="#ecc149" stroke-width="3"/></svg>`;
         }
         if (thumbnail && item.thumbnail_url) {
-          return `<img class="thumbnail" alt="" data-thumbnail-url="${escapeHtml(item.thumbnail_url)}" data-thumbnail-key="${escapeHtml(item.thumbnail_key || item.thumbnail_url)}">`;
+          return `${itemIcon(item, {thumbnail:false})}<img class="thumbnail" alt="" data-thumbnail-url="${escapeHtml(item.thumbnail_url)}" data-thumbnail-key="${escapeHtml(item.thumbnail_key || item.thumbnail_url)}">`;
         }
         const colors = {
           image: ["#287a4b", "IMG"], pdf: ["#b3261e", "PDF"], document: ["#185abd", ext || "DOC"],
@@ -1142,13 +1153,13 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             const aValid = Number.isFinite(a);
             const bValid = Number.isFinite(b);
             if (aValid !== bValid) return aValid ? -1 : 1;
-            if (!aValid && !bValid) return String(left.name).localeCompare(String(right.name), undefined, { numeric: true, sensitivity: "base" });
+            if (!aValid && !bValid) return nameCollator.compare(String(left.name), String(right.name));
           }
           else if (state.sortKey === "size") { a = Number(left.size || 0); b = Number(right.size || 0); }
           else if (state.sortKey === "type") { a = left.type; b = right.type; }
           else { a = left.name; b = right.name; }
           if (typeof a === "number") return (a - b) * direction;
-          return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * direction;
+          return nameCollator.compare(String(a), String(b)) * direction;
         });
         state.visibleItemsCache = {
           items: state.items,
@@ -1191,6 +1202,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         row.id = pathId(item.path);
         row.dataset.path = item.path;
         row.dataset.index = String(index);
+        row._item = item;
+        row._view = state.view;
         row.setAttribute("role", "option");
         row.setAttribute("aria-label", `${item.name}, ${item.type}`);
         row.tabIndex = item.path === state.focusedPath ? 0 : -1;
@@ -1225,7 +1238,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         row.addEventListener("mousemove", moveFileTooltip);
         row.addEventListener("mouseleave", hideFileTooltip);
         row.addEventListener("mousedown", hideFileTooltip);
-        row.addEventListener("pointerdown", event => beginExternalDragPointer(event, item, index));
+        row.addEventListener("pointerdown", event => beginExternalDragPointer(event, item, Number(row.dataset.index)));
         row.addEventListener("click", event => {
           if (Date.now() < state.suppressClickUntil) {
             event.preventDefault();
@@ -1233,21 +1246,21 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             return;
           }
           if (event.detail > 1) return;
-          if (event.ctrlKey || event.metaKey) selectByIndex(index, { toggle: true });
-          else if (event.shiftKey) selectByIndex(index, { range: true });
+          if (event.ctrlKey || event.metaKey) selectByIndex(Number(row.dataset.index), { toggle: true });
+          else if (event.shiftKey) selectByIndex(Number(row.dataset.index), { range: true });
           else {
-            setSingleSelection(item.path, index);
+            setSingleSelection(item.path, Number(row.dataset.index));
           }
         });
-        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); if(Date.now()<state.suppressClickUntil)return;setSingleSelection(item.path,index);openPreferredItem(item); });
+        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); if(Date.now()<state.suppressClickUntil)return;setSingleSelection(item.path,Number(row.dataset.index));openPreferredItem(item); });
         row.addEventListener("contextmenu", event => {
           hideFileTooltip();
           event.preventDefault();
           event.stopPropagation();
-          if (!state.selection.has(item.path)) setSingleSelection(item.path, index);
+          if (!state.selection.has(item.path)) setSingleSelection(item.path, Number(row.dataset.index));
           showItemContextMenu(item, event.clientX, event.clientY);
         });
-        row.addEventListener("keydown", event => handleItemKeydown(event, item, index));
+        row.addEventListener("keydown", event => handleItemKeydown(event, item, Number(row.dataset.index)));
         row.addEventListener("dragstart", event => {
           hideFileTooltip();
           event.preventDefault();
@@ -1274,7 +1287,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       function renderItems() {
         hideFileTooltip();
-        stopThumbnailLoading();
+        const activePath = document.activeElement?.closest?.(".file-item")?.dataset.path;
+        const retained = new Map(Array.from(elements.items.children).filter(row => row._view === state.view).map(row => [row.dataset.path, row]));
+        state.retainedRows = retained;
+        state.virtual = null;
+        elements.items.style.height = "";
         elements.items.className = `items view-${state.view}`;
         elements.detailsHeader.classList.toggle("visible", state.view === "details");
         elements.detailsHeader.setAttribute("aria-hidden", state.view === "details" ? "false" : "true");
@@ -1291,17 +1308,80 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           elements.items.appendChild(empty);
         } else {
           const fragment = document.createDocumentFragment();
-          items.forEach((item, index) => fragment.appendChild(createItemElement(item, index)));
+          if (items.length > 200) {
+            const probe = createItemElement(items[0], 0);
+            elements.items.appendChild(probe);
+            const style = getComputedStyle(elements.items);
+            const columns = style.display === "grid" ? style.gridTemplateColumns.split(" ").length : 1;
+            const gapX = parseFloat(style.columnGap) || 0;
+            const gapY = parseFloat(style.rowGap) || 0;
+            const height = Math.ceil(probe.getBoundingClientRect().height);
+            const width = (elements.items.clientWidth - (columns - 1) * gapX) / columns;
+            probe.remove();
+            state.virtual = { items, columns, gapX, gapY, height, width, start: -1, end: -1 };
+            elements.items.classList.add("virtual");
+            elements.items.style.height = `${Math.ceil(items.length / columns) * (height + gapY) - gapY}px`;
+            renderVirtualRows();
+          } else items.forEach((item, index) => fragment.appendChild(reuseItemElement(item, index)));
           elements.items.appendChild(fragment);
+        }
+        updateSelectionUi();
+        setupLazyThumbnails();
+        state.retainedRows = null;
+        if (activePath) document.getElementById(pathId(activePath))?.focus({preventScroll:true});
+      }
+
+      function reuseItemElement(item, index) {
+        const old = state.retainedRows?.get(item.path);
+        // Metadata objects are reused within a page/view; changing metadata rebuilds safely.
+        if (old && JSON.stringify(old._item) === JSON.stringify(item)) {
+          old.dataset.index = String(index); old.style.cssText = "";
+          return old;
+        }
+        return createItemElement(item, index);
+      }
+
+      function renderVirtualRows() {
+        const v = state.virtual;
+        if (!v) return;
+        const stride = v.height + v.gapY;
+        const top = Math.max(0, elements.results.scrollTop - elements.items.offsetTop);
+        const start = Math.max(0, Math.floor(top / stride) - 2) * v.columns;
+        const end = Math.min(v.items.length, (Math.ceil((top + elements.results.clientHeight) / stride) + 2) * v.columns);
+        if (start === v.start && end === v.end) return;
+        v.start = start; v.end = end;
+        const existing = new Map(Array.from(elements.items.children, row => [Number(row.dataset.index), row]));
+        for (const [index, row] of existing) if (index < start || index >= end) row.remove();
+        for (let index = start; index < end; index++) {
+          const row = existing.get(index) || reuseItemElement(v.items[index], index);
+          row.style.top = `${Math.floor(index / v.columns) * stride}px`;
+          row.style.left = `${(index % v.columns) * (v.width + v.gapX)}px`;
+          row.style.width = `${v.width}px`; row.style.height = `${v.height}px`;
+          row.setAttribute("aria-posinset", String(index + 1));
+          row.setAttribute("aria-setsize", String(v.items.length));
+          if (!row.isConnected) elements.items.appendChild(row);
         }
         updateSelectionUi();
         setupLazyThumbnails();
       }
 
+      function revealItem(path, focus = false) {
+        const index = visibleItems().findIndex(item => item.path === path);
+        if (index < 0) return;
+        if (state.virtual) {
+          const v = state.virtual;
+          elements.results.scrollTop = elements.items.offsetTop + Math.floor(index / v.columns) * (v.height + v.gapY);
+          renderVirtualRows();
+        }
+        const row = document.getElementById(pathId(path));
+        row?.scrollIntoView({ block: "nearest" });
+        if (focus) row?.focus({ preventScroll: true });
+      }
+
       function renderNavigation() {
-        elements.backButton.disabled = state.back.length === 0 || state.loading;
-        elements.forwardButton.disabled = state.forward.length === 0 || state.loading;
-        elements.upButton.disabled = !state.rootPath || state.currentPath.toLocaleLowerCase() === state.rootPath.toLocaleLowerCase() || state.loading;
+        elements.backButton.disabled = state.back.length === 0;
+        elements.forwardButton.disabled = state.forward.length === 0;
+        elements.upButton.disabled = !state.rootPath || state.currentPath.toLocaleLowerCase() === state.rootPath.toLocaleLowerCase();
         elements.refreshButton.disabled = state.loading;
         renderBreadcrumbs();
         elements.searchInput.value = currentSearch();
@@ -1311,7 +1391,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function renderStatus() {
-        elements.loadingIndicator.hidden = !(state.loading || state.loadingMore);
+        elements.loadingIndicator.hidden = !(state.loading && !state.items.length);
         if (state.loading && !state.items.length) {
           elements.itemCount.textContent = "";
           elements.selectionCount.textContent = "";
@@ -1321,6 +1401,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         elements.itemCount.textContent = currentSearch()
           ? `${visible} of ${state.items.length} items`
           : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
+        if (state.loadingMore) elements.itemCount.textContent += " · loading more…";
+        else if (state.incomplete) elements.itemCount.textContent += " · incomplete — Refresh to retry";
         const clipboardCount = state.clipboard.items.length;
         elements.selectionCount.textContent = state.selection.size
           ? `${state.selection.size} selected`
@@ -1394,6 +1476,13 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       function renderAll() {
         renderNavigation();
         renderItems();
+        if (state.restorePosition) {
+          const saved = state.restorePosition; state.restorePosition = null;
+          state.selection = new Set(saved.selection.filter(path => state.items.some(item => item.path === path)));
+          state.focusedPath = saved.focused;
+          elements.results.scrollTop = saved.scroll;
+          renderVirtualRows(); updateSelectionUi();
+        }
         renderStatus();
         persistState();
       }
@@ -1475,8 +1564,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           `/api/files-list?${params.toString()}`,
           controller ? { signal: controller.signal } : {}
         ).finally(() => {
-          state.folderRequests.delete(requestKey);
-          state.folderControllers.delete(requestKey);
+          if (state.folderControllers.get(requestKey) === controller) {
+            state.folderRequests.delete(requestKey);
+            state.folderControllers.delete(requestKey);
+          }
         });
         if (!page) state.folderRequests.set(requestKey, controlledRequest);
         return controlledRequest;
@@ -1499,6 +1590,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.currentPath = String(payload.current_path || state.rootPath);
         state.timeZone = String(payload.timezone || "UTC");
         state.items = Array.from(payload.items || []);
+        if (state.pinnedItem && state.pinnedFolder === state.currentPath && payload.has_more && !state.items.some(item => item.id === state.pinnedItem.id)) state.items.push(state.pinnedItem);
+        const availablePaths = new Set(state.items.map(item => item.path));
+        state.selection = new Set(Array.from(state.selection).filter(path => availablePaths.has(path)));
         state.canDelete = Boolean(payload.can_delete);
         state.searchByPath[state.currentPath] = state.searchByPath[state.currentPath] || "";
       }
@@ -1518,7 +1612,16 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       async function loadFolder(path, { refresh = false, preserveScroll = false, relativePath = "" } = {}) {
         const token = ++state.navigationToken;
-        const oldScroll = preserveScroll ? elements.results.scrollTop : 0;
+        state.incomplete = false;
+        if (state.currentPath && state.items.length) {
+          state.folderPositions.set(state.currentPath, { scroll:elements.results.scrollTop, selection:Array.from(state.selection), focused:state.focusedPath });
+          while (state.folderPositions.size > 24) state.folderPositions.delete(state.folderPositions.keys().next().value);
+        }
+        const position = state.folderPositions.get(path);
+        const oldScroll = preserveScroll ? elements.results.scrollTop : (position?.scroll || 0);
+        preserveScroll = preserveScroll || Boolean(position);
+        state.restorePosition = position || null;
+        if (path !== state.pinnedFolder) state.pinnedItem = null;
         abortStaleFolderRequests(path);
         const cachedEntry = refresh ? null : cachedFolderEntry(path);
         if (cachedEntry) {
@@ -1550,13 +1653,15 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             })
             .catch(() => {
               if (token !== state.navigationToken) return;
-              state.loadingMore = false;
+              state.loadingMore = false; state.incomplete = true;
+              showToast("Cached folder could not be refreshed. Refresh to retry.", {kind:"error",duration:6000});
               renderStatus();
             });
           return true;
         }
         state.loading = true;
         state.loadingMore = false;
+        if (path !== state.currentPath || relativePath) { state.currentPath = path; state.items = []; }
         elements.helperPanel.classList.remove("visible");
         closeMenus();
         clearSelection();
@@ -1598,6 +1703,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           } catch (error) {
             if (token === state.navigationToken) {
               state.loadingMore = false;
+              state.incomplete = true;
+              showToast("Folder listing is incomplete. Refresh to retry.", {kind:"error",duration:6000});
               renderStatus();
             }
             return;
@@ -1625,26 +1732,29 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           state.back = state.back.slice(-30);
           state.forward = [];
         }
+        const navigation = state.navigationToken + 1;
         const loaded = await loadFolder(target, { refresh, preserveScroll });
-        if (!loaded && remember && previous && state.back[state.back.length - 1] === previous) state.back.pop();
+        if (navigation === state.navigationToken && !loaded && remember && previous && state.back[state.back.length - 1] === previous) state.back.pop();
         return loaded;
       }
 
       async function navigateBack() {
-        if (!state.back.length || state.loading) return;
+        if (!state.back.length) return;
         const destination = state.back.pop();
         if (state.currentPath) state.forward.push(state.currentPath);
-        if (!await loadFolder(destination)) {
+        const navigation = state.navigationToken + 1;
+        if (!await loadFolder(destination) && navigation === state.navigationToken) {
           state.forward.pop();
           state.back.push(destination);
         }
       }
 
       async function navigateForward() {
-        if (!state.forward.length || state.loading) return;
+        if (!state.forward.length) return;
         const destination = state.forward.pop();
         if (state.currentPath) state.back.push(state.currentPath);
-        if (!await loadFolder(destination)) {
+        const navigation = state.navigationToken + 1;
+        if (!await loadFolder(destination) && navigation === state.navigationToken) {
           state.back.pop();
           state.forward.push(destination);
         }
@@ -1806,6 +1916,17 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           : "";
       }
 
+      function viewerThumbnail(path) {
+        const item = state.items.find(item => item.desktop_relative_path === path);
+        const cached = item && state.thumbnailCache.get(item.thumbnail_key || item.thumbnail_url);
+        return cached && cached.expires > Date.now() ? cached.url : "";
+      }
+
+      function viewerNavigation() {
+        return visibleItems().filter(item => item.kind === "image" || item.extension === "psd")
+          .map(item => ({path:item.desktop_relative_path, name:item.name, revision:item.revision || ""}));
+      }
+
       function imageViewerFeatures() {
         const width = Math.min(1100, Math.max(720, window.screen.availWidth - 80));
         const height = Math.min(800, Math.max(560, window.screen.availHeight - 80));
@@ -1820,6 +1941,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           path: viewerRequest.path,
           folder: viewerRequest.folder,
           name: viewerRequest.name,
+          rev: viewerRequest.revision || "",
         }).toString();
         return url.href;
       }
@@ -1849,6 +1971,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             path: pending.path,
             folder: pending.folder,
             name: pending.name,
+            images: viewerNavigation(),
+            revision: pending.revision,
+            thumbnail: viewerThumbnail(pending.path),
           }, location.origin);
         } catch (_) {
           state.imageViewerReady = false;
@@ -1888,8 +2013,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           path: String(item.desktop_relative_path || ""),
           folder: relativeFolderPath(),
           name: String(item.name || "Image"),
+          revision: String(item.rev || item.revision || ""),
         };
-        if (hasDesktopCapability("openViewer")) {
+        if (hasDesktopCapability("openViewer") && item.extension !== "psd") {
           const id = dragRequestId();
           state.desktopPending.set(id, {
             action: "openViewer",
@@ -1981,12 +2107,16 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           showToast("Select one or more files. Folder download is not available.", { kind: "error", duration: 4500 });
           return;
         }
+        const identity = files.map(item => item.id || item.path).sort().join("|");
+        if (state.downloadStamp?.identity === identity && Date.now() - state.downloadStamp.time < 650) return;
+        state.downloadStamp = {identity, time:Date.now()};
         showToast(files.length === 1 ? `Downloading ${files[0].name}...` : `Starting ${files.length} downloads. Your browser may ask to allow multiple downloads.`, { duration: 5000 });
         files.forEach((item, index) => {
+          const downloadUrl = savedEditionId===item.id ? '/api/auto-editions/file?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')) : `/api/files-download?path=${encodeURIComponent(item.path)}`;
           window.setTimeout(() => {
             const frame = document.createElement("iframe");
             frame.hidden = true;
-            frame.src = savedEditionId===item.id ? '/api/auto-editions/file?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')) : `/api/files-download?path=${encodeURIComponent(item.path)}`;
+            frame.src = downloadUrl;
             document.body.appendChild(frame);
             window.setTimeout(() => frame.remove(), 120000);
           }, index * 350);
@@ -2464,14 +2594,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       // Premium opening additions: existing openItem and native transfers stay intact.
       function openPreferredItem(item) {
-        if (item?.kind === 'image' && (hasDesktopCapability('openFile') || isWindowsPlatform())) {
-          const now=Date.now();if(state.openStamp.path===item.path&&now-state.openStamp.time<650)return;
-          state.openStamp={path:item.path,time:now};invokeDesktopHelper(item,'file');
-        } else openItem(item);
+        openItem(item);
       }
 
       function previewItem(item) {
-        if (item?.kind === 'image') openImageViewer(item);
+        if (item?.kind === 'image' || String(item?.extension).toLowerCase() === 'psd') openImageViewer(item);
         else showToast('Browser preview is unavailable for this file type. Use Open or Download.',{duration:5500});
       }
 
@@ -2579,6 +2706,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
           ];
           definitions.push(
+            { label: "Open in desktop app", disabled: !single, action: () => invokeDesktopHelper(item, "file") },
             { label: "Open With", disabled: !single, action: () => chooseFileApplication(item) },
             { label: "Preview", disabled: !single, action: () => previewItem(item) },
             { label: "Remember / change application", disabled: !single, action: () => applicationPreferences(item) },
@@ -2669,6 +2797,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           input.autocomplete = "off";
           modal.append(label, input);
           const submit = async button => {
+            if (button.disabled) return;
             const name = input.value.trim();
             if (!name) { showToast("Enter a folder name.", { kind: "error" }); input.focus(); return; }
             button.disabled = true;
@@ -2708,6 +2837,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           input.autocomplete = "off";
           modal.append(label, input);
           const submit = async button => {
+            if (button.disabled) return;
             const name = input.value.trim();
             if (!name || name === item.name) { if (name === item.name) closeModal(); else input.focus(); return; }
             button.disabled = true;
@@ -2815,16 +2945,16 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.thumbnailControllers.forEach(controller => controller.abort());
         state.thumbnailControllers.clear();
         state.thumbnailInFlight.clear();
-        state.thumbnailActive = 0;
+        // Aborted requests still occupy a slot until their finally block runs.
       }
 
       function rememberThumbnail(key, objectUrl) {
-        if (state.thumbnailCache.has(key)) URL.revokeObjectURL(state.thumbnailCache.get(key));
+        if (state.thumbnailCache.has(key)) URL.revokeObjectURL(state.thumbnailCache.get(key).url);
         state.thumbnailCache.delete(key);
-        state.thumbnailCache.set(key, objectUrl);
+        state.thumbnailCache.set(key, {url:objectUrl, expires:Date.now()+30000});
         while (state.thumbnailCache.size > MAX_CLIENT_THUMBNAILS) {
           const oldest = state.thumbnailCache.keys().next().value;
-          URL.revokeObjectURL(state.thumbnailCache.get(oldest));
+          URL.revokeObjectURL(state.thumbnailCache.get(oldest).url);
           state.thumbnailCache.delete(oldest);
         }
       }
@@ -2835,6 +2965,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           && image.isConnected
           && image.dataset.thumbnailKey === key
         ) {
+          image.style.visibility = "";
+          image.onload = () => image.parentElement?.classList.add("has-thumbnail");
+          image.onerror = () => { image.removeAttribute("src"); image.parentElement?.classList.remove("has-thumbnail"); };
           image.src = objectUrl;
         }
       }
@@ -2842,9 +2975,14 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       async function fetchThumbnail(task) {
         const controller = new AbortController();
         state.thumbnailControllers.add(controller);
+        state.thumbnailTasks.set(controller, task);
+        task.image.dataset.thumbnailPending = "1";
         try {
           const response = await fetch(task.url, { credentials: "same-origin", signal: controller.signal });
-          if (!response.ok || task.generation !== state.thumbnailGeneration) return;
+          if (!response.ok || task.generation !== state.thumbnailGeneration) {
+            if (!response.ok && task.image.isConnected) task.image.style.visibility = "hidden";
+            return;
+          }
           const blob = await response.blob();
           if (!blob.type.startsWith("image/") || task.generation !== state.thumbnailGeneration) return;
           const objectUrl = URL.createObjectURL(blob);
@@ -2854,7 +2992,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           if (error.name !== "AbortError") console.warn("Thumbnail unavailable", task.key);
         } finally {
           state.thumbnailControllers.delete(controller);
-          state.thumbnailInFlight.delete(task.key);
+          state.thumbnailTasks.delete(controller);
+          delete task.image.dataset.thumbnailPending;
+          if (task.generation === state.thumbnailGeneration) state.thumbnailInFlight.delete(task.key);
           state.thumbnailActive = Math.max(0, state.thumbnailActive - 1);
           drainThumbnailQueue();
         }
@@ -2863,7 +3003,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       function drainThumbnailQueue() {
         while (state.thumbnailActive < MAX_THUMBNAIL_CONCURRENT && state.thumbnailQueue.length) {
           const task = state.thumbnailQueue.shift();
-          if (!task || task.generation !== state.thumbnailGeneration || state.thumbnailInFlight.has(task.key)) continue;
+          if (!task || !task.image.isConnected || task.generation !== state.thumbnailGeneration || state.thumbnailInFlight.has(task.key)) continue;
           state.thumbnailInFlight.add(task.key);
           state.thumbnailActive += 1;
           fetchThumbnail(task);
@@ -2871,26 +3011,31 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function setupLazyThumbnails() {
+        state.thumbnailObserver?.disconnect();
+        state.thumbnailQueue = state.thumbnailQueue.filter(task => task.image.isConnected);
+        state.thumbnailTasks.forEach((task, controller) => { if (!task.image.isConnected) controller.abort(); });
         const generation = state.thumbnailGeneration;
-        const images = Array.from(document.querySelectorAll("img[data-thumbnail-url]"));
+        const images = Array.from(elements.items.querySelectorAll("img[data-thumbnail-url]"));
         if (!images.length) return;
         state.thumbnailObserver = new IntersectionObserver(records => {
           records.forEach(record => {
-            if (!record.isIntersecting) return;
-            state.thumbnailObserver.unobserve(record.target);
             const image = record.target;
             const key = image.dataset.thumbnailKey;
-            const cached = state.thumbnailCache.get(key);
-            if (cached) {
-              state.thumbnailCache.delete(key);
-              state.thumbnailCache.set(key, cached);
-              image.src = cached;
+            if (!record.isIntersecting) {
+              state.thumbnailQueue = state.thumbnailQueue.filter(task => task.image !== image);
+              state.thumbnailTasks.forEach((task, controller) => { if (task.image === image) controller.abort(); });
               return;
             }
-            state.thumbnailQueue.push({ image, key, url: image.dataset.thumbnailUrl, generation });
+            if (image.getAttribute("src") || image.dataset.thumbnailPending) return;
+            const cached = state.thumbnailCache.get(key);
+            if (cached && cached.expires > Date.now()) {
+              installThumbnail(image,key,cached.url); return;
+            }
+            if (cached) { URL.revokeObjectURL(cached.url); state.thumbnailCache.delete(key); }
+            if (!state.thumbnailQueue.some(task => task.image === image)) state.thumbnailQueue.push({ image, key, url: image.dataset.thumbnailUrl, generation });
           });
           drainThumbnailQueue();
-        }, { root: elements.results, rootMargin: "240px 0px", threshold: 0.01 });
+        }, { root: elements.results, rootMargin: "120px 0px", threshold: 0.01 });
         images.forEach(image => state.thumbnailObserver.observe(image));
       }
 
@@ -3060,8 +3205,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         row.uploaded = row.size;
         renderUploads();
         showToast(`Uploaded ${row.name}`, { kind: "success" });
+        invalidateClientFolderCache();
         if (row.destinationPath === state.currentPath) {
-          invalidateClientFolderCache(row.destinationPath);
           window.clearTimeout(state.uploadRefreshTimer);
           state.uploadRefreshTimer = window.setTimeout(
             () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true }),
@@ -3079,6 +3224,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function retryUpload(row) {
+        if (row.status !== "failed") return;
         if (row.errorCode === "upload_missing") {
           row.uploadId = "";
           row.uploadSecret = "";
@@ -3150,8 +3296,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         const item = items[index];
         if (!item) return;
         selectByIndex(index, { range: extend });
-        const row = document.getElementById(pathId(item.path));
-        if (row) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest" }); }
+        revealItem(item.path, true);
       }
 
       elements.backButton.onclick = navigateBack;
@@ -3194,10 +3339,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.searchByPath[state.currentPath] = elements.searchInput.value;
         state.anchorIndex = -1;
         clearSelection();
-        renderItems();
-        renderStatus();
+        elements.results.scrollTop = 0;
+        cancelAnimationFrame(state.searchFrame || 0);
+        state.searchFrame = requestAnimationFrame(() => { renderItems(); renderStatus(); persistState(); });
         elements.searchClear.hidden = !currentSearch();
-        persistState();
       });
       elements.searchClear.onclick = () => {
         state.searchByPath[state.currentPath] = "";
@@ -3212,7 +3357,16 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       elements.results.addEventListener("click", event => {
         if (!event.target.closest(".file-item")) clearSelection();
       });
-      elements.results.addEventListener("scroll", hideFileTooltip, { passive: true });
+      elements.results.addEventListener("scroll", () => {
+        hideFileTooltip();
+        if (!state.scrollFrame) state.scrollFrame = requestAnimationFrame(() => {
+          state.scrollFrame = 0; renderVirtualRows();
+        });
+      }, { passive: true });
+      new ResizeObserver(() => {
+        if (!state.virtual || state.resizeFrame) return;
+        state.resizeFrame = requestAnimationFrame(() => { state.resizeFrame = 0; renderItems(); });
+      }).observe(elements.results);
       elements.results.addEventListener("contextmenu", event => {
         event.preventDefault();
         if (!event.target.closest(".file-item")) {
@@ -3320,10 +3474,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         stopThumbnailLoading();
         abortStaleFolderRequests();
         clearImageViewerDelivery();
-        state.thumbnailCache.forEach(url => URL.revokeObjectURL(url));
+        state.thumbnailCache.forEach(value => URL.revokeObjectURL(value.url));
         cancelExternalDrag();
       });
       window.addEventListener("blur", hideFileTooltip);
+      window.addEventListener("focus", setupLazyThumbnails);
 
       function handleDesktopMessage(event) {
         const message = event && event.data;
@@ -3379,6 +3534,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             state.imageViewerWindow.postMessage({
               type: "sports-cave-image-viewer-parent-ready",
               version: 1,
+              folder: relativeFolderPath(), images: viewerNavigation(),
+              thumbnail: viewerThumbnail(event.data.path),
             }, location.origin);
           } catch (_) {
             state.imageViewerReady = false;
@@ -3414,49 +3571,64 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       async function openLinkedProduct() {
+        const navigation = ++state.navigationToken;
+        abortStaleFolderRequests(); clearSelection(); state.restorePosition=null;
         try {
-          const response = await fetch('/api/files-psd-open?product_gid='+encodeURIComponent(linkedProduct),{
-            method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'files'})});
-          let target;
-          try { target = await response.json(); } catch (_) { throw new Error('Sign in with Files access and retry Open from Files.'); }
-          if (!response.ok) throw new Error(target.message || 'The linked PSD could not be resolved.');
-          state.searchByPath[target.folder_path] = '';
-          if (!await loadFolder(target.folder_path,{refresh:true})) return;
-          if (state.currentPath !== target.folder_path || state.loadingMore) throw new Error('The linked folder is not fully available. Refresh Files and retry Open from Files.');
-          const matches = state.items.filter(item => item.id === target.file_id && item.tag === 'file');
-          if (matches.length !== 1) throw new Error('The exact linked PSD is not available in this folder. Retry Open from Files; no similar filename was selected.');
-          const item = matches[0];
-          setSingleSelection(item.path);
-          const row = Array.from(elements.items.querySelectorAll('.file-item')).find(node => node.dataset.path === item.path);
-          row?.scrollIntoView({block:'nearest'});row?.focus({preventScroll:true});
+          const target = await apiJson('/api/files-psd-open?product_gid='+encodeURIComponent(linkedProduct), {
+            method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'files'})});
+          if (navigation !== state.navigationToken) return;
+          const payload = await apiJson('/api/files-resolve?id='+encodeURIComponent(target.file_id));
+          if (navigation !== state.navigationToken) return;
+          const item = payload.item;
+          if (!item || item.id !== target.file_id || payload.current_path !== target.folder_path || item.extension !== 'psd') throw new Error('The exact linked PSD is unavailable. Retry Open from Files.');
+          state.searchByPath[payload.current_path] = '';
+          state.pinnedItem = item; state.pinnedFolder = payload.current_path;
+          applyFolderPayload(payload); state.loading=false; state.loadingMore=true;
+          renderAll(); setSingleSelection(item.path); revealItem(item.path,true);
           showToast('Linked PSD selected. Use Open or Download.',{duration:5000});
-          linkedAutoOpen = item;tryOpenLinkedFile();
+          linkedAutoOpen=item; tryOpenLinkedFile();
+          const listing = cachedFolder(payload.current_path) || await requestFolder(payload.current_path,false);
+          if (navigation !== state.navigationToken) return;
+          rememberFolder(listing,payload.current_path); applyFolderPayload(listing);
+          state.loadingMore=Boolean(listing.has_more); renderAll(); revealItem(item.path);
+          await continueFolderPages(payload.current_path,listing,navigation,0,false);
         } catch (error) {
-          clearSelection();showToast(error.message || 'Sign in with Files access and retry Open from Files.',{kind:'error',duration:8000});
+          if (navigation !== state.navigationToken) return;
+          state.loadingMore=false; renderStatus();
+          showToast(error.message || 'Sign in with Files access and retry Open from Files.',{kind:'error',duration:8000});
         }
       }
 
       async function openSavedEdition() {
         const selectionRequest=++editionSelectionRequest;
-        clearSelection();savedEditionId=null;
+        const navigation = ++state.navigationToken;
+        abortStaleFolderRequests(); clearSelection(); savedEditionId=null; state.restorePosition=null;
         try {
-          const response=await fetch('/api/auto-editions/location?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')||''));
-          const target=await response.json();
-          if(selectionRequest!==editionSelectionRequest)return;
-          if(!response.ok)throw new Error(target.error||'The archived JPG is unavailable. Retry Open from Orders.');
-          state.searchByPath[target.folder_path]='';
-          if(!await loadFolder(target.folder_path))return;
-          if(selectionRequest!==editionSelectionRequest)return;
-          let matches=state.items.filter(item=>item.id===target.file_id&&item.tag==='file');
-          if(matches.length!==1){if(!await loadFolder(target.folder_path,{refresh:true}))return;matches=state.items.filter(item=>item.id===target.file_id&&item.tag==='file');}
-          if(selectionRequest!==editionSelectionRequest)return;
-          if(state.currentPath!==target.folder_path||matches.length!==1)throw new Error('The exact saved JPG is not available in this folder. Retry Open from Orders.');
-          const item=matches[0];savedEditionId=item.id;setSingleSelection(item.path);
-          const row=Array.from(elements.items.querySelectorAll('.file-item')).find(node=>node.dataset.path===item.path);
-          row?.scrollIntoView({block:'nearest'});row?.focus({preventScroll:true});
+          const target = await apiJson('/api/auto-editions/location?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')||''));
+          if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
+          const payload = await apiJson('/api/files-resolve?id='+encodeURIComponent(target.file_id)+'&rev='+encodeURIComponent(target.revision||''));
+          if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
+          const item = payload.item;
+          if (!item || item.id !== target.file_id || item.tag !== 'file' || payload.current_path !== target.folder_path) throw new Error('The exact saved JPG is unavailable. Retry Open from Orders.');
+          state.searchByPath[payload.current_path]='';
+          state.pinnedItem=item; state.pinnedFolder=payload.current_path;
+          applyFolderPayload(payload); state.loading=false; state.loadingMore=true;
+          renderAll(); savedEditionId=item.id; setSingleSelection(item.path); revealItem(item.path,true);
           document.body.dataset.editionSelected=target.file_id;
           showToast('Saved edition JPG selected - TEST / NOT PRINT READY. Use Download for the full-resolution file.',{duration:7000});
-        }catch(error){clearSelection();showToast(error.message||'Retry Open from Orders.',{kind:'error',duration:10000});}
+          // The exact file is already usable while the containing folder arrives.
+          const cached = cachedFolder(payload.current_path);
+          const listing = cached || await requestFolder(payload.current_path,false);
+          if (navigation!==state.navigationToken) return;
+          rememberFolder(listing,payload.current_path); applyFolderPayload(listing);
+          state.loadingMore=Boolean(listing.has_more); renderAll(); revealItem(item.path);
+          await continueFolderPages(payload.current_path,listing,navigation,0,false);
+        } catch(error) {
+          if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
+          state.loadingMore=false;
+          if (!savedEditionId) clearSelection();
+          renderStatus(); showToast(error.message||'Retry Open from Orders.',{kind:'error',duration:10000});
+        }
       }
 
       let editionSelectionRequest=0;

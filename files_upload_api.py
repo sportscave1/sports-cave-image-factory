@@ -9,6 +9,7 @@ import html
 import secrets
 import threading
 import time
+import tempfile
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -543,10 +544,18 @@ _DROPBOX_CONTEXT = {}
 _DROPBOX_CONTEXT_LOCK = threading.Lock()
 _THUMBNAIL_CACHE = {}
 _THUMBNAIL_CACHE_LOCK = threading.Lock()
+_PREVIEW_CACHE = {}
+_PREVIEW_PENDING = {}
+_PREVIEW_LOCK = threading.Lock()
+_PREVIEW_DECODE_SLOT = threading.Semaphore(1)
+_PREVIEW_EPOCH = 0
+FILES_PREVIEW_CACHE_BYTES = 32 * 1024 * 1024
 _DIRECTORY_CACHE = {}
 _DIRECTORY_CACHE_LOCK = threading.Lock()
 _DIRECTORY_INFLIGHT = {}
 _DIRECTORY_PAGE_CURSORS = {}
+_DIRECTORY_PAGE_RESULTS = {}
+_DIRECTORY_EPOCH = 0
 
 
 def _directory_cache_key(path, *, root_path="", user_id=""):
@@ -596,22 +605,23 @@ def _cache_namespace(user, root_path):
 
 
 def invalidate_directory_cache(*paths):
+    global _DIRECTORY_EPOCH
     clean_paths = set()
     for path in paths:
         with suppress(Exception):
             clean_paths.add(dropbox_integration.normalize_dropbox_path(path).casefold())
     with _DIRECTORY_CACHE_LOCK:
+        _DIRECTORY_EPOCH += 1
+        for key in list(_DIRECTORY_PAGE_RESULTS):
+            if not clean_paths or _directory_cache_path_from_key(key) in clean_paths:
+                _DIRECTORY_PAGE_RESULTS.pop(key, None)
         if not clean_paths:
             _DIRECTORY_CACHE.clear()
-            _DIRECTORY_INFLIGHT.clear()
             _DIRECTORY_PAGE_CURSORS.clear()
             return
         for key in list(_DIRECTORY_CACHE):
             if _directory_cache_path_from_key(key) in clean_paths:
                 _DIRECTORY_CACHE.pop(key, None)
-        for key in list(_DIRECTORY_INFLIGHT):
-            if _directory_cache_path_from_key(key) in clean_paths:
-                _DIRECTORY_INFLIGHT.pop(key, None)
         for token, page in list(_DIRECTORY_PAGE_CURSORS.items()):
             if str((page or {}).get("path") or "").casefold() in clean_paths:
                 _DIRECTORY_PAGE_CURSORS.pop(token, None)
@@ -620,6 +630,10 @@ def invalidate_directory_cache(*paths):
 def _directory_entries(access_token, path, *, force=False, root_path="", user_id=""):
     clean_path = dropbox_integration.normalize_dropbox_path(path)
     cache_key = _directory_cache_key(clean_path, root_path=root_path, user_id=user_id)
+    if force:
+        invalidate_directory_cache(clean_path)
+    epoch = _DIRECTORY_EPOCH
+    flight_key = (cache_key, "all", epoch)
     now = time.monotonic()
     wait_for = None
     owns_request = False
@@ -628,13 +642,13 @@ def _directory_entries(access_token, path, *, force=False, root_path="", user_id
         if cached is not None:
             return cached
         if not force:
-            wait_for = _DIRECTORY_INFLIGHT.get(cache_key)
+            wait_for = _DIRECTORY_INFLIGHT.get(flight_key)
             if wait_for is None:
                 wait_for = threading.Event()
-                _DIRECTORY_INFLIGHT[cache_key] = wait_for
+                _DIRECTORY_INFLIGHT[flight_key] = wait_for
                 owns_request = True
         else:
-            _DIRECTORY_INFLIGHT.pop(cache_key, None)
+            _DIRECTORY_INFLIGHT.pop(flight_key, None)
     if wait_for is not None and not owns_request:
         wait_for.wait(timeout=15)
         with _DIRECTORY_CACHE_LOCK:
@@ -647,13 +661,14 @@ def _directory_entries(access_token, path, *, force=False, root_path="", user_id
         )
     except Exception:
         with _DIRECTORY_CACHE_LOCK:
-            pending = _DIRECTORY_INFLIGHT.pop(cache_key, None)
+            pending = _DIRECTORY_INFLIGHT.pop(flight_key, None)
             if pending is not None:
                 pending.set()
         raise
     with _DIRECTORY_CACHE_LOCK:
-        _store_directory_cache(cache_key, entries, complete=True)
-        pending = _DIRECTORY_INFLIGHT.pop(cache_key, None)
+        if epoch == _DIRECTORY_EPOCH:
+            _store_directory_cache(cache_key, entries, complete=True)
+        pending = _DIRECTORY_INFLIGHT.pop(flight_key, None)
         if pending is not None:
             pending.set()
     return list(entries)
@@ -663,6 +678,9 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
     clean_path = dropbox_integration.normalize_dropbox_path(path)
     cache_key = _directory_cache_key(clean_path, root_path=root_path, user_id=user_id)
     page_limit = max(1, min(int(limit or FILES_DIRECTORY_PAGE_SIZE), 2000))
+    if force and not page_token:
+        invalidate_directory_cache(clean_path)
+    epoch = _DIRECTORY_EPOCH
     now = time.monotonic()
     cursor = ""
     if page_token:
@@ -702,20 +720,29 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
                 }
 
     request_key = (cache_key, cursor or "first", page_limit)
+    flight_key = (*request_key, epoch)
+    with _DIRECTORY_CACHE_LOCK:
+        result = _DIRECTORY_PAGE_RESULTS.get(request_key)
+        if not force and result and result[0] > now:
+            return dict(result[1])
     wait_for = None
     owns_request = False
     with _DIRECTORY_CACHE_LOCK:
         if not force:
-            wait_for = _DIRECTORY_INFLIGHT.get(request_key)
+            wait_for = _DIRECTORY_INFLIGHT.get(flight_key)
             if wait_for is None:
                 wait_for = threading.Event()
-                _DIRECTORY_INFLIGHT[request_key] = wait_for
+                _DIRECTORY_INFLIGHT[flight_key] = wait_for
                 owns_request = True
         else:
-            _DIRECTORY_INFLIGHT.pop(request_key, None)
+            _DIRECTORY_INFLIGHT.pop(flight_key, None)
     if wait_for is not None and not owns_request:
-        wait_for.wait(timeout=15)
+        if not wait_for.wait(timeout=15):
+            raise FilesUploadError("Folder loading is taking too long. Retry.", status_code=503)
         with _DIRECTORY_CACHE_LOCK:
+            result = _DIRECTORY_PAGE_RESULTS.get(request_key)
+            if result and result[0] > time.monotonic():
+                return dict(result[1])
             cached = _directory_cache_payload(cache_key)
             if cached is not None:
                 return {
@@ -738,6 +765,8 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
         has_more = bool(page.get("has_more"))
         next_cursor = str(page.get("cursor") or "")
         with _DIRECTORY_CACHE_LOCK:
+            if epoch != _DIRECTORY_EPOCH:
+                raise FilesUploadError("Folder changed while loading. Refresh to retry.", status_code=409)
             previous = [] if (force and not page_token) else list((_DIRECTORY_CACHE.get(cache_key) or {}).get("entries") or ())
             combined = previous + page_entries if page_token else page_entries
             next_token = ""
@@ -760,7 +789,13 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
             )
             _DIRECTORY_CACHE[cache_key]["next_page"] = next_token
             _DIRECTORY_CACHE[cache_key]["has_more"] = has_more
-            pending = _DIRECTORY_INFLIGHT.pop(request_key, None)
+            result = {"entries": combined, "cursor": next_cursor if has_more else "",
+                      "page_token": next_token, "has_more": has_more, "from_cache": False,
+                      "complete": not has_more}
+            _DIRECTORY_PAGE_RESULTS[request_key] = (time.monotonic() + FILES_DIRECTORY_PAGE_SECONDS, result)
+            while len(_DIRECTORY_PAGE_RESULTS) > 128:
+                _DIRECTORY_PAGE_RESULTS.pop(next(iter(_DIRECTORY_PAGE_RESULTS)))
+            pending = _DIRECTORY_INFLIGHT.pop(flight_key, None)
             if pending is not None:
                 pending.set()
         return {
@@ -773,13 +808,14 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
         }
     except Exception:
         with _DIRECTORY_CACHE_LOCK:
-            pending = _DIRECTORY_INFLIGHT.pop(request_key, None)
+            pending = _DIRECTORY_INFLIGHT.pop(flight_key, None)
             if pending is not None:
                 pending.set()
         raise
 
 
 def invalidate_thumbnail_cache(*paths):
+    global _PREVIEW_EPOCH
     clean_paths = set()
     for path in paths:
         with suppress(Exception):
@@ -788,6 +824,11 @@ def invalidate_thumbnail_cache(*paths):
                 clean_paths.add(clean_path.casefold())
     if not clean_paths:
         return
+    with _PREVIEW_LOCK:
+        _PREVIEW_EPOCH += 1
+        for key in list(_PREVIEW_CACHE):
+            if key[1].casefold() in clean_paths:
+                _PREVIEW_CACHE.pop(key, None)
     with _THUMBNAIL_CACHE_LOCK:
         for key in list(_THUMBNAIL_CACHE):
             if str(key[0]).casefold() in clean_paths:
@@ -821,23 +862,133 @@ def _thumbnail_bytes(access_token, path, revision=""):
     return bytes(content)
 
 
+def _preview_bytes(access_token, path, *, user_id, size="w1024h768", revision=""):
+    """Bounded, session-scoped representations; never download an original as fallback."""
+    scope = hashlib.sha256((str(user_id) + "\0" + access_token).encode()).hexdigest()
+    key = (scope, path, size, revision)
+    while True:
+        with _PREVIEW_LOCK:
+            cached = _PREVIEW_CACHE.get(key)
+            if cached and cached[0] > time.monotonic():
+                if cached[1] is None:
+                    raise FilesUploadError("A lightweight preview is unavailable. Use Download or Open With.", status_code=404)
+                return cached[1]
+            pending = _PREVIEW_PENDING.get(key)
+            if pending is None:
+                pending = threading.Event()
+                _PREVIEW_PENDING[key] = pending
+                epoch = _PREVIEW_EPOCH
+                break
+        if not pending.wait(30):
+            raise FilesUploadError("Preview is taking too long. Retry.", status_code=503)
+    try:
+        content = dropbox_integration.get_thumbnail_bytes(access_token, path, size=size)
+        if not content or len(content) > 4 * 1024 * 1024:
+            raise FilesUploadError("A lightweight preview is unavailable. Use Download or Open With.", status_code=404)
+        with _PREVIEW_LOCK:
+            # Never repopulate an entry invalidated while Dropbox was responding.
+            if epoch == _PREVIEW_EPOCH:
+                _PREVIEW_CACHE.pop(key, None)
+                _PREVIEW_CACHE[key] = (time.monotonic() + 30, bytes(content))
+                while sum(len(value[1] or b"") for value in _PREVIEW_CACHE.values()) > FILES_PREVIEW_CACHE_BYTES or len(_PREVIEW_CACHE) > 256:
+                    _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
+        return bytes(content)
+    except Exception:
+        with _PREVIEW_LOCK:
+            if epoch == _PREVIEW_EPOCH:
+                _PREVIEW_CACHE[key] = (time.monotonic() + 5, None)
+                while len(_PREVIEW_CACHE) > 256:
+                    _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
+        raise
+    finally:
+        with _PREVIEW_LOCK:
+            _PREVIEW_PENDING.pop(key, None)
+            pending.set()
+
+
+def _stream_original_with_preview(upstream, *, access_token, user_id, path, metadata):
+    """Seed small representations only from an explicitly requested original transfer.
+
+    This iterator runs in Starlette's worker pool. It never downloads a second
+    original, never touches a PSD, and never changes source artwork. A single
+    decoder slot and bounded spool prevent parallel large-image memory spikes.
+    Cache warming is best effort and cannot change download success.
+    """
+    size = int(metadata.get("size") or 0)
+    can_seed = 0 < size <= FILES_IMAGE_PREVIEW_MAX_BYTES and _PREVIEW_DECODE_SLOT.acquire(blocking=False)
+    if not can_seed:
+        yield from _stream_upstream_response(upstream)
+        return
+    spool = None
+    epoch = _PREVIEW_EPOCH
+    received = 0
+    try:
+        try:
+            spool = tempfile.SpooledTemporaryFile(max_size=4 * 1024 * 1024)
+        except OSError:
+            pass
+        for chunk in _stream_upstream_response(upstream):
+            received += len(chunk)
+            if spool is not None:
+                try:
+                    if received > size:
+                        spool.close(); spool = None
+                    else:
+                        spool.write(chunk)
+                except OSError:
+                    spool.close(); spool = None
+            yield chunk
+        if spool is None or received != size:
+            return
+        try:
+            from PIL import Image, ImageOps
+            spool.seek(0)
+            with Image.open(spool) as original:
+                # PSD/layer processing is deliberately excluded. Oversized raster
+                # decoding is also skipped; the explicit original still streams.
+                if original.format not in {"JPEG", "PNG", "WEBP"} or original.width * original.height > 40_000_000:
+                    return
+                original.draft("RGB", (1024, 768))
+                original.thumbnail((1024, 768))
+                screen = ImageOps.exif_transpose(original).convert("RGB")
+                scope = hashlib.sha256((str(user_id) + "\0" + access_token).encode()).hexdigest()
+                revision = str(metadata.get("rev") or "")
+                for dimension, bounds in [("w1024h768", (1024, 768)), ("w256h256", (256, 256))]:
+                    screen.thumbnail(bounds)
+                    output = io.BytesIO(); screen.save(output, "JPEG", quality=88)
+                    content = output.getvalue()
+                    with _PREVIEW_LOCK:
+                        if epoch != _PREVIEW_EPOCH:
+                            return
+                        for rev, ttl in [("", 30), (revision, 1800)]:
+                            key = (scope, path, dimension, rev)
+                            _PREVIEW_CACHE.pop(key, None)
+                            _PREVIEW_CACHE[key] = (time.monotonic() + (ttl if rev else 30), content)
+                        while sum(len(value[1] or b"") for value in _PREVIEW_CACHE.values()) > FILES_PREVIEW_CACHE_BYTES or len(_PREVIEW_CACHE) > 256:
+                            _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
+        except Exception:
+            # Never fail or log artwork contents because optional warming failed.
+            pass
+    finally:
+        if spool is not None:
+            spool.close()
+        _PREVIEW_DECODE_SLOT.release()
+
+
 def _dropbox_context(*, force=False):
-    now = time.monotonic()
+    # Single-flight cold connection setup, shared by concurrent visible thumbnails.
     with _DROPBOX_CONTEXT_LOCK:
+        now = time.monotonic()
         if not force and _DROPBOX_CONTEXT.get("expires_at", 0) > now:
             return dict(_DROPBOX_CONTEXT)
-    auth = dropbox_integration.resolve_server_auth()
-    access_token = str(auth.get("access_token") or "")
-    root_path = dropbox_integration.find_team_folder(access_token)
-    context = {
-        "access_token": access_token,
-        "root_path": root_path,
-        "expires_at": now + 25 * 60,
-    }
-    with _DROPBOX_CONTEXT_LOCK:
+        auth = dropbox_integration.resolve_server_auth()
+        access_token = str(auth.get("access_token") or "")
+        root_path = dropbox_integration.find_team_folder(access_token)
+        context = {"access_token": access_token, "root_path": root_path,
+                   "expires_at": time.monotonic() + 25 * 60}
         _DROPBOX_CONTEXT.clear()
         _DROPBOX_CONTEXT.update(context)
-    return dict(context)
+        return dict(context)
 
 
 def _request_user(request):
@@ -1212,7 +1363,7 @@ def _public_file_item(entry, root_path, *, timezone_name="UTC"):
         return None
     relative_path = path[len(clean_root) :].lstrip("/")
     extension = PurePosixPath(name).suffix.casefold()
-    thumbnail_supported = tag != "folder" and extension in {".jpg", ".jpeg", ".png"}
+    thumbnail_supported = tag != "folder" and extension in {".jpg", ".jpeg", ".png", ".webp"}
     revision = str(entry.get("rev") or entry.get("content_hash") or "")
     modified = _utc_timestamp(entry.get("server_modified")) if tag != "folder" else ""
     latest_activity = ""
@@ -1408,8 +1559,11 @@ async def list_files(request: Request):
     try:
         if not _same_origin(request):
             raise FilesUploadError("Files request is not allowed.", status_code=403)
+        started = time.perf_counter()
         user = await run_in_threadpool(_request_user, request)
+        authenticated = time.perf_counter()
         context = await run_in_threadpool(_dropbox_context)
+        connected = time.perf_counter()
         relative_path = request.query_params.get("relative_path")
         current_path = (
             _validated_relative_folder(relative_path, context["root_path"])
@@ -1451,7 +1605,22 @@ async def list_files(request: Request):
                     root_path=context["root_path"],
                     user_id=user_id,
                 )
-        except Exception:
+        except FilesUploadError:
+            raise
+        except Exception as error:
+            # A missing folder, expired cursor or transient transport error is not
+            # evidence that the Dropbox connection must be rediscovered.
+            cause = error
+            auth_failure = False
+            for _ in range(8):
+                if cause is None:
+                    break
+                if type(cause).__name__ == "AuthError" or getattr(cause, "status_code", None) == 401:
+                    auth_failure = True
+                    break
+                cause = cause.__cause__ or cause.__context__
+            if not auth_failure:
+                raise
             context = await run_in_threadpool(_dropbox_context, force=True)
             current_path = _validated_current_folder(current_path, context["root_path"])
             if page_size or page_token:
@@ -1481,6 +1650,7 @@ async def list_files(request: Request):
                     root_path=context["root_path"],
                     user_id=user_id,
                 )
+        listed = time.perf_counter()
         timezone_name = _files_timezone_name(user)
         items = [
             item
@@ -1494,7 +1664,8 @@ async def list_files(request: Request):
             )
             if item
         ]
-        return JSONResponse(
+        encoding_started = time.perf_counter()
+        response = JSONResponse(
             {
                 "ok": True,
                 "root_path": context["root_path"],
@@ -1510,8 +1681,45 @@ async def list_files(request: Request):
                 "from_cache": bool(page.get("from_cache")),
                 "complete": bool(page.get("complete", True)),
             },
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "no-store", "Server-Timing": (
+                f'auth;dur={(authenticated-started)*1000:.1f}, '
+                f'connection;dur={(connected-authenticated)*1000:.1f}, '
+                f'listing;dur={(listed-connected)*1000:.1f}, '
+                f'metadata;dur={(encoding_started-listed)*1000:.1f}'
+            )},
         )
+        response.headers["Server-Timing"] += f', json;dur={(time.perf_counter()-encoding_started)*1000:.1f}'
+        return response
+    except Exception as error:
+        return _response_error(error)
+
+
+async def resolve_files_item(request: Request):
+    """Resolve an immutable Dropbox ID without scanning its containing folder."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Files request is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        file_id = str(request.query_params.get("id") or "")
+        if not re.fullmatch(r"id:[A-Za-z0-9_-]+", file_id):
+            raise FilesUploadError("Invalid file identity.")
+        metadata = await run_in_threadpool(dropbox_integration.psd_open_metadata,
+                                          context["access_token"], file_id, include_preview=False)
+        path = str(metadata.get("path_display") or metadata.get("path_lower") or "")
+        if metadata.get("id") != file_id or not dropbox_integration.path_is_within_root(path, context["root_path"]):
+            raise FilesUploadError("This file is not available.", status_code=403)
+        revision = request.query_params.get("rev")
+        if revision and metadata.get("rev") != revision:
+            raise FilesUploadError("The saved file changed. Retry Open from Orders.", status_code=409)
+        item = _public_file_item(metadata, context["root_path"], timezone_name=_files_timezone_name(user))
+        if not item or item["tag"] != "file":
+            raise FilesUploadError("This file is not available.", status_code=404)
+        return JSONResponse(dict(ok=True, item=item, items=[item], root_path=context["root_path"],
+            root_name=context["root_path"].rsplit("/", 1)[-1], current_path=path.rsplit("/", 1)[0],
+            cache_namespace=_cache_namespace(user, context["root_path"]),
+            can_delete=bool(os_accounts.can_delete_files(user)), timezone=_files_timezone_name(user)),
+            headers={"Cache-Control": "no-store"})
     except Exception as error:
         return _response_error(error)
 
@@ -1778,13 +1986,31 @@ async def image_preview(request: Request):
     try:
         if not _same_origin(request):
             raise FilesUploadError("Preview request is not allowed.", status_code=403)
-        await run_in_threadpool(_request_user, request)
+        user = await run_in_threadpool(_request_user, request)
         context = await run_in_threadpool(_dropbox_context)
         path = _validated_relative_path(
             request.query_params.get("path"),
             context["root_path"],
         )
         extension = PurePosixPath(path).suffix.casefold()
+        representation = request.query_params.get("representation")
+        if representation not in {None, "screen", "small"}:
+            raise FilesUploadError("Invalid preview representation.")
+        if representation in {"screen", "small"}:
+            if extension not in FILES_IMAGE_EXTENSIONS | {".psd"}:
+                raise FilesUploadError("This preview is not available.", status_code=404)
+            started = time.perf_counter()
+            content = await run_in_threadpool(
+                _preview_bytes, context["access_token"], path,
+                user_id=str(user.get("id") or ""),
+                size="w1024h768" if representation == "screen" else "w256h256",
+                revision=str(request.query_params.get("rev") or "")[:128],
+            )
+            return Response(content, media_type="image/jpeg", headers={
+                "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+                "Server-Timing": f'preview;dur={(time.perf_counter()-started)*1000:.1f}',
+                "X-Files-Representation": representation,
+            })
         if extension not in FILES_IMAGE_EXTENSIONS:
             raise FilesUploadError("This preview is not available.", status_code=404)
         metadata, upstream = await run_in_threadpool(
@@ -1803,12 +2029,18 @@ async def image_preview(request: Request):
             )
         media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
         filename = PurePosixPath(path).name
+        stream = (
+            _stream_original_with_preview(upstream, access_token=context["access_token"],
+                user_id=str(user.get("id") or ""), path=path, metadata=metadata)
+            if request.query_params.get("original") == "1"
+            else _stream_upstream_response(upstream)
+        )
 
         return StreamingResponse(
-            _stream_upstream_response(upstream),
+            stream,
             media_type=media_type,
             headers={
-                "Cache-Control": "private, max-age=300",
+                "Cache-Control": "private, no-store",
                 "Content-Disposition": _content_disposition("inline", filename),
                 "Content-Length": str(int(metadata.get("size") or 0)),
                 "X-Content-Type-Options": "nosniff",
@@ -1823,7 +2055,7 @@ async def image_folder_items(request: Request):
     try:
         if not _same_origin(request):
             raise FilesUploadError("Preview request is not allowed.", status_code=403)
-        await run_in_threadpool(_request_user, request)
+        user = await run_in_threadpool(_request_user, request)
         context = await run_in_threadpool(_dropbox_context)
         folder_value = request.query_params.get("folder")
         folder_path = (
@@ -1835,6 +2067,8 @@ async def image_folder_items(request: Request):
             _directory_entries,
             context["access_token"],
             folder_path,
+            root_path=context["root_path"],
+            user_id=str(user.get("id") or user.get("username") or ""),
         )
         clean_root = dropbox_integration.normalize_dropbox_path(context["root_path"])
         images = []
@@ -2024,23 +2258,24 @@ async def file_thumbnail(request: Request):
     try:
         if not _same_origin(request):
             raise FilesUploadError("Preview request is not allowed.", status_code=403)
-        await run_in_threadpool(_request_user, request)
+        user = await run_in_threadpool(_request_user, request)
         context = await run_in_threadpool(_dropbox_context)
         path = dropbox_integration.normalize_dropbox_path(request.query_params.get("path") or "")
         if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
             raise FilesUploadError("This preview is not available.", status_code=403)
-        if PurePosixPath(path).suffix.casefold() not in {".jpg", ".jpeg", ".png"}:
+        if PurePosixPath(path).suffix.casefold() not in {".jpg", ".jpeg", ".png", ".webp"}:
             raise FilesUploadError("This preview is not available.", status_code=404)
         content = await run_in_threadpool(
-            _thumbnail_bytes,
+            _preview_bytes,
             context["access_token"],
             path,
-            request.query_params.get("rev") or "",
+            revision=request.query_params.get("rev") or "",
+            user_id=str(user.get("id") or ""), size="w256h256",
         )
         return Response(
             content,
             media_type="image/jpeg",
-            headers={"Cache-Control": "private, max-age=900"},
+            headers={"Cache-Control": "private, no-store"},
         )
     except Exception as error:
         if isinstance(error, FilesUploadError):
@@ -2535,6 +2770,7 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-native-launch/claim", claim_native_open, ("POST", "DELETE")),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),
     ("/api/files-list", list_files, ("GET",)),
+    ("/api/files-resolve", resolve_files_item, ("GET",)),
     ("/api/files-folder", create_files_folder, ("POST",)),
     ("/api/files-rename", rename_files_item, ("POST",)),
     ("/api/files-upload/start", start_files_upload, ("POST",)),
