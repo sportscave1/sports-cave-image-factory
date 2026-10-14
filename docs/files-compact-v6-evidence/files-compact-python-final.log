@@ -1,0 +1,15 @@
+.FILES_AUTH denied reason=files_permission_denied
+PSD_OPEN failed stage=files_page exception_classes=FilesUploadError provider_tags=none request_id=ae8dc9e786f6be0f
+...FILES_AUTH denied reason=files_permission_denied
+FILES_AUTH denied reason=files_permission_denied
+................................................................WARNING:files_upload_api:FILES_AUTH denied reason=files_permission_denied
+...................................C:\Dev\SportsCaveWorktrees\sports-cave-files-performance-v1\tests\test_files_window_launcher.py:58: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient
+.ERROR:files_window_launcher:Files launcher registration failed component=files_window_launcher asset_dir=C:\Dev\SportsCaveWorktrees\sports-cave-files-performance-v1\components\files_window_launcher error_type=FileNotFoundError
+.................................................WARNING:services.files_preview_cache:FILES_PREVIEW preparation failed type=RuntimeError
+..........................
+----------------------------------------------------------------------
+Ran 179 tests in 14.968s
+
+Actual helper compiled; OS chooser flags and scoped targets validated; retained Photoshop methods unchanged; no chooser/app/settings launched.
+OK
