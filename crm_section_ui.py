@@ -148,17 +148,13 @@ def middle_editor(doc, key, shop, store=None):
     component = components.declare_component('crm_middle_sections_v2',path=str(Path(__file__).parent/'components'/'crm_sections'))
     templates=[]
     if store is not None:
-        from crm_campaign_library import library_rows
+        from crm_template_library import rows as library_rows, section_source
         from crm_store import StoreUnavailable
         try:
-            from crm_campaign_library import template_html,template_sections
-            if getattr(store,'email_mode',None)=='automation':
-                from crm_template_library import rows as library_rows
             for row in library_rows(store):
                 item={k:row[k] for k in ('id','name','version')}
-                if getattr(store,'email_mode',None)!='automation':
-                    try:item.update(html=template_html(store,row),sections=template_sections(store,row),builtin=bool(row.get('builtin')))
-                    except (ValueError,StoreUnavailable):pass
+                try:item.update(**section_source(store,row),builtin=bool(row.get('builtin')))
+                except (ValueError,StoreUnavailable):pass
                 templates.append(item)
         except StoreUnavailable:st.caption('Templates temporarily unavailable. Add HTML and Add Catalogue remain available.')
     from crm_image_prompt import image_prompt
@@ -181,33 +177,17 @@ def middle_editor(doc, key, shop, store=None):
             return {'html':validate(checkout['html']),'name':'Abandoned Checkout'}
         row=next((r for r in library_rows(store) if str(r['id'])==str(action.get('template_id')) and r['version']==action.get('version')),None)
         if row is None:raise ValueError('Template changed. Reload the template list.')
-        return {'html':template_html(store,row),'sections':template_sections(store,row),'name':row['name'] if row.get('builtin') else '',
-                'template_ref':{k:str(row[k]) if k=='id' else row[k] for k in ('id','name','version')}}
+        return section_source(store,row)
     trigger=getattr(store,'preview_trigger',None) if getattr(store,'email_mode',None)=='automation' else None
-    component_args={'discount_offer':doc.get('recovery_discount'),'discount_html':discount_html()}
+    from crm_middle_sections import button_html
+    component_args={'button_html':button_html(),'discount_offer':doc.get('recovery_discount'),'discount_html':discount_html()}
     event = render_component(component,**component_args,picker_focus=st.session_state.pop(key+'picker_focus',None),on_change=lambda:discount_callback(shop,doc,key,trigger=trigger),discount=discount_view(key,trigger=trigger),automation=getattr(store,'email_mode',None)=='automation',preview_debounce=180,clipboard_script=clipboard_script(),history_scope=scope(key),preview_scope=scope(key),element_defaults=element()['settings'],starter_sections=starter(),checkout_template=checkout,draft_version=editor.get('version'),save_status=st.session_state.get('campaign_save_status','Saved'),save_error=st.session_state.get('campaign_save_error',''),edit_error=st.session_state.get(key+'edit_error',''),image_prompt=image_prompt(doc,campaign_name,verified),sections=sections,templates=templates,warnings=warnings,ack=st.session_state.get(key+'section_event'),key=key+'middle',default=None)
     if st.session_state.get(key+'section_error'):st.warning(st.session_state.pop(key+'section_error'))
     if event and event.get('event') != st.session_state.get(key+'section_event'):
         st.session_state[key+'section_event'] = event.get('event')
         st.session_state.pop(key+'edit_error',None)
         try:
-            if event.get('type')=='add' and event.get('kind')=='checkout':
-                if store is None:raise ValueError('Template storage is unavailable.')
-                from crm_checkout_section import insert
-                insert(store,doc,event);rerun_editor()
-            elif event.get('type')=='add' and event.get('kind')=='template':
-                if store is None:raise ValueError('Template storage is unavailable.')
-                from crm_campaign_library import insert_saved_template
-                from crm_store import StoreUnavailable
-                try:
-                    with st.spinner('Loading template...'):
-                        if getattr(store,'email_mode',None)=='automation':
-                            from crm_template_library import apply_template
-                            apply_template(store,doc,event.get('template_id'),event.get('version'),confirmed=event.get('confirmed') is True)
-                        else:insert_saved_template(store,doc,event.get('template_id'),event.get('version'))
-                except (ValueError,StoreUnavailable):raise ValueError('Template could not be loaded.') from None
-                rerun_editor()
-            elif event.get('type')=='picker':
+            if event.get('type')=='picker':
                 if not any(s['id']==event.get('id') and s['type']=='catalogue' for s in sections): raise ValueError('Catalogue not found.')
                 picker_key=key+'picker_'+event['id']
                 for suffix in ('basket','page'):st.session_state.pop(picker_key+suffix,None)

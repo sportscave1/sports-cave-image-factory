@@ -216,7 +216,7 @@ def composer_form(shop,drafts,actions,editor,key,cfg,choices,available,*,mode='c
                 if templates_tab.open and available:
                     if mode=='automation':
                         from crm_template_library_ui import library
-                        library(drafts,actions.user,cfg)
+                        library(drafts,actions.user,cfg,doc)
                     else:
                         from crm_brand_template_ui import brand_templates_settings
                         brand_templates_settings(drafts,actions.user,cfg,target=COMPOSER_TARGET)

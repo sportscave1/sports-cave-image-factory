@@ -24,7 +24,7 @@ class PublicationUiTests(unittest.TestCase):
         self.assertNotIn('This email copy is reviewed',settings)
         self.assertNotIn("['copy_reviewed']",settings)
         self.assertIn('flush_current(force=True)',editor)
-        self.assertIn('store.request_publish(user,identity',editor)
+        self.assertIn('confirm(store,user,identity,revision,selected',editor)
         self.assertNotIn('open_flow(identity)',editor)  # Publishing retains editor/scroll.
         self.assertNotIn('store.publish(',editor)
         self.assertIn('request_route(None)',editor)

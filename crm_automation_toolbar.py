@@ -2,7 +2,7 @@
 from html import escape
 import inspect
 import streamlit as st
-from crm_automation_publish_state import has_changes,label
+from crm_automation_publish_state import has_changes,label,email_has_changes
 
 def period_changed():
     st.session_state['flow-period-dirty']=True
@@ -42,13 +42,19 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         if st.button('Retry status',key='toolbar-status-retry'):st.rerun(scope='fragment')
         return
     editor=st.session_state.get('automation_editor') if editor else None
+    selected=getattr(store,'step_id',None) if editor else None
+    from crm_automation_publish_confirm import completed
+    if completed(store,row,st.session_state):
+        from crm_automation_ui import request_email
+        changed();request_email(None);st.rerun(scope='app')
+    if flow_view and st.session_state.pop('automation-publication-toast',False):st.toast('Email published successfully.')
     dirty=bool(editor and (editor['document']!=st.session_state.get('automation_saved',{}).get('document') or editor['name']!=st.session_state.get('automation_saved',{}).get('name')))
     # Saved draft vs live is separate from editor vs saved. One session-local
     # comparison is reused until the authoritative definition changes.
-    token=(str(identity),row.get('updated_at'),row['config']['revision'],row['config']['published_version'])
+    token=(str(identity),row.get('updated_at'),row['config']['revision'],row['config']['published_version'],selected)
     comparison=st.session_state.get('_automation_published_comparison')
     if not comparison or comparison[0]!=token:
-        comparison=(token,has_changes(store,row));st.session_state['_automation_published_comparison']=comparison
+        comparison=(token,email_has_changes(store,row,selected) if selected else has_changes(store,row));st.session_state['_automation_published_comparison']=comparison
     pending=comparison[1];version=row['config']['published_version']
     publication=row['config'].get('publication',{});busy=publication.get('state')=='PUBLISHING';archived=status(row)=='ARCHIVED'
     blockers=[];resume_blockers=[]
@@ -57,12 +63,13 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         from crm_automation_publication import preflight
         blockers=readiness_blockers(store,row)
         resume_blockers=readiness_blockers(store,row,published=True) if row['status']=='PAUSED' else []
-        try:preflight(row,row['config']['revision'])
+        from crm_automation_publish_state import publication_flow
+        try:preflight(row,row['config']['revision'],publication_flow(store,row,selected))
         except ValueError as exc:blockers.append(str(exc))
     requested=st.session_state.get('automation-confirm-publication')
     if requested and requested[0]==str(identity):
         from crm_automation_publish_confirm import confirm
-        confirm(store,user,identity,requested[1])
+        confirm(store,user,identity,requested[1],requested[2],requested[3])
     st.html('''<style>
     .st-key-automation-toolbar{gap:8px!important;align-items:center!important;flex-wrap:wrap!important;margin:0 0 8px!important}
     .st-key-automation-toolbar>[data-testid="stElementContainer"]{width:auto!important;flex:0 0 auto!important}
@@ -132,17 +139,9 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             elif st.button('Retry Publish' if publication.get('state')=='FAILED' else 'Publish changes' if version else 'Publish now',type='primary',disabled=archived or bool(blockers),key='toolbar-publish',help='; '.join(blockers) if blockers else 'Publish for new enrollments; existing recipients keep their sequence.'):
                 if flush_current(force=True):
                     revision=editor['version'] if editor else row['config']['revision']
-                    if row['trigger_type']!='abandoned':
-                        st.session_state['automation-confirm-publication']=(str(identity),revision)
-                        from crm_automation_publish_confirm import confirm
-                        confirm(store,user,identity,revision)
-                    else:
-                        job=store.request_publish(user,identity,revision)
-                        if not job.get('unchanged'):
-                            from crm_automation_home import accepted_publication
-                            accepted_publication(job)
-                        changed()
-                        st.rerun(scope='fragment')
+                    st.session_state['automation-confirm-publication']=(str(identity),revision,selected,row['status'])
+                    from crm_automation_publish_confirm import confirm
+                    confirm(store,user,identity,revision,selected,row['status'])
             if row['status'] in ('ACTIVE','PAUSED') and not archived:
                 action='pause' if row['status']=='ACTIVE' else 'resume'
                 if st.button(action.title(),key='toolbar-lifecycle',disabled=action=='resume' and bool(resume_blockers),help='; '.join(resume_blockers) if action=='resume' and resume_blockers else None):

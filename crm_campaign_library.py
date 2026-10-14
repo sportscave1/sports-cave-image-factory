@@ -1,6 +1,5 @@
 """Small HTML library UI over existing versioned campaign template records."""
 from copy import deepcopy
-import uuid
 import inspect
 import streamlit as st
 import os_accounts
@@ -77,17 +76,12 @@ def template_sections(store,row):
 def insert_saved_template(store,doc,identity,version):
     row=next((r for r in library_rows(store) if str(r['id'])==str(identity) and r['version']==version),None)
     if row is None:raise ValueError('Template could not be loaded.')
-    from crm_collector_stages import PREFIX as stage_prefix,apply as apply_stage
-    if row.get('builtin') and str(row['id']).startswith(stage_prefix):
-        apply_stage(doc,row['id']);return
-    source=template_sections(store,row)
-    if source is not None:
-        proposed=deepcopy(doc)
-        from crm_middle_sections import apply_event
-        apply_event(proposed,{'type':'add','kind':'template','base':[s['id'] for s in middle_sections(doc)]},
-            resolve_insert=lambda _:dict(html='',sections=source,template_ref={k:str(row[k]) if k=='id' else row[k] for k in ('id','version','name')}))
-        proposed['copy_reviewed']=False;validate_document(proposed);doc.update(proposed)
-    else:insert_template(doc,template_html(store,row),row)
+    from crm_middle_sections import apply_event
+    proposed=deepcopy(doc)
+    apply_event(proposed,dict(type='add',kind='template',base=[s['id'] for s in middle_sections(doc)]),
+        resolve_insert=lambda _:dict(html=template_html(store,row),sections=template_sections(store,row),name=row['name']))
+    proposed['copy_reviewed']=False;validate_document(proposed);doc.update(proposed)
+
 
 def save_template(store,user,name,html,row=None):
     if not isinstance(html,str):raise ValueError('Enter HTML for this template.')
@@ -96,17 +90,12 @@ def save_template(store,user,name,html,row=None):
     return store.save_design(user,name,doc,row['id'] if row else None,row['version'] if row else None)
 
 def insert_template(doc,html,row):
-    proposed=deepcopy(doc);sections=middle_sections(proposed)
-    if len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():
-        sections[0].update(html=html,visible=True,css_version=1)
-    else:
-        sections.append({'id':uuid.uuid4().hex,'type':'html','visible':True,
-            'html_number':max((s.get('html_number',0) for s in sections),default=0)+1,'html':html,'css_version':1})
-    if row.get('builtin'):sections[-1]['name']=row['name']
-    commit_middle(proposed,sections)
-    proposed['template_ref']={'id':str(row['id']),'version':row['version'],'name':row['name']}
-    proposed['copy_reviewed']=False;validate_document(proposed)
-    doc.update(proposed)
+    from crm_middle_sections import apply_event
+    proposed=deepcopy(doc)
+    apply_event(proposed,dict(type='add',kind='template',base=[s['id'] for s in middle_sections(doc)]),
+        resolve_insert=lambda _:dict(html=html,name=row['name']))
+    proposed['copy_reviewed']=False;validate_document(proposed);doc.update(proposed)
+
 
 def template_dialog():
     # Streamlit's decorator exposes no public close handle. Keep this small adapter
@@ -208,7 +197,9 @@ def library(store,user,doc,target=None):
             label,controls=st.columns([3,2],vertical_alignment='center')
             label.text(row['name'])
             with controls.container(horizontal=True,gap='small'):
-                st.button('Use',key='use_'+str(row['id']),on_click=use,args=(row,))
+                st.button('Insert section',key='use_'+str(row['id']),on_click=use,args=(row,))
                 if manage and not row.get('builtin'):
                     if st.button('Edit',key='edit_'+str(row['id'])):edit_template(store,user,row,target)
                     if st.button('',icon=':material/delete:',help='Delete template',key='delete_'+str(row['id'])):delete_template(store,user,row,target)
+            from crm_template_library_ui import application_controls
+            application_controls(store,doc,row,target)

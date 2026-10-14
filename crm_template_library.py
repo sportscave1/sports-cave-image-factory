@@ -55,6 +55,13 @@ def source(store,row):
     return template_html(store,row)
 
 
+def section_source(store,row):
+    """Reusable body only; saved section groups exclude fixed email branding."""
+    from crm_campaign_library import template_sections
+    parts=template_sections(store,row)
+    return dict(html=source(store,row) if parts is None else '',sections=parts,name=row['name'])
+
+
 def save_builtin(store,user,row,name,html,group):
     from crm_navigation import require
     from crm_campaign_content import new_document,validate_document

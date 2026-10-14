@@ -62,7 +62,44 @@ def published(store,row,conn=None):
 
 def has_changes(store,row,flow=None,conn=None):
     live=published(store,row,conn)
-    return live is None or effective(flow or row['config']['draft'],live)!=effective(live,live)
+    desired=flow or row['config']['draft']
+    delivered={s['step_id'] for s in row.get('steps',[])}
+    expected={s['step_id'] for s in desired['emails'] if s.get('enabled',True)}
+    return live is None or delivered!=expected or effective(desired,live)!=effective(live,live)
+
+
+def publication_flow(store,row,step_id=None,conn=None):
+    """Email publication overlays one draft onto the last authoritative sequence.
+
+    Other draft emails (including edits, deletions and ordering) are never promoted.
+    Published flow settings stay frozen until an explicit whole-flow publication.
+    """
+    draft=deepcopy(row['config']['draft'])
+    if step_id is None:return draft
+    selected=next((s for s in draft['emails'] if s['step_id']==step_id),None)
+    if selected is None:raise ValueError('Email is unavailable. Reopen the flow before publishing.')
+    live=published(store,row,conn)
+    result=deepcopy(live or draft)
+    emails=deepcopy((live or {}).get('emails',[]))
+    position=next((i for i,s in enumerate(emails) if s['step_id']==step_id),None)
+    if position is None:
+        preceding={s['step_id'] for s in draft['emails'][:draft['emails'].index(selected)]}
+        position=max((i+1 for i,s in enumerate(emails) if s['step_id'] in preceding),default=0)
+        emails.insert(position,selected)
+    else:emails[position]=selected
+    result['emails']=emails
+    return result
+
+
+def email_has_changes(store,row,step_id):
+    live=published(store,row)
+    draft=next((s for s in row['config']['draft']['emails'] if s['step_id']==step_id),None)
+    saved=next((s for s in (live or {}).get('emails',[]) if s['step_id']==step_id),None)
+    if not draft or not saved:return True
+    if draft.get('enabled',True) and not any(s['step_id']==step_id for s in row.get('steps',[])):return True
+    a=deepcopy(live);b=deepcopy(live)
+    a['emails']=[draft];b['emails']=[saved]
+    return effective(a,b)!=effective(b,b)
 
 
 def label(row,changed=False):

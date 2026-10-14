@@ -88,12 +88,12 @@ def approved(flow):
     return result
 
 
-def preflight(row,revision):
+def preflight(row,revision,flow=None):
     if not row or not native(row) or row['config'].get('deleted_at') or status(row)=='ARCHIVED':
         raise ValueError('Automation is not publishable.')
     if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
     from crm_automation_timing import single_delay
-    flow=validate(single_delay(row['config']['draft']))
+    flow=validate(single_delay(flow if flow is not None else row['config']['draft']))
     if not any(s.get('enabled',True) for s in flow['emails']):raise ValueError('Enable at least one email before publishing.')
     for step in flow['emails']:
         if not step.get('enabled',True):continue
@@ -103,35 +103,36 @@ def preflight(row,revision):
     return flow
 
 
-def request(store,user,identity,revision):
+def request(store,user,identity,revision,step_id=None):
     require(user,'crm_automations_manage')
     with store.db() as conn:
         conn.execute("SET LOCAL lock_timeout='2s'")
         row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(identity,)).fetchone()
-        flow=preflight(row,revision)
+        from crm_automation_publish_state import publication_flow
+        if not row:raise ValueError('Automation is not publishable.')
+        flow=preflight(row,revision,publication_flow(store,row,step_id,conn))
         if flow['trigger']!='abandoned':
             from crm_automation_readiness import require_ready
             require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},conn=conn)
         active=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND state IN ('QUEUED','RUNNING')",(identity,)).fetchone()
         if active:
-            if active['revision']!=revision:raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
+            if active['revision']!=revision or active['snapshot'].get('step_id')!=step_id:raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
             return active
-        previous=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND revision=%s AND state='SUCCEEDED' ORDER BY requested_at DESC LIMIT 1",(identity,revision)).fetchone()
+        previous=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND revision=%s AND state='SUCCEEDED' AND snapshot->>'step_id' IS NOT DISTINCT FROM %s ORDER BY requested_at DESC LIMIT 1",(identity,revision,step_id)).fetchone()
         if not has_changes(store,row,flow,conn):
             return {**(previous or {'id':None,'automation_id':row['id'],'revision':revision,'publication_version':row['config']['published_version'],'state':'SUCCEEDED'}),'unchanged':True}
-        if previous:return previous
         config=deepcopy(row['config']);job_id=str(uuid.uuid4());version=config['published_version']+1
         snapshot={'flow':approved(flow),'name':row['name'],'base_status':row['status'],
-                  'base_version':config['published_version']}
+                  'base_version':config['published_version'],'step_id':step_id}
         job=conn.execute("""INSERT INTO crm_automation_publish_jobs(id,automation_id,revision,publication_version,snapshot,requested_by)
           VALUES(%s,%s,%s,%s,%s::jsonb,%s) RETURNING *""",
           (job_id,identity,revision,version,json.dumps(snapshot),str(user.get('id') or 'operator'))).fetchone()
-        config['publication']={'job_id':job_id,'revision':revision,'version':version,'state':'PUBLISHING','requested_at':now().isoformat()}
+        config['publication']={'job_id':job_id,'revision':revision,'version':version,'step_id':step_id,'state':'PUBLISHING','requested_at':now().isoformat()}
         conn.execute('UPDATE crm_automations SET config=%s::jsonb,updated_at=now() WHERE id=%s',(json.dumps(config),identity))
         return job
 
 
-def prepare(store,identity,flow,version,name,env=None):
+def prepare(store,identity,flow,version,name,env=None,*,step_id=None):
     from crm_checkout_migration import migrate_flow
     from crm_campaign_sections import with_email_defaults
     from crm_campaign_send import production_checks,validate_tracking
@@ -144,6 +145,7 @@ def prepare(store,identity,flow,version,name,env=None):
         require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},env)
     require_trigger(store,flow['trigger']);bundles=[];steps=[]
     for index,step in enumerate(flow['emails']):
+        if step_id is not None and step['step_id']!=step_id:continue
         if not step.get('enabled',True):continue
         doc=with_email_defaults(production_document(step['document']),cfg)
         validation_doc=publication_document(doc,flow['trigger'])
@@ -270,7 +272,8 @@ def tick(store,owner,env=None):
     if not job:return False
     try:
         preparing=perf_counter()
-        frozen=job['snapshot'];prepared=prepare(store,job['automation_id'],frozen['flow'],job['publication_version'],frozen['name'],env)
+        frozen=job['snapshot'];selected=frozen.get('step_id')
+        prepared=prepare(store,job['automation_id'],frozen['flow'],job['publication_version'],frozen['name'],env,**({'step_id':selected} if selected else {}))
         prepared_at=perf_counter()
         with store.db() as conn:
             locked=conn.execute('SELECT * FROM crm_automation_publish_jobs WHERE id=%s FOR UPDATE',(job['id'],)).fetchone()
@@ -285,6 +288,11 @@ def tick(store,owner,env=None):
             if frozen['flow']['trigger']!='abandoned':
                 from crm_automation_readiness import require_ready
                 require_ready(store,{'trigger_type':frozen['flow']['trigger'],'config':{'draft':frozen['flow']}},env,conn=conn)
+            if selected:
+                # Retain other emails' exact immutable template references.
+                merged={s['step_id']:s for s in row['steps'] if s['step_id']!=selected}
+                merged.update({s['step_id']:s for s in prepared[2]})
+                prepared=(prepared[0],prepared[1],[merged[s['step_id']] for s in prepared[0]['emails'] if s['step_id'] in merged])
             commit(store,conn,row,*prepared,job['publication_version'],row['config']['publication'])
             conn.execute("UPDATE crm_automation_publish_jobs SET state='SUCCEEDED',completed_at=now(),lease_until=NULL,error=NULL WHERE id=%s",(job['id'],))
         from crm_thumbnail_cache import prewarm

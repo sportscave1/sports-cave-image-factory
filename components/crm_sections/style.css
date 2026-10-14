@@ -86,3 +86,7 @@ small{font-size:11px;color:var(--editor-muted);white-space:nowrap}
 .discount-result{display:block!important;text-align:left;width:100%;padding:8px!important;background:#fff;border:0;border-bottom:1px solid #e8e4dc;border-radius:0!important;white-space:normal;overflow-wrap:anywhere}
 .discount-result:hover:not(:disabled){background:#f4eedf}.discount-result strong,.discount-result span,.discount-result small{display:block}.discount-result span,.discount-result small{font-size:11px;margin-top:3px}.discount-result:disabled{opacity:.6;cursor:default}
 .discount-pages{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}.discount-pages button{font-size:11px;max-width:100%;white-space:normal}
+
+.add-menu{width:min(280px,100%);box-sizing:border-box}
+.add-menu label,.add-menu small{display:block;padding:4px;font-size:12px;color:var(--editor-muted)}
+.add-menu select{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:5px;border:1px solid var(--editor-line);border-radius:4px;background:white;color:var(--editor-text)}

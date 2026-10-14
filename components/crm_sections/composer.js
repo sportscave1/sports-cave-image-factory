@@ -40,7 +40,8 @@ function rememberDraft(){try{sessionStorage.setItem('sc-local-draft:'+historySco
 const dirty=()=>{saveError='';saveAttempts=0;saveStatus('Unsaved · Unpublished changes');withParent(p=>{const size=p.document.querySelector('[data-email-size-editor] .sc-email-size');if(size){size.dataset.lastMeasured??=size.innerHTML;size.textContent='Email size · Updating…';}});rememberDraft();clearTimeout(saveTimer);saveTimer=setTimeout(sendChanges,650);signalPending({local:true});};
 function emit(type,extra={}){
  if(!['html','settings'].includes(type))for(const commit of [...pendingCopyInputs.values()])commit();
- const local=['html','settings','visible','order','rename','duplicate','remove','restore_section','product_order','product_remove'].includes(type)||(type==='add'&&(['html','image','discount','catalogue','visual','flexible_checkout'].includes(extra.kind)||extra.kind==='checkout'&&args.checkout_template||extra.kind==='template'&&args.templates.some(t=>t.id===extra.template_id&&typeof t.html==='string')));
+ if(type==='add')extra={...extra,position:Number(document.getElementById('insert-position').value)};
+ const local=['html','settings','visible','order','rename','duplicate','remove','restore_section','product_order','product_remove'].includes(type)||(type==='add'&&(['html','image','button','discount','catalogue','visual','flexible_checkout'].includes(extra.kind)||extra.kind==='checkout'&&args.checkout_template||extra.kind==='template'&&args.templates.some(t=>t.id===extra.template_id&&typeof t.html==='string')));
  if(!local){external.push([type,extra]);sendChanges();return;}
  const event={type,...copy(extra),base:args.sections.map(s=>s.id),edits:copy(drafts)};
  for(const s of args.sections)if(Object.hasOwn(drafts,s.id)){s.html=drafts[s.id];s.css_version=1;}
@@ -59,24 +60,25 @@ function emit(type,extra={}){
   event.new_id=crypto.randomUUID();const created={id:event.new_id,type:extra.kind==='visual'?'checkout_element':extra.kind,visible:true};
   if(extra.kind==='html'){created.html_number=Math.max(extra.reserved_html_number||0,...args.sections.map(s=>s.html_number||0))+1;created.html='';}
   if(extra.kind==='image')created.html='';
+  if(extra.kind==='button'){created.type='html';created.name='Custom Button';created.html=args.button_html;created.html_number=Math.max(0,...args.sections.map(s=>s.html_number||0))+1;}
   if(extra.kind==='discount'){created.html=args.discount_html;created.offer=copy(args.discount_offer||null);}
   if(extra.kind==='catalogue'){created.products=[];created.settings={headline:'',subtext:'',columns:2,smart_count:4,display:Object.fromEntries(['image','title','price','limit','next','remaining','cta'].map(k=>[k,k!=='price'])),cta:'Claim Your Edition'};}
   if(extra.kind==='visual')created.settings=copy(args.element_defaults);
   if(extra.kind==='template'||extra.kind==='checkout'){
    const template=extra.kind==='checkout'?{...args.checkout_template,name:'Abandoned Checkout',builtin:true}:args.templates.find(t=>t.id===extra.template_id);
-   created.type='html';created.html=template.html;created.html_number=Math.max(0,...args.sections.map(s=>s.html_number||0))+1;if(template.builtin)created.name=template.name;
-   if(args.sections.length===1&&args.sections[0].type==='html'&&!args.sections[0].html.trim()){
-    if(extra.kind==='template'){created.id=args.sections[0].id;created.html_number=args.sections[0].html_number;}
-    else created.html_number=1;
-    args.sections=[];
-   }
+   created.type='html';created.html=template.html;created.html_number=Math.max(0,...args.sections.map(s=>s.html_number||0))+1;created.name=template.name;
   }
   if(extra.kind==='flexible_checkout'){const starter=copy(args.starter_sections);event.new_ids=starter.map(s=>s.id=crypto.randomUUID());args.sections.push(...starter);}
   else if(extra.kind==='template'&&Array.isArray(args.templates.find(t=>t.id===extra.template_id)?.sections)){
    const incoming=copy(args.templates.find(t=>t.id===extra.template_id).sections);let number=Math.max(0,...args.sections.map(s=>s.html_number||0));
    event.new_ids=incoming.map(part=>{part.id=crypto.randomUUID();if(part.type==='html')part.html_number=++number;if(part.type==='discount')part.offer=copy(args.discount_offer||null);if(Object.hasOwn(part,'html'))part.css_version=1;return part.id;});args.sections.push(...incoming);
   }
-  else{if(Object.hasOwn(created,'html'))created.css_version=1;args.sections.push(created);opened[created.id]=true;}
+  else{if(Object.hasOwn(created,'html'))created.css_version=1;args.sections.push(created);}
+  const inserted=args.sections.filter(s=>!event.base.includes(s.id)),existing=args.sections.filter(s=>event.base.includes(s.id));
+  args.sections=[...existing.slice(0,extra.position),...inserted,...existing.slice(extra.position)];
+  for(const part of inserted)opened[part.id]=true;
+  document.getElementById('insert-position').dataset.before='';
+  requestAnimationFrame(()=>{const card=[...root.children].find(c=>c.dataset.id===inserted[0]?.id);card?.querySelector('.title')?.focus({preventScroll:true});});
  }
  // Supersede field edits within the same structure. This also lets a corrected
  // invalid field recover without replaying its obsolete invalid intermediate.
@@ -107,7 +109,7 @@ addEventListener('pagehide',()=>{withParent(p=>{if(p.scCampaignFlushSections===f
 // authoring component; a failed save leaves it open with its local state intact.
 let replayNavigation=false,navigationPending=false;
 const navigationGuard=async e=>{
- if(replayNavigation||!(pending||changes.length||Object.keys(drafts).length||saveError))return;
+ if(replayNavigation||!(pending||changes.length||Object.keys(drafts).length||pendingCopyInputs.size||saveError))return;
  const target=e.target.closest('a,button,[role="tab"],[role="option"]');if(!target)return;
  if(e.type==='pointerdown'&&target.getAttribute('role')!=='tab')return;
  if(e.type==='keydown'&&(target.getAttribute('role')!=='tab'||!['Enter',' ','ArrowLeft','ArrowRight','Home','End'].includes(e.key)))return;
@@ -187,17 +189,21 @@ function renderTemplates(){
  if(!association){association=el('div','','discount-summary');association.id='checkout-discount-association';root.after(association);}
  association.replaceChildren();association.hidden=!args.discount_offer;
  if(args.discount_offer){association.append(el('span','Checkout offer: '+args.discount_offer.code+' · '+args.discount_offer.value+' · independent of visible content'),button('Disconnect','Disconnect checkout discount',()=>emit('discount_disconnect')));}
+ const position=document.getElementById('insert-position'),chosen=position.dataset.before;
+ position.replaceChildren();
+ for(const [index,section] of args.sections.entries()){
+  const option=el('option','Before '+(section.name||section.type+' '+(section.html_number||index+1)));option.value=String(index);option.dataset.before=section.id;position.append(option);
+ }
+ const last=el('option','Before fixed Footer (end)');last.value=String(args.sections.length);position.append(last);
+ position.value=String(chosen?Math.max(0,args.sections.findIndex(s=>s.id===chosen)):args.sections.length);
+ position.onchange=()=>{position.dataset.before=args.sections[Number(position.value)]?.id||'';};
  const container=document.getElementById('saved-templates');container.replaceChildren();
  if((args.templates||[]).length)container.append(el('hr'));
  for(const template of args.templates||[]){
-  const item=button(template.name,(args.automation?'Apply ':'Insert ')+template.name,async()=>{
-   if(args.automation){
-    const hasContent=args.sections.some(s=>(drafts[s.id]??s.html??'').trim()||!['html','image'].includes(s.type));
-    if(hasContent&&!window.confirm('Replace this email’s current content with '+template.name+'? Subject, preview text and email settings will be kept.'))return;
-    try{await flushSections();}catch(error){saveStatus(error.message);return;}
-   }
+  const item=button(template.name,'Insert '+template.name,async()=>{
+   if(typeof template.html!=='string'){try{await flushSections();}catch(error){saveStatus(error.message);return;}}
    document.getElementById('add').open=false;
-   emit('add',{kind:'template',template_id:template.id,version:template.version,confirmed:!!args.automation});
+   emit('add',{kind:'template',template_id:template.id,version:template.version});
   });
   item.dataset.add='template';container.append(item);
  }
@@ -243,7 +249,7 @@ function render(){renderTemplates();renderDiscountPicker(document.getElementById
  const copyFields=el('div','','fields');for(const [field,limit] of [['headline',80],['subtext',180]]){const input=document.createElement('input');input.type='text';input.value=s.settings[field]||'';input.maxLength=limit;input.placeholder=field==='headline'?'Headline (optional)':'Subtext (optional)';input.setAttribute('aria-label','Catalogue '+field);let timer;const inputKey=s.id+':'+field;const commit=()=>{clearTimeout(timer);pendingCopyInputs.delete(inputKey);changeSettings(s,{[field]:input.value});};input.oninput=()=>{pendingCopyInputs.set(inputKey,commit);signalPending({id:s.id,[field]:input.value});clearTimeout(timer);timer=setTimeout(commit,100);};input.onchange=commit;copyFields.append(input);}content.append(copyFields);
 
  const labels={image:'Product image',title:'Product title',price:'Price',limit:'Limited to',next:'Next available',remaining:'Remaining',cta:'CTA'},fields=el('div','','fields');for(let [key,label] of Object.entries(labels)){let l=el('label'),c=document.createElement('input');c.type='checkbox';c.checked=s.settings.display[key];c.onchange=()=>changeSettings(s,{display:{[key]:c.checked}});l.append(c,el('span',label));fields.append(l);}content.append(fields);
- const cta=document.createElement('input');cta.type='text';cta.value=s.settings.cta;cta.maxLength=60;cta.setAttribute('aria-label','Catalogue CTA');let ctaTimer;const commitCta=()=>{clearTimeout(ctaTimer);if(cta.value.trim())changeSettings(s,{cta:cta.value});};cta.oninput=()=>{signalPending({id:s.id,cta:cta.value});clearTimeout(ctaTimer);ctaTimer=setTimeout(commitCta,100);};cta.onchange=commitCta;content.append(cta);
+ const cta=document.createElement('input');cta.type='text';cta.value=s.settings.cta;cta.maxLength=60;cta.setAttribute('aria-label','Catalogue CTA');let ctaTimer;const ctaKey=s.id+':cta';const commitCta=()=>{clearTimeout(ctaTimer);pendingCopyInputs.delete(ctaKey);if(cta.value.trim())changeSettings(s,{cta:cta.value});};cta.oninput=()=>{pendingCopyInputs.set(ctaKey,commitCta);signalPending({id:s.id,cta:cta.value});clearTimeout(ctaTimer);ctaTimer=setTimeout(commitCta,100);};cta.onchange=commitCta;content.append(cta);
  for(const warning of (args.warnings||{})[s.id]||[])content.append(el('div',warning,'warning'));
  }
  card.append(content);}if(existing)existing.replaceWith(card);else root.append(card);
@@ -294,6 +300,7 @@ addEventListener('message',e=>{
    if(!saveError&&!changes.length&&!Object.keys(drafts).length){try{sessionStorage.removeItem('sc-local-draft:'+historyScope);}catch{}}
   }
   args={...incoming,sections:pending||changes.length||Object.keys(drafts).length||saveError?localSections:incoming.sections};
+  for(const section of args.sections)if(!localSections.some(old=>old.id===section.id))opened[section.id]=true;
  }
  if(args.clipboard_script&&!window.scCopyText){const script=document.createElement('script');script.textContent=args.clipboard_script;document.head.appendChild(script);}
  if(!drag){if(args.picker_focus&&args.picker_focus.event!==pickerFocusEvent)opened[args.picker_focus.section]=true;render();restorePickerFocus();}localPreview();

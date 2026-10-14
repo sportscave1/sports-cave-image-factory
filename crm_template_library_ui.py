@@ -66,7 +66,7 @@ def toggle(group):
 
 
 @st.fragment
-def library(store,user,cfg):
+def library(store,user,cfg,doc=None):
     with st.container(key='crm-compact-library'):
         with st.container(horizontal=True,vertical_alignment='center',key='compact-library-heading'):
             st.markdown('**Templates**')
@@ -88,3 +88,38 @@ def library(store,user,cfg):
                     st.html('<span class="compact-template-name" title="'+escape(row['name'],quote=True)+'">'+escape(row['name'])+'</span>')
                     allowed=os_accounts.is_admin(user) if row.get('default') in ('header','footer') else os_accounts.can_access_page(user,'crm_automations_manage' if row.get('default') else 'crm_templates_manage')
                     st.button('Edit '+row['name'],icon=':material/edit:',help='Edit '+row['name'],key='compact-edit-'+str(row['id']),disabled=not allowed,on_click=select_template,args=(store,row,cfg))
+                if doc is not None and not row.get('default'):application_controls(store,doc,row)
+
+
+def application_controls(store,doc,row,target=None):
+    """Full replacement is an explicit Templates-tab action, never Add Section."""
+    from crm_email_editor_context import current,mark_content_edit
+    from crm_campaign_recovery import flush_current
+    from crm_campaign_library import COMPOSER_TARGET
+    from crm_template_library import apply_template
+    editor=current(st.session_state,{})
+    key='apply-full-template-'+str(editor.get('id','draft'))+'-'+str(getattr(store,'step_id',''))+'-'+str(row['id'])
+    pending=key+'-pending';error=key+'-error'
+    def choose():
+        st.session_state[pending]=row['version'];st.session_state.pop(error,None)
+    def cancel():
+        st.session_state.pop(pending,None);st.session_state.pop(error,None)
+    def replace():
+        try:
+            apply_template(store,doc,row['id'],st.session_state[pending],confirmed=True)
+            st.session_state.pop(pending,None)
+            if editor.get('document') is doc:mark_content_edit(st.session_state,editor)
+            if not flush_current(force=True):
+                st.session_state[error]='Template applied to the local draft; saving failed. Your edits are retained.';return
+            st.toast('Template applied to draft')
+            # Named reruns are supported from callbacks; refresh the shared
+            # composer so both its section list and preview get the new body.
+            st.rerun(scope=target or COMPOSER_TARGET or 'app')
+        except (ValueError,StoreUnavailable,PermissionError) as exc:st.session_state[error]=str(exc)
+    if st.session_state.get(error):st.error(st.session_state[error])
+    if not st.session_state.get(pending):
+        st.button('Apply full template',key=key,help='Replace body with '+row['name'],on_click=choose)
+        return
+    st.warning('Replace this email body with '+row['name']+'? Existing body sections will be overwritten. Fixed Header, Footer, subject, preview text and email settings are preserved.')
+    st.button('Cancel',key=key+'-cancel',on_click=cancel)
+    st.button('Replace email body',key=key+'-confirm',type='primary',on_click=replace)

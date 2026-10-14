@@ -100,6 +100,8 @@ def apply_event(doc, event, *, resolve_insert=None):
     if kind == 'persist':return
     selected = next((s for s in sections if s['id'] == event.get('id')), None)
     if kind == 'add':
+        position = event.get('position',len(sections))
+        if type(position) is not int or not 0<=position<=len(sections):raise ValueError('Invalid insertion position.')
         identity = event.get('new_id') or uuid.uuid4().hex
         if event.get('kind') == 'visual':
             from crm_checkout_elements import element
@@ -116,27 +118,24 @@ def apply_event(doc, event, *, resolve_insert=None):
             if source.get('sections') is not None:
                 incoming=deepcopy(source['sections']);identities=event.get('new_ids') or [uuid.uuid4().hex for _ in incoming]
                 if not isinstance(identities,list) or len(identities)!=len(incoming):raise ValueError('Invalid template section identities.')
-                if len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():sections=[]
                 number=max((s.get('html_number',0) for s in sections),default=0)
                 for part,identity in zip(incoming,identities):
                     part['id']=identity
                     if part['type']=='html':number+=1;part['html_number']=number
                     if part['type']=='discount':part['offer']=deepcopy(doc.get('recovery_discount'))
                 sections.extend(incoming)
-            elif event['kind']=='template' and len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():
-                sections[0].update(html=source['html'],visible=True)
-                if source.get('name'):sections[0]['name']=source['name']
             else:
-                if event['kind']=='checkout' and len(sections)==1 and sections[0]['type']=='html' and not sections[0]['html'].strip():sections=[]
                 created=dict(id=identity,type='html',visible=True,html_number=max((s.get('html_number',0) for s in sections),default=0)+1,html=source['html'])
                 if source.get('name'):created['name']=source['name']
                 sections.append(created)
-            if source.get('template_ref'):doc['template_ref']=source['template_ref']
         elif event.get('kind') == 'html':
             reserved = event.get('reserved_html_number', 0)
             if type(reserved) is not int or not 0 <= reserved <= 10000: raise ValueError('Invalid reserved section number.')
             sections.append(dict(id=identity, type='html', visible=True,
                 html_number=max(reserved,max((s.get('html_number', 0) for s in sections), default=0))+1, html=''))
+        elif event.get('kind') == 'button':
+            sections.append(dict(id=identity,type='html',name='Custom Button',visible=True,
+                html_number=max((s.get('html_number',0) for s in sections),default=0)+1,html=button_html()))
         elif event.get('kind') == 'image':
             sections.append(dict(id=identity, type='image', visible=True, html=''))
         elif event.get('kind') == 'discount':
@@ -187,7 +186,9 @@ def apply_event(doc, event, *, resolve_insert=None):
     if kind == 'add':
         for added in sections:
             if 'html' in added and added['id'] not in event['base']:added['css_version']=1
-        if event.get('kind')=='template' and len(sections)==1 and 'html' in sections[0]:sections[0]['css_version']=1
+        original=[s for s in sections if s['id'] in event['base']]
+        incoming=[s for s in sections if s['id'] not in event['base']]
+        sections=original[:position]+incoming+original[position:]
     commit_middle(doc, sections)
 
 
@@ -225,3 +226,8 @@ def render_middle(doc, *, images_off=False, campaign_key=''):
     if checks is None: checks = import_html('')[2]
     checks['HTML content present'] = present
     return ''.join(html), '\n\n'.join(t for t in text if t), checks
+
+
+def button_html():
+    """Editable, portable email button; no automation-specific context required."""
+    return '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:16px;background:#111111"><a href="https://www.sportscaveshop.com" style="display:inline-block;padding:12px 20px;background:#d4b77d;color:#111111;font-family:Arial;font-size:14px;font-weight:bold;text-decoration:none">Explore the collection</a></td></tr></table>'

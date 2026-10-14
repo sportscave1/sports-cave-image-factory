@@ -90,16 +90,16 @@ class TemplateLifecycleTests(unittest.TestCase):
         meta=next(r for r in library_rows(self.store) if r['id']==row['id'])
         doc=new_document();doc.update(content_mode='HTML',custom_html='')
         insert_saved_template(self.store,doc,row['id'],row['version'])
-        self.assertEqual(middle_sections(doc)[0]['html'],'<p>Original</p>')
+        self.assertEqual(middle_sections(doc)[-1]['html'],'<p>Original</p>')
         new=save_template(self.store,ADMIN,'Renamed '+row['name'],'<p>Changed</p>',meta)
         latest=next(r for r in library_rows(self.store) if r['id']==row['id'])
         self.assertEqual(latest['name'],new['name']);self.assertEqual(template_html(self.store,latest),'<p>Changed</p>')
-        self.assertEqual(middle_sections(doc)[0]['html'],'<p>Original</p>')
-        doc['middle_sections'][0]['html']='<p>Campaign only</p>'
+        self.assertEqual(middle_sections(doc)[-1]['html'],'<p>Original</p>')
+        doc['middle_sections'][-1]['html']='<p>Campaign only</p>'
         self.assertEqual(template_html(self.store,latest),'<p>Changed</p>')
         self.store.archive_design(ADMIN,row['id'],new['version'])
         self.assertFalse(any(r['id']==row['id'] for r in library_rows(self.store)))
-        self.assertEqual(middle_sections(doc)[0]['html'],'<p>Campaign only</p>')
+        self.assertEqual(middle_sections(doc)[-1]['html'],'<p>Campaign only</p>')
         with self.assertRaises(ValueError):insert_saved_template(self.store,doc,row['id'],new['version'])
     def test_version_conflict_cannot_load_a_stale_body(self):
         row=save_template(self.store,ADMIN,'Version '+uuid.uuid4().hex,'<p>old</p>');self.ids.append(row['id'])
@@ -132,4 +132,4 @@ class TemplateLifecycleTests(unittest.TestCase):
             at.session_state[panel]='Templates'
             at.button(key='use_'+str(row['id'])).click().run(timeout=20)
             self.assertFalse(at.exception)
-        self.assertIn('Scoped',middle_sections(at.session_state['campaign_editor']['document'])[0]['html'])
+        self.assertIn('Scoped',middle_sections(at.session_state['campaign_editor']['document'])[-1]['html'])

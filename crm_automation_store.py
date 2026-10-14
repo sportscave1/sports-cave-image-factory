@@ -127,9 +127,9 @@ class AutomationStore(CampaignStore):
             cfg.update(draft=deepcopy(flow),revision=revision+1)
             return conn.execute('UPDATE crm_automations SET name=%s,config=%s::jsonb,updated_at=now() WHERE id=%s RETURNING *',(name,json.dumps(cfg),identity)).fetchone()
 
-    def request_publish(self,user,identity,revision):
+    def request_publish(self,user,identity,revision,step_id=None):
         from crm_automation_publication import request
-        return request(self,user,identity,revision)
+        return request(self,user,identity,revision,step_id=step_id)
 
     def prepare_lifecycle(self,user,identity):
         """One reversible draft upgrade; no publication, enrollment or history deletion."""
@@ -311,7 +311,7 @@ class AutomationStore(CampaignStore):
         from crm_lifestyle_images import present as has_lifestyle,resolve as resolve_lifestyle,NO_CONTEXT
         from crm_abandoned_checkout import dynamic
         from crm_checkout_preview import legacy
-        if (present(doc) or has_lifestyle(doc)) and not dynamic(doc) and not legacy(doc) and self.flow(self.draft_identity)['config']['draft']['trigger']!='abandoned':
+        if (present(doc) or has_lifestyle(doc)) and not dynamic(doc) and not legacy(doc) and personalisation_trigger!='abandoned':
             if has_lifestyle(doc):self.preview_warning=NO_CONTEXT
             return resolve_lifestyle(resolve(doc)),''
         import streamlit as st
