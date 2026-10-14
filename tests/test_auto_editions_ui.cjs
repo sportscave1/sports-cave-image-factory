@@ -26,11 +26,11 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
  await page.getByRole('link',{name:'Open',exact:true}).click();assert.equal(starts,1);
  missing=true;await page.getByRole('link',{name:'Open',exact:true}).click();await page.getByRole('link',{name:'Retry Open',exact:true}).waitFor();assert.equal(starts,1);
  const blocked=await browser.newContext({acceptDownloads:true});await blocked.addInitScript(()=>window.open=()=>null);
- await blocked.route('**/*',route=>route.fulfill({contentType:'text/html',body:'<a href="/auto-editions/open?allocation_id=42&job_id=verified#Open">Open</a>'}));
- // Popup denial must not throw or remove the saved Open action.
+ await blocked.route('**/*',route=>new URL(route.request().url()).pathname==='/api/auto-editions/location'?route.fulfill({json:{ok:true,file_id:'id:exact'}}):route.fulfill({contentType:'text/html',body:'<a href="/auto-editions/open?allocation_id=42&job_id=verified#Open">Open</a>'}));
+ // A deliberate Open click still works in the current tab if popups are denied.
  const bp=await blocked.newPage();await bp.goto('https://cloud-edition.local.test');
  await bp.evaluate(code=>{const child=document.createElement('iframe');document.body.append(child);child.contentWindow.eval(code);},fs.readFileSync('components/psd_picker/inline.js','utf8'));
  await bp.evaluate(()=>{window.SportsCaveAutoEditions.connect(()=>{});window.SportsCaveAutoEditions.openSaved('/auto-editions/open?allocation_id=42&job_id=verified');});
- assert.equal(blocked.pages().length,1);await blocked.close();
+ await bp.waitForURL('**/auto-editions/open?allocation_id=42&job_id=verified');assert.equal(blocked.pages().length,1);await blocked.close();
  console.log('Inline generation, no modal, automatic location, repeated Open, refresh, missing archive and popup restrictions checked.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

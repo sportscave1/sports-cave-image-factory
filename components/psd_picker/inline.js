@@ -28,7 +28,7 @@
   }
   async function openSaved(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id'),job=u.searchParams.get('job_id');
    const row={status:'Ready',job_id:job,popup:reserve(id)};jobs.set(id,row);
-   try{await api('/api/auto-editions/location',id,false,job);navigateSaved(id,row);paint(id,row);}
+   try{await api('/api/auto-editions/location',id,false,job);if(!row.popup||row.popup.closed){location.assign(url('/auto-editions/open',id,row.job_id));return;}navigateSaved(id,row);paint(id,row);}
    catch(e){row.popup?.close();row.popup=null;row.status='Unavailable';row.error=e.message;paint(id,row);showError(id,row);}
   }
   async function poll(id){const row=jobs.get(id);if(!row||row.polling)return;row.polling=true;
