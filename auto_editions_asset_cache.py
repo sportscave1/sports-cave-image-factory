@@ -47,7 +47,10 @@ class AssetCache:
                 _, old = self.entries.popitem(last=False)
                 old.unlink(missing_ok=True)
             target = Path(self.directory.name) / digest
-            shutil.copyfile(source, target)
+            try:shutil.copyfile(source, target)
+            except OSError:
+                target.unlink(missing_ok=True)
+                raise
             self.entries[digest] = target
 
 

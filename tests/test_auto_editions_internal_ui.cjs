@@ -1,7 +1,7 @@
 const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
 const top=fs.readFileSync('components/sports_cave_top_bar/index.html','utf8');
-const installer=top.slice(0,top.indexOf('  const STYLE_ID =')).replace('__SPORTS_CAVE_TOP_BAR_CONFIG__','{}')+'})();</script></body></html>';
+const installer=top.slice(0,top.indexOf('  const STYLE_ID =')).replace('<script>','<script>'+fs.readFileSync('components/psd_picker/inline.js','utf8')+'\n').replace('__SPORTS_CAVE_TOP_BAR_CONFIG__','{}')+'})();</script></body></html>';
 for(const width of [1280,390]){
  const context=await browser.newContext({viewport:{width,height:800},acceptDownloads:true});
  let starts=0,locations=0,folders=0,frames=0,fullDownloads=0,missing=false,ready=false;
@@ -10,13 +10,14 @@ for(const width of [1280,390]){
  await context.route('**/*',async route=>{const u=new URL(route.request().url());
   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:`<style>body{margin:0}#sports-cave-os-top-bar{height:64px}[data-testid=stMain]{margin-left:${width>600?220:0}px;height:736px;overflow:auto}.grid{height:160px;overflow:auto}.tall{height:900px}</style><header id="sports-cave-os-top-bar">Sports Cave OS</header><section data-testid="stSidebar">Navigation</section><section data-testid="stMain"><div data-testid="stMainBlockContainer"><input aria-label="Search orders" value="SC3283"><div class="grid"><div class="tall">Orders table</div></div><a href="/auto-editions/${ready?'open?allocation_id=652&job_id='+job+'#Open':'download?allocation_id=652#Download JPG'}">${ready?'Open':'Download JPG'}</a><button>Other row</button><iframe src="/shell"></iframe><iframe src="/component"></iframe></div></section>`});
   if(u.pathname==='/shell')return route.fulfill({contentType:'text/html',body:installer});
-  if(u.pathname==='/component')return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/psd_picker/index.html','utf8')});
+  if(u.pathname==='/component'){await new Promise(r=>setTimeout(r,1200));return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/psd_picker/index.html','utf8')});}
   if(u.pathname.endsWith('/inline.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync('components/psd_picker/inline.js','utf8')});
   if(u.pathname==='/files-window'){frames++;return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/files_window/index.html','utf8')});}
   if(u.pathname==='/api/auto-editions/start'){starts++;await new Promise(r=>setTimeout(r,300));return route.fulfill({json:{job_id:job,status:'Queued'}});}
   if(u.pathname==='/api/auto-editions/state'){await new Promise(r=>setTimeout(r,300));ready=true;return route.fulfill({json:{job_id:job,status:'Ready',filename:item.name}});}
   if(u.pathname==='/api/auto-editions/location'){locations++;return route.fulfill({status:missing?409:200,json:missing?{error:'Saved JPG unavailable. Return to Orders and Retry Open.'}:{ok:true,file_id:item.id,revision:item.revision,path:item.path,folder_path:folder}});}
   if(u.pathname==='/api/files-list'){folders++;return route.fulfill({json:{root_path:'/Sportscave Team Folder',current_path:folder,items:[item],cache_namespace:'worker',cached_for_seconds:180}});}
+  if(u.pathname==='/api/files-resolve')return route.fulfill({json:{root_path:'/Sportscave Team Folder',current_path:folder,item,items:[item],cache_namespace:'worker',cached_for_seconds:180}});
   if(u.pathname==='/api/auto-editions/file'){fullDownloads++;return route.fulfill({contentType:'image/jpeg',headers:{'Content-Disposition':'attachment; filename="'+item.name+'"'},body:Buffer.from('offline synthetic fixture')});}
 
   return route.fulfill({status:404});

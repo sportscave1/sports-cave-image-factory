@@ -104,7 +104,8 @@ class DropboxAssets:
                 raise PreparationBlocked('Prepared Dropbox asset checksum changed.')
         finally:
             response.close()
-        prepared_assets.remember(asset['sha256'],destination)
+        try:prepared_assets.remember(asset['sha256'],destination)
+        except OSError:pass # Disposable cache availability must not block valid rendering.
 
     GENERATED_ROOT='/Sportscave Team Folder/03_ASSETS/Auto Editions/Generated JPGs'
 
