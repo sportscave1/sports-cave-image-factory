@@ -20,6 +20,11 @@ class FlowPublicationTests(unittest.TestCase):
     three=existing.EmailPublicationTests.three
     publish_email=existing.EmailPublicationTests.publish_email
 
+    @classmethod
+    def setUpClass(cls):
+        from tests.test_crm_lifecycle_publication import LifecyclePublicationTests
+        LifecyclePublicationTests.setUpClass()
+
     def test_complete_sequence_all_triggers_persists_and_no_enrolments(self):
         from crm_automation_store import AutomationStore
         for kind in ('abandoned','welcome','post_purchase','win_back','fulfilled'):

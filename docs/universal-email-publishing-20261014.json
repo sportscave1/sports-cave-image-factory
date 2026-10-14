@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-14",
+  "scope": "Local-only universal individual-email publishing",
+  "task_id": "20261011-54d8ff88",
+  "owner": "me/email-flow-fix",
+  "root_cause": "Shared toolbar discarded selected step_id and opened whole-flow confirmation.",
+  "implementation": [
+    "Selected email identity, comparison and readiness scope preserved. Missing editor identity fails closed.",
+    "One compact light Windows-style dialog body: Publish Email? / Publish this email now? / Cancel / Publish.",
+    "Separate Publish All scope shares dialog and existing backend; disabled emails stay excluded.",
+    "Per-email flow controls use selected-email scope.",
+    "Existing backend immutable versions, transactions, consent, timing and delivery guards retained.",
+    "Navigation waits for committed successful job and persisted email version. Paused flows and disabled emails stay paused/disabled."
+  ],
+  "verified_flows": [
+    "Abandoned Checkout",
+    "Welcome Series",
+    "Post Checkout / Post Purchase",
+    "Win Back",
+    "Fulfilment Follow-up"
+  ],
+  "validation": {
+    "disposable_sql_suite": "61 passed; no skips. Real Streamlit AppTest selected-editor path across all five triggers verifies selected-only publication, overview return and LIVE selected state.",
+    "additional_checks": "10 focused checks passed.",
+    "javascript": "Publish Email and Publish All save barrier passed; acknowledgement, duplicate clicks, failed saves, retry and syntax.",
+    "diff_check": "passed",
+    "environment": "Fresh loopback in-memory SQL; fabricated data; external Shopify/Resend calls forbidden by fixtures.",
+    "visual_limitation": "Dialog content checked with Streamlit AppTest; no production application preview launched."
+  },
+  "production_actions": "None. No commit, push, deploy, activation or customer email.",
+  "remaining_action": "Local review; deployment requires fresh explicit authorization."
+}

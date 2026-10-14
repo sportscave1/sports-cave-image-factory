@@ -51,6 +51,9 @@ def project(adapter,row,records,display,at):
     active=row['config'].get('published_flow') or row['config']['draft']
     columns += [dict(id=s['step_id'],label='Email '+str(i+1),name=s.get('name') or 'Email '+str(i+1),
         enabled=s.get('enabled',True)) for i,s in enumerate(active['emails'])]
+    if adapter is LIFECYCLE['welcome']:
+        # Presentation only: retain every column/cell for diagnostics and logic.
+        for column in columns:column['visible']=column['label'] in ('Flow','Purchased')
     result=[]
     for r in records:
         values=VALUES['fulfilled' if adapter is LIFECYCLE['fulfilled'] else row['trigger_type']](r,at)

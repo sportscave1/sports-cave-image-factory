@@ -126,6 +126,14 @@ class SharedStateTests(unittest.TestCase):
                 columns,rows=project(adapter,row,[record],str,now())
                 self.assertEqual([c['id'] for c in columns if 'id' in c],[s['step_id'] for s in flow['emails']])
                 self.assertEqual(len(rows[0]['cells']),len(columns));self.assertEqual(record,original)
+                if kind=='welcome':
+                    self.assertEqual([c['label'] for c in columns if c.get('visible',True)],['Flow','Purchased'])
+                    self.assertIn('Email',[c['label'] for c in columns])
+                    self.assertIn('Consent',[c['label'] for c in columns])
+                    self.assertIn('Source',[c['label'] for c in columns])
+                    self.assertEqual([c['label'] for c in rows[0]['cells'][:5]],
+                        ['fixture@example.test','SUBSCRIBED','ACTIVE','Yes','Fixture'])
+                else:self.assertTrue(all(c.get('visible',True) for c in columns))
 
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')

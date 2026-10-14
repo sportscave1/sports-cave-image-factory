@@ -45,7 +45,7 @@ def _audience(store,user,row):
     def display(value):
         value=date(value)
         return value.astimezone(zone).strftime('%d %b %Y %H:%M') if value else '—'
-    from crm_flow_recipient_adapters import adapter_for,project
+    from crm_flow_recipient_adapters import adapter_for,project,LIFECYCLE
     from crm_flow_recipients import table,retry_read,read_page,STYLE
     st.html(STYLE)
     adapter=adapter_for(row)
@@ -114,6 +114,7 @@ def _audience(store,user,row):
         table(slot,(criteria,page),rows=rows,columns=columns,server_now=at,
             read_at=read_at,refresh_seconds=15,
             table_label=adapter.title,date_label=adapter.date_label,
+            compact_columns=adapter is LIFECYCLE['welcome'],
             empty_label='No matching '+adapter.title.lower(),phase=phase)
         from crm_flow_recipients import pagination,close_details
         pagination(slot,page,len(visible),len(records)>50,

@@ -4,7 +4,7 @@
  window.scAutomationPublishBarrier=true;
  let busy=false,allowed=false,nativePending=false,command='Publish now';
  const button=(name=command)=>[...document.querySelectorAll('.st-key-automation-toolbar button')].find(b=>b.textContent.trim()===name);
- const match=e=>{const current=e.target.closest('.st-key-automation-toolbar button');if(!current||!['Publish now','Publish changes','Retry Publish','Save draft'].includes(current.textContent.trim()))return false;command=current.textContent.trim();return true;};
+ const match=e=>{const current=e.target.closest('.st-key-automation-toolbar button');if(!current||!['Publish now','Publish changes','Retry Publish','Publish Email','Publish All','Save draft'].includes(current.textContent.trim()))return false;command=current.textContent.trim();return true;};
  const pending=()=>{const save=document.querySelector('.st-key-toolbar-save button');if(save)save.disabled=false;};
  window.addEventListener('sc-campaign-pending',pending);
  document.addEventListener('input',e=>{if(e.target.closest('.st-key-crm-composer-controls')){nativePending=true;pending();}});

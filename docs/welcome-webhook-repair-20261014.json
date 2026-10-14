@@ -1,0 +1,166 @@
+{
+  "date": "2026-10-14",
+  "task_id": "20261011-54d8ff88",
+  "owner": "me/email-flow-fix",
+  "authorization": "User-requested production integration repair, limited to the verified missing consent subscription and diagnostic refresh. No launch or historical replay.",
+  "root_cause": "Genuinely missing required consent-change subscription, not a wrong topic, stale-only diagnostic or duplicate consent system. Shared send-time consent checks cannot supply a new-subscription trigger.",
+  "shopify": {
+    "topic": "CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE",
+    "wire_topic": "customers_email_marketing_consent/update",
+    "scope": "read_customers (already granted)",
+    "api_version": "2026-04",
+    "subscription_id": "gid://shopify/WebhookSubscription/2086814515507",
+    "callback": "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/crm",
+    "status": "REGISTERED",
+    "matching_count": 1,
+    "before": "missing",
+    "execution": "Existing scripts/register_crm_webhooks.py --topic CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE --apply through authenticated canonical Render service shell; canonical app identity checked by existing script",
+    "verification": "Fresh Shopify subscription re-read plus persisted shared verify() diagnostics at 2026-10-14T02:43:53.343180+00:00",
+    "other_subscriptions": "Existing paid, order create/update, checkout create/update, product create/update and fulfilled subscriptions retained"
+  },
+  "production": {
+    "service": "sports-cave-os",
+    "service_id": "srv-d8kl4on7f7vs73dvavv0",
+    "observed_live_commit": "54efd98acd5bd5e60f687eeb657c53c28f928698",
+    "observed_deploy": "dep-db7eiue7bikc73culpg0",
+    "deployment_by_this_task": false,
+    "worker": "HEALTHY",
+    "delivery_checkpoint": "2026-10-14T02:43:34.654612+00:00",
+    "publication_checkpoint": "2026-10-14T02:44:21.682119+00:00",
+    "marketing_provider_sender_configured": true,
+    "hmac": "CONFIGURED",
+    "callback_configuration": "VERIFIED",
+    "all_five_flow_row_hashes_unchanged": true
+  },
+  "shared_architecture": {
+    "identity_and_authority": "crm_shopify.Shopify.customer(fresh=True), Shopify GIDs; Shopify remains authoritative. Lifecycle customer cache is a projection, not another consent authority.",
+    "consent": "crm_logic.consent/marketing_state and crm_eligibility.eligible; Engine.validate fetches fresh Shopify customer before sending. Contradictory or unsubscribed consent fails closed.",
+    "checkout": "Existing crm_checkout_eligibility.recovery_eligibility uses the same consent sources and suppression ledger, with distinct checkout policy, opt-out veto and payment/recovery checks preserved.",
+    "suppression_and_unsubscribe": "Existing crm_suppressions ledger, Store.suppressed, crm_consent_sync and Shopify-native unsubscribe links; local opt-out is committed before provider synchronization. Provider suppressions and final submission suppression check retained.",
+    "registry": "crm_webhooks.SHOPIFY_TOPICS, shared crm_automation_capabilities.TOPICS dependency map, crm_tracking_health.subscriptions and existing single-topic registration script through shopify_sync transport.",
+    "event_processing": "crm_http.shopify_hook -> existing HMAC and shop-domain verification -> crm_webhooks.receive_shopify -> crm_shopify_automation_events.persist -> shared CRM worker. Unique event ledger plus consent-version guards retain deduplication.",
+    "welcome_trigger": "Only consent-update topic, subscribed state, fresh authoritative consent/version match, activation cutoff and enrollment deduplication. Routine customer update, historical import, pending/unsubscribe and unchanged subscribed state do not supply Welcome trigger authority.",
+    "readiness": "Existing shared capabilities plus crm_automation_readiness required_topics/blockers. Lifecycle Welcome also needs ORDERS_PAID for purchase exit and verified order-history scopes; these are present.",
+    "fulfilment": "Fulfilled timestamps and delivered timestamps remain separate. No invented delivery events or historical replay.",
+    "changes_needed": "None: current integration already shares these paths; repair is registration and diagnostic refresh only."
+  },
+  "flows": [
+    {
+      "name": "Welcome Series",
+      "integration": "READY",
+      "publication_prerequisites": "No blockers; all-three preflight passed on an in-memory enabled copy only",
+      "status": "DRAFT",
+      "published_version": 0,
+      "enabled": [
+        false,
+        false,
+        false
+      ],
+      "timing_seconds": [
+        0,
+        259200,
+        604800
+      ],
+      "anchor": "subscription"
+    },
+    {
+      "name": "Abandoned Checkout",
+      "integration": "READY",
+      "publication_blockers": [],
+      "status": "ACTIVE",
+      "published_version": 12,
+      "live_emails": 3,
+      "timing_seconds": [
+        7200,
+        86400,
+        86400
+      ],
+      "note": "Separate legacy Abandoned Checkout remains PAUSED and untouched"
+    },
+    {
+      "name": "Post Checkout",
+      "integration": "READY",
+      "publication_blockers": [],
+      "status": "ACTIVE",
+      "published_version": 5,
+      "live_emails": 3,
+      "timing_seconds": [
+        10800,
+        604800,
+        3888000
+      ],
+      "anchors": [
+        "payment",
+        "delivery",
+        "payment"
+      ]
+    },
+    {
+      "name": "Win Back",
+      "integration": "READY",
+      "publication_blockers": [],
+      "status": "DRAFT",
+      "published_version": 0,
+      "enabled": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "required_topics": [
+        "ORDERS_PAID"
+      ],
+      "history": "Existing read_all_orders and shared authoritative purchase-history path"
+    },
+    {
+      "name": "Fulfilment Follow-up",
+      "integration": "READY",
+      "required_topics": [
+        "ORDERS_FULFILLED"
+      ],
+      "status": "No saved fulfilled-trigger flow in the current five-row production inventory; not claimed operational"
+    }
+  ],
+  "event_evidence": {
+    "consent_received": 0,
+    "consent_processed": 0,
+    "fulfilled_received": 0,
+    "fulfilled_processed": 0,
+    "orders_paid_received_and_processed": 65,
+    "checkouts_create_received_and_processed": 104,
+    "checkouts_update_received_and_processed": 404,
+    "limitation": "Registration and receiver readiness are verified separately from actual future event delivery. No synthetic production events submitted."
+  },
+  "future_browse_cart": {
+    "pixel": "NOT VERIFIED; optional for current five types",
+    "required": "Existing pixel event support includes product_viewed, product_added_to_cart, product_removed_from_cart and cart_viewed. Future journeys require verified pixel installation/privacy consent, trustworthy customer identity linkage, inactivity/purchase-exit rules and shared send-time consent checks. Current anonymous telemetry deliberately has no journey hooks.",
+    "action": "No new tracking, events, subscriptions or flows activated."
+  },
+  "validation": {
+    "passed": 85,
+    "suites": [
+      "test_crm_shopify_automation_triggers",
+      "test_crm_native_unsubscribe",
+      "test_crm_automation_diagnostics",
+      "test_crm_shopify_receiver_reliability",
+      "test_crm_lifecycle_expansion.PolicyTests",
+      "test_crm_checkout_eligibility.PolicyTests"
+    ],
+    "environment": "55 tests on fresh loopback in-memory SQL plus 30 offline policy tests; Shopify/Resend mocked. No production customers or delivery."
+  },
+  "changes": {
+    "production_subscription": "Only CUSTOMERS_EMAIL_MARKETING_CONSENT_UPDATE created",
+    "application_code": "None in this repair; earlier local universal publishing edits retained uncommitted and undeployed",
+    "evidence": [
+      "docs/welcome-webhook-repair-20261014.json",
+      "docs/welcome-webhook-verification-20261014.png"
+    ],
+    "production_state": "Shared diagnostics refreshed; no email/flow/schedule/version/history changes"
+  },
+  "sources": [
+    "https://shopify.dev/docs/api/admin-graphql/2026-04/enums/WebhookSubscriptionTopic",
+    "https://shopify.dev/docs/api/web-pixels-api/standard-events",
+    "https://shopify.dev/docs/api/web-pixels-api/pixel-privacy"
+  ],
+  "remaining_action": "No further integration repair required. Welcome remains disabled/unpublished; user explicitly enables desired emails and publishes only when ready. First real consent event reception remains unobserved, without blocking verified registration readiness."
+}

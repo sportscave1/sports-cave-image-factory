@@ -121,6 +121,16 @@ html[data-sc-table-host="uploads"] .upload-row:hover { background: var(--sc-tabl
 html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
 </style>
 
+<style>
+/* Opt-in compact audiences share the table without checkout frozen widths. */
+html[data-sc-table-host="checkout"] .wrap.compact-columns table{table-layout:fixed;white-space:normal}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th){min-width:0;max-width:none;padding:6px;overflow-wrap:anywhere}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th):first-child{width:30px;min-width:30px;padding:4px 6px}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th):nth-child(2){width:36%;position:static;box-shadow:none}
+html[data-sc-table-host="checkout"] .wrap.compact-columns :is(td,th):nth-child(3){width:22%;min-width:0}
+.compact-columns .email{min-width:0}
+.compact-columns .customer{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+</style>
 </head><body><div id="root"></div><script>
 'use strict';
 let args={},page=0,selected=new Set(),structure='',seq=0,timer=null,inView=true;
@@ -149,10 +159,10 @@ function requestProgress(el,r){const p=r.enrollment_progress||{};
 function scrollKey(){return args.state_key?'sc-flow-scroll:'+args.state_key:null;}
 function savedScroll(){try{return JSON.parse(sessionStorage.getItem(scrollKey())||'{}')}catch{return {}}}
 function saveScroll(){const w=root.querySelector('.wrap');if(!w||!scrollKey())return;try{sessionStorage.setItem(scrollKey(),JSON.stringify({left:w.scrollLeft,top:w.scrollTop}))}catch{}}
-function render(){const rows=args.rows||[],cols=args.columns||[],count=Math.ceil(rows.length/50);page=Math.min(page,Math.max(0,count-1));
- const shown=shownRows(),next=JSON.stringify([page,shown.map(r=>r.key),cols]);
+function render(){const rows=args.rows||[],cols=(args.columns||[]).map((col,index)=>({...col,index})).filter(col=>col.visible!==false),count=Math.ceil(rows.length/50);page=Math.min(page,Math.max(0,count-1));
+ const shown=shownRows(),next=JSON.stringify([page,shown.map(r=>r.key),cols,args.compact_columns]);
  if(next!==structure){const active=document.activeElement,focused=active?.getAttribute('aria-label'),focusKey=active?.dataset.rowKey,focusTag=active?.tagName;const old=root.querySelector('.wrap'),left=old?.scrollLeft??savedScroll().left??0,top=old?.scrollTop??savedScroll().top??0;structure=next;nodes.clear();root.replaceChildren();
-  const wrap=document.createElement('div');wrap.className='wrap';wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',args.table_label||'Checkout email progress');root.append(wrap);
+  const wrap=document.createElement('div');wrap.className='wrap'+(args.compact_columns?' compact-columns':'');wrap.tabIndex=0;wrap.setAttribute('role','region');wrap.setAttribute('aria-label',args.table_label||'Checkout email progress');root.append(wrap);
   const table=document.createElement('table');table.setAttribute('aria-label',args.table_label||'Abandoned checkout email flow');wrap.append(table);
   const head=table.createTHead().insertRow(),th=cell(head,'','th'),all=document.createElement('input');all.type='checkbox';all.setAttribute('aria-label',args.table_label?'Select visible records':'Select visible checkouts');
   all.title='Select visible records; uncheck to deselect all records across pages';
@@ -174,7 +184,7 @@ function render(){const rows=args.rows||[],cols=args.columns||[],count=Math.ceil
  }
  for(const r of shown){const n=nodes.get(r.key);text(n.link,r.customer);n.link.title=r.customer;n.link.setAttribute('aria-label','Details '+r.customer);n.link.setAttribute('aria-expanded',String(args.detail_key===r.key));
   text(n.created,r.created);n.created.title=r.created_full;requestProgress(n.request,r);
-  n.cells.forEach((td,i)=>{const c=(r.cells||[])[i]||{label:'—',tone:'muted'};td.className='email '+(['green','red','gold','muted'].includes(c.tone)?c.tone:'muted');td.title=c.reason||c.label;
+  n.cells.forEach((td,i)=>{const c=(r.cells||[])[cols[i].index]||{label:'—',tone:'muted'};td.className='email '+(['green','red','gold','muted'].includes(c.tone)?c.tone:'muted');td.title=c.reason||c.label;
    td.dataset.due=c.due_at||'';text(td,c.due_at?remaining(c.due_at):c.label);});
  }
  selection();tick(false);height();

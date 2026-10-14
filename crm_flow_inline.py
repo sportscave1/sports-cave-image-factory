@@ -24,7 +24,7 @@ def status_options(row,step):
     if row['status']=='ACTIVE':options.append('Pause flow')
     if not busy:
         if row['status']=='PAUSED' and row['config'].get('published_version'):options.append('Resume flow')
-        options.append('Publish flow')
+        options.append('Publish email')
     return options
 
 
@@ -45,8 +45,8 @@ def status_action(store,user,row,step,key):
             target=next(s for s in draft['emails'] if s['step_id']==step['step_id'])
             target['enabled']=action=='Enable in draft'
             store.save_flow(user,row['id'],fresh['name'],draft,fresh['config']['revision'])
-        elif action=='Publish flow':
-            st.session_state['automation-confirm-publication']=(str(row['id']),fresh['config']['revision'],None,fresh['status'],fresh)
+        elif action=='Publish email':
+            st.session_state['automation-confirm-publication']=(str(row['id']),fresh['config']['revision'],step['step_id'],fresh['status'],fresh)
         else:store.lifecycle(user,row['id'],'pause' if action=='Pause flow' else 'resume')
         changed();st.session_state['flow-toolbar-dirty']=True
     except (ValueError,PermissionError,StoreUnavailable) as exc:
@@ -60,7 +60,7 @@ def status_control(store,user,row,step):
     with st.container(key='flow-state-'+state.lower()+'-'+step['step_id']):
         st.selectbox('Status and actions for '+(step.get('name') or 'email'),status_options(row,step),
             key=key,label_visibility='collapsed',disabled=status(row)=='ARCHIVED',
-            help='Status refers to the published email. Publish affects the entire eligible flow; disabled emails require explicit inclusion. Pause and Resume affect the whole flow; draft changes do not alter the live version.',
+            help='Status refers to the published email. Publish affects only this email; disabled emails remain disabled. Pause and Resume affect the whole flow; draft changes do not alter the live version.',
             on_change=status_action,args=(store,user,row,step,key))
 
 

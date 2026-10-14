@@ -28,6 +28,64 @@ class EmailPublicationTests(unittest.TestCase):
     def publish_email(self,row,index):
         return self.store.request_publish(ADMIN,row['id'],row['config']['revision'],step_id=row['config']['draft']['emails'][index]['step_id'])
 
+    def test_shared_editor_confirmation_and_navigation_all_five_flows(self):
+        from streamlit.testing.v1 import AppTest
+        for kind in ('abandoned','welcome','post_purchase','win_back','fulfilled'):
+            with self.subTest(kind=kind):
+                row=self.three(kind);self.publish_email(row,0);self.run_job();row=self.state(row)
+                flow=deepcopy(row['config']['draft'])
+                flow['emails'][0]['document']['content']['subject']='Unpublished sibling edit'
+                flow['emails'][2]['enabled']=False
+                row=self.store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+                selected=flow['emails'][1]['step_id'];original=deepcopy(row['steps'])
+                source=f'''
+import streamlit as st
+from tests.test_crm_send_flow import CFG
+from tests.test_crm import ADMIN
+from tests.crm_db_fixture import connect
+from crm_automation_store import AutomationStore
+from crm_automation_toolbar import toolbar
+class FixtureStore(AutomationStore):
+    def render_settings(self,env=None):return CFG
+store=FixtureStore(connect);store.step_id={selected!r}
+if '_automation_navigation_email' in st.session_state:
+    st.write('Flow overview')
+else:
+    editor=store.draft({str(row['id'])!r})
+    st.session_state['automation_editor']=editor
+    st.session_state['automation_saved']=editor.copy()
+    toolbar(store,ADMIN,{str(row['id'])!r},editor=editor)
+'''
+                with patch('crm_campaign_recovery.flush_current',return_value=True),patch('crm_campaign_send_ui.test_control'):
+                    app=AppTest.from_string(source,default_timeout=20).run()
+                    self.assertFalse(app.exception)
+                    self.assertEqual(app.button(key='toolbar-publish').label,'Publish Email')
+                    app.button(key='toolbar-publish').click().run()
+                    self.assertFalse(app.exception)
+                    self.assertEqual(app.session_state['automation-confirm-publication'][2],selected)
+                    self.assertTrue(any(x.value=='Publish this email now?' for x in app.markdown))
+                    self.assertEqual(app.button(key='automation-publication-confirm').label,'Publish')
+                    self.assertEqual(len(app.checkbox),0)
+                    app.button(key='automation-publication-confirm').click().run()
+                    self.assertFalse(app.exception)
+                    queued=self.state(row)
+                    self.assertEqual(queued['config']['publication']['step_id'],selected)
+                    self.assertNotIn('_automation_navigation_email',app.session_state)
+                    self.run_job();app.run()
+                    self.assertFalse(app.exception)
+                    self.assertEqual(app.session_state['_automation_navigation_email'],'')
+                    live=self.state(row)
+                    self.assertEqual([step_state(live,s) for s in flow['emails']],['LIVE','LIVE','DISABLED'])
+                    self.assertEqual(live['steps'][0],original[0])
+                    self.assertEqual(live['config']['draft'],flow)
+
+    def test_individual_scope_rejects_sibling_enable_requests(self):
+        row=self.three();flow=row['config']['draft'];flow['emails'][2]['enabled']=False
+        row=self.store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
+        with self.assertRaisesRegex(ValueError,'whole-flow'):
+            self.store.request_publish(ADMIN,row['id'],row['config']['revision'],step_id=flow['emails'][0]['step_id'],enable_ids=[flow['emails'][2]['step_id']])
+        self.assertEqual(self.state(row)['steps'],[])
+
     def test_all_flows_publish_only_email_two_reopen_and_immutable_history(self):
         for kind in ('abandoned','welcome','post_purchase','win_back','fulfilled'):
             with self.subTest(kind=kind):
@@ -100,8 +158,16 @@ class EmailPublicationTests(unittest.TestCase):
 
 
 class ConfirmationTests(unittest.TestCase):
+    def test_scope_titles_share_one_dialog_body(self):
+        from crm_automation_publish_confirm import confirm,confirmation_body,dismiss
+        for selected,title in (('email','Publish Email?'),(None,'Publish All?')):
+            with patch('crm_automation_publish_confirm.st.dialog') as dialog:
+                confirm(Mock(),ADMIN,'fixture',1,selected)
+                dialog.assert_called_once_with(title,width='small',on_dismiss=dismiss)
+                dialog.return_value.assert_called_once_with(confirmation_body)
+
     def test_dialog_open_performs_no_store_calls(self):
-        from crm_automation_publish_confirm import confirm
+        from crm_automation_publish_confirm import confirmation_body
         button=Mock();button.button.return_value=False
         with patch('crm_automation_publish_confirm.st.session_state',{}),patch('crm_automation_publish_confirm.st.html'),patch('crm_automation_publish_confirm.st.write'),patch('crm_automation_publish_confirm.st.columns',return_value=[button,button]):
-            store=Mock();confirm.__wrapped__(store,ADMIN,'fixture',1,'email','DRAFT');self.assertEqual(store.mock_calls,[])
+            store=Mock();confirmation_body(store,ADMIN,'fixture',1,'email','DRAFT');self.assertEqual(store.mock_calls,[])
