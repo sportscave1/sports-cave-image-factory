@@ -2823,42 +2823,8 @@ def inject_styles():
             -webkit-text-fill-color: #31A8FF !important;
         }
 
-        .sc-files-helper-notice {
-            align-items: center;
-            background: #F7F9FA;
-            border: 1px solid #CCD4DA;
-            border-radius: 5px;
-            bottom: 18px;
-            box-shadow: 0 8px 24px rgba(35, 42, 48, 0.16);
-            color: #202124;
-            display: flex;
-            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-            font-size: 0.78rem;
-            gap: 8px;
-            left: 50%;
-            max-width: min(720px, calc(100vw - 32px));
-            padding: 8px 10px;
-            position: fixed;
-            transform: translateX(-50%);
-            z-index: 10010;
-        }
 
-        .sc-files-helper-notice span {
-            flex: 1 1 auto;
-        }
 
-        .sc-files-helper-notice button,
-        .sc-files-helper-notice a {
-            background: #FFFFFF !important;
-            border: 1px solid #C7CDD2 !important;
-            border-radius: 4px !important;
-            color: #202124 !important;
-            cursor: default !important;
-            font: 0.76rem "Segoe UI Variable", "Segoe UI", system-ui, sans-serif !important;
-            padding: 5px 8px !important;
-            text-decoration: none !important;
-            white-space: nowrap;
-        }
 
         .st-key-files-explorer button,
         .st-key-files-explorer a,
@@ -15333,7 +15299,6 @@ def _files_interaction_rows(entries, root_path=""):
                     if str((entry or {}).get(".tag") or "").casefold() == "folder"
                     else "file"
                 ),
-                "desktop_available": _files_desktop_open_available(path),
                 "desktop_relative_path": relative_path,
                 "preview_supported": _files_preview_kind(name) != "unsupported",
                 "thumbnail_url": (
@@ -15366,111 +15331,43 @@ def _files_preview_kind(name):
     return "unsupported"
 
 
-def _files_desktop_application(name):
-    extension = Path(str(name or "")).suffix.casefold()
-    applications = {
-        ".psd": "Adobe Photoshop",
-        ".psb": "Adobe Photoshop",
-        ".ai": "Adobe Illustrator",
-        ".eps": "Adobe Illustrator",
-        ".indd": "Adobe InDesign",
-        ".doc": "Microsoft Word",
-        ".docx": "Microsoft Word",
-        ".xls": "Microsoft Excel",
-        ".xlsx": "Microsoft Excel",
-        ".ppt": "Microsoft PowerPoint",
-        ".pptx": "Microsoft PowerPoint",
-        ".zip": "File Explorer or your archive application",
-    }
-    return applications.get(extension, "the associated desktop application")
-
-
-def _files_open_strategy(name, *, desktop_available=False):
-    if _files_preview_kind(name) != "unsupported":
-        return "preview"
-    if desktop_available:
-        return "desktop"
-    return "details"
-
-
-def _files_desktop_open_available(_path=""):
-    # The browser cannot prove whether the per-user protocol helper is installed.
-    # Open requests use the helper and retain an in-app preview fallback.
-    return True
-
-
 def _files_download_url(path):
     clean_path = dropbox_integration.normalize_dropbox_path(path)
     return f"/api/files-download?path={quote(clean_path, safe='')}"
 
 
 def _render_files_preview(access_token, user, root_path, preview_path):
+    """The legacy Files route reuses the authenticated web preview, never a helper."""
     clean_path = dropbox_integration.normalize_dropbox_path(preview_path)
     if not dropbox_integration.path_is_within_root(clean_path, root_path):
         st.info("This file is not available.")
         return
-    try:
-        details = dropbox_integration.file_open_details(access_token, clean_path)
-    except Exception as error:
-        logging.warning("Files preview failed: %s", error)
-        st.info("This file could not be opened right now.")
-        return
-    metadata = dict(details.get("metadata") or {})
-    name = str(metadata.get("name") or clean_path.rsplit("/", 1)[-1] or "File")
-    parent_path = clean_path.rsplit("/", 1)[0]
-    _render_files_navigation(parent_path, root_path, preview_name=name)
-    modified = _files_modified_label(metadata.get("server_modified"), user)
-    size = dropbox_integration.format_file_size(metadata.get("size"))
-    summary = " Â· ".join(value for value in (_files_type_label(metadata), modified, size) if value)
+    name = clean_path.rsplit("/", 1)[-1] or "File"
+    _render_files_navigation(clean_path.rsplit("/", 1)[0], root_path, preview_name=name)
+    preview_kind = _files_preview_kind(name)
+    if preview_kind in {"audio", "video"}:
+        # Retain existing media playback, initiated only by opening that file.
+        try:
+            link = dropbox_integration.get_temporary_link(access_token, clean_path)
+            if preview_kind == "audio":
+                st.audio(link)
+            else:
+                st.video(link)
+        except Exception:
+            st.info("Preview unavailable. Use Download.")
+    else:
+        relative_path = clean_path[len(root_path):].lstrip("/")
+        viewer_url = "/files-image-viewer?legacy=1&path=" + quote(relative_path, safe="") + "&name=" + quote(name, safe="") + "&folder=" + quote(relative_path.rsplit("/", 1)[0] if "/" in relative_path else "", safe="")
+        if hasattr(st, "iframe"):
+            st.iframe(viewer_url, height=650)
+        else:
+            get_components_module().iframe(viewer_url, height=650, scrolling=True)
+    download_url = html.escape(_files_download_url(clean_path), quote=True)
     st.markdown(
-        '<div class="sc-files-preview-header">'
-        f'<strong>{html.escape(name)}</strong>'
-        f'<span>{html.escape(summary)}</span>'
-        '</div>',
+        '<iframe name="files-legacy-download" title="Download" hidden></iframe>'
+        f'<a class="sc-files-action" href="{download_url}" target="files-legacy-download">Download</a>',
         unsafe_allow_html=True,
     )
-    link = str(details.get("temporary_link") or "").strip()
-    safe_link = html.escape(link, quote=True)
-    preview_kind = _files_preview_kind(name)
-    open_strategy = _files_open_strategy(
-        name,
-        desktop_available=_files_desktop_open_available(clean_path),
-    )
-    if preview_kind == "image":
-        st.image(link, caption=name, use_container_width=True)
-    elif preview_kind == "video":
-        st.video(link)
-    elif preview_kind == "audio":
-        st.audio(link)
-    elif preview_kind == "document":
-        if hasattr(st, "iframe"):
-            st.iframe(link, height=650)
-        else:
-            get_components_module().iframe(link, height=650, scrolling=True)
-    else:
-        application = _files_desktop_application(name)
-        st.markdown(
-            '<div class="sc-files-preview-note">'
-            f'This format is normally opened with {html.escape(application)}. '
-            f'Use Open to launch {html.escape(application)}, inspect the file details '
-            'here, or deliberately download a local copy.'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-    download_url = html.escape(_files_download_url(clean_path), quote=True)
-    if open_strategy == "preview":
-        actions = (
-            f'<a class="sc-files-action" href="{safe_link}" target="_blank" '
-            'rel="noopener noreferrer">Open original</a>'
-            f'<a class="sc-files-action" href="{download_url}" target="_blank" '
-            'rel="noopener noreferrer">Download</a>'
-        )
-    else:
-        actions = (
-            f'<a class="sc-files-action" href="{download_url}" target="_blank" '
-            'rel="noopener noreferrer">Download</a>'
-        )
-    st.markdown(actions, unsafe_allow_html=True)
 
 
 def _render_files_properties(entries, user, root_path):

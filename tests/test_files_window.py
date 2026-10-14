@@ -973,7 +973,8 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertEqual(routes["/api/files-download"], ("GET",))
         self.assertEqual(routes["/api/files-image-preview"], ("GET",))
         self.assertEqual(routes["/api/files-image-items"], ("GET",))
-        self.assertEqual(routes["/api/files-native-transfer"], ("POST",))
+        self.assertNotIn("/api/files-native-transfer", routes)
+        self.assertEqual(routes["/api/files-pdf-preview"], ("GET",))
         self.assertEqual(routes["/api/files-native-transfer/manifest"], ("GET",))
         self.assertEqual(routes["/api/files-native-transfer/content"], ("GET",))
         self.assertEqual(routes["/api/files-delete"], ("POST",))
@@ -1169,21 +1170,12 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('event.key === "Backspace"', self.client)
         self.assertIn('event.altKey && event.key === "ArrowLeft"', self.client)
 
-    def test_open_never_downloads_and_uses_desktop_bridge(self):
-        open_block = self.client[self.client.index("function desktopApplication") : self.client.index("function startDownload")]
-        self.assertIn('item.kind === "photoshop"', open_block)
-        self.assertIn('return "Photoshop"', open_block)
-        self.assertIn('desktopRequest("openFile", [item])', open_block)
-        self.assertIn('hasDesktopCapability("openFile")', open_block)
-        self.assertIn("item.desktop_relative_path", open_block)
-        self.assertNotIn("/api/files-download", open_block)
-        self.assertIn("Opening in ${application}...", open_block)
-        self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', open_block)
-        self.assertIn("elements.protocolLink.click()", open_block)
-        self.assertNotIn("Sports Cave Desktop required", self.client)
-        self.assertNotIn("Update Sports Cave Desktop to enable native drag and Copy.", self.client)
-        self.assertNotIn("Sports Cave Desktop did not open.", self.client)
-        self.assertNotIn('elements.helperPanel.classList.add("visible")', self.client)
+    def test_open_navigates_folders_and_previews_files_without_transfer(self):
+        block = self.client[self.client.index("function openItem("):self.client.index("function startDownload(")]
+        self.assertIn("navigateTo(item.path)", block)
+        self.assertIn("openImageViewer(item)", block)
+        self.assertNotIn("/api/files-download", block)
+        self.assertNotIn("desktopRequest", self.client)
 
     def test_every_standard_open_action_uses_the_authoritative_open_item(self):
         self.assertEqual(self.client.count("function openItem(item)"), 1)
@@ -1204,13 +1196,13 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("elements.downloadButton.disabled = !allFiles", selection)
         for label in ("Open", "Download", "Rename", "Delete", "Copy path", "Properties"):
             self.assertIn(f'label: "{label}"', self.client)
-        self.assertIn(': "Open in Windows File Explorer"', self.client)
-        self.assertIn('? "Open in Finder"', self.client)
+        self.assertNotIn("Open in Windows File Explorer", self.client)
+        self.assertNotIn("Open in Finder", self.client)
         item_menu = self.client[
             self.client.index("function showItemContextMenu") :
             self.client.index("function showEmptyContextMenu")
         ]
-        self.assertIn('label: "Open in desktop app"', item_menu)
+        self.assertNotIn("Open in desktop app", item_menu)
         for label in ("New folder", "Upload", "Refresh", "Sort by", "View"):
             self.assertIn(f'label: "{label}"', self.client)
         self.assertIn("items.forEach(item =>", self.client)
@@ -1283,7 +1275,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('window.addEventListener("dragover"', self.client)
         self.assertIn('window.addEventListener("drop"', self.client)
         self.assertIn("event.preventDefault()", self.client)
-        self.assertIn("!state.outboundDrag", self.client)
+        self.assertNotIn("state.outboundDrag", self.client)
         self.assertIn("droppedItems(event.dataTransfer)", self.client)
         self.assertIn("row.file.slice(row.uploaded, end)", self.client)
         self.assertIn("const CHUNK_BYTES = 8 * 1024 * 1024", self.client)
@@ -1299,26 +1291,13 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('${label}</text>', self.client)
         self.assertIn("overflow-wrap: anywhere", self.client)
 
-    def test_images_use_native_viewer_bridge_with_browser_popup_fallback(self):
-        open_block = self.client[self.client.index("function imageViewerFeatures") : self.client.index("function downloadHelper")]
-        self.assertIn('hasDesktopCapability("openViewer")', open_block)
-        self.assertIn('desktopPost({ action: "openViewer"', open_block)
-        self.assertIn("path: viewerRequest.path", open_block)
-        self.assertIn('new URL("/files-image-viewer", location.origin)', open_block)
-        self.assertIn('window.open(viewerUrl, "sports-cave-image-viewer"', open_block)
-        self.assertIn("state.imageViewerReady", open_block)
-        self.assertIn("&& state.imageViewerReady", open_block)
-        self.assertIn("queueImageViewerRequest(viewerRequest)", open_block)
-        self.assertIn("deliverPendingImageViewerRequest", open_block)
-        self.assertIn("if (!pending || !viewer || viewer.closed || !state.imageViewerReady) return", open_block)
-        self.assertIn('type: "sports-cave-image-viewer-open"', open_block)
-        self.assertIn('type: "sports-cave-image-viewer-opened"', self.viewer)
-        self.assertIn("state.imageViewerWindow.focus()", open_block)
-        self.assertIn("state.imageViewerReady = false", open_block)
-        self.assertIn('sports-cave-image-viewer-ready', self.client)
-        self.assertIn('actionLabel: "Open here"', open_block)
-        self.assertIn("location.assign(viewerUrl)", open_block)
-        self.assertIn('item.kind === "image"', open_block)
+    def test_preview_reuses_embedded_viewer_and_restores_focus(self):
+        self.assertIn('id="previewPanel"', self.client)
+        self.assertIn('elements.previewFrame.src = "/files-image-viewer?" + new URLSearchParams', self.client)
+        self.assertIn('state.imageViewerWindow = elements.previewFrame.contentWindow', self.client)
+        self.assertNotIn('window.open(', self.client)
+        self.assertIn('sports-cave-image-viewer-suspend', self.client)
+        self.assertIn('state.previewOpener.focus()', self.client)
 
     def test_no_inline_image_preview_and_viewer_has_full_interaction_contract(self):
         self.assertNotIn("image-preview", self.client)
@@ -1331,11 +1310,11 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('event.key === "Escape"', self.viewer)
         self.assertIn('elements.stage.addEventListener("wheel"', self.viewer)
         self.assertIn('elements.stage.addEventListener("pointermove"', self.viewer)
-        for control in ("previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton", "rotateLeftButton", "rotateRightButton", "downloadButton", "desktopButton", "closeButton"):
+        for control in ("previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton", "rotateLeftButton", "rotateRightButton", "downloadButton", "closeButton"):
             self.assertIn(f'id="{control}"', self.viewer)
 
     def test_viewer_streams_directly_into_image_and_has_a_real_error_state(self):
-        self.assertIn("This image could not be opened", self.viewer)
+        self.assertIn("Preview unavailable", self.viewer)
         self.assertIn('class="image-error"', self.viewer)
         self.assertIn("showImageError", self.viewer)
         self.assertNotIn("Loading image", self.viewer)
@@ -1357,7 +1336,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
 
     def test_viewer_handshake_validates_origin_source_and_message_shape(self):
         self.assertIn("event.origin !== location.origin", self.viewer)
-        self.assertIn("event.source !== window.opener", self.viewer)
+        self.assertIn("event.source !== previewHost", self.viewer)
         self.assertIn("message.version !== IMAGE_VIEWER_PROTOCOL_VERSION", self.viewer)
         self.assertIn("validRelativeValue(message.path, { required: true })", self.viewer)
         self.assertIn("validRelativeValue(message.folder)", self.viewer)
@@ -1450,72 +1429,25 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('event.key === "Delete"', self.client)
         self.assertIn('event.key === "F2"', self.client)
 
-    def test_external_drag_uses_capability_detected_webview_bridge(self):
-        self.assertIn("function beginExternalDragPointer(event, item, index)", self.client)
-        self.assertIn("function moveExternalDragPointer(event)", self.client)
-        self.assertIn("function startNativeOutboundDrag(items, x, y)", self.client)
-        self.assertIn('hasDesktopCapability("drag")', self.client)
-        self.assertIn('desktopRequest("drag", items, requestId)', self.client)
-        self.assertIn("desktopBridge.postMessage(message)", self.client)
-        self.assertIn('desktopPost({ action: "cancel", request_id: requestId })', self.client)
+    def test_external_drag_removed_while_upload_drop_is_retained(self):
+        self.assertNotIn("beginExternalDragPointer", self.client)
+        self.assertNotIn("chrome.webview", self.client)
+        self.assertNotIn("desktopRequest", self.client)
         self.assertIn('row.draggable = false', self.client)
-        self.assertIn('row.addEventListener("pointerdown"', self.client)
-        self.assertIn('document.addEventListener("pointermove", moveExternalDragPointer, true)', self.client)
-        self.assertIn("showOutboundDragPreview(items, x, y)", self.client)
-        self.assertIn("selectedItems();", self.client)
-        self.assertIn("state.suppressClickUntil", self.client)
-        for removed in (
-            "item-checkbox",
-            "drag-ghost",
-            "Preparing file...",
-            "Ready to drag",
-            "new File(",
-            "dataTransfer.items.add",
-            "DownloadURL",
-            "text/uri-list",
-            "/api/files-drag-token",
-            "sports-cave-files://drag?paths=",
-            "127.0.0.1:17384",
-        ):
-            self.assertNotIn(removed, self.client)
-        drag_block = self.client[
-            self.client.index("function externalDragItems") :
-            self.client.index("function openPreferredItem")
-        ]
-        self.assertNotIn("/api/files-delete", drag_block)
-        self.assertNotIn("operation: \"move\"", drag_block)
-        self.assertNotIn("window.location", drag_block)
-        self.assertNotIn("protocolLink", drag_block)
-        self.assertNotIn("dataTransfer", drag_block)
-        self.assertIn("state.outboundDrag = true", drag_block)
-        self.assertIn("state.outboundDrag = false", drag_block)
-        self.assertIn("cancelExternalDrag()", self.client)
+        self.assertIn('window.addEventListener("drop"', self.client)
 
-    def test_copy_uses_native_helper_while_cut_remains_internal(self):
-        block = self.client[
-            self.client.index("function invokeDesktopClipboard") :
-            self.client.index("function invokeDesktopHelper")
-        ]
-        self.assertIn("const action = nativeClipboardAction(items)", block)
-        self.assertIn("desktopRequest(action, items)", block)
-        self.assertIn('action === "copyImage"', block)
-        self.assertIn('items.length === 1 && items[0].kind === "image"', self.client)
-        self.assertIn('? "copyImage"', self.client)
-        self.assertIn(': "copyFile"', self.client)
-        self.assertIn("item.desktop_relative_path || item.relative_path", self.client)
-        self.assertIn('revision: String(item.revision || "")', self.client)
-        self.assertNotIn("protocolLink", block)
-        self.assertNotIn("sports-cave-files://clipboard", self.client)
-        self.assertIn('mode === "copy" && hasDesktopCapability(nativeAction)', self.client)
-        self.assertIn("ready to move inside Sports Cave Files", self.client)
-        self.assertNotIn('invokeDesktopClipboard(chosen, "move")', self.client)
+    def test_copy_and_cut_remain_internal(self):
+        self.assertIn('state.clipboard = { mode, items: chosen', self.client)
+        self.assertIn('ready to move inside Sports Cave Files', self.client)
+        self.assertIn('copied inside Sports Cave Files', self.client)
+        self.assertNotIn('invokeDesktopClipboard', self.client)
 
-    def test_image_context_menu_keeps_explicit_original_desktop_open_action(self):
+    def test_image_context_menu_keeps_internal_open_and_copy(self):
         block = self.client[
             self.client.index("function showItemContextMenu") :
             self.client.index("function showEmptyContextMenu")
         ]
-        self.assertIn("Open in desktop app", block)
+        self.assertNotIn("Open in desktop app", block)
         self.assertNotIn(">Open in desktop app<", self.client)
         self.assertIn('{ label: "Open"', block)
         self.assertIn('{ label: "Copy"', block)
@@ -1532,16 +1464,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("installThumbnail(task.image, task.key, objectUrl)", thumbnail_block)
         self.assertNotIn('document.querySelectorAll("img[data-thumbnail-key]")', thumbnail_block)
 
-    def test_missing_or_outdated_helper_has_compact_update_fallback(self):
-        self.assertIn('if (!desktopBridge', self.client)
-        self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
-        self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 9", self.client)
-        self.assertIn("desktop_outdated", self.client)
-        self.assertIn('desktopError("", "desktop_outdated")', self.client)
-        self.assertNotIn("Update Sports Cave Desktop to enable native drag and Copy.", self.client)
-        self.assertNotIn("Sports Cave Desktop did not open.", self.client)
-        self.assertNotIn('elements.helperPanel.classList.add("visible")', self.client)
+    def test_no_helper_prompts_requests_or_version_checks_remain(self):
+        for obsolete in ['helperPanel', 'MINIMUM_DESKTOP_VERSION', 'desktopBridge', 'protocolLink', 'files-native-launch', 'files-desktop-helper']:
+            self.assertNotIn(obsolete, self.client)
+            self.assertNotIn(obsolete, self.viewer)
 
     def test_files_window_uses_folder_app_mark_instead_of_generic_blue_window(self):
         self.assertIn(".app-mark", self.client)
@@ -1554,20 +1480,13 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         ]
         self.assertNotIn("background: var(--accent);", app_mark_block)
 
-    def test_image_viewer_supports_pixel_and_original_file_copy(self):
+    def test_viewer_copies_pixels_without_native_clipboard(self):
         self.assertIn('id="copyImageButton"', self.viewer)
-        self.assertIn('id="copyFileButton"', self.viewer)
-        self.assertIn('desktopRequest("copyImage")', self.viewer)
-        self.assertIn('desktopRequest("copyFile")', self.viewer)
         self.assertIn('new ClipboardItem({ "image/png": png })', self.viewer)
-        self.assertIn("if (event.shiftKey) copyOriginalFile()", self.viewer)
-        self.assertIn('<img class="image" id="image"', self.viewer)
+        self.assertIn('window.sportsCaveCopyImagePixels = copyImagePixels', self.viewer)
         self.assertIn('draggable="false"', self.viewer)
-        self.assertIn("pointer-events: auto", self.viewer)
-        self.assertIn("window.sportsCaveCopyImagePixels = copyImagePixels", self.viewer)
-        self.assertIn('hasDesktopCapability("drag")', self.viewer)
-        self.assertIn('desktopRequest("drag")', self.viewer)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 9", self.viewer)
+        self.assertNotIn('copyFileButton', self.viewer)
+        self.assertNotIn('desktopRequest', self.viewer)
 
 
 if __name__ == "__main__":

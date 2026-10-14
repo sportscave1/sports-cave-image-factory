@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from activity_log import record_activity_log
 import dropbox_integration
@@ -2050,6 +2050,57 @@ async def image_preview(request: Request):
         return _response_error(error)
 
 
+async def preview_asset(request: Request):
+    """Immutable renderer code only. Artwork always uses authenticated API routes."""
+    root = FILES_IMAGE_VIEWER_FILE.parent / "pdfjs-6.4.299"
+    relative = str(request.path_params.get("asset") or "")
+    if not relative or "\\" in relative or any(part in {"", ".", ".."} for part in relative.split("/")):
+        return Response(status_code=404)
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root.resolve()) or not path.is_file():
+        return Response(status_code=404)
+    media = "text/javascript" if path.suffix in {".js", ".mjs"} else "application/wasm" if path.suffix == ".wasm" else "application/octet-stream"
+    headers = {"Cache-Control":"public, max-age=31536000, immutable", "X-Content-Type-Options":"nosniff", "Vary":"Accept-Encoding"}
+    encoding = re.search(r"(?:^|,)\s*gzip\s*(?:;\s*q=([01](?:\.\d{1,3})?))?\s*(?:,|$)", request.headers.get("accept-encoding", ""), re.I)
+    compressed = path.with_suffix(path.suffix + ".gz")
+    if encoding and (encoding.group(1) is None or float(encoding.group(1) or 0) > 0) and compressed.is_file():
+        path = compressed; headers["Content-Encoding"] = "gzip"
+    return FileResponse(path, media_type=media, headers=headers)
+
+
+async def pdf_preview(request: Request):
+    """Stream an explicitly opened PDF through the existing staff/root checks."""
+    upstream = None
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Preview request is not allowed.", status_code=403)
+        await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        path = _validated_relative_path(request.query_params.get("path"), context["root_path"])
+        if PurePosixPath(path).suffix.casefold() != ".pdf":
+            raise FilesUploadError("Unsupported Preview. Use Download.", status_code=404)
+        # Reject oversized PDFs before starting their content transfer.
+        metadata = await run_in_threadpool(dropbox_integration.get_file_metadata, context["access_token"], path)
+        size = int(metadata.get("size") or 0)
+        revision = str(request.query_params.get("rev") or "")
+        if metadata.get(".tag") != "file" or not 0 < size <= 25 * 1024 * 1024:
+            raise FilesUploadError("This PDF is too large for preview. Use Download.", status_code=413)
+        if revision and metadata.get("rev") != revision:
+            raise FilesUploadError("This file changed. Refresh Files and retry.", status_code=409)
+        current, upstream = await run_in_threadpool(dropbox_integration.get_file_response, context["access_token"], path)
+        if current.get("id") != metadata.get("id") or current.get("rev") != metadata.get("rev") or int(current.get("size") or 0) != size:
+            raise FilesUploadError("This file changed. Refresh Files and retry.", status_code=409)
+        return StreamingResponse(_stream_upstream_response(upstream), media_type="application/pdf", headers={
+            "Cache-Control":"private, no-store", "X-Content-Type-Options":"nosniff",
+            "Content-Length":str(size), "Content-Disposition":_content_disposition("inline", PurePosixPath(path).name),
+        })
+    except Exception as error:
+        if upstream is not None:
+            with suppress(Exception):
+                upstream.close()
+        return _response_error(error)
+
+
 async def image_folder_items(request: Request):
     """Return root-relative image navigation metadata for one approved folder."""
     try:
@@ -2090,45 +2141,6 @@ async def image_folder_items(request: Request):
                     }
                 )
         return JSONResponse({"ok": True, "images": images}, headers={"Cache-Control": "no-store"})
-    except Exception as error:
-        return _response_error(error)
-
-
-async def create_native_transfer(request: Request):
-    """Issue a short-lived Dropbox transfer grant to the trusted desktop shell."""
-    try:
-        if not _same_origin(request):
-            raise FilesUploadError("Desktop transfer is not allowed.", status_code=403)
-        user = await run_in_threadpool(_request_user, request)
-        payload = await _json_body(request)
-        if set(payload) != {"items"}:
-            raise FilesUploadError(
-                "Desktop transfer request is invalid.",
-                status_code=400,
-                code="invalid_arguments",
-            )
-        context = await run_in_threadpool(_dropbox_context)
-        record = await run_in_threadpool(
-            NATIVE_TRANSFER_MANAGER.create,
-            access_token=context["access_token"],
-            root_path=context["root_path"],
-            user=user,
-            selections=payload.get("items"),
-        )
-        return JSONResponse(
-            {
-                "ok": True,
-                "ticket": record.ticket,
-                "secret": record.secret,
-                "expires_in": FILES_NATIVE_TRANSFER_SECONDS,
-                "item_count": len(record.items),
-                "file_count": sum(
-                    not item["is_directory"] for item in record.items
-                ),
-                "total_bytes": sum(item["size"] for item in record.items),
-            },
-            headers={"Cache-Control": "no-store"},
-        )
     except Exception as error:
         return _response_error(error)
 
@@ -2751,7 +2763,6 @@ async def download_product_psd(request: Request):
         return _psd_error_page(message,reference,status)
 
 
-from files_native_launch import prepare as prepare_native_open, claim as claim_native_open, page as native_open_page
 
 from edition_test_api import ROUTES as EDITION_TEST_ROUTES
 
@@ -2764,10 +2775,6 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-psd-original", download_product_psd, ("GET",)),
     ("/files-window", files_window_page, ("GET",)),
     ("/files-component", files_window_page, ("GET",)),
-    ("/files-native-launch", native_open_page, ("GET",)),
-    ("/api/files-native-open", prepare_native_open, ("POST",)),
-    ("/api/files-native-launch", prepare_native_open, ("POST",)),
-    ("/api/files-native-launch/claim", claim_native_open, ("POST", "DELETE")),
     ("/files-image-viewer", files_image_viewer_page, ("GET",)),
     ("/api/files-list", list_files, ("GET",)),
     ("/api/files-resolve", resolve_files_item, ("GET",)),
@@ -2779,8 +2786,9 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-upload/remove", remove_files_upload, ("POST",)),
     ("/api/files-download", download_file, ("GET",)),
     ("/api/files-image-preview", image_preview, ("GET",)),
+    ("/api/files-pdf-preview", pdf_preview, ("GET",)),
+    ("/files-preview-assets/6.4.299/{asset:path}", preview_asset, ("GET",)),
     ("/api/files-image-items", image_folder_items, ("GET",)),
-    ("/api/files-native-transfer", create_native_transfer, ("POST",)),
     ("/api/files-native-transfer/manifest", native_transfer_manifest, ("GET",)),
     ("/api/files-native-transfer/content", native_transfer_content, ("GET",)),
     ("/api/files-thumbnail", file_thumbnail, ("GET",)),

@@ -468,32 +468,6 @@
         overflow-wrap: anywhere;
       }
       .file-tooltip-line { white-space: nowrap; }
-      .outbound-drag-preview {
-        align-items: center;
-        background: rgba(255, 255, 255, 0.97);
-        border: 1px solid #8d969d;
-        box-shadow: 2px 4px 10px rgba(25, 31, 36, 0.2);
-        color: #202428;
-        display: none;
-        gap: 7px;
-        max-width: min(320px, calc(100vw - 20px));
-        min-height: 34px;
-        padding: 6px 9px;
-        pointer-events: none;
-        position: fixed;
-        z-index: 220;
-      }
-      .outbound-drag-preview.visible { display: flex; }
-      .outbound-drag-preview-icon {
-        color: #1a73a8;
-        font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
-        font-size: 17px;
-      }
-      .outbound-drag-preview-label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
       .modal-backdrop {
         align-items: center;
         background: rgba(25, 30, 35, 0.28);
@@ -550,27 +524,6 @@
       .toast.error { background: #8f2f27; }
       .toast.success { background: #215c3d; }
       .toast button { background: transparent; border: 1px solid rgba(255,255,255,0.6); border-radius: 3px; color: #fff; height: 28px; margin-left: auto; white-space: nowrap; }
-      .helper-panel {
-        align-items: center;
-        background: #fff;
-        border: 1px solid #c8cdd1;
-        border-radius: 5px;
-        bottom: 38px;
-        box-shadow: 0 8px 24px rgba(25, 29, 33, 0.2);
-        display: none;
-        flex-wrap: wrap;
-        gap: 7px;
-        left: 50%;
-        max-width: calc(100vw - 24px);
-        padding: 9px;
-        position: fixed;
-        transform: translateX(-50%);
-        z-index: 155;
-      }
-      .helper-panel.visible { display: flex; }
-      .helper-panel strong { margin-right: 4px; }
-      .helper-action { background: #fff; border: 1px solid #aeb4b9; border-radius: 4px; height: 30px; padding: 0 9px; white-space: nowrap; }
-      .helper-action:hover { background: #eef1f3; }
       .upload-panel {
         background: #fff;
         border: 1px solid #cfd3d6;
@@ -612,6 +565,13 @@
         .details-header, .view-details .file-item { grid-template-columns: minmax(150px, 1fr) 156px; }
         .details-header > span:nth-child(5), .view-details .detail-size { display: none; }
       }
+      #previewPanel { position:fixed; inset:0; z-index:100; background:#181818; display:flex; flex-direction:column; }
+      #previewPanel[hidden] { display:none; }
+      #previewPanel header { height:34px; flex:none; display:flex; align-items:center; justify-content:space-between; padding:0 10px; background:#f3f3f3; border-bottom:1px solid #ccc; }
+      #previewTitle { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      #previewClose { border:1px solid #bbb; background:white; padding:3px 9px; border-radius:3px; }
+      #previewMount { display:flex; flex:1; min-height:0; }
+      #previewFrame { flex:1; width:100%; min-height:0; border:0; }
     </style>
   <style id="sc-table-design-v3">
 /* Sports Cave OS tables V3. Explicit table scopes only. */
@@ -755,7 +715,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       </div>
       <div class="command-bar" id="commandBar" role="toolbar" aria-label="Files commands">
         <button class="command" id="openButton" type="button" disabled><span class="command-icon">&#8599;</span><span class="command-label">Open</span></button>
-        <button class="command" id="openWithButton" type="button" disabled><span class="command-icon">&#8943;</span><span class="command-label">Open With</span></button>
         <span class="command-separator" aria-hidden="true"></span>
         <button class="command" id="newButton" type="button"><span class="command-icon">+</span><span class="command-label">New</span></button>
         <button class="command" id="uploadButton" type="button"><span class="command-icon">&#8593;</span><span class="command-label">Upload</span></button>
@@ -785,24 +744,17 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
     <input id="folderInput" type="file" multiple webkitdirectory directory hidden>
     <div class="menu" id="menu" role="menu"></div>
     <div class="file-tooltip" id="fileTooltip" role="tooltip" aria-hidden="true"></div>
-    <div class="outbound-drag-preview" id="outboundDragPreview" aria-hidden="true">
-      <span class="outbound-drag-preview-icon" aria-hidden="true">&#xE8B7;</span>
-      <span class="outbound-drag-preview-label" id="outboundDragPreviewLabel"></span>
-    </div>
     <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
     <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button id="toastAction" type="button"></button></div>
-    <a class="sr-only" id="protocolLink" href="#" tabindex="-1">Desktop helper</a>
-    <section class="helper-panel" id="helperPanel" aria-live="polite">
-      <strong id="helperMessage">Desktop helper required</strong>
-      <button class="helper-action" id="checkHelperButton" type="button">Check desktop helper</button>
-      <button class="helper-action" id="installHelperButton" type="button">Install or update helper</button>
-      <button class="helper-action" id="downloadInsteadButton" type="button">Download instead</button>
-    </section>
     <section class="upload-panel" id="uploadPanel" aria-label="Uploads">
       <div class="upload-head"><span id="uploadTitle">Uploads</span><button class="icon-button" id="uploadClose" type="button" title="Hide uploads" aria-label="Hide uploads">&#215;</button></div>
       <div id="uploadRows"></div>
     </section>
 
+    <section id="previewPanel" role="dialog" aria-modal="true" aria-label="File preview" hidden>
+      <header><span id="previewTitle">Preview</span><button id="previewClose" type="button">Close preview</button></header>
+      <div id="previewMount"></div>
+    </section>
     <script>
       const STORAGE_KEY = "sports-cave-files-state-v2";
       const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1";
@@ -812,8 +764,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       const MAX_CLIENT_THUMBNAILS = 160;
       const FOLDER_PAGE_SIZE = 500;
       const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-      const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 9;
       const MAX_CLIENT_FOLDER_CACHE = 24;
       const CLIENT_FOLDER_REVALIDATE_SECONDS = 20;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
@@ -824,9 +774,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         "backButton", "forwardButton", "upButton", "refreshButton", "breadcrumbs", "searchInput", "searchClear",
         "openButton", "newButton", "uploadButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
         "results", "resultsShell", "detailsHeader", "dateModifiedHeader", "modifiedSortArrow", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
-        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "loadingIndicator", "protocolLink", "helperPanel", "helperMessage", "checkHelperButton",
-        "installHelperButton", "downloadInsteadButton", "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
-        "outboundDragPreview", "outboundDragPreviewLabel"
+        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "loadingIndicator",
+        "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
+        "previewPanel", "previewTitle", "previewClose", "previewFrame", "previewMount"
       ].map(id => [id, document.getElementById(id)]));
 
       function restoredState() {
@@ -848,10 +798,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       const restored = restoredState();
       const query = new URLSearchParams(location.search);
       const linkedProduct = query.get('psd_product_gid');
-      let linkedAutoOpen = null;
       let savedEditionId = null;
-      let desktopBridge = window.chrome && window.chrome.webview;
-      try { desktopBridge = window.parent.chrome?.webview || desktopBridge; } catch (_) {}
       const requestedRelativePath = query.get("relative_path") || "";
       const state = {
         rootPath: "",
@@ -883,8 +830,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         openStamp: { path: "", time: 0 },
         toastTimer: 0,
         toastIdentity: "",
-        helperTimer: 0,
-        helperItem: null,
         imageViewerWindow: null,
         imageViewerReady: false,
         imageViewerPending: null,
@@ -906,13 +851,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         uploadConflict: restored.uploadConflict || "cancel",
         clipboard: restoredClipboard(),
         clipboardBusy: false,
-        outboundDrag: false,
-        outboundPointer: null,
-        outboundDragRequestId: "",
-        desktopCapabilities: new Set(),
-        desktopPending: new Map(),
-        desktopReady: false,
-        suppressClickUntil: 0,
         tooltipTimer: 0,
         tooltipItem: null,
         tooltipPointer: { x: 0, y: 0 },
@@ -1238,13 +1176,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         row.addEventListener("mousemove", moveFileTooltip);
         row.addEventListener("mouseleave", hideFileTooltip);
         row.addEventListener("mousedown", hideFileTooltip);
-        row.addEventListener("pointerdown", event => beginExternalDragPointer(event, item, Number(row.dataset.index)));
         row.addEventListener("click", event => {
-          if (Date.now() < state.suppressClickUntil) {
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
           if (event.detail > 1) return;
           if (event.ctrlKey || event.metaKey) selectByIndex(Number(row.dataset.index), { toggle: true });
           else if (event.shiftKey) selectByIndex(Number(row.dataset.index), { range: true });
@@ -1252,7 +1184,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             setSingleSelection(item.path, Number(row.dataset.index));
           }
         });
-        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); if(Date.now()<state.suppressClickUntil)return;setSingleSelection(item.path,Number(row.dataset.index));openPreferredItem(item); });
+        row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); setSingleSelection(item.path,Number(row.dataset.index));openPreferredItem(item); });
         row.addEventListener("contextmenu", event => {
           hideFileTooltip();
           event.preventDefault();
@@ -1431,7 +1363,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         const chosen = selectedItems();
         const allFiles = chosen.length > 0 && chosen.every(item => item.tag !== "folder");
         elements.openButton.disabled = chosen.length !== 1;
-        document.getElementById("openWithButton").disabled = chosen.length !== 1 || chosen[0]?.tag === "folder";
         elements.downloadButton.disabled = !allFiles;
         elements.renameButton.disabled = chosen.length !== 1 || chosen[0].protected;
         elements.deleteButton.disabled = !state.canDelete || !chosen.length || chosen.some(item => item.protected);
@@ -1597,11 +1528,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.searchByPath[state.currentPath] = state.searchByPath[state.currentPath] || "";
       }
 
-      const BLOCKED_EXTENSIONS = new Set([
-        "appref-ms", "application", "bat", "chm", "cmd", "com", "cpl", "dll", "exe", "gadget", "hta", "inf", "ins",
-        "jar", "js", "jse", "lnk", "msi", "msp", "pif", "ps1", "py", "pyw", "reg", "scr", "sct", "shb", "shs",
-        "url", "vbs", "vbe", "website", "ws", "wsc", "wsf"
-      ]);
 
       function parentPath(path) {
         const clean = String(path || "").replace(/\/+$/, "");
@@ -1611,6 +1537,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       async function loadFolder(path, { refresh = false, preserveScroll = false, relativePath = "" } = {}) {
+        state.openStamp = {path:"",time:0};
         const token = ++state.navigationToken;
         state.incomplete = false;
         if (state.currentPath && state.items.length) {
@@ -1662,7 +1589,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.loading = true;
         state.loadingMore = false;
         if (path !== state.currentPath || relativePath) { state.currentPath = path; state.items = []; }
-        elements.helperPanel.classList.remove("visible");
         closeMenus();
         clearSelection();
         stopThumbnailLoading();
@@ -1760,154 +1686,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         }
       }
 
-      function desktopApplication(item) {
-        if (item.kind === "photoshop") return "Photoshop";
-        if (item.kind === "design" && String(item.extension || "").toLocaleLowerCase() === "ai") return "Illustrator";
-        return "your desktop app";
-      }
-
-      function desktopFileManagerLabel() {
-        return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "")
-          ? "Open in Finder"
-          : "Open in Windows File Explorer";
-      }
-
-      function isWindowsPlatform() {
-        const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "";
-        return /Win/i.test(platform);
-      }
-
-      function desktopProtocolScheme(item, kind) {
-        return isWindowsPlatform() && kind === "file" && item.kind === "photoshop"
-          ? "sports-cave-photoshop"
-          : "sports-cave-files";
-      }
-
-      function showDesktopHelperProblem(error, item = null) {
-        state.helperItem = item || state.helperItem;
-        elements.helperPanel.classList.remove("visible");
-      }
-
-      function showDesktopTransferError(error, item = null) {
-        const helperProblem = [
-          "desktop_unavailable",
-          "desktop_outdated",
-        ].includes(String(error && error.code || ""));
-        if (helperProblem) {
-          showDesktopHelperProblem(error, item);
-          return;
-        }
-        if (error && error.code === "drag_cancelled") return;
-        showToast(
-          (error && error.message) || "Windows could not complete the file transfer.",
-          { kind: "error", duration: 6000 }
-        );
-      }
-
-      function hasDesktopCapability(capability) {
-        return state.desktopReady && state.desktopCapabilities.has(capability);
-      }
-
-      function desktopError(message, code = "desktop_unavailable") {
-        const error = new Error(message);
-        error.code = code;
-        return error;
-      }
-
-      function desktopPost(message) {
-        if (!desktopBridge || typeof desktopBridge.postMessage !== "function") {
-          throw desktopError("Open in Sports Cave Desktop to use this action.");
-        }
-        desktopBridge.postMessage(message);
-      }
-
-      function transferSelection(items) {
-        return Array.from(items || []).map(item => ({
-          path: String(item.desktop_relative_path || item.relative_path || ""),
-          id: String(item.id || ""),
-          revision: String(item.revision || ""),
-          tag: String(item.tag || "file"),
-        })).filter(item => item.path);
-      }
-
-      async function createDesktopTransfer(items, action = "") {
-        const selected = transferSelection(items);
-        if (!selected.length || selected.length > 100) {
-          showToast("Select between 1 and 100 items for Windows Copy.", { kind: "error", duration: 5000 });
-          throw desktopError("Select between 1 and 100 items.", "invalid_selection");
-        }
-        const verifiedOpen = hasDesktopCapability("verifiedOpen") && ["openFile","openWith"].includes(action) && items.length === 1 && items[0].tag !== "folder";
-        const grant = await apiJson(verifiedOpen ? "/api/files-native-open" : "/api/files-native-transfer", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(verifiedOpen ? {action, item:{id:selected[0].id,revision:selected[0].revision}} : { items: selected }),
-        });
-        return {
-          base_url: location.origin,
-          ticket: grant.ticket,
-          secret: grant.secret,
-        };
-      }
-
-      async function desktopRequest(action, items, requestId = dragRequestId()) {
-        if (!hasDesktopCapability(action)) {
-          throw desktopError("Open in Sports Cave Desktop to drag or copy files.");
-        }
-        const transfer = await createDesktopTransfer(items, action);
-        return new Promise((resolve, reject) => {
-          state.desktopPending.set(requestId, { resolve, reject, action });
-          try {
-            desktopPost({ action, request_id: requestId, transfer });
-          } catch (error) {
-            state.desktopPending.delete(requestId);
-            reject(error);
-          }
-        });
-      }
-
-      async function invokeDesktopClipboard(items) {
-        const action = nativeClipboardAction(items);
-        showToast(
-          action === "copyImage"
-            ? "Copying image..."
-            : "Preparing files for the Windows clipboard...",
-          { duration: 0 }
-        );
-        try {
-          const result = await desktopRequest(action, items);
-          const count = Number(result.count || items.length);
-          showToast(
-            action === "copyImage"
-              ? "Image copied"
-              : `${count} item${count === 1 ? "" : "s"} copied`,
-            { kind: "success", duration: 2400 }
-          );
-          return true;
-        } catch (error) {
-          showDesktopTransferError(error);
-          return false;
-        }
-      }
-
-      async function invokeDesktopHelper(item, kind = "file") {
-        if (kind === "file" && BLOCKED_EXTENSIONS.has(String(item.extension || "").toLocaleLowerCase())) {
-          showToast("This file type cannot be opened by the Sports Cave helper.", { kind: "error", duration: 5000 });
-          return;
-        }
-        if (!hasDesktopCapability("openFile")) {
-          if (kind === "file") browserNativeOpen(item,"openFile");
-          else showToast("Use Sports Cave Desktop to open a folder in the operating system.",{duration:5000});
-          return;
-        }
-        const application = kind === "folder" ? "your desktop file manager" : desktopApplication(item);
-        showToast(`Opening in ${application}...`, { duration: 2400 });
-        try {
-          await desktopRequest("openFile", [item]);
-        } catch (error) {
-          showDesktopTransferError(error, item);
-        }
-      }
-
       function relativeFolderPath() {
         const root = String(state.rootPath || "");
         const current = String(state.currentPath || "");
@@ -1925,25 +1703,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       function viewerNavigation() {
         return visibleItems().filter(item => item.kind === "image" || item.extension === "psd")
           .map(item => ({path:item.desktop_relative_path, name:item.name, revision:item.revision || ""}));
-      }
-
-      function imageViewerFeatures() {
-        const width = Math.min(1100, Math.max(720, window.screen.availWidth - 80));
-        const height = Math.min(800, Math.max(560, window.screen.availHeight - 80));
-        const left = Math.max(0, Math.round((window.screen.availWidth - width) / 2));
-        const top = Math.max(0, Math.round((window.screen.availHeight - height) / 2));
-        return `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`;
-      }
-
-      function imageViewerUrl(viewerRequest) {
-        const url = new URL("/files-image-viewer", location.origin);
-        url.search = new URLSearchParams({
-          path: viewerRequest.path,
-          folder: viewerRequest.folder,
-          name: viewerRequest.name,
-          rev: viewerRequest.revision || "",
-        }).toString();
-        return url.href;
       }
 
       function clearImageViewerDelivery(requestId = "") {
@@ -1991,8 +1750,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           showToast("The image viewer did not accept the selected image.", {
             kind: "error",
             duration: 0,
-            actionLabel: "Open here",
-            action: () => location.assign(imageViewerUrl(pending)),
+            actionLabel: "Close preview",
+            action: closePreview,
           });
         }
       }
@@ -2011,56 +1770,39 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       function openImageViewer(item) {
         const viewerRequest = {
           path: String(item.desktop_relative_path || ""),
-          folder: relativeFolderPath(),
-          name: String(item.name || "Image"),
+          folder: relativeFolderPath(), name: String(item.name || "File"),
           revision: String(item.rev || item.revision || ""),
         };
-        if (hasDesktopCapability("openViewer") && item.extension !== "psd") {
-          const id = dragRequestId();
-          state.desktopPending.set(id, {
-            action: "openViewer",
-            resolve: () => {},
-            reject: error => showToast(
-              error.message || "The image viewer could not be opened.",
-              { kind: "error", duration: 6000 }
-            ),
+        state.previewOpener = document.activeElement;
+        elements.previewTitle.textContent = viewerRequest.name;
+        elements.previewPanel.hidden = false;
+        for (const child of document.body.children) {
+          if (child !== elements.previewPanel && child.tagName !== "SCRIPT") child.inert = true;
+        }
+        if (!elements.previewFrame) {
+          elements.previewFrame = document.createElement("iframe");
+          elements.previewFrame.id = "previewFrame"; elements.previewFrame.title = "File preview";
+          elements.previewFrame.allow = "clipboard-write";
+          elements.previewFrame.src = "/files-image-viewer?" + new URLSearchParams({
+            embedded:"1", path:viewerRequest.path, folder:viewerRequest.folder,
+            name:viewerRequest.name, rev:viewerRequest.revision,
           });
-          try {
-            desktopPost({ action: "openViewer", request_id: id, viewer: viewerRequest });
-          } catch (error) {
-            state.desktopPending.delete(id);
-            showToast(
-              error.message || "The image viewer could not be opened.",
-              { kind: "error", duration: 6000 }
-            );
-          }
-          return;
+          elements.previewMount.appendChild(elements.previewFrame);
         }
-        const viewerUrl = imageViewerUrl(viewerRequest);
-        let viewer = null;
-        try {
-          if (state.imageViewerWindow && !state.imageViewerWindow.closed && state.imageViewerReady) {
-            queueImageViewerRequest(viewerRequest);
-            state.imageViewerWindow.focus();
-            return;
-          }
-          viewer = window.open(viewerUrl, "sports-cave-image-viewer", imageViewerFeatures());
-        } catch (_) {
-          viewer = null;
-        }
-        if (!viewer) {
-          showToast("The browser blocked the image viewer.", {
-            kind: "error",
-            duration: 0,
-            actionLabel: "Open here",
-            action: () => location.assign(viewerUrl),
-          });
-          return;
-        }
-        state.imageViewerWindow = viewer;
-        state.imageViewerReady = false;
+        state.imageViewerWindow = elements.previewFrame.contentWindow;
         queueImageViewerRequest(viewerRequest);
-        viewer.focus();
+        elements.previewClose.focus();
+      }
+
+      function closePreview() {
+        if (elements.previewPanel.hidden) return;
+        clearImageViewerDelivery();
+        state.imageViewerWindow?.postMessage({type:"sports-cave-image-viewer-suspend", version:1}, location.origin);
+        elements.previewPanel.hidden = true;
+        for (const child of document.body.children) child.inert = false;
+        state.openStamp = {path:"",time:0};
+        if (state.previewOpener?.isConnected) state.previewOpener.focus();
+        else revealItem(state.focusedPath, true);
       }
 
       function openItem(item) {
@@ -2072,36 +1814,12 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         if (item.kind === "folder") {
           showToast(`Opening ${item.name}...`, { duration: 1200 });
           navigateTo(item.path);
-        } else if (item.kind === "image") {
-          showToast(`Opening ${item.name}...`, { duration: 1200 });
-          openImageViewer(item);
         } else {
-          invokeDesktopHelper(item, "file");
+          openImageViewer(item);
         }
       }
 
-      function downloadHelper() {
-        elements.helperPanel.classList.remove("visible");
-        const frame = document.createElement("iframe");
-        frame.hidden = true;
-        const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-        frame.src = `/api/files-desktop-helper?platform=${isMac ? "macos" : "windows"}`;
-        document.body.appendChild(frame);
-        window.setTimeout(() => frame.remove(), 120000);
-      }
-
-      function openSportsCaveDesktop() {
-        elements.helperPanel.classList.remove("visible");
-        elements.protocolLink.href = "sports-cave-files://app";
-        elements.protocolLink.click();
-        window.clearTimeout(state.helperTimer);
-        state.helperTimer = window.setTimeout(() => {
-          elements.helperPanel.classList.remove("visible");
-        }, 3200);
-      }
-
       function startDownload(items = selectedItems()) {
-        elements.helperPanel.classList.remove("visible");
         const files = items.filter(item => item.tag !== "folder");
         if (!files.length || files.length !== items.length) {
           showToast("Select one or more files. Folder download is not available.", { kind: "error", duration: 4500 });
@@ -2305,12 +2023,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         })).filter(item => item.relative_path);
       }
 
-      function nativeClipboardAction(items) {
-        return items.length === 1 && items[0].kind === "image"
-          ? "copyImage"
-          : "copyFile";
-      }
-
       function setFilesClipboard(mode, items = selectedItems()) {
         const chosen = clipboardPayload(items);
         if (!chosen.length || !["copy", "cut"].includes(mode)) return;
@@ -2318,19 +2030,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         persistClipboard();
         updateSelectionUi();
         const count = chosen.length;
-        const nativeAction = nativeClipboardAction(chosen);
-        if (mode === "copy" && hasDesktopCapability(nativeAction)) {
-          invokeDesktopClipboard(chosen);
-        } else {
-          showToast(
-            mode === "cut"
-              ? `${count} item${count === 1 ? "" : "s"} ready to move inside Sports Cave Files`
-              : `${count} item${count === 1 ? "" : "s"} copied inside Sports Cave Files`,
-            mode === "copy" && isWindowsPlatform()
-              ? { kind: "success", duration: 5000, actionLabel: "Open Desktop", action: openSportsCaveDesktop }
-              : { kind: "success", duration: 2200 }
-          );
-        }
+        showToast(mode === "cut"
+          ? `${count} item${count === 1 ? "" : "s"} ready to move inside Sports Cave Files`
+          : `${count} item${count === 1 ? "" : "s"} copied inside Sports Cave Files`,
+          {kind:"success", duration:2200});
       }
 
       function clearFilesClipboard() {
@@ -2449,236 +2152,12 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         });
       }
 
-      function externalDragItems(item, index) {
-        if (!state.selection.has(item.path)) setSingleSelection(item.path, index);
-        return selectedItems();
-      }
-
       function dragRequestId() {
-        if (window.crypto && typeof window.crypto.randomUUID === "function") {
-          return window.crypto.randomUUID();
-        }
-        return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+        return crypto.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,14)}`;
       }
 
-      function positionOutboundDragPreview(x, y) {
-        const margin = 10;
-        const bounds = elements.outboundDragPreview.getBoundingClientRect();
-        const left = Math.min(
-          window.innerWidth - bounds.width - margin,
-          Math.max(margin, Number(x || 0) + 15)
-        );
-        const top = Math.min(
-          window.innerHeight - bounds.height - margin,
-          Math.max(margin, Number(y || 0) + 18)
-        );
-        elements.outboundDragPreview.style.left = `${left}px`;
-        elements.outboundDragPreview.style.top = `${top}px`;
-      }
-
-      function showOutboundDragPreview(items, x, y) {
-        elements.outboundDragPreviewLabel.textContent = items.length === 1
-          ? items[0].name
-          : `${items.length} selected items`;
-        elements.outboundDragPreview.classList.add("visible");
-        elements.outboundDragPreview.setAttribute("aria-hidden", "false");
-        positionOutboundDragPreview(x, y);
-      }
-
-      function hideOutboundDragPreview() {
-        elements.outboundDragPreview.classList.remove("visible");
-        elements.outboundDragPreview.setAttribute("aria-hidden", "true");
-      }
-
-      function resetOutboundPointer(pointerId = null) {
-        if (
-          pointerId !== null
-          && state.outboundPointer
-          && state.outboundPointer.pointerId !== pointerId
-        ) return;
-        state.outboundPointer = null;
-      }
-
-      function beginExternalDragPointer(event, item, index) {
-        if (
-          !hasDesktopCapability("drag")
-          || event.pointerType !== "mouse"
-          || !event.isPrimary
-          || event.button !== 0
-          || event.ctrlKey
-          || event.metaKey
-          || event.shiftKey
-          || event.altKey
-          || state.outboundDrag
-          || !String(item.desktop_relative_path || "")
-        ) {
-          resetOutboundPointer();
-          return;
-        }
-        const items = externalDragItems(item, index);
-        if (!items.length || items.length > 100) return;
-        state.outboundPointer = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startY: event.clientY,
-          items,
-        };
-      }
-
-      function moveExternalDragPointer(event) {
-        const pointer = state.outboundPointer;
-        if (
-          !pointer
-          || pointer.pointerId !== event.pointerId
-          || state.outboundDrag
-          || (event.buttons & 1) !== 1
-        ) return;
-        const distance = Math.hypot(
-          event.clientX - pointer.startX,
-          event.clientY - pointer.startY
-        );
-        if (distance < 7) return;
-        state.outboundPointer = null;
-        startNativeOutboundDrag(pointer.items, event.clientX, event.clientY);
-      }
-
-      async function startNativeOutboundDrag(items, x, y) {
-        const paths = items
-          .map(item => String(item.desktop_relative_path || ""))
-          .filter(Boolean);
-        if (!paths.length || paths.length > 100) {
-          showToast("Select between 1 and 100 items to drag.", { kind: "error", duration: 5000 });
-          return;
-        }
-        const requestId = dragRequestId();
-        state.outboundDrag = true;
-        state.outboundDragRequestId = requestId;
-        state.suppressClickUntil = Date.now() + 1200;
-        showOutboundDragPreview(items, x, y);
-        try {
-          await desktopRequest("drag", items, requestId);
-          elements.helperPanel.classList.remove("visible");
-        } catch (error) {
-          if (!error || error.name !== "AbortError") {
-            showDesktopTransferError(error, items.length === 1 ? items[0] : null);
-          }
-        } finally {
-          finishExternalDrag(requestId);
-        }
-      }
-
-      function cancelExternalDrag() {
-        const requestId = state.outboundDragRequestId;
-        if (requestId) {
-          try { desktopPost({ action: "cancel", request_id: requestId }); } catch (_) {}
-          const pending = state.desktopPending.get(requestId);
-          if (pending) {
-            pending.reject(desktopError("The drag was cancelled.", "drag_cancelled"));
-            state.desktopPending.delete(requestId);
-          }
-        }
-        finishExternalDrag(requestId);
-      }
-
-      function finishExternalDrag(requestId = "") {
-        if (
-          requestId
-          && state.outboundDragRequestId
-          && requestId !== state.outboundDragRequestId
-        ) return;
-        state.outboundDragRequestId = "";
-        state.outboundDrag = false;
-        resetOutboundPointer();
-        hideOutboundDragPreview();
-      }
-
-      // Premium opening additions: existing openItem and native transfers stay intact.
-      function openPreferredItem(item) {
-        openItem(item);
-      }
-
-      function previewItem(item) {
-        if (item?.kind === 'image' || String(item?.extension).toLowerCase() === 'psd') openImageViewer(item);
-        else showToast('Browser preview is unavailable for this file type. Use Open or Download.',{duration:5500});
-      }
-
-      async function chooseFileApplication(item) {
-        if (!item || item.tag === 'folder') return;
-        if (BLOCKED_EXTENSIONS.has(String(item.extension||'').toLocaleLowerCase())) {
-          showToast('This file type cannot be opened by the Sports Cave helper.',{kind:'error'});return;
-        }
-        if (hasDesktopCapability('openWith')) {
-          try {await desktopRequest('openWith',[item]);}
-          catch(error){showDesktopTransferError(error,item);}return;
-        }
-        if (isWindowsPlatform()) { browserNativeOpen(item,'openWith'); return; }
-        openModal(modal=>{
-          modalHeading(modal,'Open With','This browser cannot select installed applications. Download the file, then use your device’s Open With or Share action. Sports Cave Desktop can provide the Windows chooser when its existing helper supports Open With.');
-          modalActions(modal,'Download',()=>{closeModal();startDownload([item]);});
-        });
-      }
-
-      let nativeBrowserAttempt = null;
-      function cancelBrowserNativeOpen() {
-        const attempt=nativeBrowserAttempt;
-        nativeBrowserAttempt=null;
-        if (!attempt) return;
-        attempt.cancelled=true;
-        if (attempt.code) apiJson('/api/files-native-launch/claim',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:attempt.code})}).catch(()=>{});
-      }
-
-      function browserNativeOpen(item,action) {
-        if (!item || item.tag==='folder') return;
-        if (!isWindowsPlatform()) {
-          openModal(modal=>{
-            modalHeading(modal,'Open file','This browser cannot launch an arbitrary installed app. Use the existing Mac helper where configured, or download and use your device’s Open With / Share action. Preview remains available from the file menu.');
-            modalActions(modal,'Download',()=>{closeModal();startDownload([item]);});
-          });return;
-        }
-        cancelBrowserNativeOpen();
-        const attempt={cancelled:false,code:'',opener:document.activeElement}; nativeBrowserAttempt=attempt;
-        openModal(modal=>{
-          modalHeading(modal,action==='openWith'?'Open With':'Open file','Preparing the exact authorised file. Windows helper version 11 or later is required. Edge/Chrome may ask you to allow Sports Cave Desktop to open.');
-          const status=document.createElement('p');status.setAttribute('role','status');status.textContent='Checking file identity and access…';modal.append(status);
-          const primary=modalActions(modal,'Preparing…',()=>{});primary.disabled=true;
-          const fallback=document.createElement('button');fallback.className='dialog-button';fallback.textContent='Download instead';fallback.onclick=()=>{closeModal();startDownload([item]);};modal.append(fallback);
-          const refresh=document.createElement('button');refresh.className='dialog-button';refresh.textContent='Get helper update';refresh.onclick=downloadHelper;modal.append(refresh);
-          apiJson('/api/files-native-launch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,item:{id:String(item.id||''),revision:String(item.revision||'')}})}).then(data=>{
-            attempt.code=data.code;
-            if(attempt.cancelled){apiJson('/api/files-native-launch/claim',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:data.code})}).catch(()=>{});return;}
-            const launch=()=>{
-              status.textContent='Allow the browser’s Open Sports Cave Desktop prompt. Continue in its compact window for progress, cancellation or sign-in. If nothing opens, refresh/install the helper using Get helper update, then retry. This browser cannot detect whether the helper is installed.';
-              elements.protocolLink.href=data.launch_url;elements.protocolLink.click();
-              primary.disabled=true;primary.textContent='Request sent — retry from Files if needed';
-            };
-            primary.textContent='Open desktop helper';primary.disabled=false;primary.onclick=launch;
-            status.textContent='Ready. Open desktop helper within two minutes. Sign in there with the same Sports Cave OS account. No file has been downloaded.';
-            if(navigator.userActivation?.isActive) launch();
-          }).catch(error=>{
-            if(attempt.cancelled)return;
-            status.textContent=error.status ? error.message : 'File preparation failed. Check your network or sign in again, then retry.';
-            primary.textContent='Retry';primary.disabled=false;primary.onclick=()=>{closeModal();browserNativeOpen(item,action);};
-          });
-        });
-      }
-
-      function applicationPreferences(item) {
-        const extension=String(item?.extension||'file').toLocaleLowerCase();
-        const platform=(navigator.platform||'')+' '+(navigator.userAgent||'');
-        const mobile=/Android|iPhone|iPad/.test(platform)||(/Mac/.test(platform)&&navigator.maxTouchPoints>1);
-        const mac=!mobile&&/Mac/.test(platform);
-        const windows=hasDesktopCapability('appDefaults')||/Win/.test(platform);
-        openModal(modal=>{
-          modalHeading(modal,'Remember application',mobile?'Use Files or Downloads to choose an installed app or share the file. Remembered app choices depend on your device’s OS; this browser cannot change them.':mac?'In Finder, select the synced or downloaded file → Get Info → Open with. Choose an app, then explicitly use Change All to remember it for this file type. Change it again there when needed.':!windows?'Use your file manager’s Open With and default-application settings. Browser access cannot change installed application preferences.':'Choose a default app for .'+extension+' in Windows Settings → Apps → Default apps. Future native Open actions use that OS preference. Change or reset it there; Sports Cave never changes associations automatically.');
-          if(hasDesktopCapability('appDefaults'))modalActions(modal,'Open Default Apps',async()=>{
-            closeModal();const id=dragRequestId();
-            try{await new Promise((resolve,reject)=>{state.desktopPending.set(id,{resolve,reject,action:'appDefaults'});try{desktopPost({action:'appDefaults',request_id:id});}catch(error){state.desktopPending.delete(id);reject(error);}});}
-            catch(error){showDesktopTransferError(error,item);}
-          });
-          else modalActions(modal,'Done',closeModal);
-        });
-      }
-      // End premium opening additions.
+      function openPreferredItem(item) { openItem(item); }
+      function previewItem(item) { openItem(item); }
 
       function showItemContextMenu(item, x, y) {
         const chosen = selectedItems();
@@ -2688,7 +2167,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         if (item.kind === "folder") {
           showMenu([
             { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
-            { label: desktopFileManagerLabel(), action: () => invokeDesktopHelper(item, "folder") },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
             { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
@@ -2706,10 +2184,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
           ];
           definitions.push(
-            { label: "Open in desktop app", disabled: !single, action: () => invokeDesktopHelper(item, "file") },
-            { label: "Open With", disabled: !single, action: () => chooseFileApplication(item) },
             { label: "Preview", disabled: !single, action: () => previewItem(item) },
-            { label: "Remember / change application", disabled: !single, action: () => applicationPreferences(item) },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
             { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
@@ -2740,6 +2215,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function openModal(contentBuilder) {
+        state.modalOpener = document.activeElement;
         closeMenus();
         elements.modal.replaceChildren();
         contentBuilder(elements.modal);
@@ -2749,11 +2225,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function closeModal() {
-        const nativeOpener=nativeBrowserAttempt?.opener;
-        cancelBrowserNativeOpen();
+        const opener = state.modalOpener;
         elements.modalBackdrop.classList.remove("open");
         elements.modal.replaceChildren();
-        if(nativeOpener?.isConnected) nativeOpener.focus();
+        if (opener?.isConnected) opener.focus();
       }
 
       function modalHeading(modal, title, message = "") {
@@ -3277,7 +2752,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function hasExternalFiles(event) {
-        return Boolean(!state.outboundDrag && event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"));
+        return Boolean(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"));
       }
 
       function handleItemKeydown(event, item, index) {
@@ -3324,16 +2799,9 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           { label: "Copy path", disabled: !item, action: () => copyText(displayPath(item)) },
           { label: "Properties", disabled: !item, action: () => showProperties(item) },
           menuDivider(),
-          { label: state.desktopReady ? "Sports Cave Desktop is active" : "Open Sports Cave Desktop", disabled: state.desktopReady, action: openSportsCaveDesktop },
-          { label: "Install or update Desktop", action: downloadHelper },
         ], bounds.left, bounds.bottom + 3);
       };
-      elements.checkHelperButton.onclick = openSportsCaveDesktop;
-      elements.installHelperButton.onclick = downloadHelper;
-      elements.downloadInsteadButton.onclick = () => {
-        elements.helperPanel.classList.remove("visible");
-        if (state.helperItem && state.helperItem.kind !== "folder") startDownload([state.helperItem]);
-      };
+      elements.previewClose.onclick = closePreview;
 
       elements.searchInput.addEventListener("input", () => {
         state.searchByPath[state.currentPath] = elements.searchInput.value;
@@ -3410,21 +2878,18 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         hideFileTooltip();
         if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
       }, true);
-      document.addEventListener("pointermove", moveExternalDragPointer, true);
-      document.addEventListener("pointerup", event => resetOutboundPointer(event.pointerId), true);
-      document.addEventListener("pointercancel", event => resetOutboundPointer(event.pointerId), true);
       document.addEventListener("keydown", event => {
         const typing = event.target.matches && event.target.matches("input, textarea, select, [contenteditable='true']");
         if (event.key === "Escape") {
           event.preventDefault();
-          if (state.outboundDrag || state.outboundPointer) cancelExternalDrag();
+          if (!elements.previewPanel.hidden) closePreview();
           else if (elements.modalBackdrop.classList.contains("open")) closeModal();
           else if (document.querySelector(".menu.open")) closeMenus();
           else if (linkedProduct !== null && window.parent !== window) parent.postMessage({type:'sports-cave-psd-cancel'},location.origin);
           else clearSelection();
           return;
         }
-        if (typing || elements.modalBackdrop.classList.contains("open")) return;
+        if (typing || !elements.previewPanel.hidden || elements.modalBackdrop.classList.contains("open")) return;
         const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey;
         const key = event.key.toLocaleLowerCase();
         if (shortcut && key === "c" && state.selection.size) {
@@ -3469,55 +2934,14 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       });
 
       window.addEventListener("beforeunload", () => {
-        cancelBrowserNativeOpen();
         hideFileTooltip();
         stopThumbnailLoading();
         abortStaleFolderRequests();
         clearImageViewerDelivery();
         state.thumbnailCache.forEach(value => URL.revokeObjectURL(value.url));
-        cancelExternalDrag();
       });
       window.addEventListener("blur", hideFileTooltip);
       window.addEventListener("focus", setupLazyThumbnails);
-
-      function handleDesktopMessage(event) {
-        const message = event && event.data;
-        if (!message || message.type !== DESKTOP_MESSAGE_TYPE) return;
-        if (message.action === "capabilities" && message.ok) {
-          if (Number(message.version || 0) < MINIMUM_DESKTOP_VERSION) {
-            state.desktopCapabilities = new Set();
-            state.desktopReady = false;
-            showDesktopHelperProblem(
-              desktopError("", "desktop_outdated")
-            );
-            return;
-          }
-          state.desktopCapabilities = new Set(Array.from(message.capabilities || []));
-          state.desktopReady = true;
-          tryOpenLinkedFile();
-          elements.helperPanel.classList.remove("visible");
-          window.clearTimeout(state.helperTimer);
-          return;
-        }
-        if (message.action === "progress") {
-          const total = Number(message.total || 0);
-          const complete = Number(message.complete || 0);
-          const percent = total > 0 ? Math.min(100, Math.round(complete * 100 / total)) : 0;
-          showToast(`Preparing ${message.name || "files"}${total > 0 ? ` ${percent}%` : ""}...`, { duration: 0 });
-          return;
-        }
-        const pending = state.desktopPending.get(String(message.request_id || ""));
-        if (!pending) return;
-        state.desktopPending.delete(String(message.request_id || ""));
-        if (message.ok) pending.resolve(message);
-        else pending.reject(desktopError(message.message || "The desktop action failed.", message.code || "desktop_error"));
-      }
-
-      function initialiseDesktopBridge() {
-        if (!desktopBridge) return;
-        desktopBridge.addEventListener("message", handleDesktopMessage);
-        try { desktopPost({ action: "hello", request_id: dragRequestId() }); } catch (_) {}
-      }
 
       window.addEventListener("message", event => {
         if (
@@ -3528,6 +2952,12 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         ) {
           return;
         }
+        if (event.data.type === "sports-cave-image-viewer-download" && !elements.previewPanel.hidden) {
+          const item = state.items.find(item => item.desktop_relative_path === event.data.path);
+          if (item) startDownload([item]);
+          return;
+        }
+        if (event.data.type === "sports-cave-image-viewer-close") { closePreview(); return; }
         if (event.data.type === "sports-cave-image-viewer-ready") {
           state.imageViewerReady = true;
           try {
@@ -3562,14 +2992,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         }
       });
 
-      function tryOpenLinkedFile() {
-        const item = linkedAutoOpen;
-        if (!item || !hasDesktopCapability('openFile')) return;
-        linkedAutoOpen = null;
-        if (state.selection.size === 1 && state.selection.has(item.path)
-            && state.items.some(current => current.id === item.id && current.path === item.path)) openItem(item);
-      }
-
       async function openLinkedProduct() {
         const navigation = ++state.navigationToken;
         abortStaleFolderRequests(); clearSelection(); state.restorePosition=null;
@@ -3586,7 +3008,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           applyFolderPayload(payload); state.loading=false; state.loadingMore=true;
           renderAll(); setSingleSelection(item.path); revealItem(item.path,true);
           showToast('Linked PSD selected. Use Open or Download.',{duration:5000});
-          linkedAutoOpen=item; tryOpenLinkedFile();
           const listing = cachedFolder(payload.current_path) || await requestFolder(payload.current_path,false);
           if (navigation !== state.navigationToken) return;
           rememberFolder(listing,payload.current_path); applyFolderPayload(listing);
@@ -3642,7 +3063,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       async function initialise() {
         document.title = "Sports Cave Files";
-        initialiseDesktopBridge();
         if(query.has('edition_allocation')){await openSavedEdition();return;}
         if (linkedProduct !== null) { await openLinkedProduct(); return; }
         state.searchByPath[state.currentPath] = query.get("q") || state.searchByPath[state.currentPath] || "";
@@ -3658,9 +3078,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         }
       }
 
-      window.addEventListener('pagehide',()=>desktopBridge?.removeEventListener?.('message',handleDesktopMessage),{once:true});
-      document.getElementById('openWithButton').onclick=()=>chooseFileApplication(selectedItems()[0]);
-      const premiumIcons={openButton:'M5 15L15 5M5 5h10v10',openWithButton:'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',uploadButton:'M12 17V3M6 9l6-6 6 6M4 16v5h16v-5',downloadButton:'M12 3v14M6 11l6 6 6-6M4 16v5h16v-5',newButton:'M3 7V4h7l3 3h8v13H3zM12 11v6M9 14h6'};
+      const premiumIcons={openButton:'M5 15L15 5M5 5h10v10',uploadButton:'M12 17V3M6 9l6-6 6 6M4 16v5h16v-5',downloadButton:'M12 3v14M6 11l6 6 6-6M4 16v5h16v-5',newButton:'M3 7V4h7l3 3h8v13H3zM12 11v6M9 14h6'};
       for(const [id,path] of Object.entries(premiumIcons)){const icon=document.getElementById(id)?.querySelector('.command-icon');if(icon)icon.innerHTML='<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="'+path+'"/></svg>';}
       initialise();
     </script>

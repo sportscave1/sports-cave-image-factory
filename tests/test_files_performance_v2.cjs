@@ -3,10 +3,11 @@ const fs = require('node:fs');
 const {execFileSync} = require('node:child_process');
 const {chromium} = require('playwright');
 const root = '/Synthetic Files';
+const baselineRef = process.env.FILES_BENCHMARK_BASELINE || '823a1966';
 const source = fs.readFileSync('components/files_window/index.html','utf8');
 const viewer = fs.readFileSync('components/files_image_viewer/index.html','utf8');
-const baseline = execFileSync('git',['show','823a1966:components/files_window/index.html'],{encoding:'utf8',maxBuffer:2e6});
-const oldViewer = execFileSync('git',['show','823a1966:components/files_image_viewer/index.html'],{encoding:'utf8',maxBuffer:2e6});
+const baseline = execFileSync('git',['show',baselineRef+':components/files_window/index.html'],{encoding:'utf8',maxBuffer:2e6});
+const oldViewer = execFileSync('git',['show',baselineRef+':components/files_image_viewer/index.html'],{encoding:'utf8',maxBuffer:2e6});
 const delay = ms => new Promise(resolve=>setTimeout(resolve,ms));
 const item = (i, folder=root, extension='psd') => ({id:'id:file'+i,path:`${folder}/Artwork ${i}.${extension}`,desktop_relative_path:`${folder.slice(root.length+1)}${folder===root?'':'/'}Artwork ${i}.${extension}`,name:`Artwork ${i}.${extension}`,tag:'file',kind:extension==='psd'?'photoshop':'image',extension,type:extension==='psd'?'Photoshop document':'Image',revision:'r1',size:35000000,size_label:'35 MB'});
 const summary = values => {const sorted=[...values].sort((a,b)=>a-b);return {p50:+sorted[Math.floor(sorted.length/2)].toFixed(2),p95:+sorted[Math.ceil(sorted.length*.95)-1].toFixed(2),samples:values.map(x=>+x.toFixed(2))};};
@@ -54,7 +55,7 @@ async function fixture(browser, html=source, {count=2000,paginate=false,thumbnai
 }
 (async()=>{
  const browser=await chromium.launch({channel:'chrome',headless:true});
- const report={kind:'Synthetic Chrome, isolated requests; no Dropbox or production access',baseline:'823a1966',render:{},preview:{}};
+ const report={kind:'Synthetic Chrome, isolated requests; no Dropbox or production access',baseline:baselineRef,render:{},preview:{}};
  try{
   const imagePage=await browser.newPage();
   imageBytes={};
@@ -92,7 +93,7 @@ async function fixture(browser, html=source, {count=2000,paginate=false,thumbnai
    report.render[label+count].rows=samples[0].rows;report.render[label+count].dom=samples[0].dom;
   }
   report.launcher={};
-  for (const [label,launcherHtml] of [['before',execFileSync('git',['show','823a1966:components/files_window_launcher/index.html'],{encoding:'utf8'})],['after',fs.readFileSync('components/files_window_launcher/index.html','utf8')]]) {
+  for (const [label,launcherHtml] of [['before',execFileSync('git',['show',baselineRef+':components/files_window_launcher/index.html'],{encoding:'utf8'})],['after',fs.readFileSync('components/files_window_launcher/index.html','utf8')]]) {
    const {context,page,log}=await fixture(browser,source,{count:500,launcherHtml});
    await page.goto('http://files.synthetic.test/launcher');
    await page.evaluate(()=>document.querySelector('#launcher').addEventListener('click',()=>{window.clickedAt=Date.now();},true));
@@ -104,6 +105,28 @@ async function fixture(browser, html=source, {count=2000,paginate=false,thumbnai
    report.launcher[label]={clickToShellMs:Math.round(shell-clickAt),warmReopenListingRequests:log.lists.length-calls};
    assert.equal(context.pages().length,2);if(label==='after')assert.equal(log.lists.length,calls);
    assert.deepEqual(log.errors,[]);await context.close();
+  }
+  // Measure the actual file double-click through close/reopen, including the old popup.
+  report.openJourney={};
+  for (const [label,html,viewerHtml] of [['before',baseline,oldViewer],['after',source,viewer]]) {
+   const cold=[],warm=[];
+   for(let run=0;run<4;run++) {
+    const {context,page,log}=await fixture(browser,html,{count:500,thumbnails:true,viewerHtml});
+    await page.goto('http://files.synthetic.test/files-window');await page.waitForFunction(()=>state.items.length===500);
+    await page.evaluate(()=>document.querySelector('.file-item').addEventListener('dblclick',()=>window.openClickedAt=Date.now(),true));
+    for(const samples of [cold,warm]) {
+     let view;
+     if(label==='before') { [view]=await Promise.all([page.waitForEvent('popup'),page.locator('.file-item').first().dblclick()]); }
+     else { await page.locator('.file-item').first().dblclick();view=await page.locator('#previewFrame').elementHandle().then(el=>el.contentFrame()); }
+     await view.waitForFunction(()=>state.naturalWidth>0);samples.push(Date.now()-await page.evaluate(()=>window.openClickedAt));
+     if(label==='before') await view.close();
+     else await view.locator('#closeButton').click();
+     if(label==='after')await page.locator('#previewPanel').waitFor({state:'hidden'});
+     else await delay(650); // Existing duplicate-open guard on the baseline.
+    }
+    assert.deepEqual(log.errors,[]);await context.close();
+   }
+   report.openJourney[label]={cold:summary(cold),warm:summary(warm)};
   }
   // Actual production viewer, synthetic 35 MiB JPEG vs generated representation.
   for(const [label,viewerHtml] of [['before',oldViewer],['after',viewer]]){
@@ -160,12 +183,13 @@ async function fixture(browser, html=source, {count=2000,paginate=false,thumbnai
    await page.evaluate(()=>{window.peakActiveThumbnails=state.thumbnailActive;window.thumbnailSampler=setInterval(()=>window.peakActiveThumbnails=Math.max(window.peakActiveThumbnails,state.thumbnailActive),2);});
    await page.keyboard.press('End');await delay(300);assert(log.thumbs<100);assert(log.maxThumbs<=8,'at most four live requests plus aborted mock responses');
    // Open from the actual Files UI, preserve Files selection, and reuse its metadata.
-   const [popup]=await Promise.all([page.waitForEvent('popup'),page.locator('.file-item.focused').dblclick()]);
+   await page.locator('.file-item.focused').dblclick();
+   const popup=await page.locator('#previewFrame').elementHandle().then(el=>el.contentFrame());
    await popup.waitForFunction(()=>state.naturalWidth>0);assert(log.previews.every(p=>p.small));await delay(350);
    assert.equal(log.lists.length,1,'viewer receives folder metadata without a second listing');
-   await popup.screenshot({path:'test-results/files-preview.png'});
-   await popup.locator('#zoomInButton').click();await popup.locator('#stage').hover();await popup.mouse.down();await popup.mouse.move(700,450);await popup.mouse.up();await popup.locator('#fitButton').click();
-   await popup.close();assert.equal(await page.locator('.file-item.selected').count(),1);
+   await page.screenshot({path:'test-results/files-preview.png'});
+   await popup.locator('#zoomInButton').click();await popup.locator('#stage').hover();await page.mouse.down();await page.mouse.move(700,450);await page.mouse.up();await popup.locator('#fitButton').click();
+   await popup.locator('#closeButton').click();assert.equal(await page.locator('.file-item.selected').count(),1);
    report.thumbnails={requestsForTwoViewports:log.thumbs,peakLiveBrowserRequests:await page.evaluate(()=>{clearInterval(window.thumbnailSampler);return window.peakActiveThumbnails;}),peakMockInflightIncludingAborts:log.maxThumbs};
    assert(report.thumbnails.peakLiveBrowserRequests<=4);
    assert.deepEqual(log.errors,[]);await context.close();

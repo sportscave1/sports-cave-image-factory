@@ -91,33 +91,15 @@
         padding: 0 10px;
       }
       .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .helper-panel {
-        align-items: center;
-        background: #2c2c2c;
-        border: 1px solid #575757;
-        border-radius: 5px;
-        bottom: 42px;
-        box-shadow: 0 8px 26px rgba(0,0,0,.4);
-        display: none;
-        flex-wrap: wrap;
-        gap: 7px;
-        left: 50%;
-        max-width: calc(100vw - 24px);
-        padding: 9px;
-        position: fixed;
-        transform: translateX(-50%);
-        z-index: 20;
-      }
-      .helper-panel.visible { display: flex; }
-      .helper-panel strong { margin-right: 4px; }
-      .helper-action { background: #3a3a3a; border: 1px solid #666; border-radius: 4px; height: 29px; padding: 0 9px; }
-      .helper-action:hover { background: #484848; }
       .sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0,0,0,0); }
       @media (max-width: 700px) {
         .tool-label { display: none; }
         .text-tool { padding: 0 7px; }
         .file-name { font-size: 13px; }
       }
+      #pdf { width:100%; height:100%; overflow:auto; padding:12px; text-align:center; box-sizing:border-box; }
+      #pdf canvas { background:white; display:block; margin:auto; }
+      #pdf[hidden] { display:none; }
     </style>
   </head>
   <body>
@@ -136,40 +118,34 @@
         <div class="file-name" id="fileName"></div>
         <div class="toolbar-spacer"></div>
         <button class="tool text-tool" id="copyImageButton" type="button" title="Copy image pixels"><span class="icon">&#x2398;</span><span class="tool-label">Copy image</span></button>
-        <button class="tool text-tool" id="copyFileButton" type="button" title="Copy original file"><span class="icon">&#xE8C8;</span><span class="tool-label">Copy file</span></button>
         <button class="tool text-tool" id="downloadButton" type="button" title="Download"><span class="icon">&#8681;</span><span class="tool-label">Download</span></button>
-        <button class="tool text-tool" id="desktopButton" type="button" title="Open in desktop app"><span class="icon">&#8599;</span><span class="tool-label">Desktop app</span></button>
         <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
       </div>
       <section class="stage" id="stage">
         <img class="image" id="image" alt="" decoding="async" fetchpriority="high" draggable="false">
+        <div id="pdf" role="region" aria-label="PDF preview" hidden></div>
         <div class="image-error" id="imageError" role="alert">
-          <strong>This image could not be opened</strong>
+          <strong>Preview unavailable</strong>
           <span id="imageErrorDetail">Refresh Files and try again.</span>
         </div>
       </section>
       <footer class="status"><span id="dimensions"></span><span id="zoomStatus"></span></footer>
     </main>
-    <a class="sr-only" id="protocolLink" href="#" tabindex="-1">Open in desktop app</a>
     <iframe class="sr-only" id="downloadFrame" title="Download"></iframe>
-    <aside class="helper-panel" id="helperPanel" aria-live="polite">
-      <strong>File didn't open?</strong>
-      <button class="helper-action" id="checkHelperButton" type="button">Check desktop helper</button>
-      <button class="helper-action" id="installHelperButton" type="button">Reinstall helper</button>
-      <button class="helper-action" id="downloadInsteadButton" type="button">Download instead</button>
-    </aside>
     <script>
       const IMAGE_VIEWER_MESSAGE = "sports-cave-image-viewer-open";
       const IMAGE_VIEWER_PROTOCOL_VERSION = 1;
-      const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 9;
       const elements = Object.fromEntries([
         "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
-        "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "copyFileButton", "downloadButton", "desktopButton", "closeButton",
-        "stage", "image", "imageError", "imageErrorDetail", "dimensions", "zoomStatus", "protocolLink",
-        "downloadFrame", "helperPanel", "checkHelperButton", "installHelperButton", "downloadInsteadButton"
+        "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "downloadButton", "closeButton",
+        "stage", "image", "pdf", "imageError", "imageErrorDetail", "dimensions", "zoomStatus",
+        "downloadFrame"
       ].map(id => [id, document.getElementById(id)]));
       const query = new URLSearchParams(location.search);
+      const embedded = window.parent !== window && query.get("embedded") === "1";
+      // The legacy Streamlit Files route owns its Back/breadcrumb controls.
+      if (query.get("legacy") === "1") elements.closeButton.hidden = true;
+      const previewHost = embedded ? window.parent : null;
       const state = {
         path: query.get("path") || "",
         folder: query.get("folder") || "",
@@ -191,27 +167,13 @@
         panX: 0,
         panY: 0,
         pointer: null,
-        outboundPointer: null,
-        outboundBusy: false,
         loadGeneration: 0,
-        helperTimer: 0,
         sizingMode: "fit",
-        desktopCapabilities: new Set(),
-        desktopPending: new Map(),
-        desktopReady: false,
         openerReadyAttempts: 0,
         openerReadyTimer: 0,
         openerReadyAcknowledged: false,
         lastOpenRequestId: "",
       };
-
-      function isMac() {
-        return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-      }
-
-      function helperPackageUrl() {
-        return `/api/files-desktop-helper?platform=${isMac() ? "macos" : "windows"}`;
-      }
 
       function fileNameFromPath(path) {
         const parts = String(path || "").split("/");
@@ -242,6 +204,7 @@
       }
 
       function fitToScreen() {
+        if (state.pdfDocument) { state.pdfZoom=1; void renderPdfPage(state.pdfPage); return; }
         state.sizingMode = "fit";
         state.fitScale = calculateFitScale();
         state.scale = state.fitScale;
@@ -252,7 +215,7 @@
 
       function actualSize() {
         if (!state.original) {
-          if (/\.psd$/i.test(state.path)) { notify("Use Open in desktop app or Download to inspect the original PSD."); return; }
+          if (/\.psd$/i.test(state.path)) { notify("Use Download to inspect the original PSD."); return; }
           loadImage(state.path, { name: state.name, original: true });
           return;
         }
@@ -264,6 +227,7 @@
       }
 
       function zoomBy(multiplier) {
+        if (state.pdfDocument) { state.pdfZoom=Math.min(4,Math.max(0.25,state.pdfZoom*multiplier)); void renderPdfPage(state.pdfPage); return; }
         state.sizingMode = "custom";
         state.scale = Math.max(0.05, Math.min(12, state.scale * multiplier));
         applyTransform();
@@ -289,6 +253,7 @@
       async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true, original = false, revision = path === state.path ? state.revision : "" } = {}) {
         const relativePath = String(path || "");
         if (!relativePath) { showImageError("No image was selected."); return; }
+        state.suspended = false;
         const generation = ++state.loadGeneration;
         state.imageController?.abort();
         const controller = new AbortController(); state.imageController = controller;
@@ -301,12 +266,54 @@
         document.title = `${state.name} - Sports Cave Image Viewer`;
         if (!sameImage) { clearImage(); elements.image.removeAttribute("src"); }
         elements.dimensions.textContent = original ? "Opening full-resolution original…" : "Opening preview…";
-        if (replaceHistory) {
+        if (replaceHistory && !embedded) {
           const params = new URLSearchParams({ path: state.path, folder: state.folder, name: state.name });
           history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
         }
+        const extension = relativePath.split(".").pop().toLowerCase();
+        const isImage = ["jpg","jpeg","png","webp","psd"].includes(extension);
+        for (const [key,label] of [["previousButton","Previous"],["nextButton","Next"]]) {
+          elements[key].title = `${label} ${extension === "pdf" ? "page" : "image"}`;
+          elements[key].setAttribute("aria-label",elements[key].title);
+        }
+        stopPdf(); elements.pdf.hidden = true;
+        for (const key of ["zoomOutButton","zoomInButton","fitButton","actualButton","rotateLeftButton","rotateRightButton","copyImageButton"]) elements[key].disabled = !isImage;
+        if (extension === "pdf") {
+          elements.fitButton.disabled = false; elements.zoomInButton.disabled = false; elements.zoomOutButton.disabled = false;
+        }
+        if (!isImage && extension !== "pdf") {
+          showImageError("Unsupported Preview. Use Download to save this file."); syncNavigation(); return;
+        }
         try {
           const key = `${relativePath}|${revision}`;
+          if (extension === "pdf") {
+            clearImage(); elements.dimensions.textContent = "Opening PDF…";
+            let blob = state.pdfCache?.key === key && state.pdfCache.expires > Date.now() ? state.pdfCache.blob : null;
+            const rendererPromise = import("/files-preview-assets/6.4.299/build/pdf.min.mjs");
+            rendererPromise.catch(() => {});
+            if (!blob) {
+              const response = await fetch(`/api/files-pdf-preview?path=${encodeURIComponent(relativePath)}&rev=${encodeURIComponent(revision)}`, {credentials:"same-origin",signal:controller.signal,cache:"no-store"});
+              if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "PDF preview is unavailable. Use Download.");
+              blob = await response.blob();
+            }
+            if (generation !== state.loadGeneration) return;
+            if (blob.type !== "application/pdf" || blob.size > 25*1024*1024) throw new Error("PDF preview is unavailable. Use Download.");
+            if (blob.size <= 8*1024*1024) state.pdfCache = {key,blob,expires:Date.now()+30000};
+            const pdfjs = await rendererPromise;
+            if (generation !== state.loadGeneration) return;
+            const assets = "/files-preview-assets/6.4.299/";
+            pdfjs.GlobalWorkerOptions.workerSrc = assets + "build/pdf.worker.min.mjs";
+            const data = new Uint8Array(await blob.arrayBuffer());
+            if (generation !== state.loadGeneration) return;
+            const task = pdfjs.getDocument({data, cMapUrl:assets+"cmaps/", cMapPacked:true,
+              standardFontDataUrl:assets+"standard_fonts/", wasmUrl:assets+"wasm/", isEvalSupported:false});
+            state.pdfLoading = task;
+            const document = await task.promise;
+            if (generation !== state.loadGeneration) { await document.destroy(); return; }
+            state.pdfDocument = document; state.pdfZoom = 1;
+            elements.pdf.hidden = false;
+            await renderPdfPage(1); return;
+          }
           let cached = state.previewCache.get(key);
           if (cached && cached.expires <= Date.now()) {
             URL.revokeObjectURL(cached.url); state.previewCache.delete(key); cached = null;
@@ -324,7 +331,7 @@
           }
           else {
             const response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(relativePath)}&representation=screen&rev=${encodeURIComponent(revision)}`, { credentials: "same-origin", signal: controller.signal, cache: "no-store" });
-            if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "A lightweight preview is unavailable. For images, use 1:1 Actual to load the original; for PSDs, use Desktop app or Download.");
+            if (!response.ok) throw new Error(response.status === 403 ? "Files access expired. Sign in again." : "A lightweight preview is unavailable. For images, use 1:1 Actual to load the original; for PSDs, use Download.");
             const blob = await response.blob();
             if (!blob.type.startsWith("image/") || blob.size > 4 * 1024 * 1024) throw new Error("Preview representation is unavailable.");
             if (generation !== state.loadGeneration) return;
@@ -362,6 +369,44 @@
         }
       }
 
+      function stopPdf() {
+        state.pdfRender?.cancel(); state.pdfRender = null;
+        state.pdfLoading?.destroy().catch(() => {}); state.pdfLoading = null;
+        state.pdfDocument = null; state.pdfPage = 0;
+        state.pdfPageGeneration = (state.pdfPageGeneration || 0) + 1;
+        elements.pdf.replaceChildren(); delete elements.pdf.dataset.renderedPage;
+      }
+
+      async function renderPdfPage(number) {
+        const pdf = state.pdfDocument;
+        if (!pdf || number < 1 || number > pdf.numPages) return;
+        const generation = ++state.pdfPageGeneration;
+        state.pdfRender?.cancel(); state.pdfPage = number;
+        elements.previousButton.disabled = number <= 1;
+        elements.nextButton.disabled = number >= pdf.numPages;
+        elements.dimensions.textContent = `Rendering PDF page ${number} of ${pdf.numPages}…`;
+        try {
+          const page = await pdf.getPage(number);
+          if (generation !== state.pdfPageGeneration) return;
+          const base = page.getViewport({scale:1});
+          const fit = Math.min((elements.pdf.clientWidth-24)/base.width,(elements.pdf.clientHeight-24)/base.height);
+          const scale = Math.min(Math.max(0.1,fit*state.pdfZoom*(devicePixelRatio||1)), Math.sqrt(5_000_000/(base.width*base.height)));
+          const viewport = page.getViewport({scale});
+          const canvas = document.createElement("canvas");canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+          canvas.style.width = `${viewport.width/(devicePixelRatio||1)}px`;canvas.style.height = `${viewport.height/(devicePixelRatio||1)}px`;
+          canvas.setAttribute("aria-label",`PDF page ${number} of ${pdf.numPages}`);
+          const render = page.render({canvasContext:canvas.getContext("2d"),viewport});state.pdfRender=render;
+          await render.promise;
+          if (generation !== state.pdfPageGeneration) return;
+          elements.pdf.replaceChildren(canvas); elements.pdf.dataset.renderedPage=String(number);
+          elements.dimensions.textContent = `PDF · Page ${number} of ${pdf.numPages}`;
+          elements.zoomStatus.textContent = `${Math.round(state.pdfZoom*100)}%`;
+        } catch (error) {
+          if (generation !== state.pdfPageGeneration || error.name === "RenderingCancelledException") return;
+          showImageError("PDF preview is unavailable. Use Download.");
+        }
+      }
+
       function showQuickPreview(url) {
         if (state.naturalWidth || typeof url !== "string" || !url.startsWith(`blob:${location.origin}/`)) return;
         const generation = state.loadGeneration;
@@ -384,6 +429,7 @@
       }
 
       async function loadFolderImages() {
+        if (embedded) return;
         const generation = ++state.folderGeneration;
         state.folderController?.abort();
         if (state.navigationFolder === state.folder) {
@@ -417,11 +463,13 @@
       }
 
       function syncNavigation() {
+        if (state.pdfDocument) return;
         elements.previousButton.disabled = state.index <= 0;
         elements.nextButton.disabled = state.index < 0 || state.index >= state.images.length - 1;
       }
 
       function moveImage(offset) {
+        if (state.pdfDocument) { void renderPdfPage(state.pdfPage+offset); return; }
         const next = state.images[state.index + offset];
         if (!next) return;
         state.index += offset;
@@ -429,48 +477,12 @@
       }
 
       function startDownload() {
+        if (embedded) { postToOpener({type:"sports-cave-image-viewer-download",version:1,path:state.path}); return; }
         elements.downloadFrame.src = `/api/files-download?relative_path=${encodeURIComponent(state.path)}&download=${Date.now()}`;
-      }
-
-      function requestId() {
-        return window.crypto && typeof window.crypto.randomUUID === "function"
-          ? window.crypto.randomUUID()
-          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
       }
 
       function notify(message) {
         elements.dimensions.textContent = message;
-      }
-
-      function hasDesktopCapability(capability) {
-        return state.desktopReady && state.desktopCapabilities.has(capability);
-      }
-
-      function desktopPost(message) {
-        if (!window.chrome || !window.chrome.webview) throw new Error("Open in Sports Cave Desktop.");
-        window.chrome.webview.postMessage(message);
-      }
-
-      async function createTransfer() {
-        const response = await fetch("/api/files-native-transfer", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ items: [{ path: state.path, id: "", revision: "", tag: "file" }] }),
-        });
-        const payload = await response.json();
-        if (!response.ok || payload.ok === false) throw new Error(payload.message || "The file could not be prepared.");
-        return { base_url: location.origin, ticket: payload.ticket, secret: payload.secret };
-      }
-
-      async function desktopRequest(action) {
-        if (!hasDesktopCapability(action)) throw new Error("Open in Sports Cave Desktop to use this action.");
-        const transfer = await createTransfer();
-        const id = requestId();
-        return new Promise((resolve, reject) => {
-          state.desktopPending.set(id, { resolve, reject });
-          desktopPost({ action, request_id: id, transfer });
-        });
       }
 
       async function copyImagePixels() {
@@ -478,9 +490,6 @@
           if (!state.naturalWidth || !state.naturalHeight || !elements.image.complete) {
             throw new Error("Wait for the image to finish loading.");
           }
-          if (hasDesktopCapability("copyImage")) {
-            await desktopRequest("copyImage");
-          } else {
             if (!navigator.clipboard || typeof ClipboardItem !== "function") {
               throw new Error("Image copying is not supported in this browser.");
             }
@@ -493,48 +502,12 @@
               canvas.toBlob(value => value ? resolve(value) : reject(new Error("The image could not be copied.")), "image/png");
             });
             await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
-          }
           notify("Image copied");
         } catch (error) {
           notify(error.message || "Image copy failed");
         }
       }
       window.sportsCaveCopyImagePixels = copyImagePixels;
-
-      async function copyOriginalFile() {
-        try {
-          await desktopRequest("copyFile");
-          notify("Original file copied");
-        } catch (error) {
-          notify(error.message || "Open in Sports Cave Desktop to copy the file");
-          showHelperPanel();
-        }
-      }
-
-      function showHelperPanel() {
-        elements.helperPanel.classList.add("visible");
-      }
-
-      async function invokeDesktopHelper() {
-        if (!state.path) return;
-        if (hasDesktopCapability("openFile")) {
-          try {
-            await desktopRequest("openFile");
-            elements.helperPanel.classList.remove("visible");
-          } catch (error) {
-            notify(error.message || "The file could not be opened");
-          }
-          return;
-        }
-        elements.protocolLink.href = "sports-cave-files://app";
-        elements.protocolLink.click();
-        window.clearTimeout(state.helperTimer);
-        state.helperTimer = window.setTimeout(showHelperPanel, 3000);
-      }
-
-      function installHelper() {
-        elements.downloadFrame.src = `${helperPackageUrl()}&download=${Date.now()}`;
-      }
 
       elements.previousButton.onclick = () => moveImage(-1);
       elements.nextButton.onclick = () => moveImage(1);
@@ -545,70 +518,27 @@
       elements.rotateLeftButton.onclick = () => { state.rotation -= 90; fitToScreen(); };
       elements.rotateRightButton.onclick = () => { state.rotation += 90; fitToScreen(); };
       elements.copyImageButton.onclick = copyImagePixels;
-      elements.copyFileButton.onclick = copyOriginalFile;
       elements.downloadButton.onclick = startDownload;
-      elements.desktopButton.onclick = invokeDesktopHelper;
-      elements.closeButton.onclick = () => window.close();
-      elements.checkHelperButton.onclick = invokeDesktopHelper;
-      elements.installHelperButton.onclick = installHelper;
-      elements.downloadInsteadButton.onclick = startDownload;
+      elements.closeButton.onclick = closePreview;
 
       elements.stage.addEventListener("wheel", event => {
+        if (state.pdfDocument && !event.ctrlKey && !event.metaKey) return;
         event.preventDefault();
         zoomBy(event.deltaY < 0 ? 1.12 : 1 / 1.12);
       }, { passive: false });
       elements.stage.addEventListener("pointerdown", event => {
         if (event.button !== 0 || elements.image.style.display === "none") return;
-        if (
-          event.target === elements.image
-          && hasDesktopCapability("drag")
-          && event.pointerType === "mouse"
-          && event.isPrimary
-          && !event.ctrlKey
-          && !event.metaKey
-          && !event.shiftKey
-          && !event.altKey
-          && !state.outboundBusy
-        ) {
-          state.outboundPointer = {
-            id: event.pointerId,
-            x: event.clientX,
-            y: event.clientY,
-          };
-          return;
-        }
         state.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY };
         elements.stage.setPointerCapture(event.pointerId);
         elements.stage.classList.add("panning");
       });
       elements.stage.addEventListener("pointermove", event => {
-        if (state.outboundPointer && state.outboundPointer.id === event.pointerId) {
-          if ((event.buttons & 1) !== 1) {
-            state.outboundPointer = null;
-            return;
-          }
-          const distance = Math.hypot(
-            event.clientX - state.outboundPointer.x,
-            event.clientY - state.outboundPointer.y
-          );
-          if (distance >= 7) {
-            state.outboundPointer = null;
-            state.outboundBusy = true;
-            desktopRequest("drag")
-              .catch(error => notify(error.message || "Windows drag could not start"))
-              .finally(() => { state.outboundBusy = false; });
-          }
-          return;
-        }
         if (!state.pointer || state.pointer.id !== event.pointerId) return;
         state.panX = state.pointer.panX + event.clientX - state.pointer.x;
         state.panY = state.pointer.panY + event.clientY - state.pointer.y;
         applyTransform();
       });
       const stopPanning = event => {
-        if (state.outboundPointer && state.outboundPointer.id === event.pointerId) {
-          state.outboundPointer = null;
-        }
         if (state.pointer && state.pointer.id === event.pointerId) state.pointer = null;
         elements.stage.classList.remove("panning");
       };
@@ -645,7 +575,7 @@
         const message = event && event.data;
         if (
           event.origin !== location.origin
-          || event.source !== window.opener
+          || event.source !== previewHost
           || !message
           || typeof message !== "object"
           || message.type !== IMAGE_VIEWER_MESSAGE
@@ -667,10 +597,24 @@
         );
       }
 
+      function suspendPreview() {
+        state.loadGeneration += 1; state.folderGeneration += 1;
+        state.imageController?.abort(); state.folderController?.abort();
+        elements.image.removeAttribute("src"); stopPdf();
+        clearImage(); state.suspended = true;
+
+      }
+
+      function closePreview() {
+        if (query.get("legacy") === "1") return;
+        suspendPreview();
+        postToOpener({type:"sports-cave-image-viewer-close",version:1});
+      }
+
       function postToOpener(message) {
         try {
-          if (!window.opener || window.opener.closed) return false;
-          window.opener.postMessage(message, location.origin);
+          if (!previewHost || previewHost.closed) return false;
+          previewHost.postMessage(message, location.origin);
           return true;
         } catch (_) {
           return false;
@@ -687,9 +631,10 @@
 
       window.addEventListener("message", event => {
         const message = event && event.data;
+        if (event.origin === location.origin && event.source === previewHost && message?.type === "sports-cave-image-viewer-suspend") { suspendPreview(); return; }
         if (
           event.origin === location.origin
-          && event.source === window.opener
+          && event.source === previewHost
           && message
           && message.type === "sports-cave-image-viewer-parent-ready"
           && message.version === IMAGE_VIEWER_PROTOCOL_VERSION
@@ -710,12 +655,12 @@
         }
         state.lastOpenRequestId = message.requestId;
         const same = message.path === state.path && message.folder === state.folder;
-        if (!same) loadImage(message.path, { folder: message.folder, name: message.name, revision:message.revision || "" });
+        if (!same || state.suspended || state.revision !== (message.revision || "")) loadImage(message.path, { folder: message.folder, name: message.name, revision:message.revision || "" });
         if (message.images) acceptNavigation(message.images, message.folder);
         showQuickPreview(message.thumbnail);
         loadFolderImages();
         acknowledgeViewerOpen(message.requestId);
-        window.focus();
+        elements.closeButton.focus();
       });
       function notifyOpenerReady() {
         if (state.openerReadyAcknowledged || state.openerReadyAttempts >= 20) return;
@@ -730,49 +675,12 @@
         window.clearTimeout(state.openerReadyTimer);
         state.openerReadyTimer = window.setTimeout(notifyOpenerReady, 250);
       }
-      function handleDesktopMessage(event) {
-        const message = event && event.data;
-        if (!message || message.type !== DESKTOP_MESSAGE_TYPE) return;
-        if (message.action === "capabilities" && message.ok) {
-          if (Number(message.version || 0) < MINIMUM_DESKTOP_VERSION) {
-            state.desktopCapabilities = new Set();
-            state.desktopReady = false;
-            elements.copyFileButton.disabled = true;
-            elements.copyFileButton.title = "Update Sports Cave Desktop to copy the original file";
-            showHelperPanel();
-            return;
-          }
-          state.desktopCapabilities = new Set(Array.from(message.capabilities || []));
-          state.desktopReady = true;
-          elements.copyFileButton.disabled = !hasDesktopCapability("copyFile");
-          return;
-        }
-        if (message.action === "progress") {
-          const total = Number(message.total || 0);
-          const complete = Number(message.complete || 0);
-          notify(total > 0 ? `Preparing ${Math.min(100, Math.round(complete * 100 / total))}%` : "Preparing file");
-          return;
-        }
-        const pending = state.desktopPending.get(String(message.request_id || ""));
-        if (!pending) return;
-        state.desktopPending.delete(String(message.request_id || ""));
-        if (message.ok) pending.resolve(message);
-        else pending.reject(new Error(message.message || "The desktop action failed."));
-      }
-      if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.addEventListener("message", handleDesktopMessage);
-        desktopPost({ action: "hello", request_id: requestId() });
-      } else {
-        elements.copyFileButton.disabled = true;
-        elements.copyFileButton.title = "Open in Sports Cave Desktop to copy the original file";
-      }
       window.addEventListener("keydown", event => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "c") {
           event.preventDefault();
-          if (event.shiftKey) copyOriginalFile();
-          else copyImagePixels();
+          copyImagePixels();
         }
-        else if (event.key === "Escape") window.close();
+        else if (event.key === "Escape") closePreview();
         else if (event.key === "ArrowLeft") moveImage(-1);
         else if (event.key === "ArrowRight") moveImage(1);
         else if (event.key === "+" || event.key === "=") zoomBy(1.2);
@@ -783,12 +691,13 @@
         state.loadGeneration += 1;
         state.imageController?.abort(); state.folderController?.abort();
         state.previewCache.forEach(value => URL.revokeObjectURL(value.url));
+        stopPdf(); state.pdfCache = null;
         window.clearTimeout(state.openerReadyTimer);
       });
 
-      loadImage(state.path, { folder: state.folder, name: state.name, revision: state.revision, replaceHistory: false });
+      if (state.path) loadImage(state.path, { folder: state.folder, name: state.name, revision: state.revision, replaceHistory: false });
       loadFolderImages();
-      notifyOpenerReady();
+      if (embedded) notifyOpenerReady();
       elements.actualButton.title = "Load full-resolution original (may be large)";
       elements.copyImageButton.title = "Copy displayed image pixels. Use 1:1 Actual for original pixels.";
     </script>

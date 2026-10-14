@@ -13,7 +13,7 @@ class PreservationTests(unittest.TestCase):
             start=re.search(r'^      (?:async )?function '+name+r'\(',text,re.M).start()
             rest=text[start:];end=re.search(r'^      (?:async )?function ',rest[1:],re.M)
             return rest[:end.start()+1] if end else rest
-        for name in ['openItem','invokeDesktopHelper','createDesktopTransfer','desktopRequest','pasteFiles','showDeleteDialog','uploadChunk','runUpload','setSingleSelection','selectByIndex']:
+        for name in ['pasteFiles','showDeleteDialog','uploadChunk','runUpload','setSingleSelection','selectByIndex']:
             self.assertEqual(fn(source,name),fn(baseline,name),name)
         for name in ['auto_editions_api.py','dropbox_integration.py','supabase_backend.py','desktop_helper_macos/SportsCaveFilesHelper.py','desktop_helper/Install.ps1']:
             self.assertEqual((ROOT/name).read_bytes(),subprocess.check_output(['git','show','823a1966:'+name],cwd=ROOT),name)
