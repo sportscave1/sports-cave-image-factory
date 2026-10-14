@@ -56,20 +56,20 @@
    try{navigateSaved(id,row);paint(id,row);}
    catch(e){row.status='Unavailable';row.error=e.message;paint(id,row);showError(id,row);}
   }
-  async function poll(id){const row=jobs.get(id);if(!row||row.polling)return;row.polling=true;
+  async function poll(id){const row=jobs.get(id);if(!row||row.polling||row.starting)return;row.polling=true;
    try{const d=await api('/api/auto-editions/state',id,false,row.job_id);Object.assign(row,d);paint(id,row);
-    if(d.status==='Ready'){if(sessionStorage.getItem('sc-edition-pending:'+id)){initiateDownload(id,row);navigateSaved(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}}
+    if(d.status==='Ready'){if(row.clickedAt)trace('ready_observed',id,performance.now()-row.clickedAt);if(sessionStorage.getItem('sc-edition-pending:'+id)){initiateDownload(id,row);navigateSaved(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}}
     else if(d.status==='Blocked'){sessionStorage.removeItem('sc-edition-pending:'+id);}
    }catch(e){row.status=row.job_id?'Unavailable':'Blocked';row.error=e.message;paint(id,row);showError(id,row);}finally{row.polling=false;}
   }
   async function start(value){const u=new URL(value,location.href),id=u.searchParams.get('allocation_id');if(!/^\d+$/.test(id||''))return;
    const old=jobs.get(id);if(old?.status==='Generating'||old?.status==='Queued')return;
    if(old?.status==='Ready'){openSaved(url('/auto-editions/open',id,old.job_id));return;}
-   const row={status:'Generating',clickedAt:performance.now()};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
+   const row={status:'Generating',starting:true,clickedAt:performance.now()};jobs.set(id,row);paint(id,row);sessionStorage.setItem('sc-edition-pending:'+id,'1');
    immediateProgress(id);
    trace('inline_feedback',id,performance.now()-row.clickedAt);
-   try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);await poll(id);}
-   catch(e){row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
+   try{const d=await api(u.hash==='#Retry'?'/api/auto-editions/retry':'/api/auto-editions/start',id,true);Object.assign(row,d);row.starting=false;sessionStorage.removeItem('sc-edition-attempt:'+d.job_id);paint(id,row);await poll(id);}
+   catch(e){row.starting=false;row.status='Blocked';row.error=e.message;paint(id,row);showError(id,row);sessionStorage.removeItem('sc-edition-pending:'+id);}
   }
   function hydrate(){for(const [id,node] of immediate)if(!node.isConnected||gridSignature(node.editionCanvas)!==node.editionSignature)clearImmediate(id);
    for(const cell of document.querySelectorAll('canvas [role=gridcell]')){const value=cell.textContent;if(!value.startsWith('/auto-editions/download?')||!value.endsWith('#Generating'))continue;const id=new URL(value,location.href).searchParams.get('allocation_id');if(id&&!jobs.has(id)){jobs.set(id,{status:'Generating'});poll(id);}}
@@ -79,7 +79,7 @@
    for(const [id,row] of jobs)paint(id,row);
    for(let i=0;i<sessionStorage.length;i++){const k=sessionStorage.key(i);if(k?.startsWith('sc-edition-pending:')){const id=k.split(':').pop();if(!jobs.has(id)){jobs.set(id,{status:'Generating'});poll(id);}}}
   }
-  setInterval(()=>{for(const [id,row] of jobs)if(['Generating','Queued'].includes(row.status))poll(id);},2500);
+  setInterval(()=>{for(const [id,row] of jobs)if(['Generating','Queued'].includes(row.status))poll(id);},750);
   let scheduled=false;new MutationObserver(()=>{if(!scheduled){scheduled=true;setTimeout(()=>{scheduled=false;hydrate();},100);}}).observe(document.body,{childList:true,subtree:true});
   const style=document.createElement('style');style.textContent='.sc-edition-generating::before{content:"";display:inline-block;width:10px;height:10px;border:2px solid #bbb;border-top-color:#4f65a0;border-radius:50%;animation:sc-spin .8s linear infinite;margin-right:5px}@keyframes sc-spin{to{transform:rotate(360deg)}}';document.head.append(style);
   // Streamlit renders desktop LinkColumns on canvas. Add only a visual,

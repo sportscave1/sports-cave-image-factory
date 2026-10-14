@@ -81,3 +81,29 @@ def test_overlapped_identity_reads_still_reject_changed_source(tmp_path):
         with pytest.raises(ValueError,match='revision changed'):runtime.job_for(42)
         metadata['rev']='abc123';unit['cancelled_at']='now'
         with pytest.raises(ValueError,match='cancelled'):runtime.job_for(42)
+
+@async_test
+async def test_bound_snapshot_overlaps_reads_but_never_returns_before_authorization():
+    import threading
+    read_started=threading.Event()
+    def read(*args):
+        read_started.set()
+        return ({'private':'row'}, {'id':42})
+    async def deny(*args):
+        assert await asyncio.to_thread(read_started.wait,2)
+        raise PermissionError('revoked')
+    jobs=Mock();jobs.read_bound.side_effect=read
+    with patch.object(api,'actor',side_effect=deny),patch.object(api.runtime,'stores',return_value=(None,jobs)):
+        with pytest.raises(PermissionError,match='revoked'):
+            await api.bound_snapshot(request(query='allocation_id=42&job_id='+'a'*64))
+
+
+@async_test
+async def test_download_final_fence_rejects_revoked_permission_even_with_cached_bytes(tmp_path):
+    source=tmp_path/'source';source.write_bytes(b'validated')
+    digest=ae.file_hash(source);cache=AssetCache(1024);cache.remember(digest,source)
+    assets=Mock();row={'status':'Ready','result':{'retained':True,'filename':'x.jpg','output':{'sha256':digest}}}
+    with patch.object(api,'actor',return_value=VA),patch.object(api,'stored_current',side_effect=[({'id':'a'*64},assets,row),PermissionError('revoked')]),patch.object(api.runtime,'stores',return_value=(None,Mock())),patch('auto_editions_asset_cache.output_assets',cache):
+        response=await api.download(request())
+        assert response.status_code==403
+        assets.output_response.assert_not_called()

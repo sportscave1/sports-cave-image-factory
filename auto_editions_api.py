@@ -1,5 +1,6 @@
 """Cookie-authenticated cloud downloads. No companion or allocation mutations."""
 import json
+import asyncio
 import re
 from pathlib import Path
 import tempfile
@@ -139,8 +140,11 @@ async def download(request):
         timings['download_prepare_ms']=round((time.monotonic()-started)*1000,3)
         logging.getLogger(__name__).info('AUTO_EDITIONS_DOWNLOAD_TIMINGS job=%s stages=%s',job['id'],timings)
         headers={**HEADERS,'Server-Timing':', '.join(f'{k};dur={v}' for k,v in timings.items())}
-        return FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=headers,
+        response=FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=headers,
                             background=BackgroundTask(folder.cleanup))
+        # Larger bounded chunks reduce thread-pool handoffs for 35-41 MB files.
+        response.chunk_size=1024*1024
+        return response
     except Exception as error:
         if folder:folder.cleanup()
         return failure(error)
@@ -162,12 +166,24 @@ def same_allocation(unit,identity):
         and unit.get('shopify_product_gid')==identity.get('source',{}).get('product_gid'))
 
 
+async def bound_snapshot(request,*,authenticated=None):
+    """Overlap independent reads, never return data before authorization passes."""
+    saved_id=request.query_params.get('job_id','')
+    if not re.fullmatch(r'[a-f0-9]{64}',saved_id):
+        if authenticated is None:await actor(request)
+        raise ValueError('Invalid saved artwork identity.')
+    unit_id=allocation(request)
+    _,jobs=runtime.stores()
+    if authenticated is not None:
+        return await run_in_threadpool(jobs.read_bound,saved_id,unit_id)
+    # Both operations are read-only. No permission or row data is cached.
+    _,snapshot=await asyncio.gather(actor(request),run_in_threadpool(jobs.read_bound,saved_id,unit_id))
+    return snapshot
+
+
 async def stored_current(request,*,authenticated=None,assets=None):
     # Retained historical output is bound to its exact allocation, not today's PSD.
-    if authenticated is None:await actor(request)
-    if not re.fullmatch(r'[a-f0-9]{64}',request.query_params.get('job_id','')):raise ValueError('Invalid saved artwork identity.')
-    _,jobs=runtime.stores()
-    row,unit=await run_in_threadpool(jobs.read_bound,request.query_params.get('job_id',''),allocation(request))
+    row,unit=await bound_snapshot(request,authenticated=authenticated)
     if row and (row.get('result') or {}).get('retained') is True:
         if not same_allocation(unit,row['payload']['identity']):raise PermissionError('Artwork does not match this allocation.')
         return row['payload'],assets or await run_in_threadpool(runtime.storage),row
@@ -175,13 +191,11 @@ async def stored_current(request,*,authenticated=None,assets=None):
 
 
 async def state(request):
+    began=time.monotonic()
     try:
-        await actor(request)
         saved_id=request.query_params.get('job_id','')
         if saved_id:
-            if not re.fullmatch(r'[a-f0-9]{64}',saved_id):raise ValueError('Invalid job identity.')
-            _,jobs=runtime.stores()
-            row,unit=await run_in_threadpool(jobs.read_bound,saved_id,allocation(request))
+            row,unit=await bound_snapshot(request)
             if not row:raise ValueError('Generation request is unavailable.')
             job=row['payload']
             if not same_allocation(unit,job['identity']):raise PermissionError('Artwork does not match this allocation.')
@@ -189,12 +203,15 @@ async def state(request):
             # approval before and after rendering; downloads recheck access.
             assets=await run_in_threadpool(runtime.storage) if row['status']=='Ready' else None
         else:
+            await actor(request)
             job,assets=await run_in_threadpool(runtime.job_for,allocation(request))
             _,jobs=runtime.stores();row=await run_in_threadpool(jobs.read,job['id'])
         if row and row['status']=='Ready':
             await run_in_threadpool(assets.verify_output,row['result']['output'])
         runtime.start_worker()
         return JSONResponse(dict(ok=True,job_id=job['id'],status=row['status'] if row else 'Not generated',
+            timings={'state_ms':round((time.monotonic()-began)*1000,3)},
+            ready_at=str(row.get('updated_at')) if row and row['status']=='Ready' else None,
             error_code=row.get('error_code') if row else None,filename=(row.get('result') or {}).get('filename') if row else None),headers=HEADERS)
     except Exception as error:return failure(error)
 
