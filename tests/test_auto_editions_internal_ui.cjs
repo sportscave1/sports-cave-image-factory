@@ -28,15 +28,21 @@ for(const width of [1280,390]){
   const host=document.createElement('div');host.dataset.testid='stDataFrame';host.style.position='relative';
   const canvas=document.createElement('canvas');canvas.width=200;canvas.height=40;host.append(canvas);
   document.querySelector('[data-testid=stMainBlockContainer]').prepend(host);
+  const setup=document.createElement('a');setup.href='/auto-editions/setup?allocation_id=652';setup.textContent='Auto Editions setup';host.append(setup);
   const context=canvas.getContext('2d');context.font='12px system-ui';context.fillText('Download JPG',10,20);
   canvas.onclick=()=>window.open('/auto-editions/download?allocation_id=652#Download JPG');
  });
  const download=page.waitForEvent('download');const clicked=Date.now();await page.locator('canvas').click({position:{x:30,y:16}});
  await page.locator('.sc-edition-generating[role=status]').waitFor();assert(Date.now()-clicked<300,'Canvas feedback must precede the delayed start response');
  await page.getByRole('link',{name:'Generating…',exact:true}).waitFor();await page.getByRole('button',{name:'Other row',exact:true}).click();await page.getByRole('link',{name:'Generating…',exact:true}).click();
+ // A real Streamlit rerun retires the component realm during cloud polling.
+ // Completion and later Open clicks must survive its stale refresh callback.
+ await page.locator('iframe[src="/component"]').evaluate(e=>e.remove());
  const transfer=await download;assert.equal(transfer.suggestedFilename(),item.name);
  const frame=page.frameLocator('#sc-internal-files iframe');await frame.locator('.file-item.selected').waitFor();
  assert.equal(context.pages().filter(p=>!p.url().startsWith('edge://downloads-hub')).length,1,JSON.stringify(context.pages().map(p=>p.url())));assert.equal(starts,1);assert.equal(locations,1);assert.equal(await page.getByRole('dialog').count(),0);
+ assert.equal(await page.locator('#sc-edition-error').count(),0);
+ assert.equal(await page.locator('a[href="/auto-editions/setup?allocation_id=652"]').textContent(),'Auto Editions setup');
  assert(await page.locator('#sports-cave-os-top-bar').isVisible());assert.equal(await frame.locator('.file-item.selected').getAttribute('data-path'),item.path);
  const rect=await page.locator('#sc-internal-files').boundingBox();assert(rect.x>=0&&rect.x+rect.width<=width+1&&rect.y>=64);
  await page.getByRole('button',{name:'Back to Orders',exact:true}).click();await page.locator('#sc-internal-files').waitFor({state:'hidden'});

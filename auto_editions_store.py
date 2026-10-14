@@ -29,14 +29,15 @@ class Preparations:
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('''SELECT p.manifest,l.approval,l.variant_id FROM public.auto_edition_layouts l
                 JOIN public.auto_edition_preparations p ON p.hash=l.preparation_hash
-                WHERE l.product_gid=%s AND l.variant_id=%s''',
+                WHERE l.product_gid=%s AND l.variant_id IN (%s,'*')
+                ORDER BY (l.variant_id='*') ASC LIMIT 1''',
                 (unit['shopify_product_gid'],str(unit.get('shopify_variant_id') or '')))
             row=cur.fetchone()
             if not row:raise PreparationBlocked('This variant needs Auto Editions setup.')
             allowed=row['approval'].get('allocation_ids')
             if allowed is not None and unit['id'] not in allowed:
                 raise PreparationBlocked('This unit is outside the approved TEST rollout.')
-            return dict(manifest=row['manifest'],approval=row['approval'],variant_ids=[row['variant_id']])
+            return dict(manifest=row['manifest'],approval=row['approval'],variant_ids=[str(unit.get('shopify_variant_id') or '')])
 
     def save(self,manifest,proofs,receipts,actor):
         ae.validate_manifest(manifest)

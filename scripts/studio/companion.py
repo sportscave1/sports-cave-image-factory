@@ -71,6 +71,8 @@ def worker(home, task, owner):
     root, cfg = config(home, task, owner)
     server = DraftServer(home, task, owner, persistent=True, port=cfg["port"])
     studio.atomic(root/"session.json", {"protected": protect(server.token.encode()).hex(), "pid": os.getpid(), "parent_pid": os.getppid()})
+    import auto_editions_local
+    auto_editions_local.restore_host()
     try:
         server.run()
     finally:

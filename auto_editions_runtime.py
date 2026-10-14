@@ -113,6 +113,7 @@ def download_links(rows):
         for row in rows:
             allocation=str(row.get('edition_order_id') or row.get('id') or '')
             key=(psd_directory.product_id(row),variant(row.get('shopify_variant_id') or row.get('variant_id')))
+            if key not in index:key=(key[0],'*')
             if not allocation.isdigit() or key not in index:continue
             if index[key] is not None and int(allocation) not in index[key]:continue
             links[allocation]='/auto-editions/download?allocation_id='+allocation+'#Download JPG'

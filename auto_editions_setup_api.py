@@ -93,7 +93,19 @@ def grant_context(request):
             if not user or str(user.get('session_version'))!=str(setup['session_version']):
                 raise PermissionError('Administrator session changed.')
             cloud.require_access(user,setup=True)
-    current=setup_context(setup['context']['allocation_id'])
+    if setup['context'].get('automatic'):
+        from auto_editions_onboarding_api import product_context
+        if setup.get('host_token_hash'):
+            from auto_editions_onboarding_api import queue,host_account
+            with queue().connect() as conn,conn.cursor() as cur:
+                cur.execute('''SELECT * FROM auto_edition_preparation_hosts WHERE token_hash=%s
+                    AND revoked_at IS NULL AND expires_at>now()''',(setup['host_token_hash'],))
+                host=cur.fetchone()
+                if not host:raise PermissionError('Preparation host was revoked.')
+                host_account(host)
+        current=product_context(setup['context']['product_gid'],setup['context']['lease_token'])
+    else:
+        current=setup_context(setup['context']['allocation_id'])
     if current!=setup['context']:raise ValueError('Linked source or allocation changed during preparation.')
     return setup
 
@@ -128,6 +140,10 @@ async def package(request):
             await run_in_threadpool(grant_context,request)
             registry,_=runtime.stores()
             digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])
+            if ctx.get('automatic'):
+                from auto_editions_onboarding_api import queue,host_account
+                await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
+                    'Blocked','Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest)
             setup['imported']=digest
         return JSONResponse(dict(preparation_hash=digest,status='Awaiting visual approval',print_ready=False),headers=api.HEADERS)
     except Exception as error:return api.failure(error)

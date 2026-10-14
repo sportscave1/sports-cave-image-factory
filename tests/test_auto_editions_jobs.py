@@ -154,3 +154,24 @@ def test_new_master_does_not_advertise_previous_output(database):
     sql.execute("INSERT INTO auto_edition_layouts(product_gid,variant_id,preparation_hash,approval) VALUES (%s,'v1',%s,'{}')",('gid://shopify/Product/123','b'*64))
     assert jobs.summaries(['42'])=={}
     assert jobs.read(j['id'])['result']['output']['file_id']=='id:old'
+
+
+def test_product_test_layout_preserves_variant_override_and_history(database,tmp_path):
+    from auto_editions_store import Preparations
+    from test_auto_editions import package
+    jobs,sql=database;registry=Preparations(jobs.connect)
+    manifest=package(tmp_path);digest=ae.fingerprint(manifest)
+    unit=dict(id=42,shopify_product_gid=manifest['source']['product_gid'],shopify_variant_id='v1')
+    registry.save(manifest,[dict(preparation_hash=digest,pixel_exact=True,outside_number_exact=True)],{},'admin')
+    registry.approve(digest,{**unit,'shopify_variant_id':'*'},'admin')
+    assert registry.for_unit(unit)['variant_ids']==['v1']
+    registry.approve(digest,unit,'admin',allocation_ids=[42])
+    with pytest.raises(ValueError,match='outside'):registry.for_unit({**unit,'id':43})
+    assert registry.for_unit({**unit,'id':43,'shopify_variant_id':'v2'})['manifest']==manifest
+    j=job();j['identity'].update(allocation_id=43,source=manifest['source'],variant_id='v2');j['preparation_hash']=digest;j['id']=ae.fingerprint(j['identity'])
+    jobs.enqueue(j,'admin');claimed=jobs.claim();jobs.finish(j['id'],claimed['lease_token'],result={'output':{'file_id':'original'}})
+    assert jobs.summaries(['43'])['43']['id']==j['id']
+    sql.execute("INSERT INTO auto_edition_preparations(hash,manifest,proofs,receipts,created_by) VALUES (%s,'{}','[]','{}','admin')",('b'*64,))
+    sql.execute("UPDATE auto_edition_layouts SET preparation_hash=%s WHERE variant_id='*'",('b'*64,))
+    assert jobs.summaries(['43'])=={}
+    assert jobs.read(j['id'])['result']['output']['file_id']=='original'

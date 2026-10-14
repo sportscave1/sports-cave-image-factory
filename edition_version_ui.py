@@ -261,6 +261,12 @@ def workspace():
     st.html(STYLE)
     with st.container(key='edition-workspace'):
         table()
+        import os_accounts
+        if os_accounts.is_admin(actor()):
+            with st.expander('Auto Editions preparation',key='auto-editions-preparation',on_change='rerun') as panel:
+                if panel.open:
+                    import streamlit.components.v1 as components
+                    components.iframe('/auto-editions/onboarding',height=480,scrolling=True)
         archive()
         from design_tracking_page import render
         render()
