@@ -138,7 +138,7 @@ async def download(request):
         await stored_current(request,assets=assets)
         timings['download_final_identity_ms']=round((time.monotonic()-phase)*1000,3)
         timings['download_prepare_ms']=round((time.monotonic()-started)*1000,3)
-        logging.getLogger(__name__).info('AUTO_EDITIONS_DOWNLOAD_TIMINGS job=%s stages=%s',job['id'],timings)
+        logging.getLogger('uvicorn.error').info('AUTO_EDITIONS_DOWNLOAD_TIMINGS job=%s stages=%s',job['id'],timings)
         headers={**HEADERS,'Server-Timing':', '.join(f'{k};dur={v}' for k,v in timings.items())}
         response=FileResponse(path,media_type='image/jpeg',filename=result['filename'],content_disposition_type='inline' if request.query_params.get('inline')=='1' else 'attachment',headers=headers,
                             background=BackgroundTask(folder.cleanup))
