@@ -1543,6 +1543,17 @@ async def files_window_page(request: Request):
                                reference,error.status_code if isinstance(error,FilesUploadError) else 503,title='Files access')
 
 
+async def original_actions_script(request: Request):
+    """Shared Files clipboard code; contains no asset URLs or credentials."""
+    try:
+        await run_in_threadpool(_request_user, request)
+        return FileResponse(FILES_WINDOW_FILE.parent.parent / "files_original_actions.js",
+                            media_type="text/javascript", headers={"Cache-Control": "no-cache",
+                            "X-Content-Type-Options": "nosniff"})
+    except Exception as error:
+        return _response_error(error)
+
+
 async def files_image_viewer_page(request: Request):
     """Serve the standalone image viewer to an approved signed-in user."""
     try:
@@ -1958,7 +1969,8 @@ async def remove_files_upload(request: Request):
 
 
 async def download_file(request: Request):
-    """Resolve a short-lived Dropbox link only after an explicit Download action."""
+    """Stream unchanged original bytes only after an explicit Copy/Download action."""
+    upstream = None
     try:
         if not _same_origin(request):
             raise FilesUploadError("Download request is not allowed.", status_code=403)
@@ -1972,13 +1984,11 @@ async def download_file(request: Request):
         )
         if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
             raise FilesUploadError("This file is not available.", status_code=403)
-        link = await run_in_threadpool(
-            dropbox_integration.get_temporary_link,
-            context["access_token"],
-            path,
+        metadata, upstream = await run_in_threadpool(
+            dropbox_integration.get_file_response, context["access_token"], path,
         )
-        if not link:
-            raise FilesUploadError("This file could not be downloaded right now.", status_code=503)
+        if str(metadata.get(".tag") or "file").casefold() == "folder":
+            raise FilesUploadError("Select a file to download.", status_code=400)
         await run_in_threadpool(
             record_activity_log,
             "files_downloaded",
@@ -1989,8 +1999,20 @@ async def download_file(request: Request):
             metadata={**_activity_metadata(user), "filename": PurePosixPath(path).name},
             actor=_activity_actor(user),
         )
-        return RedirectResponse(str(link), status_code=307)
+        return StreamingResponse(
+            _stream_upstream_response(upstream),
+            media_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+            headers={
+                "Content-Disposition": _content_disposition("attachment", str(metadata.get("name") or PurePosixPath(path).name)),
+                "Content-Length": str(int(metadata.get("size") or 0)),
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+            background=BackgroundTask(upstream.close),
+        )
     except Exception as error:
+        if upstream is not None:
+            upstream.close()
         return _response_error(error)
 
 
@@ -2824,6 +2846,7 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-upload/status", files_upload_status, ("GET",)),
     ("/api/files-upload/remove", remove_files_upload, ("POST",)),
     ("/api/files-download", download_file, ("GET",)),
+    ("/files-original-actions.js", original_actions_script, ("GET",)),
     ("/api/files-image-preview", image_preview, ("GET",)),
     ("/api/files-pdf-preview", pdf_preview, ("GET",)),
     ("/files-preview-assets/6.4.299/{asset:path}", preview_asset, ("GET",)),

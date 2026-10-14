@@ -5,7 +5,7 @@ from pathlib import Path
 import threading
 import unittest
 from urllib.parse import urlencode
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 import files_upload_api
@@ -564,19 +564,17 @@ class FilesWindowApiTests(unittest.TestCase):
     def test_relative_download_path_is_root_scoped(self):
         relative = "Designs/O'Neal & Final.pdf"
         request = get_request("/api/files-download", {"relative_path": relative})
+        upstream = Mock()
         with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
-            files_upload_api,
-            "_dropbox_context",
+            files_upload_api, "_dropbox_context",
             return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
-        ), patch.object(
-            files_upload_api.dropbox_integration,
-            "get_temporary_link",
-            return_value="https://dropbox.example/download",
-        ) as temporary_link:
+        ), patch.object(files_upload_api.dropbox_integration, "get_file_response",
+                        return_value=({"size": 3}, upstream)) as original:
             response = asyncio.run(files_upload_api.download_file(request))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment;", response.headers["content-disposition"])
+        original.assert_called_once_with("secret-token", f"{TEAM_ROOT}/{relative}")
 
-        self.assertEqual(response.status_code, 307)
-        temporary_link.assert_called_once_with("secret-token", f"{TEAM_ROOT}/{relative}")
 
     def test_native_transfer_manifest_is_revision_scoped_and_keeps_unicode_names(self):
         manager = files_upload_api.NativeTransferManager()
@@ -1482,7 +1480,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
 
     def test_viewer_copies_pixels_without_native_clipboard(self):
         self.assertIn('id="copyImageButton"', self.viewer)
-        self.assertIn('new ClipboardItem({ "image/png": png })', self.viewer)
+        self.assertIn('await FilesOriginal.copy(`/api/files-download?relative_path=', self.viewer)
         self.assertIn('window.sportsCaveCopyImagePixels = copyImagePixels', self.viewer)
         self.assertIn('draggable="false"', self.viewer)
         self.assertNotIn('copyFileButton', self.viewer)
