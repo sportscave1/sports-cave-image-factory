@@ -119,6 +119,7 @@ async def context(request):
 
 async def package(request):
     acquired=False
+    setup=None
     import time
     started=time.monotonic();timings={}
     try:
@@ -138,6 +139,8 @@ async def package(request):
             timings['receive_seconds']=round(time.monotonic()-started,3);phase=time.monotonic()
             ctx=setup['context']
             manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
+            if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:
+                raise ValueError('Reset requires an updated companion and a fresh Photoshop preparation.')
             timings['validation_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
             assets=runtime.storage()
             receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
@@ -156,7 +159,15 @@ async def package(request):
             timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
             timings['total_seconds']=round(time.monotonic()-started,3)
         return JSONResponse(dict(preparation_hash=digest,status='Awaiting visual approval',print_ready=False,timings=timings),headers=api.HEADERS)
-    except Exception as error:return api.failure(error)
+    except Exception as error:
+        if acquired and isinstance(error,ValueError) and setup and setup['context'].get('reset_id'):
+            try:
+                from auto_editions_onboarding_api import queue
+                ctx=setup['context']
+                await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
+                    'Blocked',str(error) if isinstance(error,ValueError) else 'Replacement verification failed. The working design is retained.')
+            except Exception:pass # Existing bounded lease recovery retains ownership.
+        return api.failure(error)
     finally:
         if acquired:IMPORT_LOCK.release()
 

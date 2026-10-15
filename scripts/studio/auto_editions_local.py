@@ -123,6 +123,7 @@ def find_reusable_package(ctx):
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
                 manifest=json.loads(archive.read('manifest.json'))
+            if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:continue
             from auto_editions_onboarding import preparation_scale
             expected=preparation_scale(manifest.get('source_dimensions',manifest.get('dimensions',[])))
             if (manifest.get('source')==ctx['source'] and manifest.get('edition_total')==ctx['total']
@@ -294,6 +295,7 @@ def prepare_worker(key,roles,scale=1):
         if (output/'timings.json').exists():row['timings'].update(json.loads((output/'timings.json').read_text()))
         manifest=json.loads((output/'manifest.json').read_text())
         manifest['confirmed_roles']=roles
+        if ctx.get('reset_id'):manifest['reset_request_id']=ctx['reset_id']
         # Adding reviewed role metadata changes the package identity. Server
         # recomputes its own pixel proofs; local proof JSON is never trusted.
         (output/'manifest.json').write_text(json.dumps(manifest))
