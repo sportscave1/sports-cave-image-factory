@@ -15718,6 +15718,8 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
 
 
 def _generate_certificate_for_assignment(cur, assignment, *, force=False):
+    from edition_cancellation import require_certificate_allocation
+    require_certificate_allocation(cur, assignment)
     manual_certificate = str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
     local_file_path = ""
     local_preview_path = ""
@@ -23189,6 +23191,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
     selected_status_clause = status_clauses.get(str(status_filter or "").strip())
     if selected_status_clause:
         where_clauses.append(selected_status_clause)
+        where_clauses.append("o.cancelled_at IS NULL")
     where = f"WHERE {' AND '.join(f'({clause})' for clause in where_clauses)}" if where_clauses else ""
     with connect() as conn:
         with conn.cursor() as cur:
@@ -23218,10 +23221,12 @@ def get_order_summary():
                      WHERE assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs product mapping', 'Needs Edition Setup', 'Error')) AS needs_edition,
                     (SELECT COUNT(*) FROM shopify_order_lines
                      WHERE assignment_status = %s) AS historical_lines,
-                    (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,
+                    (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE
+                       AND allocation_valid AND status NOT IN ('cancelled','voided','refunded','superseded')) AS assigned_today,
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
-                     WHERE c.id IS NULL) AS certificates_missing,
+                     WHERE c.id IS NULL AND eo.allocation_valid
+                       AND eo.status NOT IN ('cancelled','voided','refunded','superseded')) AS certificates_missing,
                     (SELECT COUNT(*) FROM line_handles lh
                      LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
                      WHERE COALESCE(lh.shopify_handle, '') <> ''
@@ -23380,9 +23385,11 @@ def _edition_order_search_filter(search):
     return "WHERE " + "\n                       OR ".join(conditions), params
 
 
-def list_edition_orders(search="", limit=250):
+def list_edition_orders(search="", limit=250, *, include_cancelled=False):
     ensure_schema()
     where_sql, search_params = _edition_order_search_filter(search)
+    if not include_cancelled:
+        where_sql += (" AND " if where_sql else "WHERE ") + "COALESCE(eo.allocation_valid,TRUE) AND COALESCE(eo.status,'') NOT IN ('cancelled','voided','refunded','superseded')"
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(

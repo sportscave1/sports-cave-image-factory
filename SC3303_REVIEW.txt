@@ -1,0 +1,80 @@
+SC3303 — targeted edition cancellation review
+Verified 15 October 2026, 10:29 pm Australia/Sydney
+
+RESULT: PREPARED LOCALLY. NOT DEPLOYED OR APPLIED TO PRODUCTION.
+Live next edition remains #020/100. Live sold/remaining remain 19/81.
+SC3303 still holds #019 with allocation_valid=true and Certificate Missing.
+No production data, Shopify metafields, payments or refunds were changed.
+
+Read-only investigation
+- Shopify order 18945167196467 is #SC3303, Heath Morgan.
+- Product 15411172376883, kostecki-hazelwood-final-lap-wall-art.
+- Current Shopify total is AUD 0.00, current quantity is zero.
+- Shopify still returns PAID and cancelledAt=null. This explains why treating
+  the Shopify financial/cancellation fields alone as truth will restore OS state.
+- No Shopify fulfilments. Fulfilment order is CLOSED / UNSUBMITTED.
+- Allocation 678 is edition 19 in run 8a601906-f380-479a-8326-f8d34d1c9d28.
+- This run contains exactly editions 1–19. No later allocations were found.
+- No certificate, dispatch row or Auto Editions job was found for SC3303/019.
+- Recorded issuance/fulfilment evidence was checked; an unrecorded physical
+  print or manual handover cannot be inferred from software records.
+- SC3301 remains 017; SC3302 remains 018; SC3304 is another product.
+
+Why live correction is withheld
+The deployed order upsert overwrites local cancelled_at with Shopify's null.
+Certificate generation also lacks a check against invalid/released allocations.
+The existing allocator tombstone and cursor override prevent reallocation and
+counter reconciliation, but do not by themselves close those other paths.
+The user explicitly instructed: "Do not deploy until I approve."
+
+Prepared change
+1. scripts/sc3303_cancellation_guards.sql installs database guards keyed to this
+   repair's existing order sync lock. Installation changes no order/counter data.
+   Stale order/line writes preserve cancellation and zero current quantity.
+   Reactivating the allocation or writing certificate/dispatch work is rejected.
+2. edition_cancellation.py checks current order/allocation state under row locks
+   before certificate generation, including forced generation and stale callers.
+3. supabase_backend.py excludes invalid/cancelled allocations from active edition
+   and certificate queues, while retaining explicit historical access.
+4. scripts/repair_sc3303.py is an inert, narrowly scoped transaction function.
+   It requires fresh complete Shopify evidence, the installed guards and an
+   active administrator. It rechecks all conflicts before any edit, preserves a
+   full audit snapshot and the original allocation row, adds the existing source
+   tombstone, cancels SC3303, changes sold/remaining to 18/82, and invokes the
+   existing audited override from 20 to 19. A repeated call cannot decrement again.
+   Its caller must use one transaction and roll back on any exception.
+5. After commit, use the existing verified product metafield mirror for this
+   handle only. It writes sports_cave.edition_next_number and the existing counter
+   aliases consistently, with compare-and-set verification. Do not write a stale
+   fixed value if a legitimate new order has already consumed edition 019.
+
+Validation
+SC3303_TEST_SQL=1 python -m unittest tests.test_sc3303_cancellation -v
+Five tests passed against disposable PGlite PostgreSQL with synthetic records.
+Covered: freshness/identity/fulfilment rejection; stale certificate caller;
+exact one-step rollback; preserved earlier allocation rows, SC3304 and another
+artwork's counters; replayed Shopify order and line writes; allocation replay;
+blocked certificate/dispatch writes; counter overwrite rejection; repeat repair;
+next customer gets 019; certificate/job/dispatch/counter conflicts; complete
+transaction rollback when the administrator override fails.
+Python syntax and git diff --check passed.
+Full application regression suite was not run: the default Python environment
+lacks application dependencies. Disposable SQL does not prove live concurrency.
+
+Release preparation
+Verified live Render commit: 71c4a8047e9af7418f873528e262ea04272a353d.
+Task Studio base is older: bdc46c292a9a4213a21b861184c35186820a16be.
+Do not deploy this whole older task branch. The scoped review patch at
+tmp/sc3303-review/sc3303-live-review.patch is based on the verified live commit;
+its exact source anchors and integrated Python syntax were checked.
+No commit, push, merge, migration installation or deployment has been performed.
+After approval: integrate the scoped patch into the then-current release,
+complete normal release checks, deploy the certificate/queue guards and install
+the SQL guards, re-fetch Shopify evidence, execute the audited transaction,
+mirror this product, then verify DB, Shopify, protected records and UI queues.
+Stop if any later allocation, certificate, dispatch or job conflict appears.
+
+Expected state after approved execution
+SC3303 CANCELLED; allocation 019 released but retained as historical evidence.
+Last active edition 018; next available edition 019; Shopify next metafield 19.
+Active sold 18; remaining 82; SC3301/SC3302/SC3304 and other artwork runs unchanged.

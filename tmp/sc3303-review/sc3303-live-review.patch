@@ -1,0 +1,487 @@
+--- a/supabase_backend.py
++++ b/supabase_backend.py
+@@ -15766,6 +15766,8 @@
+ 
+ 
+ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
++    from edition_cancellation import require_certificate_allocation
++    require_certificate_allocation(cur, assignment)
+     manual_certificate = str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
+     local_file_path = ""
+     local_preview_path = ""
+@@ -23237,6 +23239,7 @@
+     selected_status_clause = status_clauses.get(str(status_filter or "").strip())
+     if selected_status_clause:
+         where_clauses.append(selected_status_clause)
++        where_clauses.append("o.cancelled_at IS NULL")
+     where = f"WHERE {' AND '.join(f'({clause})' for clause in where_clauses)}" if where_clauses else ""
+     with connect() as conn:
+         with conn.cursor() as cur:
+@@ -23266,10 +23269,12 @@
+                      WHERE assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs product mapping', 'Needs Edition Setup', 'Error')) AS needs_edition,
+                     (SELECT COUNT(*) FROM shopify_order_lines
+                      WHERE assignment_status = %s) AS historical_lines,
+-                    (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,
++                    (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE
++                       AND allocation_valid AND status NOT IN ('cancelled','voided','refunded','superseded')) AS assigned_today,
+                     (SELECT COUNT(*) FROM edition_orders eo
+                      LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
+-                     WHERE c.id IS NULL) AS certificates_missing,
++                     WHERE c.id IS NULL AND eo.allocation_valid
++                       AND eo.status NOT IN ('cancelled','voided','refunded','superseded')) AS certificates_missing,
+                     (SELECT COUNT(*) FROM line_handles lh
+                      LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
+                      WHERE COALESCE(lh.shopify_handle, '') <> ''
+@@ -23428,9 +23433,11 @@
+     return "WHERE " + "\n                       OR ".join(conditions), params
+ 
+ 
+-def list_edition_orders(search="", limit=250):
++def list_edition_orders(search="", limit=250, *, include_cancelled=False):
+     ensure_schema()
+     where_sql, search_params = _edition_order_search_filter(search)
++    if not include_cancelled:
++        where_sql += (" AND " if where_sql else "WHERE ") + "COALESCE(eo.allocation_valid,TRUE) AND COALESCE(eo.status,'') NOT IN ('cancelled','voided','refunded','superseded')"
+     with connect() as conn:
+         with conn.cursor() as cur:
+             cur.execute(
+--- /dev/null
++++ b/edition_cancellation.py
+@@ -0,0 +1,23 @@
++"""Guards for audited cancellations; no I/O or configuration at import time."""
++
++
++def require_certificate_allocation(cur, assignment):
++    """Hold the order and allocation through generation, including force/retries."""
++    order_id = str(assignment.get('shopify_order_id') or '').rsplit('/', 1)[-1]
++    cur.execute("""SELECT o.cancelled_at,
++      EXISTS(SELECT 1 FROM edition_order_sync_locks l
++        WHERE l.canonical_order_key='id:'||%s AND lower(l.status)='cancelled') AS cancelled
++      FROM shopify_orders o WHERE regexp_replace(o.shopify_order_id,'^.*/','')=%s
++      FOR SHARE OF o""", (order_id, order_id))
++    order = cur.fetchone()
++    if not order or order.get('cancelled_at') or order.get('cancelled'):
++        raise ValueError('Order is missing or cancelled; certificate generation is blocked.')
++    reference = str(assignment.get('id') or '')
++    if reference.startswith('manual-edition:'):
++        return
++    cur.execute('SELECT allocation_valid,status FROM edition_orders WHERE id::text=%s FOR SHARE', (reference,))
++    unit = cur.fetchone()
++    if not unit or unit.get('allocation_valid') is not True or str(unit.get('status') or '').lower() in {
++        'cancelled', 'voided', 'refunded', 'superseded'
++    }:
++        raise ValueError('Allocation is released or invalid; certificate generation is blocked.')
+--- /dev/null
++++ b/scripts/repair_sc3303.py
+@@ -0,0 +1,168 @@
++"""One-order repair. Import is inert. Caller owns transaction and fresh Shopify read.
++
++Install the reviewed guards and application certificate check before applying.
++Call apply inside a transaction; commit only on success. Then invoke the existing
++sync_product_edition_metafields(HANDLE, ensure_schema_first=False) mirror and
++verify Shopify's values. Never change Shopify financial/refund state.
++"""
++from datetime import datetime, timezone
++from decimal import Decimal
++import hashlib
++import json
++import uuid
++
++ORDER = 'gid://shopify/Order/18945167196467'
++LINE = 'gid://shopify/LineItem/50798859878707'
++PRODUCT = 'gid://shopify/Product/15411172376883'
++HANDLE = 'kostecki-hazelwood-final-lap-wall-art'
++RUN = '8a601906-f380-479a-8326-f8d34d1c9d28'
++REPAIR = 'sc3303-release-019-20261015'
++REQUEST = str(uuid.uuid5(uuid.NAMESPACE_URL, REPAIR))
++GUARDS = ('cancelled_edition_order_guard','cancelled_edition_line_guard',
++          'cancelled_edition_allocation_guard','cancelled_edition_certificate_guard',
++          'cancelled_edition_dispatch_guard')
++
++
++def require(ok, reason):
++    if not ok:
++        raise ValueError('SC3303 correction stopped: ' + reason)
++
++
++def validate_shopify(order, fetched_at, now=None):
++    now = now or datetime.now(timezone.utc)
++    require(0 <= (now-fetched_at).total_seconds() <= 120, 'Shopify evidence is stale')
++    require(order.get('id') == ORDER and order.get('name') == '#SC3303', 'order identity mismatch')
++    require(order.get('currentSubtotalLineItemsQuantity') == 0, 'order has current items')
++    require(Decimal(order['currentTotalPriceSet']['shopMoney']['amount']) == 0, 'order has a current value')
++    require(order.get('fulfillments') == [], 'fulfilment evidence exists')
++    lines = order.get('lineItems') or {}
++    require(lines.get('pageInfo', {}).get('hasNextPage') is False, 'incomplete line evidence')
++    require(len(lines.get('nodes', [])) == 1, 'unexpected order lines')
++    line = lines['nodes'][0]
++    require(line.get('id') == LINE and line.get('currentQuantity') == 0
++            and line.get('unfulfilledQuantity') == 0
++            and (line.get('product') or {}).get('id') == PRODUCT, 'line identity or quantity changed')
++    fulfillment = order.get('fulfillmentOrders') or {}
++    require(fulfillment.get('pageInfo', {}).get('hasNextPage') is False, 'incomplete fulfilment evidence')
++    require(all(f.get('status') in ('CLOSED','CANCELLED') and f.get('requestStatus') == 'UNSUBMITTED'
++                for f in fulfillment.get('nodes', [])), 'fulfilment work is pending or was submitted')
++
++
++def read_state(cur):
++    cur.execute('SELECT * FROM edition_products WHERE shopify_handle=%s FOR UPDATE', (HANDLE,))
++    product = cur.fetchone()
++    cur.execute('SELECT * FROM edition_runs WHERE id=%s FOR UPDATE', (RUN,))
++    run = cur.fetchone()
++    cur.execute("SELECT * FROM shopify_orders WHERE regexp_replace(shopify_order_id,'^.*/','')=%s FOR UPDATE", (ORDER.rsplit('/',1)[-1],))
++    orders = cur.fetchall()
++    require(len(orders)==1 and orders[0]['shopify_order_id']==ORDER, 'missing or duplicate order identity')
++    order = orders[0]
++    cur.execute("""SELECT * FROM edition_orders WHERE shopify_product_gid=%s OR shopify_handle=%s
++      OR regexp_replace(COALESCE(shopify_product_id,''),'^.*/','')=%s OR edition_run_id=%s
++      OR regexp_replace(COALESCE(shopify_order_id,''),'^.*/','')=%s ORDER BY edition_number,id FOR UPDATE""",
++      (PRODUCT,HANDLE,PRODUCT.rsplit('/',1)[-1],RUN,ORDER.rsplit('/',1)[-1]))
++    allocations = cur.fetchall()
++    cur.execute("SELECT * FROM shopify_order_lines WHERE regexp_replace(shopify_order_id,'^.*/','')=%s ORDER BY id FOR UPDATE", (ORDER.rsplit('/',1)[-1],))
++    lines = cur.fetchall()
++    cur.execute("""SELECT * FROM certificates WHERE edition_order_id='678'
++      OR regexp_replace(COALESCE(shopify_order_id,''),'^.*/','')=%s
++      OR shopify_order_name='#SC3303'
++      OR ((shopify_handle=%s OR product_handle=%s OR regexp_replace(COALESCE(shopify_product_id,''),'^.*/','')=%s)
++          AND edition_number>=19)""", (ORDER.rsplit('/',1)[-1],HANDLE,HANDLE,PRODUCT.rsplit('/',1)[-1]))
++    certificates = cur.fetchall()
++    cur.execute("""SELECT * FROM prodigi_dispatch_rows WHERE shopify_order_name='#SC3303'
++      OR regexp_replace(COALESCE(shopify_order_id,''),'^.*/','')=%s
++      OR regexp_replace(COALESCE(shopify_line_item_id,''),'^.*/','')=%s""",
++      (ORDER.rsplit('/',1)[-1],LINE.rsplit('/',1)[-1]))
++    dispatch = cur.fetchall()
++    cur.execute("""SELECT * FROM auto_edition_jobs WHERE payload->>'edition_order_id'='678'
++      OR payload->'identity'->>'allocation_id'='678'
++      OR payload::text LIKE %s OR payload::text LIKE %s OR payload::text LIKE %s""",
++      ('%SC3303%','%'+ORDER.rsplit('/',1)[-1]+'%','%'+HANDLE+'%'))
++    jobs = cur.fetchall()
++    cur.execute("""SELECT webhook_id,status FROM webhook_events
++      WHERE (shopify_order_name='#SC3303' OR regexp_replace(COALESCE(shopify_order_id,''),'^.*/','')=%s
++        OR payload->>'id'=%s) AND status NOT IN ('processed','completed','rejected','skipped')""",
++      (ORDER.rsplit('/',1)[-1],ORDER.rsplit('/',1)[-1]))
++    webhooks = cur.fetchall()
++    cur.execute('SELECT * FROM edition_allocation_tombstones WHERE shopify_product_gid=%s', (PRODUCT,))
++    tombstones = cur.fetchall()
++    return dict(product=product,run=run,order=order,allocations=allocations,lines=lines,
++                certificates=certificates,dispatch=dispatch,jobs=jobs,webhooks=webhooks,tombstones=tombstones)
++
++
++def validate_state(state):
++    p,r,o = (state[k] for k in ('product','run','order'))
++    require(p and r and o, 'required records are missing')
++    require(p['id']==727 and p['shopify_product_gid']==PRODUCT and str(p['active_edition_run_id'])==RUN,
++            'product or active run changed')
++    require((p['next_edition_number'],p['sold_count'],p['remaining_count'],p['edition_total'],p['last_assigned_edition'])
++            ==(20,19,81,100,19), 'product counters changed')
++    require((r['next_edition_number'],r['sold_count'],r['last_allocated_number'],r['edition_total'],r['status'],r['allocation_baseline_sold_count'])
++            ==(20,19,19,100,'active',0), 'run counters changed')
++    require(p['active'] and p['is_active'] and not p['sold_out'] and not p['is_sold_out'], 'run disabled')
++    require(not p.get('manual_override_id') and not r.get('manual_override_id'), 'new override exists')
++    require(o['order_name']=='#SC3303' and o['fulfillment_status']=='UNFULFILLED', 'order state changed')
++    units=state['allocations']
++    require(len(units)==19 and sorted(u['edition_number'] for u in units)==list(range(1,20)), 'allocation history changed')
++    require(all(u['allocation_valid'] and u['identity_enforced'] and u['status']=='assigned'
++                and str(u['edition_run_id'])==RUN for u in units), 'invalid or other-run allocation exists')
++    target=next(u for u in units if u['edition_number']==19)
++    require(target['id']==678 and target['shopify_order_id']==ORDER and target['external_line_item_id']==LINE
++            and target['unit_ordinal']==1 and target['quantity']==1, 'edition 019 ownership changed')
++    require(target['certificate_status']=='Certificate Missing', 'certificate state changed')
++    require(not any(target.get(k) for k in ('certificate_id','certificate_file_url','shopify_file_id',
++            'certificate_r2_key','certificate_preview_r2_key')), 'certificate asset evidence exists')
++    require(next(u for u in units if u['edition_number']==18)['shopify_order_name']=='#SC3302'
++            and next(u for u in units if u['edition_number']==17)['shopify_order_name']=='#SC3301', 'protected orders changed')
++    require(state['lines'] and all(l['shopify_line_item_id'].rsplit('/',1)[-1]==LINE.rsplit('/',1)[-1]
++            and l['shopify_product_id'].rsplit('/',1)[-1]==PRODUCT.rsplit('/',1)[-1] for l in state['lines']), 'unexpected local lines')
++    for key in ('certificates','dispatch','jobs','webhooks','tombstones'):
++        require(not state[key], key+' conflict exists')
++
++
++def apply(cur, shopify_order, fetched_at, actor_id):
++    """All checks and DB edits are in the caller's single transaction. No commit."""
++    validate_shopify(shopify_order,fetched_at)
++    cur.execute("SET LOCAL lock_timeout='10s'")
++    cur.execute("SET LOCAL statement_timeout='45s'")
++    cur.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', (PRODUCT,))
++    cur.execute("SELECT tgname FROM pg_trigger WHERE tgname=ANY(%s) AND tgenabled='O'", (list(GUARDS),))
++    require({r['tgname'] for r in cur.fetchall()}==set(GUARDS), 'deploy cancellation guards first')
++    cur.execute('SELECT applied_at FROM edition_repair_audits WHERE repair_key=%s', (REPAIR,))
++    require(not cur.fetchone(), 'repair already recorded; verify it, never decrement twice')
++    state=read_state(cur)
++    validate_state(state)
++    # Prevent new queued jobs or certificates between the checks and commit.
++    # Existing writers finish first; repeat checks under these short table locks.
++    cur.execute('LOCK TABLE auto_edition_jobs,webhook_events,certificates,prodigi_dispatch_rows IN SHARE ROW EXCLUSIVE MODE')
++    state=read_state(cur)
++    validate_state(state)
++    before=json.dumps({**state,'shopify_evidence':shopify_order,'shopify_checked_at':fetched_at},default=str,sort_keys=True)
++    cur.execute("""INSERT INTO edition_repair_audits(repair_key,product_gid,mode,snapshot_sha256,report,actor)
++      VALUES(%s,%s,'apply',%s,%s::jsonb,%s)""",
++      (REPAIR,PRODUCT,hashlib.sha256(before.encode()).hexdigest(),before,'user-authorized SC3303 correction; '+str(actor_id)))
++    cur.execute("""INSERT INTO edition_repair_archive(repair_key,edition_order_id,row_snapshot)
++      SELECT %s,id::text,to_jsonb(e) FROM edition_orders e WHERE id=678""", (REPAIR,))
++    cur.execute("SELECT set_config('sports_cave.edition_repair_key',%s,true)", (REPAIR,))
++    for key in ('id:'+ORDER.rsplit('/',1)[-1],'name:#SC3303'):
++        cur.execute("""INSERT INTO edition_order_sync_locks(canonical_order_key,shopify_order_id,shopify_order_name,status,reason)
++          VALUES(%s,%s,'#SC3303','cancelled',%s) ON CONFLICT(canonical_order_key) DO UPDATE
++          SET status='cancelled',reason=EXCLUDED.reason,updated_at=now()""", (key,ORDER,REPAIR))
++    cur.execute("""INSERT INTO edition_allocation_tombstones(source_channel,external_order_id,external_line_item_id,
++      unit_ordinal,shopify_product_gid,former_edition_number,repair_key,reason,edition_run_id)
++      VALUES('shopify',%s,%s,1,%s,19,%s,'Cancelled before issue; number released by explicit cursor override',%s)""",
++      (ORDER,LINE,PRODUCT,REPAIR,RUN))
++    cur.execute("""UPDATE edition_orders SET status='cancelled',allocation_valid=false,invalidated_at=now(),
++      invalidation_reason=%s,certificate_status='Cancelled',updated_at=now() WHERE id=678""", (REPAIR,))
++    cur.execute("UPDATE shopify_orders SET cancelled_at=now(),fulfillment_status='CANCELLED',total_price='0.00',updated_at=now() WHERE shopify_order_id=%s", (ORDER,))
++    cur.execute("UPDATE shopify_order_lines SET quantity=0,assignment_status='Cancelled',updated_at=now() WHERE shopify_order_id=%s", (ORDER,))
++    cur.execute("""UPDATE edition_products SET sold_count=18,remaining_count=82,last_assigned_edition=18,
++      edition_display_text='Next Available Edition #019/100',updated_at=now() WHERE id=727""")
++    cur.execute('SELECT override_edition_cursor(%s,%s::uuid,20,19,%s::uuid,%s::uuid,100,100)', (HANDLE,RUN,REQUEST,str(actor_id)))
++    cur.execute('SELECT next_edition_number,sold_count,remaining_count,last_assigned_edition FROM edition_products WHERE id=727')
++    require(cur.fetchone()==dict(next_edition_number=19,sold_count=18,remaining_count=82,last_assigned_edition=18), 'unexpected final counters')
++    cur.execute('SELECT * FROM edition_orders WHERE shopify_product_gid=%s AND id<>678 ORDER BY edition_number,id', (PRODUCT,))
++    require(cur.fetchall()==[u for u in state['allocations'] if u['id']!=678], 'earlier allocations changed')
++    cur.execute('UPDATE edition_repair_audits SET applied_at=now() WHERE repair_key=%s', (REPAIR,))
++    return dict(order='#SC3303',status='CANCELLED',released=19,next=19,sold=18,remaining=82,shopify_sync='Pending')
+--- /dev/null
++++ b/scripts/sc3303_cancellation_guards.sql
+@@ -0,0 +1,60 @@
++-- REVIEW REQUIRED: install only with explicit deployment approval.
++-- Uses the existing durable order locks. No orders or counters change on install.
++BEGIN;
++CREATE OR REPLACE FUNCTION public.guard_cancelled_edition_order()
++RETURNS trigger LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
++DECLARE order_id text; cancellation timestamptz; unit edition_orders%ROWTYPE;
++BEGIN
++  order_id := regexp_replace(COALESCE(NEW.shopify_order_id,''),'^.*/','');
++  IF TG_TABLE_NAME='certificates' THEN
++    IF NULLIF(NEW.edition_order_id,'') IS NOT NULL THEN
++      SELECT * INTO unit FROM edition_orders WHERE id::text=NEW.edition_order_id;
++      order_id := COALESCE(NULLIF(order_id,''),regexp_replace(unit.shopify_order_id,'^.*/',''));
++    END IF;
++  END IF;
++  -- Certificate/dispatch writers serialize with the repair's order row lock.
++  IF TG_TABLE_NAME IN ('certificates','prodigi_dispatch_rows') THEN
++    PERFORM 1 FROM shopify_orders
++      WHERE regexp_replace(shopify_order_id,'^.*/','')=order_id FOR SHARE;
++  END IF;
++  SELECT updated_at INTO cancellation FROM edition_order_sync_locks
++    WHERE canonical_order_key='id:'||order_id AND lower(status)='cancelled'
++      AND reason='sc3303-release-019-20261015';
++  IF cancellation IS NULL THEN RETURN NEW; END IF;
++  IF TG_TABLE_NAME='shopify_orders' THEN
++    NEW.cancelled_at := cancellation;
++    NEW.fulfillment_status := 'CANCELLED';
++    NEW.total_price := '0.00';
++    NEW.raw_json := COALESCE(NEW.raw_json,'{}'::jsonb)||jsonb_build_object(
++      'cancelled_at',cancellation,'sports_cave_fulfilment_status','CANCELLED',
++      '_edition_cancellation','sc3303-release-019-20261015');
++    NEW.raw := COALESCE(NEW.raw,'{}'::jsonb)||jsonb_build_object(
++      'cancelled_at',cancellation,'sports_cave_fulfilment_status','CANCELLED',
++      '_edition_cancellation','sc3303-release-019-20261015');
++  ELSIF TG_TABLE_NAME='shopify_order_lines' THEN
++    NEW.quantity := 0;
++    NEW.assignment_status := 'Cancelled';
++    NEW.last_error := 'Cancelled in Sports Cave OS; allocation released by audited repair';
++  ELSIF TG_TABLE_NAME='edition_orders' THEN
++    IF NEW.allocation_valid OR NEW.status IS DISTINCT FROM 'cancelled'
++       OR NEW.certificate_status IS DISTINCT FROM 'Cancelled' THEN
++      RAISE EXCEPTION 'Cancelled order allocation cannot be restored';
++    END IF;
++  ELSE
++    RAISE EXCEPTION 'Cancelled order cannot create certificate or dispatch work';
++  END IF;
++  RETURN NEW;
++END $$;
++REVOKE ALL ON FUNCTION public.guard_cancelled_edition_order() FROM PUBLIC,anon,authenticated;
++
++CREATE TRIGGER cancelled_edition_order_guard BEFORE INSERT OR UPDATE ON shopify_orders
++  FOR EACH ROW EXECUTE FUNCTION guard_cancelled_edition_order();
++CREATE TRIGGER cancelled_edition_line_guard BEFORE INSERT OR UPDATE ON shopify_order_lines
++  FOR EACH ROW EXECUTE FUNCTION guard_cancelled_edition_order();
++CREATE TRIGGER cancelled_edition_allocation_guard BEFORE INSERT OR UPDATE ON edition_orders
++  FOR EACH ROW EXECUTE FUNCTION guard_cancelled_edition_order();
++CREATE TRIGGER cancelled_edition_certificate_guard BEFORE INSERT OR UPDATE ON certificates
++  FOR EACH ROW EXECUTE FUNCTION guard_cancelled_edition_order();
++CREATE TRIGGER cancelled_edition_dispatch_guard BEFORE INSERT OR UPDATE ON prodigi_dispatch_rows
++  FOR EACH ROW EXECUTE FUNCTION guard_cancelled_edition_order();
++COMMIT;
+--- /dev/null
++++ b/tests/sc3303_postgres_server.mjs
+@@ -0,0 +1,34 @@
++// Disposable loopback SQL with synthetic data only. Never loads credentials.
++import {PGlite} from './fixtures/crm/node_modules/@electric-sql/pglite/dist/index.js';
++import {readFileSync} from 'node:fs';
++import http from 'node:http';
++process.on('uncaughtException',e=>{console.error(e.message);process.exit(1);});
++const db=new PGlite();
++await db.exec(readFileSync('tests/fixtures/edition_base.sql','utf8'));
++for(const f of ['create_edition_runs_phase2.sql','20260825_atomic_edition_allocation_ledger.sql','20260912045939_independent_edition_cursor.sql','20261008041452_edition_version_transitions.sql','20261008045733_edition_version_guard_hardening.sql','20261008065000_explicit_edition_cursor_override.sql','20261008090000_edition_admin_cursor_repair.sql'])
++  await db.exec(readFileSync('migrations/'+f,'utf8').replace('CREATE EXTENSION IF NOT EXISTS pgcrypto;',''));
++await db.exec(`
++ALTER TABLE shopify_orders ADD COLUMN order_name text, ADD COLUMN fulfillment_status text DEFAULT 'UNFULFILLED',
++  ADD COLUMN cancelled_at timestamptz, ADD COLUMN total_price text, ADD COLUMN raw jsonb DEFAULT '{}', ADD COLUMN updated_at timestamptz;
++ALTER TABLE edition_orders ADD COLUMN certificate_id text, ADD COLUMN certificate_file_url text, ADD COLUMN shopify_file_id text,
++  ADD COLUMN certificate_r2_key text, ADD COLUMN certificate_preview_r2_key text;
++ALTER TABLE certificates ADD COLUMN shopify_order_id text, ADD COLUMN shopify_order_name text, ADD COLUMN shopify_handle text,
++  ADD COLUMN product_handle text, ADD COLUMN shopify_product_id text, ADD COLUMN edition_number int;
++CREATE TABLE shopify_order_lines(id bigserial PRIMARY KEY,shopify_order_id text,shopify_line_item_id text,
++  shopify_product_id text,quantity int,assignment_status text,last_error text,updated_at timestamptz);
++CREATE TABLE edition_order_sync_locks(canonical_order_key text PRIMARY KEY,shopify_order_id text,shopify_order_name text,
++  status text,reason text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
++CREATE TABLE prodigi_dispatch_rows(row_id text PRIMARY KEY,shopify_order_id text,shopify_order_name text,shopify_line_item_id text);
++CREATE TABLE auto_edition_jobs(id text PRIMARY KEY,payload jsonb);
++CREATE TABLE webhook_events(webhook_id text PRIMARY KEY,shopify_order_id text,shopify_order_name text,payload jsonb,status text);
++CREATE TABLE IF NOT EXISTS edition_repair_audits(repair_key text PRIMARY KEY,product_gid text,mode text,snapshot_sha256 text,report jsonb,
++  actor text,applied_at timestamptz);
++CREATE TABLE IF NOT EXISTS edition_repair_archive(repair_key text,edition_order_id text,row_snapshot jsonb,PRIMARY KEY(repair_key,edition_order_id));
++`);
++await db.exec(readFileSync('scripts/sc3303_cancellation_guards.sql','utf8'));
++let queue=Promise.resolve();
++http.createServer(async(req,res)=>{let body='';for await(const chunk of req)body+=chunk;
++  queue=queue.then(async()=>{try{const {sql,args=[]}=JSON.parse(body);const result=await db.query(sql,args);
++    res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));}
++    catch(e){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:e.message}));}});
++}).listen(8874,'127.0.0.1',()=>console.log('Disposable SC3303 SQL ready on 8874'));
+--- /dev/null
++++ b/tests/test_sc3303_cancellation.py
+@@ -0,0 +1,140 @@
++from datetime import datetime, timedelta, timezone
++import os
++import unittest
++from unittest.mock import MagicMock
++
++from scripts import repair_sc3303 as repair
++from edition_cancellation import require_certificate_allocation
++from tests.edition_db_fixture import connect
++
++
++def shopify():
++    return dict(id=repair.ORDER,name='#SC3303',currentSubtotalLineItemsQuantity=0,
++      currentTotalPriceSet={'shopMoney':{'amount':'0.00'}},fulfillments=[],
++      lineItems={'pageInfo':{'hasNextPage':False},'nodes':[dict(id=repair.LINE,currentQuantity=0,
++        unfulfilledQuantity=0,product={'id':repair.PRODUCT})]},
++      fulfillmentOrders={'pageInfo':{'hasNextPage':False},'nodes':[dict(status='CLOSED',requestStatus='UNSUBMITTED')]})
++
++
++class EvidenceTests(unittest.TestCase):
++    def test_live_evidence_is_required_and_fresh(self):
++        now=datetime.now(timezone.utc)
++        repair.validate_shopify(shopify(),now)
++        with self.assertRaisesRegex(ValueError,'stale'):
++            repair.validate_shopify(shopify(),now-timedelta(minutes=3))
++        for key,value in [('id','other'),('currentSubtotalLineItemsQuantity',1),('fulfillments',[{'status':'SUCCESS'}])]:
++            with self.subTest(key=key),self.assertRaises(ValueError):
++                repair.validate_shopify({**shopify(),key:value},now)
++        for status,request in [('OPEN','UNSUBMITTED'),('CLOSED','ACCEPTED')]:
++            data=shopify();data['fulfillmentOrders']['nodes'][0].update(status=status,requestStatus=request)
++            with self.assertRaisesRegex(ValueError,'fulfilment work'):
++                repair.validate_shopify(data,now)
++
++    def test_generation_checks_database_not_stale_assignment(self):
++        for order,unit in [(None,None),({'cancelled_at':'now'},None),({'cancelled':True},None),
++                           ({'cancelled':False},{'allocation_valid':False,'status':'cancelled'})]:
++            cur=MagicMock();cur.fetchone.side_effect=[order,unit]
++            with self.subTest(order=order,unit=unit),self.assertRaises(ValueError):
++                require_certificate_allocation(cur,{'id':678,'shopify_order_id':repair.ORDER,'status':'assigned'})
++
++
++@unittest.skipUnless(os.getenv('SC3303_TEST_SQL')=='1','Disposable SC3303 SQL required')
++class TransactionTests(unittest.TestCase):
++    actor='11111111-1111-4111-8111-111111111111'
++
++    def setUp(self):
++        self.connection=connect();self.connection.__enter__();self.cur=self.connection.cursor()
++        self.addCleanup(self.connection.__exit__,ValueError,ValueError('test rollback'),None)
++        c=self.cur
++        c.execute("INSERT INTO os_users VALUES(%s,'admin',true,'active')",(self.actor,))
++        c.execute("INSERT INTO edition_products(id,shopify_product_id,shopify_product_gid,shopify_handle,active_edition_run_id) VALUES(727,%s,%s,%s,%s)",
++                  (repair.PRODUCT,repair.PRODUCT,repair.HANDLE,repair.RUN))
++        c.execute("INSERT INTO edition_runs(id,edition_product_id,shopify_product_id,shopify_handle,edition_name,edition_total,next_edition_number,status) VALUES(%s,727,%s,%s,'Original Edition',100,1,'active')",
++                  (repair.RUN,repair.PRODUCT,repair.HANDLE))
++        for number in range(1,20):
++            order=repair.ORDER if number==19 else 'gid://shopify/Order/'+str(9000+number)
++            line=repair.LINE if number==19 else 'gid://shopify/LineItem/'+str(8000+number)
++            name={17:'#SC3301',18:'#SC3302',19:'#SC3303'}.get(number,'#SYNTHETIC'+str(number))
++            c.execute('INSERT INTO shopify_orders(shopify_order_id,order_name) VALUES(%s,%s)',(order,name))
++            c.execute('SELECT allocate_edition_line_units_atomic(%s,%s,%s,%s,1,%s,%s,%s)',
++                      ('shopify',order,line,repair.PRODUCT,order,name,line))
++        c.execute("SELECT set_config('sports_cave.edition_repair_key','synthetic-fixture',true)")
++        c.execute('UPDATE edition_orders SET id=678 WHERE shopify_order_id=%s',(repair.ORDER,))
++        c.execute('INSERT INTO shopify_order_lines(shopify_order_id,shopify_line_item_id,shopify_product_id,quantity,assignment_status) VALUES(%s,%s,%s,1,\'Assigned\')',
++                  (repair.ORDER,repair.LINE,repair.PRODUCT))
++        c.execute('INSERT INTO shopify_orders(shopify_order_id,order_name) VALUES(\'gid://shopify/Order/3304\',\'#SC3304\')')
++        c.execute("INSERT INTO edition_products(id,shopify_handle,sold_count,remaining_count,next_edition_number) VALUES(999,'unrelated-art',9,91,10)")
++        c.execute("SELECT set_config('sports_cave.edition_repair_key','',true)")
++
++    def apply(self):
++        return repair.apply(self.cur,shopify(),datetime.now(timezone.utc),self.actor)
++
++    def test_exact_one_decrement_history_replay_and_next_customer(self):
++        c=self.cur
++        c.execute('SELECT * FROM edition_products WHERE id=999');other=c.fetchone()
++        c.execute("SELECT * FROM shopify_orders WHERE order_name='#SC3304'");sc3304=c.fetchone()
++        self.assertEqual(self.apply()['next'],19)
++        c.execute('SELECT status,allocation_valid,edition_number FROM edition_orders WHERE id=678')
++        self.assertEqual(c.fetchone(),dict(status='cancelled',allocation_valid=False,edition_number=19))
++        c.execute('SELECT count(*) AS n FROM edition_repair_archive');self.assertEqual(c.fetchone()['n'],1)
++        c.execute('SELECT * FROM edition_products WHERE id=999');self.assertEqual(c.fetchone(),other)
++        c.execute("SELECT * FROM shopify_orders WHERE order_name='#SC3304'");self.assertEqual(c.fetchone(),sc3304)
++        # Production commit clears these transaction-local repair/allocator flags.
++        for setting in ('sports_cave.cursor_action','sports_cave.atomic_edition_allocation','sports_cave.edition_repair_key'):
++            c.execute("SELECT set_config(%s,'',true)",(setting,))
++        # Older Shopify payload cannot clear the local cancellation or revive lines.
++        c.execute("UPDATE shopify_orders SET cancelled_at=NULL,fulfillment_status='UNFULFILLED',total_price='339.00',raw_json='{}' WHERE shopify_order_id=%s",(repair.ORDER,))
++        c.execute('SELECT cancelled_at,fulfillment_status,total_price FROM shopify_orders WHERE shopify_order_id=%s',(repair.ORDER,))
++        row=c.fetchone();self.assertTrue(row['cancelled_at']);self.assertEqual(row['fulfillment_status'],'CANCELLED');self.assertEqual(row['total_price'],'0.00')
++        c.execute("UPDATE shopify_order_lines SET quantity=1,assignment_status='Assigned' WHERE shopify_order_id=%s",(repair.ORDER,))
++        c.execute('SELECT quantity,assignment_status FROM shopify_order_lines WHERE shopify_order_id=%s',(repair.ORDER,))
++        self.assertEqual(c.fetchone(),dict(quantity=0,assignment_status='Cancelled'))
++        for sql,args in [
++            ('SELECT allocate_edition_line_units_atomic(%s,%s,%s,%s,1,%s,%s,%s)',('shopify',repair.ORDER,repair.LINE,repair.PRODUCT,repair.ORDER,'#SC3303',repair.LINE)),
++            ("INSERT INTO certificates(edition_order_id,shopify_order_id) VALUES('678',%s)",(repair.ORDER,)),
++            ("INSERT INTO prodigi_dispatch_rows(row_id,shopify_order_id) VALUES('blocked',%s)",(repair.ORDER,)),
++            ("UPDATE edition_orders SET status='assigned',allocation_valid=true WHERE id=678",()),
++            ('UPDATE edition_products SET next_edition_number=20 WHERE id=727',()),
++        ]:
++            c.execute('SAVEPOINT rejected')
++            with self.subTest(sql=sql),self.assertRaises(RuntimeError):c.execute(sql,args)
++            c.execute('ROLLBACK TO SAVEPOINT rejected')
++        with self.assertRaisesRegex(ValueError,'already recorded'):self.apply()
++        c.execute("INSERT INTO shopify_orders(shopify_order_id) VALUES('gid://shopify/Order/999999')")
++        c.execute('SELECT allocate_edition_line_units_atomic(%s,%s,%s,%s,1,%s,%s,%s) AS result',
++                  ('shopify','gid://shopify/Order/999999','gid://shopify/LineItem/999999',repair.PRODUCT,
++                   'gid://shopify/Order/999999','#NEXT','gid://shopify/LineItem/999999'))
++        self.assertEqual(c.fetchone()['result']['allocation']['edition_number'],19)
++        c.execute('SELECT sold_count,remaining_count,next_edition_number FROM edition_products WHERE id=727')
++        self.assertEqual(c.fetchone(),dict(sold_count=19,remaining_count=81,next_edition_number=20))
++
++    def test_conflicts_abort_before_mutation(self):
++        c=self.cur
++        conflicts=[("INSERT INTO certificates(edition_order_id,shopify_order_id) VALUES('678',%s)",(repair.ORDER,)),
++                   ("INSERT INTO auto_edition_jobs VALUES('pending','{\"edition_order_id\":\"678\"}')",()),
++                   ("INSERT INTO prodigi_dispatch_rows(row_id,shopify_order_id) VALUES('sent',%s)",(repair.ORDER,)),
++                   ("UPDATE edition_products SET next_edition_number=21 WHERE id=727",())]
++        for sql,args in conflicts:
++            c.execute('SAVEPOINT conflict')
++            c.execute(sql,args)
++            with self.subTest(sql=sql),self.assertRaises(ValueError):self.apply()
++            c.execute('SELECT allocation_valid,status FROM edition_orders WHERE id=678')
++            self.assertEqual(c.fetchone(),dict(allocation_valid=True,status='assigned'))
++            c.execute('SELECT count(*) AS n FROM edition_repair_audits');self.assertEqual(c.fetchone()['n'],0)
++            c.execute('ROLLBACK TO SAVEPOINT conflict')
++
++    def test_failure_in_override_rolls_back_every_change(self):
++        c=self.cur
++        c.execute('SAVEPOINT entire_repair')
++        with self.assertRaisesRegex(RuntimeError,'administrator'):
++            repair.apply(c,shopify(),datetime.now(timezone.utc),'22222222-2222-4222-8222-222222222222')
++        c.execute('ROLLBACK TO SAVEPOINT entire_repair')
++        c.execute('SELECT allocation_valid,status FROM edition_orders WHERE id=678')
++        self.assertEqual(c.fetchone(),dict(allocation_valid=True,status='assigned'))
++        c.execute('SELECT next_edition_number,sold_count,remaining_count FROM edition_products WHERE id=727')
++        self.assertEqual(c.fetchone(),dict(next_edition_number=20,sold_count=19,remaining_count=81))
++        for table in ('edition_repair_archive','edition_repair_audits','edition_allocation_tombstones','edition_order_sync_locks'):
++            c.execute('SELECT count(*) AS n FROM '+table);self.assertEqual(c.fetchone()['n'],0)
++
++
++if __name__=='__main__':unittest.main()
