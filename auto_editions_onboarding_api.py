@@ -68,11 +68,20 @@ async def heartbeat(request):
         if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
         user=await preparation_actor(request)
         body=await files._json_body(request)
+        await run_in_threadpool(host_health,request,body.pop('health',None))
         if body:
             if set(body)!={'product_gid','lease_token','stage'}:raise ValueError('Exact preparation lease required.')
             await run_in_threadpool(queue().heartbeat,body['product_gid'],body['lease_token'],str(user['id']),body['stage'])
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
+
+
+def host_health(request,value):
+    if value is None:return
+    token=request.headers.get('x-sports-cave-preparation-host')
+    if not token:raise PermissionError('Scoped preparation host required for telemetry.')
+    from worker_health import record_heartbeat
+    record_heartbeat(queue().connect,'Companion',hashlib.sha256(token.encode()).hexdigest()[:24],value)
 
 
 async def register_host(request):
@@ -179,10 +188,10 @@ async def fail(request):
         ctx=setup['context']
         if not ctx.get('automatic'):raise ValueError('A product preparation grant is required.')
         body=await files._json_body(request)
-        if set(body)!={'reason','repair'} or not isinstance(body['reason'],str) or len(body['reason'])>500:
+        if set(body) not in ({'reason','repair'},{'reason','repair','diagnostic'}) or not isinstance(body['reason'],str) or len(body['reason'])>500:
             raise ValueError('A bounded preparation failure reason is required.')
         await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
-            'Needs PSD Repair' if body['repair'] is True else 'Blocked',body['reason'])
+            'Needs PSD Repair' if body['repair'] is True else 'Blocked',body['reason'],diagnostic=body.get('diagnostic'))
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
@@ -295,7 +304,9 @@ async def claim(request):
     try:
         import files_upload_api as files
         user=await preparation_actor(request)
-        if await files._json_body(request)!={}:raise ValueError('Preparation reads authoritative product identities.')
+        body=await files._json_body(request)
+        await run_in_threadpool(host_health,request,body.pop('health',None))
+        if body!={}:raise ValueError('Preparation reads authoritative product identities.')
         from auto_editions_priority import refresh
         store=queue()
         from auto_editions_discovery import enabled
@@ -354,6 +365,7 @@ async def reconnect(request):
         import files_upload_api as files
         if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
         user=await preparation_actor(request);body=await files._json_body(request)
+        await run_in_threadpool(host_health,request,body.pop('health',None))
         if set(body)!={'product_gid','lease_token'}:raise ValueError('Exact active preparation lease required.')
         store=queue()
         with store.connect() as conn,conn.cursor() as cur:
