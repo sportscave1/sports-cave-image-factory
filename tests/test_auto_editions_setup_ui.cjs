@@ -8,9 +8,9 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
  if(u.pathname==='/api/auto-editions/approve'){confirmed=JSON.parse(route.request().postData());return route.fulfill({json:{status:'TEST READY'}});}
  return route.abort();});
  const page=await ctx.newPage();await page.goto('https://edition.test/auto-editions/setup?allocation_id=42&preparation_hash='+ 'a'.repeat(64));
- await page.getByText('Review 8505 × 6012 pixels · TEST enlargement.').waitFor();
- assert(await page.getByRole('button',{name:'Save TEST READY layout'}).isDisabled());
- await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Save TEST READY layout'}).click();
+ await page.getByText('Review 8505 × 6012 pixels · preview enlargement.').waitFor();
+ assert(await page.getByRole('button',{name:'Approve preview layout'}).isDisabled());
+ await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Approve preview layout'}).click();
  await page.getByRole('link',{name:'Download JPG',exact:true}).waitFor();
  assert.equal(confirmed.expected_hash,'old');assert.equal(confirmed.confirm_test_layout,true);
  assert.equal(confirmed.preparation_hash,'a'.repeat(64));

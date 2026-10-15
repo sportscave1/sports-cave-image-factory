@@ -46,9 +46,9 @@ try{
   const detail=page.frameLocator('dialog iframe');await detail.locator('#stage').getByText('Review',{exact:false}).waitFor();
   const before=calls;await page.evaluate(()=>SportsCaveEditionStatus.poll());assert.equal(calls,before,'Parent polling pauses while modal performs scoped reads');
   await detail.getByRole('button',{name:'Review',exact:true}).click();const review=detail.frameLocator('#review');
-  await review.getByRole('button',{name:'Approve TEST cloud downloads'}).waitFor();assert.equal(await review.getByRole('button',{name:'Approve TEST cloud downloads'}).isEnabled(),false);
+  await review.getByRole('button',{name:'Approve preview downloads'}).waitFor();assert.equal(await review.getByRole('button',{name:'Approve preview downloads'}).isEnabled(),false);
   assert.equal(await review.locator('#resume').isVisible(),false);
-  await review.locator('#confirm').check();await review.getByRole('button',{name:'Approve TEST cloud downloads'}).click();
+  await review.locator('#confirm').check();await review.getByRole('button',{name:'Approve preview downloads'}).click();
   await detail.locator('#stage').getByText('Cloud Ready',{exact:false}).waitFor();
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.getByRole('button',{name:'Close',exact:true}).click();assert.equal(page.url(),'https://edition-ui.local.test/');

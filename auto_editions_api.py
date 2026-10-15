@@ -62,7 +62,7 @@ async def start(request):
         timings['enqueue_ms']=round((time.monotonic()-phase)*1000,3)
         runtime.start_worker()
         timings['request_total_ms']=round((time.monotonic()-started)*1000,3)
-        return JSONResponse({'ok':True,'job_id':row['id'],'status':row['status'],'test_only':True,'timings':timings},headers=HEADERS)
+        return JSONResponse({'ok':True,'job_id':row['id'],'status':row['status'],'test_only':not bool(job.get('production')),'timings':timings},headers=HEADERS)
     except Exception as error:return failure(error)
 
 
@@ -82,7 +82,7 @@ async def status(request):
         runtime.start_worker()
         return JSONResponse({'ok':True,'status':row['status'],'error_code':row['error_code'],
                              'filename':row['result']['filename'] if row['status']=='Ready' else None,
-                             'test_only':True},headers=HEADERS)
+                             'test_only':row.get('result',{}).get('test_only',True) if row.get('result') else True},headers=HEADERS)
     except Exception as error:return failure(error)
 
 

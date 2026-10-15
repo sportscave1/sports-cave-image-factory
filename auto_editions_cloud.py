@@ -53,8 +53,15 @@ def confirmed_job(unit, mapping, metadata, preparation):
     identity = dict(allocation_id=allocation,order_id=unit['shopify_order_id'],
                     line_id=unit['shopify_line_item_id'],ordinal=ordinal,variant_id=variant,
                     number=number,total=total,source=source,preparation=ae.fingerprint(manifest))
+    production=preparation.get('production')
+    if production:
+        from auto_editions_quality import current_certificate,standards
+        if not current_certificate(production,manifest,standards()):
+            raise PreparationBlocked('Production validation is unavailable or changed.')
+        identity['production_policy']=ae.fingerprint(production)
     return dict(id=ae.fingerprint(identity),identity=identity,number=number,total=total,
                 manifest=manifest,preparation_hash=identity['preparation'],
+                **({'production':production} if production else {}),
                 archive_labels={k:unit.get(k,'') for k in ('order_name','shopify_order_name','product_title','variant_title')})
 
 
@@ -122,8 +129,9 @@ class DropboxAssets:
         variant=size.group(1) if size else slug(variant_text,24)
         # Full immutable job identity prevents collisions across line items,
         # master versions, edition assets and concurrent requests.
-        name=f"{job['number']:03}-of-{job['total']} - {title} - {order} - Unit {job['identity']['ordinal']} - {variant} - TEST - {job['id']}.jpg"
-        return f"{cls.GENERATED_ROOT}/{order}/TEST/{name}"
+        mode='Production' if job.get('production') else 'TEST'
+        name=f"{job['number']:03}-of-{job['total']} - {title} - {order} - Unit {job['identity']['ordinal']} - {variant} - {mode} - {job['id']}.jpg"
+        return f"{cls.GENERATED_ROOT}/{order}/{mode}/{name}"
 
     def verify_output(self,output):
         metadata=self.integration.psd_open_metadata(self.token,output['file_id'],include_preview=False)
@@ -174,7 +182,7 @@ class DropboxAssets:
             raise PreparationBlocked('Archived Dropbox output differs; nothing was overwritten.')
         output={'file_id':metadata['id'],'revision':metadata['rev'],'path':metadata.get('path_display') or destination,
                 'sha256':ae.file_hash(path),'dropbox_content_hash':digest,'bytes':Path(path).stat().st_size,
-                'archive_status':'TEST','master_version':job['preparation_hash'],
+                'archive_status':'Production' if job.get('production') else 'TEST','master_version':job['preparation_hash'],
                 'identity':job['identity'],'labels':job.get('archive_labels',{})}
         self.verify_output(output)
         self.timings['archive_checksum_verify_ms']=round((time.monotonic()-phase)*1000,3)
@@ -252,6 +260,14 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
         path=root/'output.jpg'
         step=time.monotonic()
         rendered=ae.render_jpg(manifest,root,job['number'],path)
+        if job.get('production'):
+            from auto_editions_quality import verify_output,current_certificate,standards
+            check=job['production']
+            if (job['identity'].get('production_policy')!=ae.fingerprint(check)
+                    or not current_certificate(check,manifest,standards())):
+                raise PreparationBlocked('Production policy changed while queued.')
+            verify_output(path,check['evidence']['output'])
+            rendered['print_ready']=True
         timings['compose_encode_validate_ms']=round((time.monotonic()-step)*1000)
         if path.stat().st_size>MAX_OUTPUT_BYTES:
             raise PreparationBlocked('Rendered output exceeds the verified download limit.')
@@ -268,8 +284,10 @@ def execute(job, assets, *, max_pixels=ae.WORKER_MAX_PIXELS):
         timings.update(rendered.pop('render_timings',{}))
     from auto_editions_print import describe
     print_spec=describe(job.get('archive_labels',{}).get('variant_title',''),manifest)
+    if job.get('production'):
+        print_spec=dict(print_status='Production Ready',**job['production']['evidence'])
     timings['worker_total_ms']=round((time.monotonic()-started)*1000)
-    return {**rendered,'output':output,'status':'Ready','test_only':True,
+    return {**rendered,'output':output,'status':'Ready','test_only':not bool(job.get('production')),
             'timings':timings,
             'print_spec':print_spec,
-            'retained':True, 'filename':Path(output.get('path') or f"edition-{job['number']:03}-of-{job['total']}-TEST-NOT-PRINT-READY.jpg").name}
+            'retained':True, 'filename':Path(output.get('path') or f"edition-{job['number']:03}-of-{job['total']}-{'Production' if job.get('production') else 'TEST-NOT-PRINT-READY'}.jpg").name}

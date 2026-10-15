@@ -256,6 +256,16 @@ def run(stop):
             refresh(discovery.queue,ACTOR,limit=100)
         except Exception as error:
             LOG.warning('auto_editions_priority_failed error_type=%s',type(error).__name__)
+        try:
+            from auto_editions_quality import enabled as quality_enabled
+            if quality_enabled():
+                from auto_editions_quality_store import Quality
+                from auto_editions_cloud import DropboxAssets
+                # One bounded assessment per existing worker cycle, never per
+                # claim/table row. Legacy/unapproved inputs never fetch PNGs.
+                Quality(db.connect).run_one(DropboxAssets(context(),dropbox))
+        except Exception as error:
+            LOG.warning('auto_editions_quality_failed error_type=%s',type(error).__name__)
         stop.wait(60)
 
 

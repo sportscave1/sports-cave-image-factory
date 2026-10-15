@@ -14,8 +14,16 @@ import auto_editions_api as api
 import auto_editions_runtime as runtime
 from auto_editions_onboarding_store import Queue
 
-LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Cloud Ready','Needs Repair','Failed','Unavailable')
-ICONS=dict(zip(LABELS,('○','↗','◷','–','↻','◇','✅','⚒','!','?')))
+LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Needs Review','Cloud Ready','Production Ready','Needs Repair','Failed','Unavailable')
+ICONS=dict(zip(LABELS,('○','↗','◷','–','↻','◇','◇','✅','✅','⚒','!','?')))
+
+
+def labels():
+    from auto_editions_quality import enabled as quality_enabled
+    hidden=('Review','Cloud Ready') if quality_enabled() else ('Needs Review','Production Ready')
+    return tuple(label for label in LABELS if label not in hidden)
+
+
 CHECKPOINTS={'queued':'Queued','mapping_confirmed':'Mapping saved','claimed':'Companion claimed',
     'Preparing':'Preparing','Blocked':'Preparation paused','Cloud Ready':'Cloud Ready',
     'Needs PSD Repair':'PSD repair required','visual_quality_approved':'Visual review approved',
@@ -27,7 +35,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {observed} AS observed_source
+ {observed} AS observed_source {quality_select}
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
@@ -49,6 +57,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  LEFT JOIN LATERAL (SELECT event,created_at FROM auto_edition_onboarding_audit
    WHERE product_gid=w.pid ORDER BY created_at DESC,id DESC LIMIT 1) a ON true
  {inventory}
+ {quality_join}
 """
 
 
@@ -111,6 +120,18 @@ def project(row, *, writable=False, now=None):
         elif status=='Blocked':
             state='Failed';why=reason(row.get('reason')) or 'Preparation is blocked.';actions=['retry']
         else:state='Failed';why='Onboarding checkpoint requires administrator review.'
+    from auto_editions_quality import enabled as quality_enabled,current_certificate,standards,standard_for
+    if quality_enabled() and digest and valid and state in ('Review','Cloud Ready'):
+        check=row.get('quality_assessment')
+        if check and row.get('quality_fresh') and current_certificate(check,row.get('quality_manifest') or {},standards()):
+            state='Production Ready';why='Validated supplier assets for the approved variant scope.';actions=[]
+        elif check and row.get('quality_fresh') and check.get('status') in ('Failed','Needs Repair'):
+            state=check['status'];why=reason(check.get('reason'));actions=['recheck']
+        elif not row.get('quality_fresh') and standard_for(row.get('quality_manifest') or {},standards()):
+            state='Preparing';why='Automatic production validation is pending.';actions=[]
+        elif state in ('Review','Cloud Ready'):
+            state='Needs Review';why=reason((check or {}).get('reason')) or 'Artwork or supplier evidence requires review.'
+            actions=['review']+(['recheck'] if check else [])
     return dict(product_gid=pid,status=state,icon=ICONS[state],reason=why,
                 mapping_file_id=mapped,
                 checkpoint=CHECKPOINTS.get(row.get('checkpoint'),'Checkpoint recorded' if row.get('checkpoint') else ''),
@@ -123,9 +144,12 @@ def batch(connect, ids, *, writable=False):
     if len(ids)>1000:raise ValueError('Status batch exceeds the Edition Ops limit.')
     if not ids:return {'rows':[],'query_count':0,'duration_ms':0}
     from auto_editions_discovery import enabled
+    from auto_editions_quality import enabled as quality_enabled
     observed="jsonb_build_object('product_gid',w.pid,'file_id',i.file_id,'revision',i.metadata->>'rev','content_hash',i.metadata->>'content_hash')"
     sql=SQL.format(observed=f"CASE WHEN i.file_id IS NOT NULL THEN {observed} WHEN c.complete THEN jsonb_build_object('missing',true) END" if enabled() else 'NULL::jsonb',
-                   inventory='LEFT JOIN auto_edition_source_inventory i ON i.file_id=m.dropbox_file_id LEFT JOIN auto_edition_discovery_cursor c ON c.id=1' if enabled() else '')
+                   inventory='LEFT JOIN auto_edition_source_inventory i ON i.file_id=m.dropbox_file_id LEFT JOIN auto_edition_discovery_cursor c ON c.id=1' if enabled() else '',
+                   quality_select=', qc.assessment AS quality_assessment,qc.next_check_at>now() AS quality_fresh,prep.manifest AS quality_manifest' if quality_enabled() else '',
+                   quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() else '')
     start=time.perf_counter()
     with connect() as conn,conn.cursor() as cur:
         cur.execute(sql,(ids,));raw=cur.fetchall()
@@ -220,6 +244,19 @@ async def connect_action(request):
     except Exception as error:return api.failure(error)
 
 
+async def recheck_action(request):
+    try:
+        import files_upload_api as files
+        import supabase_backend as db
+        from auto_editions_quality_store import Quality
+        user=await actor(request,write=True)
+        body=await files._json_body(request)
+        if set(body)!={'product_gid'}:raise ValueError('Recheck validates one existing preparation only.')
+        await run_in_threadpool(Quality(db.connect).recheck,identity(body['product_gid']),str(user['id']))
+        return JSONResponse({'ok':True},headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 async def detail_page(request):
     try:
         await actor(request)
@@ -230,4 +267,5 @@ async def detail_page(request):
 
 ROUTES=(('/api/auto-editions/status',statuses,('POST',)),
         ('/api/auto-editions/status/connect',connect_action,('POST',)),
+        ('/api/auto-editions/status/recheck',recheck_action,('POST',)),
         ('/auto-editions/status',detail_page,('GET',)))

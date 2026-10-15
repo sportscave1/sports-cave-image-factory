@@ -13,11 +13,11 @@ for(const width of [1280,390]){
  const page=await context.newPage();await page.goto('https://onboarding.local.test/');await page.getByText('Visual review required',{exact:true}).waitFor();
  assert((await page.locator('#summary').innerText()).includes('284 mapped products'));
  assert.equal(await page.getByRole('button',{name:'Connect preparation computer'}).isEnabled(),false);
- assert.equal(await page.getByRole('button',{name:'Approve TEST cloud downloads'}).isVisible(),false);
+ assert.equal(await page.getByRole('button',{name:'Approve preview downloads'}).isVisible(),false);
  await page.getByRole('button',{name:'Review prepared artwork'}).click();
- assert.equal(await page.getByRole('button',{name:'Approve TEST cloud downloads'}).isEnabled(),false);
- await page.locator('#confirm').check();await page.getByRole('button',{name:'Approve TEST cloud downloads'}).click();
- await page.getByText('Cloud Ready for TEST downloads.',{exact:false}).waitFor();assert.equal(approvals,1);assert.equal(retries,0);
+ assert.equal(await page.getByRole('button',{name:'Approve preview downloads'}).isEnabled(),false);
+ await page.locator('#confirm').check();await page.getByRole('button',{name:'Approve preview downloads'}).click();
+ await page.getByText('Cloud Ready for preview downloads.',{exact:false}).waitFor();assert.equal(approvals,1);assert.equal(retries,0);
  assert.equal(await page.locator('#retry').isEnabled(),false);
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  await context.close();console.log('Onboarding responsive review passed',width);
