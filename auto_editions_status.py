@@ -14,13 +14,16 @@ import auto_editions_api as api
 import auto_editions_runtime as runtime
 from auto_editions_onboarding_store import Queue
 
-LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Needs Review','Cloud Ready','Production Ready','Needs Repair','Failed','Unavailable')
+LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Needs Review','Cloud Ready','Production Ready','Needs Repair','Failed','Unavailable','Uploading','Recovering')
 ICONS=dict(zip(LABELS,('○','↗','◷','–','↻','◇','◇','✅','✅','⚒','!','?')))
+
+ICONS.update(Uploading=chr(8593),Recovering=chr(8635))
 
 
 def labels():
     from auto_editions_quality import enabled as quality_enabled
-    hidden=('Review','Cloud Ready') if quality_enabled() else ('Needs Review','Production Ready')
+    from auto_editions_v17 import enabled as continuous
+    hidden=('Review','Cloud Ready') if quality_enabled() else ('Review','Production Ready') if continuous() else ('Needs Review','Production Ready')
     return tuple(label for label in LABELS if label not in hidden)
 
 
@@ -31,11 +34,12 @@ CHECKPOINTS={'queued':'Queued','mapping_confirmed':'Mapping saved','claimed':'Co
 
 SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priority,
  q.preparation_hash,q.source,q.reason,q.attempts,q.lease_until,q.updated_at,
+ EXISTS(SELECT 1 FROM auto_edition_preparation_hosts h WHERE h.revoked_at IS NULL AND h.expires_at>now() AND h.last_seen_at>now()-interval '150 seconds') AS companion_connected,
  p.edition_total AS product_total,prep.manifest->'source' AS prepared_source,
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement {quality_select}
+ {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement {quality_select}
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
@@ -104,13 +108,25 @@ def project(row, *, writable=False, now=None):
         elif row['file_id']!=mapped:
             state='Failed';why='Onboarding refers to a different mapping. Administrator review required.'
         elif status=='Awaiting preparation':
-            state='Deferred' if row.get('priority',0)==0 else 'Queued';actions=['prepare-now']
+            state='Deferred' if row.get('priority',0)==0 else 'Recovering' if str(row.get('reason','')).startswith('Recovering') else 'Queued';actions=['prepare-now']
+            from auto_editions_v17 import enabled as continuous
+            if continuous():
+                if type(row.get('product_total')) is not int or not 1<=row['product_total']<=1000:
+                    state='Needs Repair';why='A valid product edition limit is required.';actions=[]
+                elif digest:
+                    state='Needs Review';why='A retained preparation needs checkpoint review.';actions=['review']
+                elif state=='Deferred':state='Queued'
         elif status=='Preparing':
             lease=row.get('lease_until')
             if isinstance(lease,str):lease=datetime.fromisoformat(lease.replace('Z','+00:00'))
             if not lease or lease<=now:
                 state='Failed';why='Companion lease expired. Durable worker recovery is pending.'
-            else:state='Preparing'
+            else:
+                state='Uploading' if row.get('reason')=='Uploading' else 'Recovering' if row.get('reason')=='Recovering' else 'Preparing'
+                seen=row.get('updated_at')
+                if isinstance(seen,str):seen=datetime.fromisoformat(seen.replace('Z','+00:00'))
+                if seen and (now-seen).total_seconds()>150:
+                    state='Recovering';why='Companion heartbeat is stale; waiting for owned lease recovery.'
         elif status=='Needs PSD Repair':state='Needs Repair';why=reason(row.get('reason'));actions=['retry'] if not digest else []
         elif digest:
             if not valid:state='Failed';why='Preparation differs from current source, edition limit or validation proofs. Review required.'
@@ -138,7 +154,13 @@ def project(row, *, writable=False, now=None):
         state={'Discovering':'Queued','Queued':'Queued','Preparing':'Preparing','Failed':reset.get('failure_status','Failed')}[reset['stage']]
         why=reason(reset.get('reason')) or ('Verifying the original PSD.' if reset['stage']=='Discovering' else '')
         actions=[]
-    return dict(product_gid=pid,status=state,icon=ICONS[state],reason=why,
+    from auto_editions_v17 import enabled as continuous
+    uploaded=bool(valid and row.get('receipts_valid'))
+    if continuous():
+        if state=='Review':state='Needs Review'
+        if digest and state in ('Cloud Ready','Production Ready','Needs Review') and not uploaded:
+            state='Needs Review';why='Recorded upload receipts are incomplete or inconsistent; verify retained assets.';actions=['review']
+    return dict(**({'uploaded':uploaded} if continuous() else {}),product_gid=pid,status=state,icon=ICONS[state],reason=why,
                 reset_allowed=bool(writable and discovery_enabled() and status!='Preparing' and reset.get('stage') not in ('Discovering','Queued','Preparing')),
                 mapping_file_id=mapped,
                 checkpoint=CHECKPOINTS.get(row.get('checkpoint'),'Checkpoint recorded' if row.get('checkpoint') else ''),
@@ -155,6 +177,7 @@ def batch(connect, ids, *, writable=False):
     observed="jsonb_build_object('product_gid',w.pid,'file_id',i.file_id,'revision',i.metadata->>'rev','content_hash',i.metadata->>'content_hash')"
     sql=SQL.format(observed=f"CASE WHEN i.file_id IS NOT NULL THEN {observed} WHEN c.complete THEN jsonb_build_object('missing',true) END" if enabled() else 'NULL::jsonb',
                    inventory='LEFT JOIN auto_edition_source_inventory i ON i.file_id=m.dropbox_file_id LEFT JOIN auto_edition_discovery_cursor c ON c.id=1' if enabled() else '',
+                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if __import__('auto_editions_v17').enabled() else 'NULL::boolean',
                    quality_select=', qc.assessment AS quality_assessment,qc.next_check_at>now() AS quality_fresh,prep.manifest AS quality_manifest' if quality_enabled() else '',
                    quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() else '')
     start=time.perf_counter()
@@ -166,7 +189,7 @@ def batch(connect, ids, *, writable=False):
     for pid,rows in groups.items():
         if len(rows)!=1:result.append(unavailable(pid))
         else:result.append(project(rows[0],writable=writable))
-    return {'rows':result,'query_count':1,'duration_ms':round((time.perf_counter()-start)*1000,2)}
+    return {'rows':result,'companion_connected':any(r.get('companion_connected') for r in raw),'query_count':1,'duration_ms':round((time.perf_counter()-start)*1000,2)}
 
 
 async def actor(request, *, write=False):

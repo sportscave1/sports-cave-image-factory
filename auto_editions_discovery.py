@@ -106,14 +106,15 @@ class Discovery:
             cur.execute("UPDATE auto_edition_discovery_cursor SET cursor='',complete=false WHERE id=1")
 
     def seed_existing(self, limit=20):
-        """One bounded bootstrap of missing historical handoffs; never rematch.
+        """Bounded missing handoffs; repeat under V17, never rematch.
 
-        Existing queue/prepared checkpoints are excluded. The deferred backlog
+        Existing queue/prepared checkpoints are excluded. With V17 off, the backlog
         retains priority zero until commerce signals or Prepare Now promote it.
         """
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('SELECT seed_finished FROM auto_edition_discovery_cursor WHERE id=1 FOR UPDATE')
-            if cur.fetchone()['seed_finished']:return 0
+            from auto_editions_v17 import enabled as continuous
+            if cur.fetchone()['seed_finished'] and not continuous():return 0
             cur.execute("""SELECT m.shopify_product_gid,m.dropbox_file_id FROM product_psd_mappings m
                 WHERE NOT EXISTS(SELECT 1 FROM auto_edition_onboarding q WHERE q.product_gid=m.shopify_product_gid)
                 ORDER BY m.shopify_product_gid LIMIT %s""",(max(1,min(int(limit),20)),))

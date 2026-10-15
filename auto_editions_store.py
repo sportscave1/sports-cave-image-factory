@@ -33,16 +33,17 @@ class Preparations:
         and sole master are Cloud Ready. Multiple distinct masters never infer
         compatibility for an unapproved variant.
         """
+        import auto_editions_v17 as v17
         with self.connect() as conn,conn.cursor() as cur:
-            cur.execute("""SELECT m.shopify_product_gid AS product_gid,m.dropbox_file_id,
+            cur.execute("""SELECT {receipts} AS receipts_valid,m.shopify_product_gid AS product_gid,m.dropbox_file_id,
                 l.variant_id,l.preparation_hash,l.approval,p.manifest,
-                q.status AS preparation_status,q.source AS current_source,
+                q.status AS preparation_status,q.reason AS preparation_reason,q.lease_until AS preparation_lease_until,q.updated_at AS preparation_updated_at,q.source AS current_source,
                 q.preparation_hash AS current_hash
                 FROM product_psd_mappings m
                 LEFT JOIN auto_edition_layouts l ON l.product_gid=m.shopify_product_gid
                 LEFT JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
                 LEFT JOIN auto_edition_onboarding q ON q.product_gid=m.shopify_product_gid
-                WHERE (%s::text IS NULL OR m.shopify_product_gid=%s)""",(product,product))
+                WHERE (%s::text IS NULL OR m.shopify_product_gid=%s)""".format(receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean'),(product,product))
             rows=cur.fetchall()
         return resolve_layouts(rows)
 
@@ -141,6 +142,16 @@ def resolve_layouts(rows):
             'Needs PSD Repair':'Needs PSD Repair', 'Blocked':'Preparation review required',
             'Cloud Ready':'Needs compatible layout',
         }.get(state,'Mapped; preparation required')
+        if state=='Blocked':
+            result.reasons[product]='Needs Review' if first.get('current_hash') else 'Failed'
+        elif state=='Preparing':
+            from datetime import datetime,timezone
+            until=first.get('preparation_lease_until');seen=first.get('preparation_updated_at')
+            if isinstance(until,str):until=datetime.fromisoformat(until.replace('Z','+00:00'))
+            if isinstance(seen,str):seen=datetime.fromisoformat(seen.replace('Z','+00:00'))
+            now=datetime.now(timezone.utc)
+            result.reasons[product]=('Recovering' if not until or until<=now or (seen and (now-seen).total_seconds()>150)
+                else 'Uploading' if first.get('preparation_reason')=='Uploading' else 'Preparing')
         approved=[]
         for row in group:
             manifest=row.get('manifest')
@@ -148,6 +159,9 @@ def resolve_layouts(rows):
             source=manifest['source']
             if source['product_gid']!=product or source['file_id']!=row['dropbox_file_id']:continue
             if row.get('current_source') and row['current_source']!=source:continue
+            import auto_editions_v17 as v17
+            if v17.enabled() and row.get('receipts_valid') is not True:
+                result.reasons[product]='Needs Review';continue
             approved.append(row)
         # Do not turn a distinct variant master into a product-wide fallback.
         hashes={row['preparation_hash'] for row in group if row.get('preparation_hash')}

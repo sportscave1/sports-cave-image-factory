@@ -13,6 +13,7 @@ LEFT JOIN LATERAL (
  SELECT count(DISTINCT o.shopify_order_id) AS sales,
  count(DISTINCT o.shopify_order_id) FILTER(WHERE
    COALESCE(o.fulfillment_status,'') NOT IN ('fulfilled','FULFILLED')
+   AND lower(COALESCE(o.financial_status,'')) IN ('paid','partially_paid')
    AND COALESCE(l.quantity,0)>0) AS outstanding,
  count(DISTINCT o.shopify_order_id) FILTER(WHERE o.created_at>=now()-interval '90 days') AS recent
  FROM shopify_order_lines l JOIN shopify_orders o USING(shopify_order_id)
@@ -25,12 +26,16 @@ LEFT JOIN LATERAL (
 
 
 def priority(row, current=0):
+    from auto_editions_v17 import enabled
+    if enabled() and row['outstanding']:return 8, 'Outstanding customer orders'
     if current == 10:return 10, 'Administrator Prepare Now'
     if row['outstanding']:return 8, 'Outstanding customer orders'
+    if enabled() and row['advertised']:return 7, 'Urgent advertised product'
     if row['recent'] or row['sales'] > 1:return 6, 'Recent or repeat sales'
     if row['sales']:return 5, 'Historical sale'
     if row['advertised']:return 4, 'Active mapped advertisement'
     if current == 2 and row['active']:return 2, 'Newly linked active product'
+    if enabled():return 1, 'Continuous mapped catalogue'
     return 0, 'Deferred until an order, active advertisement or Prepare Now'
 
 

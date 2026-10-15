@@ -79,7 +79,7 @@ def test_failed_upload_keeps_recoverable_package(tmp_path):
     with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.ConnectionError()),\
          patch.object(local,'reconnect'),patch.object(local,'report_failure'),patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
-        assert row['status']=='Blocked' and archive.read_bytes()==b'retained'
+        assert row['status']=='Recovering' and archive.read_bytes()==b'retained'
         cleanup.assert_not_called()
 
 

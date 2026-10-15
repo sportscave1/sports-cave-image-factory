@@ -141,7 +141,10 @@ def download_links(rows):
             if key not in index:key=(key[0],'*')
             if not allocation.isdigit():continue
             if key not in index:
-                if key[0] in reasons:links[allocation]=reasons[key[0]]
+                if key[0] in reasons:
+                    from urllib.parse import urlencode
+                    label=reasons[key[0]]
+                    links[allocation]='/auto-editions/status?'+urlencode({'product_gid':key[0],'allocation_id':allocation})+'#'+label
                 continue
             if index[key] is not None and int(allocation) not in index[key]:continue
             links[allocation]='/auto-editions/download?allocation_id='+allocation+'#Download JPG'

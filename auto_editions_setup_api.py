@@ -153,8 +153,10 @@ async def package(request):
             phase=time.monotonic()
             if ctx.get('automatic'):
                 from auto_editions_onboarding_api import queue,host_account
+                imported_state=await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])
                 await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
-                    'Blocked','Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
+                    imported_state,'Existing exact preparation approval retained.' if imported_state=='Cloud Ready' else
+                    'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
             setup['imported']=digest
             timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
             timings['total_seconds']=round(time.monotonic()-started,3)

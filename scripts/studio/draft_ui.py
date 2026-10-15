@@ -305,6 +305,8 @@ class DraftServer(HTTPServer):
         if action == "new":
             return drafts.new(self.home, self.task_id, self.owner, data.get("name"))
         if action == "close":
+            import auto_editions_local
+            auto_editions_local.prepare_stop()
             self.stopping = True
             return {"stopped": True}
         draft = state["draft"]
@@ -382,6 +384,8 @@ class DraftServer(HTTPServer):
                 return frame
             return self.preview_runtime.event(data.get("event",{}))
         if action == "close":
+            import auto_editions_local
+            auto_editions_local.prepare_stop()
             self.stopping = True
             return {"stopped": True}
         raise ValueError("Unsupported action.")
@@ -542,6 +546,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.reply(200, {"revoked": True}, cookie=name+"=; HttpOnly; SameSite=Strict; Path=/api/device; Max-Age=0")
                     return
                 elif data.get("operation") == "stop":
+                    import auto_editions_local
+                    auto_editions_local.prepare_stop()
                     self.server.stopping = True
                     self.reply(200, {"stopped": True})
                     return

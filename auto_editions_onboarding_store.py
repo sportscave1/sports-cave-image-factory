@@ -24,10 +24,17 @@ class Queue:
         mapping = cur.fetchone()
         if not mapping or mapping['dropbox_file_id'] != file_id:
             raise ValueError('The verified PSD mapping changed.')
-        cur.execute('''SELECT p.hash,p.manifest FROM auto_edition_layouts l
+        import auto_editions_v17 as v17
+        cur.execute('''SELECT {receipts} AS receipts_valid,p.hash,p.manifest,l.approval,l.variant_id,
+            NOT EXISTS(SELECT 1 FROM auto_edition_layouts other WHERE other.product_gid=l.product_gid
+                AND other.preparation_hash<>l.preparation_hash) AS single_hash FROM auto_edition_layouts l
             JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
-            WHERE l.product_gid=%s AND p.manifest->'source'->>'file_id'=%s LIMIT 1''',(pid,file_id))
+            WHERE l.product_gid=%s AND p.manifest->'source'->>'file_id'=%s LIMIT 1'''.format(receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean'),(pid,file_id))
         approved=cur.fetchone()
+        if approved and v17.enabled():
+            import auto_editions as ae
+            if (approved['variant_id']!='*' or not approved['single_hash'] or not approved['receipts_valid']
+                or ae.status(approved['manifest'],approved['approval'])!='TEST READY'):approved=None
         if approved and (expected_source is None or approved['manifest']['source']==expected_source):
             cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,source,preparation_hash)
                 VALUES(%s,%s,'Cloud Ready',%s::jsonb,%s) ON CONFLICT DO NOTHING""",
@@ -46,7 +53,7 @@ class Queue:
             ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
             preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=excluded.priority,
             lease_token=NULL,lease_until=NULL,updated_at=now()
-            WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 0))
+            WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 1 if v17.enabled() else 0))
         if cur.fetchone():
             cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
             pending=(cur.fetchone() or {}).get('replacement') or {}
@@ -71,6 +78,19 @@ class Queue:
 
     def claim(self, actor):
         token = str(uuid.uuid4())
+        from auto_editions_v17 import enabled as continuous
+        eligibility="priority>0 AND priority<>1"
+        ordering='priority'
+        if continuous():
+            # Existing persisted scores remain compatible; paid work wins the
+            # next claim even over a manual catalogue Prepare Now request.
+            ordering='CASE WHEN priority=8 THEN 11 ELSE priority END'
+            eligibility="""priority>=0 AND q.preparation_hash IS NULL AND EXISTS(
+                SELECT 1 FROM product_psd_mappings m JOIN edition_products p
+                ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=m.shopify_product_gid
+                WHERE m.shopify_product_gid=q.product_gid AND m.dropbox_file_id=q.file_id
+                AND p.edition_total BETWEEN 1 AND 1000
+                GROUP BY m.shopify_product_gid HAVING count(*)=1)"""
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
             cur.execute("""SELECT product_gid FROM auto_edition_onboarding q WHERE lease_until>now()
@@ -89,14 +109,14 @@ class Queue:
                 reason='Preparation worker interrupted three times. Retry after checking Photoshop.',
                 lease_token=NULL,lease_until=NULL,updated_at=now()
                 WHERE status='Preparing' AND lease_until<now() AND attempts>=3""")
-            cur.execute("""SELECT * FROM auto_edition_onboarding q WHERE
+            cur.execute(f"""SELECT * FROM auto_edition_onboarding q WHERE
                 (((to_jsonb(q)->'replacement'->>'stage'='Queued' OR
                   (to_jsonb(q)->'replacement'->>'stage'='Preparing' AND lease_until<now()))
                    AND COALESCE((to_jsonb(q)->'replacement'->>'attempts')::int,0)<3)
                 OR (COALESCE(to_jsonb(q)->'replacement'->>'stage','') IN ('','Complete','Failed') AND attempts<3 AND
-                  ((status='Awaiting preparation' AND priority>0) OR (status='Preparing' AND lease_until<now()))))
-                ORDER BY GREATEST(priority,CASE WHEN to_jsonb(q)->'replacement'->>'stage' IN ('Queued','Preparing') THEN 2 ELSE 0 END) DESC,
-                created_at FOR UPDATE SKIP LOCKED LIMIT 1""")
+                  ((status='Awaiting preparation' AND ({eligibility})) OR (status='Preparing' AND lease_until<now()))))
+                ORDER BY GREATEST({ordering},CASE WHEN to_jsonb(q)->'replacement'->>'stage' IN ('Queued','Preparing') THEN 2 ELSE 0 END) DESC,
+                CASE WHEN priority=8 THEN updated_at END DESC NULLS LAST,created_at FOR UPDATE SKIP LOCKED LIMIT 1""")
             row=cur.fetchone()
             if not row:return None
             pending=row.get('replacement') or {}
@@ -116,6 +136,53 @@ class Queue:
                 updated_at=now() WHERE product_gid=%s RETURNING *""",(token,row['product_gid']))
             result=dict(cur.fetchone());self.audit(cur,row['product_gid'],actor,'claimed',{'lease':token})
             return result
+
+    def imported_state(self,pid,digest,source):
+        """Reuse only an existing product-wide approval for this exact immutable preparation.
+
+        This never creates, copies or extends an approval to a changed preparation.
+        """
+        import auto_editions as ae
+        with self.connect() as conn,conn.cursor() as cur:
+            import auto_editions_v17 as v17
+            cur.execute("""SELECT {receipts} AS receipts_valid,p.manifest,l.approval FROM auto_edition_layouts l
+                JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
+                WHERE l.product_gid=%s AND l.variant_id='*' AND l.preparation_hash=%s
+                AND NOT EXISTS(SELECT 1 FROM auto_edition_layouts other
+                    WHERE other.product_gid=l.product_gid AND other.preparation_hash<>l.preparation_hash)""".format(receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean'),(pid,digest))
+            row=cur.fetchone()
+        if (row and (not v17.enabled() or row.get('receipts_valid') is True) and row['manifest']['source']==source and row['approval'].get('test_only') is True
+            and ae.status(row['manifest'],row['approval'])=='TEST READY'):return 'Cloud Ready'
+        return 'Blocked'
+
+    def defer_owned(self,pid,token,actor):
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""UPDATE auto_edition_onboarding SET
+                status=CASE WHEN attempts>=3 THEN 'Blocked' ELSE 'Awaiting preparation' END,
+                reason='Recovering after a transient preparation connection failure',
+                lease_token=NULL,lease_until=NULL,updated_at=now()
+                WHERE product_gid=%s AND lease_token=%s AND status='Preparing'
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'replacement'->>'stage','') NOT IN ('Preparing','Queued')
+                RETURNING product_gid""",(pid,token))
+            if not cur.fetchone():raise ValueError('Preparation changed; automatic recovery deferred.')
+            self.audit(cur,pid,actor,'recovering')
+
+    def heartbeat(self,pid,token,actor,stage):
+        if stage not in ('Preparing','Uploading','Recovering'):raise ValueError('Unsupported preparation stage.')
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
+            cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit WHERE product_gid=%s AND actor_id=%s
+                AND event='claimed' AND detail->>'lease'=%s""",(pid,actor,token))
+            if not cur.fetchone():raise PermissionError('Preparation lease belongs to another operator.')
+            # Never resurrect a superseded lease or compete with another processor.
+            cur.execute("""SELECT 1 FROM auto_edition_onboarding WHERE lease_until>now()
+                AND product_gid<>%s AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing')""",(pid,))
+            if cur.fetchone():raise ValueError('Another preparation owns the processor lease.')
+            cur.execute("""UPDATE auto_edition_onboarding SET updated_at=now(),reason=%s,
+                lease_until=now()+interval '45 minutes'
+                WHERE product_gid=%s AND lease_token=%s
+                AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing') RETURNING product_gid""",(stage,pid,token))
+            if not cur.fetchone():raise ValueError('Preparation lease was superseded or completed.')
 
     def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None, metrics=None):
         if status not in ('Preparing','Needs PSD Repair','Blocked','Cloud Ready'):

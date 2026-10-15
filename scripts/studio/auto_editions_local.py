@@ -16,7 +16,9 @@ JOBS={}
 LOCK=threading.Lock()
 HOST_THREAD=None
 HOST_STOP=threading.Event()
+HOST_BUSY=threading.Event()
 HOST_FILE=Path.home()/'Documents'/'SportsCaveAutoEditions'/'preparation-host.dpapi'
+RECOVERY_CURSOR=0
 
 
 def configure_host(config):
@@ -44,32 +46,116 @@ def restore_host():
         HOST_THREAD.start()
 
 
+def journal(row):
+    if not row.get('context',{}).get('automatic'):return
+    atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
+        phase=row.get('phase','Preparing'),status=row['status'],error=row.get('error',''),
+        repair=bool(row.get('repair')),checkpoint_pending=bool(row.get('checkpoint_pending')),
+        started_at=row.setdefault('started_at',time.time()),retry_at=row.get('retry_at',0),recovery_failures=row.get('recovery_failures',0)))
+
+
+def host_request(config,path,body):
+    import requests
+    response=requests.post(config['base_url']+path,json=body,
+        headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=20)
+    response.raise_for_status();return response.json()
+
+
+def recover_retained(config):
+    # No grants/secrets in journals. Reissue only the same host-owned lease.
+    # Rotate the bounded read window: retained completed history must never hide
+    # an older interrupted package once the continuous catalogue grows past 20.
+    global RECOVERY_CURSOR
+    files=sorted(HOST_FILE.parent.glob('*/job-state.json'),key=lambda p:p.stat().st_mtime,reverse=True)
+    cursor_start=RECOVERY_CURSOR%len(files) if files else 0
+    window=(files[cursor_start:]+files[:cursor_start])[:20]
+    RECOVERY_CURSOR=(cursor_start+len(window))%len(files) if files else 0
+    for file in window:
+        if file.is_symlink() or file.parent.is_symlink():continue
+        try:
+            if file.stat().st_size>4*1024*1024:continue
+            data=json.loads(file.read_text());ctx=data['context']
+            if not isinstance(ctx,dict) or data.get('status') not in ('Working','Recovering','Prepared','Blocked'):continue
+            if not ctx.get('automatic') or not all(k in ctx for k in ('source','product_gid','lease_token')):continue
+        except (OSError,ValueError,KeyError,TypeError):continue
+        if data['status'] in ('Prepared','Blocked') and not data.get('checkpoint_pending'):continue
+        if time.time()<data.get('retry_at',0)<=time.time()+300:return True
+        heartbeat={k:ctx[k] for k in ('product_gid','lease_token')}
+        try:
+            try:result=host_request(config,'/api/auto-editions/onboarding/reconnect',heartbeat)
+            except Exception as error:
+                response=getattr(error,'response',None)
+                if response is None or response.status_code not in (400,409):raise
+                host_request(config,'/api/auto-editions/onboarding/heartbeat',dict(heartbeat,stage='Recovering'))
+                result=host_request(config,'/api/auto-editions/onboarding/reconnect',heartbeat)
+        except Exception as error:
+            # Superseded/finished leases cannot be resurrected. Source/approval conflicts remain terminal.
+            response=getattr(error,'response',None)
+            if response is not None and response.status_code in (400,403,409):
+                data.update(status='Blocked',checkpoint_pending=False,error='Lease or source changed; package retained for review.')
+                atomic_json(file,data);continue
+            raise
+        if result.get('completed'):
+            if result['completed']['source']!=ctx['source']:raise ValueError('Completed source changed.')
+            row=dict(context=ctx,folder=file.parent,status='Prepared',created=time.monotonic())
+            finish_upload(row,result['completed'],time.monotonic());journal(row);return True
+        if data.get('checkpoint_pending'):
+            row=dict(data,grant=result['grant'],folder=file.parent)
+            report_failure(row);return True
+        start(result['grant'],resume_folder=file.parent)
+        return True
+    return False
+
+
 def host_loop():
     from device_trust import protect
-    import requests
+    failures=0
     while not HOST_STOP.is_set():
+        with LOCK:
+            if HOST_STOP.is_set():return
+            HOST_BUSY.set()
+        delay=30
         try:
             config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
             if config['base_url'] not in transfer.ALLOWED_ORIGINS:return
-            if shutil.disk_usage(HOST_FILE.parent).free<8*1024**3:
-                HOST_STOP.wait(30);continue
-            # Other authorised Photoshop operations share this existing lease.
-            if any(r['status']=='Working' for r in list(JOBS.values())) or (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
-                HOST_STOP.wait(30);continue
-            retry_verified_cleanup()
-            response=requests.post(config['base_url']+'/api/auto-editions/onboarding/claim',json={},
-                headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=90)
-            if response.status_code==403:return
-            response.raise_for_status();data=response.json()
-            (HOST_FILE.parent/'host-status.json').write_text(json.dumps(dict(last_poll=time.time(),
-                status='Preparing' if data.get('grant') else 'Waiting for eligible work')))
-            if data.get('grant'):start(data['grant'])
+            active=[r for r in list(JOBS.values()) if r['status']=='Working']
+            state='Companion Connected'
+            if active:
+                row=active[0];stage=row.get('phase','Preparing')
+                # A stuck COM call keeps its processor lock. Never steal it or renew forever.
+                if time.time()-row.get('started_at',time.time())>2700:
+                    state='Failed';raise RuntimeError('Preparation exceeded the recovery window; inspect Photoshop. Lock retained.')
+                state=stage
+                host_request(config,'/api/auto-editions/onboarding/heartbeat',
+                    dict(product_gid=row['context']['product_gid'],lease_token=row['context']['lease_token'],stage=stage))
+            elif (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
+                state='Recovering'
+                host_request(config,'/api/auto-editions/onboarding/heartbeat',{})
+            elif shutil.disk_usage(HOST_FILE.parent).free<8*1024**3:
+                raise RuntimeError('Preparation storage is low.')
+            elif recover_retained(config):state='Recovering'
+            else:
+                retry_verified_cleanup()
+                data=host_request(config,'/api/auto-editions/onboarding/claim',{})
+                if data.get('grant'):start(data['grant'],initial_context=data.get('context'));state='Preparing'
+            failures=0
+            atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
+                companion_pid=os.getpid(),version='unattended-recovery-v1'))
         except Exception as error:
-            # No credentials or private transport data in logs. Durable leases
-            # make interrupted work recoverable on the next authorised session.
-            try:(HOST_FILE.parent/'host-status.json').write_text(json.dumps(dict(last_poll=time.time(),status='Retrying',error_type=type(error).__name__)))
+            failures=min(failures+1,5);delay=min(30*2**(failures-1),300)
+            try:atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status='Recovering',
+                error_type=type(error).__name__,retry_seconds=delay,companion_pid=os.getpid()))
             except OSError:pass
-        HOST_STOP.wait(30)
+        HOST_BUSY.clear()
+        HOST_STOP.wait(delay)
+
+
+def prepare_stop():
+    """Existing Close must not kill a daemon upload or an in-flight host claim."""
+    with LOCK:
+        if HOST_BUSY.is_set() or any(r.get('status')=='Working' or r.get('checkpoint_pending') for r in JOBS.values()):
+            raise ValueError('Preparation is active or checkpointing. Wait for it to finish before stopping this companion.')
+        HOST_STOP.set()
 
 
 def context(grant):
@@ -82,8 +168,8 @@ def context(grant):
     return transfer.get(grant,'/api/auto-editions/context?'+urlencode({'ticket':grant['ticket']}))
 
 
-def start(grant):
-    verified=context(grant)
+def start(grant,resume_folder=None,initial_context=None):
+    verified=initial_context or context(grant)
     with LOCK:
         for key,row in list(JOBS.items()):
             if time.monotonic()-row['created']>1800 and row['status']!='Working':JOBS.pop(key,None)
@@ -94,23 +180,58 @@ def start(grant):
                 JOBS.pop(key,None)
         if any(row['status']=='Working' for row in JOBS.values()):raise ValueError('A preparation is already running.')
         if len(JOBS)>=8:raise ValueError('Too many preparation sessions. Retry later.')
-        key=secrets.token_hex(24)
+        key=resume_folder.name if resume_folder else secrets.token_hex(24)
         folder=Path.home()/'Documents'/'SportsCaveAutoEditions'/key
-        folder.mkdir(parents=True,exist_ok=False)
+        if resume_folder:
+            if folder.resolve()!=resume_folder.resolve() or json.loads((folder/'job-state.json').read_text())['context']!=verified:
+                raise ValueError('Retained preparation identity changed.')
+        else:folder.mkdir(parents=True,exist_ok=False)
         JOBS[key]=dict(grant=grant,context=verified,folder=folder,created=time.monotonic(),status='Working')
+        if resume_folder:JOBS[key]['recovery_failures']=json.loads((folder/'job-state.json').read_text()).get('recovery_failures',0)
+        journal(JOBS[key])
         package=find_reusable_package(verified)
+        if not package and resume_folder:package=package_finished(row=JOBS[key],ctx=verified)
         if package:
             JOBS[key]['reused_package']=str(package)
-            journal=package.parent/'preparation-timing.json'
-            if journal.exists() and not journal.is_symlink():
+            timing_file=package.parent/'preparation-timing.json'
+            if timing_file.exists() and not timing_file.is_symlink():
                 try:
-                    saved=json.loads(journal.read_text())
+                    saved=json.loads(timing_file.read_text())
                     if saved.get('source')==verified['source']:
                         JOBS[key]['timings']=saved.get('timings',{})
                 except (OSError,ValueError):pass
             threading.Thread(target=upload_prepared,args=(key,package),daemon=True).start()
         else:threading.Thread(target=inspect,args=(key,),daemon=True).start()
         return dict(job_id=key,status='Working')
+
+
+def package_finished(row,ctx):
+    """A crash after Photoshop/validation must not rerender a verified finished set."""
+    import auto_editions as ae
+    from auto_editions_onboarding import preparation_scale
+    from auto_editions_package import MAX_PACKAGE_BYTES
+    for folder in row['folder'].glob('prepared*'):
+        if not folder.is_dir() or folder.is_symlink():continue
+        try:
+            manifest=json.loads((folder/'manifest.json').read_text())
+            if (manifest['source']!=ctx['source'] or manifest['edition_total']!=ctx['total']
+                or not manifest.get('confirmed_roles') or
+                manifest.get('preparation_geometry',{}).get('scale',1)!=preparation_scale(manifest.get('source_dimensions',manifest['dimensions']))
+                or (ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id'])):continue
+            ae.validate_manifest(manifest)
+            refs=sorted({1,ctx['number'],ctx['total']})
+            for n in refs:ae.compare_reference(manifest,folder,n,folder/f'reference-{n}.png')
+            ae.compare_original_outside_number(manifest,folder,ctx['number'],folder/'original.png')
+            names=['manifest.json','master.png','original.png']+[p['name'] for p in manifest['patches'].values()]+[f'reference-{n}.png' for n in refs]
+            archive=row['folder']/'prepared.zip'
+            if archive.exists():return None
+            temporary=archive.with_suffix('.partial')
+            with zipfile.ZipFile(temporary,'w',compression=zipfile.ZIP_STORED) as output:
+                for name in names:output.write(folder/name,name)
+            if temporary.stat().st_size>MAX_PACKAGE_BYTES:raise ValueError('Package exceeds transfer limit.')
+            temporary.replace(archive);return archive
+        except (OSError,ValueError,KeyError):continue
+    return None
 
 
 def find_reusable_package(ctx):
@@ -154,6 +275,8 @@ def upload_prepared(key,archive):
     """Retry transfer after deploy without repeating Photoshop or source download."""
     import requests
     row=JOBS[key];started=time.monotonic()
+    row.setdefault('folder',archive.parent)
+    row['phase']='Uploading';journal(row)
     try:
         for attempt in range(3):
             try:
@@ -173,36 +296,64 @@ def upload_prepared(key,archive):
                     finish_upload(row,completed,started)
                     return
     except Exception as error:
-        row.update(status='Blocked',error='Prepared package retained; upload/checkpoint failed: '+type(error).__name__)
-        report_failure(row)
+        response=getattr(error,'response',None)
+        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code>=500)
+        row.update(status='Recovering' if transient else 'Blocked',error='Prepared package retained; upload/checkpoint failed: '+type(error).__name__)
+        if transient:
+            row['recovery_failures']=row.get('recovery_failures',0)+1
+            if row['recovery_failures']>=3:
+                transient=False;row.update(status='Blocked',error='Upload recovery exhausted after three cycles; verified package retained.')
+            row['retry_at']=time.time()+min(30*2**min(row['recovery_failures']-1,4),300)
+        journal(row)
+        if not transient:report_failure(row)
 
 
 def finish_upload(row,result,started):
     row.update(status='Prepared',preparation_hash=result['preparation_hash'])
     row.setdefault('timings',{})['upload_validate_seconds']=round(time.monotonic()-started,3)
     row['server_timings']=result.get('timings',{})
+    row['checkpoint_pending']=False; journal(row)
     if row['context'].get('automatic'):
         try:release_verified_temporary_files(row)
         except (OSError,ValueError):row['cleanup_pending']=True
 
 
+class OwnedProcessorLease:
+    def __init__(self,path,owner):self.path,self.owner=path,owner
+    def unlink(self,missing_ok=False):
+        try:
+            if json.loads(self.path.read_text()).get('owner')!=self.owner:
+                raise RuntimeError('Processor lock ownership changed; lock retained.')
+            self.path.unlink()
+        except FileNotFoundError:
+            if not missing_ok:raise
+
+
 def processor_lease():
     folder=Path.home()/'Documents'/'SportsCavePrintJobs';folder.mkdir(parents=True,exist_ok=True)
-    lease=folder/'processor.lock'
-    handle=os.open(lease,os.O_CREAT|os.O_EXCL|os.O_WRONLY);os.close(handle)
-    return lease
+    lease=folder/'processor.lock';owner=secrets.token_hex(16)
+    handle=os.open(lease,os.O_CREAT|os.O_EXCL|os.O_WRONLY)
+    with os.fdopen(handle,'w') as output:
+        json.dump(dict(owner=owner,pid=os.getpid(),created_at=time.time()),output);output.flush();os.fsync(output.fileno())
+    return OwnedProcessorLease(lease,owner)
 
 
 def report_failure(row):
-    if not row['context'].get('automatic') or row.get('status')!='Blocked':return
+    if not row['context'].get('automatic') or row.get('status')!='Blocked' or row.get('checkpoint_reported'):return
+    row['checkpoint_pending']=True; journal(row)
     try:
         import requests
+        reconnect(row)
         grant=row['grant']
         response=requests.post(grant['base_url']+'/api/auto-editions/onboarding/fail?'+urlencode({'ticket':grant['ticket']}),
             json=dict(reason=row['error'][:500],repair=bool(row.get('repair'))),
             headers={'X-Sports-Cave-Transfer-Secret':grant['secret']},allow_redirects=False,timeout=30)
         response.raise_for_status()
+        row['checkpoint_pending']=False; row['checkpoint_reported']=True; journal(row)
     except Exception:
+        row['recovery_failures']=row.get('recovery_failures',0)+1
+        row['retry_at']=time.time()+min(30*2**min(row['recovery_failures']-1,4),300)
+        journal(row)
         # The durable lease expires into an explicit retryable state; never
         # invent completion when a checkpoint cannot reach the service.
         row['error']+=' The server checkpoint needs reconnection.'
@@ -224,12 +375,15 @@ def inspect(key):
         if not 0<meta['size']<=1024*1024*1024:raise ValueError('Source exceeds the preparation transfer limit.')
         req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),
                     headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
-        count=0
-        with build_opener(transfer.NoRedirect()).open(req,timeout=300) as response,source.open('xb') as output:
-            while block:=response.read(4*1024*1024):
-                count+=len(block)
-                if count>meta['size']:raise ValueError('Source exceeded its verified size.')
-                output.write(block)
+        complete=source.exists() and source.stat().st_size==meta['size'] and transfer.digest(source,True)==meta['content_hash']
+        if source.exists() and not complete:source.rename(source.with_name('input.incomplete-'+secrets.token_hex(6)+'.psd'))
+        count=meta['size'] if complete else 0
+        if not complete:
+            with build_opener(transfer.NoRedirect()).open(req,timeout=300) as response,source.open('xb') as output:
+                while block:=response.read(4*1024*1024):
+                    count+=len(block)
+                    if count>meta['size']:raise ValueError('Source exceeded its verified size.')
+                    output.write(block)
         if count!=meta['size'] or transfer.digest(source,True)!=meta['content_hash']:raise ValueError('Source checksum failed.')
         row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
         phase='Photoshop inspection'
@@ -247,7 +401,10 @@ def inspect(key):
         automatic=bool(row['context'].get('automatic'))
         row.update(status='Working' if automatic else 'Inspected',inspection=result['inspection'])
     except Exception as error:
-        JOBS[key].update(status='Blocked',error=phase+' failed: '+type(error).__name__+'. Retry after checking '+('the connection' if phase=='PSD transfer' else 'Photoshop')+'.')
+        from urllib.error import URLError
+        transient=phase=='PSD transfer' and isinstance(error,(URLError,TimeoutError,ConnectionError))
+        JOBS[key].update(status='Recovering' if transient else 'Blocked',error=phase+' failed: '+type(error).__name__+'. Retry after checking '+('the connection' if phase=='PSD transfer' else 'Photoshop')+'.')
+        journal(JOBS[key])
     finally:
         if lease:lease.unlink(missing_ok=True)
     if automatic:
@@ -288,6 +445,7 @@ def prepare_worker(key,roles,scale=1):
         if ctx!=row['context']:raise ValueError('Preparation identity changed.')
         lease=processor_lease()
         output=row['folder']/'prepared'
+        if output.exists():output=row['folder']/('prepared-recovery-'+secrets.token_hex(6))
         build_started=time.monotonic()
         build(row['folder']/'input.psd',output,ctx['source'],number_layer=roles['number'],
               plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'],scale=scale)
@@ -315,6 +473,7 @@ def prepare_worker(key,roles,scale=1):
         JOBS[key].update(status='Blocked',error='Preparation failed: '+(str(error)[:350] if isinstance(error,ValueError) else type(error).__name__)+'. Existing PSD and mapping are preserved.')
     finally:
         if lease:lease.unlink(missing_ok=True)
+    report_failure(JOBS[key])
 
 
 def atomic_json(path,data):

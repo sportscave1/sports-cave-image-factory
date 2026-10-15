@@ -39,6 +39,10 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
         raise ValueError('Photoshop did not confirm preparation.')
     report=json.loads((output/'preparation.json').read_text(encoding='utf-8-sig'))
+    from auto_editions_colour import restore_export_profiles
+    names=['original.png','master.png']+[f'number-{n}.png' for n in range(1,total+1)]
+    names += [f'reference-{n}.png' for n in sorted({1,reference_number,total})]
+    restore_export_profiles(output,report,names)
     # Measurements must never change the reusable artwork identity.
     timings=report.pop('timings',{})
     (output/'timings.json').write_text(json.dumps(timings))

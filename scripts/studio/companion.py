@@ -146,7 +146,7 @@ def supervise(home, task, owner):
     with instance_lock(root/"instance.lock"):
         (root/"stopped").unlink(missing_ok=True)
         failures = 0
-        while failures < 5:
+        while True:
             started = time.monotonic()
             child = existing_worker(root, cfg, task)
             if child is None:
@@ -159,10 +159,9 @@ def supervise(home, task, owner):
             recover_previews(home, owner, actual_pid)
             if (root/"stopped").exists():
                 return
-            failures = 1 if time.monotonic()-started > 60 else failures+1
+            failures = 1 if time.monotonic()-started > 60 else min(failures+1,8)
             studio.atomic(root/"recovery.json", {"exit_code":code,"consecutive_failures":failures,"at":studio.now()})
-            time.sleep(min(2**failures,30))
-        raise RuntimeError("Repeated startup failure; inspect port/registry/ownership. No forced takeover.")
+            time.sleep(min(2**failures,300))
 
 def browser_command(browser):
     """Resolve only the two explicitly supported Windows browser applications."""

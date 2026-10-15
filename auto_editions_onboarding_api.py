@@ -62,6 +62,19 @@ async def preparation_actor(request):
     return await run_in_threadpool(resolve)
 
 
+async def heartbeat(request):
+    try:
+        import files_upload_api as files
+        if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
+        user=await preparation_actor(request)
+        body=await files._json_body(request)
+        if body:
+            if set(body)!={'product_gid','lease_token','stage'}:raise ValueError('Exact preparation lease required.')
+            await run_in_threadpool(queue().heartbeat,body['product_gid'],body['lease_token'],str(user['id']),body['stage'])
+        return JSONResponse(dict(ok=True),headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 async def register_host(request):
     try:
         import files_upload_api as files
@@ -198,6 +211,10 @@ def product_context(pid, token):
     if type(total) is not int or not 1<=total<=1000:raise ValueError('Configure the product edition limit first.')
     assets=runtime.storage()
     meta=assets.integration.psd_open_metadata(assets.token,row['file_id'],include_preview=False)
+    from auto_editions_v17 import enabled as continuous
+    if continuous():
+        import psd_directory as psd
+        if not psd.approved_file(meta):raise ValueError('Mapped source is not an approved original PSD.')
     if reset_id:
         import psd_directory as psd
         if not psd.approved_file(meta) or psd.filename_key(meta['name'][:-4]) not in psd.title_filename_keys(row['product_title']):
@@ -224,13 +241,38 @@ async def summary(request):
         if enabled():
             public.extend(await run_in_threadpool(waiting_rows,queue().connect))
         with queue().connect() as conn,conn.cursor() as cur:
-            cur.execute('SELECT count(*) AS total FROM product_psd_mappings')
-            mapped=cur.fetchone()['total']
-            cur.execute('''SELECT count(*) AS connected,max(last_seen_at) AS last_seen FROM auto_edition_preparation_hosts
-                WHERE revoked_at IS NULL AND expires_at>now()''')
+            cur.execute("""SELECT count(*) AS total,array_agg(shopify_product_gid ORDER BY shopify_product_gid) AS ids,
+                (SELECT jsonb_build_object('at',a.created_at,'product_gid',a.product_gid,
+                    'title',(SELECT product_title FROM edition_products p WHERE p.shopify_product_gid=a.product_gid LIMIT 1))
+                 FROM auto_edition_onboarding_audit a WHERE a.event='preparation_metrics' ORDER BY a.id DESC LIMIT 1) AS last_success
+                FROM product_psd_mappings""")
+            inventory=cur.fetchone();mapped=inventory['total']
+            cur.execute("""SELECT count(*) AS connected,max(last_seen_at) AS last_seen FROM auto_edition_preparation_hosts
+                WHERE revoked_at IS NULL AND expires_at>now()""")
             host=cur.fetchone()
-        return JSONResponse(dict(rows=public,mapped=mapped,host=dict(connected=host['connected'],
-            last_seen=str(host['last_seen']) if host['last_seen'] else None)),headers=api.HEADERS)
+        import auto_editions_v17 as v17
+        extra={}
+        if v17.enabled():
+            from auto_editions_status import batch
+            from datetime import datetime,timezone
+            data=await run_in_threadpool(batch,queue().connect,inventory['ids'] or [])
+            authoritative={r['product_gid']:r for r in data['rows']}
+            for row in public:
+                value=authoritative.get(row['product_gid'])
+                if value:row.update(display_status=value['status'],uploaded=value.get('uploaded',False))
+            present={r['product_gid'] for r in public}
+            for pid,value in authoritative.items():
+                if pid not in present:public.append(dict(product_gid=pid,product_title=pid,status='Awaiting preparation',
+                    display_status=value['status'],reason=value['reason'],preparation_hash=value['preparation_hash'],attempts=0,priority=1,uploaded=value.get('uploaded',False)))
+            mapped_rows=[r for r in public if r['product_gid'] in authoritative]
+            current=next((dict(product_gid=r['product_gid'],title=r['product_title'],stage=r.get('display_status'))
+                for r in mapped_rows if r.get('display_status') in ('Preparing','Uploading','Recovering')),None)
+            seen=host['last_seen']
+            connected=bool(seen and (datetime.now(timezone.utc)-seen).total_seconds()<=150)
+            extra=dict(counts=v17.dashboard(mapped_rows,mapped),current=current,last_success=inventory['last_success'],
+                       processing='Companion Connected' if connected else 'Companion heartbeat stale or disconnected')
+        return JSONResponse(dict(rows=public,mapped=mapped,continuous_enabled=v17.enabled(),**extra,
+            host=dict(connected=host['connected'],last_seen=str(host['last_seen']) if host['last_seen'] else None)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 
@@ -256,7 +298,7 @@ async def claim(request):
         store=queue()
         from auto_editions_discovery import enabled
         if not enabled():
-            await run_in_threadpool(refresh,store,str(user['id']))
+            await run_in_threadpool(refresh,store,str(user['id']),limit=100 if __import__('auto_editions_v17').enabled() else None)
         row=await run_in_threadpool(store.claim,str(user['id']))
         if not row:return JSONResponse(dict(grant=None),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,row['product_gid'],str(row['lease_token']))
@@ -270,12 +312,14 @@ async def claim(request):
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
         if host:record.v6_setup['host_token_hash']=hashlib.sha256(host.encode()).hexdigest()
-        return JSONResponse(dict(product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
+        return JSONResponse(dict(context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
             ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:
         if row:
-            try:await run_in_threadpool(queue().checkpoint,row['product_gid'],str(row['lease_token']),str(user['id']),
-                                      'Blocked',str(error) if isinstance(error,ValueError) else 'PSD access or preparation service unavailable.')
+            try:
+                if isinstance(error,(ValueError,PermissionError)):
+                    await run_in_threadpool(queue().checkpoint,row['product_gid'],str(row['lease_token']),str(user['id']),'Blocked',str(error))
+                else:await run_in_threadpool(queue().defer_owned,row['product_gid'],str(row['lease_token']),str(user['id']))
             except Exception:pass
         return api.failure(error)
 
@@ -352,7 +396,8 @@ async def discrepancies(request):
     except Exception as error:return api.failure(error)
 
 
-ROUTES=(('/api/auto-editions/onboarding',summary,('GET',)),
+ROUTES=(('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
+        ('/api/auto-editions/onboarding',summary,('GET',)),
         ('/api/auto-editions/onboarding/discrepancies',discrepancies,('GET',)),
         ('/api/auto-editions/onboarding/prepare-now',prepare_now,('POST',)),
         ('/api/auto-editions/onboarding/reconnect',reconnect,('POST',)),

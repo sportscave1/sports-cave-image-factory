@@ -12,7 +12,7 @@ var SCAutoEditionsPreparation = (function () {
             || !/\.psd$/i.test(r.input) || !/\.json$/i.test(r.report)
             || !r.number_layer_name || !r.plaque_layer_name) throw Error("unsafe_preparation_request");
         var original = app.documents.length ? app.activeDocument : null, doc = null;
-        var dialogs = app.displayDialogs, existing = {}, layer = null, plaque = null;
+        var dialogs = app.displayDialogs, existing = {}, layer = null, plaque = null, exportProfiles = {};
         for (var e = 0; e < app.documents.length; e++) existing[String(app.documents[e].id)] = true;
         app.displayDialogs = DialogModes.NO;
         function named(container, name, found) {
@@ -30,7 +30,10 @@ var SCAutoEditionsPreparation = (function () {
             var destination = r.output_root + "/" + name;
             if (!inside(r.output_root, destination)) throw Error("unsafe_output");
             var options = new PNGSaveOptions(); options.interlaced = false; options.compression = 6;
+            var profile = d.colorProfileName;
             d.saveAs(new File(destination), options, true, Extension.LOWERCASE);
+            if (d.colorProfileName !== profile) throw Error("export_profile_changed");
+            exportProfiles[name] = profile;
         }
         function write(value) {
             var f = new File(r.report); f.encoding = "UTF8";
@@ -111,7 +114,7 @@ var SCAutoEditionsPreparation = (function () {
                 plaque_bounds:plaqueBounds,original_text:text,number_layer_name:r.number_layer_name,
                 plaque_layer_name:r.plaque_layer_name,font:layer.textItem.font,
                 resolution:doc.resolution,source_modified:false,print_ready:false,
-                source_inspection:inspection});
+                source_inspection:inspection,export_profiles:exportProfiles});
             return "AUTO_EDITIONS_PREPARED:" + total;
         } finally {
             if (doc && !existing[String(doc.id)]) doc.close(SaveOptions.DONOTSAVECHANGES);
