@@ -29,6 +29,11 @@ class Quality:
     def run_one(self, assets, records=None):
         if not quality.enabled():
             return False
+        # Admission happens before provider I/O. An already admitted validation
+        # finishes its existing transaction; a pause prevents the next one.
+        from worker_health import control
+        with self.connect() as conn,conn.cursor() as cur:
+            if control(cur)['paused']:return False
         records = quality.standards() if records is None else records
         policy_hash = ae.fingerprint(records)
         with self.connect() as conn, conn.cursor() as cur:

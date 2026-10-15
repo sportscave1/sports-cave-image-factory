@@ -84,7 +84,7 @@ def unavailable(pid):
                 checkpoint='',checkpoint_at=None,preparation_hash=None,actions=[])
 
 
-def project(row, *, writable=False, now=None):
+def project(row, *, writable=False, now=None, evidence=False):
     """Conservative states: no inferred connection, approval or print readiness."""
     now=now or datetime.now(timezone.utc)
     pid=row['product_gid'];status=row.get('status');digest=row.get('preparation_hash')
@@ -160,7 +160,7 @@ def project(row, *, writable=False, now=None):
         if state=='Review':state='Needs Review'
         if digest and state in ('Cloud Ready','Production Ready','Needs Review') and not uploaded:
             state='Needs Review';why='Recorded upload receipts are incomplete or inconsistent; verify retained assets.';actions=['review']
-    return dict(**({'uploaded':uploaded} if continuous() else {}),product_gid=pid,status=state,icon=ICONS[state],reason=why,
+    return dict(**({'uploaded':uploaded} if continuous() or evidence else {}),product_gid=pid,status=state,icon=ICONS[state],reason=why,
                 reset_allowed=bool(writable and discovery_enabled() and status!='Preparing' and reset.get('stage') not in ('Discovering','Queued','Preparing')),
                 mapping_file_id=mapped,
                 checkpoint=CHECKPOINTS.get(row.get('checkpoint'),'Checkpoint recorded' if row.get('checkpoint') else ''),
@@ -168,7 +168,7 @@ def project(row, *, writable=False, now=None):
                 preparation_hash=digest,actions=actions if writable else [])
 
 
-def batch(connect, ids, *, writable=False):
+def batch(connect, ids, *, writable=False, evidence=False):
     ids=list(dict.fromkeys(identity(pid) for pid in ids))
     if len(ids)>1000:raise ValueError('Status batch exceeds the Edition Ops limit.')
     if not ids:return {'rows':[],'query_count':0,'duration_ms':0}
@@ -177,7 +177,7 @@ def batch(connect, ids, *, writable=False):
     observed="jsonb_build_object('product_gid',w.pid,'file_id',i.file_id,'revision',i.metadata->>'rev','content_hash',i.metadata->>'content_hash')"
     sql=SQL.format(observed=f"CASE WHEN i.file_id IS NOT NULL THEN {observed} WHEN c.complete THEN jsonb_build_object('missing',true) END" if enabled() else 'NULL::jsonb',
                    inventory='LEFT JOIN auto_edition_source_inventory i ON i.file_id=m.dropbox_file_id LEFT JOIN auto_edition_discovery_cursor c ON c.id=1' if enabled() else '',
-                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if __import__('auto_editions_v17').enabled() else 'NULL::boolean',
+                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if __import__('auto_editions_v17').enabled() or evidence else 'NULL::boolean',
                    quality_select=', qc.assessment AS quality_assessment,qc.next_check_at>now() AS quality_fresh,prep.manifest AS quality_manifest' if quality_enabled() else '',
                    quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() else '')
     start=time.perf_counter()
@@ -188,7 +188,7 @@ def batch(connect, ids, *, writable=False):
     result=[]
     for pid,rows in groups.items():
         if len(rows)!=1:result.append(unavailable(pid))
-        else:result.append(project(rows[0],writable=writable))
+        else:result.append(project(rows[0],writable=writable,evidence=evidence))
     return {'rows':result,'companion_connected':any(r.get('companion_connected') for r in raw),'query_count':1,'duration_ms':round((time.perf_counter()-start)*1000,2)}
 
 
