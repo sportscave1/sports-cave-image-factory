@@ -349,3 +349,22 @@ def test_334_product_reset_status_performance_against_verified_baseline(store):
                            response_bytes=len(json.dumps(response)),queries=1,dropbox_calls=0)
     target=ROOT/'output/reset/performance.json';target.parent.mkdir(parents=True,exist_ok=True)
     target.write_text(json.dumps(metrics,indent=2))
+
+
+@pytest.mark.parametrize('stage,expected', [('Queued','Queued'),('Preparing','Preparing'),('Failed','Failed')])
+def test_reset_pending_status_overrides_current_v16_certificate(monkeypatch,stage,expected):
+    from tests.test_auto_editions_status import record
+    monkeypatch.setenv('AUTO_EDITIONS_V16_AUTO_APPROVAL_ENABLED','true')
+    monkeypatch.setenv('AUTO_EDITIONS_V15_ENABLED','true')
+    row=record(quality_assessment={'status':'Production Ready'},quality_fresh=True,
+               quality_manifest={},replacement={'stage':stage})
+    with patch('auto_editions_quality.current_certificate',return_value=True):
+        result=status.project(row,writable=True)
+    assert result['status']==expected
+    assert result['actions']==[]
+    assert result['reset_allowed']==(stage=='Failed')
+
+
+def test_combined_release_retains_reset_and_quality_routes():
+    paths={route[0] for route in status.ROUTES}
+    assert {'/api/auto-editions/status/reset','/api/auto-editions/status/recheck'} <= paths
