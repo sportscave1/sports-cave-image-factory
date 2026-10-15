@@ -37,9 +37,14 @@ var SCPSDInspector = (function () {
     }
     function bounds(layer) {return attempt(function(){var b=layer.bounds;return [b[0].as("px"),b[1].as("px"),b[2].as("px"),b[3].as("px")];},null);}
     function inspect(doc,request) {
+        var profileState = "inspector_failure", profileName = null;
+        try {
+            if (doc.colorProfileType === ColorProfile.NONE) profileState = "untagged";
+            else { profileName = doc.colorProfileName; if (profileName) profileState = "tagged"; }
+        } catch (profileError) {}
         var out={engine:"Photoshop",engine_version:app.version,script_version:1,complete:true,layers:[],warnings:[],
             document:{width_px:doc.width.as("px"),height_px:doc.height.as("px"),resolution:doc.resolution,
-            mode:String(doc.mode),bits_per_channel:String(doc.bitsPerChannel),profile:attempt(function(){return doc.colorProfileName;},null)}};
+            mode:String(doc.mode),bits_per_channel:String(doc.bitsPerChannel),profile:profileName,profile_state:profileState}};
         var objectCount=0;
         function walk(container,path,visible,locked,chain,depth,owner) {
             for(var i=0;i<container.layers.length;i++){

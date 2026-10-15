@@ -223,6 +223,13 @@ class Queue:
                 self.audit(cur,pid,actor,'diagnostic',value)
             if metrics is not None:
                 self.audit(cur,pid,actor,'preparation_metrics',dict(metrics,preparation_hash=digest))
+                cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit a
+                    JOIN auto_edition_onboarding q ON q.product_gid=a.product_gid
+                    WHERE a.product_gid=%s AND a.event='colour_retry' AND a.detail->'source'=q.source
+                    AND NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit done WHERE done.product_gid=a.product_gid
+                        AND done.event='colour_recovered' AND done.detail->>'preparation_hash'=%s) LIMIT 1""",(pid,digest))
+                if digest and cur.fetchone():
+                    self.audit(cur,pid,actor,'colour_recovered',dict(preparation_hash=digest,reason='Successful automatic colour recovery'))
 
     def completed_receipt(self,pid,token,actor):
         """Recover an acknowledged import only for its original owner and lease."""

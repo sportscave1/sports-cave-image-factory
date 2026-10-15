@@ -38,7 +38,9 @@ def test_host_capability_is_hashed_revocable_and_session_bound(database):
             token=json.loads(response.body)['token'];assert len(token)==43
             sql.execute('SELECT * FROM auto_edition_preparation_hosts');row=sql.fetchone()
             assert row['token_hash']==hashlib.sha256(token.encode()).hexdigest()
-            assert token not in json.dumps(row)
+            # PostgreSQL timestamps are datetime values; inspect their printable
+            # form too when checking that only the capability hash was stored.
+            assert token not in json.dumps(row, default=str)
             assert (await onboarding.preparation_actor(host_request(token)))['id']=='admin'
             with pytest.raises(PermissionError):await onboarding.preparation_actor(host_request(token,'https://os.test'))
             with patch.object(files.os_accounts.DEFAULT_STORE,'get_user',return_value={**admin,'session_version':8}):

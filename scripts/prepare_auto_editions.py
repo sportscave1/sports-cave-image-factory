@@ -25,24 +25,46 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
         raise ValueError('Source hash does not match the pinned Dropbox revision.')
     before = ae.file_hash(source)
     output.mkdir(parents=True)
+    from auto_editions_colour_source import inspect_psd,stage_profile,ColourReview
+    from auto_editions_colour_policy import resolve
+    colour=inspect_psd(source)
+    if colour['mode']!=3 or colour['depth']!=8:
+        raise ColourReview('Print-colour incompatibility: conversion requires separate approval.')
+    policy=None;assignment=None
+    icc=colour['icc']
+    if not icc:icc,policy=resolve(identity)
     stage = output / 'staging'; stage.mkdir()
-    staged = stage / 'input.psd'; shutil.copyfile(source, staged)
+    staged = stage / 'input.psd'
+    if policy:assignment=stage_profile(source,staged,icc)
+    else:shutil.copyfile(source, staged)
+    staged_hash=ae.file_hash(staged)
+    if (not policy and staged_hash!=before) or (policy and assignment['source_sha256']!=before):
+        raise ValueError('Source preservation check failed before Photoshop preparation.')
+    expected_icc=stage/'expected-source.icc';expected_icc.write_bytes(icc)
     request = dict(stage_root=str(stage),input=str(staged),output_root=str(output),
+                   icc_path=str(expected_icc),
                    report=str(output/'preparation.json'),number_layer_name=number_layer,
                    plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale)
     script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
     script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
     script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
     result = run(script)
-    if ae.file_hash(source) != before or ae.file_hash(staged) != before:
+    if ae.file_hash(source) != before or ae.file_hash(staged) != staged_hash:
         raise ValueError('Source preservation check failed.')
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
         raise ValueError('Photoshop did not confirm preparation.')
     report=json.loads((output/'preparation.json').read_text(encoding='utf-8-sig'))
+    if report.get('source_dimensions')!=[colour['width'],colour['height']]:
+        raise ColourReview('Inspector failure: Photoshop source geometry differs from the pinned PSD.')
+    witness=inspect_psd(output/'profile-witness.psd')
+    if witness['icc']!=icc:
+        raise ColourReview('ICC export mismatch: Photoshop opened the source under a different ICC profile.')
     from auto_editions_colour import restore_export_profiles
     names=['original.png','master.png']+[f'number-{n}.png' for n in range(1,total+1)]
     names += [f'reference-{n}.png' for n in sorted({1,reference_number,total})]
-    restore_export_profiles(output,report,names)
+    restored=restore_export_profiles(output,report,names,source_icc=icc)
+    report['colour_evidence']=dict(source_state=colour['state'],icc_sha256=__import__('hashlib').sha256(icc).hexdigest(),
+        policy=policy,assignment=assignment,restored_exports=restored,source_sha256=before,pixels_converted=False)
     # Measurements must never change the reusable artwork identity.
     timings=report.pop('timings',{})
     (output/'timings.json').write_text(json.dumps(timings))

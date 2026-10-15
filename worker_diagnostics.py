@@ -2,9 +2,15 @@
 import re
 
 RULES=(
+ ('COLOUR_RECOVERED','Photoshop',('successful automatic colour recovery',),'Successful automatic colour recovery; verified package retained for visual review.','Complete the existing artwork and supplier reviews.'),
+ ('PROFILE_APPROVED','Photoshop',('profile correction approved',),'Profile correction approved for this pinned source.','Preparation can reuse the approved source policy; supplier checks remain separate.'),
+ ('COLOUR_POLICY_PENDING','Photoshop',('colour policy awaiting approval',),'Colour policy awaiting approval.','Review the proposed ICC profile against trusted print/reference evidence for this source group.'),
+ ('PROFILE_INSPECTOR_FAILURE','Photoshop',('inspector failure','profile_inspector_failure','independent photoshop colour-profile evidence is incomplete'),'Inspector failure; source tagging is undetermined.','Review the file resource and Photoshop inspection; do not infer an untagged or corrupt PSD.'),
+ ('COLOUR_INCOMPATIBLE','Photoshop',('print-colour incompatibility','colour_conversion_requires_approval'),'Print-colour compatibility requires review.','Obtain supplier evidence and separate conversion approval.'),
+ ('SCRATCH_DISK','Photoshop',('scratch disk','scratch disks'),'Photoshop scratch disk failure.','Free Photoshop scratch storage and retry; retain the original and verified package.'),
  ('RECOVERY_RESUMED','Companion',('owned recovery resumed',),'Connection recovered; owned checkpoint processing resumed.','No action required.'),
  ('DISK_SPACE','Companion',('storage is low','no space left on device'),'Preparation computer has insufficient working storage.','Free working space without deleting unverified packages or originals.'),
- ('ICC_MISMATCH','Photoshop',('different colour profile','profile does not match','conflicting photoshop export'), 'Photoshop export failed — ICC profile mismatch.','Review the source/export profile evidence; do not assign a guessed profile.'),
+ ('ICC_MISMATCH','Photoshop',('icc export mismatch','export_profile_changed','different colour profile','profile does not match','conflicting photoshop export'), 'Photoshop export failed — ICC profile mismatch.','Review the source/export profile evidence; do not assign a guessed profile.'),
  ('PROFILE_MISSING','Photoshop',('colour profile is unavailable','source_profile_requires_review','colour settings require owner review'), 'Original PSD has no verified colour profile.','Ask the owner to review the source colour settings.'),
  ('NUMBER_LAYER','Photoshop',('exactly one visible, editable edition-number','nested, locked or not independently editable'), 'PSD missing a uniquely editable edition-number layer.','Review the number layer in the original PSD.'),
  ('PLAQUE_AMBIGUOUS','Photoshop',('unique recognised collector plaque','ambiguous_roles'), 'PSD plaque identity is ambiguous.','Review the plaque role; retain the original geometry.'),
@@ -25,7 +31,7 @@ def explain(reason,stage='Unknown',component=None):
     for code,owner,patterns,message,action in RULES:
         if any(pattern in value for pattern in patterns):
             return dict(code=code,component=component if code=='CONNECTION_INTERRUPTED' and component in COMPONENTS else owner,description=message,recommended_action=action,
-                        stage=stage if stage in STAGES else 'Unknown',severity='info' if code=='RECOVERY_RESUMED' else 'error')
+                        stage=stage if stage in STAGES else 'Unknown',severity='info' if code in ('RECOVERY_RESUMED','COLOUR_RECOVERED','PROFILE_APPROVED') else 'warning' if code=='COLOUR_POLICY_PENDING' else 'error')
     return dict(code='CAUSE_UNDETERMINED',component=component if component in COMPONENTS else 'Companion',
                 description='Cause not yet determined.',recommended_action='Inspect the referenced checkpoint and retained local diagnostics.',
                 stage=stage if stage in STAGES else 'Unknown',severity='error')

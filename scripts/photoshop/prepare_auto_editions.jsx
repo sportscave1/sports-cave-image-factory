@@ -2,6 +2,41 @@
    A lossless master plus small opaque number patches retains Photoshop's exact
    font, antialiasing, effects and individual position. No per-order Photoshop. */
 var SCAutoEditionsPreparation = (function () {
+    function witnessICC(data) {
+        function uint(p) {
+            if (p+4>data.length) throw Error("profile_inspector_failure");
+            return data.charCodeAt(p)*16777216+data.charCodeAt(p+1)*65536+data.charCodeAt(p+2)*256+data.charCodeAt(p+3);
+        }
+        if (data.substr(0,6)!=="8BPS\x00\x01") throw Error("profile_inspector_failure");
+        var start=30+uint(26),size=uint(start),pos=start+4,end=pos+size,icc=null;
+        if (size>4194304 || end>data.length) throw Error("profile_inspector_failure");
+        while(pos<end){
+            if(data.substr(pos,4)!=="8BIM") throw Error("profile_inspector_failure");
+            var id=data.charCodeAt(pos+4)*256+data.charCodeAt(pos+5),name=data.charCodeAt(pos+6)+1;
+            pos+=6+name+(name%2);var length=uint(pos);pos+=4;
+            if(pos+length+(length%2)>end) throw Error("profile_inspector_failure");
+            if(id===1039){if(icc!==null) throw Error("profile_inspector_failure");icc=data.substr(pos,length);}
+            pos+=length+(length%2);
+        }
+        if(!icc) throw Error("profile_inspector_failure");return icc;
+    }
+    function binary(path) {
+        var file=new File(path);file.encoding="BINARY";
+        if(file.length>4194304 || !file.open("r")) throw Error("profile_inspector_failure");
+        try{return file.read();}finally{file.close();}
+    }
+    function profileWitness(doc, root, expectedICC) {
+        // A tiny disposable PSD provides the actual Photoshop ICC bytes. Names
+        // alone cannot distinguish two installed profiles with the same label.
+        var witness = doc.duplicate("icc-evidence", true);
+        try {
+            witness.crop([UnitValue(0,"px"),UnitValue(0,"px"),UnitValue(1,"px"),UnitValue(1,"px")]);
+            var options = new PhotoshopSaveOptions();options.layers=false;options.embedColorProfile=true;
+            witness.saveAs(new File(root + "/profile-witness.psd"),options,true,Extension.LOWERCASE);
+            if(expectedICC && witnessICC(binary(root+"/profile-witness.psd"))!==binary(expectedICC))
+                throw Error("export_profile_changed");
+        } finally { witness.close(SaveOptions.DONOTSAVECHANGES);app.activeDocument=doc; }
+    }
     function inside(root, path) {
         var base = new Folder(root).fsName.toLowerCase().replace(/[\\\/]+$/, "");
         var target = new File(path).fsName.toLowerCase();
@@ -9,6 +44,7 @@ var SCAutoEditionsPreparation = (function () {
     }
     function run(r) {
         if (!r || !inside(r.stage_root, r.input) || !inside(r.output_root, r.report)
+            || !r.icc_path || !inside(r.stage_root,r.icc_path)
             || !/\.psd$/i.test(r.input) || !/\.json$/i.test(r.report)
             || !r.number_layer_name || !r.plaque_layer_name) throw Error("unsafe_preparation_request");
         var original = app.documents.length ? app.activeDocument : null, doc = null;
@@ -31,7 +67,10 @@ var SCAutoEditionsPreparation = (function () {
             if (!inside(r.output_root, destination)) throw Error("unsafe_output");
             var options = new PNGSaveOptions(); options.interlaced = false; options.compression = 6;
             var profile;
-            try { profile = d.colorProfileName; } catch (profileError) { throw Error("source_profile_requires_review"); }
+            try {
+                if (d.colorProfileType === ColorProfile.NONE) throw Error("source_profile_requires_review");
+                profile = d.colorProfileName;
+            } catch (profileError) { throw Error("source_profile_requires_review"); }
             if (!profile) throw Error("source_profile_requires_review");
             d.saveAs(new File(destination), options, true, Extension.LOWERCASE);
             if (d.colorProfileName !== profile) throw Error("export_profile_changed");
@@ -58,6 +97,8 @@ var SCAutoEditionsPreparation = (function () {
             if (layer.parent !== doc || plaque.parent !== doc)
                 throw Error("nested_roles_require_transform_review");
             var inspection = SCPSDInspector.inspect(doc, {smart_object_depth:0,smart_object_limit:0});
+            if (inspection.document.profile_state !== "tagged") throw Error("profile_inspector_failure");
+            profileWitness(doc,r.output_root,r.icc_path);
             var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
             var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
             timings.layer_inspection_ms = new Date().getTime()-tick; tick = new Date().getTime();
@@ -124,6 +165,6 @@ var SCAutoEditionsPreparation = (function () {
             if (original) try { app.activeDocument = original; } catch (ignored) {}
         }
     }
-    return {run:run};
+    return {run:run,profileWitness:profileWitness,witnessICC:witnessICC};
 })();
 if (typeof SC_AUTO_EDITIONS_REQUEST !== "undefined") SCAutoEditionsPreparation.run(SC_AUTO_EDITIONS_REQUEST);

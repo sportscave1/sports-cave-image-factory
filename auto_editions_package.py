@@ -39,6 +39,21 @@ def unpack(archive,root,source,number,total):
                 if length!=entry.file_size:raise ValueError('Generated asset is truncated.')
     # Checksums for every numbered patch, not just the sample reference.
     for asset in [manifest['master']]+list(manifest['patches'].values()):ae.asset_path(root,asset)
+    colour=manifest.get('colour_evidence')
+    if colour:
+        from auto_editions_colour_source import profile_info
+        from PIL import Image
+        expected=colour.get('icc_sha256')
+        if colour.get('pixels_converted') is not False:raise ValueError('Unapproved colour conversion.')
+        if colour.get('policy'):
+            from auto_editions_colour_policy import resolve
+            _,approved=resolve(source)
+            if colour['policy']!=approved or expected!=approved['icc_sha256']:
+                raise ValueError('Colour policy awaiting approval: package policy changed.')
+        for name in allowed-{'manifest.json'}:
+            with Image.open(root/name) as image:
+                if profile_info(image.info.get('icc_profile',b''))['sha256']!=expected:
+                    raise ValueError('ICC export mismatch: package profile evidence differs.')
     proofs=[ae.compare_reference(manifest,root,n,root/f'reference-{n}.png') for n in refs]
     proofs.append(ae.compare_original_outside_number(manifest,root,number,root/'original.png'))
     return manifest,proofs

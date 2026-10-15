@@ -136,6 +136,11 @@ def project(row, *, writable=False, now=None, evidence=False):
         elif status=='Blocked':
             state='Failed';why=reason(row.get('reason')) or 'Preparation is blocked.';actions=['retry']
         else:state='Failed';why='Onboarding checkpoint requires administrator review.'
+    # Missing/uncertain colour evidence is a review decision, not proof of PSD damage.
+    if status in ('Blocked','Needs PSD Repair') and not digest:
+        from worker_diagnostics import explain
+        if explain(row.get('reason'))['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','COLOUR_INCOMPATIBLE'):
+            state='Needs Review';why=reason(row.get('reason'));actions=[]
     from auto_editions_quality import enabled as quality_enabled,current_certificate,standards,standard_for
     if quality_enabled() and digest and valid and state in ('Review','Cloud Ready'):
         check=row.get('quality_assessment')

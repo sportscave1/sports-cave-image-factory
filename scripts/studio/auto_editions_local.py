@@ -417,6 +417,8 @@ def inspect(key):
         row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
         phase='Photoshop inspection'
         row['phase']='Photoshop';journal(row)
+        from auto_editions_colour_source import inspect_psd,ColourReview
+        colour=inspect_psd(source)
         lease=processor_lease()
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
                      entries=[dict(work_path=str(source),product_gid=row['context']['source']['product_gid'],
@@ -427,24 +429,39 @@ def inspect(key):
         run(script)
         result=json.loads((folder/'inspection.json').read_text(encoding='utf-8-sig'))['documents'][0]
         row['timings']['inspection_seconds']=round(time.monotonic()-row['created']-row['timings']['psd_retrieval_seconds'],3)
-        if 'error' in result:raise ValueError('Photoshop could not inspect the linked source.')
+        if 'error' in result:raise ColourReview('Inspector failure: Photoshop could not inspect the linked source.')
+        document=result['inspection']['document']
+        if colour['state']=='untagged':
+            document['observed_profile']=document.get('profile')
+            document['observed_profile_state']=document.get('profile_state')
+            document.update(profile=None,profile_state='untagged')
+        elif document.get('profile_state')!='tagged':
+            raise ColourReview('Inspector failure: embedded PSD profile was not retained by Photoshop.')
+        elif document.get('profile') not in (colour['profile']['name'],colour['profile']['description']):
+            raise ColourReview('ICC export mismatch: Photoshop did not retain the embedded source profile.')
         automatic=bool(row['context'].get('automatic'))
         row.update(status='Working' if automatic else 'Inspected',inspection=result['inspection'])
     except Exception as error:
         from urllib.error import URLError
         transient=phase=='PSD transfer' and isinstance(error,(URLError,TimeoutError,ConnectionError))
-        JOBS[key].update(status='Recovering' if transient else 'Blocked',error=phase+' failed: '+type(error).__name__+'. Retry after checking '+('the connection' if phase=='PSD transfer' else 'Photoshop')+'.')
+        detail=failure_detail(JOBS[key],phase,error)
+        JOBS[key].update(status='Recovering' if transient else 'Blocked',error=phase+' failed: '+detail)
         journal(JOBS[key])
     finally:
         if lease:lease.unlink(missing_ok=True)
     if automatic:
         try:
             from auto_editions_onboarding import detect,preparation_scale
-            roles=detect(row['inspection'],row['context']['total'])
+            from auto_editions_colour_policy import resolve
+            policy=None
+            if row['inspection']['document'].get('profile_state')=='untagged':
+                _,policy=resolve(row['context']['source'])
+            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy)
             prepare_worker(key,dict(number=roles['number_layer'],plaque=roles['plaque_layer']),
                            preparation_scale(roles['source_dimensions']))
         except Exception as error:
-            row.update(status='Blocked',error=str(error),repair=True)
+            from auto_editions_onboarding import NeedsRepair
+            row.update(status='Blocked',error=failure_detail(row,'Photoshop',error),repair=isinstance(error,NeedsRepair))
     report_failure(JOBS[key])
 
 
@@ -480,8 +497,11 @@ def failure_detail(row,stage,error):
     except OSError:pass
     if isinstance(error,RuntimeError):
         if 'source_profile_requires_review' in message or 'colour_conversion_requires_approval' in message:
-            row['repair']=True
-            return 'Original PSD colour settings require owner review.'
+            row['repair']=False
+            return 'Colour policy awaiting approval: original PSD colour settings require owner review.'
+        if 'profile_inspector_failure' in message:return 'Inspector failure: Photoshop colour metadata could not be read.'
+        if 'export_profile_changed' in message:return 'ICC export mismatch: Photoshop changed the document profile.'
+        if 'scratch' in message.lower():return 'Photoshop scratch disk failure; inspect free scratch storage.'
         return 'Photoshop preparation failed; inspect the retained local failure-detail.json.'
     return str(error)[:350] if isinstance(error,ValueError) else type(error).__name__
 

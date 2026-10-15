@@ -68,4 +68,6 @@ def test_listing_and_generation_share_policy_and_archive_master_fence(database,t
         jobs.summaries.return_value['43']['preparation_hash']='b'*64
         assert runtime.download_links(rows)['43'].endswith('#Download JPG')
         sql.execute("UPDATE product_psd_mappings SET dropbox_file_id='id:changed'")
-        assert not runtime.download_links(rows)['43'].startswith('/auto-editions/')
+        blocked=runtime.download_links(rows)['43']
+        assert blocked.startswith('/auto-editions/status?') and 'job_id=' not in blocked
+        with pytest.raises(ValueError):registry.for_unit(unit)

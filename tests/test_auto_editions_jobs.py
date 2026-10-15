@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 import threading
-import urllib.request
-import urllib.error
+import http.client
+from datetime import datetime
 
 import pytest
 import auto_editions as ae
@@ -20,10 +20,13 @@ def database():
     child=subprocess.Popen(['node',str(Path(__file__).with_name('auto_editions_postgres_server.mjs'))],
         stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+    transport=None
     try:
         port=child.stdout.readline().strip()
         assert port.isdigit(), child.stderr.read()
         lock=threading.RLock()
+        # Repeated isolated suites must not exhaust Windows ephemeral sockets.
+        transport=http.client.HTTPConnection('127.0.0.1',int(port),timeout=10)
         class Cursor:
             rows=[]
             def __enter__(self):return self
@@ -31,12 +34,17 @@ def database():
             def execute(self,sql,args=()):
                 parts=sql.split('%s')
                 sql=parts[0]+''.join('$'+str(i)+p for i,p in enumerate(parts[1:],1))
-                request=urllib.request.Request('http://127.0.0.1:'+port,
-                    data=json.dumps(dict(sql=sql,args=args)).encode(),headers={'Content-Type':'application/json'})
-                try:
-                    with urllib.request.urlopen(request,timeout=10) as response:self.rows=json.load(response)['rows']
-                except urllib.error.HTTPError as error:
-                    with error:raise RuntimeError(json.load(error)['error']) from None
+                body=json.dumps(dict(sql=sql,args=args),default=lambda v:v.isoformat() if isinstance(v,datetime) else str(v)).encode()
+                with lock:
+                    transport.request('POST','/',body=body,headers={'Content-Type':'application/json'})
+                    response=transport.getresponse();result=json.loads(response.read())
+                    if response.status>=400:raise RuntimeError(result['error'])
+                    self.rows=result['rows']
+                    # Match psycopg's top-level timestamp values; JSONB stays JSON.
+                    dates={f['name'] for f in result.get('fields',[]) if f.get('dataTypeID') in (1114,1184)}
+                    for row in self.rows:
+                        for key in dates:
+                            if isinstance(row.get(key),str):row[key]=datetime.fromisoformat(row[key].replace('Z','+00:00'))
             def fetchone(self):return self.rows[0] if self.rows else None
             def fetchall(self):return self.rows
         class Connection:
@@ -47,6 +55,7 @@ def database():
             def cursor(self):return Cursor()
         yield Jobs(Connection),Cursor()
     finally:
+        if transport:transport.close()
         child.terminate();child.communicate(timeout=10)
 
 
@@ -194,5 +203,5 @@ def test_bound_read_observes_current_allocation_without_mapping_queries(database
 
 def eligibility_tables(sql,manifest):
     sql.execute('CREATE TABLE product_psd_mappings(shopify_product_gid text PRIMARY KEY,dropbox_file_id text)')
-    sql.execute('CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text)')
+    sql.execute("CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text,reason text DEFAULT '',lease_until timestamptz,updated_at timestamptz)")
     sql.execute('INSERT INTO product_psd_mappings VALUES(%s,%s)',(manifest['source']['product_gid'],manifest['source']['file_id']))

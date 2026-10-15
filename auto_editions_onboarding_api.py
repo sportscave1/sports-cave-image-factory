@@ -309,6 +309,14 @@ async def claim(request):
         if body!={}:raise ValueError('Preparation reads authoritative product identities.')
         from auto_editions_priority import refresh
         store=queue()
+        import os
+        if os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true':
+            from auto_editions_colour_recovery import recover
+            # A bad/missing optional policy must never prevent other eligible jobs.
+            try:await run_in_threadpool(recover,store,str(user['id']),dry_run=False)
+            except Exception as error:
+                import logging
+                logging.getLogger(__name__).warning('colour_recovery_unavailable error_type=%s',type(error).__name__)
         from auto_editions_discovery import enabled
         if not enabled():
             await run_in_threadpool(refresh,store,str(user['id']),limit=100 if __import__('auto_editions_v17').enabled() else None)
