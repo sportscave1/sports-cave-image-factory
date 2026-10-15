@@ -2231,6 +2231,8 @@ def _column_config():
 
 def _fulfilment_cell_style(value):
     status = str(value or "").strip()
+    if status in {"Refunded", "Refund Pending"}:
+        return "color: #c92a2a; font-weight: 600;"
     if status == "Complete":
         return "color: #2f9e44; font-weight: 600;"
     if status == "Needs certificate":
@@ -2250,7 +2252,19 @@ def _display_table_payload(rows, *, normalised=False):
     if pandas_module is None:
         return display_rows
     frame = pandas_module.DataFrame(display_rows, columns=VISIBLE_COLUMNS)
-    return frame.style.map(_fulfilment_cell_style, subset=["prodigi"])
+    def refund_row_style(row):
+        return ['color: #8b929a; text-decoration: line-through;' if row.get('prodigi') == 'Refunded' else '' for _ in row]
+    styled = frame.style.apply(refund_row_style, axis=1).map(_fulfilment_cell_style, subset=["prodigi"])
+    # Streamlit's canvas grid supports Styler colors but ignores CSS text-decoration.
+    # Format display text only; underlying values, search, sort, IDs and links stay intact.
+    refunded_indices = frame.index[frame['prodigi'] == 'Refunded']
+    if len(refunded_indices):
+        text_columns = [column for column in VISIBLE_COLUMNS if column not in {'file', 'print_jpg'}]
+        styled = styled.format(
+            lambda value: ''.join(character + '\u0336' for character in str(value)),
+            subset=pandas_module.IndexSlice[refunded_indices, text_columns],
+        )
+    return styled
 
 
 def _manual_edition_eligibility(row, backend):
@@ -2336,8 +2350,8 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     backend = _configured_supabase_backend()
     open_url = _first_pdf_url(selected_rows)
     fulfilment_order_reference = _fulfilment_qa_order_reference(selected_rows)
-    can_dispatch = bool(fulfilment_order_reference)
-    can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") for row in selected_rows)
+    can_dispatch = bool(fulfilment_order_reference) and not any(order_refunds.blocked(r) for r in selected_rows)
+    can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") and not order_refunds.blocked(row) for row in selected_rows)
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
     st.session_state[ORDER_SYNC_BACKFILL_KEY] = False

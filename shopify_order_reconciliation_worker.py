@@ -68,6 +68,12 @@ def run_once():
                 ensure_schema_first=False,
                 allow_unrelated_allocation_duplicates=True,
             )
+        try:
+            import order_refunds
+            refund_result = order_refunds.reconcile(backend=supabase_backend)
+            _log("shopify_refunds_reconciled", **refund_result)
+        except Exception as exc:
+            _log("shopify_refund_reconciliation_failed", error_type=type(exc).__name__)
         if result.get("sync_blocked"):
             _log(
                 "shopify_order_reconciliation_blocked",

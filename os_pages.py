@@ -776,6 +776,9 @@ def _prodigi_status_from_sheet(value):
 
 def prodigi_submission_blockers(row):
     blockers = []
+    import order_refunds
+    if order_refunds.blocked(row):
+        blockers.append('Shopify refund pending or completed')
     if not _prodigi_clean(row.get("variant_title") or row.get("shopify_variant_title")):
         blockers.append("Missing variant metadata; repair the order line before fulfilment")
     if not _prodigi_clean(row.get("shopify_order_id") or row.get("shopify_order_name")):
@@ -906,6 +909,7 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
     )
     created_at = stored.get("created_at") or _prodigi_now_iso()
     row = {
+        "_orders_refund": order_row.get("_orders_refund") or {},
         "row_id": stored.get("row_id") or prodigi_tracker_row_id(order_row),
         "edition_order_id": stored.get("edition_order_id") or order_row.get("edition_order_id") or "",
         "allocation_index": allocation_index,
@@ -3954,6 +3958,8 @@ def _prodigi_merge_allocation_lookup_rows(base_rows, allocation_rows):
 
 
 def prodigi_find_order_rows(order_rows, search_text, stored_rows=None):
+    import order_refunds
+    order_rows = [r for r in order_rows or [] if not order_refunds.blocked(r)]
     query = _prodigi_clean(search_text)
     if not query:
         return []
@@ -4513,6 +4519,9 @@ def prodigi_line_confirmation_defaults(row):
 
 def prodigi_dispatch_blockers(row, answers):
     blockers = []
+    import order_refunds
+    if order_refunds.blocked(row):
+        blockers.append('Shopify refund pending or completed')
     if not _prodigi_clean(row.get("variant_title") or row.get("shopify_variant_title")):
         blockers.append("Missing variant metadata; repair the order line before fulfilment")
     if not row.get("shopify_order_name"):

@@ -12211,7 +12211,10 @@ def _prodigi_payload_from_db_row(row):
 
 def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, limit=1000, search=""):
     limit_value = max(min(int(limit or 1000), 5000), 1)
-    where_clauses = []
+    where_clauses = ["""NOT EXISTS (SELECT 1 FROM shopify_orders refund_order
+        WHERE (refund_order.shopify_order_id=prodigi_dispatch_rows.shopify_order_id
+            OR refund_order.order_name=prodigi_dispatch_rows.shopify_order_name)
+        AND refund_order.raw_json->'_orders_refund'->>'blocked'='true')"""]
     params = []
     clean_status = str(status or "").strip()
     if clean_status == "Submitted":
@@ -12352,6 +12355,8 @@ def upsert_prodigi_dispatch_rows(rows, *, ensure_schema_first=True):
                 row_id = str(row.get("row_id") or "").strip()
                 if not row_id:
                     continue
+                import order_refunds
+                order_refunds.assert_processing_allowed(cur, row.get('shopify_order_id'))
                 cur.execute(
                     """
                     INSERT INTO prodigi_dispatch_rows(
@@ -13043,6 +13048,9 @@ def _truthy_shopify_flag(value):
 
 def shopify_order_eligibility(order, *, tracking_start=None, allow_historical=False):
     """Return the shared paid-order policy for every source channel."""
+    import order_refunds
+    if order.get('refund_pending') or order_refunds.blocked(order):
+        return {'eligible': False, 'reason': 'refund_processing_hold'}
     return edition_ledger.paid_order_eligibility(
         order,
         tracking_start=tracking_start,
@@ -14830,18 +14838,18 @@ def _upsert_order(cur, order):
             remote_updated_at=EXCLUDED.remote_updated_at,
             processed_at=EXCLUDED.processed_at,
             cancelled_at=EXCLUDED.cancelled_at,
-            raw_json=CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
+            raw_json=(CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
                 THEN EXCLUDED.raw_json || jsonb_build_object(
                     '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
                     'shipping_method', shopify_orders.raw_json->'shipping_method',
                     'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
-                ELSE EXCLUDED.raw_json END,
-            raw=CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
+                ELSE EXCLUDED.raw_json END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')),
+            raw=(CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
                 THEN EXCLUDED.raw || jsonb_build_object(
                     '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
                     'shipping_method', shopify_orders.raw_json->'shipping_method',
                     'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
-                ELSE EXCLUDED.raw END,
+                ELSE EXCLUDED.raw END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')),
             synced_at=now(),
             updated_at=now()
         """,
@@ -15766,6 +15774,8 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
 
 
 def _generate_certificate_for_assignment(cur, assignment, *, force=False):
+    import order_refunds
+    order_refunds.assert_processing_allowed(cur, assignment.get('shopify_order_id'))
     from edition_cancellation import require_certificate_allocation
     require_certificate_allocation(cur, assignment)
     manual_certificate = str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
@@ -16802,6 +16812,13 @@ def process_paid_order(
     changed_handles = set()
     generated_certificates = 0
     errors = []
+    if order.get('refund_pending') or str(order.get('financial_status') or '').upper() == 'REFUNDED':
+        import order_refunds
+        order_refunds.reconcile([order['shopify_order_id']])
+        return {'assignments_created': 0, 'existing_assignments_skipped': 0,
+                'missing_mapping_skipped': 0, 'generated_certificates': 0,
+                'changed_handles': [], 'errors': [], 'ingestion_status': 'on_hold',
+                'import_result': 'refund_pending'}
     _persist_order_snapshot(order)
     mapping_methods = set()
 
@@ -20467,7 +20484,8 @@ ORDER_ACTION_ROWS_SQL = """
                  dispatch.submitted_at DESC NULLS LAST
         LIMIT 1
     ) pd ON TRUE
-    WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid')
+    WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid', 'partially_refunded')
+      AND COALESCE(o.raw_json->'_orders_refund'->>'blocked', 'false') <> 'true'
       AND o.cancelled_at IS NULL
 """
 
@@ -20651,7 +20669,8 @@ def orders_visibility_marker(*, ensure_schema_first=True):
                 ORDER BY created_at DESC
                 LIMIT 50
             )
-            SELECT COUNT(*) AS order_count,
+            SELECT (SELECT value->>'changed_at' FROM app_settings WHERE key='orders_refund_visibility') AS refund_marker,
+                   COUNT(*) AS order_count,
                    COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
             FROM latest_orders
             """
@@ -20663,7 +20682,7 @@ def orders_visibility_marker(*, ensure_schema_first=True):
     return {
         "order_count": int(row.get("order_count") or 0),
         "latest_order_update": _datetime_to_setting(latest) if latest else "",
-        "marker": f"{int(row.get('order_count') or 0)}|{_datetime_to_setting(latest) if latest else ''}",
+        "marker": f"{int(row.get('order_count') or 0)}|{_datetime_to_setting(latest) if latest else ''}" + (f"|{row['refund_marker']}" if row.get('refund_marker') else ''),
     }
 
 
@@ -23274,7 +23293,10 @@ def get_order_summary():
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
                      WHERE c.id IS NULL AND eo.allocation_valid
-                       AND eo.status NOT IN ('cancelled','voided','refunded','superseded')) AS certificates_missing,
+                       AND eo.status NOT IN ('cancelled','voided','refunded','superseded')
+                       AND NOT EXISTS (SELECT 1 FROM shopify_orders refund_order
+                           WHERE refund_order.shopify_order_id=eo.shopify_order_id
+                             AND refund_order.raw_json->'_orders_refund'->>'blocked'='true')) AS certificates_missing,
                     (SELECT COUNT(*) FROM line_handles lh
                      LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
                      WHERE COALESCE(lh.shopify_handle, '') <> ''
@@ -23349,7 +23371,10 @@ def get_dashboard_summary():
                           AND pa.is_primary IS DISTINCT FROM FALSE
                           AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '') <> ''
                      )) AS missing_psd,
-                    (SELECT COUNT(*) FROM edition_orders WHERE certificate_status <> 'Certificate Ready') AS certificates_missing,
+                    (SELECT COUNT(*) FROM edition_orders eo WHERE certificate_status <> 'Certificate Ready'
+                       AND NOT EXISTS (SELECT 1 FROM shopify_orders refund_order
+                           WHERE refund_order.shopify_order_id=eo.shopify_order_id
+                             AND refund_order.raw_json->'_orders_refund'->>'blocked'='true')) AS certificates_missing,
                     (SELECT COUNT(*) FROM app_errors WHERE created_at > now() - interval '7 days') AS recent_errors,
                     (SELECT COUNT(*) FROM shopify_orders) AS orders_synced
                 """
@@ -23619,6 +23644,8 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
                             assignment = cur.fetchone()
                         if not assignment:
                             raise ValueError("Edition order was not found.")
+                        import order_refunds
+                        order_refunds.assert_processing_allowed(cur, assignment.get('shopify_order_id'))
                         set_certificate_log_context(
                             source_page=source_page,
                             order_name=assignment.get("order_name") or assignment.get("shopify_order_name") or "",
