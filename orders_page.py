@@ -2778,6 +2778,11 @@ def _mobile_toggle(key, unit):
 
 def _render_mobile_orders(rows):
     mapping = psd_directory.page_directory(st)
+    refunded_cards = [f'.st-key-orders-mobile-card-{_mobile_unit_id(row)} p'
+                      for row in rows if order_refunds.state(row).get('closed')]
+    if refunded_cards:
+        st.html('<style>' + ','.join(refunded_cards) +
+                '{color:#8b929a;text-decoration:line-through;}</style>')
     import auto_editions_runtime
     cloud_links=auto_editions_runtime.download_links(rows)
     for row in rows:
@@ -2788,7 +2793,10 @@ def _render_mobile_orders(rows):
             if row.get('admin_url'): st.link_button('Open Order', row['admin_url'])
             st.markdown(f"**{row.get('product')}**")
             st.caption(f"{row.get('customer')} · {row.get('variant_full')}")
-            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {row.get('prodigi')}")
+            fulfilment = row.get('prodigi')
+            if fulfilment in {'Refunded', 'Refund Pending'}:
+                fulfilment = f':red[{fulfilment}]'
+            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {fulfilment}")
             link = psd_directory.link(row, mapping)
             if link: st.link_button('Open PSD', link + '#Open PSD')
             else: st.caption('PSD: Not linked')
