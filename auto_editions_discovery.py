@@ -124,7 +124,7 @@ class Discovery:
             return len(rows)
 
     @staticmethod
-    def candidate(cur, pid):
+    def candidate(cur, pid, *, rematch=False):
         # One DB snapshot only for due discovery, never on a UI load/host claim.
         # Full authoritative identities are needed to reject competing titles
         # and handles, including products that predate V15.
@@ -138,7 +138,8 @@ class Discovery:
         entries = [r['metadata'] for r in cur.fetchall()]
         cur.execute('SELECT * FROM product_psd_mappings WHERE dropbox_file_id=ANY(%s)',
                     ([e['id'] for e in entries],))
-        owners = {r['shopify_product_gid']: _record(r) for r in cur.fetchall()}
+        owners = {r['shopify_product_gid']: _record(r) for r in cur.fetchall()
+                  if not rematch or r['shopify_product_gid']!=pid}
         match = psd.reconcile(products, entries, owners).get(pid, {})
         if not match.get('verified') or match.get('state') != 'Linked':
             state = match.get('state', 'Not linked')
@@ -207,7 +208,8 @@ class Discovery:
         with self.connect() as conn, conn.cursor() as cur:
             self.fence(cur, token)
             cur.execute("""UPDATE auto_edition_discovery_cursor SET lease_token=NULL,lease_until=NULL,
-                next_poll_at=now()+(%s * interval '1 second') WHERE id=1""", (2 if more else 300,))
+                next_poll_at=now()+(CASE WHEN EXISTS(SELECT 1 FROM auto_edition_onboarding q
+                  WHERE to_jsonb(q)->'replacement'->>'stage'='Discovering') THEN 2 ELSE %s END * interval '1 second') WHERE id=1""", (2 if more else 300,))
 
     def tick(self, list_page, read_metadata):
         claim = self.claim()
@@ -222,6 +224,9 @@ class Discovery:
                 candidate = self.reconcile(token,request)
                 if candidate:
                     self.reconcile(token,request,read_metadata(candidate['id']))
+            if not page['has_more']:
+                from auto_editions_reset import Reset
+                Reset(self.connect).discover(token,read_metadata)
             self.finish(token,page['has_more'] or len(pending)==10)
             return True
         except Exception as error:

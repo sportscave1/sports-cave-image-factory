@@ -27,7 +27,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {observed} AS observed_source
+ {observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
@@ -111,7 +111,14 @@ def project(row, *, writable=False, now=None):
         elif status=='Blocked':
             state='Failed';why=reason(row.get('reason')) or 'Preparation is blocked.';actions=['retry']
         else:state='Failed';why='Onboarding checkpoint requires administrator review.'
+    reset=row.get('replacement') or {}
+    from auto_editions_discovery import enabled as discovery_enabled
+    if reset.get('stage') in ('Discovering','Queued','Preparing','Failed'):
+        state={'Discovering':'Queued','Queued':'Queued','Preparing':'Preparing','Failed':reset.get('failure_status','Failed')}[reset['stage']]
+        why=reason(reset.get('reason')) or ('Verifying the original PSD.' if reset['stage']=='Discovering' else '')
+        actions=[]
     return dict(product_gid=pid,status=state,icon=ICONS[state],reason=why,
+                reset_allowed=bool(writable and discovery_enabled() and status!='Preparing' and reset.get('stage') not in ('Discovering','Queued','Preparing')),
                 mapping_file_id=mapped,
                 checkpoint=CHECKPOINTS.get(row.get('checkpoint'),'Checkpoint recorded' if row.get('checkpoint') else ''),
                 checkpoint_at=str(row.get('checkpoint_at') or row.get('updated_at') or '') or None,
@@ -220,6 +227,19 @@ async def connect_action(request):
     except Exception as error:return api.failure(error)
 
 
+async def reset_action(request):
+    try:
+        import files_upload_api as files
+        import supabase_backend as db
+        from auto_editions_reset import Reset
+        user=await actor(request,write=True)
+        body=await files._json_body(request)
+        if set(body)!={'product_gid','request_id'}:raise ValueError('Reset selects one design only.')
+        stage=await run_in_threadpool(Reset(db.connect).request,identity(body['product_gid']),body['request_id'],str(user['id']))
+        return JSONResponse({'ok':True,'stage':stage},headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 async def detail_page(request):
     try:
         await actor(request)
@@ -230,4 +250,5 @@ async def detail_page(request):
 
 ROUTES=(('/api/auto-editions/status',statuses,('POST',)),
         ('/api/auto-editions/status/connect',connect_action,('POST',)),
+        ('/api/auto-editions/status/reset',reset_action,('POST',)),
         ('/auto-editions/status',detail_page,('GET',)))

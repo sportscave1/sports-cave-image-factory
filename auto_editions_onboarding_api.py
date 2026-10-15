@@ -179,21 +179,33 @@ def product_context(pid, token):
     with store.connect() as conn,conn.cursor() as cur:
         cur.execute("""SELECT q.*,m.dropbox_file_id,p.edition_total AS current_total,p.product_title
             FROM auto_edition_onboarding q
-            JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
+            LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
             JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
-            WHERE q.product_gid=%s AND q.status='Preparing' AND q.lease_token=%s
+            WHERE q.product_gid=%s AND (q.status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing') AND q.lease_token=%s
               AND q.lease_until>now()""",(pid,token))
         rows=cur.fetchall()
     if len(rows)!=1:raise ValueError('Preparation lease or product identity is unavailable.')
     row=rows[0]
-    if row['file_id']!=row['dropbox_file_id']:raise ValueError('PSD mapping changed during preparation.')
+    pending=row.get('replacement') or {}
+    reset_id=None
+    if pending.get('stage')=='Preparing':
+        from auto_editions_reset import snapshot
+        if row['dropbox_file_id']!=(pending['mapping_before'] or {}).get('dropbox_file_id') or snapshot(row)!=pending['previous']:
+            raise ValueError('The working design changed during reset.')
+        row['file_id']=pending['file_id'];row['source']=pending['source'];reset_id=pending['id']
+    elif row['file_id']!=row['dropbox_file_id']:raise ValueError('PSD mapping changed during preparation.')
     total=row['current_total']
     if type(total) is not int or not 1<=total<=1000:raise ValueError('Configure the product edition limit first.')
     assets=runtime.storage()
     meta=assets.integration.psd_open_metadata(assets.token,row['file_id'],include_preview=False)
+    if reset_id:
+        import psd_directory as psd
+        if not psd.approved_file(meta) or psd.filename_key(meta['name'][:-4]) not in psd.title_filename_keys(row['product_title']):
+            raise ValueError('Reset original PSD no longer matches the product.')
     source=ae.source_identity(pid,meta)
     if row['source'] and row['source']!=source:raise ValueError('Source revision changed. Retry preparation.')
     return dict(automatic=True,product_gid=pid,lease_token=str(token),source=source,
+                **({'reset_id':reset_id} if reset_id else {}),
                 metadata={k:meta[k] for k in ('id','rev','content_hash','size','name')},
                 number=1,total=total,product_title=row['product_title'])
 

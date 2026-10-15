@@ -7,7 +7,7 @@
   const retained=host.SportsCaveEditionStatusState||{scroll:[],nonce:0};
   host.SportsCaveEditionStatusState=retained;
   const controller=new host.AbortController();
-  let ids=[],baseline='',pending=null,inFlight=false,force=false,lastPoll=0,timer,interactionUntil=0,pointerHeld=false,touchHeld=false;
+  let ids=[],baseline='',pending=null,inFlight=false,force=false,refreshAfter=false,lastPoll=0,timer,interactionUntil=0,pointerHeld=false,touchHeld=false;
   const root=()=>doc.querySelector('.st-key-edition-workspace');
   const grid=()=>root()?.querySelector('[data-testid="stDataFrame"]');
   const modal=()=>doc.querySelector('dialog[open],[role="dialog"]');
@@ -32,11 +32,11 @@
       if(fingerprint(value.rows)!==baseline)pending=value;else pending=null;
       force=false;
     }catch(error){if(error.name!=='AbortError'&&baseline!=='Unavailable')pending={unavailable:true};force=false;}
-    finally{inFlight=false;flush();}
+    finally{inFlight=false;if(refreshAfter){refreshAfter=false;force=true;lastPoll=0;poll();}else flush();}
   }
   addEventListener('message',event=>{
     if(event.source!==host||event.data?.type!=='streamlit:render')return;
-    const args=event.data.args||{};ids=args.product_gids||[];baseline=fingerprint(args.rows||[]);
+    const args=event.data.args||{};ids=args.product_gids||[];baseline=fingerprint(args.rows||[]);retained.rows=args.rows||[];
     restore();host.requestAnimationFrame(restore);
   },{signal:controller.signal});
   doc.addEventListener('scroll',event=>{if((grid()?.contains(event.target)||event.target===doc.scrollingElement||event.target===doc.querySelector('[data-testid="stMain"]'))&&Date.now()>=(retained.restoreUntil||0))capture();},{capture:true,passive:true,signal:controller.signal});
@@ -60,7 +60,7 @@
   const observer=new host.MutationObserver(()=>{restore();if(force&&!modal())poll();else flush();});
   const scope=root();if(scope)observer.observe(scope,{childList:true,subtree:true});
   timer=host.setInterval(poll,25000);
-  const lifecycle={poll,flush,safe,destroy(){host.clearInterval(timer);controller.abort();observer.disconnect();}};
+  const lifecycle={poll,flush,safe,refresh(){force=true;lastPoll=0;if(inFlight){refreshAfter=true;return;}poll();},destroy(){host.clearInterval(timer);controller.abort();observer.disconnect();}};
   host.SportsCaveEditionStatus=lifecycle;
   addEventListener('pagehide',()=>{if(host.SportsCaveEditionStatus===lifecycle)lifecycle.destroy();},{once:true});
 })();
