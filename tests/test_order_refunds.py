@@ -130,6 +130,19 @@ class RefundTests(unittest.TestCase):
         self.assertFalse(refunds.blocked(row))
         self.assertEqual('Needs certificate', actions.final_fulfilment_status(row))
 
+    def test_mobile_cards_render_refund_status_and_historical_number(self):
+        fake = MagicMock()
+        rows = [{'order': '#EXAMPLE', 'edition': '#019/100', 'prodigi': 'Refund Pending'},
+                {'order': '#EXAMPLE2', 'edition': '#020/100', 'prodigi': 'Refunded',
+                 '_orders_refund': {'closed': True, 'blocked': True}}]
+        with patch.object(orders_page, 'st', fake), patch.object(orders_page.psd_directory, 'page_directory', return_value={}), patch.object(orders_page.psd_directory, 'link', return_value=''), patch.object(orders_page.psd_directory, 'render_missing_link_guard'), patch.object(orders_page.print_jpg, 'state', return_value={'label': '', 'reason': ''}), patch.object(orders_page.edition_test, 'eligible', return_value=False), patch('auto_editions_runtime.download_links', return_value={}), patch('auto_editions_runtime.enabled', return_value=False):
+            orders_page._render_mobile_orders(rows)
+        self.assertIn('line-through', fake.html.call_args.args[0])
+        self.assertIn('#019/100', fake.checkbox.call_args_list[0].args[0])
+        captions = ' '.join(call.args[0] for call in fake.caption.call_args_list)
+        self.assertIn(':red[Refund Pending]', captions)
+        self.assertIn(':red[Refunded]', captions)
+
     def test_refund_ui_styles_and_existing_refresh(self):
         self.assertIn('#c92a2a', orders_page._fulfilment_cell_style('Refunded'))
         self.assertIn('line-through', inspect.getsource(orders_page._display_table_payload))
