@@ -16,35 +16,39 @@ class Queue:
 
     def enqueue(self, pid, file_id, actor, *, newly_linked=True):
         with self.connect() as conn, conn.cursor() as cur:
-            cur.execute('SELECT dropbox_file_id FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
-            mapping = cur.fetchone()
-            if not mapping or mapping['dropbox_file_id'] != file_id:
-                raise ValueError('The verified PSD mapping changed.')
-            cur.execute('''SELECT p.hash,p.manifest FROM auto_edition_layouts l
-                JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
-                WHERE l.product_gid=%s AND p.manifest->'source'->>'file_id'=%s LIMIT 1''',(pid,file_id))
-            approved=cur.fetchone()
-            if approved:
-                cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,source,preparation_hash)
-                    VALUES(%s,%s,'Cloud Ready',%s::jsonb,%s) ON CONFLICT DO NOTHING""",
-                    (pid,file_id,json.dumps(approved['manifest']['source']),approved['hash']))
-                return
-            cur.execute("""SELECT hash,manifest FROM auto_edition_preparations
-                WHERE manifest->'source'->>'product_gid'=%s AND manifest->'source'->>'file_id'=%s
-                ORDER BY created_at DESC LIMIT 1""",(pid,file_id))
-            prepared=cur.fetchone()
-            if prepared:
-                cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,source,preparation_hash)
-                    VALUES(%s,%s,'Blocked','Prepared assets retained; review current source and visual quality.',%s::jsonb,%s)
-                    ON CONFLICT DO NOTHING""",(pid,file_id,json.dumps(prepared['manifest']['source']),prepared['hash']))
-                return
-            cur.execute('''INSERT INTO auto_edition_onboarding(product_gid,file_id,priority) VALUES(%s,%s,%s)
-                ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
-                preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=excluded.priority,
-                lease_token=NULL,lease_until=NULL,updated_at=now()
-                WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 0))
-            if cur.fetchone():
-                self.audit(cur,pid,actor,'queued')
+            self.enqueue_cursor(cur,pid,file_id,actor,newly_linked=newly_linked)
+
+    def enqueue_cursor(self, cur, pid, file_id, actor, *, newly_linked=True, expected_source=None):
+        """Reuse checkpoint decisions inside a mapping/registration transaction."""
+        cur.execute('SELECT dropbox_file_id FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
+        mapping = cur.fetchone()
+        if not mapping or mapping['dropbox_file_id'] != file_id:
+            raise ValueError('The verified PSD mapping changed.')
+        cur.execute('''SELECT p.hash,p.manifest FROM auto_edition_layouts l
+            JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
+            WHERE l.product_gid=%s AND p.manifest->'source'->>'file_id'=%s LIMIT 1''',(pid,file_id))
+        approved=cur.fetchone()
+        if approved and (expected_source is None or approved['manifest']['source']==expected_source):
+            cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,source,preparation_hash)
+                VALUES(%s,%s,'Cloud Ready',%s::jsonb,%s) ON CONFLICT DO NOTHING""",
+                (pid,file_id,json.dumps(approved['manifest']['source']),approved['hash']))
+            return
+        cur.execute("""SELECT hash,manifest FROM auto_edition_preparations
+            WHERE manifest->'source'->>'product_gid'=%s AND manifest->'source'->>'file_id'=%s
+            ORDER BY created_at DESC LIMIT 1""",(pid,file_id))
+        prepared=cur.fetchone()
+        if prepared:
+            cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,source,preparation_hash)
+                VALUES(%s,%s,'Blocked','Prepared assets retained; review current source and visual quality.',%s::jsonb,%s)
+                ON CONFLICT DO NOTHING""",(pid,file_id,json.dumps(prepared['manifest']['source']),prepared['hash']))
+            return
+        cur.execute('''INSERT INTO auto_edition_onboarding(product_gid,file_id,priority) VALUES(%s,%s,%s)
+            ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
+            preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=excluded.priority,
+            lease_token=NULL,lease_until=NULL,updated_at=now()
+            WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 0))
+        if cur.fetchone():
+            self.audit(cur,pid,actor,'queued')
 
     def seed(self, actor):
         """Resume existing mappings; completed products are not reset or rescanned."""

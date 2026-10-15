@@ -28,6 +28,7 @@ def _page():
 class EditionOpsTableEditingTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
+        self.stack.enter_context(patch('edition_auto_status_ui.status.batch',return_value={'rows':[],'query_count':1,'duration_ms':0}))
         self.stack.enter_context(patch.object(edition_ops.psd_directory, 'directory', return_value={}))
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(socket.socket, "connect", side_effect=AssertionError("No network in tests")))
@@ -50,6 +51,7 @@ class EditionOpsTableEditingTests(unittest.TestCase):
         kwargs = fake_st.data_editor.call_args.kwargs
         self.assertEqual(kwargs["column_order"], (
             "product_title", "edition_next_number", "edition_total", "display_status", "psd_file",
+            "auto_editions",
         ))
         for field in ("edition_total", "edition_next_number", "edition_enabled"):
             self.assertNotIn(field, kwargs["disabled"])

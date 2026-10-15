@@ -8108,6 +8108,7 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
         result = upsert_shopify_products_to_edition_products(
             eligible, source=source, config=config, sync_inserted_metafields=False,
             sync_variants=False, missing_only=missing_only,
+            discovery_event=webhook_id or source,
         )
     except Exception as error:
         _webhook_log("edition_product_registration_error", "failed", topic=topic, webhook_id=webhook_id,
@@ -8154,6 +8155,7 @@ def upsert_shopify_products_to_edition_products(
     raise_on_apply_errors=False,
     sync_variants=True,
     missing_only=False,
+    discovery_event=None,
 ):
     """Shared Shopify product -> edition_products upsert path.
 
@@ -8198,6 +8200,9 @@ def upsert_shopify_products_to_edition_products(
                 )
             if apply_summary.get("errors"):
                 raise RuntimeError("; ".join(apply_summary["errors"][:3]))
+            if discovery_event is not None:
+                from auto_editions_discovery import register
+                register(cur,active_draft_products,discovery_event)
         conn.commit()
 
     summary.update(

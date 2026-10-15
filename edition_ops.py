@@ -55,6 +55,7 @@ EDITABLE_FIELDS = (
 
 VISIBLE_COLUMNS = (
     "product_title", "edition_next_number", "edition_total", "display_status", "psd_file",
+    "auto_editions",
 )
 
 CSV_COLUMNS = (
@@ -1979,12 +1980,14 @@ def _apply_csv_import(uploaded_file):
     return True
 
 
-def _editor_payload(row, psd_mapping=None):
+def _editor_payload(row, psd_mapping=None, auto_status=None):
     normalised = _normalise_row(row)
     keys = ("edition_product_id", "shopify_product_gid", *VISIBLE_COLUMNS)
     payload = {key: normalised.get(key) for key in keys}
     payload["display_status"] = psd_directory.status(normalised)
     payload["psd_file"] = psd_directory.display_link(normalised, psd_mapping if psd_mapping is not None else psd_directory.page_directory(), missing="Add")
+    from edition_auto_status_ui import link
+    payload['auto_editions']=link(normalised,auto_status or {})
     return payload
 
 
@@ -2042,6 +2045,7 @@ def _column_config():
         "edition_status": st.column_config.TextColumn("Status"),
         "display_status": st.column_config.TextColumn("Status",width="small"),
         "psd_file": st.column_config.LinkColumn("File", display_text=r"(Open PSD|Add|Unavailable)$", width="small"),
+        "auto_editions": st.column_config.LinkColumn('Auto Editions',display_text=r'#(.*)$',width='small'),
     }
 
 
@@ -2408,22 +2412,30 @@ def _render_advanced_controls(backend, rows, *, inline=False):
 def _render_table():
     """Existing native grid, with local interactions and bounded visible rows."""
     _ensure_state()
-    _hydrate_from_snapshot_once()
+    live_event=st.session_state.get('edition-auto-live')
+    status_only=isinstance(live_event,dict) and live_event.get('nonce')!=st.session_state.get('edition-auto-status-event')
+    if not status_only:_hydrate_from_snapshot_once()
     backend=_configured_supabase_backend()
     rows=_mark_current_changes(st.session_state.get(ROWS_KEY,[]),st.session_state.get(ORIGINAL_ROWS_KEY,[]))
     st.session_state[ROWS_KEY]=rows
+    auto_force=False
     with st.container(horizontal=True,vertical_alignment='bottom'):
         with st.container(width=130):st.subheader('Edition Ops')
         with st.container(width='stretch'):visible,selected=_editor_visible_rows(rows)
         with st.container(width=150):
             status=st.selectbox('Status',['All','Active','Pending sync','Needs review'],key='edition-status-filter')
+        with st.container(width=140):
+            from auto_editions_status import LABELS
+            auto_filter=st.selectbox('Auto Editions',['All',*LABELS],key='edition-auto-filter')
         if st.button('Refresh',key='edition-refresh'):
-            if selected!=ALL_PRODUCTS_SELECTION:
+            auto_force=True
+            dirty=bool(_editable_changed_keys(rows,st.session_state.get(ORIGINAL_ROWS_KEY,[])))
+            if not dirty and selected!=ALL_PRODUCTS_SELECTION:
                 from edition_version_ui import refresh_handle
                 match=next((r for r in rows if _stable_row_key(r)==selected),None)
                 if match:refresh_handle(match['handle'])
-            else:_reload_products_from_supabase()
-            st.session_state.pop(EDITOR_KEY,None);st.rerun(scope='fragment')
+            elif not dirty:_reload_products_from_supabase()
+            rows=st.session_state.get(ROWS_KEY,rows)
         save_clicked=st.button('Save & Sync Shopify',type='secondary',disabled=not backend or not rows,key='edition-ops-save-changes')
         from edition_version_ui import advanced
         advanced()
@@ -2447,16 +2459,29 @@ def _render_table():
     if status=='Active':visible=[r for r in visible if r['edition_enabled']]
     elif status=='Pending sync':visible=[r for r in visible if r['sync_status'].casefold() in SHOPIFY_RETRY_STATUSES or r.get('run_status')=='pending_sync']
     elif status=='Needs review':visible=[r for r in visible if r.get('sync_error')]
-    criteria=(selected,status)
+    import edition_auto_status_ui as auto_ui
+    auto_rows=visible
+    auto_status=auto_ui.snapshot(st,backend,auto_rows,force=auto_force)
+    if auto_filter!='All':visible=[r for r in visible if auto_status.get(psd_directory.product_id(r),{}).get('status')==auto_filter]
+    criteria=(selected,status,auto_filter)
     if st.session_state.get('edition-grid-criteria')!=criteria:
         st.session_state['edition-grid-criteria']=criteria;st.session_state['edition-grid-page']=0;st.session_state.pop(EDITOR_KEY,None)
-    psd_mapping = psd_directory.page_directory(st)
-    st.data_editor([_editor_payload(r, psd_mapping) for r in visible],hide_index=True,width='stretch',height=600,num_rows='fixed',
+    if status_only and 'edition-auto-file-mapping' in st.session_state:
+        psd_mapping=dict(st.session_state['edition-auto-file-mapping'])
+        for pid,value in auto_status.items():
+            if 'mapping_file_id' not in value:continue
+            if value['mapping_file_id']:
+                psd_mapping[pid]={'verified':True,'state':'Linked','dropbox_file_id':value['mapping_file_id']}
+            else:psd_mapping.pop(pid,None)
+    else:psd_mapping = psd_directory.page_directory(st)
+    st.session_state['edition-auto-file-mapping']=psd_mapping
+    st.data_editor([_editor_payload(r, psd_mapping,auto_status) for r in visible],hide_index=True,width='stretch',height=600,num_rows='fixed',
         key=EDITOR_KEY,column_order=VISIBLE_COLUMNS,on_change=_capture_editor_changes,args=(deepcopy(visible),),
-        column_config=_column_config(),row_height=32,
-        disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url','display_status','psd_file'])
+        column_config=_column_config(),row_height=28,
+        disabled=['product_title','handle','edition_sold_count','edition_remaining','edition_status','sync_status','admin_url','online_store_url','display_status','psd_file','auto_editions'])
     psd_directory.render_missing_link_guard(st)
     psd_directory.render_import(rows, st)
+    auto_ui.live(st,auto_rows,auto_status)
     if selected!=ALL_PRODUCTS_SELECTION:
         for row in visible:
             if row.get('sync_error'):

@@ -34,11 +34,21 @@ def priority(row, current=0):
     return 0, 'Deferred until an order, active advertisement or Prepare Now'
 
 
-def refresh(queue, actor):
-    """Called by host polling: the first synced order wakes a deferred mapping."""
+def refresh(queue, actor, *, limit=None):
+    """Worker batches rotate durably; explicit legacy Resume retains a full refresh."""
     with queue.connect() as conn, conn.cursor() as cur:
-        cur.execute(SQL);signals=[dict(r) for r in cur.fetchall()]
-        cur.execute('SELECT product_gid,priority,status FROM auto_edition_onboarding')
+        if limit is not None:
+            cur.execute("""SELECT product_gid FROM auto_edition_onboarding
+                WHERE status='Awaiting preparation' ORDER BY priority_checked_at NULLS FIRST,product_gid
+                LIMIT %s FOR UPDATE SKIP LOCKED""",(max(1,min(int(limit),100)),))
+            ids=[r['product_gid'] for r in cur.fetchall()]
+            if not ids:return []
+            cur.execute(SQL+' WHERE m.shopify_product_gid=ANY(%s)',(ids,))
+            signals=[dict(r) for r in cur.fetchall()]
+            cur.execute('SELECT product_gid,priority,status FROM auto_edition_onboarding WHERE product_gid=ANY(%s)',(ids,))
+        else:
+            cur.execute(SQL);signals=[dict(r) for r in cur.fetchall()]
+            cur.execute('SELECT product_gid,priority,status FROM auto_edition_onboarding')
         existing={r['product_gid']:dict(r) for r in cur.fetchall()}
         for row in signals:
             old=existing.get(row['product_gid'])
@@ -49,4 +59,6 @@ def refresh(queue, actor):
                 AND (priority<>%s OR reason<>%s) RETURNING product_gid""",
                 (score,reason,row['product_gid'],score,reason))
             if cur.fetchone():queue.audit(cur,row['product_gid'],actor,'priority',{'priority':score,'reason':reason})
+        if limit is not None:
+            cur.execute('UPDATE auto_edition_onboarding SET priority_checked_at=now() WHERE product_gid=ANY(%s)',(ids,))
     return signals

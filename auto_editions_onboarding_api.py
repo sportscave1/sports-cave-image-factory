@@ -206,6 +206,11 @@ async def summary(request):
         public=[{**{k:r[k] for k in ('product_gid','product_title','status','reason','preparation_hash','attempts')},
                  'priority':r['priority'],
                  'status':'Deferred' if r['status']=='Awaiting preparation' and r['priority']==0 else r['status']} for r in rows]
+        from auto_editions_status import reason as public_reason
+        for item in public:item['reason']=public_reason(item.get('reason'))
+        from auto_editions_discovery import enabled,waiting_rows
+        if enabled():
+            public.extend(await run_in_threadpool(waiting_rows,queue().connect))
         with queue().connect() as conn,conn.cursor() as cur:
             cur.execute('SELECT count(*) AS total FROM product_psd_mappings')
             mapped=cur.fetchone()['total']
@@ -237,7 +242,9 @@ async def claim(request):
         if await files._json_body(request)!={}:raise ValueError('Preparation reads authoritative product identities.')
         from auto_editions_priority import refresh
         store=queue()
-        await run_in_threadpool(refresh,store,str(user['id']))
+        from auto_editions_discovery import enabled
+        if not enabled():
+            await run_in_threadpool(refresh,store,str(user['id']))
         row=await run_in_threadpool(store.claim,str(user['id']))
         if not row:return JSONResponse(dict(grant=None),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,row['product_gid'],str(row['lease_token']))
@@ -315,7 +322,26 @@ async def reconnect(request):
     except Exception as error:return api.failure(error)
 
 
+async def discrepancies(request):
+    try:
+        await api.actor(request,setup=True)
+        from auto_editions_discovery import prepared_report
+        import files_upload_api as files
+        digest=request.query_params.get('preparation_hash','')
+        offset=int(request.query_params.get('offset','0'))
+        if not 0<=offset<=1000:raise ValueError('Invalid asset offset.')
+        def inspect():
+            auth=files._dropbox_context()
+            return prepared_report(queue().connect,
+                lambda fid:files.dropbox_integration.psd_open_metadata(auth['access_token'],fid,include_preview=False),
+                digest,offset)
+        result=await run_in_threadpool(inspect)
+        return JSONResponse(result,headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 ROUTES=(('/api/auto-editions/onboarding',summary,('GET',)),
+        ('/api/auto-editions/onboarding/discrepancies',discrepancies,('GET',)),
         ('/api/auto-editions/onboarding/prepare-now',prepare_now,('POST',)),
         ('/api/auto-editions/onboarding/reconnect',reconnect,('POST',)),
         ('/api/auto-editions/onboarding/host',register_host,('POST',)),

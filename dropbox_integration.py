@@ -96,7 +96,7 @@ def _metadata_to_dict(metadata):
     if isinstance(metadata, dict):
         return dict(metadata)
     class_name = metadata.__class__.__name__.casefold()
-    tag = "folder" if "folder" in class_name else "file" if "file" in class_name else ""
+    tag = "deleted" if "deleted" in class_name else "folder" if "folder" in class_name else "file" if "file" in class_name else ""
     row = {".tag": tag}
     for field in (
         "id",
@@ -122,6 +122,8 @@ def _dropbox_error(error, fallback="Dropbox request failed."):
     message = str(error or "").strip() or fallback
     wrapped = DropboxApiError(message[:500])
     api_error = getattr(error, "error", None)
+    wrapped.cursor_reset = bool(api_error is not None and
+                                callable(getattr(api_error,'is_reset',None)) and api_error.is_reset())
     try:
         if api_error is not None and api_error.is_incorrect_offset():
             offset_error = api_error.get_incorrect_offset()
@@ -399,7 +401,7 @@ def list_folder(access_token, path="", *, max_entries=2000):
     return [_metadata_to_dict(entry) for entry in entries[:limit]]
 
 
-def list_folder_page(access_token, path="", *, cursor="", limit=500):
+def list_folder_page(access_token, path="", *, cursor="", limit=500, include_deleted=False):
     """Return one non-recursive Dropbox folder page without scanning the whole folder."""
     clean_path = normalize_dropbox_path(path)
     page_limit = max(1, min(int(limit or 500), 2000))
@@ -411,7 +413,7 @@ def list_folder_page(access_token, path="", *, cursor="", limit=500):
             response = client.files_list_folder(
                 clean_path,
                 recursive=False,
-                include_deleted=False,
+                include_deleted=include_deleted,
                 include_media_info=False,
                 limit=page_limit,
             )

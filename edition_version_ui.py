@@ -17,6 +17,15 @@ STYLE='''<style>
 .st-key-edition-workspace [data-baseweb="select"]>div{min-height:34px;border-radius:4px}
 .st-key-edition-workspace [data-testid="stExpander"] summary{padding:4px 8px;min-height:32px}
 .st-key-edition-workspace [data-testid="stElementContainer"]{min-width:0;max-width:100%}
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter){flex-wrap:nowrap!important}
+@media(max-width:800px){
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter){overflow-x:auto;padding-bottom:4px}
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter)>*{flex-shrink:0!important}
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter)>:nth-child(2){min-width:220px}
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter)>:last-child{min-width:100px}
+}
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter) h3{margin:0!important;line-height:28px!important;padding:0!important}
+.st-key-edition-workspace [data-testid="stHorizontalBlock"]:has(.st-key-edition-auto-filter) [data-testid="stHeading"] [data-testid="stMarkdownContainer"]{margin-bottom:0!important}
 </style>'''
 
 

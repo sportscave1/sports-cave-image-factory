@@ -128,3 +128,26 @@ def test_lost_success_response_uses_receipt_without_second_upload(tmp_path):
     assert row['status']=='Prepared' and post.call_count==1
     assert row['server_timings']['validation_seconds']==5
     cleanup.assert_called_once_with(row)
+
+
+def test_interrupted_photoshop_releases_only_its_lease_and_preserves_source(tmp_path):
+    folder=tmp_path/'job';folder.mkdir()
+    original=folder/'input.psd';original.write_bytes(b'synthetic working source')
+    lease=folder/'processor.lock';lease.write_bytes(b'owned lease')
+    ctx={'automatic':True,'source':{'file_id':'id:synthetic'},'number':1,'total':100}
+    row={'folder':folder,'grant':{},'context':ctx,'status':'Working'}
+    with patch.object(local,'JOBS',{'job':row}),patch.object(local,'context',return_value=ctx),\
+            patch.object(local,'processor_lease',return_value=lease),\
+            patch('scripts.prepare_auto_editions.prepare',side_effect=RuntimeError('Photoshop interrupted')):
+        local.prepare_worker('job',{'number':'Number','plaque':'Plaque'})
+    assert row['status']=='Blocked' and not lease.exists()
+    assert original.read_bytes()==b'synthetic working source'
+    assert not (folder/'prepared.zip').exists()
+
+
+def test_existing_shared_photoshop_lock_is_never_stolen(tmp_path):
+    lock=tmp_path/'Documents'/'SportsCavePrintJobs'/'processor.lock'
+    lock.parent.mkdir(parents=True);lock.write_bytes(b'unknown existing operation')
+    with patch.object(Path,'home',return_value=tmp_path):
+        with pytest.raises(FileExistsError):local.processor_lease()
+    assert lock.read_bytes()==b'unknown existing operation'
