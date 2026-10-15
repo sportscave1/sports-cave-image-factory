@@ -47,6 +47,10 @@ class Preparations:
         return resolve_layouts(rows)
 
     def for_unit(self,unit):
+        from auto_editions_quality_store import Quality
+        production=Quality(self.connect).for_unit(unit)
+        if production:
+            return production
         index=self.layouts(unit['shopify_product_gid'])
         key=(unit['shopify_product_gid'],variant_id(unit.get('shopify_variant_id')))
         row=index.get(key) or index.get((key[0],'*'))
@@ -107,6 +111,10 @@ class Preparations:
         result=LayoutIndex({key:row['approval'].get('allocation_ids') for key,row in layouts.items()})
         result.reasons=layouts.reasons
         result.hashes={key:row['preparation_hash'] for key,row in layouts.items()}
+        from auto_editions_quality_store import Quality
+        for key,digest in Quality(self.connect).index().items():
+            result[key]=None
+            result.hashes[key]=digest
         return result
 
 

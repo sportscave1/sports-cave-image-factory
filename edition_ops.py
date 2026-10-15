@@ -2425,8 +2425,8 @@ def _render_table():
         with st.container(width=150):
             status=st.selectbox('Status',['All','Active','Pending sync','Needs review'],key='edition-status-filter')
         with st.container(width=140):
-            from auto_editions_status import LABELS
-            auto_filter=st.selectbox('Auto Editions',['All',*LABELS],key='edition-auto-filter')
+            from auto_editions_status import labels
+            auto_filter=st.selectbox('Auto Editions',['All',*labels()],key='edition-auto-filter')
         if st.button('Refresh',key='edition-refresh'):
             auto_force=True
             dirty=bool(_editable_changed_keys(rows,st.session_state.get(ORIGINAL_ROWS_KEY,[])))
