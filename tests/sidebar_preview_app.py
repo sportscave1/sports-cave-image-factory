@@ -10,7 +10,8 @@ import ads_navigation as ads_nav
 import analytics_navigation as analytics_nav
 import files_window_launcher
 
-source=(Path(__file__).resolve().parents[1]/'app.py').read_text(encoding='utf-8')
+__file__=str(Path(__file__).resolve().parents[1]/'app.py')
+source=Path(__file__).read_text(encoding='utf-8')
 tree=ast.parse(source)
 names={'inject_styles','_sidebar_route_clicked','_sidebar_route_button','_active_sidebar_group','_toggle_sidebar_group','_render_sidebar_create_growth','_render_sidebar_create_reporting','render_sidebar'}
 constants={'SIDEBAR_ICON_BY_ROUTE','SIDEBAR_NAV_LABELS','SIDEBAR_OPEN_GROUP_KEY','MENU_OPTIONS','NAVIGATION_HISTORY_ROUTE_STATE_KEY'}

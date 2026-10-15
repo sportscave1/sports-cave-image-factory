@@ -19,6 +19,29 @@ HOST_STOP=threading.Event()
 HOST_BUSY=threading.Event()
 HOST_FILE=Path.home()/'Documents'/'SportsCaveAutoEditions'/'preparation-host.dpapi'
 RECOVERY_CURSOR=0
+HOST_RETRY_AT=0
+HOST_FAILURES=0
+HOST_LAST_DIAGNOSTIC=None
+
+
+def health_payload():
+    import hashlib
+    active=next((r for r in list(JOBS.values()) if r.get('status')=='Working'),None)
+    retained=next((r for r in list(JOBS.values()) if r.get('checkpoint_pending') or r.get('status')=='Recovering'),{})
+    row=active or retained;stage=row.get('phase','Unknown')
+    if stage not in ('Claimed','Photoshop','Preparing','Uploading','Verifying','Review'):stage='Recovery' if retained else 'Unknown'
+    if row and row.get('_last_stage')!=stage:row['_last_stage']=stage;row['last_progress_at']=time.time()
+    marker=transfer.ROOT/'AUTO_EDITIONS_INSTALLED_RELEASE.json'
+    try:revision=json.loads(marker.read_text()).get('revision','local')
+    except (OSError,ValueError):revision='local'
+    locked=(Path.home()/'Documents/SportsCavePrintJobs/processor.lock').exists()
+    result=dict(state='Recovering' if HOST_FAILURES or retained or locked and not active else 'Live' if active else 'Idle',
+        stage=stage,revision=revision,protocol=1,code_hash=hashlib.sha256(Path(__file__).read_text(encoding='utf-8-sig').replace('\r\n','\n').encode()).hexdigest(),
+        product_gid=row.get('context',{}).get('product_gid'),last_progress_at=row.get('last_progress_at',row.get('started_at',0)),
+        retry_at=max(HOST_RETRY_AT,row.get('retry_at',0)),recovery_failures=max(HOST_FAILURES,row.get('recovery_failures',0)),
+        checkpoint_pending=bool(row.get('checkpoint_pending')),processor_lock=locked and not bool(active))
+    if row.get('diagnostic') or HOST_LAST_DIAGNOSTIC:result['diagnostic']=row.get('diagnostic') or HOST_LAST_DIAGNOSTIC
+    return result
 
 
 def configure_host(config):
@@ -51,11 +74,12 @@ def journal(row):
     atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
         phase=row.get('phase','Preparing'),status=row['status'],error=row.get('error',''),
         repair=bool(row.get('repair')),checkpoint_pending=bool(row.get('checkpoint_pending')),
-        started_at=row.setdefault('started_at',time.time()),retry_at=row.get('retry_at',0),recovery_failures=row.get('recovery_failures',0)))
+        started_at=row.setdefault('started_at',time.time()),retry_at=row.get('retry_at',0),recovery_failures=row.get('recovery_failures',0),diagnostic=row.get('diagnostic')))
 
 
 def host_request(config,path,body):
     import requests
+    if path.rsplit('/',1)[-1] in ('claim','heartbeat','reconnect'):body={**body,'health':health_payload()}
     response=requests.post(config['base_url']+path,json=body,
         headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=20)
     response.raise_for_status();return response.json()
@@ -108,6 +132,7 @@ def recover_retained(config):
 
 
 def host_loop():
+    global HOST_FAILURES,HOST_RETRY_AT,HOST_LAST_DIAGNOSTIC
     from device_trust import protect
     failures=0
     while not HOST_STOP.is_set():
@@ -139,10 +164,13 @@ def host_loop():
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):start(data['grant'],initial_context=data.get('context'));state='Preparing'
             failures=0
+            HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
                 companion_pid=os.getpid(),version='unattended-recovery-v1'))
         except Exception as error:
             failures=min(failures+1,5);delay=min(30*2**(failures-1),300)
+            HOST_FAILURES=failures;HOST_RETRY_AT=time.time()+delay
+            HOST_LAST_DIAGNOSTIC=safe_diagnostic(str(error) if isinstance(error,ValueError) else type(error).__name__,'Recovery')
             try:atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status='Recovering',
                 error_type=type(error).__name__,retry_seconds=delay,companion_pid=os.getpid()))
             except OSError:pass
@@ -261,7 +289,7 @@ def reconnect(row):
     if config['base_url']!=row['grant']['base_url']:raise ValueError('Preparation origin changed.')
     ctx=row['context']
     response=requests.post(config['base_url']+'/api/auto-editions/onboarding/reconnect',
-        json={k:ctx[k] for k in ('product_gid','lease_token')},
+        json={**{k:ctx[k] for k in ('product_gid','lease_token')},'health':health_payload()},
         headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=90)
     response.raise_for_status();data=response.json()
     if data.get('completed'):
@@ -346,7 +374,7 @@ def report_failure(row):
         reconnect(row)
         grant=row['grant']
         response=requests.post(grant['base_url']+'/api/auto-editions/onboarding/fail?'+urlencode({'ticket':grant['ticket']}),
-            json=dict(reason=row['error'][:500],repair=bool(row.get('repair'))),
+            json=dict(reason=row['error'][:500],repair=bool(row.get('repair')),diagnostic=row.get('diagnostic') or safe_diagnostic(row['error'],row.get('phase','Unknown'))),
             headers={'X-Sports-Cave-Transfer-Secret':grant['secret']},allow_redirects=False,timeout=30)
         response.raise_for_status()
         row['checkpoint_pending']=False; row['checkpoint_reported']=True; journal(row)
@@ -366,6 +394,7 @@ def inspect(key):
     try:
         from scripts.photoshop_dispatch import run
         row=JOBS[key];grant=row['grant'];meta=row['context']['metadata'];folder=row['folder']
+        row['phase']='Claimed'
         source=folder/'input.psd'
         manifest=transfer.get(grant,'/api/files-native-transfer/manifest?'+urlencode({'ticket':grant['ticket']}))
         if len(manifest['items'])!=1:raise ValueError('Expected the one linked PSD.')
@@ -387,6 +416,7 @@ def inspect(key):
         if count!=meta['size'] or transfer.digest(source,True)!=meta['content_hash']:raise ValueError('Source checksum failed.')
         row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
         phase='Photoshop inspection'
+        row['phase']='Photoshop';journal(row)
         lease=processor_lease()
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
                      entries=[dict(work_path=str(source),product_gid=row['context']['source']['product_gid'],
@@ -440,6 +470,7 @@ def failure_detail(row,stage,error):
     """Retain Photoshop's cause locally; never put paths/capabilities in status."""
     import re
     message=str(error)[:4000]
+    row['diagnostic']=safe_diagnostic(message,'Preparing')
     for value in [*row.get('grant',{}).values(),row.get('context',{}).get('lease_token')]:
         if isinstance(value,str) and len(value)>8:message=message.replace(value,'[redacted]')
     message=re.sub(r'https?://[^\s]+','[redacted URL]',message)
@@ -455,12 +486,23 @@ def failure_detail(row,stage,error):
     return str(error)[:350] if isinstance(error,ValueError) else type(error).__name__
 
 
+def safe_diagnostic(message,stage):
+    from worker_diagnostics import explain
+    value=explain(message,stage)
+    result={k:value[k] for k in ('code','stage','component')}
+    marker=transfer.ROOT/'AUTO_EDITIONS_INSTALLED_RELEASE.json'
+    try:result['revision']=json.loads(marker.read_text()).get('revision','local')
+    except (OSError,ValueError):result['revision']='local'
+    return result
+
+
 def prepare_worker(key,roles,scale=1):
     lease=None
     try:
         from scripts.prepare_auto_editions import prepare as build
         from auto_editions_package import MAX_PACKAGE_BYTES
         row=JOBS[key];ctx=context(row['grant'])
+        row['phase']='Preparing';journal(row)
         if ctx!=row['context']:raise ValueError('Preparation identity changed.')
         lease=processor_lease()
         output=row['folder']/'prepared'
