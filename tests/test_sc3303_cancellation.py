@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import os
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from scripts import repair_sc3303 as repair
 from edition_cancellation import require_certificate_allocation
@@ -68,6 +68,29 @@ class TransactionTests(unittest.TestCase):
 
     def apply(self):
         return repair.apply(self.cur,shopify(),datetime.now(timezone.utc),self.actor)
+
+    def test_cancelled_allocation_is_excluded_from_every_search_branch(self):
+        import supabase_backend as backend
+        self.cur.execute('ALTER TABLE edition_orders ADD COLUMN product_handle text')
+        self.cur.execute("UPDATE edition_orders SET customer_name='Heath Morgan' WHERE id=678")
+        self.apply()
+
+        def ids(search, history=False):
+            connection = MagicMock()
+            capture = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
+            with patch.object(backend, 'ensure_schema'), patch.object(backend, 'connect', return_value=connection):
+                backend.list_edition_orders(search=search, include_cancelled=history)
+            sql, params = capture.execute.call_args.args
+            where = sql[sql.index('WHERE '):sql.index('ORDER BY COALESCE')]
+            self.cur.execute('SELECT eo.id FROM edition_orders eo LEFT JOIN shopify_orders o '
+                             'ON o.shopify_order_id=eo.shopify_order_id ' + where, params[:-1])
+            return {row['id'] for row in self.cur.fetchall()}
+
+        for search in ('', '#SC3303', 'SC3303', '19', '019', 'Heath Morgan', repair.HANDLE):
+            with self.subTest(search=search):
+                self.assertNotIn(678, ids(search))
+        self.assertEqual(ids('#SC3303', history=True), {678})
+        self.assertTrue(ids('#SC3302'))
 
     def test_exact_one_decrement_history_replay_and_next_customer(self):
         c=self.cur

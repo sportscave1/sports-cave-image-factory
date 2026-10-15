@@ -1,0 +1,62 @@
+SC3303 targeted correction — applied 15 October 2026
+
+The owner explicitly approved deployment and the correction. Initial safeguards
+were deployed at ae1734b41f80d0302af5553bcb123a32cc681aec. Five database guards
+were installed through the Supabase migration tool.
+
+The audited transaction committed at 2026-10-15T11:52:25.486290Z.
+Repair key: sc3303-release-019-20261015
+Cursor override: 0316faf6-c0cc-502a-9ad8-3be7e6088a4b
+Before-snapshot SHA256:
+95b6b9a0d207b848c6d07a1e5b4428f1bef70ad860d9ecfd8b7c2d2ccdc9dd35
+
+Verified production result
+- SC3303 is CANCELLED. Original allocation row 678 is retained, invalid and
+  cancelled, with certificate status Cancelled. Edition 019 is released.
+- Product and active run next number: 19; sold: 18; remaining: 82; last: 18.
+- The existing product mirror completed with compare-and-set verification.
+  Shopify sports_cave.edition_next_number and next_edition_number both read 19;
+  sold aliases read 18, remaining aliases 82, last_assigned_edition 18.
+- Shopify payment/refund processing was not modified.
+- Source tombstone and canonical cancellation locks prevent reallocation to
+  this order. Order/line triggers preserve cancellation on replay. Allocation,
+  certificate and dispatch triggers reject restoration or issuance.
+- The original order, allocation snapshot and full audit evidence remain.
+
+Checks before release
+Fresh Shopify connector evidence showed AUD 0, zero current items, no
+fulfilments, and a CLOSED/UNSUBMITTED fulfilment order. The Render app token
+lacked fulfillmentOrders scope, so the connected Shopify tool supplied that
+complete evidence; no permissions were expanded. The maintenance function
+validated its timestamp within 120 seconds. Database checks found exactly
+editions 001–019 and no later allocation, certificate, dispatch, Auto Editions
+job, pending webhook or tombstone conflict. Checks repeated inside the transaction
+with the product advisory lock, row locks and short queue/certificate locks.
+No recorded issuance evidence exists; software cannot prove an unrecorded handover.
+
+Preservation evidence
+Inside the transaction, full-row hashes before and after matched for every
+other edition allocation, every other product/run and orders SC3301/3302/3304.
+Those hashes remain in the repair audit. Independent reads confirmed SC3301=017,
+SC3302=018 and SC3304=009 in its different product run.
+
+Search regression discovered during live verification
+The initial cancellation filter followed an ungrouped OR search predicate.
+Searching by order name could still display the cancelled allocation. This
+revision groups search predicates so the active filter applies to every search
+branch. Explicit include_cancelled=True retains history. Certificate generation
+already rejects the cancelled order before any external side effect.
+
+Validation
+- Six disposable PostgreSQL/PGlite cancellation tests, including executable SQL
+  search predicates, exact decrement, preservation, replay protection, conflict
+  rejection, transaction rollback and next-customer allocation of 019.
+- Combined cancellation, Instant Experience, cleanup-plan, navigation and
+  Settings suite: 47 passed. Settings fixture uses the actual app source path.
+- Shopify regression suite: 173 run, 34 intentionally skipped, no failures.
+- Existing verified-source navigation tests recovered from V9 work: 7 passed.
+- Render topology validation passed. No infrastructure replacement is proposed.
+
+Never rerun the repair to decrement again. It rejects an existing audit.
+Any subsequent legitimate allocation must be preserved. Verify current database
+and Shopify values rather than rewriting a stale fixed next number.

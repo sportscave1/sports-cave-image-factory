@@ -23430,7 +23430,7 @@ def _edition_order_search_filter(search):
 
     if not conditions:
         return "", []
-    return "WHERE " + "\n                       OR ".join(conditions), params
+    return "WHERE (" + "\n                       OR ".join(conditions) + ")", params
 
 
 def list_edition_orders(search="", limit=250, *, include_cancelled=False):

@@ -136,6 +136,9 @@ class EmailReturnTests(unittest.TestCase):
             entry['expires'] = 0
         self.imap.calls.clear()
         self.render_return()
+        self.assertEqual(self.imap.calls, [])
+        import uuid
+        self.w.handle({'id': str(uuid.uuid4()), 'action': 'load_mail_metadata'})
         self.assertEqual(sum(call[0] == 'headers' for call in self.imap.calls), 1)
 
     def test_explicit_refresh_still_forces_provider_reads(self):

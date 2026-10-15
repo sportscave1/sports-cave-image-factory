@@ -12,9 +12,10 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def main():
     with socket.socket() as probe:
-        probe.bind(('127.0.0.1',8891))
-    environment={**os.environ,'POST_AD_COMPACT_PROGRESS':'1','META_POSTING_UI_FIXTURE':'1'}
-    command=[sys.executable,'-c',"import uvicorn; from streamlit.web.server.starlette import App; uvicorn.run(App('tests/meta_posting_progress_fixture.py'),host='127.0.0.1',port=8891)"]
+        probe.bind(('127.0.0.1',0))
+        port = probe.getsockname()[1]
+    environment={**os.environ,'POST_AD_COMPACT_PROGRESS':'1','META_POSTING_UI_FIXTURE':'1','POSTING_FIXTURE_URL':f'http://127.0.0.1:{port}'}
+    command=[sys.executable,'-c',f"import uvicorn; from streamlit.web.server.starlette import App; uvicorn.run(App('tests/meta_posting_progress_fixture.py'),host='127.0.0.1',port={port})"]
     with (ROOT/'tmp/meta_repair_browser_server.log').open('w',encoding='utf8') as log:
         process=subprocess.Popen(command,cwd=ROOT,env=environment,stdout=log,stderr=log,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
@@ -24,7 +25,7 @@ def main():
                 if process.poll() is not None:
                     raise RuntimeError('Local posting fixture exited')
                 try:
-                    with urllib.request.urlopen('http://127.0.0.1:8891/_stcore/health',timeout=1):
+                    with urllib.request.urlopen(f'http://127.0.0.1:{port}/_stcore/health',timeout=1):
                         break
                 except OSError:
                     if time.monotonic()>deadline:
@@ -36,7 +37,9 @@ def main():
                 subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             else:
                 process.terminate()
-            process.wait(timeout=5)
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
 
 
 if __name__=='__main__':

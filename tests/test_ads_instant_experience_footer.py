@@ -83,29 +83,20 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             self.assertEqual(instant_experience_prompt(country).count(footer), 3)
         self.assertIn("Never create separate Australian layout behaviour", footer)
 
-    def test_headline_validator_accepts_control_and_rejects_warne_regression(self):
-        valid = "ONLY 100 WILL EVER EXIST"
-        invalid = "THE WARNE EDITION STOPS AT 100"
-        self.assertTrue(ads_page.instant_experience_on_image_headline_is_valid(valid))
-        self.assertFalse(ads_page.instant_experience_on_image_headline_is_valid(invalid))
-        errors = ads_page.instant_experience_on_image_headline_errors(invalid)
-        self.assertTrue(any("28 characters" in error for error in errors))
-        self.assertEqual(
-            ads_page.shorten_instant_experience_on_image_headline(invalid),
-            valid,
-        )
-        resolved = ads_page.resolve_instant_experience_on_image_copy(
-            invalid,
-            "Once they're claimed, this edition retires forever.",
-            "CLAIM YOUR EDITION",
-        )
-        self.assertEqual(resolved["headline_text"], valid)
-        self.assertNotIn(invalid, instant_experience_prompt())
+    def test_all_approved_headlines_survive_validation_and_resolution(self):
+        for headline in ads_page.ie_visuals.HEADLINES:
+            self.assertTrue(ads_page.instant_experience_on_image_headline_is_valid(headline))
+            self.assertEqual(ads_page.shorten_instant_experience_on_image_headline(headline), headline)
+            resolved = ads_page.resolve_instant_experience_on_image_copy(
+                headline, "Made for serious collectors only.", "CLAIM YOUR EDITION")
+            self.assertEqual(resolved["headline_text"], headline)
+        self.assertIsNone(ads_page.INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_CHARACTERS)
+        self.assertIsNone(ads_page.INSTANT_EXPERIENCE_ON_IMAGE_HEADLINE_MAX_WORDS)
 
     def test_on_image_copy_limits_and_one_line_rules_are_enforced(self):
         self.assertTrue(
             ads_page.instant_experience_on_image_headline_errors(
-                "ONE TWO THREE FOUR FIVE SIX SEVEN"
+                "ONE TWO\nTHREE"
             )
         )
         errors = ads_page.validate_instant_experience_on_image_copy(
@@ -138,11 +129,13 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
     def test_copy_fit_contract_requires_shortening_not_smaller_typography(self):
         contract = ads_page.build_instant_experience_on_image_copy_fit_rules()
         for wording in (
-            "no more than six words and no more than 28 characters",
+            "Assess rendered glyph width, not character or word count",
             "no more than 12 words and no more than 70 characters",
             "no more than four words and no more than 24 characters",
-            "shorten it before returning the standalone image-generation prompt",
-            "Never solve overflow by shrinking typography",
+            "880–896 px usable width",
+            "Allow only subtle font-size or letter-spacing adjustments",
+            "Check readability at 256 x 256",
+            "Never repeat a sibling headline",
             "on exactly one line",
         ):
             self.assertIn(wording, contract)
