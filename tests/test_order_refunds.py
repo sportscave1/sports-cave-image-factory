@@ -3,7 +3,7 @@ import inspect
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import order_refunds as refunds
 import order_action_state as actions
@@ -115,6 +115,15 @@ class RefundTests(unittest.TestCase):
             styled = orders_page._display_table_payload([])
         self.assertEqual('#SC1', styled.data.iloc[0]['order'])
         self.assertIn('\u0336', styled._display_funcs[(0, 0)]('#SC1'))
+
+    def test_refunds_reconcile_even_when_paid_order_lease_is_held(self):
+        import shopify_order_reconciliation_worker as worker
+        lease = MagicMock()
+        lease.__enter__.return_value = False
+        with patch.object(supabase_backend, 'is_configured', return_value=True), patch.object(supabase_backend, 'shopify_order_reconciliation_lease', return_value=lease), patch('edition_versions.resume_pending'), patch.object(refunds, 'reconcile', return_value={'orders_checked': 1}) as reconcile:
+            result = worker.run_once()
+        reconcile.assert_called_once_with(backend=supabase_backend)
+        self.assertEqual('already_running', result['status'])
 
     def test_normal_orders_unchanged(self):
         row = self.row(node())
