@@ -10,7 +10,7 @@ async def page(request):
     import files_upload_api as files
     try:
         user=await run_in_threadpool(files._request_user,request)
-        if not files.os_accounts.can_access_page(user,'Orders'):raise ValueError('Orders and Files access are required for this test.')
+        if not files.os_accounts.is_admin(user) or not files.os_accounts.can_access_page(user,'Orders'):raise ValueError('An active administrator with Orders and Files access is required for local Photoshop tests.')
         return HTMLResponse((Path(__file__).parent/'components/edition_test/index.html').read_text(encoding='utf-8'),headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
     except Exception as error:return files._psd_error_page(str(error),status=403,title='Download JPG')
 
@@ -20,7 +20,7 @@ async def prepare(request):
     try:
         if not request.headers.get('origin') or not files._same_origin(request):raise ValueError('Request origin rejected.')
         user=await run_in_threadpool(files._request_user,request)
-        if not files.os_accounts.can_access_page(user,'Orders'):raise ValueError('Orders and Files access are required for this test.')
+        if not files.os_accounts.is_admin(user) or not files.os_accounts.can_access_page(user,'Orders'):raise ValueError('An active administrator with Orders and Files access is required for local Photoshop tests.')
         if await files._json_body(request)!={}:raise ValueError('Only the verified test unit is enabled.')
         unit=await run_in_threadpool(case.confirmed_unit)
         auth=await run_in_threadpool(files._dropbox_context)
@@ -44,7 +44,7 @@ async def context(request):
             if not actor or (record.edition_test_claimed and not verify) or (verify and not record.edition_test_claimed):raise ValueError('Edition test grant expired or already used.')
             if actor['id']!='legacy-master-admin':
                 current=files.os_accounts.DEFAULT_STORE.get_user(actor['id'])
-                if not current or str(current.get('session_version'))!=str(actor['session_version']) or not all(files.os_accounts.can_access_page(current,p) for p in ('Files','Orders')):raise ValueError('Files/Orders permission or session changed.')
+                if not files.os_accounts.is_admin(current) or str(current.get('session_version'))!=str(actor['session_version']) or not all(files.os_accounts.can_access_page(current,p) for p in ('Files','Orders')):raise ValueError('Administrator permission or session changed.')
             record.edition_test_claimed=True
         unit=await run_in_threadpool(case.confirmed_unit)
         meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,record.access_token,case.FILE,include_preview=False)

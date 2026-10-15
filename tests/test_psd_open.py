@@ -27,7 +27,7 @@ def metadata(path=psd.ROOT+'/Renamed.psd',fid='id:1'):
 
 
 class PsdOpenTests(unittest.IsolatedAsyncioTestCase):
-    async def call(self, auth={'id':'test-user'}, permitted=True, record=True, meta=None,req=None):
+    async def call(self, auth={'id':'test-user','role':'admin','is_active':True}, permitted=True, record=True, meta=None,req=None):
         self.context=Mock(return_value={'access_token':'fake-test-token','root_path':'/Sportscave Team Folder'})
         self.read=Mock(return_value=meta or metadata())
         mapping={'gid://shopify/Product/1':{'verified':True,'state':'Linked','dropbox_file_id':'id:1'}} if record else {}
@@ -42,10 +42,44 @@ class PsdOpenTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.call(auth=auth,permitted=permitted)).status_code,403)
             self.context.assert_not_called();self.read.assert_not_called()
 
+    async def test_staff_cannot_mint_desktop_grant_even_with_files_permission(self):
+        for user in ({'id':'va','role':'worker'}, {'id':'owner','role':'admin','is_active':False}):
+            response=await self.call(auth=user)
+            self.assertEqual(response.status_code,403)
+            self.assertEqual(json.loads(response.body)['code'],'owner_desktop_required')
+            self.context.assert_not_called();self.read.assert_not_called()
+
+    async def test_staff_menu_and_previews_remain_on_demand(self):
+        staff={'id':'va','role':'worker','page_permissions':['files','orders']}
+        response=await self.call(auth=staff,req=request('GET',origin=''))
+        self.assertIn(b"const ownerDesktopAllowed='false'==='true';",response.body)
+        self.context.assert_not_called();self.read.assert_not_called()
+        with patch.object(dbx,'get_psd_thumbnail_bytes',return_value=b'preview') as preview:
+            response=await self.call(auth=staff,req=request(payload={'action':'preview'}))
+            self.assertEqual(response.status_code,200)
+            preview.assert_called_once()
+        response=await self.call(auth=staff,req=request(payload={'action':'describe'}))
+        self.assertEqual(json.loads(response.body)['mac_url'],'')
+        self.assertIn('dropbox.com',json.loads(response.body)['dropbox_url'])
+        response=await self.call(auth=staff,req=request(payload={'action':'files'}))
+        self.assertEqual(response.status_code,200)
+
+    async def test_staff_explicit_master_download_preserves_original_bytes(self):
+        staff={'id':'va','role':'worker','page_permissions':['files','orders']}
+        meta=metadata();upstream=Mock();upstream.iter_content.return_value=[b'PS',b'D!!']
+        mapping={'gid://shopify/Product/1':{'verified':True,'state':'Linked','dropbox_file_id':'id:1'}}
+        with patch.object(api,'_request_user',return_value=staff),patch.object(api,'_dropbox_context',return_value={'access_token':'test','root_path':'/Sportscave Team Folder'}),patch.object(psd,'directory',return_value=mapping),patch.object(dbx,'psd_open_metadata',return_value=meta),patch.object(dbx,'get_psd_file_response',return_value=(meta,upstream)) as download:
+            response=await api.download_product_psd(request('GET',origin=''))
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(b''.join([block async for block in response.body_iterator]),b'PSD!!')
+            self.assertEqual(response.headers['cache-control'],'no-store')
+            download.assert_called_once_with('test','id:1','test-revision')
+
     async def test_get_is_human_page_and_does_not_prepare_or_download(self):
         response=await self.call(req=request('GET',origin=''))
         self.assertEqual(response.status_code,200)
         self.assertIn('Sports Cave OS Desktop',response.body.decode())
+        self.assertIn(b"const ownerDesktopAllowed='true'==='true';",response.body)
         self.assertEqual(response.headers['content-type'].split(';')[0],'text/html')
         self.context.assert_not_called();self.read.assert_not_called()
         denied=await self.call(auth=None,req=request('GET',origin=''))
@@ -74,7 +108,7 @@ class PsdOpenTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.call(meta={**metadata(),'content_hash':''})).status_code,409)
 
     async def test_safe_diagnostics_identify_stage_and_class_without_secret_messages(self):
-        with patch.object(api,'_request_user',return_value={'id':'test'}),patch.object(api.os_accounts,'can_access_page',return_value=True),patch.object(psd,'directory',side_effect=RuntimeError('SECRET_CREDENTIAL_IN_EXCEPTION')),self.assertLogs(api.__name__,level='WARNING') as logs:
+        with patch.object(api,'_request_user',return_value={'id':'test','role':'admin'}),patch.object(api.os_accounts,'can_access_page',return_value=True),patch.object(psd,'directory',side_effect=RuntimeError('SECRET_CREDENTIAL_IN_EXCEPTION')),self.assertLogs(api.__name__,level='WARNING') as logs:
             response=await api.open_product_psd(request())
         self.assertEqual(response.status_code,503);self.assertIn('stage=mapping',' '.join(logs.output));self.assertIn('RuntimeError',' '.join(logs.output));self.assertNotIn('SECRET_CREDENTIAL',' '.join(logs.output)+response.body.decode())
         self.assertNotEqual(json.loads(response.body)['code'],'files_unavailable')

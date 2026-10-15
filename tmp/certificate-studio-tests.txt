@@ -1,0 +1,67 @@
+....................................FE.......F                           [100%]
+=================================== ERRORS ====================================
+___ ERROR at teardown of CatalogTests.test_preview_and_source_paths_denied ____
+scripts\studio\test_draft_ui.py:23: in cleanup
+    self.assertFalse(thread.is_alive())
+E   AssertionError: True is not false
+================================== FAILURES ===================================
+______________ CatalogTests.test_preview_and_source_paths_denied ______________
+scripts\studio\test_draft_ui.py:87: in test_preview_and_source_paths_denied
+    self.assertEqual(self.request(s, "/api/action", {"action": action})[0], 409)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+scripts\studio\test_draft_ui.py:35: in request
+    response = conn.getresponse()
+               ^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\http\client.py:1430: in getresponse
+    response.begin()
+C:\Python314\Lib\http\client.py:331: in begin
+    version, status, reason = self._read_status()
+                              ^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\http\client.py:292: in _read_status
+    line = str(self.fp.readline(_MAXLINE + 1), "iso-8859-1")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\socket.py:725: in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+E   TimeoutError: timed out
+_________ OwnerTests.test_lazy_page_has_no_development_backend_import _________
+scripts\studio\test_phase4a.py:117: in test_lazy_page_has_no_development_backend_import
+    self.assertLess(len(page.encode()),90000)
+E   AssertionError: 113745 not less than 90000
+============================== warnings summary ===============================
+scripts/studio/test_phase4a.py::CatalogTests::test_scope_cannot_be_overridden_and_owner_change_denied
+  C:\Users\hello\Documents\sports-cave-image-factory\.venv\Lib\site-packages\_pytest\threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-13 (run)
+  
+  Traceback (most recent call last):
+    File "C:\Python314\Lib\threading.py", line 1081, in _bootstrap_inner
+      self._context.run(self.run)
+      ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+    File "C:\Python314\Lib\threading.py", line 1023, in run
+      self._target(*self._args, **self._kwargs)
+      ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "C:\Dev\SportsCaveWorktrees\sports-cave-core-core-admin-only-windows-automation-lightwe-20261015-27ba7051\scripts\studio\draft_ui.py", line 407, in run
+      self.preview_runtime.stop()
+      ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+    File "C:\Dev\SportsCaveWorktrees\sports-cave-core-core-admin-only-windows-automation-lightwe-20261015-27ba7051\scripts\studio\preview_runtime.py", line 266, in stop
+      registry=studio.read(file)
+    File "C:\Dev\SportsCaveWorktrees\sports-cave-core-core-admin-only-windows-automation-lightwe-20261015-27ba7051\scripts\studio\studio.py", line 86, in read
+      d = json.loads(path.read_text(encoding="utf-8"))
+                     ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+    File "C:\Python314\Lib\pathlib\__init__.py", line 792, in read_text
+      with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "C:\Python314\Lib\pathlib\__init__.py", line 776, in open
+      return io.open(self, mode, buffering, encoding, errors, newline)
+             ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\hello\\AppData\\Local\\Temp\\tmpa2m5yasv\\.studio\\registry.json'
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED scripts/studio/test_phase4a.py::CatalogTests::test_preview_and_source_paths_denied
+FAILED scripts/studio/test_phase4a.py::OwnerTests::test_lazy_page_has_no_development_backend_import
+ERROR scripts/studio/test_phase4a.py::CatalogTests::test_preview_and_source_paths_denied
+2 failed, 43 passed, 1 warning, 1 error in 26.22s

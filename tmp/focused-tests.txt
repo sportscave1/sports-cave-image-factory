@@ -1,0 +1,16 @@
+....F.......................................                             [100%]
+================================== FAILURES ===================================
+_ PsdOpenTests.test_representative_real_ids_renames_and_multiline_orders_read_only _
+tests\test_psd_open.py:106: in test_representative_real_ids_renames_and_multiline_orders_read_only
+    rows=list(csv.DictReader(io.StringIO((folder/'approved_dropbox_psds_282.csv').read_text(encoding='utf-8-sig'))))
+                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\pathlib\__init__.py:792: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+C:\Python314\Lib\pathlib\__init__.py:776: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Dev\\SportsCaveWorktrees\\sports-cave-core-core-admin-only-windows-automation-lightwe-20261015-27ba7051\\output\\psd_snapshot\\approved_dropbox_psds_282.csv'
+=========================== short test summary info ===========================
+FAILED tests/test_psd_open.py::PsdOpenTests::test_representative_real_ids_renames_and_multiline_orders_read_only
+1 failed, 43 passed in 3.13s

@@ -1,6 +1,6 @@
 const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({channel:'chrome',headless:true});try{
-const html=fs.readFileSync('components/psd_open/index.html','utf8');let count=0;
+const html=fs.readFileSync('components/psd_open/index.html','utf8').replace('__OWNER_DESKTOP_ALLOWED__','true');let count=0;
 for(const platform of ['Windows','MacIntel','iPhone','iPad','Android','Linux','ChromeOS']){
  const context=await browser.newContext({viewport:{width:platform==='iPhone'?390:1000,height:800}}),page=await context.newPage();let actions=[],download=0;
  await page.addInitScript(({platform})=>{Object.defineProperty(navigator,'platform',{value:platform==='iPad'?'MacIntel':platform});Object.defineProperty(navigator,'userAgent',{value:platform});Object.defineProperty(navigator,'maxTouchPoints',{value:platform==='iPad'?5:0});},{platform});

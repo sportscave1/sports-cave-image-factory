@@ -2723,10 +2723,13 @@ async def open_product_psd(request: Request):
             raise FilesUploadError('The PSD product link is invalid. Open it from Edition Ops or Orders.',status_code=400,code='psd_link_invalid')
         if request.method == 'GET':
             content = (Path(__file__).resolve().parent/'components'/'psd_open'/'index.html').read_text(encoding='utf-8')
+            content = content.replace('__OWNER_DESKTOP_ALLOWED__', json.dumps(os_accounts.is_admin(user)))
             return HTMLResponse(content,headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Frame-Options':'SAMEORIGIN'})
         payload = await _json_body(request)
         if set(payload) != {'action'} or payload.get('action') not in {'openPhotoshop','describe','preview','files'}:
             raise FilesUploadError('Only the linked master can be opened. Arbitrary paths are not accepted.',status_code=400,code='psd_request_invalid')
+        if payload['action'] == 'openPhotoshop' and not os_accounts.is_admin(user):
+            raise FilesUploadError('Desktop master opening is administrator-only. Use Preview Artwork, Files or Download Original PSD.',status_code=403,code='owner_desktop_required')
         stage = 'mapping'
         mapping = await run_in_threadpool(psd_directory.directory)
         record = mapping.get(pid) or {}
@@ -2750,7 +2753,7 @@ async def open_product_psd(request: Request):
             if not path.startswith(context['root_path'].rstrip('/')+'/'):
                 raise FilesUploadError('The Dropbox master is outside the configured team folder.',status_code=403,code='psd_scope_denied')
             native_url = ''
-            if re.fullmatch('[a-fA-F0-9]{64}',str(metadata.get('content_hash') or '')):
+            if os_accounts.is_admin(user) and re.fullmatch('[a-fA-F0-9]{64}',str(metadata.get('content_hash') or '')):
                 native_url = ('sports-cave-files://open?kind=master&path='+quote(relative,safe='')+
                               '&hash='+metadata['content_hash']+'&size='+str(int(metadata.get('size') or 0)))
             return JSONResponse({'ok':True,'name':name,'size':int(metadata.get('size') or 0),

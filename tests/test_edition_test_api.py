@@ -10,7 +10,7 @@ from test_edition_test import context as fixture_context
 
 
 def test_context_single_use_and_fresh_permission_revocation():
-    actor = {'id': 'fixture', 'session_version': 1}
+    actor = {'id': 'fixture', 'session_version': 1, 'role': 'admin'}
     record = SimpleNamespace(edition_test_actor=dict(actor), edition_test_claimed=False, access_token='TEST-ONLY')
     manager = SimpleNamespace(_lock=threading.RLock(), get=lambda *_: record)
     request = SimpleNamespace(query_params={'ticket': 'fixture'})
@@ -26,6 +26,25 @@ def test_context_single_use_and_fresh_permission_revocation():
         access.return_value = True
         actor['session_version'] = 2
         assert asyncio.run(api.context(request)).status_code == 403
+
+
+def test_staff_and_inactive_admin_cannot_start_local_photoshop():
+    request = SimpleNamespace(headers={'origin': 'https://os.test'})
+    for actor in ({'id':'va','role':'worker'}, {'id':'owner','role':'admin','is_active':False}):
+        with patch.object(files, '_same_origin', return_value=True), patch.object(files, '_request_user', return_value=actor), patch.object(api.case, 'confirmed_unit') as unit, patch.object(files, '_dropbox_context') as dropbox:
+            assert asyncio.run(api.page(request)).status_code == 403
+            assert asyncio.run(api.prepare(request)).status_code == 403
+            unit.assert_not_called();dropbox.assert_not_called()
+
+
+def test_preexisting_staff_pilot_grant_is_denied_before_asset_reads():
+    actor={'id':'va','role':'worker','session_version':1}
+    record=SimpleNamespace(edition_test_actor=actor,edition_test_claimed=False)
+    manager=SimpleNamespace(_lock=threading.RLock(),get=lambda *_:record)
+    request=SimpleNamespace(query_params={'ticket':'test'})
+    with patch.object(files,'NATIVE_TRANSFER_MANAGER',manager),patch.object(files,'_native_transfer_secret',return_value='test'),patch.object(files.os_accounts.DEFAULT_STORE,'get_user',return_value=actor),patch.object(api.case,'confirmed_unit') as unit:
+        assert asyncio.run(api.context(request)).status_code==403
+        unit.assert_not_called()
 
 
 def test_prepare_rejects_cross_origin_before_creating_grant():

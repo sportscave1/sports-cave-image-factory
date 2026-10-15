@@ -1,0 +1,9 @@
+.........F......F.........................F...............F......... [ 86%]
+.....F.....                                                            [100%]
+=========================== short test summary info ===========================
+FAILED tests/test_os_accounts.py::AccountAccessTests::test_accounts_access_exposes_password_access_permission_ticks
+FAILED tests/test_os_accounts.py::AccountAccessTests::test_admin_can_access_every_registered_page_except_owner_only_reporting
+FAILED tests/test_os_accounts.py::AccountAccessTests::test_files_page_uses_server_refresh_token_without_connect_step
+FAILED tests/test_os_accounts.py::AccountAccessTests::test_product_upload_prompt_edit_buttons_follow_account_permission
+FAILED tests/test_os_accounts.py::AccountAccessTests::test_unsupported_file_preview_requires_explicit_download_action
+5 failed, 74 passed, 6 subtests passed in 38.95s

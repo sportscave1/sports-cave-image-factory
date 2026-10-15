@@ -1,0 +1,191 @@
+SPORTS CAVE OS — LOCAL ADMIN / STAFF AUDIT
+15 October 2026, Australia/Sydney
+
+Scope and isolation
+-------------------
+Task: 20261015-27ba7051, category CORE
+Owner: codex/admin-staff-audit-20261015
+Worktree: C:\Dev\SportsCaveWorktrees\sports-cave-core-core-admin-only-windows-automation-lightwe-20261015-27ba7051
+Branch: codex/task/core-core-admin-only-windows-automation-lightwe-20261015-27ba7051
+Baseline: 2047030aa8e6fe82cac659e4aeeb41201ba00da0 (Auto Editions V15).
+The Studio registry initially approved V6 bdc46c29. The user explicitly approved
+using V15 for this task. Only this task's initially clean branch was advanced;
+its registry entry records that authorization. The shared approved-base pointer
+and all earlier task assignments remain unchanged. Root, branch, HEAD and task
+owner were checked before edits. No original unfinished code was copied.
+
+Confirmed architecture and existing protections
+-----------------------------------------------
+Accounts: os_accounts.is_admin requires an active, nonremoved admin account.
+The account schema enforces a single admin. Staff routes remain permission-based.
+Developer Studio additionally requires the configured reporting/admin owner email
+and an active admin role. Both can_access_page and render_page deny staff, even
+if a stale/forged developer_studio page permission is present. Direct denial
+happens before assembling the editor's JavaScript/CSS bundle.
+
+Windows Studio companion: separate localhost service, task/owner assignment,
+exact Host/Origin checks, private tokens, Windows-user DPAPI device trust and
+expiring sessions. The OS page needs a Connect gesture. Startup is an explicit
+PowerShell operation with -ApproveStartup, registered for a Windows user, not a
+web-account login hook. Two existing SportsCave-Studio scheduled tasks belong to
+Windows user hello. Eight existing companion pythonw process IDs were identical
+before/after inspection: 9488, 9512, 13248, 13288, 20040, 20056, 19712, 19636.
+No worker API, startup configuration, registry trust or running process was changed.
+
+Auto Editions: setup, host enrollment, queue controls and visual approval already
+require active administrator access. Preparation-host tokens are bound to the
+enrolling actor/session and rechecked against current access. Staff may use the
+explicit cloud JPG fulfilment flow with Files/Orders access. It generates or
+transfers a prepared JPG; it does not run Photoshop or fetch the layered master
+to the staff PC. Existing owner-enrolled preparation continues independently of
+which web user logs in. No shared job loop, worker, Render config, preparation
+queue, product discovery, Shopify sync, mapping or edition number was altered.
+
+Files/Dropbox: browsing lists metadata and loads viewport thumbnails, rather than
+prefetching originals. Client folder cache is bounded to 24 listings; thumbnail
+cache to 160 entries, with expiry, cancellation and object-URL cleanup. The image
+viewer already limits cached previews to 12 entries / 16 MiB, individual image
+previews to 4 MiB, and cached PDF blobs to 8 MiB. These are existing bounds, not
+new settings. PSD artwork preview uses Dropbox's thumbnail representation.
+Original download endpoints stream the chosen file on request with no-store.
+Generic explicit Files transfers/copy/native actions remain available under
+existing permissions. These user-requested transfers are not background sync.
+
+Orders, Prodigi, certificates and assigned work retain their existing permissions.
+Neither account grants nor staff data were changed. No production APIs or live
+customer records were used in testing. Render/support-worker audit was of local
+source/configuration, not a verification of the current live service state.
+
+Confirmed gaps and focused fixes
+--------------------------------
+1. The PSD menu previously automatically contacted the desktop bridge when opened
+   as a top-level Windows WebView. It now waits for an explicit owner click.
+   Staff HTML hides Open in App and does not attach to the desktop bridge.
+2. The PSD openPhotoshop POST previously accepted any account with Files access.
+   It now denies nonadmins before mapping/Dropbox reads or minting a native grant.
+   describe omits the native Mac master-opening URL for staff. Staff still have
+   preview, Files navigation, Dropbox navigation and explicit original download.
+3. The older local Photoshop edition-test page/prepare endpoints previously
+   accepted staff with Orders/Files permissions. They now require an active admin.
+   Context verification also rejects previously issued staff pilot grants and
+   demoted/revoked administrators before reading source assets.
+4. PSD popup dismissal now releases its preview object URL; stale pending preview
+   responses already check the popup generation before installing an image.
+
+Production files changed (only three)
+-----------------------------------
+files_upload_api.py
+edition_test_api.py
+components/psd_open/index.html
+
+Tests changed/added
+-------------------
+tests/test_psd_open.py
+tests/test_edition_test_api.py
+tests/test_psd_open_ui.cjs
+tests/test_psd_modal_files_ui.cjs
+tests/test_psd_universal_ui.cjs
+tests/test_staff_lightweight.py (new)
+tests/test_staff_lightweight_ui.cjs (new)
+This report is also new. Evidence/measurement scripts are retained under tmp/.
+
+Measurements (synthetic/local, baseline V15 versus local changes)
+----------------------------------------------------------------
+Staff PSD native-grant request HTTP status:             200 -> 403
+Staff legacy Photoshop pilot page HTTP status:         200 -> 403
+Unrequested PSD grant requests on WebView menu entry:     1 -> 0
+Desktop bridge messages before any click:                2 -> 0
+Retained PSD preview object URLs after dismissal:         1 -> 0
+
+These use mock HTTP/desktop/provider responses, not real master downloads or a
+physical Photoshop run. They measure requests and retained references, not GB
+saved or total browser heap. Owner explicit desktop opening still passes the
+existing grant-handoff scenarios. Staff explicit PSD downloading is checked
+byte-for-byte against a synthetic upstream; no conversion or preview is substituted.
+
+Prodigi investigation
+---------------------
+No demonstrable new loading defect was found, so no Prodigi source was changed.
+Its initial dispatch log submits one asynchronous latest-50 read, skips Shopify
+and the full order snapshot, and does not download artwork. Search is submitted
+in a form. The loading fragment polls once per second and stops via a full rerun
+when the future resolves. The UI has an eight-second timeout and an explicit
+Retry button; it retains prior rows on failure. The DB read owns its connection,
+has a six-second query/pool watchdog after connection establishment, and retries
+once only for a stale connection. Network connection establishment and cancellation
+can extend the database task beyond the UI deadline; the UI deadline is not a
+guarantee that a running thread has stopped. No unrelated DB policy was changed.
+
+100 repeated pending-load checks submitted exactly one read (~0.59 ms harness
+overhead). A synthetic timeout produced an error, preserved prior display data,
+did not automatically resubmit, and recovered on explicit retry. With the DB
+deliberately held pending, the real Streamlit page shell rendered in ~2259 ms
+on cold initialization and ~9 ms warmed. Both role predicates allowed the same
+fulfilment renderer. These are test-harness timings, not an admin/staff speed
+comparison or the VA's network timings. Both runs requested one 50-row read and
+zero asset downloads. No staff-specific extra query/Photoshop path was found.
+
+Validation and known test limitations
+-------------------------------------
+Final affected Python tests: 28 passed, one real-data snapshot test deselected.
+Broader Python run: 206 passed, 11 skipped, 13 subtests passed; five failures in
+test_os_accounts.py also reproduce on untouched V15 (74 baseline tests pass).
+Those failures concern old Password Access copy, blanket-admin route assumptions,
+Files refresh-token copy, prompt-edit UI, and old unsupported-preview UI copy.
+No account source was changed. The missing output/psd_snapshot CSV fixture was
+not restored or populated with real data; that test was deliberately excluded.
+
+Additional certificate/Studio run: 43 passed, an existing Studio HTML-size
+assertion failed (also reproduced on V15), and one localhost test initially timed
+out with a teardown error. The timed-out test passed on targeted rerun; the direct
+owner-page denial test also passed. Do not treat the entire repository as green.
+
+Browser checks: 10 desktop/fallback scenarios, 11 universal-platform scenarios,
+9 PSD-modal/Files scenarios, 11 role/cookie/picker scenarios, two new owner/staff
+idle-preview scenarios, plus the Files-originals clipboard/download suite pass.
+All HTTP and desktop actions were fixtures. py_compile and git diff --check pass.
+No physical-device, live VA browser, live Supabase/RLS, deployed owner-email
+configuration or production Render-health claim is made.
+
+External Dropbox settings — action for the VA, only on the VA's computer
+---------------------------------------------------------------------
+Dropbox Desktop is a separate application. Its sync may download online-only
+files when opened, independent of Sports Cave OS. OS page permissions cannot
+change a remote PC's Dropbox selective sync, startup applications or Windows
+identity. Dropbox processes are running on the inspected owner PC; this does not
+establish the VA's configuration. No remote PC configuration was attempted.
+
+On the VA's Windows PC: Dropbox taskbar icon > account menu > Preferences > Sync
+> Selective Sync > Modify. Deselect owner-only master PSD/development/preparation
+folders that the VA does not need; keep required fulfilment folders. Click Update.
+Use Dropbox's online-only option for remaining large folders needed occasionally.
+Use the OS browser previews and download the specific final artwork/certificate
+when fulfilling an assigned order. Selective sync removes a local folder copy
+while retaining it in Dropbox; do not delete the shared folder in Explorer.
+This is per-device, so it does not alter the owner's preparation computer.
+
+Official instructions (verified during this audit):
+https://help.dropbox.com/sync/selective-sync-overview
+https://help.dropbox.com/sync/make-files-online-only
+
+Remaining boundaries
+---------------------
+The new restrictions are LOCAL and have not changed live behavior. Separate
+release authorization is required before they can protect deployed sessions.
+Normal staff web sessions cannot load Developer Studio or obtain the protected
+Photoshop preparation/native grants. The localhost Studio service is also a
+separate Windows-user application: its task-owner/DPAPI trust is not a web-account
+identity check. Someone using the owner's Windows account, local launcher or
+already trusted local browser has that local authority independently of their OS
+web login. Do not share that Windows/browser profile with staff. This audit does
+not claim to revoke existing Windows trust or protect against malicious reuse of
+an owner's previously issued bearer grant; existing transfers have bounded TTLs.
+No live grant, host token or running preparation was revoked.
+
+The actual cause of the VA's Prodigi slowness remains unconfirmed without that
+browser's timings, memory profile and failing request diagnostics. The local
+tests support retaining the existing bounded reader rather than speculative
+database, permission, worker or retry changes.
+
+No commits, pushes, merges, deployments, live permissions or production data
+changes were made. Existing worktrees and the running Windows worker were kept.

@@ -1,0 +1,4 @@
+.F                                                                       [100%]
+=========================== short test summary info ===========================
+FAILED scripts/studio/test_phase4a.py::OwnerTests::test_lazy_page_has_no_development_backend_import
+1 failed, 1 passed, 17 deselected in 2.91s
