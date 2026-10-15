@@ -82,6 +82,12 @@ class Supervisor:
         self.children.clear()
 
     def run(self):
+        from auto_editions_discovery import enabled, run as discovery_run
+        discovery_thread = None
+        if enabled():
+            discovery_thread = threading.Thread(target=discovery_run,args=(self.stop,),
+                                                name='auto-editions-discovery',daemon=True)
+            discovery_thread.start()
         try:
             while not self.stop.is_set():
                 self.check_children()
@@ -89,6 +95,8 @@ class Supervisor:
                 self.stop.wait(0.5)
         finally:
             self.shutdown()
+            if discovery_thread:
+                discovery_thread.join(timeout=SHUTDOWN_SECONDS)
         return 0
 
 

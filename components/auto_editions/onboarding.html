@@ -9,6 +9,8 @@ body{font:14px system-ui;margin:8px;color:#243145}button,select{font:inherit;pad
 <div id="reason"></div><section id="quality" hidden><img id="preview" alt="Prepared first edition for visual quality review"><p><label><input id="confirm" type="checkbox"> Composition, original plaque placement, number, faces, signatures, logos and enlargement quality checked for TEST use.</label></p><button id="approve" disabled>Approve TEST cloud downloads</button></section>
 <script>
 const $=id=>document.getElementById(id),local='http://127.0.0.1:18762';let rows=[],popup,nonce,connected=false,registering=false,timer;
+const compact=new URLSearchParams(location.search).get('compact')==='1',product=new URLSearchParams(location.search).get('product_gid');
+if(compact){for(const id of ['summary','resume','refresh','host','status'])$(id).hidden=true;$('hostConsent').parentElement.parentElement.hidden=true;$('products').parentElement.hidden=true;document.querySelector('small').hidden=true;document.body.style.margin='0';}
 const status=text=>$('status').textContent=text;
 async function api(path,body){const response=await fetch('/api/auto-editions/onboarding'+path,{credentials:'same-origin',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});const data=await response.json();if(!response.ok)throw Error(data.error||'Preparation unavailable.');return data;}
 function selected(){return rows.find(r=>r.product_gid===$('products').value);}
@@ -25,6 +27,6 @@ $('refresh').onclick=load;$('products').onchange=change;
 $('retry').onclick=async()=>{try{await api('/retry',{product_gid:selected().product_gid});await load();}catch(e){status(e.message);}};
 $('review').onclick=()=>{const row=selected();$('quality').hidden=false;$('preview').src='/api/auto-editions/onboarding/preview?product_gid='+encodeURIComponent(row.product_gid)+'&hash='+encodeURIComponent(row.preparation_hash);};
 $('confirm').onchange=()=>{$('approve').disabled=!$('confirm').checked;};
-$('approve').onclick=async()=>{try{const row=selected();$('approve').disabled=true;await api('/approve',{product_gid:row.product_gid,hash:row.preparation_hash,confirm_visual_quality:$('confirm').checked});status('Cloud Ready for TEST downloads. Supplier print certification remains separate.');await load();}catch(e){status(e.message);}};
-addEventListener('pagehide',()=>clearInterval(timer));load();
+$('approve').onclick=async()=>{try{const row=selected();$('approve').disabled=true;await api('/approve',{product_gid:row.product_gid,hash:row.preparation_hash,confirm_visual_quality:$('confirm').checked});status('Cloud Ready for TEST downloads. Supplier print certification remains separate.');await load();if(compact)parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);}catch(e){status(e.message);}};
+addEventListener('pagehide',()=>clearInterval(timer));load().then(()=>{if(compact){$('products').value=product;if(selected()?.preparation_hash)$('review').click();else $('reason').textContent='Preparation unavailable. Refresh the status.';}});
 </script></body></html>
