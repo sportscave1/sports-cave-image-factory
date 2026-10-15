@@ -10,6 +10,8 @@ body{font:14px system-ui;margin:8px;color:#243145}button,select{font:inherit;pad
 <script>
 const $=id=>document.getElementById(id),local='http://127.0.0.1:18762';let rows=[],popup,nonce,connected=false,registering=false,timer,continuous=false,loading=false;
 const compact=new URLSearchParams(location.search).get('compact')==='1',product=new URLSearchParams(location.search).get('product_gid');
+const summaryOnly=new URLSearchParams(location.search).get('summary')==='1';
+if(summaryOnly){$('products').parentElement.hidden=true;$('reason').hidden=true;$('quality').hidden=true;document.querySelector('small').hidden=true;}
 if(compact){for(const id of ['summary','resume','refresh','host','status'])$(id).hidden=true;$('hostConsent').parentElement.parentElement.hidden=true;$('products').parentElement.hidden=true;document.querySelector('small').hidden=true;document.body.style.margin='0';}
 const status=text=>$('status').textContent=text;
 async function api(path,body){const response=await fetch('/api/auto-editions/onboarding'+path,{credentials:'same-origin',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});const data=await response.json();if(!response.ok)throw Error(data.error||'Preparation unavailable.');return data;}
@@ -22,8 +24,9 @@ async function load(passive=false){if(loading)return;loading=true;try{
  const keepReview=!$('quality').hidden&&data.rows.some(r=>r.product_gid===old&&r.preparation_hash===oldHash);
  rows=data.rows;
  if(continuous&&data.counts){
-  $('summary').textContent=['Total mapped','Cloud Ready','Preparing','Queued','Needs Review','Needs PSD Repair','Failed','Remaining'].map(k=>k+': '+(data.counts[k]||0)).join(' · ');
-  $('summary').title='Uploaded: '+(data.counts.Uploaded||0)+' · Production Ready: '+(data.counts['Production Ready']||0)+' · Remaining includes designs needing attention.';
+  const catalogue=Number.isInteger(data.catalogue_total)?'Catalogue: '+data.catalogue_total+' ('+data.mapped+' PSD mapped)':'Total mapped: '+data.mapped;
+  $('summary').textContent=[catalogue,...['Cloud Ready','Preparing','Queued','Needs Review','Needs PSD Repair','Failed'].map(k=>k+': '+(data.counts[k]||0))].join(' · ');
+  $('summary').title='Of the '+data.mapped+' mapped products: Uploaded '+(data.counts.Uploaded||0)+' · Production Ready '+(data.counts['Production Ready']||0)+' · Not ready '+(data.counts.Remaining||0)+'. These are subsets, not additional products.';
   const current=data.current?data.current.title+' — '+data.current.stage:'No active preparation';
   const last=data.last_success?'Last prepared: '+(data.last_success.title||data.last_success.product_gid)+' · '+data.last_success.at:'No completed preparation recorded';
   $('host').textContent=[data.processing,current,last,'Heartbeat: '+(data.host.last_seen||'unavailable')].join(' · ');
@@ -33,9 +36,11 @@ async function load(passive=false){if(loading)return;loading=true;try{
   $('host').textContent=data.host.last_seen?'Preparation host last contacted server: '+data.host.last_seen:'No preparation host has contacted the server yet.';
  }
  $('resume').hidden=compact||continuous;
- $('products').replaceChildren(...rows.map(r=>new Option(r.product_title+'  -  '+(r.display_status||r.status),r.product_gid)));
- if(rows.some(r=>r.product_gid===old))$('products').value=old;
- change(keepReview);
+ if(!summaryOnly){
+  $('products').replaceChildren(...rows.map(r=>new Option(r.product_title+'  -  '+(r.display_status||r.status),r.product_gid)));
+  if(rows.some(r=>r.product_gid===old))$('products').value=old;
+  change(keepReview);
+ }
  }catch(e){status(e.message);}finally{loading=false;}}
 
 function send(type,extra={}){popup?.postMessage({studio:1,nonce,type,...extra},local);}

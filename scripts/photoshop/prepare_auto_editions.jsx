@@ -30,7 +30,9 @@ var SCAutoEditionsPreparation = (function () {
             var destination = r.output_root + "/" + name;
             if (!inside(r.output_root, destination)) throw Error("unsafe_output");
             var options = new PNGSaveOptions(); options.interlaced = false; options.compression = 6;
-            var profile = d.colorProfileName;
+            var profile;
+            try { profile = d.colorProfileName; } catch (profileError) { throw Error("source_profile_requires_review"); }
+            if (!profile) throw Error("source_profile_requires_review");
             d.saveAs(new File(destination), options, true, Extension.LOWERCASE);
             if (d.colorProfileName !== profile) throw Error("export_profile_changed");
             exportProfiles[name] = profile;

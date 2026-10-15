@@ -242,6 +242,7 @@ async def summary(request):
             public.extend(await run_in_threadpool(waiting_rows,queue().connect))
         with queue().connect() as conn,conn.cursor() as cur:
             cur.execute("""SELECT count(*) AS total,array_agg(shopify_product_gid ORDER BY shopify_product_gid) AS ids,
+                (SELECT count(DISTINCT COALESCE(NULLIF(shopify_product_gid,''),shopify_product_id)) FROM edition_products) AS catalogue_total,
                 (SELECT jsonb_build_object('at',a.created_at,'product_gid',a.product_gid,
                     'title',(SELECT product_title FROM edition_products p WHERE p.shopify_product_gid=a.product_gid LIMIT 1))
                  FROM auto_edition_onboarding_audit a WHERE a.event='preparation_metrics' ORDER BY a.id DESC LIMIT 1) AS last_success
@@ -251,6 +252,7 @@ async def summary(request):
                 WHERE revoked_at IS NULL AND expires_at>now()""")
             host=cur.fetchone()
         import auto_editions_v17 as v17
+        public=v17.unique_products(public)
         extra={}
         if v17.enabled():
             from auto_editions_status import batch
@@ -271,7 +273,7 @@ async def summary(request):
             connected=bool(seen and (datetime.now(timezone.utc)-seen).total_seconds()<=150)
             extra=dict(counts=v17.dashboard(mapped_rows,mapped),current=current,last_success=inventory['last_success'],
                        processing='Companion Connected' if connected else 'Companion heartbeat stale or disconnected')
-        return JSONResponse(dict(rows=public,mapped=mapped,continuous_enabled=v17.enabled(),**extra,
+        return JSONResponse(dict(rows=public,mapped=mapped,catalogue_total=inventory['catalogue_total'],continuous_enabled=v17.enabled(),**extra,
             host=dict(connected=host['connected'],last_seen=str(host['last_seen']) if host['last_seen'] else None)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 

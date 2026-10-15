@@ -18,6 +18,8 @@ class NeedsRepair(ValueError):
 def detect(inspection, total):
     """Accept a single complete top-level editable edition, with its own plaque."""
     doc = inspection.get('document', {})
+    if 'profile' in doc and not doc['profile']:
+        raise NeedsRepair('Original PSD colour profile is unavailable; owner colour review is required.')
     canvas = ae.dimensions([doc.get('width_px'), doc.get('height_px')])
     rows = inspection.get('layers', [])
     candidates = []

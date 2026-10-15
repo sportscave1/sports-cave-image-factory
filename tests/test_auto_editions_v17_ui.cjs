@@ -11,7 +11,7 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
  });
  await page.clock.install();await page.goto('https://v17.local.test/');await page.getByText('Total mapped: 285',{exact:false}).waitFor();
  assert.equal(await page.locator('#resume').isVisible(),false);
- assert.equal((await page.locator('#summary').innerText()).split(' · ').length,8);
+ assert.equal((await page.locator('#summary').innerText()).split(' · ').length,7);
  assert((await page.locator('#host').innerText()).includes('Active artwork — Uploading'));
  assert((await page.locator('#host').innerText()).includes('Completed artwork'));
  assert.equal(reads,1);await page.clock.runFor(24900);assert.equal(reads,1);

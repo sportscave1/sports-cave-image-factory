@@ -436,6 +436,25 @@ def prepare(key,roles,scale=1):
     return dict(job_id=key,status='Working')
 
 
+def failure_detail(row,stage,error):
+    """Retain Photoshop's cause locally; never put paths/capabilities in status."""
+    import re
+    message=str(error)[:4000]
+    for value in [*row.get('grant',{}).values(),row.get('context',{}).get('lease_token')]:
+        if isinstance(value,str) and len(value)>8:message=message.replace(value,'[redacted]')
+    message=re.sub(r'https?://[^\s]+','[redacted URL]',message)
+    try:
+        atomic_json(row['folder']/'failure-detail.json',dict(stage=stage,error_type=type(error).__name__,
+            message=message,product_gid=row.get('context',{}).get('product_gid'),recorded_at=time.time()))
+    except OSError:pass
+    if isinstance(error,RuntimeError):
+        if 'source_profile_requires_review' in message or 'colour_conversion_requires_approval' in message:
+            row['repair']=True
+            return 'Original PSD colour settings require owner review.'
+        return 'Photoshop preparation failed; inspect the retained local failure-detail.json.'
+    return str(error)[:350] if isinstance(error,ValueError) else type(error).__name__
+
+
 def prepare_worker(key,roles,scale=1):
     lease=None
     try:
@@ -470,7 +489,8 @@ def prepare_worker(key,roles,scale=1):
         lease.unlink(missing_ok=True);lease=None
         upload_prepared(key,archive)
     except Exception as error:
-        JOBS[key].update(status='Blocked',error='Preparation failed: '+(str(error)[:350] if isinstance(error,ValueError) else type(error).__name__)+'. Existing PSD and mapping are preserved.')
+        detail=failure_detail(JOBS[key],'Preparation',error)
+        JOBS[key].update(status='Blocked',error='Preparation failed: '+detail+'. Existing PSD and mapping are preserved.')
     finally:
         if lease:lease.unlink(missing_ok=True)
     report_failure(JOBS[key])

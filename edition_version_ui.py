@@ -275,7 +275,7 @@ def workspace():
             with st.expander('Auto Editions preparation',key='auto-editions-preparation',on_change='rerun') as panel:
                 if panel.open:
                     import streamlit.components.v1 as components
-                    components.iframe('/auto-editions/onboarding',height=480,scrolling=True)
+                    components.iframe('/auto-editions/onboarding?summary=1',height=280,scrolling=True)
         archive()
         from design_tracking_page import render
         render()

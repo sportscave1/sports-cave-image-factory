@@ -6,10 +6,15 @@ def enabled():
     return os.getenv('AUTO_EDITIONS_V17_CONTINUOUS_ENABLED','').lower()=='true'
 
 
+def unique_products(rows):
+    """One displayed state per product, even if a legacy join repeats a row."""
+    return list({row['product_gid']:row for row in rows}.values())
+
+
 def dashboard(rows,mapped):
     counts={name:0 for name in ('Total mapped','Cloud Ready','Preparing','Queued','Needs Review','Needs PSD Repair','Failed','Remaining','Uploaded','Production Ready')}
     counts['Total mapped']=mapped
-    for row in rows:
+    for row in unique_products(rows):
         state=row.get('display_status',row.get('status','Unavailable'))
         key={'Review':'Needs Review','Needs Review':'Needs Review','Needs Repair':'Needs PSD Repair',
              'Needs PSD Repair':'Needs PSD Repair','Uploading':'Preparing','Recovering':'Preparing',
