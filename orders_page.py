@@ -2389,7 +2389,7 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
         st.caption(f"{selected_count} selected")
     if not backend:
         st.caption("Orders are temporarily unavailable.")
-    if selected_rows and not can_generate:
+    if selected_rows and not can_generate and not any(order_refunds.blocked(row) for row in selected_rows):
         st.caption("Assign edition number before certificate generation.")
 
 
