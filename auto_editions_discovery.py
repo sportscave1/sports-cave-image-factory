@@ -172,6 +172,11 @@ class Discovery:
                 status, reason, identity = 'Mapped', '', None
                 self.queue.enqueue_cursor(cur,pid,file_id,ACTOR)
             else:
+                cur.execute("SELECT to_jsonb(q)->'replacement'->>'manual_required' AS manual_required FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
+                reset=cur.fetchone()
+                if reset and reset['manual_required']=='true':
+                    cur.execute("UPDATE auto_edition_discovery SET status='Waiting for PSD',reason='Reset; manually Add the PSD to start again.',next_check_at=now()+interval '15 minutes',updated_at=now() WHERE product_gid=%s",(pid,))
+                    return None
                 candidate, status, reason = self.candidate(cur, pid)
                 identity = None
                 if candidate and metadata is None:

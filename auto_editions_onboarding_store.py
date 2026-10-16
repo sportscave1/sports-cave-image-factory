@@ -112,6 +112,7 @@ class Queue:
                 lease_token=NULL,lease_until=NULL,updated_at=now()
                 WHERE status='Preparing' AND lease_until<now() AND attempts>=3""")
             cur.execute(f"""SELECT * FROM auto_edition_onboarding q WHERE
+                COALESCE(to_jsonb(q)->'replacement'->>'manual_required','false')<>'true' AND
                 (((to_jsonb(q)->'replacement'->>'stage'='Queued' OR
                   (to_jsonb(q)->'replacement'->>'stage'='Preparing' AND lease_until<now()))
                    AND COALESCE((to_jsonb(q)->'replacement'->>'attempts')::int,0)<3)
@@ -257,6 +258,7 @@ class Queue:
             cur.execute("""UPDATE auto_edition_onboarding SET status='Awaiting preparation',reason='',
                 attempts=0,priority=10,lease_token=NULL,lease_until=NULL,source=NULL,preparation_hash=NULL,updated_at=now()
                 WHERE product_gid=%s AND status IN ('Blocked','Needs PSD Repair') AND preparation_hash IS NULL
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'replacement'->>'manual_required','false')<>'true'
                 RETURNING product_gid""",(pid,))
             if not cur.fetchone():raise ValueError('Only a failed preparation can be retried.')
             self.audit(cur,pid,actor,'retry')
@@ -271,6 +273,7 @@ class Queue:
     def prepare_now(self,pid,actor):
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("""UPDATE auto_edition_onboarding SET priority=10,reason='Administrator Prepare Now',updated_at=now()
-                WHERE product_gid=%s AND status='Awaiting preparation' RETURNING product_gid""",(pid,))
+                WHERE product_gid=%s AND status='Awaiting preparation'
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'replacement'->>'manual_required','false')<>'true' RETURNING product_gid""",(pid,))
             if not cur.fetchone():raise ValueError('Only an awaiting or deferred product can be prioritised. Review failed or prepared artwork separately.')
             self.audit(cur,pid,actor,'prepare_now')

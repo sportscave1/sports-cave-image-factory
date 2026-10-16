@@ -19,6 +19,7 @@ async def statuses(request):
 async def change(request):
     body=await request.json();state.stage=body['stage']
     if 'review_jobs' in body:state.review_jobs=body['review_jobs']
+    if 'mapping_overrides' in body:state.mapping_overrides=body['mapping_overrides']
     return JSONResponse({'ok':True})
 
 

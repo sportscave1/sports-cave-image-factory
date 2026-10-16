@@ -131,11 +131,14 @@ class PostgresMappings:
             # keep the existing mapping behavior during a rolling deployment.
             cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")
             if cur.fetchone()['name']:
+                cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
+                reset=(cur.fetchone() or {}).get('replacement') or {}
+                clear_reset='replacement=NULL,' if reset.get('manual_required') else ''
                 cur.execute("""INSERT INTO public.auto_edition_onboarding(product_gid,file_id,priority)
                     VALUES(%s,%s,2) ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,
                     source=NULL,preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=2,
-                    lease_token=NULL,lease_until=NULL,updated_at=now()
-                    WHERE auto_edition_onboarding.file_id<>excluded.file_id""",(pid,fid))
+                    lease_token=NULL,lease_until=NULL,{clear_reset}updated_at=now()
+                    WHERE auto_edition_onboarding.file_id<>excluded.file_id""".format(clear_reset=clear_reset),(pid,fid))
                 cur.execute("""INSERT INTO public.auto_edition_onboarding_audit(product_gid,actor_id,event)
                     VALUES(%s,%s,'mapping_confirmed')""",(pid,actor_id))
         self._revision = None
@@ -156,6 +159,10 @@ class PostgresMappings:
             for product in catalogue:
                 identities.setdefault(product['pid'], []).append(product)
             valid_ids = {pid for pid, products in identities.items() if len(products) == 1 and (not candidates.get(pid, {}).get('handle') or candidates[pid]['handle'] == products[0]['shopify_handle'])}
+            cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")
+            if cur.fetchone()['name']:
+                cur.execute("SELECT product_gid FROM auto_edition_onboarding q WHERE to_jsonb(q)->'replacement'->>'manual_required'='true'")
+                valid_ids-={r['product_gid'] for r in cur.fetchall()}
             report = preview(candidates, existing, valid_ids)
             if not execute:
                 return report

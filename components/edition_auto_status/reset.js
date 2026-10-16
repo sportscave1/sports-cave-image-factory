@@ -30,12 +30,17 @@
   try{
    const response=await fetch('/api/auto-editions/status/reset',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_gid:pid,request_id:id})});
    if(response.ok){requests.delete(pid);try{host.sessionStorage.removeItem(key);}catch{}}
+   else{let data={};try{data=await response.json();}catch{}throw Error(data.error||'Reset could not complete. Retry after the active operation finishes.');}
+  }catch(error){
+   close();dialog=doc.createElement('dialog');dialog.className='sc-auto-reset-confirm';dialog.setAttribute('aria-label','Reset unavailable');
+   const text=doc.createElement('p');text.textContent=error.message||'Reset request interrupted. Retry uses the same saved request identity.';
+   const button=doc.createElement('button');button.textContent='Close';button.onclick=close;dialog.append(text,button);doc.body.append(dialog);dialog.showModal();
   }finally{inFlight.delete(pid);host.SportsCaveEditionStatus?.refresh();schedule();}
  }
  function confirm(pid){
   if(dialog||!permissions.get(pid)||inFlight.has(pid))return;
   focusBefore=doc.activeElement;dialog=doc.createElement('dialog');dialog.className='sc-auto-reset-confirm';dialog.setAttribute('aria-label','Reset design?');
-  const text=doc.createElement('p');text.textContent='Reset design?';
+  const text=doc.createElement('p');text.textContent='Reset this design and clear its PSD mapping? You must enter the PSD name again using Add. Previous mapping and approval history will be retained.';
   const actions=doc.createElement('div'),cancel=doc.createElement('button'),accept=doc.createElement('button');
   cancel.textContent='Cancel';accept.textContent='Reset';cancel.onclick=close;accept.onclick=()=>reset(pid).catch(()=>{});
   actions.append(cancel,accept);dialog.append(text,actions);doc.body.append(dialog);dialog.showModal();

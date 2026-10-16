@@ -1,7 +1,7 @@
-"""One product's pending redo in the EXISTING preparation queue.
+"""Complete manual remapping reset, plus recovery for earlier pending redos.
 
-Active mapping/checkpoint stay intact until the existing import verifies a new
-package. No orders, allocations, approvals, source files or assets are rewritten.
+Legacy replacement recovery stays intact for already accepted work. Complete
+reset unlinks active associations while retaining audit, preparations and assets.
 """
 import json
 import uuid
@@ -32,6 +32,51 @@ def save(cur,pid,pending):
 class Reset:
     def __init__(self,connect):self.connect=connect
 
+    def clear(self,pid,request_id,actor):
+        """Clear active state atomically; legacy replacement recovery remains supported below."""
+        from auto_editions_status import identity
+        identity(pid)
+        if not isinstance(request_id,str) or str(uuid.UUID(request_id))!=request_id:
+            raise ValueError('Exact reset request identity required.')
+        if not actor:raise PermissionError('An identified administrator is required.')
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("SET LOCAL lock_timeout='1000ms'; SET LOCAL statement_timeout='5000ms'")
+            locks(cur);PostgresMappings.product(cur,pid)
+            cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
+            cur.execute("SELECT 1 FROM auto_edition_onboarding_audit WHERE product_gid=%s AND event='reset_cleared' AND detail->>'request_id'=%s",(pid,request_id))
+            if cur.fetchone():return 'Complete'
+            cur.execute('SELECT * FROM auto_edition_onboarding WHERE product_gid=%s FOR UPDATE',(pid,));row=cur.fetchone()
+            pending=(row or {}).get('replacement') or {}
+            if row and (row['status']=='Preparing' or pending.get('stage')=='Preparing' or row.get('lease_token')):
+                raise ValueError('This design has an active or uncertain companion operation. Wait for owned recovery to finish before resetting.')
+            # Never cancel order rendering or a running review validation underneath its owner.
+            cur.execute('LOCK TABLE auto_edition_jobs IN SHARE ROW EXCLUSIVE MODE')
+            cur.execute("SELECT 1 FROM auto_edition_jobs WHERE payload->'identity'->'source'->>'product_gid'=%s AND status IN ('Queued','Generating') LIMIT 1",(pid,))
+            if cur.fetchone():raise ValueError('This design has a queued or active order artwork operation. Wait for it to finish before resetting.')
+            cur.execute("SELECT to_regclass('public.auto_edition_review_jobs') AS name");reviews=cur.fetchone()['name']
+            cancelled=[]
+            if reviews:
+                cur.execute('LOCK TABLE auto_edition_review_jobs IN SHARE ROW EXCLUSIVE MODE')
+                cur.execute("SELECT 1 FROM auto_edition_review_jobs WHERE product_gid=%s AND state='Processing' LIMIT 1",(pid,))
+                if cur.fetchone():raise ValueError('This design is currently approving. Wait for approval recovery to finish before resetting.')
+                cur.execute("UPDATE auto_edition_review_jobs SET state='Skipped',reason='Design reset; manually Add its PSD before reviewing again.',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE product_gid=%s AND state='Pending' RETURNING id",(pid,))
+                cancelled=[r['id'] for r in cur.fetchall()]
+            cur.execute('SELECT * FROM product_psd_mappings WHERE shopify_product_gid=%s',(pid,));mapping=cur.fetchone()
+            cur.execute('SELECT * FROM auto_edition_layouts WHERE product_gid=%s FOR UPDATE',(pid,));layouts=[dict(r) for r in cur.fetchall()]
+            detail=dict(request_id=request_id,previous=snapshot(row or {}),mapping_before=_record(mapping) if mapping else None,layouts_before=layouts,cancelled_review_jobs=cancelled)
+            # Preserve the previous approvals and association in append-only history before unlinking.
+            Queue.audit(cur,pid,actor,'reset_cleared',json.loads(json.dumps(detail,default=str)))
+            PostgresMappings._audit(cur,pid,'replace',actor,detail['mapping_before'],dict(state='Reset',request_id=request_id,mapping_cleared=True))
+            cur.execute('DELETE FROM auto_edition_layouts WHERE product_gid=%s',(pid,))
+            cur.execute('DELETE FROM product_psd_mappings WHERE shopify_product_gid=%s',(pid,))
+            marker=dict(id=request_id,actor=actor,stage='Complete',manual_required=True)
+            cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,priority,replacement,reason)
+                VALUES(%s,'','Blocked',0,%s::jsonb,'Reset; manually Add the PSD to start again.')
+                ON CONFLICT(product_gid) DO UPDATE SET file_id='',source=NULL,preparation_hash=NULL,
+                status='Blocked',priority=0,reason=excluded.reason,attempts=0,lease_token=NULL,lease_until=NULL,
+                replacement=excluded.replacement,updated_at=now()""",(pid,json.dumps(marker)))
+        return 'Complete'
+
     def request(self,pid,request_id,actor):
         from auto_editions_discovery import enabled
         if not enabled():raise ValueError('Automatic PSD discovery is disabled.')
@@ -61,6 +106,7 @@ class Reset:
                     return {'reset_completed':'Complete','reset_failed':'Failed','reset_queued':'Queued'}.get(prior['event'],'Discovering')
             if row:
                 pending=row.get('replacement') or {}
+                if pending.get('manual_required'):raise ValueError('Manually Add the PSD before starting preparation again.')
                 if pending.get('id')==request_id:return pending['stage']
                 if row['status']=='Preparing' or pending.get('stage') in BUSY:
                     raise ValueError('This design is already processing. Wait for it to finish.')
