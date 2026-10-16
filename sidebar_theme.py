@@ -62,6 +62,14 @@ section[data-testid="stSidebar"] [class*="st-key-sidebar-disclosure-"][class*="-
 section[data-testid="stSidebar"] [class*="st-key-sidebar-"][class*="-children"] {background:rgba(255,255,255,.025);border-radius:0 0 7px 7px;box-sizing:border-box;margin:-2px 0 4px;padding:0 0 6px;width:100%;max-width:100%;}
 section[data-testid="stSidebar"] [class*="st-key-sidebar-"][class*="-children"] [data-testid="stButton"] button {height:auto;min-height:33px;border-radius:0 !important;padding-left:36px !important;font-weight:500 !important;}
 section[data-testid="stSidebar"] [class*="st-key-sidebar-"][class*="-children"] [data-testid="stButton"] button[kind="primary"] {font-weight:600 !important;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a {display:flex;align-items:center;justify-content:flex-start;min-height:33px;box-sizing:border-box;padding:6px 10px 6px 36px!important;border:1px solid transparent!important;border-radius:0!important;background:transparent!important;color:var(--sidebar-text)!important;font:500 14px/1.3 "Segoe UI",sans-serif;text-decoration:none;transition:background-color 100ms ease,color 100ms ease;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a:hover {background:var(--sidebar-panel-hover)!important;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a:focus-visible {outline:2px solid var(--sidebar-gold)!important;outline-offset:-2px;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a * {color:var(--sidebar-text)!important;-webkit-text-fill-color:var(--sidebar-text)!important;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a > div {justify-content:flex-start;gap:8px;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a[kind="primary"] {background:linear-gradient(105deg,#b99436,#d0aa46)!important;color:var(--sidebar-gold-text)!important;font-weight:600!important;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] a[kind="primary"] * {color:var(--sidebar-gold-text)!important;-webkit-text-fill-color:var(--sidebar-gold-text)!important;}
+section[data-testid="stSidebar"] .st-key-sidebar-developer-children [data-testid="stLinkButton"] [data-testid="stIconMaterial"] {font-size:18px!important;height:18px!important;line-height:18px!important;width:18px!important;flex:0 0 18px;}
 section[data-testid="stSidebar"] .st-key-sidebar-profile-footer {background:var(--sidebar-bg-bottom);margin-top:10px;padding-bottom:6px;}
 section[data-testid="stSidebar"] .st-key-sidebar-profile-footer [data-testid="stCaptionContainer"],
 section[data-testid="stSidebar"] .sc-sidebar-role {color:var(--sidebar-muted) !important;font-size:12px;}

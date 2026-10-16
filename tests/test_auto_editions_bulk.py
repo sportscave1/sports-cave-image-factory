@@ -173,6 +173,42 @@ def test_bulk_api_admin_origin_confirmation_and_partial_results():
     asyncio.run(run())
 
 
+def rebind(record):
+    digest=ae.fingerprint(record['manifest']);record['hash']=digest
+    record['receipts']['preparation_hash']=digest
+    for proof in record['proofs']:proof['preparation_hash']=digest
+
+
+def test_current_colour_evidence_binds_preview_to_exact_profile(tmp_path):
+    record,assets=prepared(tmp_path)
+    record['manifest']['colour_evidence']=dict(pixels_converted=False,icc_sha256='a'*64)
+    rebind(record)
+    with pytest.raises(ValueError,match='ICC evidence differs'):
+        bulk.ReviewCache().get(record,assets.fetch)
+
+
+def test_revoked_colour_policy_prevents_bulk_eligibility(tmp_path):
+    record,_=prepared(tmp_path)
+    record['manifest']['colour_evidence']=dict(pixels_converted=False,icc_sha256='a'*64,policy=dict(approval_hash='a'*64))
+    rebind(record)
+    with patch('auto_editions_colour_policy.resolve',return_value=(b'',dict(approval_hash='b'*64))):
+        with pytest.raises(ValueError,match='colour policy changed'):bulk.evidence(record)
+
+
+def test_visual_failure_during_validation_is_fenced_in_locked_transaction(review,monkeypatch):
+    d,sql,record,assets=review;monkeypatch.setenv('AUTO_EDITIONS_VISUAL_AUTO_APPROVAL_ENABLED','true')
+    def fail(*args):
+        detail=dict(assessment=dict(status='Failed',reason='Reference changed'))
+        sql.execute("INSERT INTO auto_edition_setup_audit(actor_id,preparation_hash,event,detail) VALUES('synthetic-admin',%s,'automatic_visual_assessment',%s::jsonb)",(record['hash'],json.dumps(detail)))
+    with patch('auto_editions_onboarding_api.candidate',return_value=(record,assets)),patch.object(bulk,'validate_files',side_effect=fail):
+        assert bulk.approve_one(d.connect,dict(product_gid=PID,hash=record['hash']),'synthetic-admin')=='Needs Attention'
+    sql.execute('SELECT * FROM auto_edition_layouts');assert not sql.fetchall()
+
+
+def test_repair_assessment_is_ineligible_even_when_projection_says_needs_review():
+    assert not bulk.eligible_state(dict(status='Needs Review',approval_status='Needs Repair'))
+
+
 def test_synthetic_performance(tmp_path):
     record,assets=prepared(tmp_path);cache=bulk.ReviewCache();started=time.perf_counter();data=cache.get(record,assets.fetch);cold=(time.perf_counter()-started)*1000
     started=time.perf_counter()

@@ -31,6 +31,7 @@ CHECKPOINTS={'queued':'Queued','mapping_confirmed':'Mapping saved','claimed':'Co
     'Preparing':'Preparing','Blocked':'Preparation paused','Cloud Ready':'Cloud Ready',
     'Needs PSD Repair':'PSD repair required','visual_quality_approved':'Visual review approved',
     'preparation_metrics':'Preparation uploaded','priority':'Priority updated','retry':'Retry queued','prepare_now':'Prepare Now queued'}
+CHECKPOINTS['automatic_visual_assessment']='Automatic visual assessment'
 
 SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priority,
  q.preparation_hash,q.source,q.reason,q.attempts,q.lease_until,q.updated_at,
@@ -39,7 +40,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement {quality_select}
+ {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement {quality_select} {visual_select}
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
@@ -62,6 +63,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
    WHERE product_gid=w.pid ORDER BY created_at DESC,id DESC LIMIT 1) a ON true
  {inventory}
  {quality_join}
+ {visual_join}
 """
 
 
@@ -84,7 +86,7 @@ def unavailable(pid):
                 checkpoint='',checkpoint_at=None,preparation_hash=None,actions=[])
 
 
-def project(row, *, writable=False, now=None):
+def project(row, *, writable=False, now=None, evidence=False):
     """Conservative states: no inferred connection, approval or print readiness."""
     now=now or datetime.now(timezone.utc)
     pid=row['product_gid'];status=row.get('status');digest=row.get('preparation_hash')
@@ -102,6 +104,11 @@ def project(row, *, writable=False, now=None):
         and row.get('pixel_exact') is True and row.get('outside_exact') is True and row.get('bound') is True)
     observed=row.get('observed_source')
     if observed and observed!=row.get('prepared_source'):valid=False
+    automatic=False
+    from auto_editions_visual import enabled as visual_enabled,current_identity as visual_current
+    if visual_enabled() and row.get('automatic_approval'):
+        automatic=visual_current(row['automatic_approval'],digest,dict(source=source,dimensions=row.get('visual_dimensions'),edition_total=row.get('prepared_total'),colour_evidence=row.get('visual_colour')))
+        row=dict(row,approved=row.get('approved') is True or automatic)
     if mapped:
         if not row.get('file_id'):
             state='Connect';why='Verified PSD has no onboarding checkpoint.';actions=['connect']
@@ -136,6 +143,13 @@ def project(row, *, writable=False, now=None):
         elif status=='Blocked':
             state='Failed';why=reason(row.get('reason')) or 'Preparation is blocked.';actions=['retry']
         else:state='Failed';why='Onboarding checkpoint requires administrator review.'
+    # Missing/uncertain colour evidence is a review decision, not proof of PSD damage.
+    if status in ('Blocked','Needs PSD Repair') and not digest:
+        from worker_diagnostics import explain
+        if explain(row.get('reason'))['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','COLOUR_INCOMPATIBLE'):
+            state='Needs Review';why=reason(row.get('reason'));actions=[]
+    if visual_enabled() and row.get('automatic_approval') and not automatic and valid and state=='Failed':
+        state='Needs Review';why='Automatic visual evidence expired or its owner policy changed; recheck required.';actions=['review']
     from auto_editions_quality import enabled as quality_enabled,current_certificate,standards,standard_for
     if quality_enabled() and digest and valid and state in ('Review','Cloud Ready'):
         check=row.get('quality_assessment')
@@ -160,7 +174,14 @@ def project(row, *, writable=False, now=None):
         if state=='Review':state='Needs Review'
         if digest and state in ('Cloud Ready','Production Ready','Needs Review') and not uploaded:
             state='Needs Review';why='Recorded upload receipts are incomplete or inconsistent; verify retained assets.';actions=['review']
-    return dict(**({'uploaded':uploaded} if continuous() else {}),product_gid=pid,status=state,icon=ICONS[state],reason=why,
+    assessment=row.get('visual_assessment') or {}
+    if valid and state in ('Review','Needs Review','Cloud Ready') and visual_enabled():
+        if automatic:why=why or 'Auto Approved: exact source and reference evidence verified. Supplier certification remains separate.'
+        elif assessment and row.get('approved') is not True and assessment.get('status')!='Auto Approved':
+            state='Failed' if assessment.get('status')=='Failed' else 'Needs Review'
+            why=reason(assessment.get('reason')) or 'Automatic visual evidence requires review.'
+    return dict(approval_status='Auto Approved' if automatic else None if row.get('approved') is True else assessment.get('status') if visual_enabled() else None,
+                **({'uploaded':uploaded} if continuous() or evidence else {}),product_gid=pid,status=state,icon=ICONS[state],reason=why,
                 reset_allowed=bool(writable and discovery_enabled() and status!='Preparing' and reset.get('stage') not in ('Discovering','Queued','Preparing')),
                 mapping_file_id=mapped,
                 checkpoint=CHECKPOINTS.get(row.get('checkpoint'),'Checkpoint recorded' if row.get('checkpoint') else ''),
@@ -168,7 +189,7 @@ def project(row, *, writable=False, now=None):
                 preparation_hash=digest,actions=actions if writable else [])
 
 
-def batch(connect, ids, *, writable=False):
+def batch(connect, ids, *, writable=False, evidence=False):
     ids=list(dict.fromkeys(identity(pid) for pid in ids))
     if len(ids)>1000:raise ValueError('Status batch exceeds the Edition Ops limit.')
     if not ids:return {'rows':[],'query_count':0,'duration_ms':0}
@@ -177,9 +198,11 @@ def batch(connect, ids, *, writable=False):
     observed="jsonb_build_object('product_gid',w.pid,'file_id',i.file_id,'revision',i.metadata->>'rev','content_hash',i.metadata->>'content_hash')"
     sql=SQL.format(observed=f"CASE WHEN i.file_id IS NOT NULL THEN {observed} WHEN c.complete THEN jsonb_build_object('missing',true) END" if enabled() else 'NULL::jsonb',
                    inventory='LEFT JOIN auto_edition_source_inventory i ON i.file_id=m.dropbox_file_id LEFT JOIN auto_edition_discovery_cursor c ON c.id=1' if enabled() else '',
-                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if __import__('auto_editions_v17').enabled() else 'NULL::boolean',
+                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if __import__('auto_editions_v17').enabled() or evidence else 'NULL::boolean',
                    quality_select=', qc.assessment AS quality_assessment,qc.next_check_at>now() AS quality_fresh,prep.manifest AS quality_manifest' if quality_enabled() else '',
-                   quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() else '')
+                   quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() else '',
+                   visual_select=", CASE WHEN va.detail IS NULL THEN NULL ELSE jsonb_build_object('status',va.detail->'assessment'->>'status','reason',va.detail->'assessment'->>'reason') END AS visual_assessment,prep.manifest->'dimensions' AS visual_dimensions,prep.manifest->'colour_evidence' AS visual_colour,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.preparation_hash=prep.hash AND l.variant_id='*' AND l.approval->>'method'='auto-editions-visual-v1') AS automatic_approval" if __import__('auto_editions_visual').enabled() else '',
+                   visual_join="LEFT JOIN (SELECT DISTINCT ON(preparation_hash) preparation_hash,detail FROM auto_edition_setup_audit WHERE event='automatic_visual_assessment' ORDER BY preparation_hash,id DESC) va ON va.preparation_hash=prep.hash" if __import__('auto_editions_visual').enabled() else '')
     start=time.perf_counter()
     with connect() as conn,conn.cursor() as cur:
         cur.execute(sql,(ids,));raw=cur.fetchall()
@@ -188,7 +211,7 @@ def batch(connect, ids, *, writable=False):
     result=[]
     for pid,rows in groups.items():
         if len(rows)!=1:result.append(unavailable(pid))
-        else:result.append(project(rows[0],writable=writable))
+        else:result.append(project(rows[0],writable=writable,evidence=evidence))
     return {'rows':result,'companion_connected':any(r.get('companion_connected') for r in raw),'query_count':1,'duration_ms':round((time.perf_counter()-start)*1000,2)}
 
 

@@ -66,7 +66,7 @@ def test_recovery_journal_contains_no_transfer_secret_and_uses_same_owned_lease(
     with patch.object(local,'host_request',return_value={'grant':{'base_url':'scoped'}}) as request,patch.object(local,'start') as start:
         assert local.recover_retained({'base_url':'scoped'})
     assert request.call_args.args[2]=={'product_gid':PID,'lease_token':'owned'}
-    start.assert_called_once_with({'base_url':'scoped'},resume_folder=folder)
+    start.assert_called_once_with({'base_url':'scoped'},resume_folder=folder,package_transport=0)
 
 
 def test_lost_response_receipt_recovers_without_photoshop_or_second_upload(tmp_path,monkeypatch):
@@ -137,7 +137,7 @@ def test_busy_companion_heartbeats_without_claiming_or_opening_photoshop(tmp_pat
     host=tmp_path/'host.dpapi';host.write_text(json.dumps(config))
     event=local.threading.Event()
     row={'status':'Working','phase':'Uploading','context':{'product_gid':PID,'lease_token':'owned'},'started_at':local.time.time()}
-    monkeypatch.setattr(local,'HOST_FILE',host);monkeypatch.setattr(local,'HOST_STOP',event);monkeypatch.setattr(local,'JOBS',{'job':row})
+    monkeypatch.setattr(local,'HOST_FILE',host);monkeypatch.setattr(local,'HOST_STOP',event);monkeypatch.setattr(local,'HOST_WAKE',event);monkeypatch.setattr(local,'JOBS',{'job':row})
     import device_trust
     with patch.object(device_trust,'protect',side_effect=lambda data,**kw:data),patch.object(local,'host_request',return_value={}) as request,patch.object(event,'wait',side_effect=lambda delay:event.set()):
         local.host_loop()

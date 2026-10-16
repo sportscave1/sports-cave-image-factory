@@ -1,10 +1,12 @@
 """Phase 3: read-only connection and asynchronous Orders result safeguards."""
 import ast
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 import os_accounts
+import supabase_backend
 from scripts.benchmark_account_reads import Connection, Cursor
 
 
@@ -12,7 +14,8 @@ def orders_functions(st, marker, busy=lambda: False):
     names = {'_check_orders_supabase_live_refresh', '_render_orders_supabase_live_refresh'}
     nodes = [n for n in ast.parse(Path('orders_page.py').read_text(encoding='utf-8')).body
              if isinstance(n, ast.FunctionDef) and n.name in names]
-    ns = dict(st=st, _orders_supabase_visibility_marker=marker,
+    ns = dict(st=st, time=time, LOAD_FUTURE_KEY='future', LOAD_GENERATION_KEY='generation',
+              LIVE_CHECKED_AT_KEY='checked_at', _orders_supabase_visibility_marker=marker,
               _certificate_action_in_progress=busy, _reload_orders_from_source=Mock(),
               ORDERS_SUPABASE_LIVE_MARKER_KEY='marker', ORDERS_SUPABASE_LIVE_CHECK_SECONDS=30)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), 'orders_page.py', 'exec'), ns)
@@ -23,9 +26,9 @@ class Phase3ReadTests(unittest.TestCase):
     def test_account_refresh_autocommit_only_single_statement(self):
         store = os_accounts.PostgresAccountStore()
         cur = Cursor()
-        with patch.object(store, 'ensure_schema'), patch.object(store, '_connect', return_value=Connection(cur)) as connect, patch('scripts.benchmark_account_reads.time.sleep'):
+        with patch.object(store, 'ensure_schema'), patch.object(store, '_read_connection', return_value=Connection(cur)) as connect, patch('scripts.benchmark_account_reads.time.sleep'):
             store.get_user('fixture')
-        connect.assert_called_once_with(autocommit=True)
+        connect.assert_called_once_with()
         self.assertEqual(cur.calls, 1)
         self.assertIn('p.user_id=u.id', cur.sql)
 
@@ -45,8 +48,9 @@ class Phase3ReadTests(unittest.TestCase):
         conn.__enter__ = Mock(return_value=conn)
         conn.__exit__ = Mock(return_value=False)
         conn.cursor.side_effect = RuntimeError('fixture timeout')
-        with patch.object(store, 'ensure_schema'), patch.object(store, '_connect', return_value=conn):
-            with self.assertRaisesRegex(RuntimeError, 'fixture timeout'): store.get_user('fixture')
+        with patch.object(store, 'ensure_schema'), patch.object(store, '_read_connection', return_value=conn):
+            with self.assertRaises(supabase_backend.DatabaseReadError) as error: store.get_user('fixture')
+        self.assertEqual(str(error.exception.__cause__), 'fixture timeout')
         conn.__exit__.assert_called_once()
 
     def test_parallel_registration_preserves_cadence(self):

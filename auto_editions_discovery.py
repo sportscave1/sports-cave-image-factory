@@ -245,6 +245,8 @@ def run(stop):
     from auto_editions_priority import refresh
     discovery = Discovery(db.connect)
     while not stop.is_set():
+        from worker_health import record_heartbeat
+        health_ok=True
         try:
             auth = None
             def context():
@@ -257,12 +259,19 @@ def run(stop):
                 lambda fid: dropbox.psd_open_metadata(context(),fid,include_preview=False))
         except Exception as error:
             LOG.warning('auto_editions_discovery_failed error_type=%s',type(error).__name__)
+            health_ok=False
         try:
             discovery.seed_existing()
             refresh(discovery.queue,ACTOR,limit=100)
         except Exception as error:
             LOG.warning('auto_editions_priority_failed error_type=%s',type(error).__name__)
+            health_ok=False
         try:
+            from auto_editions_visual import enabled as visual_enabled
+            if visual_enabled():
+                from auto_editions_visual_store import Visual
+                from auto_editions_cloud import DropboxAssets
+                Visual(db.connect).run_one(DropboxAssets(context(),dropbox))
             from auto_editions_quality import enabled as quality_enabled
             if quality_enabled():
                 from auto_editions_quality_store import Quality
@@ -272,6 +281,9 @@ def run(stop):
                 Quality(db.connect).run_one(DropboxAssets(context(),dropbox))
         except Exception as error:
             LOG.warning('auto_editions_quality_failed error_type=%s',type(error).__name__)
+            health_ok=False
+        record_heartbeat(db.connect,'Render',os.getenv('RENDER_INSTANCE_ID','local-worker'),
+            dict(state='Live' if health_ok else 'Degraded',stage='Discovery',revision=os.getenv('RENDER_GIT_COMMIT','local'),protocol=1))
         stop.wait(60)
 
 

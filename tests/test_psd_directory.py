@@ -99,7 +99,8 @@ class PsdDirectoryTests(unittest.TestCase):
         # Execute the real table projection without importing application/server modules.
         tree = ast.parse(Path('orders_page.py').read_text(encoding='utf-8'))
         fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_display_rows')
-        namespace = {'psd_directory': psd, 'print_jpg': print_jpg, 'VISIBLE_COLUMNS': ['order', 'product', 'file'], 'COPY_ORDER_ICON': 'copy', 'st': None}
+        namespace = {'psd_directory': psd, 'print_jpg': print_jpg, 'VISIBLE_COLUMNS': ['order', 'product', 'file'], 'COPY_ORDER_ICON': 'copy', 'st': None,
+                     '_order_display_resources': lambda rows: (psd.directory(), {})}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), 'orders_page.py', 'exec'), namespace)
         lines = [{'order': '#SC1', 'product': p['product_title'], 'shopify_product_id': p['shopify_product_gid']} for p in products]
         lines.append({'order': '#SC1', 'product': 'Missing', 'shopify_product_id': '3'})

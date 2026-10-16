@@ -1759,6 +1759,8 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
             or ""
         )
         base = {
+            "_orders_refund": order_raw.get("_orders_refund") or {},
+            "_orders_workflow_status": order_raw.get("_orders_workflow_status") or "",
             "order": order_name,
             "date": date_value,
             "customer": str(row.get("customer_name") or order_raw.get("customer_name") or ""),

@@ -137,6 +137,8 @@ async def package(request):
                     output.write(block)
             assets_root=root/'assets';assets_root.mkdir()
             timings['receive_seconds']=round(time.monotonic()-started,3);phase=time.monotonic()
+            timings['package_bytes']=size
+            timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
             ctx=setup['context']
             manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
             if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:
@@ -145,6 +147,8 @@ async def package(request):
             assets=runtime.storage()
             receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
             timings['dropbox_upload_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
+            timings.update({k:v for k,v in getattr(assets,'timings',{}).items() if k.startswith('prepared_')})
+            timings['dropbox_publish_mib_s']=round(timings.get('prepared_upload_bytes',0)/1024**2/max(timings['dropbox_upload_seconds'],.000001),4)
             await run_in_threadpool(grant_context,request)
             registry,_=runtime.stores()
             digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])
@@ -159,8 +163,29 @@ async def package(request):
                     'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
             setup['imported']=digest
             timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
+            # Disabled by default. Reuse the exact imported files and fresh cloud
+            # receipts; never regenerate or upload during visual reconciliation.
+            from auto_editions_visual import enabled as visual_enabled
+            if ctx.get('automatic') and visual_enabled():
+                visual_started=time.monotonic()
+                try:
+                    from auto_editions_visual_store import Visual
+                    from auto_editions_onboarding_api import queue
+                    await run_in_threadpool(Visual(queue().connect).run_one,assets,pid=ctx['product_gid'],local_root=assets_root)
+                except Exception:
+                    # The already-durable import must remain recoverable. The
+                    # existing discovery worker retries missing visual evidence.
+                    __import__('logging').getLogger(__name__).warning('automatic_visual_pending preparation=%s',digest)
+                timings['automatic_visual_seconds']=round(time.monotonic()-visual_started,3)
             timings['total_seconds']=round(time.monotonic()-started,3)
-        return JSONResponse(dict(preparation_hash=digest,status='Awaiting visual approval',print_ready=False,timings=timings),headers=api.HEADERS)
+        response_status='Awaiting visual approval'
+        if ctx.get('automatic') and visual_enabled():
+            # Report the durable exact-hash decision, never infer success from a
+            # completed comparison call or fabricate a human approval.
+            try:
+                if await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])=='Cloud Ready':response_status='Cloud Ready'
+            except Exception:pass
+        return JSONResponse(dict(preparation_hash=digest,status=response_status,print_ready=False,timings=timings),headers=api.HEADERS)
     except Exception as error:
         if acquired and isinstance(error,ValueError) and setup and setup['context'].get('reset_id'):
             try:

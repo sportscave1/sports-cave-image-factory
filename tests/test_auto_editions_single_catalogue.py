@@ -6,6 +6,7 @@ import pytest
 import auto_editions_v17 as policy
 import auto_editions_onboarding_api as api
 from auto_editions_onboarding import detect,NeedsRepair
+from auto_editions_colour_source import ColourReview
 from tests.test_auto_editions_onboarding import inspection
 from tests.test_auto_editions_v17 import continuous,prepared
 from tests.test_auto_editions_discovery import database,store,pglite_database,PID,rows
@@ -39,7 +40,7 @@ def test_summary_separates_catalogue_from_mapped_without_duplicate_options(prepa
 @pytest.mark.parametrize('profile',[None,''])
 def test_known_missing_profile_requires_review_before_photoshop(profile):
     source=inspection();source['document']['profile']=profile
-    with pytest.raises(NeedsRepair,match='colour profile is unavailable'):detect(source,100)
+    with pytest.raises(ColourReview,match='colour profile is unavailable'):detect(source,100)
     source['document']['profile']='sRGB IEC61966-2.1'
     assert detect(source,100)['number_layer']=='001 / 100'
 
@@ -52,5 +53,5 @@ def test_photoshop_cause_is_retained_without_exposing_paths_or_capabilities(tmp_
     detail=json.loads((tmp_path/'failure-detail.json').read_text())
     assert detail['error_type']=='RuntimeError' and 'source_profile_requires_review' in detail['message']
     assert all(value not in json.dumps(detail) for value in (secret,ticket,lease))
-    assert row['repair'] is True and 'owner review' in public and 'C:/' not in public
+    assert row['repair'] is False and 'owner review' in public and 'C:/' not in public
     assert 'private' not in local.failure_detail(row,'Preparation',RuntimeError('Photoshop scripting failed: C:/private/art.psd'))

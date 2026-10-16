@@ -5,6 +5,7 @@ the inspected source; ambiguous or nested roles remain disabled.
 """
 import re
 import auto_editions as ae
+from auto_editions_colour_source import ColourReview
 
 NUMBER = re.compile(r'^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)$', re.I)
 PLAQUES = {'SC_EDITION_PLAQUE', 'limited-edition-plaque'}
@@ -15,11 +16,20 @@ class NeedsRepair(ValueError):
     pass
 
 
-def detect(inspection, total):
+def detect(inspection, total, *, colour_policy=None):
     """Accept a single complete top-level editable edition, with its own plaque."""
     doc = inspection.get('document', {})
-    if 'profile' in doc and not doc['profile']:
-        raise NeedsRepair('Original PSD colour profile is unavailable; owner colour review is required.')
+    state=doc.get('profile_state')
+    if state=='inspector_failure':
+        raise ColourReview('Inspector failure: Photoshop colour metadata could not be read.')
+    if (state=='untagged' or 'profile' in doc and not doc['profile']) and not colour_policy:
+        raise ColourReview('Colour policy awaiting approval: original PSD colour profile is unavailable; owner colour review is required.')
+    return detect_roles(inspection,total)
+
+
+def detect_roles(inspection,total):
+    """Structural review evidence only; never authorises colour or preparation."""
+    doc=inspection.get('document',{})
     canvas = ae.dimensions([doc.get('width_px'), doc.get('height_px')])
     rows = inspection.get('layers', [])
     candidates = []

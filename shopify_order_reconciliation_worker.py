@@ -48,6 +48,14 @@ def run_once():
         if not supabase_backend.is_configured():
             _log("shopify_order_reconciliation_skipped", reason="database_not_configured")
             return {"status": "skipped", "reason": "database_not_configured"}
+        # Refund status must progress even when paid-order allocation is leased
+        # or blocked by an unrelated mapping problem.
+        try:
+            import order_refunds
+            refund_result = order_refunds.reconcile(backend=supabase_backend)
+            _log("shopify_refunds_reconciled", **refund_result)
+        except Exception as exc:
+            _log("shopify_refund_reconciliation_failed", error_type=type(exc).__name__)
         # Resume durable edition transitions even when there are no new orders.
         from edition_versions import resume_pending
         try:

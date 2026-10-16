@@ -205,6 +205,7 @@ def render_jpg(manifest, root, number, destination):
     destination = Path(destination)
     timings={}
     with compose(manifest, root, number,timings=timings) as image:
+        expected_profile=image.info.get('icc_profile',b'')
         started=time.monotonic()
         image.save(destination, format='JPEG', quality=100, subsampling=0,
                    icc_profile=image.info.get('icc_profile', b''), dpi=(300, 300))
@@ -216,6 +217,7 @@ def render_jpg(manifest, root, number, destination):
             raise ValueError('Encoded JPG geometry changed.')
         verified.load()
         profile = verified.info.get('icc_profile', b'')
+        if profile!=expected_profile:raise ValueError('ICC export mismatch: JPG did not retain the verified source profile.')
         import io
         profile_name = ImageCms.getProfileName(ImageCms.ImageCmsProfile(io.BytesIO(profile))).strip() if profile else 'Unspecified'
     digest=file_hash(destination)
@@ -255,6 +257,9 @@ def status(manifest=None, approval=None):
         validate_manifest(manifest)
     except (ValueError, TypeError, KeyError):
         return 'NOT CONFIGURED'
+    if approval and approval.get('method')=='auto-editions-visual-v1':
+        from auto_editions_visual import current
+        return 'TEST READY' if current(approval,manifest) else 'NOT CONFIGURED'
     if (not approval or approval.get('preparation_hash') != fingerprint(manifest)
             or not approval.get('actor_id') or approval.get('visual_approved') is not True
             or approval.get('pixel_exact') is not True):

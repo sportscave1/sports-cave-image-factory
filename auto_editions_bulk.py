@@ -6,6 +6,7 @@ import tempfile
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from pathlib import Path
 
 from PIL import Image, ImageCms
@@ -30,6 +31,14 @@ def sorted_rows(rows, values, choice, identity):
 def evidence(record):
     m=record['manifest'];ae.validate_manifest(m);digest=ae.fingerprint(m)
     if record['hash']!=digest:raise ValueError('Preparation identity changed.')
+    colour=m.get('colour_evidence')
+    if colour:
+        if colour.get('pixels_converted') is not False or not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256'))):
+            raise ValueError('Current source colour evidence required.')
+        if colour.get('policy'):
+            from auto_editions_colour_policy import resolve
+            _,active=resolve(m['source'])
+            if active!=colour['policy']:raise ValueError('Source colour policy changed.')
     proofs=record.get('proofs') or []
     if (not proofs or any(p.get('preparation_hash')!=digest for p in proofs)
             or not any(p.get('outside_number_exact') is True for p in proofs)
@@ -48,7 +57,7 @@ def evidence(record):
     return m
 
 
-def inspect_asset(root, asset, expected, fetch, digest, receipts):
+def inspect_asset(root, asset, expected, fetch, digest, receipts, expected_icc=None):
     path=root/asset['name'];fetch(digest,asset,path);ae.asset_path(root,asset)
     receipt=next(r for r in receipts['assets'] if r['name']==asset['name'])
     if path.stat().st_size!=receipt['bytes']:raise ValueError('Prepared file size changed.')
@@ -57,7 +66,9 @@ def inspect_asset(root, asset, expected, fetch, digest, receipts):
             raise ValueError('Prepared file geometry or mode changed.')
         profile=image.info.get('icc_profile',b'')
         if not profile:raise ValueError('Embedded ICC profile required.')
-        ImageCms.ImageCmsProfile(io.BytesIO(profile))
+        from auto_editions_colour_source import profile_info
+        actual=profile_info(profile)
+        if expected_icc and actual['sha256']!=expected_icc:raise ValueError('Source ICC evidence differs from prepared bytes.')
     return profile
 
 
@@ -79,7 +90,7 @@ class ReviewCache:
             with tempfile.TemporaryDirectory(prefix='sc-review-small-') as folder:
                 root=Path(folder);r=m['number_region'];profile=None
                 for asset,size in ((m['master'],m['dimensions']),(m['patches']['1'],[r[2]-r[0],r[3]-r[1]])):
-                    p=inspect_asset(root,asset,size,fetch,digest,record['receipts'])
+                    p=inspect_asset(root,asset,size,fetch,digest,record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
                     if profile is not None and p!=profile:raise ValueError('Number ICC profile differs.')
                     profile=p
                 # Resize each existing verified asset before composition. Never build a full canvas/JPG.
@@ -127,6 +138,10 @@ def records(connect,ids):
     return {pid:rs[0] for pid,rs in groups.items() if len(rs)==1}
 
 
+def eligible_state(row):
+    return row['status'] in ('Review','Needs Review') and row.get('approval_status') not in ('Failed','Needs Repair')
+
+
 def listing(connect,ids,user):
     start=time.perf_counter();data=statuses.batch(connect,ids,writable=True)
     candidates=[r for r in data['rows'] if r['status'] in ('Review','Needs Review')]
@@ -138,7 +153,7 @@ def listing(connect,ids,user):
         for row in candidates:
             record=found.get(row['product_gid']);eligible=False;reason=row['reason']
             if record:
-                try:evidence(record);eligible=True
+                try:evidence(record);eligible=eligible_state(row)
                 except (ValueError,KeyError,TypeError):reason='Preparation proofs, geometry or receipts need attention.'
                 key=(str(user['id']),row['product_gid'],record['hash'])
                 snapshots[key]=(now+900,record)
@@ -158,7 +173,7 @@ def validate_files(record,assets):
             if (fresh.get('rev')!=receipt['revision'] or fresh.get('id')!=receipt['file_id']
                     or fresh.get('size')!=receipt['bytes']
                     or str(fresh.get('path_display','')).lower()!=DropboxAssets.path(record['hash'],a['name']).lower()):raise ValueError('Cloud receipt changed.')
-            p=inspect_asset(Path(folder),a,m['dimensions'] if a==m['master'] else [r[2]-r[0],r[3]-r[1]],assets.fetch,record['hash'],record['receipts'])
+            p=inspect_asset(Path(folder),a,m['dimensions'] if a==m['master'] else [r[2]-r[0],r[3]-r[1]],assets.fetch,record['hash'],record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
             if profile is not None and p!=profile:raise ValueError('ICC profiles differ.')
             profile=p
             if ae.file_hash(Path(folder)/a['name'],dropbox=True)!=fresh.get('content_hash'):raise ValueError('Cloud file integrity differs.')
@@ -172,7 +187,7 @@ def approve_one(connect,item,actor):
     state=statuses.batch(connect,[pid],writable=True)['rows'][0]
     if state['preparation_hash']!=digest:return 'Skipped'
     if state['status']=='Cloud Ready':return 'Skipped'
-    if state['status'] not in ('Review','Needs Review'):return 'Needs Attention'
+    if not eligible_state(state):return 'Needs Attention'
     record,assets=candidate(pid,digest);validate_files(record,assets)
     # Lock the same product -> mapping -> checkpoint order as the reset/quality paths.
     with connect() as conn,conn.cursor() as cur:
@@ -196,6 +211,14 @@ def approve_one(connect,item,actor):
         cur.execute('LOCK TABLE auto_edition_layouts IN SHARE ROW EXCLUSIVE MODE')
         cur.execute('SELECT * FROM auto_edition_layouts WHERE product_gid=%s',(pid,));layouts=cur.fetchall()
         if any(l['preparation_hash']!=digest for l in layouts):return 'Needs Attention'
+        # Reuse the current production projection inside our locked transaction.
+        # This also fences newer visual assessments without opening another connection.
+        @contextmanager
+        def borrowed():yield conn
+        fresh=statuses.batch(borrowed,[pid],writable=True)['rows'][0]
+        if fresh['preparation_hash']!=digest:return 'Skipped'
+        if not eligible_state(fresh):return 'Skipped' if fresh['status']=='Cloud Ready' else 'Needs Attention'
+        evidence(record)  # Colour policy may have been revoked during file validation.
         old=next((l for l in layouts if l['variant_id']=='*'),None)
         if old:
             # Never broaden an existing restricted TEST approval on retry.

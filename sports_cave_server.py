@@ -28,6 +28,7 @@ from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
 from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
 from auto_editions_status import ROUTES as AUTO_EDITIONS_STATUS_ROUTES
 from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
+from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
 
 
 routes = [
@@ -39,6 +40,7 @@ routes = [
         *AUTO_EDITIONS_ONBOARDING_ROUTES,
         *AUTO_EDITIONS_STATUS_ROUTES,
         *AUTO_EDITIONS_BULK_ROUTES,
+        *WORKER_HEALTH_ROUTES,
         *COLLECTOR_VAULT_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,
@@ -141,6 +143,8 @@ if __name__ == "__main__":
         warm_renderer()
         from auto_editions_runtime import start_worker
         start_worker()
+        from database_read_pool import warm_application_reads
+        warm_application_reads()
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),

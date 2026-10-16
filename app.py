@@ -8906,6 +8906,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     os_accounts.DAILY_PLANNER_ROUTE: ":material/event_note:",
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
+    "Worker Health": ":material/monitor_heart:",
     "Accounts & Access": ":material/settings:"
 }
 
@@ -8932,10 +8933,6 @@ def _sidebar_route_button(
     container = (root if root is not None else st.sidebar).container(
         key=f"sidebar-row-{os_accounts.page_key_for_route(route) or route}"
     )
-    if route == "Developer Studio":
-        # A real link preserves the browser's click gesture and leaves Live untouched.
-        container.markdown('<a style="display:block;padding:10px 12px;color:#ddd6bc;text-decoration:none;font:600 14px Segoe UI,sans-serif" class="sc-dev-mode-entry" href="?page=Developer%20Studio&amp;dev_mode=1" target="_blank" rel="noopener">⌘ &nbsp; Dev Mode ↗</a>', unsafe_allow_html=True)
-        return False
     clicked = container.button(
         label or SIDEBAR_NAV_LABELS.get(route, route),
         key=key or f"sidebar-nav::{route}",
@@ -9155,6 +9152,14 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
+    if 'Worker Health' in allowed_routes and disclosure('developer','Developer',':material/developer_mode:','Worker Health'):
+        children=st.container(key='sidebar-developer-children')
+        children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
+        child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Developer Studio' in allowed_routes:
+            children.container(key='sidebar-row-developer_studio').link_button('Dev Mode',
+                '?page=Developer%20Studio&dev_mode=1',use_container_width=True,icon=SIDEBAR_ICON_BY_ROUTE['Developer Studio'],
+                type='primary' if current_page=='Developer Studio' else 'secondary')
     for route in history_routes:
         route_key = os_accounts.page_key_for_route(route)
         if not route_key or route == os_accounts.DAILY_PLANNER_ROUTE:
@@ -9268,7 +9273,6 @@ def render_sidebar():
     with st.sidebar:
         _render_sidebar_create_growth(current_page, allowed_routes, history_routes)
 
-    _sidebar_route_button("Developer Studio", current_page, allowed_routes)
     _sidebar_route_button("Image Protection", current_page, allowed_routes)
 
     reporting_overview_allowed = os_accounts.can_access_page(user, "Reporting")
@@ -15878,13 +15882,43 @@ def _navigation_page_status(current_page):
     return "ready"
 
 
+@st.fragment
+def _render_orders_workspace():
+    # Form and selection events rerender only the existing Orders workspace.
+    # Reuse the exact authentication/permission checks, including expiry and
+    # revocation, rather than trusting a captured user in a fragment closure.
+    if st.session_state.get("current_page", "Orders") != "Orders":
+        return
+    if not is_app_authenticated():
+        st.rerun()
+        return
+    allowed = ensure_current_page_access("Orders")
+    if allowed:
+        try:
+            get_orders_page().render_page()
+        except Exception as error:
+            logging.exception("Page render failed for Orders")
+            _render_navigation_failure("Orders", error)
+            if os_accounts.is_admin(current_os_user()):
+                st.exception(error)
+            status = "error"
+        else:
+            status = _navigation_page_status("Orders")
+    else:
+        status = "denied"
+    _finish_navigation_transition("Orders", status=status)
+    top_bar.render_navigation_complete(
+        get_components_module(), current_route="Orders",
+        navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0), status=status)
+
+
 def render_selected_page(current_page):
     # Opt in only where the local dispatcher survey confirmed oversized native
     # headings/top spacing. Keep newer module-specific workspaces independent.
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
         "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
-        "Developer Studio", "Developer", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Developer Studio", "Developer", "Worker Health", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -15913,6 +15947,9 @@ def render_selected_page(current_page):
         render_lightweight_dashboard_page()
     elif current_page == "Developer Studio":
         from developer_studio_page import render_page
+        render_page(current_os_user())
+    elif current_page == 'Worker Health':
+        from worker_health_page import render_page
         render_page(current_os_user())
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
@@ -15964,7 +16001,7 @@ def render_selected_page(current_page):
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
-        get_orders_page().render_page()
+        _render_orders_workspace()
     elif current_page == "Email":
         get_support_email_page().render_page(current_os_user())
     elif current_page == "Reviews":
@@ -16116,14 +16153,15 @@ def main():
             status="error",
         )
     else:
-        page_status = _navigation_page_status(current_page)
-        _finish_navigation_transition(current_page, status=page_status)
-        top_bar.render_navigation_complete(
-            get_components_module(),
-            current_route=current_page,
-            navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
-            status=page_status,
-        )
+        if current_page != "Orders":
+            page_status = _navigation_page_status(current_page)
+            _finish_navigation_transition(current_page, status=page_status)
+            top_bar.render_navigation_complete(
+                get_components_module(),
+                current_route=current_page,
+                navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
+                status=page_status,
+            )
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
     safe_startup_print(
