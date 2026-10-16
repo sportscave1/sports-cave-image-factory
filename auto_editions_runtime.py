@@ -122,13 +122,14 @@ def start_worker():
     _wake.set()
 
 
-def download_links(rows):
+def download_links(rows, *, read_connection=None):
     if not enabled():return {}
     try:
         import psd_directory
-        registry,jobs=stores()
+        registry,jobs=(Preparations(read_connection),Jobs(read_connection)) if read_connection else stores()
         def variant(value):return str(value or '').removeprefix('gid://shopify/ProductVariant/')
-        raw_index=registry.index()
+        product_ids=sorted({psd_directory.product_id(row) for row in rows if psd_directory.product_id(row)})
+        raw_index=registry.index(product_ids=product_ids) if read_connection else registry.index()
         index={(product,variant(v)):(raw_index[(product,v)] if isinstance(raw_index,dict) else None) for product,v in raw_index}
         links={};expected={}
         reasons=getattr(raw_index,'reasons',{})

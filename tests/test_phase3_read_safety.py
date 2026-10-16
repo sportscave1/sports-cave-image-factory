@@ -1,5 +1,6 @@
 """Phase 3: read-only connection and asynchronous Orders result safeguards."""
 import ast
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -13,7 +14,8 @@ def orders_functions(st, marker, busy=lambda: False):
     names = {'_check_orders_supabase_live_refresh', '_render_orders_supabase_live_refresh'}
     nodes = [n for n in ast.parse(Path('orders_page.py').read_text(encoding='utf-8')).body
              if isinstance(n, ast.FunctionDef) and n.name in names]
-    ns = dict(st=st, _orders_supabase_visibility_marker=marker,
+    ns = dict(st=st, time=time, LOAD_FUTURE_KEY='future', LOAD_GENERATION_KEY='generation',
+              LIVE_CHECKED_AT_KEY='checked_at', _orders_supabase_visibility_marker=marker,
               _certificate_action_in_progress=busy, _reload_orders_from_source=Mock(),
               ORDERS_SUPABASE_LIVE_MARKER_KEY='marker', ORDERS_SUPABASE_LIVE_CHECK_SECONDS=30)
     exec(compile(ast.Module(body=nodes, type_ignores=[]), 'orders_page.py', 'exec'), ns)

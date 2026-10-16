@@ -92,7 +92,7 @@ class OrdersBadgeRepairTests(unittest.TestCase):
         self.assertIsNone(result['action_required_count'])
 
     def test_independent_link_reads_overlap_and_are_reused_for_table(self):
-        import auto_editions_runtime
+        import orders_display_reads
         started = threading.Event()
         def jpg(rows):
             started.set()
@@ -100,7 +100,7 @@ class OrdersBadgeRepairTests(unittest.TestCase):
         def mapping(ui):
             self.assertTrue(started.wait(2))
             return {}
-        with patch.object(auto_editions_runtime, 'download_links', side_effect=jpg) as links, patch.object(
+        with patch.object(orders_display_reads, 'download_links', side_effect=jpg) as links, patch.object(
                 orders_page.psd_directory, 'page_directory', side_effect=mapping) as directory:
             resources = orders_page._order_display_resources([])
             self.assertEqual([], orders_page._display_rows([], normalised=True, resources=resources))

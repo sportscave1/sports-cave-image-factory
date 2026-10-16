@@ -25,7 +25,7 @@ class Preparations:
             row=cur.fetchone()
             return dict(row) if row else None
 
-    def layouts(self,product=None):
+    def layouts(self,product=None,*,product_ids=None):
         """One authoritative policy for the Orders listing and generation request.
 
         V11 Cloud Ready approves a reusable TEST product composition. Legacy
@@ -34,6 +34,8 @@ class Preparations:
         compatibility for an unapproved variant.
         """
         import auto_editions_v17 as v17
+        product_filter = ' AND m.shopify_product_gid=ANY(%s)' if product_ids is not None else ''
+        params = (product, product, list(product_ids)) if product_ids is not None else (product, product)
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("""SELECT {receipts} AS receipts_valid,m.shopify_product_gid AS product_gid,m.dropbox_file_id,
                 l.variant_id,l.preparation_hash,l.approval,p.manifest,
@@ -43,7 +45,8 @@ class Preparations:
                 LEFT JOIN auto_edition_layouts l ON l.product_gid=m.shopify_product_gid
                 LEFT JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
                 LEFT JOIN auto_edition_onboarding q ON q.product_gid=m.shopify_product_gid
-                WHERE (%s::text IS NULL OR m.shopify_product_gid=%s)""".format(receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean'),(product,product))
+                WHERE (%s::text IS NULL OR m.shopify_product_gid=%s){product_filter}""".format(
+                    receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean', product_filter=product_filter),params)
             rows=cur.fetchall()
         return resolve_layouts(rows)
 
@@ -107,13 +110,14 @@ class Preparations:
                 (actor,digest,json.dumps(dict(variant_id=variant,previous=expected))))
         return approval
 
-    def index(self):
-        layouts=self.layouts()
+    def index(self,*,product_ids=None):
+        layouts=self.layouts(product_ids=product_ids) if product_ids is not None else self.layouts()
         result=LayoutIndex({key:row['approval'].get('allocation_ids') for key,row in layouts.items()})
         result.reasons=layouts.reasons
         result.hashes={key:row['preparation_hash'] for key,row in layouts.items()}
         from auto_editions_quality_store import Quality
-        for key,digest in Quality(self.connect).index().items():
+        production = Quality(self.connect).index(product_ids=product_ids) if product_ids is not None else Quality(self.connect).index()
+        for key,digest in production.items():
             result[key]=None
             result.hashes[key]=digest
         return result

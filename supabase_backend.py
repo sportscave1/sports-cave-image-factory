@@ -22550,53 +22550,26 @@ def list_hybrid_order_rows(limit=50, search=""):
 
     operation_prefix = "orders.search" if raw_search else "orders.latest_50"
 
-    def load_order_ids(cur):
-        cur.execute(
-            f"""
-            SELECT o.shopify_order_id
-            FROM shopify_orders o
-            {search_where}
-            ORDER BY o.created_at DESC
-            LIMIT %s
-            """,
-            (*search_params, limit_value),
-        )
-        return cur.fetchall()
-
-    selected_rows, id_diagnostic = _run_read_operation(
-        f"{operation_prefix}.ids",
-        load_order_ids,
-    )
-    selected_order_ids = [
-        str(row.get("shopify_order_id") or "").strip()
-        for row in selected_rows
-        if str(row.get("shopify_order_id") or "").strip()
-    ]
-    if not selected_order_ids:
-        diagnostic = {
-            "operation": operation_prefix,
-            "category": "ok",
-            "exception_class": "",
-            "sqlstate": "",
-            "attempts": int(id_diagnostic.get("attempts") or 1),
-            "query_count": 1,
-            "recovered": bool(id_diagnostic.get("recovered")),
-            "duration_ms": int((time.perf_counter() - total_started) * 1000),
-            "phase_ms": {"ids": int(id_diagnostic.get("duration_ms") or 0)},
-            "marketplace_schema_optional": True,
-        }
-        _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
-        return []
+    manual_table_available = None
 
     def load_base_rows(cur):
+        nonlocal manual_table_available
         cur.execute(
-            """
-            WITH selected_orders AS MATERIALIZED (
+            f"""
+            WITH selected_order_ids AS MATERIALIZED (
+                SELECT o.shopify_order_id FROM shopify_orders o
+                {search_where}
+                ORDER BY o.created_at DESC LIMIT %s
+            ), selected_orders AS MATERIALIZED (
                 SELECT o.*, to_jsonb(o) AS optional_columns
                 FROM shopify_orders o
-                WHERE o.shopify_order_id=ANY(%s)
+                WHERE o.shopify_order_id IN (
+                    SELECT BTRIM(shopify_order_id) FROM selected_order_ids
+                    WHERE BTRIM(COALESCE(shopify_order_id, '')) <> ''
+                )
             )
             SELECT
+                to_regclass('public.manual_order_line_editions') IS NOT NULL AS _manual_table_available,
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                 o.customer_name, o.customer_email, o.financial_status,
                 COALESCE(
@@ -22625,7 +22598,9 @@ def list_hybrid_order_rows(limit=50, search=""):
                 COALESCE(o.optional_columns->>'ingestion_reason', '') AS ingestion_reason,
                 o.total_price, o.currency, o.created_at, o.remote_updated_at,
                 o.processed_at, o.cancelled_at, o.synced_at,
-                o.raw_json AS order_raw_json,
+                CASE WHEN ROW_NUMBER() OVER (
+                    PARTITION BY o.shopify_order_id ORDER BY li.id ASC NULLS LAST
+                )=1 THEN o.raw_json END AS order_raw_json,
                 li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
                 li.assignment_status, li.last_error,
                 COALESCE(NULLIF(to_jsonb(li)->>'mapping_method', ''),
@@ -22653,14 +22628,32 @@ def list_hybrid_order_rows(limit=50, search=""):
             ORDER BY o.created_at DESC,
                      li.id ASC NULLS LAST
             """,
-            (selected_order_ids,),
+            (*search_params, limit_value),
         )
-        return cur.fetchall()
+        from copy import deepcopy
+        rows = cur.fetchall()
+        for row in rows:
+            available = row.pop('_manual_table_available', None)
+            if available is not None:
+                manual_table_available = bool(available)
+        # Transport the full authoritative order JSON once per order, then
+        # restore independent row values before any existing merge/status logic.
+        raw_orders = {str(row.get("shopify_order_id") or ""): row["order_raw_json"]
+                      for row in rows if row.get("order_raw_json") is not None}
+        for row in rows:
+            if row.get("order_raw_json") is None:
+                row["order_raw_json"] = deepcopy(raw_orders.get(str(row.get("shopify_order_id") or "")))
+        return rows
 
     base_rows, base_diagnostic = _run_read_operation(
         f"{operation_prefix}.base",
         load_base_rows,
     )
+    selected_order_ids = list(dict.fromkeys(
+        str(row.get("shopify_order_id") or "").strip() for row in base_rows
+        if str(row.get("shopify_order_id") or "").strip()))
+    id_diagnostic = {"attempts": 0, "duration_ms": 0}
+    enrichment_readers = {}
     line_id_lookup_values = sorted({
         candidate
         for row in base_rows
@@ -22704,12 +22697,9 @@ def list_hybrid_order_rows(limit=50, search=""):
                 """,
                 (line_id_lookup_values,),
             )
-            return cur.fetchall()
+            return True
 
-        fulfilment_rows, fulfilment_diagnostic = _run_read_operation(
-            f"{operation_prefix}.fulfilment",
-            load_fulfilment_rows,
-        )
+        enrichment_readers["fulfilment"] = load_fulfilment_rows
 
     edition_rows = []
     allocation_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
@@ -22784,19 +22774,18 @@ def list_hybrid_order_rows(limit=50, search=""):
                 """,
                 tuple(params),
             )
-            return cur.fetchall()
+            return True
 
-        edition_rows, allocation_diagnostic = _run_read_operation(
-            f"{operation_prefix}.allocations",
-            load_edition_rows,
-        )
+        enrichment_readers["allocations"] = load_edition_rows
 
     manual_edition_rows = []
     manual_edition_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
     if line_id_lookup_values:
         def load_manual_edition_rows(cur):
-            if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
-                return []
+            if manual_table_available is False:
+                return False
+            if manual_table_available is None and not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
+                return False
             cur.execute(
                 """
                 SELECT
@@ -22864,12 +22853,22 @@ def list_hybrid_order_rows(limit=50, search=""):
                 """,
                 (line_id_lookup_values,),
             )
-            return cur.fetchall()
+            return True
 
-        manual_edition_rows, manual_edition_diagnostic = _run_read_operation(
-            f"{operation_prefix}.manual_editions",
-            load_manual_edition_rows,
-        )
+        enrichment_readers["manual_editions"] = load_manual_edition_rows
+
+    from orders_read_batch import read_batch
+    batch, enrichment_diagnostic = _run_read_operation(
+        f"{operation_prefix}.enrichments", lambda cur: read_batch(cur, enrichment_readers))
+    fulfilment_rows = batch['rows'].get('fulfilment', [])
+    edition_rows = batch['rows'].get('allocations', [])
+    manual_edition_rows = batch['rows'].get('manual_editions', [])
+    def phase(name):
+        return {'duration_ms': 0, 'attempts': int(name in batch['executed']),
+                'recovered': False, 'pipelined': True}
+    fulfilment_diagnostic = phase('fulfilment')
+    allocation_diagnostic = phase('allocations')
+    manual_edition_diagnostic = phase('manual_editions')
 
     merge_started = time.perf_counter()
     fulfilment_by_line = {}
@@ -23023,7 +23022,7 @@ def list_hybrid_order_rows(limit=50, search=""):
         "phase_ms": {
             name: int(value.get("duration_ms") or 0)
             for name, value in phase_diagnostics.items()
-        } | {"merge": merge_ms},
+        } | {"enrichments": enrichment_diagnostic["duration_ms"], "merge": merge_ms},
         "selected_order_count": len(selected_order_ids),
         "base_row_count": len(base_rows),
         "marketplace_schema_optional": True,

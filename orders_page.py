@@ -90,10 +90,17 @@ LOAD_ERROR_KEY = "orders_load_error"
 LOAD_FUTURE_KEY = "orders_load_future"
 LOAD_REQUEST_KEY = "orders_load_request"
 LOAD_STARTED_KEY = "orders_load_started_at"
+LOAD_SCOPE_KEY = "orders_load_account_scope"
+LOAD_GENERATION_KEY = "orders_load_generation"
+LIVE_CHECKED_AT_KEY = "orders_visibility_checked_at"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
 ORDERS_PAGE_LOAD_TIMEOUT_SECONDS = 8
+# Covers the measured 1.03s p95 Latest 50 read without a loading-poll rerun.
+# Requests exceeding this short grace period keep the asynchronous fallback.
+ORDERS_INLINE_READ_WAIT_SECONDS = 1.2
 HYBRID_FAST_ORDERS_ENABLED = True
-_ORDERS_LOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="orders-ledger-read")
+from orders_read_executor import OrdersReadExecutor, ReadQueueFull
+_ORDERS_LOAD_EXECUTOR = OrdersReadExecutor()
 _PANDAS_MODULE = None
 _PANDAS_IMPORT_ATTEMPTED = False
 ALLOCATION_BLOCKER_STATUSES = {
@@ -342,6 +349,9 @@ def _start_snapshot_load(search="", *, force=False):
         current.cancel()
     st.session_state[LOAD_ERROR_KEY] = ""
     st.session_state[LOAD_REQUEST_KEY] = query
+    user = st.session_state.get('sports_cave_current_user') or {}
+    st.session_state[LOAD_SCOPE_KEY] = (str(user.get('id') or ''), user.get('session_version'))
+    st.session_state[LOAD_GENERATION_KEY] = int(st.session_state.get(LOAD_GENERATION_KEY) or 0) + 1
     st.session_state[LOAD_STARTED_KEY] = time.monotonic()
     future = _ORDERS_LOAD_EXECUTOR.submit(
         _read_orders_snapshot,
@@ -361,7 +371,20 @@ def _consume_snapshot_load():
     future = st.session_state.get(LOAD_FUTURE_KEY)
     if future is None:
         return "idle"
+    user = st.session_state.get('sports_cave_current_user') or {}
+    scope = (str(user.get('id') or ''), user.get('session_version'))
+    if (st.session_state.get(LOAD_SCOPE_KEY, scope) != scope
+            or st.session_state.get('current_page', 'Orders') != 'Orders'):
+        future.cancel()
+        st.session_state[LOAD_FUTURE_KEY] = None
+        return 'superseded'
     query = str(st.session_state.get(LOAD_REQUEST_KEY) or "")
+    def still_current():
+        current_user = st.session_state.get('sports_cave_current_user') or {}
+        return (st.session_state.get(LOAD_FUTURE_KEY) is future
+                and (str(current_user.get('id') or ''), current_user.get('session_version')) == scope
+                and st.session_state.get('current_page', 'Orders') == 'Orders')
+
     started = float(st.session_state.get(LOAD_STARTED_KEY) or time.monotonic())
     elapsed = time.monotonic() - started
     if not future.done():
@@ -382,9 +405,13 @@ def _consume_snapshot_load():
     try:
         payload = future.result()
     except Exception as error:
+        if not still_current():
+            return 'superseded'
         _record_snapshot_load_error(error, query)
         status = "error"
     else:
+        if not still_current():
+            return 'superseded'
         st.session_state[LOAD_ERROR_KEY] = ""
         _apply_snapshot_payload(payload)
         st.session_state[LOADED_QUERY_KEY] = query
@@ -783,10 +810,18 @@ def _apply_snapshot_payload(payload):
 
 def _reload_orders_from_source():
     query = str(st.session_state.get(LOADED_QUERY_KEY) or "").strip()
+    generation = st.session_state.get(LOAD_GENERATION_KEY)
+    user = dict(st.session_state.get('sports_cave_current_user') or {})
+    page = st.session_state.get('current_page', 'Orders')
     payload = _read_orders_snapshot(search=query, limit=DEFAULT_VISIBLE_ROW_LIMIT)
+    if (st.session_state.get(LOAD_GENERATION_KEY) != generation
+            or dict(st.session_state.get('sports_cave_current_user') or {}) != user
+            or st.session_state.get('current_page', 'Orders') != page):
+        return False
     _apply_snapshot_payload(payload)
     st.session_state[LOADED_QUERY_KEY] = query
     st.session_state[SNAPSHOT_LOADED_KEY] = True
+    return True
 
 
 def _certificate_action_in_progress():
@@ -804,12 +839,19 @@ def _orders_supabase_visibility_marker():
 
 
 def _check_orders_supabase_live_refresh():
-    if _certificate_action_in_progress():
+    if st.session_state.get('current_page', 'Orders') != 'Orders':
         return
+    if _certificate_action_in_progress() or st.session_state.get(LOAD_FUTURE_KEY) is not None:
+        return
+    checked_at = float(st.session_state.get(LIVE_CHECKED_AT_KEY) or 0)
+    if checked_at and time.monotonic() - checked_at < ORDERS_SUPABASE_LIVE_CHECK_SECONDS:
+        return
+    st.session_state[LIVE_CHECKED_AT_KEY] = time.monotonic()
     # A parallel check may finish after navigation or an account change. Never
     # let that stale result invalidate the new workspace or interrupt an action.
     page = st.session_state.get("current_page")
     user = dict(st.session_state.get("sports_cave_current_user") or {})
+    generation = st.session_state.get(LOAD_GENERATION_KEY)
     try:
         marker = _orders_supabase_visibility_marker()
     except Exception as error:
@@ -817,6 +859,8 @@ def _check_orders_supabase_live_refresh():
         return
     if (st.session_state.get("current_page") != page
             or dict(st.session_state.get("sports_cave_current_user") or {}) != user
+            or st.session_state.get(LOAD_GENERATION_KEY) != generation
+            or st.session_state.get(LOAD_FUTURE_KEY) is not None
             or _certificate_action_in_progress()):
         return
     if not marker:
@@ -832,8 +876,9 @@ def _check_orders_supabase_live_refresh():
         f"status=completed old_marker={previous} new_marker={marker}",
         flush=True,
     )
+    if _reload_orders_from_source() is False:
+        return
     st.session_state[ORDERS_SUPABASE_LIVE_MARKER_KEY] = marker
-    _reload_orders_from_source()
     print("ORDERS SYNC: orders_snapshot_invalidated source=supabase_live_refresh", flush=True)
     st.rerun()
 
@@ -2026,10 +2071,16 @@ def _render_ledger_diagnostics():
 
 def _order_display_resources(rows):
     """Overlap independent stored link reads; keep Streamlit calls on its thread."""
-    import auto_editions_runtime
-    links = _ORDERS_LOAD_EXECUTOR.submit(auto_editions_runtime.download_links, rows or [])
+    from orders_display_reads import download_links
+    links = _ORDERS_LOAD_EXECUTOR.submit(download_links, rows or [])
     mapping = psd_directory.page_directory(st)
-    return mapping, links.result()
+    try:
+        cloud_links = links.result()
+    except ReadQueueFull:
+        # A loaded page must keep accurate link states even under queue pressure.
+        # This still uses the same bounded database pool and read watchdog.
+        cloud_links = download_links(rows or [])
+    return mapping, cloud_links
 
 
 def _display_rows(rows, *, normalised=False, resources=None):
@@ -2951,6 +3002,19 @@ def render_page():
             _start_snapshot_load(search_text, force=True)
         elif not st.session_state.get(SNAPSHOT_LOADED_KEY) and st.session_state.get(LOAD_FUTURE_KEY) is None:
             _start_snapshot_load("")
+        if st.session_state.get(LOAD_FUTURE_KEY) is not None:
+            # Fast reads can finish in this event's render, avoiding a timer
+            # tick and a second app rerun. Slow reads keep the existing bounded
+            # asynchronous loader and its unchanged loading/error presentation.
+            future = st.session_state[LOAD_FUTURE_KEY]
+            try:
+                future.result(timeout=ORDERS_INLINE_READ_WAIT_SECONDS)
+            except FutureTimeoutError:
+                pass
+            except Exception:
+                # _consume_snapshot_load retains the established error path.
+                pass
+            _consume_snapshot_load()
         if st.session_state.get(LOAD_FUTURE_KEY) is not None:
             _render_orders_loading_fragment()
             _perf_log("page shell", page_started, state="loading")
