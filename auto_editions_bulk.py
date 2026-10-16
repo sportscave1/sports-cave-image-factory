@@ -409,7 +409,18 @@ async def page(request):
     try:
         await actor(request)
         return HTMLResponse((Path(__file__).parent/'components/auto_editions/bulk.html').read_text(encoding='utf-8'),headers=api.HEADERS)
-    except Exception as error:return api.failure(error)
+    except Exception as error:
+        # This endpoint is an iframe document, not a JSON API. Keep diagnostic
+        # details server-side, including UnicodeDecodeError (a ValueError).
+        LOG.exception('BULK_REVIEW_PAGE failed to load review interface')
+        return HTMLResponse('''<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Bulk Review</title>
+<style>body{font:14px system-ui;margin:16px;color:#28323d}h2{font-size:17px}button{padding:7px 12px;margin-right:6px;cursor:pointer}</style>
+</head><body><h2>Bulk Review</h2><p role="alert">Bulk Review could not load. Retry shortly.</p>
+<button id="retry-page" type="button">Retry</button><button id="close-page" type="button">Close</button>
+<script>document.getElementById('retry-page').onclick=()=>location.reload();
+document.getElementById('close-page').onclick=()=>parent.postMessage({type:'sports-cave-bulk-dismiss'},location.origin);</script>
+</body></html>''',status_code=403 if isinstance(error,PermissionError) else 503,headers=api.HEADERS)
 
 
 async def list_api(request):

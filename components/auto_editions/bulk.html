@@ -85,7 +85,7 @@ async function fetchPreview(row,large=false,signal){
 function pumpImages(){
   while(!disposed&&activeImages<3&&imageTasks.length){
     const {row,version}=imageTasks.shift();if(version!==generation||row.removed)continue;
-    activeImages++;row.imageState='loading';row.previewStarted ||= performance.now();row.detail.textContent=row.operationText||(row.eligible?'Loading preview…':row.reason+' · Loading preview…');let settled=false;
+    activeImages++;row.imageState='loading';row.previewStarted ||= performance.now();row.detail.textContent=row.operationText||(row.eligible?'Loading previewâ€¦':row.reason+' Â· Loading previewâ€¦');let settled=false;
     const controller=new AbortController();requests.add(controller);
     const finish=(ok,cancelled=false,waiting=false,error=null)=>{
       if(settled)return;settled=true;clearTimeout(timer);controller.abort();requests.delete(controller);row.img.onload=row.img.onerror=null;imageCancels.delete(cancel);activeImages--;
@@ -94,7 +94,7 @@ function pumpImages(){
         const transient=error&&(!error.status||error.status>=500)&&(row.transientRetries||0)<1;
         if((waiting||transient)&&performance.now()-row.previewStarted<90000){
           if(transient)row.transientRetries=(row.transientRetries||0)+1;
-          row.imageState='waiting';if(waiting)row.cacheChecked=false;row.detail.textContent=waiting?'Loading verified preview…':'Preview temporarily unavailable. Retrying…';
+          row.imageState='waiting';if(waiting)row.cacheChecked=false;row.detail.textContent=waiting?'Loading verified previewâ€¦':'Preview temporarily unavailable. Retryingâ€¦';
           row.retryTimer=setTimeout(()=>{if(version===generation&&!disposed&&!row.removed)queueImage(row);},waiting?previewDelay(row):1500);
         }else{
           row.previewReady=ok;row.imageState=ok?'ready':'failed';
@@ -118,7 +118,7 @@ function pumpImages(){
 }
 function largePreview(row){
   if(!row.previewReady){row.previewStarted=0;queueImage(row);return;}
-  clearTimeout(largeTimer);largeController?.abort();$('large-status').textContent='Loading larger preview…';$('large').showModal();
+  clearTimeout(largeTimer);largeController?.abort();$('large-status').textContent='Loading larger previewâ€¦';$('large').showModal();
   const started=performance.now(),image=$('large-image');
   async function load(){
     if(disposed||!$('large').open)return;
