@@ -15,6 +15,8 @@ def snapshot(ui,backend,rows,*,force=False):
     # Streamlit component events affect display only and are server-signed.
     event=ui.session_state.get('edition-auto-live')
     if isinstance(event,dict) and event.get('nonce')!=ui.session_state.get(EVENT):
+        from auto_editions_bulk import SORTS
+        if event.get('sort') in SORTS:ui.session_state['edition-auto-sort']=event['sort']
         verified=status.verify_snapshot(event,user,ids)
         if verified is not None:
             ui.session_state[CACHE]=verified;ui.session_state[IDS]=ids
@@ -35,7 +37,8 @@ def snapshot(ui,backend,rows,*,force=False):
 def link(row,values):
     pid=psd_directory.product_id(row)
     value=values.get(pid,status.unavailable(pid))
-    return '/auto-editions/status?product_gid='+quote(pid,safe='')+'#'+value['icon']+' '+value['status'] if pid else ''
+    label=(chr(9989)+' ' if value['status']=='Cloud Ready' else '')+('Needs Review' if value['status']=='Review' else value['status'])
+    return '/auto-editions/status?product_gid='+quote(pid,safe='')+'#'+label if pid else ''
 
 
 def live(ui,rows,values):
