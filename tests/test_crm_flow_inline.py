@@ -55,6 +55,20 @@ class InlineTests(unittest.TestCase):
         self.assertEqual(state['action'],'DRAFT');self.assertEqual(state['flow-inline-error'],'Activation locked')
         store.lifecycle.assert_not_called()
 
+    def test_status_action_preserves_newer_sibling_edits(self):
+        from crm_automation_definition import email_step
+        r=row();r['config']['draft']['emails'].append(email_step())
+        s=r['config']['draft']['emails'][0];fresh=deepcopy(r)
+        fresh['config']['draft']['emails'][1]['name']='Newer sibling edit'
+        fresh['config']['revision']+=1
+        store=Mock();store.flow.return_value=fresh
+        state={'action':'Disable in draft'}
+        with patch('crm_flow_inline.st') as ui,patch('crm_campaign_recovery.flush_current',return_value=True),patch('crm_automation_ui.changed'):
+            ui.session_state=state;status_action(store,{},r,s,'action')
+        saved=store.save_flow.call_args.args[3]
+        self.assertFalse(saved['emails'][0]['enabled'])
+        self.assertEqual(saved['emails'][1]['name'],'Newer sibling edit')
+
     def test_delay_preserves_all_other_fields_and_uses_existing_save(self):
         r=row();original=deepcopy(r);s=r['config']['draft']['emails'][0]
         store=Mock();store.flow.return_value=deepcopy(r)

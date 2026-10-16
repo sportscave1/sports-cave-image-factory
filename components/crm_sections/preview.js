@@ -51,14 +51,14 @@ function visual(s,model){
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="${c.align}" style="${k==='button'?'text-align:'+c.align:style};padding-bottom:${c.spacing}px">${body}</td></tr></table>`;
  }).join('');
 }
-function catalogue(s){
+function catalogue(s,model){
  const c=s.settings,d=c.display,products=s.products.filter(p=>p.status==='ACTIVE'&&p.title.trim()&&/^https:\/\//.test(p.url)&&(!d.image||imageUrl(p.image))&&(!d.price||(p.price!==''&&p.price!=null&&p.currency))),single=products.length===1;if(!products.length)return '';
  const table='<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;table-layout:fixed">';
  const p=(t,style)=>`<p style="margin:0;${style}">${t}</p>`;
  const money=v=>v.price==null?'':`${v.currency==='AUD'?'A$':v.currency==='USD'?'US$':v.currency==='GBP'?'£':v.currency+' '}${Number(v.price).toFixed(2)}`;
  const cards=products.map(v=>{const info={};
   if(d.image)info.image=`<img src="${esc(v.image)}" alt="${esc(v.image_alt||v.title)}" width="274" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0">`;
-  if(d.title)info.title=p(esc(v.title),'color:#faf6eb;font-size:14px;line-height:19px;font-weight:700;word-wrap:break-word');
+  if(d.title)info.title=p(esc(Object.hasOwn(model.catalogue_titles||{},v.title)?model.catalogue_titles[v.title]:v.title),'color:#faf6eb;font-size:14px;line-height:19px;font-weight:700;word-wrap:break-word');
   const e=v.edition;if(e){if(d.limit)info.limit=p('LIMITED TO '+e.limit+(single?' WORLDWIDE':''),'color:#d4b77d;font-size:11px;line-height:16px');const next=d.next&&e.remaining!==0&&e.sold!==e.limit&&e.next>=1&&e.next<=e.limit&&!['sold_out','sold out','closed','archived','expired','allocation_blocked','unavailable','exhausted','paused'].includes((e.status||'').toLowerCase());if(next)info.next=p('#'+String(e.next).padStart(3,'0')+' / '+e.limit,`color:#faf6eb;font-size:16px;line-height:28px;font-weight:700`);const status=next&&single?['NEXT AVAILABLE']:[];if(d.remaining&&e.remaining!=null)status.push(e.remaining?e.remaining+' REMAINING':'SOLD OUT');if(status.length)info.remaining=p(status.join(' · '),'color:#d6d0c4;font-size:11px;line-height:16px');}
   if(d.price)info.price=p('From '+esc(money(v))+(Number(v.compare_at)>Number(v.price)?' <s>'+esc(money({...v,price:v.compare_at}))+'</s>':''),'color:#d6d0c4;font-size:13px;line-height:18px');
   if(d.cta)info.cta=`${table}<tr><td align="center" bgcolor="#151515" style="border:1px solid #d4b77d"><span style="display:block;color:#eed9ad;padding:12px 4px;font-size:11px;line-height:18px;font-weight:700;text-decoration:none;text-transform:uppercase;word-wrap:break-word">${esc(c.cta)}</span></td></tr></table>`;
@@ -90,9 +90,9 @@ function sectionHtml(s,model,sections=[]){
  if(known)return sanitize(known.html,model);
  if(s.type==='checkout_element')return sanitize(visual(s,model),model);
  if(s.type==='catalogue'){
-  if(!s.settings.smart)return sanitize(catalogue(s),model);
+  if(!s.settings.smart)return sanitize(catalogue(s,model),model);
   const verified=model.resolved[s.id];
-  return verified?.section?.settings?.smart&&Array.isArray(verified.products)?sanitize(catalogue({...s,products:verified.products.slice(0,s.settings.smart_count??4)}),model):'';
+  return verified?.section?.settings?.smart&&Array.isArray(verified.products)?sanitize(catalogue({...s,products:verified.products.slice(0,s.settings.smart_count??4)},model),model):'';
  }
  if(s.type==='abandoned_checkout_products')return sanitize(model.replacements['<!--SC_ABANDONED_CHECKOUT-->']||'',model);
  let source=s.html||'';

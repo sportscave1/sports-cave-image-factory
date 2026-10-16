@@ -63,19 +63,20 @@ else:
                     app.button(key='toolbar-publish').click().run()
                     self.assertFalse(app.exception)
                     self.assertEqual(app.session_state['automation-confirm-publication'][2],selected)
-                    self.assertTrue(any(x.value=='Publish this email now?' for x in app.markdown))
-                    self.assertEqual(app.button(key='automation-publication-confirm').label,'Publish')
+                    self.assertTrue(any('flow stays disabled' in x.value for x in app.caption))
+                    self.assertEqual(app.button(key='automation-publication-confirm').label,'Publish email')
                     self.assertEqual(len(app.checkbox),0)
                     app.button(key='automation-publication-confirm').click().run()
                     self.assertFalse(app.exception)
                     queued=self.state(row)
                     self.assertEqual(queued['config']['publication']['step_id'],selected)
-                    self.assertNotIn('_automation_navigation_email',app.session_state)
+                    self.assertEqual(app.session_state['_automation_navigation_target'],str(row['id']))
+                    self.assertEqual(app.session_state['_automation_navigation_email'],'')
                     self.run_job();app.run()
                     self.assertFalse(app.exception)
                     self.assertEqual(app.session_state['_automation_navigation_email'],'')
                     live=self.state(row)
-                    self.assertEqual([step_state(live,s) for s in flow['emails']],['LIVE','LIVE','DISABLED'])
+                    self.assertEqual([step_state(live,s) for s in flow['emails']],['PUBLISHED','PUBLISHED','DISABLED'])
                     self.assertEqual(live['steps'][0],original[0])
                     self.assertEqual(live['config']['draft'],flow)
 
@@ -97,9 +98,9 @@ else:
                 job=self.publish_email(saved,1)
                 self.assertEqual(self.publish_email(saved,1)['id'],job['id'])
                 with self.assertRaisesRegex(ValueError,'already publishing'):self.publish_email(saved,0)
-                self.assertEqual([step_state(self.state(row),s) for s in draft['emails']],['LIVE','DRAFT','DRAFT'])
+                self.assertEqual([step_state(self.state(row),s) for s in draft['emails']],['PUBLISHED','DRAFT','DRAFT'])
                 self.run_job();live=self.state(row)
-                self.assertEqual([step_state(live,s) for s in draft['emails']],['LIVE','LIVE','DRAFT'])
+                self.assertEqual([step_state(live,s) for s in draft['emails']],['PUBLISHED','PUBLISHED','DRAFT'])
                 self.assertEqual(live['steps'][0],original)
                 self.assertEqual(live['config']['draft'],draft)
                 self.assertEqual(live['steps'][1]['template_version'],2)
@@ -111,7 +112,7 @@ else:
                 # Reopen uses persisted rows, not session state or draft enabled flags.
                 from crm_automation_store import AutomationStore
                 reopened=AutomationStore(self.store.connect).flow(row['id'])
-                self.assertEqual([step_state(reopened,s) for s in draft['emails']],['LIVE','LIVE','DRAFT'])
+                self.assertEqual([step_state(reopened,s) for s in draft['emails']],['PUBLISHED','PUBLISHED','DRAFT'])
                 self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_automation_enrollments WHERE automation_id=%s',(row['id'],),True)['n'],0)
 
     def test_same_revision_can_publish_two_distinct_emails(self):
@@ -120,7 +121,10 @@ else:
         self.assertEqual(len(self.state(row)['steps']),2)
 
     def test_paused_failure_and_navigation_are_authoritative(self):
-        row=self.three();self.publish_email(row,0);self.run_job();self.store.lifecycle(ADMIN,row['id'],'pause')
+        row=self.three();self.publish_email(row,0);self.run_job()
+        # Set up an explicitly active existing flow before testing Pause.
+        self.store.q("UPDATE crm_automations SET status='ACTIVE' WHERE id=%s",(row['id'],))
+        self.store.lifecycle(ADMIN,row['id'],'pause')
         row=self.state(row);draft=deepcopy(row['config']['draft']);job=self.publish_email(row,1)
         waiting={'automation-publication-waiting':{'identity':str(row['id']),'job_id':str(job['id'])}}
         self.assertFalse(completed(self.store,self.state(row),waiting))
@@ -149,18 +153,20 @@ else:
         self.assertTrue(has_changes(self.store,row))
         self.assertTrue(email_has_changes(self.store,row,row['config']['draft']['emails'][1]['step_id']))
 
-    def test_disabled_draft_is_not_live_and_does_not_enable_itself(self):
+    def test_individual_publish_includes_only_the_selected_disabled_draft(self):
         row=self.three();flow=deepcopy(row['config']['draft']);flow['emails'][1]['enabled']=False
         row=self.store.save_flow(ADMIN,row['id'],row['name'],flow,row['config']['revision'])
         self.publish_email(row,0);self.run_job();self.publish_email(self.state(row),1);self.run_job();live=self.state(row)
-        self.assertEqual([step_state(live,s) for s in flow['emails']],['LIVE','DISABLED','DRAFT'])
-        self.assertEqual(len(live['steps']),1)
+        self.assertEqual([step_state(live,s) for s in flow['emails']],['PUBLISHED','PUBLISHED','DRAFT'])
+        self.assertEqual(len(live['steps']),2)
+        self.assertTrue(live['config']['draft']['emails'][1]['enabled'])
+        self.assertEqual(live['status'],'DRAFT')
 
 
 class ConfirmationTests(unittest.TestCase):
     def test_scope_titles_share_one_dialog_body(self):
         from crm_automation_publish_confirm import confirm,confirmation_body,dismiss
-        for selected,title in (('email','Publish Email?'),(None,'Publish All?')):
+        for selected,title in (('email','Publish email?'),(None,'Publish All?')):
             with patch('crm_automation_publish_confirm.st.dialog') as dialog:
                 confirm(Mock(),ADMIN,'fixture',1,selected)
                 dialog.assert_called_once_with(title,width='small',on_dismiss=dismiss)
