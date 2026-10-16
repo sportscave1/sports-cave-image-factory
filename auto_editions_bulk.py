@@ -1,4 +1,5 @@
 """Explicit TEST visual review. No queue claims, generation, or supplier writes."""
+import asyncio
 import io
 import json
 import re
@@ -6,7 +7,7 @@ import tempfile
 import threading
 import time
 from collections import OrderedDict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 from PIL import Image, ImageCms
@@ -117,6 +118,47 @@ class ReviewCache:
 thumbnails=ReviewCache()
 # Listing snapshots avoid a metadata query for each image; short lived, bounded, actor scoped.
 snapshots=OrderedDict();snapshot_lock=threading.Lock()
+PAGE_SIZE=20
+LIST_TIMEOUT_SECONDS=12
+READ_DEADLINE_SECONDS=6
+READ_SLOTS=threading.BoundedSemaphore(3)
+
+# Bound candidates BEFORE loading manifests, proof/receipt arrays or status laterals.
+# Ordinality is a stable cursor within the caller's fixed catalogue/search context.
+PAGE_SQL='''SELECT w.pid AS product_gid,w.position
+    FROM unnest(%s::text[]) WITH ORDINALITY AS w(pid,position)
+    JOIN auto_edition_onboarding q ON q.product_gid=w.pid
+    WHERE w.position>%s AND q.preparation_hash IS NOT NULL
+    ORDER BY w.position LIMIT %s'''
+
+
+@contextmanager
+def review_read(connect):
+    if not READ_SLOTS.acquire(blocking=False):
+        raise ValueError('Review reads are busy. Retry in a moment.')
+    try:
+        with connect() as conn:
+            # Pool-side checkout waits are outside PostgreSQL statement_timeout.
+            # Cancel only this exclusive lease, never a connection after return.
+            finished=threading.Event();cancel_lock=threading.Lock()
+            def cancel_read():
+                with cancel_lock:
+                    if finished.is_set():return
+                    safe_cancel=getattr(conn,'cancel_safe',None)
+                    if callable(safe_cancel):
+                        try:safe_cancel(timeout=1)
+                        except Exception:pass
+            timer=threading.Timer(READ_DEADLINE_SECONDS,cancel_read);timer.daemon=True;timer.start()
+            # The existing read pool uses autocommit. Keep limits/read-only state
+            # transaction-local so they never leak to Orders or other pool users.
+            try:
+                with conn.transaction() if hasattr(conn,'transaction') else nullcontext():
+                    with conn.cursor() as cur:
+                        cur.execute("SET TRANSACTION READ ONLY; SET LOCAL statement_timeout='2500ms'; SET LOCAL lock_timeout='500ms'")
+                    yield conn
+            finally:
+                with cancel_lock:finished.set();timer.cancel()
+    finally:READ_SLOTS.release()
 
 
 async def actor(request,write=False):
@@ -142,25 +184,37 @@ def eligible_state(row):
     return row['status'] in ('Review','Needs Review') and row.get('approval_status') not in ('Failed','Needs Repair')
 
 
-def listing(connect,ids,user):
-    start=time.perf_counter();data=statuses.batch(connect,ids,writable=True)
-    candidates=[r for r in data['rows'] if r['status'] in ('Review','Needs Review')]
-    found=records(connect,[r['product_gid'] for r in candidates]);public=[]
+def listing(connect,ids,user,cursor=0):
+    start=time.perf_counter();public=[]
+    with review_read(connect) as conn:
+        @contextmanager
+        def borrowed():yield conn
+        with conn.cursor() as cur:
+            cur.execute(PAGE_SQL,(ids,cursor,PAGE_SIZE+1));page=cur.fetchall()
+        has_more=len(page)>PAGE_SIZE;page=page[:PAGE_SIZE]
+        next_cursor=int(page[-1]['position']) if has_more else None
+        data=statuses.batch(borrowed,[r['product_gid'] for r in page],writable=True)
+        candidates=[r for r in data['rows'] if r['status'] in ('Review','Needs Review')]
+        found=records(borrowed,[r['product_gid'] for r in candidates]) if candidates else {}
+    now=time.monotonic();entries={}
+    for row in candidates:
+        record=found.get(row['product_gid']);eligible=False;reason=row['reason']
+        if record:
+            try:evidence(record);eligible=eligible_state(row)
+            except (ValueError,KeyError,TypeError):reason='Preparation proofs, geometry or receipts need attention.'
+            key=(str(user['id']),row['product_gid'],record['hash'])
+            entries[key]=(now+900,record)
+        public.append(dict(product_gid=row['product_gid'],hash=row['preparation_hash'],
+                           title=record['product_title'] if record else row['product_gid'],eligible=eligible,reason=reason))
+    # Do not hold the image lookup lock during manifest/policy validation.
     with snapshot_lock:
-        now=time.monotonic()
-        for k in list(snapshots):
-            if snapshots[k][0]<now:del snapshots[k]
-        for row in candidates:
-            record=found.get(row['product_gid']);eligible=False;reason=row['reason']
-            if record:
-                try:evidence(record);eligible=eligible_state(row)
-                except (ValueError,KeyError,TypeError):reason='Preparation proofs, geometry or receipts need attention.'
-                key=(str(user['id']),row['product_gid'],record['hash'])
-                snapshots[key]=(now+900,record)
-            public.append(dict(product_gid=row['product_gid'],hash=row['preparation_hash'],
-                               title=record['product_title'] if record else row['product_gid'],eligible=eligible,reason=reason))
+        for key in list(snapshots):
+            if snapshots[key][0]<now:del snapshots[key]
+        snapshots.update(entries)
         while len(snapshots)>1000:snapshots.popitem(last=False)
-    return dict(rows=public,metadata_queries=2,duration_ms=round((time.perf_counter()-start)*1000,2))
+    return dict(rows=public,next_cursor=next_cursor,scanned=len(page),page_size=PAGE_SIZE,
+                metadata_queries=1+(1 if page else 0)+(1 if candidates else 0),
+                duration_ms=round((time.perf_counter()-start)*1000,2))
 
 
 def validate_files(record,assets):
@@ -245,10 +299,18 @@ async def list_api(request):
     try:
         import files_upload_api as files
         import supabase_backend as db
-        user=await actor(request)
-        body=await files._json_body(request);ids=body.get('product_gids')
-        if set(body)!={'product_gids'} or not isinstance(ids,list) or len(ids)>1000:raise ValueError('Bounded product batch required.')
-        return JSONResponse(await run_in_threadpool(listing,db.connect,list(dict.fromkeys(statuses.identity(p) for p in ids)),user),headers=api.HEADERS)
+        async def read():
+            user=await actor(request)
+            body=await files._json_body(request);ids=body.get('product_gids');cursor=body.get('cursor',0)
+            if (set(body)-{'product_gids','cursor'} or not isinstance(ids,list) or len(ids)>1000
+                    or type(cursor) is not int or not 0<=cursor<=len(ids)):
+                raise ValueError('Bounded product batch and review cursor required.')
+            ids=list(dict.fromkeys(statuses.identity(p) for p in ids))
+            return await asyncio.to_thread(listing,db.read_connection,ids,user,cursor)
+        result=await asyncio.wait_for(read(),timeout=LIST_TIMEOUT_SECONDS)
+        return JSONResponse(result,headers={**api.HEADERS,'Server-Timing':f'metadata;dur={result["duration_ms"]}'})
+    except TimeoutError:
+        return JSONResponse(dict(error='Review metadata took too long. Retry.'),status_code=503,headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

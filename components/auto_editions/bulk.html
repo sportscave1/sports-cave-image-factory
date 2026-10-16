@@ -3,21 +3,149 @@
 body{font:14px system-ui;margin:12px;color:#28323d;background:#fff}button{padding:7px 10px;background:#fff;border:1px solid #ccd2d9;border-radius:5px;cursor:pointer}button:disabled{opacity:.45;cursor:default}header{display:flex;gap:6px;flex-wrap:wrap;position:sticky;top:0;background:#fff;padding:6px 0;z-index:1}h2{font-size:17px;margin:0 0 5px}#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}figure{margin:0;border:1px solid #e0e4e8;border-radius:6px;padding:7px;min-width:0}figure img{width:100%;height:160px;object-fit:contain;cursor:zoom-in;background:#f6f7f8}figcaption{margin-top:5px;overflow-wrap:anywhere}small{display:block;color:#637083}dialog{max-width:95vw;max-height:95vh;border:1px solid #ccd2d9;border-radius:8px}dialog img{display:block;max-width:85vw;max-height:80vh}#message{margin:8px 0;color:#536274}#proof{width:min(700px,95vw)}
 </style></head><body>
 <h2>Bulk Review</h2><small>Review artwork, plaque and number placement. Approval permits TEST previews only. Use Review / Repair for designs needing attention.</small>
-<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="all" disabled>Approve All Eligible</button><button id="reload">Refresh</button></header>
-<div id="message" role="status">Loading review metadata…</div><div id="grid"></div>
-<dialog id="large"><button id="close-large">Close preview</button><img id="large-image" alt="Larger artwork preview"></dialog>
+<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="all" disabled>Approve All Eligible</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button></header>
+<div id="message" role="status" aria-live="polite">Loading review metadata…</div><div id="grid"></div><button id="more" hidden>Load more designs</button>
+<dialog id="large"><button id="close-large">Close preview</button><div id="large-status" role="status"></div><img id="large-image" alt="Larger artwork preview"></dialog>
 <dialog id="proof"><p id="confirmation"></p><label><input type="checkbox" id="confirm"> I have reviewed the selected artwork, plaques, edition numbers, borders and enlargement quality.</label><p>Current source, files and evidence will be rechecked. Supplier certification remains separate.</p><button id="cancel">Cancel</button> <button id="accept" disabled>Confirm TEST Approval</button></dialog>
 <script>
-const $=id=>document.getElementById(id);let ids=[],rows=[],selected=new Set(),pending=[],busy=false,generation=0;
+const $=id=>document.getElementById(id);
 const timings={};window.reviewTimings=timings;
-async function api(path,body){const r=await fetch('/api/auto-editions/bulk/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw Error(d.error||'Review unavailable.');return d;}
-function controls(){const eligible=rows.filter(r=>r.eligible).length;$('approve').disabled=busy||!selected.size;$('all').disabled=busy||!eligible;for(const id of ['select','clear','reload'])$(id).disabled=busy;for(const box of document.querySelectorAll('#grid input'))box.disabled=busy||!rows.find(r=>r.product_gid===box.value)?.eligible;}
+let ids=[],contextKey=null,rows=[],byId=new Map(),selected=new Set(),pending=[];
+let busy=false,loading=false,started=false,disposed=false,generation=0,cursor=0,hasMore=true;
+let errorText='',resultText='',bootstrapTimer,largeTimer,activeImages=0,loadedImages=0,thumbnailStart=0;
+const requests=new Set(),imageTasks=[],imageCancels=new Set();
+const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;nearImages.unobserve(entry.target);queueImage(entry.target._row);}},{rootMargin:'350px'});
+const nearMore=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPage();},{rootMargin:'400px'});
+nearMore.observe($('more'));
+function summary(){
+  const count=rows.filter(r=>r.eligible&&r.previewReady).length;
+  $('message').textContent=errorText||resultText||(rows.length?rows.length+' designs loaded · '+count+' eligible previews'+(loading?' · loading more…':hasMore?' · more designs load as you scroll':' · all pages loaded'):'Loading review metadata…');
+  if(started&&!loading&&!rows.length&&!hasMore&&!errorText)$('message').textContent='No designs need review in this catalogue selection.';
+}
+function controls(){
+  const ready=rows.filter(r=>r.eligible&&r.previewReady).length,confirming=$('proof').open;
+  $('approve').disabled=busy||confirming||!selected.size;$('all').disabled=busy||confirming||!ready;
+  $('select').disabled=busy||confirming||!ready;$('clear').disabled=busy||confirming||!selected.size;
+  $('reload').disabled=busy||confirming;$('retry').disabled=busy||loading;
+  $('retry').hidden=!errorText;$('more').hidden=!hasMore||!started;$('more').disabled=loading||busy||!!errorText;
+  for(const row of rows){row.box.disabled=busy||confirming||!row.eligible||!row.previewReady;row.box.checked=selected.has(row.product_gid);}
+}
+async function api(path,body,timeout=10000){
+  const controller=new AbortController();requests.add(controller);let timedOut=false;
+  const timer=setTimeout(()=>{timedOut=true;controller.abort();},timeout);
+  try{
+    const response=await fetch('/api/auto-editions/bulk/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
+    const data=await response.json();if(!response.ok)throw Error(data.error||'Review unavailable. Retry.');return data;
+  }catch(error){if(timedOut)throw Error(path==='approve'?'Approval result was not received. Refresh to verify the current status before retrying.':'Review metadata timed out. Retry.');if(error.name==='SyntaxError')throw Error('Review returned an unreadable response. Retry.');if(error.name==='TypeError')throw Error('Review network request failed. Retry.');throw error;}
+  finally{clearTimeout(timer);requests.delete(controller);}
+}
 function imageURL(row,large=false){return '/api/auto-editions/bulk/image?'+new URLSearchParams({product_gid:row.product_gid,hash:row.hash,...(large?{large:'1'}:{})});}
-async function images(tasks,version){let next=0,finished=0;const start=performance.now();async function worker(){while(next<tasks.length&&version===generation){const task=tasks[next++];await new Promise(resolve=>{task.img.onload=resolve;task.img.onerror=()=>{task.row.eligible=false;selected.delete(task.row.product_gid);const card=task.img.closest('figure');card.querySelector('input').checked=false;card.querySelector('small').textContent='Preview unavailable. Refresh or use Review / Repair.';controls();resolve();};task.img.src=imageURL(task.row);});finished++;if(finished===Math.min(8,tasks.length)){timings.initialThumbnailsMs=performance.now()-start;}}}await Promise.all(Array.from({length:Math.min(3,tasks.length)},worker));if(version===generation)timings.allThumbnailsMs=performance.now()-start;}
-async function load(){if(busy)return;const version=++generation;selected.clear();const start=performance.now();$('message').textContent='Loading review metadata…';try{const data=await api('list',{product_gids:ids});if(version!==generation)return;rows=data.rows;$('grid').replaceChildren();const tasks=[];for(const row of rows){const card=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),label=document.createElement('label'),box=document.createElement('input'),detail=document.createElement('small'),link=document.createElement('a');img.alt=row.title;img.width=300;img.height=180;img.decoding='async';img.onclick=()=>{$('large-image').src=imageURL(row,true);$('large').showModal();};box.type='checkbox';box.value=row.product_gid;box.disabled=!row.eligible;box.onchange=()=>{box.checked?selected.add(row.product_gid):selected.delete(row.product_gid);controls();};label.append(box,document.createTextNode(row.title));caption.append(label);detail.textContent=row.eligible?'Eligible for confirmed TEST review':row.reason;link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';card.append(img,caption,detail,link);$('grid').append(card);if(row.hash)tasks.push({img,row});}timings.galleryMetadataMs=performance.now()-start;timings.serverMetadataMs=data.duration_ms;$('message').textContent=rows.length+' designs need review · '+rows.filter(r=>r.eligible).length+' eligible';controls();images(tasks,version);}catch(e){$('message').textContent=e.message;}}
-function selectAll(){selected=new Set(rows.filter(r=>r.eligible).map(r=>r.product_gid));for(const b of document.querySelectorAll('#grid input'))b.checked=selected.has(b.value);controls();}
-function confirm(all){if(all)selectAll();pending=rows.filter(r=>r.eligible&&selected.has(r.product_gid)).map(r=>({product_gid:r.product_gid,hash:r.hash}));if(!pending.length)return;$('confirmation').textContent='Approve '+pending.length+' selected designs?';$('confirm').checked=false;$('accept').disabled=true;$('proof').showModal();}
-$('select').onclick=selectAll;$('clear').onclick=()=>{selected.clear();for(const b of document.querySelectorAll('#grid input'))b.checked=false;controls();};$('approve').onclick=()=>confirm(false);$('all').onclick=()=>confirm(true);$('reload').onclick=load;$('close-large').onclick=()=>{$('large').close();$('large-image').removeAttribute('src');};$('cancel').onclick=()=>$('proof').close();$('confirm').onchange=()=>$('accept').disabled=!$('confirm').checked;
-$('accept').onclick=async()=>{if(busy||!$('confirm').checked)return;busy=true;$('proof').close();controls();$('message').textContent='Rechecking current files and approving eligible designs…';const start=performance.now();try{const d=await api('approve',{items:pending,confirm_visual_quality:true});timings.bulkApprovalMs=performance.now()-start;timings.serverApprovalMs=d.duration_ms;for(const result of d.results){selected.delete(result.product_gid);const row=rows.find(r=>r.product_gid===result.product_gid);if(row)row.eligible=false;const box=[...document.querySelectorAll('#grid input')].find(b=>b.value===result.product_gid);if(box){box.checked=false;box.closest('figure').querySelector('small').textContent=result.result;}}$('message').textContent=Object.entries(d.counts).map(([k,v])=>k+': '+v).join(' / ');parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);}catch(e){$('message').textContent=e.message;}finally{busy=false;controls();}};
-addEventListener('message',event=>{if(event.source!==parent||event.origin!==location.origin||event.data?.type!=='sports-cave-bulk-products')return;ids=event.data.product_gids||[];load();});parent.postMessage({type:'sports-cave-bulk-ready'},location.origin);
+function queueImage(row){
+  if(disposed||row.previewReady||row.imageState==='queued'||row.imageState==='loading'||!row.hash)return;
+  row.imageState='queued';imageTasks.push({row,version:generation});pumpImages();
+}
+function pumpImages(){
+  while(!disposed&&activeImages<3&&imageTasks.length){
+    const {row,version}=imageTasks.shift();if(version!==generation)continue;
+    activeImages++;row.imageState='loading';let settled=false;
+    const finish=(ok,cancelled=false)=>{
+      if(settled)return;settled=true;clearTimeout(timer);row.img.onload=row.img.onerror=null;imageCancels.delete(cancel);activeImages--;
+      if(!ok)row.img.removeAttribute('src');
+      if(version===generation&&!disposed&&!cancelled){
+        row.previewReady=ok;row.imageState=ok?'ready':'failed';
+        if(!ok){selected.delete(row.product_gid);row.detail.textContent='Preview unavailable. Click the image to retry, or use Review / Repair.';}
+        else row.detail.textContent=row.eligible?'Eligible for confirmed TEST review':row.reason;
+        loadedImages++;timings.thumbnailLoads=loadedImages;if(ok&&timings.firstThumbnailMs===undefined)timings.firstThumbnailMs=performance.now()-thumbnailStart;
+        if(loadedImages===Math.min(8,rows.length))timings.initialThumbnailsMs=performance.now()-thumbnailStart;
+        timings.allThumbnailsMs=performance.now()-thumbnailStart;controls();summary();
+      }
+      pumpImages();
+    };
+    const cancel=()=>finish(false,true),timer=setTimeout(()=>finish(false),15000);imageCancels.add(cancel);
+    row.img.onload=()=>finish(true);row.img.onerror=()=>finish(false);row.img.src=imageURL(row);
+  }
+}
+function largePreview(row){
+  if(!row.previewReady){queueImage(row);return;}
+  clearTimeout(largeTimer);$('large-status').textContent='Loading larger preview…';$('large').showModal();
+  const image=$('large-image');image.onload=()=>{clearTimeout(largeTimer);$('large-status').textContent='';};
+  image.onerror=()=>{clearTimeout(largeTimer);$('large-status').textContent='Larger preview unavailable. Close and click the artwork to retry.';};
+  largeTimer=setTimeout(()=>{image.removeAttribute('src');$('large-status').textContent='Larger preview timed out. Close and retry.';},30000);image.src=imageURL(row,true);
+}
+function append(data){
+  const fragment=document.createDocumentFragment();
+  for(const value of data){
+    if(byId.has(value.product_gid))continue;
+    const row={...value,previewReady:false,imageState:'waiting'},card=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),label=document.createElement('label'),box=document.createElement('input'),detail=document.createElement('small'),link=document.createElement('a');
+    img.alt=row.title;img.width=300;img.height=180;img.decoding='async';img._row=row;img.onclick=()=>largePreview(row);
+    box.type='checkbox';box.value=row.product_gid;box.disabled=true;box.onchange=()=>{if(box.checked&&row.eligible&&row.previewReady)selected.add(row.product_gid);else selected.delete(row.product_gid);controls();};
+    label.append(box,document.createTextNode(row.title));caption.append(label);detail.textContent=row.eligible?'Loading preview…':row.reason;
+    link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';
+    Object.assign(row,{img,box,detail});card.append(img,caption,detail,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
+  }
+  $('grid').append(fragment);for(const row of rows)if(row.imageState==='waiting')nearImages.observe(row.img);
+}
+async function loadPage(){
+  if(disposed||!started||loading||busy||!hasMore||errorText)return;
+  const version=generation,previousCursor=cursor,start=performance.now();loading=true;controls();summary();
+  try{
+    const data=await api('list',{product_gids:ids,cursor});if(version!==generation||disposed)return;
+    if(!Array.isArray(data.rows)||data.rows.length>20||(data.next_cursor!==null&&(!Number.isInteger(data.next_cursor)||data.next_cursor<=previousCursor||data.next_cursor>ids.length)))throw Error('Review page changed unexpectedly. Refresh to retry.');
+    append(data.rows);hasMore=data.next_cursor!==null;if(hasMore)cursor=data.next_cursor;
+    timings.serverMetadataMs=data.duration_ms;timings.lastMetadataMs=performance.now()-start;
+    if(timings.galleryMetadataMs===undefined){timings.galleryMetadataMs=performance.now()-thumbnailStart;timings.firstPageRows=rows.length;}
+  }catch(error){if(version===generation&&!disposed&&error.name!=='AbortError')errorText=error.message;}
+  finally{
+    if(version===generation&&!disposed){loading=false;controls();summary();
+      // Empty candidate pages still advance exactly once; errors never auto-retry.
+      if(!errorText&&hasMore&&$('more').getBoundingClientRect().top<innerHeight+400)queueMicrotask(loadPage);
+    }
+  }
+}
+function cancelWork(){for(const request of requests)request.abort();requests.clear();imageTasks.length=0;nearImages.disconnect();for(const cancel of [...imageCancels])cancel();clearTimeout(largeTimer);$('large-image').removeAttribute('src');}
+function reset(){
+  if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;loading=false;errorText='';resultText='';loadedImages=0;
+  for(const key of Object.keys(timings))delete timings[key];thumbnailStart=performance.now();$('grid').replaceChildren();
+  if(started)loadPage();else requestContext();
+}
+function requestContext(){
+  clearTimeout(bootstrapTimer);errorText='';controls();summary();
+  parent.postMessage({type:'sports-cave-bulk-ready'},location.origin);
+  bootstrapTimer=setTimeout(()=>{if(!started&&!disposed){errorText='Review could not start. Retry, or close and reopen Bulk Review.';controls();summary();}},5000);
+}
+function selectAll(){selected=new Set(rows.filter(r=>r.eligible&&r.previewReady).map(r=>r.product_gid));controls();}
+function confirmSelection(all){
+  if(busy||$('proof').open)return;if(all)selectAll();
+  pending=rows.filter(r=>r.eligible&&r.previewReady&&selected.has(r.product_gid)).map(r=>({product_gid:r.product_gid,hash:r.hash}));if(!pending.length)return;
+  $('confirmation').textContent='Approve '+pending.length+' loaded designs?'+(hasMore?' Additional designs have not been selected.':'');
+  $('confirm').checked=false;$('accept').disabled=true;$('proof').showModal();controls();
+}
+$('select').onclick=selectAll;$('clear').onclick=()=>{selected.clear();controls();};$('approve').onclick=()=>confirmSelection(false);$('all').onclick=()=>confirmSelection(true);
+$('reload').onclick=reset;$('retry').onclick=()=>{if(loading||busy)return;if(!hasMore||resultText.startsWith('Rechecking')){reset();return;}errorText='';if(started)loadPage();else requestContext();};$('more').onclick=loadPage;
+$('close-large').onclick=()=>{$('large').close();clearTimeout(largeTimer);$('large-image').removeAttribute('src');};
+$('large').addEventListener('close',()=>{clearTimeout(largeTimer);$('large-image').onload=$('large-image').onerror=null;$('large-image').removeAttribute('src');});
+$('cancel').onclick=()=>{$('proof').close();controls();};$('proof').addEventListener('cancel',()=>queueMicrotask(controls));$('confirm').onchange=()=>$('accept').disabled=!$('confirm').checked;
+$('accept').onclick=async()=>{
+  if(busy||!$('confirm').checked)return;busy=true;$('proof').close();resultText='Rechecking current files and approving eligible designs…';errorText='';controls();summary();const start=performance.now();
+  try{
+    const data=await api('approve',{items:pending,confirm_visual_quality:true},120000);if(disposed)return;
+    timings.bulkApprovalMs=performance.now()-start;timings.serverApprovalMs=data.duration_ms;
+    for(const result of data.results){selected.delete(result.product_gid);const row=byId.get(result.product_gid);if(row){row.eligible=false;row.detail.textContent=result.result;}}
+    resultText=Object.entries(data.counts).map(([key,value])=>key+': '+value).join(' / ');parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);
+  }catch(error){if(!disposed){errorText=error.message;if(error.name==='AbortError')errorText='Approval result was not received. Refresh to verify current status.';for(const item of pending){const row=byId.get(item.product_gid);selected.delete(item.product_gid);if(row){row.eligible=false;row.detail.textContent='Approval result unknown. Refresh to verify current status.';}}}}
+  finally{busy=false;if(!disposed){controls();summary();}}
+};
+function dispose(){if(disposed)return;disposed=true;generation++;clearTimeout(bootstrapTimer);cancelWork();nearMore.disconnect();}
+addEventListener('pagehide',dispose);
+addEventListener('message',event=>{
+  if(event.origin!==location.origin)return;
+  const bridge=parent.SportsCaveEditionBulk;
+  const owningBridge=event.source===bridge?.sourceWindow&&bridge?.ownsGallery(window);
+  if(event.source!==parent&&!owningBridge)return;
+  if(event.data?.type==='sports-cave-bulk-close'){dispose();return;}
+  if(event.data?.type!=='sports-cave-bulk-products'||!Array.isArray(event.data.product_gids))return;
+  const next=[...new Set(event.data.product_gids)],key=JSON.stringify(next);if(started&&key===contextKey)return;
+  ids=next;contextKey=key;started=true;clearTimeout(bootstrapTimer);reset();
+});
+controls();requestContext();
 </script></body></html>
