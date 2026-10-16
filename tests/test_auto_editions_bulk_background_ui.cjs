@@ -37,8 +37,7 @@ async function fixture(context,state){
  for(const width of [1280,390]){
   const context=await browser.newContext({viewport:{width,height:800}}),state={submissions:[],polls:0,dropAck:true,previewFailure:true};
   let {page,start,errors}=await fixture(context,state);
-  await page.getByRole('button',{name:'Retry Preview',exact:true}).waitFor();
-  await page.getByRole('button',{name:'Retry Preview',exact:true}).click();
+  await page.clock.fastForward(1800);
   await page.waitForFunction(()=>[...document.querySelectorAll('#grid input')].some(n=>!n.disabled));
   const boxes=page.locator('#grid input:not(:disabled)');await boxes.nth(0).check();await boxes.nth(1).check();
   await page.locator('#approve').click();await page.locator('#confirm').check();

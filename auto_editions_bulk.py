@@ -3,10 +3,12 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import re
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
@@ -19,6 +21,8 @@ import auto_editions_api as api
 import auto_editions_runtime as runtime
 import auto_editions_status as statuses
 from auto_editions_onboarding_store import Queue
+
+LOG=logging.getLogger(__name__)
 
 SORTS={'Failed First':('Failed',), 'Not Connected First':('Not Connected','Connect'),
        'Queued First':('Queued','Deferred'), 'Needs Review First':('Needs Review','Review'),
@@ -89,14 +93,27 @@ class ReviewCache:
     def key(record,width=300):
         return (ae.fingerprint(dict(renderer='review-jpeg-v2',hash=record['hash'],receipts=record['receipts'],source=record['manifest']['source'])),width)
 
-    def get(self,record,fetch,width=300,store=None):
+    @staticmethod
+    def valid(data,width):
+        if not data or len(data)>524288:return False
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                if image.format!='JPEG' or image.mode!='RGB' or image.width>width or image.height>1200:return False
+                image.load()
+            return True
+        except (OSError,ValueError):return False
+
+    def get(self,record,fetch,width=300,store=None,cache_checked=False):
         if width not in (300,1200):raise ValueError('Fixed review sizes required.')
         m=evidence(record);digest=record['hash'];key=self.key(record,width)
         with self.lock:
             if key in self.entries:
                 self.entries.move_to_end(key);return self.entries[key]
-        persisted=store.get(ae.fingerprint(key)) if store else None
-        if persisted:
+        try:persisted=store.get(ae.fingerprint(key)) if store and not cache_checked else None
+        except Exception as error:
+            LOG.warning('REVIEW_PREVIEW cache_read_failed type=%s',type(error).__name__)
+            persisted=None
+        if self.valid(persisted,width):
             self.remember(key,persisted)
             return persisted
         # Serialize duplicate cold builds only, after both warm cache paths.
@@ -129,13 +146,54 @@ class ReviewCache:
                                 output=io.BytesIO();scaled.save(output,'JPEG',quality=78);outputs[target]=output.getvalue()
                     data=outputs[width]
                 finally:small.close()
-            if store:
-                for target,value in outputs.items():store.put(ae.fingerprint((key[0],target)),value)
             for target,value in outputs.items():self.remember((key[0],target),value)
+            if store:
+                try:
+                    for target,value in outputs.items():store.put(ae.fingerprint((key[0],target)),value)
+                except Exception as error:LOG.warning('REVIEW_PREVIEW cache_write_failed type=%s',type(error).__name__)
             return data
 
 
 thumbnails=ReviewCache()
+
+
+class PreviewBuilds:
+    """Bounded disposable image work; never owns approvals or preparation jobs."""
+    def __init__(self):
+        self.lock=threading.Lock();self.pending={};self.pool=ThreadPoolExecutor(max_workers=2,thread_name_prefix='review-preview')
+
+    def read(self,record,fetch,width,store,cache_checked=False):
+        evidence(record);key=thumbnails.key(record,width)
+        with thumbnails.lock:data=thumbnails.entries.get(key)
+        if data:return data
+        # Both display sizes come from one build. HTTP retries cannot duplicate it.
+        with self.lock:
+            for old,(future,created) in list(self.pending.items()):
+                if future.done():
+                    error=future.exception();ttl=30 if isinstance(error,(ValueError,KeyError,TypeError)) else 1
+                    if error is None or time.monotonic()-getattr(future,'review_finished_at',created)>ttl:self.pending.pop(old)
+            entry=self.pending.get(key[0])
+            if entry:
+                future,_=entry
+                if future.done():
+                    future.result()
+                    with thumbnails.lock:return thumbnails.entries.get(key)
+                return None
+            if len(self.pending)>=8:return None
+        # A stored hit is already small; never queue it behind a PNG transfer.
+        try:data=store.get(ae.fingerprint(key)) if not cache_checked else None
+        except Exception:data=None
+        if thumbnails.valid(data,width):
+            thumbnails.remember(key,data);return data
+        with self.lock:
+            if key[0] in self.pending or len(self.pending)>=8:return None
+            future=self.pool.submit(thumbnails.get,record,fetch,width,store,True)
+            future.add_done_callback(lambda finished:setattr(finished,'review_finished_at',time.monotonic()))
+            self.pending[key[0]]=(future,time.monotonic())
+        return None
+
+
+preview_builds=PreviewBuilds()
 # Listing snapshots avoid a metadata query for each image; short lived, bounded, actor scoped.
 snapshots=OrderedDict();snapshot_lock=threading.Lock()
 PAGE_SIZE=20
@@ -387,27 +445,57 @@ async def image_api(request):
             return assets.fetch(*args)
         from auto_editions_bulk_jobs import PreviewStore
         from auto_editions_bulk_runtime import connection
-        data=await run_in_threadpool(thumbnails.get,entry[1],fetch,width,PreviewStore(connection))
+        data=await run_in_threadpool(preview_builds.read,entry[1],fetch,width,PreviewStore(connection))
+        if data is None:return JSONResponse(dict(state='Loading',error='Preparing verified preview.'),status_code=202,headers={**api.HEADERS,'Retry-After':'2'})
         return Response(data,media_type='image/jpeg',headers={**api.HEADERS,'Cache-Control':'private, max-age=900','Vary':'Cookie','ETag':'"'+ae.hashlib.sha256(data).hexdigest()+'"'})
-    except Exception as error:return api.failure(error)
+    except Exception as error:return preview_failure(error)
 
 
-def cached_previews(entries,store):
-    """Cache hits only: no provider, PNG transfer or cold-build queue in this request."""
+def preview_failure(error):
+    from files_upload_api import FilesUploadError
+    LOG.warning('REVIEW_PREVIEW request_failed type=%s',type(error).__name__)
+    if isinstance(error,FilesUploadError):
+        return JSONResponse(dict(error=str(error)),status_code=error.status_code,headers=api.HEADERS)
+    return api.failure(error)
+
+
+def cached_previews(entries,store,raw=False):
+    """One bounded cache read; the binary client can enqueue disposable misses without waiting."""
     response=[];missing={}
     for pid,digest,record in entries:
         try:
             evidence(record);key=thumbnails.key(record);identity=ae.fingerprint(key)
             with thumbnails.lock:data=thumbnails.entries.get(key)
             row=dict(product_gid=pid,hash=digest,jpeg=None);response.append(row)
-            if data:row['jpeg']=base64.b64encode(data).decode('ascii')
+            if data:row['jpeg']=data if raw else base64.b64encode(data).decode('ascii')
             else:missing[identity]=(key,row)
         except (ValueError,KeyError,TypeError):
             response.append(dict(product_gid=pid,hash=digest,jpeg=None))
     if missing:
-        for identity,data in store.get_many(list(missing)).items():
-            key,row=missing[identity];thumbnails.remember(key,data)
-            row['jpeg']=base64.b64encode(data).decode('ascii')
+        try:stored=store.get_many(list(missing))
+        except Exception as error:
+            LOG.warning('REVIEW_PREVIEW cache_batch_failed type=%s',type(error).__name__)
+            stored={}
+        for identity,data in stored.items():
+            key,row=missing[identity]
+            if not thumbnails.valid(data,key[1]):continue
+            thumbnails.remember(key,data)
+            row['jpeg']=data if raw else base64.b64encode(data).decode('ascii')
+        with preview_builds.lock:
+            for key,row in missing.values():
+                pending=preview_builds.pending.get(key[0])
+                if not row['jpeg'] and pending and not pending[0].done():row['state']='Loading'
+    if raw:
+        records={(pid,digest):record for pid,digest,record in entries}
+        for row in response:
+            if row['jpeg']:continue
+            def fetch(*args):return runtime.storage().fetch(*args)
+            try:
+                data=preview_builds.read(records[(row['product_gid'],row['hash'])],fetch,300,store,True)
+                if data:row['jpeg']=data
+                else:row['state']='Loading'
+            except (ValueError,KeyError,TypeError) as error:row.update(state='Unavailable',error=str(error))
+            except Exception:row.update(state='Unavailable',error='Preview temporarily unavailable. Retry Preview.')
     return response
 
 
@@ -417,7 +505,7 @@ async def previews_api(request):
         from auto_editions_bulk_jobs import PreviewStore
         from auto_editions_bulk_runtime import connection
         started=time.perf_counter();user=await actor(request);body=await files._json_body(request)
-        if set(body)!={'items'} or not isinstance(body['items'],list) or not 1<=len(body['items'])<=8:
+        if set(body)-{'items','binary'} or not isinstance(body.get('items'),list) or not 1<=len(body['items'])<=8:
             raise ValueError('At most eight cached preview identities required.')
         entries=[]
         with snapshot_lock:
@@ -427,10 +515,19 @@ async def previews_api(request):
                 entry=snapshots.get((str(user['id']),pid,digest))
                 if not entry or entry[0]<time.monotonic():raise ValueError('Refresh review metadata to renew preview access.')
                 entries.append((pid,digest,entry[1]))
-        rows=await run_in_threadpool(cached_previews,entries,PreviewStore(connection))
+        binary=body.get('binary') is True
+        rows=await run_in_threadpool(cached_previews,entries,PreviewStore(connection),binary)
         elapsed=round((time.perf_counter()-started)*1000,2)
+        if binary:
+            boundary='sc-review-preview';parts=[];meta=[]
+            for index,row in enumerate(rows):
+                data=row['jpeg'];meta.append(dict(product_gid=row['product_gid'],hash=row['hash'],part=str(index) if data else None,state=row.get('state'),error=row.get('error')))
+                if data:parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{index}"; filename="preview.jpg"\r\nContent-Type: image/jpeg\r\n\r\n'.encode()+data+b'\r\n')
+            parts.insert(0,f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n\r\n'.encode()+json.dumps(dict(rows=meta,duration_ms=elapsed)).encode()+b'\r\n')
+            parts.append(f'--{boundary}--\r\n'.encode())
+            return Response(b''.join(parts),media_type=f'multipart/form-data; boundary={boundary}',headers={**api.HEADERS,'Server-Timing':f'cached-previews;dur={elapsed}'})
         return JSONResponse(dict(rows=rows,hits=sum(bool(r['jpeg']) for r in rows),duration_ms=elapsed),headers={**api.HEADERS,'Server-Timing':f'cached-previews;dur={elapsed}'})
-    except Exception as error:return api.failure(error)
+    except Exception as error:return preview_failure(error)
 
 
 async def approve_api(request):

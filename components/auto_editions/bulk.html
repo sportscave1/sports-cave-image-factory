@@ -4,7 +4,7 @@ body{font:14px system-ui;margin:12px;color:#28323d;background:#fff}button{paddin
 small.approving::before{content:"";display:inline-block;width:10px;height:10px;border:2px solid #d9dfdd;border-top-color:#9c7b26;border-radius:50%;margin-right:5px;animation:review-spin .9s linear infinite}@keyframes review-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){small.approving::before{animation:none}}
 </style></head><body>
 <h2>Bulk Review</h2><small>Review artwork, plaque and number placement. Approval permits TEST previews only. Use Review / Repair for designs needing attention.</small>
-<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="all" disabled>Approve All Loaded Eligible</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button></header>
+<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button></header>
 <div id="progress" role="status" aria-live="polite"></div><button id="retry-approval" hidden>Retry approval tracking</button>
 <div id="message" role="status" aria-live="polite">Loading review metadataâ€¦</div><div id="grid"></div><button id="more" hidden>Load more designs</button>
 <dialog id="large"><button id="close-large">Close preview</button><div id="large-status" role="status"></div><img id="large-image" alt="Larger artwork preview"></dialog>
@@ -18,8 +18,8 @@ let errorText='',resultText='',bootstrapTimer,largeTimer,activeImages=0,loadedIm
 let approvalTimer=null,approvalFlight=false,approvalRequest=null,trackingFailures=0,trackingAgain=false,submissionInPopup=false;
 const operationStates=new Map(),restoredFailures=new Set(),failureQueue=[];let restoringFailures=false;
 const approvalStorage='sc-edition-review-request-v3';
-const requests=new Set(),imageTasks=[],warmTasks=[],imageCancels=new Set(),previewWaiters=new Map();
-let activeWarm=0,warmScheduled=false,controlsFrame=0;
+const requests=new Set(),imageTasks=[],warmTasks=[],imageCancels=new Set();
+let activeWarm=0,warmScheduled=false,controlsFrame=0,largeController=null;
 const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;nearImages.unobserve(entry.target);queueImage(entry.target._row);}},{rootMargin:'350px'});
 const nearMore=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPage();},{rootMargin:'400px'});
 nearMore.observe($('more'));
@@ -31,7 +31,7 @@ function summary(){
 function controls(defer=false){if(!defer){cancelAnimationFrame(controlsFrame);controlsFrame=0;updateControls();return;}if(!controlsFrame)controlsFrame=requestAnimationFrame(()=>{controlsFrame=0;updateControls();});}
 function updateControls(){
   const ready=rows.filter(r=>r.eligible&&r.previewReady).length,confirming=$('proof').open;
-  $('approve').disabled=busy||confirming||!selected.size;$('all').disabled=busy||confirming||!rows.some(r=>r.eligible);
+  $('approve').disabled=busy||confirming||!selected.size;
   $('select').disabled=busy||confirming||!ready;$('clear').disabled=busy||confirming||!selected.size;
   $('reload').disabled=busy||confirming;$('retry').disabled=busy||loading;
   $('retry').hidden=!errorText;$('more').hidden=!hasMore||!started;$('more').disabled=loading||busy||!!errorText;
@@ -42,19 +42,18 @@ async function api(path,body,timeout=10000){
   const timer=setTimeout(()=>{timedOut=true;controller.abort();},timeout);
   try{
     const response=await fetch('/api/auto-editions/bulk/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
-    const data=await response.json();if(!response.ok){const failure=Error(data.error||'Review unavailable. Retry.');failure.status=response.status;throw failure;}return data;
+    let data;if(path==='previews'&&response.ok&&response.headers.get('content-type')?.startsWith('multipart/form-data')){const parts=await response.formData();data=JSON.parse(parts.get('metadata'));for(const row of data.rows)row.blob=row.part===null?null:parts.get(row.part);}else data=await response.json();if(!response.ok){const failure=Error(data.error||'Review unavailable. Retry.');failure.status=response.status;throw failure;}return data;
   }catch(error){if(timedOut)throw Error(path==='approve'?'Acknowledgement delayed. Checking the saved review requestâ€¦':path==='progress'?'Progress temporarily unavailable. Accepted work continues in the background.':'Review metadata timed out. Retry.');if(error.name==='SyntaxError')throw Error('Review returned an unreadable response. Retry.');if(error.name==='TypeError')throw Error('Review network request failed. Retry.');throw error;}
   finally{clearTimeout(timer);requests.delete(controller);}
 }
 function imageURL(row,large=false){return '/api/auto-editions/bulk/image?'+new URLSearchParams({product_gid:row.product_gid,hash:row.hash,...(large?{large:'1'}:{})});}
 function queueImage(row){
   if(disposed||row.previewReady||row.imageState==='queued'||row.imageState==='loading'||!row.hash)return;
-  row.imageState='queued';const task={row,version:generation};
+  clearTimeout(row.retryTimer);row.previewStarted ||= performance.now();row.imageState='queued';const task={row,version:generation};
   if(row.cacheChecked){imageTasks.push(task);pumpImages();}
-  else{warmTasks.push(task);if(!warmScheduled){warmScheduled=true;queueMicrotask(()=>{warmScheduled=false;pumpWarm();});}}
+  else{warmTasks.push(task);if(!warmScheduled){warmScheduled=true;setTimeout(()=>{warmScheduled=false;pumpWarm();},16);}}
 }
-function settlePreview(row,ok){const waiters=previewWaiters.get(row);if(waiters){for(const resolve of waiters)resolve(ok);previewWaiters.delete(row);}}
-function ensurePreview(row){if(row.previewReady)return Promise.resolve(true);return new Promise(resolve=>{if(!previewWaiters.has(row))previewWaiters.set(row,new Set());previewWaiters.get(row).add(resolve);queueImage(row);});}
+function previewDelay(row){row.previewPolls=(row.previewPolls||0)+1;return Math.min(2500,350*2**Math.min(row.previewPolls-1,3));}
 function revokePreview(row){if(row.objectURL){URL.revokeObjectURL(row.objectURL);delete row.objectURL;}}
 function pumpWarm(){
   while(!disposed&&activeWarm<2&&warmTasks.length){
@@ -62,10 +61,11 @@ function pumpWarm(){
     activeWarm++;
     (async()=>{
       let cached=new Map();
-      try{const data=await api('previews',{items:tasks.map(({row})=>({product_gid:row.product_gid,hash:row.hash}))},8000);cached=new Map(data.rows.map(r=>[r.product_gid,r]));timings.cachedPreviewBatches=(timings.cachedPreviewBatches||0)+1;timings.cachedPreviewHits=(timings.cachedPreviewHits||0)+data.rows.filter(r=>r.jpeg).length;}catch{}
+      try{const data=await api('previews',{items:tasks.map(({row})=>({product_gid:row.product_gid,hash:row.hash})),binary:true},8000);cached=new Map(data.rows.map(r=>[r.product_gid,r]));timings.cachedPreviewBatches=(timings.cachedPreviewBatches||0)+1;timings.cachedPreviewHits=(timings.cachedPreviewHits||0)+data.rows.filter(r=>r.blob||r.jpeg).length;}catch{}
       finally{
         for(const task of tasks){if(disposed||task.version!==generation||task.row.removed)continue;const row=task.row,value=cached.get(row.product_gid);row.cacheChecked=true;
-          if(value?.hash===row.hash&&typeof value.jpeg==='string'&&value.jpeg.length<700000){
+          if(value?.hash===row.hash&&value.state==='Loading'&&performance.now()-row.previewStarted<90000){row.imageState='waiting';row.cacheChecked=false;row.retryTimer=setTimeout(()=>{if(task.version===generation&&!disposed&&!row.removed)queueImage(row);},previewDelay(row));continue;}
+          if(value?.hash===row.hash&&value.blob instanceof Blob&&value.blob.size<=524288){row.objectURL=URL.createObjectURL(value.blob);}else if(value?.hash===row.hash&&typeof value.jpeg==='string'&&value.jpeg.length<700000){
             try{row.objectURL=URL.createObjectURL(new Blob([Uint8Array.from(atob(value.jpeg),c=>c.charCodeAt(0))],{type:'image/jpeg'}));}catch{}
           }
           imageTasks.push(task);
@@ -75,32 +75,62 @@ function pumpWarm(){
     })();
   }
 }
+async function fetchPreview(row,large=false,signal){
+  const response=await fetch(imageURL(row,large),{credentials:'same-origin',signal});
+  if(response.status===202)return {waiting:true};
+  if(!response.ok){let message='Preview request failed ('+response.status+').';try{const body=await response.json();message=body.error||message;}catch{}const error=Error(message);error.status=response.status;throw error;}
+  if(!response.headers.get('content-type')?.startsWith('image/'))throw Error('Preview returned an invalid content type.');
+  return {blob:await response.blob()};
+}
 function pumpImages(){
   while(!disposed&&activeImages<3&&imageTasks.length){
     const {row,version}=imageTasks.shift();if(version!==generation||row.removed)continue;
-    activeImages++;row.imageState='loading';let settled=false;
-    const finish=(ok,cancelled=false)=>{
-      if(settled)return;settled=true;clearTimeout(timer);row.img.onload=row.img.onerror=null;imageCancels.delete(cancel);activeImages--;
-      if(!ok)row.img.removeAttribute('src');revokePreview(row);settlePreview(row,ok&&!cancelled);
+    activeImages++;row.imageState='loading';row.previewStarted ||= performance.now();row.detail.textContent=row.operationText||(row.eligible?'Loading preview…':row.reason+' · Loading preview…');let settled=false;
+    const controller=new AbortController();requests.add(controller);
+    const finish=(ok,cancelled=false,waiting=false,error=null)=>{
+      if(settled)return;settled=true;clearTimeout(timer);controller.abort();requests.delete(controller);row.img.onload=row.img.onerror=null;imageCancels.delete(cancel);activeImages--;
+      if(!ok)row.img.removeAttribute('src');revokePreview(row);
       if(version===generation&&!disposed&&!cancelled){
-        row.previewReady=ok;row.imageState=ok?'ready':'failed';
-        if(!ok){selected.delete(row.product_gid);row.retryPreview.hidden=false;row.detail.textContent=row.operationText||'Preview unavailable. Retry Preview or use Review / Repair.';}else{row.retryPreview.hidden=true;row.detail.textContent=row.operationText||(row.eligible?'Eligible for confirmed TEST review':row.reason);}
-        loadedImages++;timings.thumbnailLoads=loadedImages;if(ok&&timings.firstThumbnailMs===undefined)timings.firstThumbnailMs=performance.now()-thumbnailStart;
-        if(loadedImages===Math.min(8,rows.length))timings.initialThumbnailsMs=performance.now()-thumbnailStart;
-        timings.allThumbnailsMs=performance.now()-thumbnailStart;controls(true);summary();
+        const transient=error&&(!error.status||error.status>=500)&&(row.transientRetries||0)<1;
+        if((waiting||transient)&&performance.now()-row.previewStarted<90000){
+          if(transient)row.transientRetries=(row.transientRetries||0)+1;
+          row.imageState='waiting';if(waiting)row.cacheChecked=false;row.detail.textContent=waiting?'Loading verified preview…':'Preview temporarily unavailable. Retrying…';
+          row.retryTimer=setTimeout(()=>{if(version===generation&&!disposed&&!row.removed)queueImage(row);},waiting?previewDelay(row):1500);
+        }else{
+          row.previewReady=ok;row.imageState=ok?'ready':'failed';
+          if(!ok){selected.delete(row.product_gid);row.retryPreview.hidden=false;row.detail.textContent=row.operationText||('Preview unavailable. '+(error?.message||'Generation is still pending; Retry Preview.'));}
+          else{row.retryPreview.hidden=true;row.detail.textContent=row.operationText||(row.eligible?'Eligible for confirmed TEST review':row.reason);}
+          loadedImages++;timings.thumbnailLoads=loadedImages;if(ok&&timings.firstThumbnailMs===undefined)timings.firstThumbnailMs=performance.now()-thumbnailStart;
+          if(loadedImages===Math.min(8,rows.length))timings.initialThumbnailsMs=performance.now()-thumbnailStart;
+          timings.allThumbnailsMs=performance.now()-thumbnailStart;controls(true);summary();
+        }
       }
       pumpImages();
     };
-    const cancel=()=>finish(false,true),timer=setTimeout(()=>finish(false),15000);row.cancelImage=cancel;imageCancels.add(cancel);
-    row.img.onload=()=>finish(true);row.img.onerror=()=>finish(false);if(!row.objectURL)timings.individualPreviewRequests=(timings.individualPreviewRequests||0)+1;row.img.src=row.objectURL||imageURL(row);
+    const cancel=()=>finish(false,true),timer=setTimeout(()=>finish(false,false,false,Error('Preview request timed out.')),10000);row.cancelImage=cancel;imageCancels.add(cancel);
+    row.img.onload=()=>finish(true);row.img.onerror=()=>finish(false,false,false,Error('Preview image could not be decoded.'));
+    if(row.objectURL)row.img.src=row.objectURL;
+    else{timings.individualPreviewRequests=(timings.individualPreviewRequests||0)+1;fetchPreview(row,false,controller.signal).then(result=>{
+      if(settled)return;if(result.waiting){finish(false,false,true);return;}
+      row.objectURL=URL.createObjectURL(result.blob);row.img.src=row.objectURL;
+    }).catch(error=>{if(!settled)finish(false,false,false,error);});}
   }
 }
 function largePreview(row){
-  if(!row.previewReady){queueImage(row);return;}
-  clearTimeout(largeTimer);$('large-status').textContent='Loading larger previewâ€¦';$('large').showModal();
-  const image=$('large-image');image.onload=()=>{clearTimeout(largeTimer);$('large-status').textContent='';};
-  image.onerror=()=>{clearTimeout(largeTimer);$('large-status').textContent='Larger preview unavailable. Close and click the artwork to retry.';};
-  largeTimer=setTimeout(()=>{image.removeAttribute('src');$('large-status').textContent='Larger preview timed out. Close and retry.';},30000);image.src=imageURL(row,true);
+  if(!row.previewReady){row.previewStarted=0;queueImage(row);return;}
+  clearTimeout(largeTimer);largeController?.abort();$('large-status').textContent='Loading larger preview…';$('large').showModal();
+  const started=performance.now(),image=$('large-image');
+  async function load(){
+    if(disposed||!$('large').open)return;
+    const controller=new AbortController();largeController=controller;requests.add(controller);const deadline=setTimeout(()=>controller.abort(),10000);
+    try{
+      const result=await fetchPreview(row,true,controller.signal);if(disposed||!$('large').open)return;
+      if(result.waiting){if(performance.now()-started>90000)throw Error('Larger preview is still pending. Close and retry.');largeTimer=setTimeout(load,2500);return;}
+      const url=URL.createObjectURL(result.blob);image.onload=()=>{URL.revokeObjectURL(url);$('large-status').textContent='';};image.onerror=()=>{URL.revokeObjectURL(url);$('large-status').textContent='Larger preview could not be decoded. Close and retry.';};image.src=url;
+    }catch(error){if($('large').open)$('large-status').textContent=error.message||'Larger preview unavailable. Close and retry.';}
+    finally{clearTimeout(deadline);requests.delete(controller);}
+  }
+  load();
 }
 function append(data){
   const fragment=document.createDocumentFragment();
@@ -111,7 +141,7 @@ function append(data){
     box.type='checkbox';box.value=row.product_gid;box.disabled=true;box.onchange=()=>{if(box.checked&&row.eligible&&row.previewReady)selected.add(row.product_gid);else selected.delete(row.product_gid);controls();};
     label.append(box,document.createTextNode(row.title));caption.append(label);detail.textContent=row.eligible?'Loading previewâ€¦':row.reason;
     link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';
-    retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>queueImage(row);
+    retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>{row.previewStarted=0;row.previewPolls=0;row.transientRetries=0;queueImage(row);};
     Object.assign(row,{img,box,detail,retryPreview,card});card.append(img,caption,detail,retryPreview,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
   }
   $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting')nearImages.observe(row.img);
@@ -133,7 +163,7 @@ async function loadPage(){
     }
   }
 }
-function cancelWork(){for(const request of requests)request.abort();requests.clear();imageTasks.length=0;warmTasks.length=0;nearImages.disconnect();for(const row of rows){settlePreview(row,false);revokePreview(row);row.img.removeAttribute('src');}for(const cancel of [...imageCancels])cancel();clearTimeout(largeTimer);$('large-image').removeAttribute('src');}
+function cancelWork(){for(const request of requests)request.abort();requests.clear();imageTasks.length=0;warmTasks.length=0;nearImages.disconnect();for(const row of rows){clearTimeout(row.retryTimer);revokePreview(row);row.img.removeAttribute('src');}for(const cancel of [...imageCancels])cancel();clearTimeout(largeTimer);$('large-image').removeAttribute('src');}
 function reset(){
   if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;loading=false;errorText='';resultText='';loadedImages=0;
   for(const key of Object.keys(timings))delete timings[key];thumbnailStart=performance.now();$('grid').replaceChildren();
@@ -145,24 +175,17 @@ function requestContext(){
   bootstrapTimer=setTimeout(()=>{if(!started&&!disposed){errorText='Review could not start. Retry, or close and reopen Bulk Review.';controls();summary();}},5000);
 }
 function selectAll(){selected=new Set(rows.filter(r=>r.eligible&&r.previewReady).map(r=>r.product_gid));controls();}
-async function confirmSelection(all){
+function confirmSelection(){
   if(approvalRequest){trackApprovals();return;}if(busy||$('proof').open)return;
-  let unavailable=0;
-  if(all){
-    // All loaded metadata, including offscreen designs. Never auto-select missing/failed previews.
-    const candidates=rows.filter(r=>r.eligible),version=generation;busy=true;resultText='Loading previews for all '+candidates.length+' loaded eligible designs...';controls();summary();
-    const available=await Promise.all(candidates.map(ensurePreview));if(disposed||version!==generation)return;
-    selected=new Set(candidates.filter((r,i)=>available[i]).map(r=>r.product_gid));unavailable=available.filter(ok=>!ok).length;busy=false;resultText='';
-  }
   pending=rows.filter(r=>r.eligible&&r.previewReady&&selected.has(r.product_gid)).map(r=>({product_gid:r.product_gid,hash:r.hash}));
   if(!pending.length){resultText='No eligible previews are available. Retry Preview before approval.';controls();summary();return;}
-  $('confirmation').textContent='Approve '+pending.length+' loaded designs?'+(hasMore?' Additional designs have not been selected.':'')+(unavailable?' '+unavailable+' unavailable previews excluded; retained for retry.':'');
+  $('confirmation').textContent='Approve '+pending.length+' loaded designs?'+(hasMore?' Additional designs have not been selected.':'');
   $('confirm').checked=false;$('accept').disabled=true;$('proof').showModal();controls();summary();
 }
-$('select').onclick=selectAll;$('clear').onclick=()=>{selected.clear();controls();};$('approve').onclick=()=>confirmSelection(false);$('all').onclick=()=>confirmSelection(true);
+$('select').onclick=selectAll;$('clear').onclick=()=>{selected.clear();controls();};$('approve').onclick=confirmSelection;
 $('reload').onclick=reset;$('retry').onclick=()=>{if(loading||busy)return;if(!hasMore||resultText.startsWith('Rechecking')){reset();return;}errorText='';if(started)loadPage();else requestContext();};$('more').onclick=loadPage;
 $('close-large').onclick=()=>{$('large').close();clearTimeout(largeTimer);$('large-image').removeAttribute('src');};
-$('large').addEventListener('close',()=>{clearTimeout(largeTimer);$('large-image').onload=$('large-image').onerror=null;$('large-image').removeAttribute('src');});
+$('large').addEventListener('close',()=>{clearTimeout(largeTimer);largeController?.abort();$('large-image').onload=$('large-image').onerror=null;$('large-image').removeAttribute('src');});
 $('cancel').onclick=()=>{$('proof').close();controls();};$('proof').addEventListener('cancel',()=>queueMicrotask(controls));$('confirm').onchange=()=>$('accept').disabled=!$('confirm').checked;
 
 function saveRequest(value){sessionStorage.setItem(approvalStorage,JSON.stringify(value));approvalRequest=value;}
@@ -170,7 +193,7 @@ function clearRequest(){try{sessionStorage.removeItem(approvalStorage);}catch{}a
 function applyOperations(){
   for(const row of rows){const op=operationStates.get(row.product_gid);if(!op||op.hash!==row.hash)continue;
     const ready=['Cloud Ready','Production Ready'].includes(op.current_status)&&op.current_hash===row.hash;
-    if(['Pending','Processing'].includes(op.state)||(op.state==='Approved'&&ready)){row.removed=true;nearImages.unobserve(row.img);row.cancelImage?.();settlePreview(row,false);revokePreview(row);row.img.removeAttribute('src');row.card.remove();byId.delete(row.product_gid);selected.delete(row.product_gid);continue;}
+    if(['Pending','Processing'].includes(op.state)||(op.state==='Approved'&&ready)){row.removed=true;clearTimeout(row.retryTimer);nearImages.unobserve(row.img);row.cancelImage?.();revokePreview(row);row.img.removeAttribute('src');row.card.remove();byId.delete(row.product_gid);selected.delete(row.product_gid);continue;}
     row.operationText=op.state==='Processing'?'Approvingâ€¦':op.state==='Pending'?'Pending Approval':op.state==='Approved'?(op.current_status==='Cloud Ready'&&op.current_hash===row.hash?'Cloud Ready Â· TEST approval complete':'TEST approval committed'+(op.current_status?' Â· '+op.current_status:'')):op.state==='Failed'?'Approval Failed Â· '+op.reason:op.state+' Â· '+op.reason;
     row.detail.textContent=row.operationText;row.detail.classList.toggle('approving',op.state==='Processing');
     selected.delete(row.product_gid);
