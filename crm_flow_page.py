@@ -37,6 +37,11 @@ STYLE='''<style>
 [data-testid="stMainBlockContainer"]:has(.st-key-flow-workspace) [data-testid="stElementContainer"]:has(>[data-testid="stEmpty"]){display:none}
 .sc-flow-empty{border:1px solid #e5e5e5;border-radius:6px;padding:12px;font-size:13px;color:#626262}
 .sc-flow-empty strong{display:block;color:#242424;margin-bottom:3px}
+.sc-email-publication{display:inline-flex;align-items:center;gap:6px;font-size:12px;line-height:1.5;overflow-wrap:anywhere;color:#536348}
+.sc-email-publication.failed{color:#9c3c36}.sc-email-publication.pending{color:#76633c}
+.sc-email-publication-spinner{width:10px;height:10px;flex-shrink:0;border:1px solid #dedbd4;border-top-color:#a98735;border-radius:50%;animation:sc-email-publication-spin 1s linear infinite}
+@keyframes sc-email-publication-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.sc-email-publication-spinner{animation:none}}
 .st-key-flow-workspace [data-testid="stExpander"] details{border-radius:4px!important}
 .st-key-flow-workspace [data-testid="stExpander"] summary{min-height:32px;padding:4px 8px;font-size:13px}
 .sc-flow-stats{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:0;padding:0!important}
@@ -215,7 +220,7 @@ def sequence(shop,store,user,identity,period):
     from crm_automation_toolbar import definition
     row=definition(store,st.session_state,identity);flow=row['config']['draft']
     version=row['config'].get('published_version')
-    st.caption('Draft sequence · '+('Published version '+str(version)+' remains unchanged until publication.' if version else 'Not published.'))
+    st.caption('Draft sequence · Each email’s published status is shown below. Flow activation is separate.')
     slots={};detail_slots={}
     from crm_flow_inline import controls,status_control
     error=st.session_state.pop('flow-inline-error',None)
@@ -231,7 +236,6 @@ def sequence(shop,store,user,identity,period):
             delay=f'{amount} {unit.lower()}'+timing_label(s)+' · Draft'
         with st.container(horizontal=True,key='flow-row-'+sid):
             with st.container(width=86):
-                status_control(store,user,row,s)
                 thumbnail(store,s,row)
                 if st.button('Preview email',key='flow-preview-'+sid):st.session_state['flow_preview_step']=sid
             with st.container(width='stretch'):
@@ -239,7 +243,9 @@ def sequence(shop,store,user,identity,period):
                 body=snippet(s['document'])
                 title='Email '+str(i+1)+((' · '+name) if name!='Email '+str(i+1) else '')
                 copy=''.join('<p'+(' class="sc-flow-summary"' if n else '')+' title="'+escape(text,quote=True)+'"><small>'+escape(text)+'</small></p>' for n,text in enumerate((preheader,body)) if text)
-                st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+(' · Disabled in draft' if not s.get('enabled',True) else '')+'</small></div>')
+                st.html('<div class="sc-flow-copy"><strong>'+escape(title)+'</strong><p title="'+escape(subject,quote=True)+'">'+escape(subject)+'</p>'+copy+'<small>'+escape(delay)+'</small></div>')
+                from crm_flow_inline import publication_status
+                publication_status(store,user,row,sid)
                 slots[sid]=st.empty()
             with st.container(width=302,key='flow-actions-'+sid):
                 controls(store,user,row,s,i)

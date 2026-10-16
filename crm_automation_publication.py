@@ -88,7 +88,7 @@ def approved(flow):
     return result
 
 
-def preflight(row,revision,flow=None):
+def preflight(row,revision,flow=None,*,step_id=None):
     if not row or not native(row) or row['config'].get('deleted_at') or status(row)=='ARCHIVED':
         raise ValueError('Automation is not publishable.')
     if row['config']['revision']!=revision:raise ValueError('A newer draft exists. Save your changes before publishing.')
@@ -96,6 +96,7 @@ def preflight(row,revision,flow=None):
     flow=validate(single_delay(flow if flow is not None else row['config']['draft']))
     if not any(s.get('enabled',True) for s in flow['emails']):raise ValueError('Enable at least one email before publishing.')
     for step in flow['emails']:
+        if step_id is not None and step['step_id']!=step_id:continue
         if not step.get('enabled',True):continue
         subject=step['document']['content']['subject'].strip()
         if not subject:raise ValueError('Add a subject before publishing.')
@@ -117,15 +118,22 @@ def request(store,user,identity,revision,step_id=None,*,enable_ids=()):
         if not set(enable_ids)<=disabled:raise ValueError('Disabled email selection changed. Reopen publication confirmation.')
         for step in flow['emails']:
             if step['step_id'] in enable_ids:step['enabled']=True
-        flow=preflight(row,revision,flow)
+        # An accepted request can be retried after a lost response, even after
+        # its successful enable transition advanced the editable revision.
+        active=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND state IN ('QUEUED','RUNNING')",(identity,)).fetchone()
+        if active:
+            if active['revision']!=revision or active['snapshot'].get('step_id')!=step_id or (step_id is None and active['snapshot'].get('enable_ids',[])!=enable_ids):raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
+            return active
+        previous=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND revision=%s AND state='SUCCEEDED' AND snapshot->>'step_id' IS NOT DISTINCT FROM %s ORDER BY requested_at DESC LIMIT 1",(identity,revision,step_id)).fetchone()
+        if step_id and previous:
+            from crm_automation_publish_state import email_has_changes
+            if not email_has_changes(store,row,step_id,conn):return {**previous,'unchanged':True}
+        if step_id:
+            enable_ids=[step_id] if any(s['step_id']==step_id and not s.get('enabled',True) for s in row['config']['draft']['emails']) else []
+        flow=preflight(row,revision,flow,step_id=step_id)
         if flow['trigger']!='abandoned':
             from crm_automation_readiness import require_ready
             require_ready(store,{'trigger_type':flow['trigger'],'config':{'draft':flow}},conn=conn)
-        active=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND state IN ('QUEUED','RUNNING')",(identity,)).fetchone()
-        if active:
-            if active['revision']!=revision or active['snapshot'].get('step_id')!=step_id or active['snapshot'].get('enable_ids',[])!=enable_ids:raise ValueError('A saved revision is already publishing. Wait before publishing the next revision.')
-            return active
-        previous=conn.execute("SELECT * FROM crm_automation_publish_jobs WHERE automation_id=%s AND revision=%s AND state='SUCCEEDED' AND snapshot->>'step_id' IS NOT DISTINCT FROM %s ORDER BY requested_at DESC LIMIT 1",(identity,revision,step_id)).fetchone()
         if not enable_ids and not has_changes(store,row,flow,conn):
             return {**(previous or {'id':None,'automation_id':row['id'],'revision':revision,'publication_version':row['config']['published_version'],'state':'SUCCEEDED'}),'unchanged':True}
         config=deepcopy(row['config']);job_id=str(uuid.uuid4());version=config['published_version']+1
@@ -135,6 +143,7 @@ def request(store,user,identity,revision,step_id=None,*,enable_ids=()):
           VALUES(%s,%s,%s,%s,%s::jsonb,%s) RETURNING *""",
           (job_id,identity,revision,version,json.dumps(snapshot),str(user.get('id') or 'operator'))).fetchone()
         config['publication']={'job_id':job_id,'revision':revision,'version':version,'step_id':step_id,'enable_ids':enable_ids,'state':'PUBLISHING','requested_at':now().isoformat()}
+        if step_id:config.setdefault('email_publications',{})[step_id]=deepcopy(config['publication'])
         conn.execute('UPDATE crm_automations SET config=%s::jsonb,updated_at=now() WHERE id=%s',(json.dumps(config),identity))
         return job
 
@@ -206,8 +215,10 @@ def commit(store,conn,row,flow,bundles,steps,version,publication=None):
     for step in config['published_flow']['emails']:
         if step['step_id'] in documents:step['document']=deepcopy(documents[step['step_id']])
     if flow.get('timing_version')!=2:config['published']['abandonment_seconds']=flow.get('abandonment_seconds',3600)
-    target='PAUSED' if row['status']=='PAUSED' else 'ACTIVE'
+    individual=bool(publication and publication.get('step_id'))
+    target=row['status'] if individual else ('PAUSED' if row['status']=='PAUSED' else 'ACTIVE')
     if publication:config['publication']={**publication,'state':'LIVE','completed_at':now().isoformat()}
+    if individual:config.setdefault('email_publications',{})[publication['step_id']]=deepcopy(config['publication'])
     # Explicit inclusion updates draft and publication together, only after validation.
     # Its revision is fenced by the worker so concurrent administrator edits win.
     if publication and publication.get('enable_ids'):
@@ -219,7 +230,8 @@ def commit(store,conn,row,flow,bundles,steps,version,publication=None):
             if step['step_id'] in publication['enable_ids']:step['enabled']=True
         config['revision']+=1
     # Preserve all other editable draft content.
-    return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps=%s::jsonb,trigger_type=%s,status=%s,activated_at=COALESCE(activated_at,now()),updated_at=now() WHERE id=%s RETURNING *",
+    activation='activated_at' if individual else 'COALESCE(activated_at,now())'
+    return conn.execute("UPDATE crm_automations SET config=%s::jsonb,steps=%s::jsonb,trigger_type=%s,status=%s,activated_at="+activation+",updated_at=now() WHERE id=%s RETURNING *",
                         (json.dumps(config),json.dumps(steps),flow['trigger'],target,identity)).fetchone()
 
 
@@ -280,6 +292,8 @@ def fail(conn,job,reason):
     row=conn.execute('SELECT * FROM crm_automations WHERE id=%s FOR UPDATE',(job['automation_id'],)).fetchone()
     if row and row['config'].get('publication',{}).get('job_id')==str(job['id']):
         config=deepcopy(row['config']);config['publication'].update(state='FAILED',error=reason,completed_at=now().isoformat())
+        if job['snapshot'].get('step_id'):
+            config.setdefault('email_publications',{})[job['snapshot']['step_id']]=deepcopy(config['publication'])
         conn.execute('UPDATE crm_automations SET config=%s::jsonb,updated_at=now() WHERE id=%s',(json.dumps(config),row['id']))
 
 

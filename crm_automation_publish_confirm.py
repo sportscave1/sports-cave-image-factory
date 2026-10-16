@@ -1,5 +1,7 @@
 """Fast shared confirmation and authoritative durable-publication handoff."""
 import streamlit as st
+from html import escape
+from pathlib import Path
 from crm_store import StoreUnavailable
 
 
@@ -54,38 +56,44 @@ def completed(store,row,state):
 
 def confirm(store,user,identity,revision,step_id=None,flow_status='DRAFT',row=None):
     """One dialog body and submission path; scope is explicit at every entry point."""
-    title='Publish Email?' if step_id is not None else 'Publish All?'
+    title='Publish email?' if step_id is not None else 'Publish All?'
     dialog=st.dialog(title,width='small',on_dismiss=dismiss)
     return dialog(confirmation_body)(store,user,identity,revision,step_id,flow_status,row)
 
 
 def confirmation_body(store,user,identity,revision,step_id=None,flow_status='DRAFT',row=None):
     # No store reads on open. Locked request/worker validation remains authoritative.
-    st.html("""<style>
-    [data-testid="stDialog"]:has(.sc-publication-confirm){align-items:center!important;padding:16px!important}
-    [role="dialog"]:has(.sc-publication-confirm) [data-testid="stDialogContent"]{background:#f9f9f9!important;padding:0!important}
-    [role="dialog"]:has(.sc-publication-confirm){width:min(360px,calc(100vw - 32px))!important;background:#f9f9f9!important;color:#1b1b1b!important;border:1px solid #d6d6d6!important;border-radius:8px!important;padding:16px!important;box-shadow:0 8px 28px #0003}
-    [role="dialog"]:has(.sc-publication-confirm) :is(h2,h3){font:600 18px 'Segoe UI',sans-serif!important;color:#1b1b1b!important;padding:0!important;margin:0!important}
-    [role="dialog"]:has(.sc-publication-confirm) [data-testid="stVerticalBlock"]{gap:10px!important}
-    [role="dialog"]:has(.sc-publication-confirm) p{font:14px 'Segoe UI',sans-serif!important;color:#1b1b1b!important;margin:0!important}
-    [role="dialog"]:has(.sc-publication-confirm) button{min-height:32px!important;padding:4px 14px!important;border-radius:4px!important}
-    [role="dialog"]:has(.sc-publication-confirm) button p{color:inherit!important}
-    [role="dialog"]:has(.sc-publication-confirm) button[kind="secondary"]{background:#fff!important;color:#1b1b1b!important;border:1px solid #ccc!important}
-    [role="dialog"]:has(.sc-publication-confirm) button[kind="primary"]{background:#0067c0!important;color:#fff!important;border:1px solid #0067c0!important}
-    </style><span class="sc-publication-confirm"></span>""")
-    st.write('Publish this email now?' if step_id is not None else 'Publish all enabled emails in this flow now?')
     submitting=st.session_state.get('automation-publication-submitting',False)
     error=st.session_state.pop('automation-publication-submit-error',None)
-    if error:st.error(error)
-    cancel,publish=st.columns(2)
-    if cancel.button('Cancel',key='automation-publication-cancel',disabled=submitting,use_container_width=True):
-        dismiss();st.rerun(scope='app')
-    publish.button('Publish' if step_id is not None else 'Publish All',type='primary',key='automation-publication-confirm',disabled=submitting,on_click=submit,use_container_width=True)
+    assets=Path(__file__).with_name('components')/'crm_sections'
+    with st.container(key='sc-publication-body'):
+        st.html('<span class="sc-publication-confirm" hidden></span><style>'+assets.joinpath('publication_confirm.css').read_text(encoding='utf8')+'</style>')
+        if row:
+            step=next((s for s in row['config']['draft']['emails'] if s['step_id']==step_id),None)
+            name=(step.get('name') or step['document']['content'].get('subject') or 'Untitled email') if step else 'All enabled emails'
+            st.html('<div class="sc-publication-summary"><strong>'+escape(name)+'</strong><span>'+escape(row['name'])+'</span></div>')
+        st.caption('Publish this email’s saved content. '+('The flow stays active.' if flow_status=='ACTIVE' else 'The flow stays disabled.' ) if step_id else 'Publish all enabled emails in this flow now?')
+        if error:st.error(error)
+        cancel,publish=st.columns(2,gap='small')
+        if cancel.button('Cancel',key='automation-publication-cancel',disabled=submitting,use_container_width=True):
+            dismiss();st.rerun(scope='app')
+        publish.button('Publish email' if step_id is not None else 'Publish All',type='primary',key='automation-publication-confirm',disabled=submitting,on_click=submit,use_container_width=True)
+        st.html('<script>'+assets.joinpath('publication_confirm.js').read_text(encoding='utf8')+'</script>',unsafe_allow_javascript=True)
     if submitting:
         try:
             with st.spinner('Publishing…'):
+                # Recheck the save barrier at final confirmation as well as open.
+                from crm_campaign_recovery import flush_current
+                if not flush_current(force=True):raise ValueError('Save failed. Your draft is retained. Retry saving before publishing.')
+                editor=st.session_state.get('automation_editor')
+                if editor and str(editor['id'])==str(identity):revision=editor['version']
                 job=store.request_publish(user,identity,revision,step_id=step_id)
-            if job.get('unchanged'):
+            if step_id is not None:
+                # Acceptance is durable. The destination owns completion status.
+                from crm_automation_ui import request_route
+                request_route(identity)
+                st.session_state.pop('automation-publication-waiting',None)
+            elif job.get('unchanged'):
                 st.session_state['automation-publication-waiting']={'identity':str(identity),'unchanged':True,'version':job['publication_version'],'step_id':step_id}
             elif job.get('id'):
                 st.session_state['automation-publication-waiting']={'identity':str(identity),'job_id':str(job['id'])}

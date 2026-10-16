@@ -78,6 +78,9 @@ def publication_flow(store,row,step_id=None,conn=None):
     if step_id is None:return draft
     selected=next((s for s in draft['emails'] if s['step_id']==step_id),None)
     if selected is None:raise ValueError('Email is unavailable. Reopen the flow before publishing.')
+    # Publishing this email explicitly includes it. Commit the matching draft
+    # transition only after the immutable replacement has been stored.
+    selected['enabled']=True
     live=published(store,row,conn)
     result=deepcopy(live or draft)
     emails=deepcopy((live or {}).get('emails',[]))
@@ -91,8 +94,8 @@ def publication_flow(store,row,step_id=None,conn=None):
     return result
 
 
-def email_has_changes(store,row,step_id):
-    live=published(store,row)
+def email_has_changes(store,row,step_id,conn=None):
+    live=published(store,row,conn)
     draft=next((s for s in row['config']['draft']['emails'] if s['step_id']==step_id),None)
     saved=next((s for s in (live or {}).get('emails',[]) if s['step_id']==step_id),None)
     if not draft or not saved:return True

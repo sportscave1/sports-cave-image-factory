@@ -48,6 +48,7 @@
     const timer=setTimeout(()=>{observer.disconnect();if(note.isConnected){note.textContent='Confirmation not yet available. Checking saved status…';document.querySelector('.st-key-toolbar-refresh button')?.click();}},15000);
     observer.observe(document.body,{childList:true,subtree:true}); // Dialog is mounted outside the editor.
    }
+   if(requested!=='Save draft')window.scAutomationPublishOrigin=current;
    allowed=true;try{current.click();}finally{allowed=false;}
   }catch{note.textContent='Save your latest edits, then retry publishing.';}
   finally{busy=false;}

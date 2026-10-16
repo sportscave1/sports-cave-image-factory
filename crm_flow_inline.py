@@ -13,6 +13,7 @@ def step_state(row,step):
     if not published and not step.get('enabled',True):return 'DISABLED'
     if published and status(row)=='ACTIVE':return 'LIVE'
     if published and status(row)=='PAUSED':return 'PAUSED'
+    if published and status(row)=='DRAFT':return 'PUBLISHED'
     return 'DRAFT'
 
 
@@ -38,7 +39,9 @@ def status_action(store,user,row,step,key):
         from crm_automation_ui import changed
         if not flush_current(force=True):return
         fresh=store.flow(row['id'])
-        if fresh['config']['draft']!=row['config']['draft'] or fresh['status']!=row['status']:
+        selected=next((s for s in fresh['config']['draft']['emails'] if s['step_id']==step['step_id']),None)
+        settings=lambda flow:{k:v for k,v in flow.items() if k!='emails'}
+        if selected!=step or settings(fresh['config']['draft'])!=settings(row['config']['draft']) or fresh['status']!=row['status']:
             raise ValueError('The flow changed. Review its current state and retry.')
         if action in ('Disable in draft','Enable in draft'):
             draft=deepcopy(fresh['config']['draft'])
@@ -60,8 +63,75 @@ def status_control(store,user,row,step):
     with st.container(key='flow-state-'+state.lower()+'-'+step['step_id']):
         st.selectbox('Status and actions for '+(step.get('name') or 'email'),status_options(row,step),
             key=key,label_visibility='collapsed',disabled=status(row)=='ARCHIVED',
-            help='Status refers to the published email. Publish affects only this email; disabled emails remain disabled. Pause and Resume affect the whole flow; draft changes do not alter the live version.',
+            help='Publish includes only this email. Other emails and the parent flow activation stay unchanged. Pause and Resume affect the whole flow.',
             on_change=status_action,args=(store,user,row,step,key))
+
+
+def email_publication(row,sid):
+    latest=row['config'].get('publication',{})
+    return row['config'].get('email_publications',{}).get(sid,latest if latest.get('step_id')==sid else {})
+
+
+@st.fragment
+def publication_status(store,user,row,sid):
+    """Only this email's durable job is polled; no sequence/analytics reload."""
+    from html import escape
+    publication=email_publication(row,sid)
+    key='flow-email-publication-'+str(row['id'])+'-'+sid
+    if st.session_state.pop('flow-toolbar-dirty',False):
+        try:
+            fresh=store.flow(row['id'])
+            st.session_state[key]={**email_publication(fresh,sid),'_row':fresh}
+            from crm_flow_page import refresh_control
+            refresh_control('toolbar-refresh')
+        except StoreUnavailable:st.caption('Status unavailable. Reload this flow to retry.')
+    cached=st.session_state.get(key,{})
+    if cached.get('requested_at','')>=publication.get('requested_at',''):publication=cached or publication
+    if publication.get('state')=='PUBLISHING':
+        try:
+            from crm_automation_publication import overdue,expire
+            if overdue(publication):expire(store,row['id'])
+            job=store.q('SELECT state,error FROM crm_automation_publish_jobs WHERE id=%s AND automation_id=%s',
+                        (publication['job_id'],row['id']),True)
+            if job and job['state'] in ('SUCCEEDED','FAILED'):
+                # One terminal metadata read updates this email's enable/action
+                # controls. Pending polls never fetch the full definition.
+                fresh=store.flow(row['id'])
+                publication={**publication,'state':'LIVE' if job['state']=='SUCCEEDED' else 'FAILED','error':job.get('error'),'_row':fresh}
+                st.session_state[key]=publication
+                from crm_flow_page import refresh_control
+                refresh_control('toolbar-refresh')
+        except StoreUnavailable:
+            st.caption('Status temporarily unavailable; checking again.')
+    phase=publication.get('state')
+    current=publication.get('_row',row)
+    if str(row.get('updated_at',''))>str(current.get('updated_at','')):current=row
+    step=next((s for s in current['config']['draft']['emails'] if s['step_id']==sid),None)
+    if step:status_control(store,user,current,step)
+    error=st.session_state.pop('flow-inline-error',None)
+    if error:st.caption(error)
+    if phase=='PUBLISHING':
+        st.html('<span class="sc-email-publication pending" role="status"><span class="sc-email-publication-spinner" aria-hidden="true"></span>Publishing…</span>')
+        from crm_logic import now,date
+        requested=date(publication.get('requested_at'))
+        age=(now()-requested).total_seconds() if requested else 0
+        from crm_automation_analytics_ui import arm
+        arm('flow-email-publish-refresh-'+sid,5 if age>=30 else 2)
+    elif phase=='FAILED':
+        st.html('<span class="sc-email-publication failed" role="status">Publish failed · '+escape(publication.get('error') or 'Review the saved draft and retry.')+'</span>')
+        if st.button('Retry',key='flow-email-publish-retry-'+sid,help='Retry publishing this saved email only.'):
+            try:
+                fresh=store.flow(row['id'])
+                accepted=store.request_publish(user,row['id'],fresh['config']['revision'],step_id=sid)
+                from crm_logic import now,date
+                requested=date(accepted.get('requested_at')) or now()
+                st.session_state[key]={'job_id':str(accepted['id']),'step_id':sid,
+                    'state':'LIVE' if accepted.get('unchanged') or accepted['state']=='SUCCEEDED' else 'PUBLISHING',
+                    'version':accepted['publication_version'],'requested_at':requested.isoformat()}
+                st.rerun(scope='fragment')
+            except (ValueError,PermissionError,StoreUnavailable,RuntimeError) as exc:st.error(str(exc))
+    elif phase=='LIVE' or any(s['step_id']==sid for s in row.get('steps',[])):
+        st.html('<span class="sc-email-publication" role="status">Published</span>')
 
 
 @st.dialog('Delete email?',width='small')
