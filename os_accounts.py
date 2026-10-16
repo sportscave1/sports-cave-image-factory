@@ -183,7 +183,9 @@ PAGE_REGISTRY = (
         "label": "Settings",
         "worker_assignable": False,
     },
-    {"key": "developer", "route": "Developer", "label": "Developer", "worker_assignable": False},
+    {"key": "developer", "route": "Developer", "label": "Developer", "worker_assignable": False, "top_level": True},
+    {"key": "product_quiz", "route": "Product Quiz", "label": "Product Quiz", "worker_assignable": False,
+     "parent_key": "developer", "navigation_child": True},
     {"key": "products", "route": "Products", "label": "Products", "worker_assignable": False},
     {
         "key": "product_assets",

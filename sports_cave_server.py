@@ -27,6 +27,7 @@ from auto_editions_api import ROUTES as AUTO_EDITIONS_ROUTES
 from auto_editions_setup_api import ROUTES as AUTO_EDITIONS_SETUP_ROUTES
 from auto_editions_onboarding_api import ROUTES as AUTO_EDITIONS_ONBOARDING_ROUTES
 from auto_editions_status import ROUTES as AUTO_EDITIONS_STATUS_ROUTES
+from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
 
 
 routes = [
@@ -37,6 +38,7 @@ routes = [
         *AUTO_EDITIONS_SETUP_ROUTES,
         *AUTO_EDITIONS_ONBOARDING_ROUTES,
         *AUTO_EDITIONS_STATUS_ROUTES,
+        *PRODUCT_QUIZ_ROUTES,
         *COLLECTOR_VAULT_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
         *TOP_BAR_ROUTE_HANDLERS,

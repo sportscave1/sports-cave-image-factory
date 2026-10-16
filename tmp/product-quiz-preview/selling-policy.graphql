@@ -1,0 +1,7 @@
+query SportsCaveQuizSellingPolicy($ids:[ID!]!) {
+  nodes(ids:$ids) { ... on Product { id
+    variants(first:100) { pageInfo { hasNextPage } nodes {
+      inventoryQuantity inventoryPolicy inventoryItem { tracked }
+    } }
+  } }
+}
