@@ -54,7 +54,7 @@ class ProductionCardinalityDatabase:
             self.database.statements.append((self.sql, self.params))
 
         def fetchall(self):
-            if "SELECT o.shopify_order_id" in self.sql and "FROM shopify_orders o" in self.sql:
+            if "SELECT o.shopify_order_id" in self.sql and "FROM shopify_orders o" in self.sql and "LEFT JOIN shopify_order_lines li" not in self.sql:
                 requested = int(self.params[-1])
                 return [
                     {"shopify_order_id": f"gid://shopify/Order/{self.database.order_count - offset}"}
@@ -62,7 +62,9 @@ class ProductionCardinalityDatabase:
                 ]
             if "FROM shopify_orders o" in self.sql and "LEFT JOIN shopify_order_lines li" in self.sql:
                 rows = []
-                for order_offset, order_gid in enumerate(self.params[0]):
+                order_ids = ([f"gid://shopify/Order/{self.database.order_count - offset}" for offset in range(int(self.params[-1]))]
+                             if "WITH selected_order_ids AS MATERIALIZED" in self.sql else self.params[0])
+                for order_offset, order_gid in enumerate(order_ids):
                     number = self.database.order_count - order_offset
                     for line_offset in range(self.database.lines_per_order):
                         line_number = number * 10 + line_offset
@@ -77,6 +79,7 @@ class ProductionCardinalityDatabase:
                             order_name, title, edition = "#SC3055", "Shane Warne Tribute Wall Art", 8
                         rows.append(
                             {
+                                "_manual_table_available": True,
                                 "shopify_order_id": order_gid,
                                 "order_name": order_name,
                                 "shopify_line_item_id": f"gid://shopify/LineItem/{line_number}",
@@ -139,27 +142,20 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         database, rows, _elapsed_ms = self._load()
 
         self.assertEqual(100, len(rows))
-        self.assertEqual(5, len(database.statements))
+        self.assertEqual(4, len(database.statements))
         id_sql, id_params = database.statements[0]
         self.assertIn("SELECT o.shopify_order_id", id_sql)
         self.assertIn("ORDER BY o.created_at DESC", id_sql)
         self.assertIn("LIMIT %s", id_sql)
         self.assertEqual(50, id_params[-1])
-        for expanded_table in (
-            "shopify_order_lines",
-            "edition_orders",
-            "certificates",
-            "prodigi_dispatch_rows",
-        ):
-            self.assertNotIn(expanded_table, id_sql)
-        self.assertIn("WHERE o.shopify_order_id=ANY", database.statements[1][0])
-        self.assertIn("WHERE shopify_line_item_id=ANY", database.statements[2][0])
-        self.assertIn("WITH selected_edition_ids AS", database.statements[3][0])
-        self.assertIn("information_schema.tables", database.statements[4][0])
-        self.assertEqual(
-            (supabase_backend.MANUAL_ORDER_LINE_EDITION_TABLE,),
-            database.statements[4][1],
-        )
+        window_sql = id_sql.split('), selected_orders AS MATERIALIZED', 1)[0]
+        for expanded_table in ('shopify_order_lines', 'edition_orders', 'certificates', 'prodigi_dispatch_rows'):
+            self.assertNotIn(expanded_table, window_sql)
+        self.assertIn("WHERE o.shopify_order_id IN", id_sql)
+        self.assertIn("WHERE shopify_line_item_id=ANY", database.statements[1][0])
+        self.assertIn("WITH selected_edition_ids AS", database.statements[2][0])
+        self.assertIn("FROM manual_order_line_editions", database.statements[3][0])
+        self.assertIn("to_regclass('public.manual_order_line_editions')", id_sql)
         self.assertEqual(1, len(database.connections))
         self.assertTrue(all(connection.closed for connection in database.connections))
         self.assertTrue(all(connection.rollback_calls == 1 for connection in database.connections))
@@ -169,7 +165,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
         large_db, large_rows, _ = self._load(order_count=1_000_000)
 
         self.assertEqual(len(small_db.statements), len(large_db.statements))
-        self.assertEqual(5, len(large_db.statements))
+        self.assertEqual(4, len(large_db.statements))
         self.assertEqual(100, len(small_rows))
         self.assertEqual(100, len(large_rows))
         self.assertEqual(50, len({row["shopify_order_id"] for row in large_rows}))
@@ -227,14 +223,14 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
     def test_reader_has_only_the_new_separate_manual_edition_capability(self):
         database, rows, _ = self._load()
         self.assertEqual(100, len(rows))
-        self.assertEqual(5, len(database.statements))
+        self.assertEqual(4, len(database.statements))
         self.assertFalse(
             any("order_line_edition_overrides" in sql for sql, _ in database.statements)
         )
         self.assertTrue(
             any(
-                supabase_backend.MANUAL_ORDER_LINE_EDITION_TABLE in params
-                for _sql, params in database.statements
+                supabase_backend.MANUAL_ORDER_LINE_EDITION_TABLE in sql
+                for sql, params in database.statements
             )
         )
 

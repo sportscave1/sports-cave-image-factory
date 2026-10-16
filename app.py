@@ -15882,6 +15882,36 @@ def _navigation_page_status(current_page):
     return "ready"
 
 
+@st.fragment
+def _render_orders_workspace():
+    # Form and selection events rerender only the existing Orders workspace.
+    # Reuse the exact authentication/permission checks, including expiry and
+    # revocation, rather than trusting a captured user in a fragment closure.
+    if st.session_state.get("current_page", "Orders") != "Orders":
+        return
+    if not is_app_authenticated():
+        st.rerun()
+        return
+    allowed = ensure_current_page_access("Orders")
+    if allowed:
+        try:
+            get_orders_page().render_page()
+        except Exception as error:
+            logging.exception("Page render failed for Orders")
+            _render_navigation_failure("Orders", error)
+            if os_accounts.is_admin(current_os_user()):
+                st.exception(error)
+            status = "error"
+        else:
+            status = _navigation_page_status("Orders")
+    else:
+        status = "denied"
+    _finish_navigation_transition("Orders", status=status)
+    top_bar.render_navigation_complete(
+        get_components_module(), current_route="Orders",
+        navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0), status=status)
+
+
 def render_selected_page(current_page):
     # Opt in only where the local dispatcher survey confirmed oversized native
     # headings/top spacing. Keep newer module-specific workspaces independent.
@@ -15971,7 +16001,7 @@ def render_selected_page(current_page):
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
-        get_orders_page().render_page()
+        _render_orders_workspace()
     elif current_page == "Email":
         get_support_email_page().render_page(current_os_user())
     elif current_page == "Reviews":
@@ -16123,14 +16153,15 @@ def main():
             status="error",
         )
     else:
-        page_status = _navigation_page_status(current_page)
-        _finish_navigation_transition(current_page, status=page_status)
-        top_bar.render_navigation_complete(
-            get_components_module(),
-            current_route=current_page,
-            navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
-            status=page_status,
-        )
+        if current_page != "Orders":
+            page_status = _navigation_page_status(current_page)
+            _finish_navigation_transition(current_page, status=page_status)
+            top_bar.render_navigation_complete(
+                get_components_module(),
+                current_route=current_page,
+                navigation_epoch=st.session_state.get(NAVIGATION_EPOCH_STATE_KEY, 0),
+                status=page_status,
+            )
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
     safe_startup_print(

@@ -3,7 +3,9 @@
   padding-top: calc(var(--sc-topbar-height, 64px) + 8px) !important;
   padding-bottom: 12px;
 }
-[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) > [data-testid="stVerticalBlock"] {
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) > [data-testid="stVerticalBlock"],
+/* A fragment wraps the same workspace; retain its original eight-pixel gap. */
+[data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) [data-testid="stVerticalBlock"]:has(> [data-testid="stElementContainer"] > [data-testid="stHeading"] h1) {
   gap: 8px;
 }
 [data-testid="stMainBlockContainer"]:has(.st-key-orders_search_text) h1 {
