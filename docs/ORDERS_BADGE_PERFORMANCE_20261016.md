@@ -32,7 +32,7 @@ Read-only EXPLAIN ANALYZE against the current 560-order production database, ten
 | Before | 50.01 ms | 74.75 ms | 1 | 0 |
 | After, before backfill | 18.19 ms | 21.24 ms | 1 | 0 |
 
-The latest-50 base query was profiled separately on the same 126 production rows: ten paired SQL samples improved from 68.95 ms median (79.02 ms p95) to 13.97 ms median (17.91 ms p95). Both queries returned the identical full-result digest c165968a723dcb44218a7f45abad7540 before reconciliation; no selected data was dropped. One production end-to-end base snapshot sample was 3.101 seconds, including 1.059 seconds in the base phase and about 1.1 seconds of connection setup. Connection and transport latency remain a larger cost than SQL execution and must not be presented as eliminated.
+The latest-50 base query was profiled separately on the same 126 production rows: ten paired SQL samples improved from 68.95 ms median (79.02 ms p95) to 14.10 ms median (17.91 ms p95). Both queries returned the identical full-result digest c165968a723dcb44218a7f45abad7540 before reconciliation; no selected data was dropped. One production end-to-end base snapshot sample was 3.101 seconds, including 1.059 seconds in the base phase and about 1.1 seconds of connection setup. Connection and transport latency remain a larger cost than SQL execution and must not be presented as eliminated.
 
 A production reconciliation check caught PostgreSQL operator precedence in the first deployed semantic JSON comparison; that transaction rolled back. Parenthesizing the JSON extraction corrects it. The corrected expression was validated directly against PostgreSQL before the follow-up release, and final reconciliation must succeed before completion is claimed.
 
@@ -40,7 +40,7 @@ A separate earlier single observation was 282.607 ms before; do not compare that
 
 Browser observation baseline: reload 11.360 and 12.261 seconds; warm navigation back to searched Orders 4.625 seconds; search 8.380 seconds including automation observation overhead. Too few browser samples for defensible p95. Production after-deployment observations are recorded separately with release evidence.
 
-The existing Orders reader remains bounded to latest 50 and five batched SQL phases. Certificate generation, Shopify writes and edition operations are not part of sidebar calculation. Stable resource reads remain fresh; the resource reuse is per render, not a stale cross-session cache.
+The existing Orders reader remains bounded to latest 50 and five batched SQL phases (six SQL statements on the current production schema). Certificate generation, Shopify writes and edition operations are not part of sidebar calculation. Stable resource reads remain fresh; the resource reuse is per render, not a stale cross-session cache.
 
 ## Validation
 
@@ -49,3 +49,5 @@ Focused regression set: 99 passing tests covering badge policy, aliases, multipl
 The broader legacy EditionOpsUiTests class contains unrelated obsolete source-contract expectations against newer Edition Ops, prompt and JPG interfaces; it is outside this repair and was not changed to fit this release.
 
 Production edition/certificate baseline digests: edition_orders 55d2b4aebfb7c57e61d3e0a0bc840343; certificates e47a100a4f5a7f52ee7fb957b4911fd3. No allocation, numbering, certificate history or Shopify metafield write path was added or changed.
+
+The read-only profiler permits Psycopg pool empty-query health checks. Resource timings from a guard that rejected those checks were discarded; those artificial eight-second checkout timeouts were not an application slowdown. The corrected profiler also records the existing warm sidebar cache separately from its uncached aggregate.

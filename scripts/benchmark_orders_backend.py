@@ -26,7 +26,7 @@ def main(samples=20):
 
     def execute(cursor, query, *args, **kwargs):
         sql = str(query).strip().upper()
-        if not sql.startswith(('SELECT', 'WITH', 'SHOW', 'SET', 'BEGIN', 'COMMIT', 'ROLLBACK')):
+        if sql and not sql.startswith(('SELECT', 'WITH', 'SHOW', 'SET', 'BEGIN', 'COMMIT', 'ROLLBACK')):
             raise RuntimeError('Benchmark refuses non-read SQL')
         if sql.startswith(('SELECT', 'WITH')) and sql not in {'SELECT 1', 'SELECT 1;'}:
             counts['sql'] += 1
@@ -55,6 +55,10 @@ def main(samples=20):
 
     with patch.object(psycopg.Cursor, 'execute', execute), patch.object(requests.sessions.Session, 'request', network):
         result = {'badge': measure(db.get_order_action_summary)}
+        import top_bar_api
+        top_bar_api.clear_order_summary_display_cache()
+        top_bar_api._cached_order_action_summary(db)
+        result['badge_cached'] = measure(lambda: top_bar_api._cached_order_action_summary(db))
         result['latest_50'] = measure(lambda: orders._read_orders_snapshot(limit=50))
         result['search'] = measure(lambda: orders._read_orders_snapshot(search='SC3303', limit=50))
         result['visibility_marker'] = measure(lambda: db.orders_visibility_marker(ensure_schema_first=False))
