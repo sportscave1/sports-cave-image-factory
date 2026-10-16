@@ -127,6 +127,9 @@ def test_reset_permissions_migration_is_service_only_and_checksum_bound(design):
     name='20261016120000_auto_editions_reset_mapping_permissions.sql';source=Path('supabase/migrations')/name
     assert hashlib.sha256(source.read_bytes()).hexdigest()==run_migrations.REVIEWED_MIGRATION_SHA256[name]
     assert name in run_migrations.DEPLOYMENT_MIGRATIONS
+    assert (run_migrations.MIGRATIONS_DIR/name).read_bytes()==source.read_bytes()
+    # Exercise the actual startup path, including every reviewed manifest file; no DB access.
+    run_migrations.run_deployment_migrations(check=True)
     sql.execute(source.read_text())
     for table in ('product_psd_mappings','auto_edition_layouts'):
         sql.execute("SELECT has_table_privilege('service_role',%s,'DELETE') AS allowed",(table,));assert sql.fetchone()['allowed']
