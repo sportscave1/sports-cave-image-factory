@@ -203,22 +203,42 @@ class DropboxAssets:
             raise PreparationBlocked('Prepared asset exceeds the transfer limit.')
         folder=self.path(digest,'master.png').rsplit('/',1)[0]
         self.integration.ensure_folder_path(self.token,folder,root_path='/Sportscave Team Folder')
+        # One fresh bounded listing supplies the same immutable metadata as
+        # separate lookups. Partial listings retain per-file fallback checks.
+        existing_files={};complete=False;listing_requests=0;listing_start=time.monotonic();asset_names={a['name'] for a in assets}
+        list_page=getattr(self.integration,'list_folder_page',None)
+        if callable(list_page):
+            page=list_page(self.token,folder,limit=min(2000,len(assets)+1))
+            entries=page.get('entries')
+            if not isinstance(entries,list) or len(entries)>2000:raise PreparationBlocked('Prepared folder listing exceeds bounds.')
+            for item in entries:
+                name=item.get('name');path=item.get('path_lower') or item.get('path_display','')
+                if name not in asset_names:continue
+                if path.lower()!=self.path(digest,name).lower() or name in existing_files:
+                    raise PreparationBlocked('Prepared folder metadata differs; review required.')
+                existing_files[name]=item
+            complete=page.get('has_more') is False;listing_requests=1
+        self.timings['prepared_listing_seconds']=round(time.monotonic()-listing_start,6)
         def publish(pair):
             asset,path=pair
             destination=self.path(digest,asset['name'])
-            existing=self.integration.get_metadata_if_exists(self.token,destination)
+            lookup=not complete and asset['name'] not in existing_files
+            existing=existing_files.get(asset['name']) if not lookup else self.integration.get_metadata_if_exists(self.token,destination)
             metadata=existing or self.integration.upload_local_file(self.token,destination,path,conflict='cancel')
             if (not metadata or not metadata.get('id') or not metadata.get('rev')
                     or metadata.get('content_hash')!=ae.file_hash(path,dropbox=True)
                     or metadata.get('size')!=path.stat().st_size):
                 raise PreparationBlocked('Existing or uploaded asset differs; it was not overwritten.')
-            return dict(name=asset['name'],file_id=metadata['id'],revision=metadata['rev'],
-                        bytes=metadata['size'])
+            return (dict(name=asset['name'],file_id=metadata['id'],revision=metadata['rev'],bytes=metadata['size']),
+                    int(lookup),0 if existing else path.stat().st_size,bool(existing))
         # Bounded network concurrency only. Photoshop and pixel checks remain serial.
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=3,thread_name_prefix='edition-assets') as pool:
-            records=list(pool.map(publish,zip(assets,paths)))
-        return dict(preparation_hash=digest,assets=records)
+            results=list(pool.map(publish,zip(assets,paths)))
+        self.timings.update(prepared_metadata_requests=listing_requests+sum(r[1] for r in results),
+                            prepared_upload_requests=sum(not r[3] for r in results),
+                            prepared_upload_bytes=sum(r[2] for r in results),prepared_reused_assets=sum(r[3] for r in results))
+        return dict(preparation_hash=digest,assets=[r[0] for r in results])
 
     def discard_cache(self,job_id,output):
         if output.get('archive_status'):return # Immutable archives are never expired or removed.

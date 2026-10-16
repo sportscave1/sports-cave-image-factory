@@ -131,7 +131,7 @@ def test_snapshot_uses_current_receipts_and_bounded_reads(telemetry):
     d,sql=telemetry;pid,fid=mapping(sql,1000);d.queue.enqueue(pid,fid,'fixture')
     value=health.Health(d.connect).snapshot()
     assert value['counts']['eligible']==1 and value['counts']['queued']==1 and value['counts']['completed']==0
-    assert value['cost']['queries']==5 and value['cost']['dropbox_calls']==0
+    assert value['cost']['queries']==2 and value['cost']['dropbox_calls']==0
     assert value['overall']=='Degraded' # no independent heartbeats yet
     assert 'lease_token' not in json.dumps(value)
 
@@ -193,7 +193,7 @@ def test_334_job_snapshot_is_bounded_read_only_and_timed(telemetry):
     for _ in range(5):
         start=time.perf_counter();value=health.Health(d.connect).snapshot();times.append((time.perf_counter()-start)*1000)
         assert len(value['jobs'])==334 and value['counts']['eligible']==334 and value['counts']['queued']==334
-        assert value['cost']['queries']==5 and value['cost']['dropbox_calls']==0
+        assert value['cost']['queries']==2 and value['cost']['dropbox_calls']==0
     assert before==protected()
     print('334-job local snapshot median_ms=',round(statistics.median(times),2),'max_ms=',round(max(times),2),'response_bytes=',len(json.dumps(value)))
 

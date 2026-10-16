@@ -137,6 +137,8 @@ async def package(request):
                     output.write(block)
             assets_root=root/'assets';assets_root.mkdir()
             timings['receive_seconds']=round(time.monotonic()-started,3);phase=time.monotonic()
+            timings['package_bytes']=size
+            timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
             ctx=setup['context']
             manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
             if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:
@@ -145,6 +147,8 @@ async def package(request):
             assets=runtime.storage()
             receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
             timings['dropbox_upload_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
+            timings.update({k:v for k,v in getattr(assets,'timings',{}).items() if k.startswith('prepared_')})
+            timings['dropbox_publish_mib_s']=round(timings.get('prepared_upload_bytes',0)/1024**2/max(timings['dropbox_upload_seconds'],.000001),4)
             await run_in_threadpool(grant_context,request)
             registry,_=runtime.stores()
             digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])

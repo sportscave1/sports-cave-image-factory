@@ -16,6 +16,8 @@ JOBS={}
 LOCK=threading.Lock()
 HOST_THREAD=None
 HOST_STOP=threading.Event()
+HOST_WAKE=threading.Event()
+HOST_LAST_COMPLETED_AT=None
 HOST_BUSY=threading.Event()
 HOST_FILE=Path.home()/'Documents'/'SportsCaveAutoEditions'/'preparation-host.dpapi'
 RECOVERY_CURSOR=0
@@ -72,6 +74,7 @@ def restore_host():
 def journal(row):
     if not row.get('context',{}).get('automatic'):return
     atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
+        package_transport=row.get('package_transport',0),
         phase=row.get('phase','Preparing'),status=row['status'],error=row.get('error',''),
         repair=bool(row.get('repair')),checkpoint_pending=bool(row.get('checkpoint_pending')),
         started_at=row.setdefault('started_at',time.time()),retry_at=row.get('retry_at',0),recovery_failures=row.get('recovery_failures',0),diagnostic=row.get('diagnostic')))
@@ -126,7 +129,7 @@ def recover_retained(config):
         if data.get('checkpoint_pending'):
             row=dict(data,grant=result['grant'],folder=file.parent)
             report_failure(row);return True
-        start(result['grant'],resume_folder=file.parent)
+        start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0))
         return True
     return False
 
@@ -136,6 +139,7 @@ def host_loop():
     from device_trust import protect
     failures=0
     while not HOST_STOP.is_set():
+        HOST_WAKE.clear()
         with LOCK:
             if HOST_STOP.is_set():return
             HOST_BUSY.set()
@@ -161,8 +165,14 @@ def host_loop():
             elif recover_retained(config):state='Recovering'
             else:
                 retry_verified_cleanup()
+                claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
-                if data.get('grant'):start(data['grant'],initial_context=data.get('context'));state='Preparing'
+                if data.get('grant'):
+                    started=start(data['grant'],initial_context=data.get('context'),package_transport=data.get('package_transport',0))
+                    timings=JOBS[started['job_id']].setdefault('timings',{})
+                    timings['claim_seconds']=round(time.monotonic()-claim_started,6)
+                    if HOST_LAST_COMPLETED_AT is not None:timings['completed_to_claim_request_seconds']=round(claim_started-HOST_LAST_COMPLETED_AT,6)
+                    state='Preparing'
             failures=0
             HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
@@ -175,7 +185,7 @@ def host_loop():
                 error_type=type(error).__name__,retry_seconds=delay,companion_pid=os.getpid()))
             except OSError:pass
         HOST_BUSY.clear()
-        HOST_STOP.wait(delay)
+        HOST_WAKE.wait(delay)
 
 
 def prepare_stop():
@@ -184,6 +194,7 @@ def prepare_stop():
         if HOST_BUSY.is_set() or any(r.get('status')=='Working' or r.get('checkpoint_pending') for r in JOBS.values()):
             raise ValueError('Preparation is active or checkpointing. Wait for it to finish before stopping this companion.')
         HOST_STOP.set()
+        HOST_WAKE.set()
 
 
 def context(grant):
@@ -196,7 +207,7 @@ def context(grant):
     return transfer.get(grant,'/api/auto-editions/context?'+urlencode({'ticket':grant['ticket']}))
 
 
-def start(grant,resume_folder=None,initial_context=None):
+def start(grant,resume_folder=None,initial_context=None,package_transport=0):
     verified=initial_context or context(grant)
     with LOCK:
         for key,row in list(JOBS.items()):
@@ -214,7 +225,8 @@ def start(grant,resume_folder=None,initial_context=None):
             if folder.resolve()!=resume_folder.resolve() or json.loads((folder/'job-state.json').read_text())['context']!=verified:
                 raise ValueError('Retained preparation identity changed.')
         else:folder.mkdir(parents=True,exist_ok=False)
-        JOBS[key]=dict(grant=grant,context=verified,folder=folder,created=time.monotonic(),status='Working')
+        JOBS[key]=dict(grant=grant,context=verified,folder=folder,created=time.monotonic(),status='Working',
+                       package_transport=1 if type(package_transport) is int and package_transport==1 else 0)
         if resume_folder:JOBS[key]['recovery_failures']=json.loads((folder/'job-state.json').read_text()).get('recovery_failures',0)
         journal(JOBS[key])
         package=find_reusable_package(verified)
@@ -253,11 +265,9 @@ def package_finished(row,ctx):
             names=['manifest.json','master.png','original.png']+[p['name'] for p in manifest['patches'].values()]+[f'reference-{n}.png' for n in refs]
             archive=row['folder']/'prepared.zip'
             if archive.exists():return None
-            temporary=archive.with_suffix('.partial')
-            with zipfile.ZipFile(temporary,'w',compression=zipfile.ZIP_STORED) as output:
-                for name in names:output.write(folder/name,name)
-            if temporary.stat().st_size>MAX_PACKAGE_BYTES:raise ValueError('Package exceeds transfer limit.')
-            temporary.replace(archive);return archive
+            from auto_editions_transport import build_package
+            build_package(folder,names,archive,compact=row.get('package_transport')==1)
+            return archive
         except (OSError,ValueError,KeyError):continue
     return None
 
@@ -305,11 +315,13 @@ def upload_prepared(key,archive):
     row=JOBS[key];started=time.monotonic()
     row.setdefault('folder',archive.parent)
     row['phase']='Uploading';journal(row)
+    row.setdefault('timings',{}).update(package_bytes=archive.stat().st_size,upload_attempts=0)
     try:
         for attempt in range(3):
             try:
                 grant=row['grant']
-                with archive.open('rb') as content:
+                row['timings']['upload_attempts']+=1
+                with archive.open('rb',buffering=1024*1024) as content:
                     response=requests.post(grant['base_url']+'/api/auto-editions/package?'+urlencode({'ticket':grant['ticket']}),
                         data=content,headers={'X-Sports-Cave-Transfer-Secret':grant['secret'],'Content-Type':'application/zip'},
                         allow_redirects=False,timeout=600)
@@ -337,13 +349,19 @@ def upload_prepared(key,archive):
 
 
 def finish_upload(row,result,started):
+    global HOST_LAST_COMPLETED_AT
     row.update(status='Prepared',preparation_hash=result['preparation_hash'])
     row.setdefault('timings',{})['upload_validate_seconds']=round(time.monotonic()-started,3)
+    from auto_editions_performance import throughput,resources
+    throughput(row['timings'],'package_bytes','upload_validate_seconds','upload_end_to_end')
+    resources(row['timings'],row['folder'])
     row['server_timings']=result.get('timings',{})
     row['checkpoint_pending']=False; journal(row)
     if row['context'].get('automatic'):
         try:release_verified_temporary_files(row)
         except (OSError,ValueError):row['cleanup_pending']=True
+    HOST_LAST_COMPLETED_AT=time.monotonic()
+    HOST_WAKE.set()
 
 
 class OwnedProcessorLease:
@@ -378,6 +396,7 @@ def report_failure(row):
             headers={'X-Sports-Cave-Transfer-Secret':grant['secret']},allow_redirects=False,timeout=30)
         response.raise_for_status()
         row['checkpoint_pending']=False; row['checkpoint_reported']=True; journal(row)
+        HOST_WAKE.set()
     except Exception:
         row['recovery_failures']=row.get('recovery_failures',0)+1
         row['retry_at']=time.time()+min(30*2**min(row['recovery_failures']-1,4),300)
@@ -404,7 +423,10 @@ def inspect(key):
         if not 0<meta['size']<=1024*1024*1024:raise ValueError('Source exceeds the preparation transfer limit.')
         req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),
                     headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
-        complete=source.exists() and source.stat().st_size==meta['size'] and transfer.digest(source,True)==meta['content_hash']
+        from auto_editions_local_cache import reuse_source,cached_inspection,inspection_receipt
+        from auto_editions_performance import file_hashes
+        cached=reuse_source(HOST_FILE.parent,source,row['context']['source'],meta['size'])
+        complete=bool(cached)
         if source.exists() and not complete:source.rename(source.with_name('input.incomplete-'+secrets.token_hex(6)+'.psd'))
         count=meta['size'] if complete else 0
         if not complete:
@@ -413,21 +435,30 @@ def inspect(key):
                     count+=len(block)
                     if count>meta['size']:raise ValueError('Source exceeded its verified size.')
                     output.write(block)
-        if count!=meta['size'] or transfer.digest(source,True)!=meta['content_hash']:raise ValueError('Source checksum failed.')
+        hashes=cached or file_hashes(source)
+        if count!=meta['size'] or hashes['dropbox']!=meta['content_hash']:raise ValueError('Source checksum failed.')
         row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
+        row['timings'].update(source_bytes=meta['size'],source_transfer_bytes=0 if complete else count,source_reused=complete)
         phase='Photoshop inspection'
         row['phase']='Photoshop';journal(row)
         from auto_editions_colour_source import inspect_psd,ColourReview
         colour=inspect_psd(source)
-        lease=processor_lease()
         request=dict(stage_root=str(folder),output_root=str(folder),report_path=str(folder/'inspection.json'),
                      entries=[dict(work_path=str(source),product_gid=row['context']['source']['product_gid'],
                                    dropbox_file_id=meta['id'],dropbox_revision=meta['rev'])],
                      smart_object_depth=0,smart_object_limit=0)
-        script='var SC_PSD_INSPECT_REQUEST = '+json.dumps(request)+';\n'
-        script+=(transfer.ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
-        run(script)
-        result=json.loads((folder/'inspection.json').read_text(encoding='utf-8-sig'))['documents'][0]
+        inspector=(transfer.ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
+        inspector_hash=__import__('hashlib').sha256(inspector.replace('\r\n','\n').encode()).hexdigest()
+        inspection=cached_inspection(folder,row['context']['source'],hashes['sha256'],inspector_hash)
+        row['timings']['inspection_reused']=inspection is not None
+        if inspection is None:
+            lease=processor_lease()
+            script='var SC_PSD_INSPECT_REQUEST = '+json.dumps(request)+';\n'+inspector
+            run(script)
+            inspection=json.loads((folder/'inspection.json').read_text(encoding='utf-8-sig'))
+            if not inspection['documents'][0].get('error'):
+                atomic_json(folder/'inspection-cache.json',inspection_receipt(folder,row['context']['source'],hashes['sha256'],inspector_hash))
+        result=inspection['documents'][0]
         row['timings']['inspection_seconds']=round(time.monotonic()-row['created']-row['timings']['psd_retrieval_seconds'],3)
         if 'error' in result:raise ColourReview('Inspector failure: Photoshop could not inspect the linked source.')
         document=result['inspection']['document']
@@ -542,11 +573,15 @@ def prepare_worker(key,roles,scale=1):
         names += [p['name'] for p in manifest['patches'].values()]
         names += [f'reference-{n}.png' for n in sorted({1,ctx['number'],ctx['total']})]
         archive=row['folder']/'prepared.zip'
-        with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED) as package:
-            for name in names:package.write(output/name,name)
-        if archive.stat().st_size>MAX_PACKAGE_BYTES:raise ValueError('Prepared package exceeds the cloud transfer limit.')
+        from auto_editions_transport import build_package,digest
+        from auto_editions_performance import stage as measured
+        with measured(row['timings'],'package_build',path=output):
+            packet=build_package(output,names,archive,compact=row.get('package_transport')==1)
+        row['timings'].update(packet)
+        with measured(row['timings'],'package_checksum'):
+            packet_hash=digest(archive)
         atomic_json(row['folder']/'preparation-timing.json',dict(source=ctx['source'],
-            timings=row.get('timings',{}),prepared_at=time.time()))
+            timings=row.get('timings',{}),package_sha256=packet_hash,prepared_at=time.time()))
         # Photoshop is finished; independent uploads must not occupy its lease.
         lease.unlink(missing_ok=True);lease=None
         upload_prepared(key,archive)

@@ -12,6 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import auto_editions as ae
+from auto_editions_performance import file_hashes,stage as measured,resources
 
 
 def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1):
@@ -21,9 +22,12 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     source, output = Path(source).resolve(), Path(output).resolve()
     if output.exists():
         raise ValueError('Use a new package directory; existing work is never overwritten.')
-    if ae.file_hash(source, dropbox=True) != identity['content_hash']:
+    timings={}
+    with measured(timings,'source_checksums'):
+        hashes=file_hashes(source)
+    if hashes['dropbox'] != identity['content_hash']:
         raise ValueError('Source hash does not match the pinned Dropbox revision.')
-    before = ae.file_hash(source)
+    before = hashes['sha256']
     output.mkdir(parents=True)
     from auto_editions_colour_source import inspect_psd,stage_profile,ColourReview
     from auto_editions_colour_policy import resolve
@@ -35,8 +39,9 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if not icc:icc,policy=resolve(identity)
     stage = output / 'staging'; stage.mkdir()
     staged = stage / 'input.psd'
-    if policy:assignment=stage_profile(source,staged,icc)
-    else:shutil.copyfile(source, staged)
+    with measured(timings,'source_staging'):
+        if policy:assignment=stage_profile(source,staged,icc)
+        else:shutil.copyfile(source, staged)
     staged_hash=ae.file_hash(staged)
     if (not policy and staged_hash!=before) or (policy and assignment['source_sha256']!=before):
         raise ValueError('Source preservation check failed before Photoshop preparation.')
@@ -48,7 +53,8 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
     script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
     script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
-    result = run(script)
+    with measured(timings,'photoshop_prepare',path=output):
+        result = run(script)
     if ae.file_hash(source) != before or ae.file_hash(staged) != staged_hash:
         raise ValueError('Source preservation check failed.')
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
@@ -62,24 +68,31 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     from auto_editions_colour import restore_export_profiles
     names=['original.png','master.png']+[f'number-{n}.png' for n in range(1,total+1)]
     names += [f'reference-{n}.png' for n in sorted({1,reference_number,total})]
-    restored=restore_export_profiles(output,report,names,source_icc=icc)
+    with measured(timings,'icc_preservation'):
+        restored=restore_export_profiles(output,report,names,source_icc=icc)
     report['colour_evidence']=dict(source_state=colour['state'],icc_sha256=__import__('hashlib').sha256(icc).hexdigest(),
         policy=policy,assignment=assignment,restored_exports=restored,source_sha256=before,pixels_converted=False)
     # Measurements must never change the reusable artwork identity.
-    timings=report.pop('timings',{})
-    (output/'timings.json').write_text(json.dumps(timings))
+    timings.update(report.pop('timings',{}))
     def asset(name):
         return dict(name=name,sha256=ae.file_hash(output/name))
-    manifest={**report,'schema_version':1,'strategy':'photoshop_number_patches','source':identity,
-              'master':asset('master.png'), 'patches':{str(n):asset(f'number-{n}.png') for n in range(1,total+1)}}
+    with measured(timings,'asset_checksums'):
+        manifest={**report,'schema_version':1,'strategy':'photoshop_number_patches','source':identity,
+                  'master':asset('master.png'), 'patches':{str(n):asset(f'number-{n}.png') for n in range(1,total+1)}}
     ae.validate_manifest(manifest)
-    proofs=[ae.compare_reference(manifest,output,n,output/f'reference-{n}.png')
-            for n in sorted({1,reference_number,total})]
-    original_proof=ae.compare_original_outside_number(manifest,output,reference_number,output/'original.png')
+    with measured(timings,'pixel_verification',path=output):
+        proofs=[ae.compare_reference(manifest,output,n,output/f'reference-{n}.png')
+                for n in sorted({1,reference_number,total})]
+        original_proof=ae.compare_original_outside_number(manifest,output,reference_number,output/'original.png')
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     (output/'proofs.json').write_text(json.dumps(proofs,indent=2)+'\n')
     (output/'source-proof.json').write_text(json.dumps(original_proof,indent=2)+'\n')
-    ae.render_jpg(manifest,output,reference_number,output/f'edition-{reference_number:03}-TEST-NOT-PRINT-READY.jpg')
+    with measured(timings,'jpg_preview'):
+        ae.render_jpg(manifest,output,reference_number,output/f'edition-{reference_number:03}-TEST-NOT-PRINT-READY.jpg')
+    timings['source_bytes']=source.stat().st_size
+    timings['staged_psd_bytes']=staged.stat().st_size
+    timings['generated_bytes']=sum((output/name).stat().st_size for name in names)
+    (output/'timings.json').write_text(json.dumps(timings))
     return dict(preparation_hash=ae.fingerprint(manifest),proofs=proofs,source_unchanged=True,
                 print_ready=False,master_bytes=(output/'master.png').stat().st_size,
                 patch_bytes=sum((output/p['name']).stat().st_size for p in manifest['patches'].values()))
