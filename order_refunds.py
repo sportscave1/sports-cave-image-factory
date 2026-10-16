@@ -119,7 +119,7 @@ def reconcile(order_ids=None, *, backend=None, shopify=None, limit=50):
                         financial_status=%s,
                         raw_json=COALESCE(raw_json, '{}'::jsonb) || %s::jsonb,
                         raw=COALESCE(raw, '{}'::jsonb) || %s::jsonb,
-                        updated_at=CASE WHEN (raw_json->'_orders_refund' - 'remote_updated_at') IS DISTINCT FROM (%s::jsonb - 'remote_updated_at')
+                        updated_at=CASE WHEN ((raw_json->'_orders_refund') - 'remote_updated_at') IS DISTINCT FROM (%s::jsonb - 'remote_updated_at')
                             THEN now() ELSE updated_at END
                         WHERE shopify_order_id=%s
                           AND COALESCE(raw_json->'_orders_refund'->>'remote_updated_at', '') <= %s

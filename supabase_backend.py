@@ -22573,16 +22573,21 @@ def list_hybrid_order_rows(limit=50, search=""):
     def load_base_rows(cur):
         cur.execute(
             """
+            WITH selected_orders AS MATERIALIZED (
+                SELECT o.*, to_jsonb(o) AS optional_columns
+                FROM shopify_orders o
+                WHERE o.shopify_order_id=ANY(%s)
+            )
             SELECT
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                 o.customer_name, o.customer_email, o.financial_status,
                 COALESCE(
-                    NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
-                    NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
-                    NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
-                    NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
-                    NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
-                    NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
+                    NULLIF(o.optional_columns->>'sports_cave_fulfilment_status', ''),
+                    NULLIF(o.optional_columns->>'sports_cave_fulfillment_status', ''),
+                    NULLIF(o.optional_columns->>'internal_fulfilment_status', ''),
+                    NULLIF(o.optional_columns->>'internal_fulfillment_status', ''),
+                    NULLIF(o.optional_columns->>'marketplace_fulfilment_status', ''),
+                    NULLIF(o.optional_columns->>'marketplace_fulfillment_status', ''),
                     NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
                     NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
                     NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
@@ -22594,12 +22599,12 @@ def list_hybrid_order_rows(limit=50, search=""):
                     NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
                     ''
                 ) AS fulfillment_status,
-                COALESCE(NULLIF(to_jsonb(o)->>'source_name', ''),
+                COALESCE(NULLIF(o.optional_columns->>'source_name', ''),
                          NULLIF(o.raw_json->>'source_display', ''),
                          NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
-                COALESCE(NULLIF(to_jsonb(o)->>'ingestion_status', ''), 'schema_optional') AS ingestion_status,
-                COALESCE(to_jsonb(o)->>'ingestion_result', '') AS ingestion_result,
-                COALESCE(to_jsonb(o)->>'ingestion_reason', '') AS ingestion_reason,
+                COALESCE(NULLIF(o.optional_columns->>'ingestion_status', ''), 'schema_optional') AS ingestion_status,
+                COALESCE(o.optional_columns->>'ingestion_result', '') AS ingestion_result,
+                COALESCE(o.optional_columns->>'ingestion_reason', '') AS ingestion_reason,
                 o.total_price, o.currency, o.created_at, o.remote_updated_at,
                 o.processed_at, o.cancelled_at, o.synced_at,
                 o.raw_json AS order_raw_json,
@@ -22622,12 +22627,11 @@ def list_hybrid_order_rows(limit=50, search=""):
                 ''::text AS prodigi_status,
                 ''::text AS prodigi_row_id,
                 COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
-            FROM shopify_orders o
+            FROM selected_orders o
             LEFT JOIN shopify_order_lines li
               ON li.shopify_order_id=o.shopify_order_id
             LEFT JOIN shopify_products sp
               ON sp.handle=li.shopify_handle
-            WHERE o.shopify_order_id=ANY(%s)
             ORDER BY o.created_at DESC,
                      li.id ASC NULLS LAST
             """,
