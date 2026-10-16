@@ -176,7 +176,9 @@ def status_html(category,publication):
     if category=='Archived':label,colour='Archived',''
     elif state=='PUBLISHING':label,colour='Publishing…','publishing'
     elif state=='FAILED':label,colour='Publish failed','failed'
-    else:label,colour=('Live','active') if category=='Active' or state=='LIVE' else (category,'')
+    elif category=='Active':label,colour='Live','active'
+    elif state=='LIVE' and category=='Draft':label,colour='Published · Disabled',''
+    else:label,colour=category,''
     title='Publishing saved revision '+str(publication.get('revision')) if state=='PUBLISHING' else publication.get('error','')
     requested=date(publication.get('requested_at'))
     if state=='PUBLISHING' and requested and (now()-requested).total_seconds()>600:
