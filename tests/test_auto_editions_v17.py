@@ -166,7 +166,7 @@ def test_failed_upload_recovery_does_not_monopolise_catalogue(tmp_path):
     sys.path.insert(0,str(Path(__file__).parents[1]/'scripts/studio'));import auto_editions_local as local
     package=tmp_path/'prepared.zip';package.write_bytes(b'preserved')
     row=dict(context={'automatic':True},folder=tmp_path,grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},status='Working',recovery_failures=2)
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.ConnectionError()),patch.object(local,'reconnect'),patch.object(local,'report_failure') as report:
+    with patch.object(local,'cancellation_check',return_value=False),patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.ConnectionError()),patch.object(local,'reconnect'),patch.object(local,'report_failure') as report:
         local.upload_prepared('job',package)
     assert row['status']=='Blocked' and package.read_bytes()==b'preserved';report.assert_called_once()
 

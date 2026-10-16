@@ -162,6 +162,14 @@ async def package(request):
                     imported_state,'Existing exact preparation approval retained.' if imported_state=='Cloud Ready' else
                     'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
             setup['imported']=digest
+            # Optional derived cache only, after durable import/checkpoint. The
+            # existing bounded preview pool retains private local file links.
+            try:
+                from auto_editions_review_thumbnails import ReviewBuildStore,schedule_prepared
+                schedule_prepared(dict(hash=digest,manifest=manifest,proofs=proofs,receipts=receipts),
+                                  assets_root,ReviewBuildStore(registry.connect))
+            except Exception:
+                __import__('logging').getLogger(__name__).warning('review_thumbnail_pending preparation=%s',digest)
             timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
             # Disabled by default. Reuse the exact imported files and fresh cloud
             # receipts; never regenerate or upload during visual reconciliation.

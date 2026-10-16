@@ -82,6 +82,18 @@ def host_health(request,value):
     if not token:raise PermissionError('Scoped preparation host required for telemetry.')
     from worker_health import record_heartbeat
     record_heartbeat(queue().connect,'Companion',hashlib.sha256(token.encode()).hexdigest()[:24],value)
+async def cancellation(request):
+    try:
+        import files_upload_api as files
+        from auto_editions_cancellation import Cancellation
+        user=await preparation_actor(request)
+        body=await files._json_body(request)
+        if set(body)!={'product_gid','lease_token','stopped'} or type(body['stopped']) is not bool:
+            raise ValueError('Exact preparation lease and safe-stop acknowledgement required.')
+        cancelled=await run_in_threadpool(Cancellation(queue().connect).poll,
+            body['product_gid'],body['lease_token'],str(user['id']),body['stopped'])
+        return JSONResponse(dict(cancelled=cancelled),headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
 
 
 async def register_host(request):
@@ -244,6 +256,9 @@ async def summary(request):
         public=[{**{k:r[k] for k in ('product_gid','product_title','status','reason','preparation_hash','attempts')},
                  'priority':r['priority'],
                  'status':'Deferred' if r['status']=='Awaiting preparation' and r['priority']==0 else r['status']} for r in rows]
+        for item,row in zip(public,rows):
+            if (row.get('reset_cancellation') or {}).get('stage') in ('Cancelling','Confirmed'):
+                item.update(status='Cancelling'+chr(8230),reason='Waiting for Companion to confirm a safe stop; Reset resumes automatically.')
         from auto_editions_status import reason as public_reason
         for item in public:item['reason']=public_reason(item.get('reason'))
         from auto_editions_discovery import enabled,waiting_rows
@@ -418,7 +433,7 @@ async def discrepancies(request):
     except Exception as error:return api.failure(error)
 
 
-ROUTES=(('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
+ROUTES=(('/api/auto-editions/onboarding/cancellation',cancellation,('POST',)),('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
         ('/api/auto-editions/onboarding',summary,('GET',)),
         ('/api/auto-editions/onboarding/discrepancies',discrepancies,('GET',)),
         ('/api/auto-editions/onboarding/prepare-now',prepare_now,('POST',)),

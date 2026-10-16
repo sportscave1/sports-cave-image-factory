@@ -110,8 +110,8 @@ def test_cached_preview_endpoint_auth_limits_and_actor_snapshot_scope(ops):
     async def admin(*args,**kwargs):return ADMIN
     async def check():
         bulk.snapshots.clear();body=dict(items=[item(record)])
-        with patch.object(bulk,'actor',side_effect=admin),patch('auto_editions_bulk_runtime.connection',jobs.connect):
-            assert (await bulk.previews_api(request('POST',body=body))).status_code==409
+        with patch.object(bulk,'actor',side_effect=admin),patch('auto_editions_bulk_runtime.connection',jobs.connect),patch('supabase_backend.read_connection',jobs.connect):
+            assert (await bulk.previews_api(request('POST',body=body))).status_code==200
             bulk.listing(jobs.connect,[PID],ADMIN)
             assert (await bulk.previews_api(request('POST',body=body))).status_code==200
             assert (await bulk.previews_api(request('POST',body=dict(items=[item(record)]*9)))).status_code==409
@@ -138,7 +138,7 @@ def test_measured_actual_loopback_http_preview_batch_vs_individual_requests(ops)
     server=uvicorn.Server(uvicorn.Config(app,log_level='error',lifespan='off'))
     thread=threading.Thread(target=lambda:server.run(sockets=[sock]),daemon=True)
     from urllib.parse import urlencode
-    with patch.object(bulk,'actor',side_effect=auth),patch('auto_editions_bulk_runtime.connection',jobs.connect),patch.object(bulk.runtime,'storage',side_effect=AssertionError('No provider should be used')):
+    with patch.object(bulk,'current_previews',side_effect=lambda connect,entries:{(p,h) for p,h,_ in entries}),patch.object(bulk,'actor',side_effect=auth),patch('auto_editions_bulk_runtime.connection',jobs.connect),patch.object(bulk.runtime,'storage',side_effect=AssertionError('No provider should be used')):
         thread.start()
         while not server.started:time.sleep(.01)
         try:

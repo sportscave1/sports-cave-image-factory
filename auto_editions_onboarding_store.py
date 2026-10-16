@@ -53,7 +53,8 @@ class Queue:
             ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
             preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=excluded.priority,
             lease_token=NULL,lease_until=NULL,updated_at=now()
-            WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 1 if v17.enabled() else 0))
+            WHERE auto_edition_onboarding.file_id<>excluded.file_id
+            AND COALESCE(to_jsonb(auto_edition_onboarding)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed') RETURNING product_gid''',(pid,file_id,2 if newly_linked else 1 if v17.enabled() else 0))
         if cur.fetchone():
             cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
             pending=(cur.fetchone() or {}).get('replacement') or {}
@@ -113,6 +114,7 @@ class Queue:
                 WHERE status='Preparing' AND lease_until<now() AND attempts>=3""")
             cur.execute(f"""SELECT * FROM auto_edition_onboarding q WHERE
                 COALESCE(to_jsonb(q)->'replacement'->>'manual_required','false')<>'true' AND
+                COALESCE(to_jsonb(q)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed') AND
                 (((to_jsonb(q)->'replacement'->>'stage'='Queued' OR
                   (to_jsonb(q)->'replacement'->>'stage'='Preparing' AND lease_until<now()))
                    AND COALESCE((to_jsonb(q)->'replacement'->>'attempts')::int,0)<3)
@@ -259,6 +261,7 @@ class Queue:
                 attempts=0,priority=10,lease_token=NULL,lease_until=NULL,source=NULL,preparation_hash=NULL,updated_at=now()
                 WHERE product_gid=%s AND status IN ('Blocked','Needs PSD Repair') AND preparation_hash IS NULL
                 AND COALESCE(to_jsonb(auto_edition_onboarding)->'replacement'->>'manual_required','false')<>'true'
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed')
                 RETURNING product_gid""",(pid,))
             if not cur.fetchone():raise ValueError('Only a failed preparation can be retried.')
             self.audit(cur,pid,actor,'retry')

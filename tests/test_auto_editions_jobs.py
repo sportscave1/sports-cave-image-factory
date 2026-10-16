@@ -81,6 +81,7 @@ def database():
                     else:Cursor().execute('ROLLBACK' if typ else 'COMMIT')
                 finally:self.release()
             def cursor(self):return Cursor()
+        Connection.test_url='http://127.0.0.1:'+port
         yield Jobs(Connection),Cursor()
     finally:
         if transport:transport.close()

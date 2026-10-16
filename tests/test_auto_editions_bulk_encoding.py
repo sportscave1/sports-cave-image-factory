@@ -42,7 +42,7 @@ def test_repository_template_preserves_utf8_and_repaired_punctuation():
     assert '\ufffd' not in text
 
 
-@pytest.mark.parametrize('content', [TEMPLATE.read_bytes(), '<p>Caf\u00e9 \u2026 \u65e5\u672c\u8a9e</p>'.encode('utf-8')])
+@pytest.mark.parametrize('content', [TEMPLATE.read_bytes(), '<p>Caf\u00e9 \u2026 \u65e5\u672c\u8a9e</p>'.encode('utf-8')],ids=['template','unicode'])
 def test_page_serves_valid_utf8_without_changing_content(tmp_path, content):
     template_root(tmp_path, content)
     with patch.object(bulk, 'Path', return_value=tmp_path/'auto_editions_bulk.py'), patch.object(bulk, 'actor', new=AsyncMock(return_value=ADMIN)), patch.object(bulk, 'approve_one') as approve:

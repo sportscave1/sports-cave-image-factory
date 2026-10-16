@@ -83,7 +83,9 @@ def test_heartbeat_renews_only_owned_unclaimed_lease_and_protects_allocations(st
     sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()-interval '1 second'")
     with pytest.raises(PermissionError):d.queue.heartbeat(PID,token,'other','Uploading')
     d.queue.heartbeat(PID,token,'owner','Uploading')
-    row=rows(sql,'auto_edition_onboarding')[0];assert row['reason']=='Uploading' and row['lease_until']>datetime.now(timezone.utc)
+    row=rows(sql,'auto_edition_onboarding')[0];assert row['reason']=='Uploading'
+    sql.execute('SELECT lease_until>now() AS renewed FROM auto_edition_onboarding WHERE product_gid=%s',(PID,))
+    assert sql.fetchone()['renewed'] is True
     assert rows(sql,'edition_allocations')==before
     sql.execute("UPDATE auto_edition_onboarding SET lease_token=NULL")
     with pytest.raises(ValueError):d.queue.heartbeat(PID,token,'owner','Preparing')
@@ -209,7 +211,8 @@ def test_backoff_retains_recovery_without_repeated_network_calls(tmp_path,monkey
     row=dict(folder=folder,context={'automatic':True,'product_gid':PID,'lease_token':'owned','source':{}},status='Recovering',retry_at=local.time.time()+300)
     local.journal(row);monkeypatch.setattr(local,'HOST_FILE',tmp_path/'host.dpapi')
     with patch.object(local,'host_request') as request:
-        assert local.recover_retained({});request.assert_not_called()
+        assert local.recover_retained({});request.assert_called_once()
+    assert request.call_args.args[1].endswith('/cancellation')
 
 
 def test_finished_pixels_can_resume_packaging_without_reopening_photoshop(tmp_path):

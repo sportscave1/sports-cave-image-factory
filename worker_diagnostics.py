@@ -2,6 +2,12 @@
 import re
 
 RULES=(
+ ('FONT_MISSING','Photoshop',('missing font','font is not installed','font unavailable','font is unavailable','fonts are unavailable','font is missing'),'A required PSD font is unavailable.','Install or repair the required font on the preparation computer, then confirm the correction and retry.'),
+ ('EDITION_GEOMETRY','Photoshop',('psd edition total differs','not contained in its plaque','number does not lie inside'),'PSD edition text or plaque geometry does not match the required design.','Repair the mapped PSD to match the authoritative limit and plaque. Do not change issued edition numbers.'),
+ ('PSD_MISSING','Dropbox',('path/not_found','file not found','mapped psd is missing'),'The mapped source PSD could not be found.','Restore or verify the existing mapped source. Do not silently select another PSD.'),
+ ('DOWNLOAD_INTERRUPTED','Dropbox',('download failed','download interrupted'),'The artwork download was interrupted.','Check connectivity and retry; the worker will verify the source and downloaded bytes again.'),
+ ('VALIDATION_FAILED','Companion',('checksum mismatch','geometry changed','file integrity','prepared file size changed'),'Prepared-file validation failed.','Inspect the recorded checksum, geometry and source evidence. Retry must pass the same validation.'),
+ ('PHOTOSHOP_RPC','Photoshop',('0x800706be','rpc server is unavailable'),'Photoshop communication failed.','Check the companion and Photoshop diagnostics. Let owned recovery finish; do not remove an uncertain processor lock.'),
  ('VISUAL_AUTO_APPROVED','Photoshop',('auto approved:',),'Auto Approved under an exact owner-reviewed artwork policy.','Supplier certification remains separate; no human review was fabricated.'),
  ('VISUAL_POLICY_PENDING','Photoshop',('visual policy awaiting approval',),'Trusted visual reference policy awaits owner approval.','Review the exact original, numbered references and Shopify relationship; colour approval alone is insufficient.'),
  ('VISUAL_REFERENCE_CHANGED','Photoshop',('approved artwork reference bytes changed','differs from the approved original','storefront artwork comparison','live shopify product revision'),'Artwork or storefront reference evidence changed or is ambiguous.','Review the pinned reference comparison before approving this exact preparation.'),
@@ -54,3 +60,23 @@ def accepted(value):
         if not re.fullmatch(r'[a-zA-Z0-9._-]{1,64}',value['revision']):raise ValueError('Invalid diagnostic revision.')
         result['revision']=value['revision']
     return result
+
+
+def operator_details(reason,stage='Unknown',code=None):
+    """Operator advice is evidence based; it never authorises a retry itself."""
+    value=explain(reason,stage)
+    if code:
+        try:value=accepted(dict(code=code,stage=stage))
+        except ValueError:pass
+    repair=value['code'] in {'FONT_MISSING','EDITION_GEOMETRY','NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','PROFILE_MISSING','COLOUR_POLICY_PENDING','COLOUR_INCOMPATIBLE','ICC_MISMATCH','SOURCE_CHANGED','PSD_MISSING','VALIDATION_FAILED'}
+    transient=value['code'] in {'DOWNLOAD_INTERRUPTED','UPLOAD_INTERRUPTED','CONNECTION_INTERRUPTED'}
+    return {**value,'stage':stage if stage in STAGES and stage!='Unknown' else 'Stage unavailable',
+        'manual_repair':repair,'retry_may_help':transient,
+        'retry_guidance':'Correct the PSD, mapping or validation issue before retrying.' if repair else 'Retry may help after the connection recovers.' if transient else 'Inspect the recorded evidence before retrying; the cause is not established.'}
+
+
+def technical_text(value):
+    """Only existing textual errors are displayed; never expose grant objects."""
+    text=str(value or '')[:4000]
+    text=re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._~-]+',r'\1[redacted]',text)
+    return re.sub(r'(?i)((?:token|secret|password|authorization|lease_token)\s*[=:]\s*)[^\s,;]+',r'\1[redacted]',text)

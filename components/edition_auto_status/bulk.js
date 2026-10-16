@@ -14,7 +14,12 @@
  function paint(){frame=0;const scope=doc.querySelector('.st-key-edition-workspace [data-testid="stDataFrame"]');let found=false;for(const canvas of scope?.querySelectorAll('canvas')||[]){const current=adapter(canvas);if(!current)continue;const column=current.props.columns.findIndex(c=>c.title==='Auto Editions');if(column<0||!current.props.rows)continue;const b=current.api.getBounds(column,0),rect=canvas.getBoundingClientRect();if(!b||b.x<rect.x||b.x+b.width>rect.right+1)continue;if(!button){button=doc.createElement('button');button.className='sc-edition-menu-button';button.textContent='⋮';button.setAttribute('aria-label','Auto Editions menu: Bulk Review and Sort by');button.onclick=showMenu;doc.body.append(button);}button.style.left=(b.x+b.width-24)+'px';button.style.top=(rect.top+3)+'px';found=true;break;}if(button)button.hidden=!found;}
  function schedule(){if(!frame)frame=host.requestAnimationFrame(paint);}
  addEventListener('message',event=>{if(event.source!==host||event.data?.type!=='streamlit:render')return;ids=event.data.args?.product_gids||[];schedule();},{signal:controller.signal});
- host.addEventListener('message',event=>{if(event.origin===host.location.origin&&event.source===dialog?.querySelector('iframe')?.contentWindow&&['sports-cave-bulk-accepted','sports-cave-bulk-dismiss'].includes(event.data?.type)){closeDialog();}}, {signal:controller.signal});
+ host.addEventListener('message',event=>{
+  if(event.origin!==host.location.origin||event.source!==dialog?.querySelector('iframe')?.contentWindow)return;
+  const closing=event.data?.type==='sports-cave-bulk-dismiss'||event.data?.type==='sports-cave-bulk-accepted'&&!event.data.partial;
+  if(['sports-cave-bulk-accepted','sports-cave-bulk-progress'].includes(event.data?.type))host.SportsCaveEditionStatus?.acceptBatch?.(event.data.rows||[],!closing);
+  if(closing)closeDialog();
+ }, {signal:controller.signal});
  host.addEventListener('message',event=>{if(event.origin!==host.location.origin||event.data?.type!=='sports-cave-bulk-ready'||event.source!==dialog?.querySelector('iframe')?.contentWindow)return;sendContext(dialog.querySelector('iframe'));},{signal:controller.signal});
  doc.addEventListener('pointerdown',e=>{if(menu&&!menu.contains(e.target)&&e.target!==button)closeMenu();},{signal:controller.signal});
  doc.addEventListener('keydown',e=>{if(e.key==='Escape')closeMenu();},{signal:controller.signal});

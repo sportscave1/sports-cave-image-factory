@@ -73,6 +73,8 @@ REVIEWED_MIGRATION_SHA256 = {
     '20261008041452_edition_version_transitions.sql': 'b35a3418b5f469e9a9ff00ae510c60c96fffcb854b292dfc4fd3cc8dbf502930',
     '20261008045733_edition_version_guard_hardening.sql': '37d46b43946f677711549690f4eae652e2aa51480573a5300966936b7fdd7aa8',
     '20261008065000_explicit_edition_cursor_override.sql': 'af6e4e02daddc5d10d12a221521e74ebea26d37fa9b98f4a5c8831098ba92fc1',
+    "20261016210905_auto_editions_reset_cancellation.sql": "c492c69046529a8d0f4f05d7dce258c81068d22e0766cf33cecf49c3d4e2059e",
+    "20261016211735_review_thumbnail_build_leases.sql": "f15e5bae49c674710b0ed58c68330e90f1e9c004e1aa2d513f488ae5ed6f30f6",
     '20261008090000_edition_admin_cursor_repair.sql': 'a156582896a7e4e0657a8f472bf4c231847036f062087afcb40da20f327a4c1a',
 
     '20261006084655_wall_preview_engagement.sql': 'dd1975f28b31ef3c201221713c875b471fb1e264f46ee04cd12e2112d162761b',
@@ -121,6 +123,8 @@ REVIEWED_MIGRATION_SHA256 = {
 # Explicit deployment manifest: do not replay historic allocator/repair migrations.
 # Every entry additionally requires its reviewed SHA, even for additive SQL.
 DEPLOYMENT_MIGRATIONS = (
+    "20261016211735_review_thumbnail_build_leases.sql",
+    "20261016210905_auto_editions_reset_cancellation.sql",
     "20260912224424_manual_certificate_controls.sql",
     "20260912231446_manual_certificate_identity.sql",
     "20260927221221_edition_design_tracking.sql",

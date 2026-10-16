@@ -8,6 +8,13 @@ import auto_editions_local as local
 import device_trust
 
 
+@pytest.fixture(autouse=True)
+def isolated_host_file(monkeypatch,tmp_path):
+    # Never inspect or use this computer's registered host capability in tests.
+    monkeypatch.setattr(local,'HOST_FILE',tmp_path/'isolated-host.dpapi')
+    monkeypatch.setattr(local,'cancellation_check',lambda *a,**kw:False)
+
+
 def test_completed_bulk_jobs_do_not_exhaust_interactive_slots(tmp_path):
     completed={str(i):dict(created=local.time.monotonic(),status='Blocked' if i%2 else 'Prepared',
                            context={'automatic':True}) for i in range(8)}

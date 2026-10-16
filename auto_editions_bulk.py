@@ -64,7 +64,9 @@ def evidence(record):
 
 
 def inspect_asset(root, asset, expected, fetch, digest, receipts, expected_icc=None):
+    from auto_editions_cloud import DropboxAssets
     path=root/asset['name'];fetch(digest,asset,path);ae.asset_path(root,asset)
+    if not 0<path.stat().st_size<=DropboxAssets.MAX_ASSET_BYTES:raise ValueError('Prepared review asset exceeds the transfer limit.')
     receipt=next(r for r in receipts['assets'] if r['name']==asset['name'])
     if path.stat().st_size!=receipt['bytes']:raise ValueError('Prepared file size changed.')
     with Image.open(path) as image:
@@ -78,10 +80,13 @@ def inspect_asset(root, asset, expected, fetch, digest, receipts, expected_icc=N
     return profile
 
 
+REVIEW_DECODERS=threading.BoundedSemaphore(2)
+
+
 class ReviewCache:
     """Bounded thumbnail bytes only; bounded cold decoders; durable derived JPEGs, no PSD/JPG renders."""
     def __init__(self,max_bytes=32*1024*1024):
-        self.entries=OrderedDict();self.lock=threading.Lock();self.build_locks=[threading.Lock() for _ in range(64)];self.decoders=threading.BoundedSemaphore(2);self.max_bytes=max_bytes
+        self.entries=OrderedDict();self.lock=threading.Lock();self.build_locks=[threading.Lock() for _ in range(64)];self.decoders=REVIEW_DECODERS;self.max_bytes=max_bytes
 
     def remember(self,key,data):
         with self.lock:
@@ -103,55 +108,92 @@ class ReviewCache:
             return True
         except (OSError,ValueError):return False
 
-    def get(self,record,fetch,width=300,store=None,cache_checked=False):
+    @contextmanager
+    def decoder(self,background):
+        acquired=self.decoders.acquire(blocking=not background)
+        try:yield acquired
+        finally:
+            if acquired:self.decoders.release()
+
+    def get(self,record,fetch,width=300,store=None,cache_checked=False,*,local_root=None,metrics=None,queued_at=None,background=False):
         if width not in (300,1200):raise ValueError('Fixed review sizes required.')
+        metrics={} if metrics is None else metrics;started=time.perf_counter()
+        metrics.update(queue_wait_ms=round((started-queued_at)*1000,3) if queued_at else 0,asset_fetch_ms=0,decode_compose_ms=0,persistence_ms=0)
         m=evidence(record);digest=record['hash'];key=self.key(record,width)
         with self.lock:
             if key in self.entries:
-                self.entries.move_to_end(key);return self.entries[key]
+                self.entries.move_to_end(key);metrics['cache']='memory';return self.entries[key]
         try:persisted=store.get(ae.fingerprint(key)) if store and not cache_checked else None
         except Exception as error:
             LOG.warning('REVIEW_PREVIEW cache_read_failed type=%s',type(error).__name__)
             persisted=None
         if self.valid(persisted,width):
             self.remember(key,persisted)
+            metrics['cache']='persistent'
             return persisted
         # Serialize duplicate cold builds only, after both warm cache paths.
+        waited=time.perf_counter()
         with self.build_locks[int(key[0][:8],16)%len(self.build_locks)]:
+            metrics['queue_wait_ms']+=round((time.perf_counter()-waited)*1000,3)
             with self.lock:
                 if key in self.entries:
-                    self.entries.move_to_end(key);return self.entries[key]
-            with self.decoders, tempfile.TemporaryDirectory(prefix='sc-review-small-') as folder:
-                root=Path(folder);r=m['number_region'];profile=None
-                for asset,size in ((m['master'],m['dimensions']),(m['patches']['1'],[r[2]-r[0],r[3]-r[1]])):
-                    p=inspect_asset(root,asset,size,fetch,digest,record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
-                    if profile is not None and p!=profile:raise ValueError('Number ICC profile differs.')
-                    profile=p
-                # Resize each existing verified asset before composition. Never build a full canvas/JPG.
-                scale=min(1,1200/m['dimensions'][0],1200/m['dimensions'][1])
-                size=tuple(max(1,round(n*scale)) for n in m['dimensions'])
-                with Image.open(root/m['master']['name']) as master:
-                    master.thumbnail(size,Image.Resampling.LANCZOS);small=master.copy()
-                try:
-                    box=[round(n*scale) for n in r]
-                    with Image.open(root/m['patches']['1']['name']) as patch:
-                        with patch.resize((max(1,box[2]-box[0]),max(1,box[3]-box[1])),Image.Resampling.LANCZOS) as number:
-                            small.paste(number,(box[0],box[1]))
-                    # Convert only the small review to browser sRGB; retain the source profile untouched.
-                    with ImageCms.profileToProfile(small,ImageCms.ImageCmsProfile(io.BytesIO(profile)),ImageCms.createProfile('sRGB'),outputMode='RGB') as display:
-                        outputs={}
-                        for target in (1200,300):
-                            with display.copy() as scaled:
-                                scaled.thumbnail((target,1200),Image.Resampling.LANCZOS)
-                                output=io.BytesIO();scaled.save(output,'JPEG',quality=78);outputs[target]=output.getvalue()
-                    data=outputs[width]
-                finally:small.close()
-            for target,value in outputs.items():self.remember((key[0],target),value)
-            if store:
-                try:
-                    for target,value in outputs.items():store.put(ae.fingerprint((key[0],target)),value)
-                except Exception as error:LOG.warning('REVIEW_PREVIEW cache_write_failed type=%s',type(error).__name__)
-            return data
+                    self.entries.move_to_end(key);metrics['cache']='memory';return self.entries[key]
+            from auto_editions_review_thumbnails import build_lease
+            with build_lease(store,key[0]) as token:
+                if token is False:return None
+                if token is not None:
+                    # A different process can publish between the initial read and claim.
+                    persisted=store.get(ae.fingerprint(key))
+                    if self.valid(persisted,width):
+                        self.remember(key,persisted);metrics['cache']='persistent';return persisted
+                waited=time.perf_counter()
+                with self.decoder(background) as available:
+                    if not available:return None
+                    with (nullcontext(str(local_root)) if local_root is not None else tempfile.TemporaryDirectory(prefix='sc-review-small-')) as folder:
+                        metrics['queue_wait_ms']+=round((time.perf_counter()-waited)*1000,3)
+                        phase=time.perf_counter()
+                        root=Path(folder);r=m['number_region'];profile=None
+                        for asset,size in ((m['master'],m['dimensions']),(m['patches']['1'],[r[2]-r[0],r[3]-r[1]])):
+                            p=inspect_asset(root,asset,size,(lambda *a:None) if local_root is not None else fetch,digest,record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
+                            if profile is not None and p!=profile:raise ValueError('Number ICC profile differs.')
+                            profile=p
+                        metrics['asset_fetch_ms']=round((time.perf_counter()-phase)*1000,3)
+                        phase=time.perf_counter()
+                        source_metrics=getattr(fetch,'review_timings',getattr(getattr(fetch,'__self__',None),'timings',{}))
+                        if isinstance(source_metrics,dict):
+                            metrics.update({name:source_metrics.get('review_'+name,0) for name in ('provider_transfer_ms','provider_bytes','asset_cache_hits','asset_cache_misses','cache_copy_ms')})
+                        # Resize each existing verified asset before composition. Never build a full canvas/JPG.
+                        scale=min(1,1200/m['dimensions'][0],1200/m['dimensions'][1])
+                        size=tuple(max(1,round(n*scale)) for n in m['dimensions'])
+                        with Image.open(root/m['master']['name']) as master:
+                            master.thumbnail(size,Image.Resampling.LANCZOS);small=master.copy()
+                        try:
+                            box=[round(n*scale) for n in r]
+                            with Image.open(root/m['patches']['1']['name']) as patch:
+                                with patch.resize((max(1,box[2]-box[0]),max(1,box[3]-box[1])),Image.Resampling.LANCZOS) as number:
+                                    small.paste(number,(box[0],box[1]))
+                            # Convert only the small review to browser sRGB; retain the source profile untouched.
+                            with ImageCms.profileToProfile(small,ImageCms.ImageCmsProfile(io.BytesIO(profile)),ImageCms.createProfile('sRGB'),outputMode='RGB') as display:
+                                outputs={}
+                                for target in (1200,300):
+                                    with display.copy() as scaled:
+                                        scaled.thumbnail((target,1200),Image.Resampling.LANCZOS)
+                                        output=io.BytesIO();scaled.save(output,'JPEG',quality=78);outputs[target]=output.getvalue()
+                            data=outputs[width]
+                        finally:small.close()
+                metrics['decode_compose_ms']=round((time.perf_counter()-phase)*1000,3)
+                phase=time.perf_counter()
+                if store:
+                    try:
+                        if token is not None:
+                            if not store.publish(key[0],token,{ae.fingerprint((key[0],target)):value for target,value in outputs.items()}):return None
+                        else:
+                            for target,value in outputs.items():store.put(ae.fingerprint((key[0],target)),value)
+                    except Exception as error:LOG.warning('REVIEW_PREVIEW cache_write_failed type=%s',type(error).__name__)
+                metrics.update(persistence_ms=round((time.perf_counter()-phase)*1000,3),cache='local-assets' if local_root is not None else 'built',jpeg_bytes=len(data),total_ms=round((time.perf_counter()-started)*1000,3))
+                for target,value in outputs.items():self.remember((key[0],target),value)
+                LOG.info('REVIEW_PREVIEW build_metrics=%s',json.dumps(metrics,sort_keys=True))
+                return data
 
 
 thumbnails=ReviewCache()
@@ -187,7 +229,7 @@ class PreviewBuilds:
             thumbnails.remember(key,data);return data
         with self.lock:
             if key[0] in self.pending or len(self.pending)>=8:return None
-            future=self.pool.submit(thumbnails.get,record,fetch,width,store,True)
+            future=self.pool.submit(thumbnails.get,record,fetch,width,store,True,queued_at=time.perf_counter())
             future.add_done_callback(lambda finished:setattr(finished,'review_finished_at',time.monotonic()))
             self.pending[key[0]]=(future,time.monotonic())
         return None
@@ -271,6 +313,34 @@ def records(connect,ids):
 
 def eligible_state(row):
     return row['status'] in ('Review','Needs Review') and row.get('approval_status') not in ('Failed','Needs Repair')
+
+
+def admission(conn,selected):
+    """Batch current metadata/evidence checks only; slow file checks remain leased.
+
+    Runs inside the short submission transaction, with no provider requests.
+    Final approval retains its full current-source, integrity and atomic fences.
+    """
+    @contextmanager
+    def borrowed():yield conn
+    current={r['product_gid']:r for r in statuses.batch(borrowed,list(selected),writable=True)['rows']}
+    found=records(borrowed,list(selected));rejected={}
+    with conn.cursor() as cur:
+        cur.execute("SELECT product_gid,preparation_hash FROM auto_edition_review_jobs WHERE product_gid=ANY(%s) AND state IN ('Pending','Processing')",(list(selected),))
+        active={r['product_gid']:r['preparation_hash'] for r in cur.fetchall()}
+    for pid,digest in selected.items():
+        row=current.get(pid);record=found.get(pid)
+        if pid in active and active[pid]!=digest:
+            rejected[pid]='A different preparation is already processing. Wait for its recorded result before retrying.'
+        elif not row or row.get('preparation_hash')!=digest or not record or record['hash']!=digest:
+            rejected[pid]='Preparation changed or is missing. Review the current design before retrying.'
+        elif row['status'] not in ('Cloud Ready','Production Ready'):
+            try:
+                if not eligible_state(row):raise ValueError('Design is not eligible. Use Review / Repair.')
+                evidence(record)
+            except (ValueError,KeyError,TypeError) as error:
+                rejected[pid]=str(error) if isinstance(error,ValueError) else 'Required review evidence is incomplete. Use Review / Repair.'
+    return rejected
 
 
 def listing(connect,ids,user,cursor=0):
@@ -445,18 +515,15 @@ async def list_api(request):
 async def image_api(request):
     try:
         user=await actor(request);q=request.query_params
-        key=(str(user['id']),q.get('product_gid'),q.get('hash'))
-        with snapshot_lock:entry=snapshots.get(key)
-        if not entry or entry[0]<time.monotonic():raise ValueError('Refresh the gallery to renew preview access.')
+        import supabase_backend as db
+        entries,failures=await run_in_threadpool(preview_entries,user,[dict(product_gid=q.get('product_gid'),hash=q.get('hash'))],db.read_connection)
+        if failures:raise ValueError(failures[0]['error'])
+        record=entries[0][2]
         width=1200 if q.get('large')=='1' else 300
-        assets=None
-        def fetch(*args):
-            nonlocal assets
-            if assets is None:assets=runtime.storage()
-            return assets.fetch(*args)
-        from auto_editions_bulk_jobs import PreviewStore
+        fetch=prepared_fetch()
+        from auto_editions_review_thumbnails import ReviewBuildStore as PreviewStore
         from auto_editions_bulk_runtime import connection
-        data=await run_in_threadpool(preview_builds.read,entry[1],fetch,width,PreviewStore(connection))
+        data=await run_in_threadpool(preview_builds.read,record,fetch,width,PreviewStore(connection))
         if data is None:return JSONResponse(dict(state='Loading',error='Preparing verified preview.'),status_code=202,headers={**api.HEADERS,'Retry-After':'2'})
         return Response(data,media_type='image/jpeg',headers={**api.HEADERS,'Cache-Control':'private, max-age=900','Vary':'Cookie','ETag':'"'+ae.hashlib.sha256(data).hexdigest()+'"'})
     except Exception as error:return preview_failure(error)
@@ -470,7 +537,70 @@ def preview_failure(error):
     return api.failure(error)
 
 
-def cached_previews(entries,store,raw=False):
+def current_previews(connect, entries):
+    """One small identity read per HTTP batch; no manifests, signing or provider I/O.
+
+    Actor snapshots amortize expensive metadata, but cannot authorize an image
+    after another process resets/unmaps the product or changes its preparation.
+    """
+    if not entries:return set()
+    with review_read(connect) as conn,conn.cursor() as cur:
+        cur.execute("""SELECT q.product_gid,q.preparation_hash,m.dropbox_file_id,
+            to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS cancellation
+            FROM auto_edition_onboarding q LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
+            WHERE q.product_gid=ANY(%s)""",(list(dict.fromkeys(pid for pid,_,_ in entries)),))
+        current={r['product_gid']:r for r in cur.fetchall()}
+    valid=set()
+    for pid,digest,record in entries:
+        row=current.get(pid) or {};reset=row.get('replacement') or {};cancel=row.get('cancellation') or {}
+        if (row.get('preparation_hash')==digest and row.get('dropbox_file_id')==record['manifest']['source']['file_id']
+            and not reset.get('manual_required') and reset.get('stage') not in ('Discovering','Queued','Preparing')
+            and cancel.get('stage') not in ('Cancelling','Confirmed')):valid.add((pid,digest))
+    return valid
+
+
+def prepared_fetch():
+    assets=None
+    def fetch(*args):
+        nonlocal assets
+        if assets is None:assets=runtime.storage()
+        result=assets.fetch(*args);fetch.review_timings=assets.timings;return result
+    return fetch
+
+
+def preview_entries(user,items,connect):
+    """Renew expired actor-scoped metadata in one bounded read, never old assets.
+
+    An unchanged immutable identity can reuse its persisted thumbnail after
+    cache expiry/restart. Changed preparations require a fresh visual review.
+    """
+    pairs=[];entries=[];failures=[];renew=[]
+    for item in items:
+        if not isinstance(item,dict) or set(item)!={'product_gid','hash'}:raise ValueError('Exact preview identities required.')
+        pid=statuses.identity(item['product_gid']);digest=item['hash']
+        if not re.fullmatch('[a-f0-9]{64}',str(digest)):raise ValueError('Exact preparation hash required.')
+        pairs.append((pid,digest))
+    with snapshot_lock:
+        for pid,digest in pairs:
+            value=snapshots.get((str(user['id']),pid,digest))
+            if not value or value[0]<time.monotonic():renew.append(pid)
+    if renew:listing(connect,list(dict.fromkeys(renew)),user)
+    with snapshot_lock:
+        for pid,digest in pairs:
+            value=snapshots.get((str(user['id']),pid,digest))
+            if not value or value[0]<time.monotonic():
+                failures.append(dict(product_gid=pid,hash=digest,jpeg=None,state='Unavailable',error='Preparation changed or is no longer available for review. Refresh the review list.'))
+            else:entries.append((pid,digest,value[1]))
+    valid=current_previews(connect,entries)
+    for pid,digest,record in list(entries):
+        if (pid,digest) not in valid:
+            entries.remove((pid,digest,record))
+            with snapshot_lock:snapshots.pop((str(user['id']),pid,digest),None)
+            failures.append(dict(product_gid=pid,hash=digest,jpeg=None,state='Unavailable',error='Preparation changed or design was reset. Refresh the review list.'))
+    return entries,failures
+
+
+def cached_previews(entries,store,raw=False,prefetch=False):
     """One bounded cache read; the binary client can enqueue disposable misses without waiting."""
     response=[];missing={}
     for pid,digest,record in entries:
@@ -479,7 +609,10 @@ def cached_previews(entries,store,raw=False):
             with thumbnails.lock:data=thumbnails.entries.get(key)
             row=dict(product_gid=pid,hash=digest,jpeg=None);response.append(row)
             if data:row['jpeg']=data if raw else base64.b64encode(data).decode('ascii')
-            else:missing[identity]=(key,row)
+            else:
+                with preview_builds.lock:pending=preview_builds.pending.get(key[0])
+                if pending and not pending[0].done():row['state']='Loading'
+                else:missing[identity]=(key,row)
         except (ValueError,KeyError,TypeError):
             response.append(dict(product_gid=pid,hash=digest,jpeg=None))
     if missing:
@@ -496,11 +629,11 @@ def cached_previews(entries,store,raw=False):
             for key,row in missing.values():
                 pending=preview_builds.pending.get(key[0])
                 if not row['jpeg'] and pending and not pending[0].done():row['state']='Loading'
-    if raw:
+    if raw and not prefetch:
         records={(pid,digest):record for pid,digest,record in entries}
         for row in response:
             if row['jpeg']:continue
-            def fetch(*args):return runtime.storage().fetch(*args)
+            fetch=prepared_fetch()
             try:
                 data=preview_builds.read(records[(row['product_gid'],row['hash'])],fetch,300,store,True)
                 if data:row['jpeg']=data
@@ -513,21 +646,16 @@ def cached_previews(entries,store,raw=False):
 async def previews_api(request):
     try:
         import files_upload_api as files
-        from auto_editions_bulk_jobs import PreviewStore
+        from auto_editions_review_thumbnails import ReviewBuildStore as PreviewStore
         from auto_editions_bulk_runtime import connection
         started=time.perf_counter();user=await actor(request);body=await files._json_body(request)
-        if set(body)-{'items','binary'} or not isinstance(body.get('items'),list) or not 1<=len(body['items'])<=8:
+        if set(body)-{'items','binary','prefetch'} or not isinstance(body.get('items'),list) or not 1<=len(body['items'])<=8:
             raise ValueError('At most eight cached preview identities required.')
-        entries=[]
-        with snapshot_lock:
-            for item in body['items']:
-                if not isinstance(item,dict) or set(item)!={'product_gid','hash'}:raise ValueError('Exact preview identities required.')
-                pid=statuses.identity(item['product_gid']);digest=item['hash']
-                entry=snapshots.get((str(user['id']),pid,digest))
-                if not entry or entry[0]<time.monotonic():raise ValueError('Refresh review metadata to renew preview access.')
-                entries.append((pid,digest,entry[1]))
+        import supabase_backend as db
+        entries,failures=await run_in_threadpool(preview_entries,user,body['items'],db.read_connection)
         binary=body.get('binary') is True
-        rows=await run_in_threadpool(cached_previews,entries,PreviewStore(connection),binary)
+        rows=await run_in_threadpool(cached_previews,entries,PreviewStore(connection),binary,body.get('prefetch') is True)
+        rows.extend(failures)
         elapsed=round((time.perf_counter()-started)*1000,2)
         if binary:
             boundary='sc-review-preview';parts=[];meta=[]
@@ -554,9 +682,11 @@ async def approve_api(request):
             if not re.fullmatch('[a-f0-9]{64}',str(item['hash'])):raise ValueError('Exact preparation hashes required.')
         from auto_editions_bulk_jobs import ReviewJobs
         from auto_editions_bulk_runtime import connection,wake
-        key=await run_in_threadpool(ReviewJobs(connection).submit,str(user['id']),body['request_id'],body['items'])
+        jobs=ReviewJobs(connection)
+        key=await run_in_threadpool(jobs.submit,str(user['id']),body['request_id'],body['items'],admission)
+        result=await run_in_threadpool(jobs.progress,str(user['id']),batch_id=key)
         wake.set()
-        return JSONResponse(dict(batch_id=key,accepted=True,print_ready=False),status_code=202,headers=api.HEADERS)
+        return JSONResponse({**result,'batch_id':key,'accepted':True,'print_ready':False},status_code=202,headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 
@@ -566,7 +696,7 @@ async def progress_api(request):
         from auto_editions_bulk_jobs import ReviewJobs
         from auto_editions_bulk_runtime import connection
         user=await actor(request);body=await files._json_body(request)
-        if set(body) not in ({'batch_id'},{'product_gids'}):raise ValueError('Batch identity or bounded catalogue required.')
+        if set(body) not in ({'batch_id'},{'product_gids'},{'product_gids','watch'}):raise ValueError('Batch identity or bounded catalogue required.')
         result=await run_in_threadpool(ReviewJobs(connection).progress,str(user['id']),active_review_only='product_gids' in body,**body)
         committed=[r['product_gid'] for r in result['rows'] if r['state']=='Approved']
         if committed:

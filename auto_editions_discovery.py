@@ -266,6 +266,8 @@ def run(stop):
             LOG.warning('auto_editions_discovery_failed error_type=%s',type(error).__name__)
             health_ok=False
         try:
+            from auto_editions_cancellation import Cancellation
+            Cancellation(db.connect).resume()
             discovery.seed_existing()
             refresh(discovery.queue,ACTOR,limit=100)
         except Exception as error:

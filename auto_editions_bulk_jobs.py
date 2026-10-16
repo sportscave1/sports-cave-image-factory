@@ -16,7 +16,7 @@ class ReviewJobs:
 
     def __init__(self,connect):self.connect=connect
 
-    def submit(self,actor,key,items):
+    def submit(self,actor,key,items,validate=None):
         from auto_editions_status import identity
         key=request_identity(key)
         if not actor or not isinstance(items,list) or not 1<=len(items)<=1000:raise ValueError('Bounded confirmed selection required.')
@@ -37,11 +37,13 @@ class ReviewJobs:
             if batch['payload_hash']!=fingerprint:raise ValueError('Review request identity already used for a different selection.')
             cur.execute('SELECT count(*) AS n FROM auto_edition_review_items WHERE batch_id=%s',(key,))
             if cur.fetchone()['n']:return key
-            payload=json.dumps([dict(id=str(uuid.uuid4()),product_gid=pid,preparation_hash=digest) for pid,digest in sorted(selected.items())])
-            cur.execute("""INSERT INTO auto_edition_review_jobs(id,product_gid,preparation_hash,actor_id)
-                SELECT x.id,x.product_gid,x.preparation_hash,%s FROM jsonb_to_recordset(%s::jsonb)
-                AS x(id text,product_gid text,preparation_hash text)
-                WHERE NOT EXISTS(SELECT 1 FROM auto_edition_review_jobs done
+            rejected=validate(conn,selected) if validate else {}
+            payload=json.dumps([dict(id=str(uuid.uuid4()),product_gid=pid,preparation_hash=digest,
+                state='Needs Attention' if pid in rejected else 'Pending',reason=rejected.get(pid,'')) for pid,digest in sorted(selected.items())])
+            cur.execute("""INSERT INTO auto_edition_review_jobs(id,product_gid,preparation_hash,actor_id,state,reason)
+                SELECT x.id,x.product_gid,x.preparation_hash,%s,x.state,x.reason FROM jsonb_to_recordset(%s::jsonb)
+                AS x(id text,product_gid text,preparation_hash text,state text,reason text)
+                WHERE x.state<>'Pending' OR NOT EXISTS(SELECT 1 FROM auto_edition_review_jobs done
                     JOIN auto_edition_layouts l ON l.product_gid=done.product_gid AND l.preparation_hash=done.preparation_hash AND l.variant_id='*'
                     JOIN auto_edition_onboarding q ON q.product_gid=done.product_gid AND q.preparation_hash=done.preparation_hash
                     WHERE done.product_gid=x.product_gid AND done.preparation_hash=x.preparation_hash AND done.state='Approved'
@@ -50,37 +52,41 @@ class ReviewJobs:
                 ON CONFLICT (product_gid) WHERE state IN ('Pending','Processing') DO NOTHING""",(actor,payload))
             cur.execute("""INSERT INTO auto_edition_review_items(batch_id,product_gid,job_id)
                 SELECT %s,x.product_gid,j.id FROM jsonb_to_recordset(%s::jsonb)
-                    AS x(product_gid text,preparation_hash text)
+                    AS x(id text,product_gid text,preparation_hash text)
                 JOIN LATERAL (SELECT candidate.id FROM auto_edition_review_jobs candidate
-                    WHERE candidate.product_gid=x.product_gid AND (candidate.state IN ('Pending','Processing') OR
+                    WHERE candidate.product_gid=x.product_gid AND (candidate.id=x.id OR (candidate.state IN ('Pending','Processing') AND candidate.preparation_hash=x.preparation_hash) OR
                         (candidate.state='Approved' AND candidate.preparation_hash=x.preparation_hash AND EXISTS(
                             SELECT 1 FROM auto_edition_layouts l JOIN auto_edition_onboarding q ON q.product_gid=l.product_gid
                             WHERE l.product_gid=x.product_gid AND l.preparation_hash=x.preparation_hash AND q.preparation_hash=x.preparation_hash
                             AND l.variant_id='*' AND l.approval->>'test_only'='true' AND l.approval->>'visual_approved'='true')))
-                    ORDER BY (candidate.state IN ('Pending','Processing')) DESC,candidate.created_at DESC,candidate.id DESC LIMIT 1) j ON true
+                    ORDER BY (candidate.state IN ('Pending','Processing')) DESC,(candidate.id=x.id) DESC,candidate.created_at DESC,candidate.id DESC LIMIT 1) j ON true
                 RETURNING product_gid""",(key,payload))
             if len(cur.fetchall())!=len(selected):raise RuntimeError('Concurrent review completed during submission. Reconcile this request before retrying.')
         return key
 
-    def progress(self,actor,*,batch_id=None,product_gids=None,active_review_only=False):
+    def progress(self,actor,*,batch_id=None,product_gids=None,active_review_only=False,watch=None):
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='3000ms'; SET LOCAL lock_timeout='500ms'")
             if batch_id:
                 batch_id=request_identity(batch_id)
                 cur.execute('SELECT id FROM auto_edition_review_batches WHERE id=%s AND actor_id=%s',(batch_id,actor))
                 if not cur.fetchone():return dict(batch_id=batch_id,found=False,rows=[],counts={s:0 for s in STATES},active=False)
-                cur.execute("""SELECT j.*,i.batch_id FROM auto_edition_review_items i JOIN auto_edition_review_jobs j ON j.id=i.job_id
+                cur.execute("""SELECT j.*,i.batch_id,(j.created_at<b.confirmed_at) AS reused FROM auto_edition_review_items i JOIN auto_edition_review_jobs j ON j.id=i.job_id
+                    JOIN auto_edition_review_batches b ON b.id=i.batch_id
                     WHERE i.batch_id=%s ORDER BY j.created_at,j.id""",(batch_id,))
             else:
                 # Bounded catalogue recovery includes terminal results; no browser storage is required for accepted work.
                 from auto_editions_status import identity
                 ids=list(dict.fromkeys(identity(p) for p in product_gids or []))
                 if len(ids)>1000:raise ValueError('Bounded recovery selection required.')
+                watch=list(dict.fromkeys(identity(p) for p in watch or []))
+                if len(watch)>1000 or not set(watch)<=set(ids):raise ValueError('Watched products must belong to this catalogue selection.')
                 cur.execute("""SELECT * FROM (SELECT DISTINCT ON(j.product_gid) j.* FROM auto_edition_review_jobs j
                     WHERE j.product_gid=ANY(%s) ORDER BY j.product_gid,j.created_at DESC,j.id DESC) latest"""+
-                    (" WHERE state IN ('Pending','Processing','Failed','Needs Attention')" if active_review_only else ''),(ids,))
+                    (" WHERE state IN ('Pending','Processing','Failed','Needs Attention') OR product_gid=ANY(%s)" if active_review_only else ''),(ids,watch) if active_review_only else (ids,))
             rows=cur.fetchall()
-        public=[dict(job_id=r['id'],product_gid=r['product_gid'],hash=r['preparation_hash'],state=r['state'],reason=r['reason']) for r in rows]
+        public=[dict(job_id=r['id'],product_gid=r['product_gid'],hash=r['preparation_hash'],state=r['state'],reason=r['reason'],
+            acceptance=('already_processing' if r.get('reused') else 'accepted') if r['state'] in ACTIVE else 'already_approved' if r['state']=='Approved' else 'failed') for r in rows]
         counts={s:sum(r['state']==s for r in public) for s in STATES}
         return dict(batch_id=batch_id,found=True,rows=public,counts=counts,active=any(r['state'] in ACTIVE for r in public),print_ready=False)
 

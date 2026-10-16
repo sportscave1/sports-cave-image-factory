@@ -6,7 +6,7 @@ mapping_overrides={}
 
 def rows(ids):
     result=[dict(product_gid=pid,status=stage,icon='◷' if stage=='Queued' else '↻',reason='',
-                 checkpoint=stage,checkpoint_at='2026-10-15T00:00:00Z',preparation_hash=None,actions=[],reset_allowed=True) for pid in ids]
+                 checkpoint=stage,checkpoint_at='2026-10-15T00:00:00Z',preparation_hash=None,actions=[],reset_allowed=stage!='Cancelling'+chr(8230),cancelling=stage=='Cancelling'+chr(8230)) for pid in ids]
     for row in result:
         if row['product_gid'] in mapping_overrides:
             row['mapping_file_id']=mapping_overrides[row['product_gid']]

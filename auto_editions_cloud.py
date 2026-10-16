@@ -96,7 +96,13 @@ class DropboxAssets:
     def fetch(self, preparation_hash, asset, destination):
         from auto_editions_asset_cache import prepared_assets
         source_path=self.path(preparation_hash,asset['name'])
-        if prepared_assets.copy(asset['sha256'],destination):return
+        phase=time.perf_counter()
+        if prepared_assets.copy(asset['sha256'],destination):
+            self.timings['review_asset_cache_hits']=self.timings.get('review_asset_cache_hits',0)+1
+            self.timings['review_cache_copy_ms']=self.timings.get('review_cache_copy_ms',0)+(time.perf_counter()-phase)*1000
+            return
+        self.timings['review_asset_cache_misses']=self.timings.get('review_asset_cache_misses',0)+1
+        phase=time.perf_counter()
         metadata,response=self.integration.get_file_response(self.token,source_path)
         try:
             size=metadata.get('size')
@@ -108,6 +114,8 @@ class DropboxAssets:
                     length+=len(block)
                     if length>size:raise PreparationBlocked('Prepared Dropbox asset length changed.')
                     output.write(block)
+            self.timings['review_provider_transfer_ms']=self.timings.get('review_provider_transfer_ms',0)+(time.perf_counter()-phase)*1000
+            self.timings['review_provider_bytes']=self.timings.get('review_provider_bytes',0)+length
             if length!=size or ae.file_hash(destination)!=asset['sha256']:
                 raise PreparationBlocked('Prepared Dropbox asset checksum changed.')
         finally:

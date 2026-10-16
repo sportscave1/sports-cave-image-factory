@@ -19,8 +19,18 @@ let approvalTimer=null,approvalFlight=false,approvalRequest=null,trackingFailure
 const operationStates=new Map(),restoredFailures=new Set(),failureQueue=[];let restoringFailures=false;
 const approvalStorage='sc-edition-review-request-v3';
 const requests=new Set(),imageTasks=[],warmTasks=[],imageCancels=new Set();
-let activeWarm=0,warmScheduled=false,controlsFrame=0,largeController=null;
-const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;nearImages.unobserve(entry.target);queueImage(entry.target._row);}},{rootMargin:'350px'});
+let activeWarm=0,activeSpeculative=0,warmScheduled=false,controlsFrame=0,largeController=null;
+// Visible cards get cold builders. Next-screen work reads small cached JPEGs only.
+function visible(row){const b=row.img.getBoundingClientRect();return b.bottom>0&&b.top<innerHeight&&b.right>0&&b.left<innerWidth;}
+function priority(tasks){tasks.sort((a,b)=>Number(!visible(a.row))-Number(!visible(b.row))||Math.abs(a.row.img.getBoundingClientRect().top)-Math.abs(b.row.img.getBoundingClientRect().top));}
+function cancelSpeculation(row){
+  if(visible(row)||row.previewReady)return;
+  clearTimeout(row.retryTimer);row.cancelImage?.();row.imageState='waiting';row.cacheChecked=false;
+  for(const tasks of [warmTasks,imageTasks])for(let n=tasks.length-1;n>=0;n--)if(tasks[n].row===row)tasks.splice(n,1);
+  const group=row.warmGroup;if(group&&group.tasks.every(t=>!t.row.near&&!visible(t.row)))group.controller.abort();
+}
+const visibleImages=new IntersectionObserver(entries=>{for(const entry of entries){const row=entry.target._row;if(entry.isIntersecting)queueImage(row);}},{rootMargin:'0px'});
+const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){const row=entry.target._row;row.near=entry.isIntersecting;if(entry.isIntersecting)queueImage(row);else cancelSpeculation(row);}},{rootMargin:'0px 0px '+Math.min(600,Math.round(innerHeight*.75))+'px 0px'});
 const nearMore=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPage();},{rootMargin:'400px'});
 nearMore.observe($('more'));
 function summary(){
@@ -37,18 +47,20 @@ function updateControls(){
   $('retry').hidden=!errorText;$('more').hidden=!hasMore||!started;$('more').disabled=loading||busy||!!errorText;
   for(const row of rows){const disabled=busy||confirming||!row.eligible||!row.previewReady,checked=selected.has(row.product_gid);if(row.box.disabled!==disabled)row.box.disabled=disabled;if(row.box.checked!==checked)row.box.checked=checked;}
 }
-async function api(path,body,timeout=10000){
+async function api(path,body,timeout=10000,signal){
   const controller=new AbortController();requests.add(controller);let timedOut=false;
+  const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)controller.abort();
   const timer=setTimeout(()=>{timedOut=true;controller.abort();},timeout);
   try{
     const response=await fetch('/api/auto-editions/bulk/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
     let data;if(path==='previews'&&response.ok&&response.headers.get('content-type')?.startsWith('multipart/form-data')){const parts=await response.formData();data=JSON.parse(parts.get('metadata'));for(const row of data.rows)row.blob=row.part===null?null:parts.get(row.part);}else data=await response.json();if(!response.ok){const failure=Error(data.error||'Review unavailable. Retry.');failure.status=response.status;throw failure;}return data;
   }catch(error){if(timedOut)throw Error(path==='approve'?'Acknowledgement delayed. Checking the saved review request…':path==='progress'?'Progress temporarily unavailable. Accepted work continues in the background.':'Review metadata timed out. Retry.');if(error.name==='SyntaxError')throw Error('Review returned an unreadable response. Retry.');if(error.name==='TypeError')throw Error('Review network request failed. Retry.');throw error;}
-  finally{clearTimeout(timer);requests.delete(controller);}
+  finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);requests.delete(controller);}
 }
 function imageURL(row,large=false){return '/api/auto-editions/bulk/image?'+new URLSearchParams({product_gid:row.product_gid,hash:row.hash,...(large?{large:'1'}:{})});}
 function queueImage(row){
-  if(disposed||row.previewReady||row.imageState==='queued'||row.imageState==='loading'||!row.hash)return;
+  if(disposed||row.removed||(!row.near&&!visible(row))||row.previewReady||row.imageState==='queued'||row.imageState==='loading'||!row.hash)return;
+  row.retryPreview.hidden=true;row.detail.textContent=row.operationText||'Loading preview…';
   clearTimeout(row.retryTimer);row.previewStarted ||= performance.now();row.imageState='queued';const task={row,version:generation};
   if(row.cacheChecked){imageTasks.push(task);pumpImages();}
   else{warmTasks.push(task);if(!warmScheduled){warmScheduled=true;setTimeout(()=>{warmScheduled=false;pumpWarm();},16);}}
@@ -57,20 +69,38 @@ function previewDelay(row){row.previewPolls=(row.previewPolls||0)+1;return Math.
 function revokePreview(row){if(row.objectURL){URL.revokeObjectURL(row.objectURL);delete row.objectURL;}}
 function pumpWarm(){
   while(!disposed&&activeWarm<2&&warmTasks.length){
-    const tasks=warmTasks.splice(0,8).filter(t=>t.version===generation);if(!tasks.length)continue;
-    activeWarm++;
+    priority(warmTasks);
+    const isVisible=warmTasks.some(t=>visible(t.row));
+    if(!isVisible&&activeSpeculative>=1)break;
+    const tasks=warmTasks.filter(t=>visible(t.row)===isVisible).slice(0,isVisible?8:4);for(const task of tasks)warmTasks.splice(warmTasks.indexOf(task),1);
+    for(let n=tasks.length-1;n>=0;n--)if(tasks[n].version!==generation||(!tasks[n].row.near&&!visible(tasks[n].row)))tasks.splice(n,1);if(!tasks.length)continue;
+    const speculative=tasks.every(t=>!visible(t.row)),group={tasks,controller:new AbortController()};for(const {row} of tasks)row.warmGroup=group;
+    activeWarm++;if(speculative)activeSpeculative++;
     (async()=>{
-      let cached=new Map();
-      try{const data=await api('previews',{items:tasks.map(({row})=>({product_gid:row.product_gid,hash:row.hash})),binary:true},8000);cached=new Map(data.rows.map(r=>[r.product_gid,r]));timings.cachedPreviewBatches=(timings.cachedPreviewBatches||0)+1;timings.cachedPreviewHits=(timings.cachedPreviewHits||0)+data.rows.filter(r=>r.blob||r.jpeg).length;}catch{}
+      let cached=new Map(),batchError=null;
+      try{const data=await api('previews',{items:tasks.map(({row})=>({product_gid:row.product_gid,hash:row.hash})),binary:true,...(speculative?{prefetch:true}:{})},8000,group.controller.signal);cached=new Map(data.rows.map(r=>[r.product_gid,r]));timings.cachedPreviewBatches=(timings.cachedPreviewBatches||0)+1;timings.cachedPreviewHits=(timings.cachedPreviewHits||0)+data.rows.filter(r=>r.blob||r.jpeg).length;}catch(error){batchError=error;}
       finally{
-        for(const task of tasks){if(disposed||task.version!==generation||task.row.removed)continue;const row=task.row,value=cached.get(row.product_gid);row.cacheChecked=true;
-          if(value?.hash===row.hash&&value.state==='Loading'&&performance.now()-row.previewStarted<90000){row.imageState='waiting';row.cacheChecked=false;row.retryTimer=setTimeout(()=>{if(task.version===generation&&!disposed&&!row.removed)queueImage(row);},previewDelay(row));continue;}
+        for(const task of tasks){if(disposed||task.version!==generation||task.row.removed)continue;const row=task.row,value=cached.get(row.product_gid);delete row.warmGroup;row.cacheChecked=true;
+          if(!row.near&&!visible(row)){row.imageState='waiting';row.cacheChecked=false;continue;}
+          if(batchError?.name==='AbortError'){row.imageState='waiting';row.cacheChecked=false;continue;}
+          if(speculative&&!value?.blob&&!value?.jpeg){row.imageState='waiting';row.cacheChecked=false;if(visible(row))queueImage(row);continue;}
+          if(batchError){
+            if((!batchError.status||batchError.status>=500)&&!(row.warmRetries||0)){
+              row.warmRetries=1;row.cacheChecked=false;row.imageState='waiting';row.detail.textContent='Preview connection unavailable. Retrying…';row.retryTimer=setTimeout(()=>{if(task.version===generation&&!disposed&&!row.removed)queueImage(row);},1500);
+            }else{row.imageState='failed';row.retryPreview.hidden=false;row.detail.textContent='Preview unavailable. '+batchError.message;}
+            continue;
+          }
+          if(value?.hash===row.hash&&value.state==='Unavailable'){row.imageState='failed';row.retryPreview.hidden=false;row.detail.textContent=value.error||'Preview unavailable. Retry Preview.';continue;}
+          if(value?.hash===row.hash&&value.state==='Loading'){
+            if(performance.now()-row.previewStarted>=90000){row.imageState='failed';row.retryPreview.hidden=false;row.detail.textContent='Preview is taking too long. Retry Preview.';continue;}
+            row.imageState='waiting';row.cacheChecked=false;row.retryTimer=setTimeout(()=>{if(task.version===generation&&!disposed&&!row.removed)queueImage(row);},previewDelay(row));continue;
+          }
           if(value?.hash===row.hash&&value.blob instanceof Blob&&value.blob.size<=524288){row.objectURL=URL.createObjectURL(value.blob);}else if(value?.hash===row.hash&&typeof value.jpeg==='string'&&value.jpeg.length<700000){
             try{row.objectURL=URL.createObjectURL(new Blob([Uint8Array.from(atob(value.jpeg),c=>c.charCodeAt(0))],{type:'image/jpeg'}));}catch{}
           }
           imageTasks.push(task);
         }
-        activeWarm--;pumpImages();pumpWarm();
+        activeWarm--;if(speculative)activeSpeculative--;pumpImages();pumpWarm();controls(true);summary();
       }
     })();
   }
@@ -84,12 +114,15 @@ async function fetchPreview(row,large=false,signal){
 }
 function pumpImages(){
   while(!disposed&&activeImages<3&&imageTasks.length){
+    priority(imageTasks);
     const {row,version}=imageTasks.shift();if(version!==generation||row.removed)continue;
+    if(!row.near&&!visible(row)){row.imageState='waiting';row.cacheChecked=false;continue;}
     activeImages++;row.imageState='loading';row.previewStarted ||= performance.now();row.detail.textContent=row.operationText||(row.eligible?'Loading preview…':row.reason+' · Loading preview…');let settled=false;
     const controller=new AbortController();requests.add(controller);
     const finish=(ok,cancelled=false,waiting=false,error=null)=>{
-      if(settled)return;settled=true;clearTimeout(timer);controller.abort();requests.delete(controller);row.img.onload=row.img.onerror=null;imageCancels.delete(cancel);activeImages--;
+      if(settled)return;settled=true;clearTimeout(timer);controller.abort();requests.delete(controller);row.img.onload=row.img.onerror=null;imageCancels.delete(cancel);delete row.cancelImage;activeImages--;
       if(!ok)row.img.removeAttribute('src');revokePreview(row);
+      if(cancelled&&version===generation&&!disposed)row.imageState='waiting';
       if(version===generation&&!disposed&&!cancelled){
         const transient=error&&(!error.status||error.status>=500)&&(row.transientRetries||0)<1;
         if((waiting||transient)&&performance.now()-row.previewStarted<90000){
@@ -100,7 +133,8 @@ function pumpImages(){
           row.previewReady=ok;row.imageState=ok?'ready':'failed';
           if(!ok){selected.delete(row.product_gid);row.retryPreview.hidden=false;row.detail.textContent=row.operationText||('Preview unavailable. '+(error?.message||'Generation is still pending; Retry Preview.'));}
           else{row.retryPreview.hidden=true;row.detail.textContent=row.operationText||(row.eligible?'Eligible for confirmed TEST review':row.reason);}
-          loadedImages++;timings.thumbnailLoads=loadedImages;if(ok&&timings.firstThumbnailMs===undefined)timings.firstThumbnailMs=performance.now()-thumbnailStart;
+          loadedImages++;timings.thumbnailLoads=loadedImages;if(ok&&visible(row)&&timings.firstThumbnailMs===undefined)timings.firstThumbnailMs=performance.now()-thumbnailStart;
+          if(visible(row)&&!timings.firstViewportResolvedMs&&rows.filter(visible).every(r=>r.previewReady||r.imageState==='failed'))timings.firstViewportResolvedMs=performance.now()-thumbnailStart;
           if(loadedImages===Math.min(8,rows.length))timings.initialThumbnailsMs=performance.now()-thumbnailStart;
           timings.allThumbnailsMs=performance.now()-thumbnailStart;controls(true);summary();
         }
@@ -136,15 +170,15 @@ function append(data){
   const fragment=document.createDocumentFragment();
   for(const value of data){
     if(byId.has(value.product_gid))continue;
-    const row={...value,previewReady:false,imageState:'waiting'},card=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),label=document.createElement('label'),box=document.createElement('input'),detail=document.createElement('small'),link=document.createElement('a'),retryPreview=document.createElement('button');
+    const row={...value,reviewEligible:value.eligible,previewReady:false,imageState:'waiting'},card=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),label=document.createElement('label'),box=document.createElement('input'),detail=document.createElement('small'),link=document.createElement('a'),retryPreview=document.createElement('button');
     img.alt=row.title;img.width=300;img.height=180;img.decoding='async';img._row=row;img.onclick=()=>largePreview(row);
     box.type='checkbox';box.value=row.product_gid;box.disabled=true;box.onchange=()=>{if(box.checked&&row.eligible&&row.previewReady)selected.add(row.product_gid);else selected.delete(row.product_gid);controls();};
     label.append(box,document.createTextNode(row.title));caption.append(label);detail.textContent=row.eligible?'Loading preview…':row.reason;
     link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';
-    retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>{row.previewStarted=0;row.previewPolls=0;row.transientRetries=0;queueImage(row);};
+    retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>{if(['queued','loading'].includes(row.imageState))return;row.cacheChecked=false;row.previewStarted=0;row.previewPolls=0;row.transientRetries=0;row.warmRetries=0;queueImage(row);};
     Object.assign(row,{img,box,detail,retryPreview,card});card.append(img,caption,detail,retryPreview,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
   }
-  $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting')nearImages.observe(row.img);
+  $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting'&&!row.previewStarted){visibleImages.observe(row.img);nearImages.observe(row.img);}
 }
 async function loadPage(){
   if(disposed||!started||loading||busy||!hasMore||errorText)return;
@@ -163,7 +197,7 @@ async function loadPage(){
     }
   }
 }
-function cancelWork(){for(const request of requests)request.abort();requests.clear();imageTasks.length=0;warmTasks.length=0;nearImages.disconnect();for(const row of rows){clearTimeout(row.retryTimer);revokePreview(row);row.img.removeAttribute('src');}for(const cancel of [...imageCancels])cancel();clearTimeout(largeTimer);$('large-image').removeAttribute('src');}
+function cancelWork(){for(const request of requests)request.abort();requests.clear();imageTasks.length=0;warmTasks.length=0;nearImages.disconnect();visibleImages.disconnect();for(const row of rows){clearTimeout(row.retryTimer);revokePreview(row);row.img.removeAttribute('src');}for(const cancel of [...imageCancels])cancel();clearTimeout(largeTimer);$('large-image').removeAttribute('src');}
 function reset(){
   if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;loading=false;errorText='';resultText='';loadedImages=0;
   for(const key of Object.keys(timings))delete timings[key];thumbnailStart=performance.now();$('grid').replaceChildren();
@@ -193,10 +227,12 @@ function clearRequest(){try{sessionStorage.removeItem(approvalStorage);}catch{}a
 function applyOperations(){
   for(const row of rows){const op=operationStates.get(row.product_gid);if(!op||op.hash!==row.hash)continue;
     const ready=['Cloud Ready','Production Ready'].includes(op.current_status)&&op.current_hash===row.hash;
-    if(['Pending','Processing'].includes(op.state)||(op.state==='Approved'&&ready)){row.removed=true;clearTimeout(row.retryTimer);nearImages.unobserve(row.img);row.cancelImage?.();revokePreview(row);row.img.removeAttribute('src');row.card.remove();byId.delete(row.product_gid);selected.delete(row.product_gid);continue;}
-    row.operationText=op.state==='Processing'?'Approving…':op.state==='Pending'?'Pending Approval':op.state==='Approved'?(op.current_status==='Cloud Ready'&&op.current_hash===row.hash?'Cloud Ready · TEST approval complete':'TEST approval committed'+(op.current_status?' · '+op.current_status:'')):op.state==='Failed'?'Approval Failed · '+op.reason:op.state+' · '+op.reason;
-    row.detail.textContent=row.operationText;row.detail.classList.toggle('approving',op.state==='Processing');
-    selected.delete(row.product_gid);
+    if(op.state==='Approved'&&ready){row.removed=true;clearTimeout(row.retryTimer);nearImages.unobserve(row.img);visibleImages.unobserve(row.img);row.cancelImage?.();revokePreview(row);row.img.removeAttribute('src');row.card.remove();byId.delete(row.product_gid);selected.delete(row.product_gid);continue;}
+    const active=['Pending','Processing'].includes(op.state),key=JSON.stringify([op.state,op.reason,op.job_id]);
+    row.operationText=active?'Approving…'+(op.state==='Pending'?' · Queued for validation':''):op.state==='Approved'?'TEST approval committed'+(op.current_status?' · '+op.current_status:''):op.state==='Failed'?'Approval Failed · '+op.reason:op.state+' · '+op.reason;
+    row.eligible=active?false:row.reviewEligible;
+    row.detail.textContent=row.operationText;row.detail.classList.toggle('approving',active);
+    if(active||row.operationKey!==key)selected.delete(row.product_gid);row.operationKey=key;
   }
   rows=rows.filter(r=>!r.removed);
 }
@@ -212,24 +248,24 @@ async function drainFailures(){
   catch{if(!disposed){$('progress').textContent='Some failed approvals need review. Retry tracking to restore their cards.';$('retry-approval').hidden=false;}}
   finally{restoringFailures=false;if(!disposed)drainFailures();}
 }
-function showProgress(data){
+function showProgress(data,notify=true){
   operationStates.clear();for(const op of data.rows)operationStates.set(op.product_gid,op);applyOperations();
   const counts=data.counts,done=['Approved','Skipped','Needs Attention','Failed'].reduce((sum,k)=>sum+counts[k],0),total=data.rows.length;
   $('progress').textContent=(data.active?'Approving '+Math.min(total,done+counts.Processing)+' of '+total+' designs… · ':'')+Object.entries(counts).map(([key,value])=>key+': '+value).join(' / ');
   $('retry-approval').hidden=true;queueFailures(data.rows);controls();summary();
-  parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);
+  if(notify)parent.postMessage({type:'sports-cave-bulk-progress',rows:data.rows},location.origin);
 }
 async function trackApprovals(){
   if(disposed||!started)return;
   if(approvalFlight){trackingAgain=true;return;}
   clearTimeout(approvalTimer);approvalFlight=true;
   try{
-    const data=await api('progress',approvalRequest?{batch_id:approvalRequest.request_id}:{product_gids:ids},8000);if(disposed)return;
+    const data=await api('progress',approvalRequest?{batch_id:approvalRequest.request_id}:{product_gids:ids,watch:[...operationStates.keys()].filter(pid=>ids.includes(pid))},8000);if(disposed)return;
     if(approvalRequest&&!data.found){
       $('progress').textContent='Request not recorded yet. Retry submission using the same saved request ID.';
       $('retry-approval').textContent='Reconcile and retry submission';$('retry-approval').hidden=false;return;
     }
-    if(approvalRequest&&data.found){const key=approvalRequest.request_id;if(submissionInPopup&&(data.active||data.counts.Approved)&&!data.counts.Failed&&!data.counts['Needs Attention']){handoffAccepted(key);return;}submissionInPopup=false;clearRequest();}
+    if(approvalRequest&&data.found){const key=approvalRequest.request_id;if(submissionInPopup&&(data.active||data.counts.Approved)&&!data.counts.Failed&&!data.counts['Needs Attention']&&!data.counts.Skipped){handoffAccepted(key,data);return;}submissionInPopup=false;clearRequest();}
     trackingFailures=0;showProgress(data);
     if(!data.active){if(approvalRequest)clearRequest();return;}
     approvalTimer=setTimeout(trackApprovals,3000);
@@ -240,10 +276,10 @@ function recoverApprovals(){
   try{const value=JSON.parse(sessionStorage.getItem(approvalStorage)||'null');if(value?.request_id&&Array.isArray(value.items))approvalRequest=value;}catch{}
   trackApprovals();
 }
-function handoffAccepted(batchID){
+function handoffAccepted(batchID,data){
+  if(data?.rows)showProgress(data,false);
   clearRequest();submissionInPopup=false;
-  parent.postMessage({type:'sports-cave-bulk-accepted',batch_id:batchID},location.origin);
-  parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);
+  parent.postMessage({type:'sports-cave-bulk-accepted',batch_id:batchID,rows:data?.rows||[],partial:!!(data?.counts?.Failed||data?.counts?.['Needs Attention']||data?.counts?.Skipped)},location.origin);
 }
 async function submitApproval(){
   if(busy||!approvalRequest||disposed)return;submissionInPopup=true;busy=true;controls();$('progress').textContent='Saving confirmed approval batch…';
@@ -251,9 +287,13 @@ async function submitApproval(){
     const start=performance.now(),data=await api('approve',{...approvalRequest,confirm_visual_quality:true},10000);if(disposed)return;
     if(data.batch_id!==approvalRequest.request_id||!data.accepted)throw Error('Checking saved request…');
     timings.batchAcknowledgementMs=performance.now()-start;
-    const acceptedID=approvalRequest.request_id;handoffAccepted(acceptedID);
-    $('progress').textContent='Approval batch accepted. Current progress is in Auto Editions.';
-  }catch(error){if(!disposed)$('progress').textContent='Acknowledgement delayed. Reconciling the saved request before any retry…';}
+    const acceptedID=approvalRequest.request_id;handoffAccepted(acceptedID,data);
+    if(!data.rows)$('progress').textContent='Approval batch accepted. Current progress is in Auto Editions.';
+  }catch(error){if(!disposed){
+    const rejected=[403,409].includes(error.status);
+    for(const item of approvalRequest?.items||[]){const row=byId.get(item.product_gid);if(row)row.detail.textContent=rejected?'Submission rejected: '+error.message:'Checking durable acceptance before retry…';}
+    $('progress').textContent=rejected?'Submission rejected: '+error.message:'Acknowledgement delayed. Reconciling the saved request before any retry…';
+  }}
   finally{busy=false;if(!disposed){controls();trackApprovals();}}
 }
 $('retry-approval').onclick=async()=>{
@@ -261,7 +301,7 @@ $('retry-approval').onclick=async()=>{
   if(!approvalRequest){restoredFailures.clear();trackApprovals();return;}
   try{
     const data=await api('progress',{batch_id:approvalRequest.request_id},8000);
-    if(data.found){const key=approvalRequest.request_id;handoffAccepted(key);showProgress(data);if(data.active)approvalTimer=setTimeout(trackApprovals,3000);else clearRequest();}
+    if(data.found){const key=approvalRequest.request_id;handoffAccepted(key,data);if(data.active)approvalTimer=setTimeout(trackApprovals,3000);else clearRequest();}
     else await submitApproval();
   }catch(error){$('progress').textContent='Connection unavailable. Your saved request ID is retained; retry tracking when connected.';}
 };

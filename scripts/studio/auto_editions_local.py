@@ -46,6 +46,60 @@ def health_payload():
     return result
 
 
+class Cancelled(Exception):
+    pass
+
+
+def cancellation_check(row, *, stopped=False, config=None):
+    """Check only this lease. Acknowledge only after its workers have unwound."""
+    if not row.get('context',{}).get('automatic'):return False
+    if config is None:
+        if not HOST_FILE.exists():raise ConnectionError('Companion host connection is required to check cancellation.')
+        from device_trust import protect
+        config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
+    ctx=row['context']
+    result=host_request(config,'/api/auto-editions/onboarding/cancellation',
+        dict(product_gid=ctx['product_gid'],lease_token=ctx['lease_token'],stopped=stopped))
+    if result.get('cancelled') is True:
+        row['cancel_requested']=True
+        if stopped:
+            row.update(status='Cancelled',checkpoint_pending=False,cancellation_confirmed=True,error='Cancelled for Reset; source and generated files retained.')
+            journal(row)
+        return True
+    return False
+
+
+def boundary(row):
+    if row.get('cancel_requested') or cancellation_check(row):raise Cancelled()
+
+
+def cancellable(operation):
+    """Nested stages share a worker count; no acknowledgement during COM/upload."""
+    from functools import wraps
+    @wraps(operation)
+    def guarded(key,*args,**kwargs):
+        row=JOBS[key]
+        with LOCK:row['workers']=row.get('workers',0)+1
+        try:
+            boundary(row)
+            return operation(key,*args,**kwargs)
+        except Cancelled:
+            row['cancel_requested']=True
+        except Exception:
+            row.update(status='Recovering',error='Companion cancellation check needs reconnection.')
+            journal(row)
+        finally:
+            with LOCK:
+                row['workers']-=1
+                stopped=row['workers']==0
+            if stopped and row.get('cancel_requested'):
+                row.update(status='Cancelled',checkpoint_pending=False)
+                journal(row)
+                try:cancellation_check(row,stopped=True)
+                except Exception:pass # Durable pending request is retried by host recovery.
+    return guarded
+
+
 def configure_host(config):
     """Opt-in preparation-only capability; never a Dropbox or Shopify credential."""
     import re
@@ -76,6 +130,7 @@ def journal(row):
     atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
         package_transport=row.get('package_transport',0),
         phase=row.get('phase','Preparing'),status=row['status'],error=row.get('error',''),
+        cancellation_confirmed=bool(row.get('cancellation_confirmed')),
         repair=bool(row.get('repair')),checkpoint_pending=bool(row.get('checkpoint_pending')),
         started_at=row.setdefault('started_at',time.time()),retry_at=row.get('retry_at',0),recovery_failures=row.get('recovery_failures',0),diagnostic=row.get('diagnostic')))
 
@@ -102,10 +157,17 @@ def recover_retained(config):
         try:
             if file.stat().st_size>4*1024*1024:continue
             data=json.loads(file.read_text());ctx=data['context']
-            if not isinstance(ctx,dict) or data.get('status') not in ('Working','Recovering','Prepared','Blocked'):continue
+            if not isinstance(ctx,dict) or data.get('status') not in ('Working','Recovering','Prepared','Blocked','Cancelled'):continue
             if not ctx.get('automatic') or not all(k in ctx for k in ('source','product_gid','lease_token')):continue
         except (OSError,ValueError,KeyError,TypeError):continue
         if data['status'] in ('Prepared','Blocked') and not data.get('checkpoint_pending'):continue
+        if data['status']=='Cancelled' and data.get('cancellation_confirmed'):continue
+        retained=dict(context=ctx,folder=file.parent,status=data['status'])
+        if any(r.get('context',{}).get('lease_token')==ctx['lease_token'] and r.get('workers',0)>0 for r in list(JOBS.values())):continue
+        if cancellation_check(retained,config=config):
+            if (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():return True
+            cancellation_check(retained,stopped=True,config=config);continue
+        if data['status']=='Cancelled':continue
         if time.time()<data.get('retry_at',0)<=time.time()+300:return True
         heartbeat={k:ctx[k] for k in ('product_gid','lease_token')}
         try:
@@ -151,6 +213,11 @@ def host_loop():
             state='Companion Connected'
             if active:
                 row=active[0];stage=row.get('phase','Preparing')
+                if cancellation_check(row,config=config):
+                    state='Cancelling'
+                    if not row.get('workers',0) and not (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
+                        cancellation_check(row,stopped=True,config=config)
+                    HOST_BUSY.clear();HOST_STOP.wait(delay);continue
                 # A stuck COM call keeps its processor lock. Never steal it or renew forever.
                 if time.time()-row.get('started_at',time.time())>2700:
                     state='Failed';raise RuntimeError('Preparation exceeded the recovery window; inspect Photoshop. Lock retained.')
@@ -215,7 +282,7 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0):
         # Durable server checkpoints retain completed automatic jobs. They must
         # not exhaust the eight interactive-session slots during a fast batch.
         for key,row in list(JOBS.items()):
-            if row['context'].get('automatic') and row['status'] in ('Prepared','Blocked'):
+            if row['context'].get('automatic') and row['status'] in ('Prepared','Blocked','Cancelled'):
                 JOBS.pop(key,None)
         if any(row['status']=='Working' for row in JOBS.values()):raise ValueError('A preparation is already running.')
         if len(JOBS)>=8:raise ValueError('Too many preparation sessions. Retry later.')
@@ -309,6 +376,7 @@ def reconnect(row):
     if context(row['grant'])!=ctx:raise ValueError('Preparation identity changed.')
 
 
+@cancellable
 def upload_prepared(key,archive):
     """Retry transfer after deploy without repeating Photoshop or source download."""
     import requests
@@ -319,12 +387,14 @@ def upload_prepared(key,archive):
     try:
         for attempt in range(3):
             try:
+                boundary(row)
                 grant=row['grant']
                 row['timings']['upload_attempts']+=1
                 with archive.open('rb',buffering=1024*1024) as content:
                     response=requests.post(grant['base_url']+'/api/auto-editions/package?'+urlencode({'ticket':grant['ticket']}),
                         data=content,headers={'X-Sports-Cave-Transfer-Secret':grant['secret'],'Content-Type':'application/zip'},
                         allow_redirects=False,timeout=600)
+                boundary(row)
                 response.raise_for_status();result=response.json()
                 if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
                 finish_upload(row,result,started)
@@ -335,6 +405,7 @@ def upload_prepared(key,archive):
                 if isinstance(completed,dict) and completed.get('preparation_hash'):
                     finish_upload(row,completed,started)
                     return
+    except Cancelled:raise
     except Exception as error:
         response=getattr(error,'response',None)
         transient=isinstance(error,requests.RequestException) and (response is None or response.status_code>=500)
@@ -385,6 +456,7 @@ def processor_lease():
 
 
 def report_failure(row):
+    if row.get('cancel_requested') or row.get('status')=='Cancelled':return
     if not row['context'].get('automatic') or row.get('status')!='Blocked' or row.get('checkpoint_reported'):return
     row['checkpoint_pending']=True; journal(row)
     try:
@@ -406,6 +478,7 @@ def report_failure(row):
         row['error']+=' The server checkpoint needs reconnection.'
 
 
+@cancellable
 def inspect(key):
     lease=None
     automatic=False
@@ -439,6 +512,7 @@ def inspect(key):
         if count!=meta['size'] or hashes['dropbox']!=meta['content_hash']:raise ValueError('Source checksum failed.')
         row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
         row['timings'].update(source_bytes=meta['size'],source_transfer_bytes=0 if complete else count,source_reused=complete)
+        boundary(row)
         phase='Photoshop inspection'
         row['phase']='Photoshop';journal(row)
         from auto_editions_colour_source import inspect_psd,ColourReview
@@ -451,10 +525,13 @@ def inspect(key):
         inspector_hash=__import__('hashlib').sha256(inspector.replace('\r\n','\n').encode()).hexdigest()
         inspection=cached_inspection(folder,row['context']['source'],hashes['sha256'],inspector_hash)
         row['timings']['inspection_reused']=inspection is not None
+        boundary(row)
         if inspection is None:
             lease=processor_lease()
             script='var SC_PSD_INSPECT_REQUEST = '+json.dumps(request)+';\n'+inspector
+            boundary(row)
             run(script)
+            boundary(row)
             inspection=json.loads((folder/'inspection.json').read_text(encoding='utf-8-sig'))
             if not inspection['documents'][0].get('error'):
                 atomic_json(folder/'inspection-cache.json',inspection_receipt(folder,row['context']['source'],hashes['sha256'],inspector_hash))
@@ -472,6 +549,7 @@ def inspect(key):
             raise ColourReview('ICC export mismatch: Photoshop did not retain the embedded source profile.')
         automatic=bool(row['context'].get('automatic'))
         row.update(status='Working' if automatic else 'Inspected',inspection=result['inspection'])
+    except Cancelled:raise
     except Exception as error:
         from urllib.error import URLError
         transient=phase=='PSD transfer' and isinstance(error,(URLError,TimeoutError,ConnectionError))
@@ -547,6 +625,7 @@ def safe_diagnostic(message,stage):
     return result
 
 
+@cancellable
 def prepare_worker(key,roles,scale=1):
     lease=None;output=None
     try:
@@ -558,10 +637,12 @@ def prepare_worker(key,roles,scale=1):
         lease=processor_lease()
         output=row['folder']/'prepared'
         if output.exists():output=row['folder']/('prepared-recovery-'+secrets.token_hex(6))
+        boundary(row)
         build_started=time.monotonic()
         build(row['folder']/'input.psd',output,ctx['source'],number_layer=roles['number'],
               plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'],scale=scale)
         row.setdefault('timings',{})['prepare_validate_seconds']=round(time.monotonic()-build_started,3)
+        boundary(row)
         if (output/'timings.json').exists():row['timings'].update(json.loads((output/'timings.json').read_text()))
         manifest=json.loads((output/'manifest.json').read_text())
         manifest['confirmed_roles']=roles
@@ -585,6 +666,7 @@ def prepare_worker(key,roles,scale=1):
         # Photoshop is finished; independent uploads must not occupy its lease.
         lease.unlink(missing_ok=True);lease=None
         upload_prepared(key,archive)
+    except Cancelled:raise
     except Exception as error:
         detail=failure_detail(JOBS[key],'Preparation',error)
         JOBS[key].update(status='Blocked',error='Preparation failed: '+detail+'. Existing PSD and mapping are preserved.')

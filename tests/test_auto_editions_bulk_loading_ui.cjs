@@ -6,13 +6,13 @@ const catalogue=Array.from({length:60},(_,i)=>({product_gid:'gid://shopify/Produ
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const data=(cursor=0)=>({rows:catalogue.slice(cursor,cursor+20),next_cursor:cursor+20<catalogue.length?cursor+20:null,duration_ms:10});
 const report=[];
-async function fixture(browser,{width=1280,clock=false,list,image,body=html}={}){
+async function fixture(browser,{width=1280,clock=false,list,image,previews,body=html}={}){
  const page=await browser.newPage({viewport:{width,height:800}}),state={lists:[],images:0,active:0,maxActive:0,large:0,approvals:[],aborted:0,errors:[]};
  page.on('pageerror',e=>state.errors.push(e.message));page.on('requestfailed',r=>{if(r.url().includes('/bulk/'))state.aborted++;});
  if(clock)await page.clock.install();
  await page.route('**/*',async route=>{const url=new URL(route.request().url());
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body});
-  if(url.pathname.endsWith('/previews'))return route.fulfill({json:{rows:[]}});
+  if(url.pathname.endsWith('/previews'))return previews?previews(route,state):route.fulfill({json:{rows:[]}});
    if(url.pathname.endsWith('/list')){const request=route.request().postDataJSON();state.lists.push(request);if(list)return list(route,request,state);return route.fulfill({json:data(request.cursor||0)});}
   if(url.pathname.endsWith('/image')){if(url.searchParams.has('large'))state.large++;else state.images++;state.active++;state.maxActive=Math.max(state.maxActive,state.active);if(image)return image(route,url,state);await sleep(15);state.active--;return route.fulfill({contentType:'image/png',body:png});}
   if(url.pathname.endsWith('/approve')){const body=route.request().postDataJSON();state.approvals.push(body);return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id}});}
@@ -93,5 +93,13 @@ async function fixture(browser,{width=1280,clock=false,list,image,body=html}={})
   const f=await fixture(browser,{list:async route=>{await sleep(500);await route.abort().catch(()=>{});}}),{page,state}=f;await f.start();await sleep(40);
   await page.evaluate(()=>postMessage({type:'sports-cave-bulk-close'},location.origin));await sleep(120);assert(state.aborted>=1);assert.equal(state.lists.length,1);assert.equal(state.errors.length,0);await page.close();
  }
- fs.mkdirSync('output/bulk-loading',{recursive:true});fs.writeFileSync('output/bulk-loading/browser-performance.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));console.log('Progressive loading, lazy bounded images, selections, explicit approvals, stalled requests, Retry, stale cancellation and popup cleanup passed.');
+ {
+  let calls=0,failed=true;const attempts=new Map();const f=await fixture(browser,{clock:true,previews:route=>{calls++;for(const i of route.request().postDataJSON().items)attempts.set(i.product_gid,(attempts.get(i.product_gid)||0)+1);return failed?route.fulfill({status:503,json:{error:'Temporary preview cache outage'}}):route.fulfill({json:{rows:route.request().postDataJSON().items.map(i=>({...i,jpeg:png.toString('base64')}))}});}});
+  await f.start();await f.page.locator('#grid figure').first().waitFor();await sleep(50);await f.page.clock.fastForward(1800);await f.page.locator('#grid figure').first().getByRole('button',{name:'Retry Preview'}).waitFor();assert.equal(f.state.images,0,'Cache outage must not fan out into image requests');await f.page.clock.fastForward(10000);assert([...attempts.values()].every(n=>n<=2),'Only one automatic retry per preview');failed=false;await f.page.locator('#grid figure').first().getByRole('button',{name:'Retry Preview'}).click();await f.page.locator('#grid input:not(:disabled)').first().waitFor();assert.equal(f.state.approvals.length,0);await f.page.close();
+ }
+ {
+  const f=await fixture(browser,{clock:true,previews:route=>route.fulfill({json:{rows:route.request().postDataJSON().items.map(i=>({...i,state:'Loading',jpeg:null}))}})});
+  await f.start();await f.page.locator('#grid figure').first().waitFor();await sleep(50);await f.page.evaluate(()=>{for(const r of rows)r.previewStarted=performance.now()-90001;});await f.page.clock.fastForward(3000);await f.page.locator('#grid figure').first().getByRole('button',{name:'Retry Preview'}).waitFor();assert.equal(f.state.images,0);assert.equal(await f.page.locator('#grid input:not(:disabled)').count(),0);await f.page.close();
+ }
+ fs.mkdirSync('output/bulk-loading',{recursive:true});fs.writeFileSync('output/bulk-loading/browser-performance.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));console.log('Progressive loading, lazy bounded images, selections, explicit approvals, stalled requests, Retry, stale cancellation, bounded cache-outage retries, pending-preview deadline and popup cleanup passed.');
  }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

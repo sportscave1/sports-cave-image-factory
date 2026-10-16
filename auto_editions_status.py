@@ -17,6 +17,8 @@ from auto_editions_onboarding_store import Queue
 LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Needs Review','Cloud Ready','Production Ready','Needs Repair','Failed','Unavailable','Uploading','Recovering')
 ICONS=dict(zip(LABELS,('○','↗','◷','–','↻','◇','◇','✅','✅','⚒','!','?')))
 
+ICONS['Cancelling'+chr(8230)]=chr(8635)
+LABELS+=('Cancelling'+chr(8230),)
 ICONS.update(Uploading=chr(8593),Recovering=chr(8635))
 
 
@@ -41,7 +43,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement {quality_select} {visual_select}
+ {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS reset_cancellation {quality_select} {visual_select}
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
@@ -183,9 +185,13 @@ def project(row, *, writable=False, now=None, evidence=False):
         elif assessment and row.get('approved') is not True and assessment.get('status')!='Auto Approved':
             state='Failed' if assessment.get('status')=='Failed' else 'Needs Review'
             why=reason(assessment.get('reason')) or 'Automatic visual evidence requires review.'
-    return dict(approval_status='Auto Approved' if automatic else None if row.get('approved') is True else assessment.get('status') if visual_enabled() else None,
+    cancellation=row.get('reset_cancellation') or {}
+    cancelling=cancellation.get('stage') in ('Cancelling','Confirmed')
+    if cancelling:
+        state='Cancelling'+chr(8230);why='Waiting for Companion to confirm a safe stop. If offline, cancellation stays pending. Reset resumes automatically when confirmed.';actions=[]
+    return dict(cancelling=cancelling,approval_status='Auto Approved' if automatic else None if row.get('approved') is True else assessment.get('status') if visual_enabled() else None,
                 **({'uploaded':uploaded} if continuous() or evidence else {}),product_gid=pid,status=state,icon=ICONS[state],reason=why,
-                reset_allowed=bool(writable and discovery_enabled() and status!='Preparing' and reset.get('stage') not in ('Discovering','Queued','Preparing')),
+                reset_allowed=bool(writable and discovery_enabled() and not cancelling and reset.get('stage') not in ('Discovering','Queued','Preparing')),
                 mapping_file_id=mapped,
                 checkpoint=CHECKPOINTS.get(row.get('checkpoint'),'Checkpoint recorded' if row.get('checkpoint') else ''),
                 checkpoint_at=str(row.get('checkpoint_at') or row.get('updated_at') or '') or None,
@@ -266,8 +272,8 @@ def review_operations(connect,data):
         if not operation or operation['hash']!=row.get('preparation_hash'):continue
         # Authoritative Cloud/Production Ready and repair outcomes always take precedence.
         if row['status'] in ('Review','Needs Review'):
-            label={'Pending':'Pending Approval','Processing':'Approving…','Failed':'Approval Failed','Needs Attention':'Needs Review'}.get(operation['state'])
-            if label:row['review_operation']=dict(label=label,reason=operation['reason'],job_id=operation['job_id'])
+            label={'Pending':'Approving…','Processing':'Approving…','Failed':'Approval Failed','Needs Attention':'Needs Review'}.get(operation['state'])
+            if label:row['review_operation']=dict(label=label,state=operation['state'],reason=operation['reason'] or ('Queued for validation' if operation['state']=='Pending' else ''),job_id=operation['job_id'])
     return data
 
 
@@ -333,12 +339,12 @@ async def reset_action(request):
     try:
         import files_upload_api as files
         import supabase_backend as db
-        from auto_editions_reset import Reset
+        from auto_editions_cancellation import Cancellation as Reset
         user=await actor(request,write=True)
         body=await files._json_body(request)
         if set(body)!={'product_gid','request_id'}:raise ValueError('Reset selects one design only.')
         stage=await run_in_threadpool(Reset(db.connect).clear,identity(body['product_gid']),body['request_id'],str(user['id']))
-        return JSONResponse({'ok':True,'stage':stage},headers=api.HEADERS)
+        return JSONResponse({'ok':stage!='Cancelling','stage':stage},status_code=202 if stage=='Cancelling' else 200,headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

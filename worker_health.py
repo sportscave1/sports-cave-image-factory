@@ -147,15 +147,20 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         measured=max(0,(stamp(finished)-stamp(start)).total_seconds()) if finished and start else None
         stage=row.get('reason') if row.get('reason') in diagnostics.STAGES else 'Preparing' if category=='Active' else 'Review' if category=='Needs Review' else 'Claimed' if category=='Queued' else 'Unknown'
         if validation_pending:stage='Verifying'
+        recorded=row.get('last_diagnostic') or {}
+        if category=='Failed':stage=recorded.get('stage') if recorded.get('stage') in diagnostics.STAGES else stage
         proof_reason=state.get('reason') or row.get('reason')
-        explanation=diagnostics.explain(proof_reason,stage)
+        explanation=diagnostics.operator_details(proof_reason,stage,recorded.get('code') if category=='Failed' else None)
+        if stage=='Unknown':stage='Stage unavailable'
         jobs.append(dict(id=row['product_gid'],design=str(row.get('product_title') or row['product_gid'])[:180],priority=row['priority'],
-            stage=stage,status='Auto Approved' if auto_approved and label=='Cloud Ready' else label,approval_status=state.get('approval_status'),category=category,elapsed_seconds=elapsed if category=='Active' else None,duration_seconds=measured,
+            stage=stage,status='Pending' if row.get('wh_requested') and row['status']=='Awaiting preparation' and category=='Queued' else 'Auto Approved' if auto_approved and label=='Cloud Ready' else label,approval_status=state.get('approval_status'),category=category,elapsed_seconds=elapsed if category=='Active' else None,duration_seconds=measured,
             last_activity=sydney(row.get('updated_at')),last_activity_iso=stamp(row['updated_at']).isoformat(),
             checkpoint=__import__('auto_editions_status').CHECKPOINTS.get(row.get('latest_checkpoint'),state.get('checkpoint') or 'No checkpoint'),reason=explanation['description'] if category=='Failed' else state.get('reason',''),
             diagnostic=explanation if category=='Failed' or explanation['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','PROFILE_APPROVED','COLOUR_INCOMPATIBLE') else None,
             colour_recovered=bool(row.get('colour_recovered')),colour_affected=bool(row.get('colour_affected')),attempts=row['attempts'],completed=completed,
             validation_pending=validation_pending,actions=state.get('actions',[]),lease_expired=bool(row.get('lease_until') and stamp(row['lease_until'])<=now and row['status']=='Preparing')))
+        jobs[-1].update(retry_eligible=bool(eligible and row['status'] in ('Blocked','Needs PSD Repair') and not row.get('preparation_hash') and not (row.get('replacement') or {}).get('manual_required')),
+            repair_required=row['status']=='Needs PSD Repair' or explanation['manual_repair'])
     counts['remaining']=counts['queued']+counts['active']
     current=next((j for j in jobs if j['category']=='Active'),None)
     durations=[float(s['duration_seconds']) for s in successes if s.get('duration_seconds') is not None and 1<=float(s['duration_seconds'])<=86400]
@@ -217,21 +222,25 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
 class Health:
     def __init__(self,connect):self.connect=connect
 
-    def _read_snapshot(self,include_beats):
+    def _read_snapshot(self,include_beats,after=''):
         with self.connect() as conn,conn.cursor() as cur:
             queue_sql="""SELECT q.product_gid,q.file_id,q.status,q.priority,q.reason,q.attempts,
                 q.preparation_hash,q.lease_until,q.updated_at,to_jsonb(q)->'replacement' AS replacement,p.product_title,
                 EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_retry') AS colour_affected,
+                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='worker_health_queue_request') AS wh_requested,
                 EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_recovered'
                     AND ca.detail->>'preparation_hash'=q.preparation_hash) AS colour_recovered,
                 (m.dropbox_file_id=q.file_id AND p.edition_total BETWEEN 1 AND 1000 AND
                  (SELECT count(*) FROM edition_products other WHERE COALESCE(NULLIF(other.shopify_product_gid,''),other.shopify_product_id)=q.product_gid)=1) AS eligible,
                 (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='claimed' ORDER BY created_at DESC,id DESC LIMIT 1) AS claimed_at,
                 (SELECT event FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event IN ('queued','mapping_confirmed','claimed','Preparing','Blocked','Cloud Ready','Needs PSD Repair','visual_quality_approved','preparation_metrics','retry','prepare_now') ORDER BY created_at DESC,id DESC LIMIT 1) AS latest_checkpoint,
-                (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='preparation_metrics' AND a.detail->>'preparation_hash'=q.preparation_hash ORDER BY created_at DESC,id DESC LIMIT 1) AS completed_at
-                FROM auto_edition_onboarding q JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
+                (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='preparation_metrics' AND a.detail->>'preparation_hash'=q.preparation_hash ORDER BY created_at DESC,id DESC LIMIT 1) AS completed_at,
+                (SELECT detail FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='diagnostic'
+                    AND a.created_at>=COALESCE((SELECT max(c.created_at) FROM auto_edition_onboarding_audit c WHERE c.product_gid=q.product_gid AND c.event='claimed'),q.created_at)
+                    ORDER BY created_at DESC,id DESC LIMIT 1) AS last_diagnostic
+                FROM auto_edition_onboarding q LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
                 LEFT JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
-                ORDER BY q.product_gid LIMIT 1001"""
+                WHERE q.product_gid>%s ORDER BY q.product_gid LIMIT 500"""
             successes_sql="""SELECT a.id,a.product_gid,p.product_title,a.created_at,
                 EXTRACT(EPOCH FROM a.created_at-c.created_at) AS duration_seconds
                 FROM auto_edition_onboarding_audit a
@@ -250,7 +259,7 @@ class Health:
                     'requested_at',created_at,'audit_id',id) FROM auto_edition_onboarding_audit
                     WHERE product_gid=%s AND event IN ('worker_paused','worker_resumed')
                     ORDER BY created_at DESC,id DESC LIMIT 1),
-                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause""",(CONTROL,))
+                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause""",(after,CONTROL))
             return dict(cur.fetchone())
 
     def snapshot(self):
@@ -263,8 +272,14 @@ class Health:
             # Retry in a NEW transaction after the failed optional read.
             raw=self._read_snapshot(False);telemetry_error=True;reads+=1
         rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause']
-        if len(rows)>1000:raise ValueError('Worker Health snapshot exceeds its reviewed 1000-row bound.')
-        states=batch(self.connect,list(dict.fromkeys(r['product_gid'] for r in rows)),writable=True,evidence=True)
+        while len(raw['rows'])==500:
+            raw=self._read_snapshot(False,raw['rows'][-1]['product_gid']);reads+=1;rows.extend(raw['rows'])
+        state_rows=[];state_reads=0
+        ids=list(dict.fromkeys(r['product_gid'] for r in rows))
+        for index in range(0,len(ids),500):
+            part=batch(self.connect,ids[index:index+500],writable=True,evidence=True)
+            state_rows.extend(part['rows']);state_reads+=part['query_count']
+        states=dict(rows=state_rows,query_count=state_reads)
         result=project(rows,{r['product_gid']:r for r in states['rows']},beats,successes,pause,telemetry_error=telemetry_error)
         result['cost']=dict(queries=reads+states['query_count'],dropbox_calls=0,duration_ms=round((time.perf_counter()-start)*1000,2))
         return result
@@ -301,11 +316,13 @@ class Health:
                     severity='info' if row['event'].startswith('worker_') else 'warning',description={'worker_paused':'Administrator paused new claims.','worker_resumed':'Administrator resumed new claims.','recovering':'Owned preparation is awaiting automatic recovery.'}[row['event']],recommended_action='No action required unless processing remains unhealthy.')
             if severity and value['severity']!=severity or component and value['component']!=component:continue
             if search and search.casefold() not in (str(row.get('product_title',''))+' '+value['description']+' '+value['code']).casefold():continue
+            if value['stage']=='Unknown':value['stage']='Stage unavailable'
             out.append(dict(**value,id=row['id'],trace='AE-'+str(row['id']),timestamp=sydney(row['created_at']),
                 product_gid=row['product_gid'],design=str(row.get('product_title') or 'Worker control')[:180],attempts=detail.get('attempt',row.get('attempts')),
                 last_checkpoint=row.get('last_checkpoint'),revision=detail.get('revision') if re.fullmatch(r'[a-zA-Z0-9._-]{1,64}',str(detail.get('revision') or '')) else None,
                 recovery_attempted=bool(detail.get('recovery_attempted') or row['event'] in ('recovering','colour_retry','colour_recovered')),
                 recovery_result='Recovered' if row['event']=='colour_recovered' else detail.get('recovery_result') if detail.get('recovery_result') in ('Recovered','Retry scheduled','Cause not yet determined') else 'Awaiting next owned checkpoint' if row['event'] in ('recovering','colour_retry') else None,
-                next_retry_at=sydney(detail['next_retry_at']) if detail.get('next_retry_at') else None))
+                next_retry_at=sydney(detail['next_retry_at']) if detail.get('next_retry_at') else None,
+                technical_error=diagnostics.technical_text(detail.get('reason') or detail.get('error') or detail.get('message')) or None))
             if len(out)==50:break
         return dict(rows=out,next_cursor=scanned if scanned and (len(out)==50 or len(raw)==200) else None,scanned=len(raw))

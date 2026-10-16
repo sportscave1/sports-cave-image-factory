@@ -173,7 +173,8 @@ def test_operation_overlay_cannot_change_authoritative_status_or_certification(o
     jobs,sql,record,assets=ops;submit(jobs,record)
     base=dict(rows=[dict(product_gid=PID,status='Needs Review',preparation_hash=record['hash'])])
     status.review_operations(jobs.connect,base)
-    assert base['rows'][0]['status']=='Needs Review' and base['rows'][0]['review_operation']['label']=='Pending Approval'
+    assert base['rows'][0]['status']=='Needs Review' and base['rows'][0]['review_operation']['label']=='Approving…'
+    assert base['rows'][0]['review_operation']['state']=='Pending'
     current=dict(rows=[dict(product_gid=PID,status='Needs Repair',preparation_hash=record['hash'])])
     status.review_operations(jobs.connect,current);assert 'review_operation' not in current['rows'][0]
 

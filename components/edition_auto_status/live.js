@@ -17,6 +17,22 @@
   function scrollables(){const el=grid();return el?[doc.scrollingElement,doc.querySelector('[data-testid="stMain"]'),el,...el.querySelectorAll('*')].filter(n=>n&&(n.scrollHeight>n.clientHeight||n.scrollWidth>n.clientWidth)):[];}
   function capture(){retained.scroll=scrollables().map((n,index)=>({index,node:n,cls:n.className,top:n.scrollTop,left:n.scrollLeft}));}
   function restore(){const nodes=scrollables();for(const saved of retained.scroll){const n=saved.node?.isConnected?saved.node:nodes.find(n=>saved.cls&&n.className===saved.cls)||nodes[saved.index];if(n){n.scrollTop=saved.top;n.scrollLeft=saved.left;}}}
+  function updateRows(rows){
+    const previous=new Map((retained.rows||[]).map(r=>[r.product_gid,fingerprint(r)]));
+    const changed=rows.filter(r=>previous.get(r.product_gid)!==fingerprint(r));
+    retained.rows=rows;if(changed.length)host.SportsCaveEditionReset?.updateRows?.(changed);return changed.length;
+  }
+  function acceptBatch(operations,refresh=true){
+    const byID=new Map(operations.map(r=>[r.product_gid,r]));
+    const changed=updateRows((retained.rows||[]).map(row=>{
+      const op=byID.get(row.product_gid);if(!op||op.hash!==row.preparation_hash||!['Review','Needs Review'].includes(row.status))return row;
+      if(['Pending','Processing'].includes(op.state))return {...row,reset_allowed:op.state==='Processing'?false:row.reset_allowed,review_operation:{label:'Approving…',state:op.state,reason:op.reason||(op.state==='Pending'?'Queued for validation':''),job_id:op.job_id}};
+      if(['Failed','Needs Attention','Skipped'].includes(op.state))return {...row,review_operation:{label:op.state==='Failed'?'Approval Failed':'Needs Review',state:op.state,reason:op.reason,job_id:op.job_id}};
+      if(op.state==='Approved'&&op.current_hash===row.preparation_hash&&['Cloud Ready','Production Ready'].includes(op.current_status))return {...row,status:op.current_status,review_operation:undefined};
+      return row;
+    }));
+    if(!changed||!refresh)return;force=true;lastPoll=0;if(inFlight)refreshAfter=true;else poll();
+  }
   function flush(){
     if(!pending||!visible()||!safe()||force)return;
     if(!pending.unavailable&&Date.now()/1000-pending.snapshot.issued_at>85){force=true;poll();return;}
@@ -24,15 +40,16 @@
     send('streamlit:setComponentValue',{value:{...value,nonce:++retained.nonce},dataType:'json'});
   }
   async function poll(){
-    if(inFlight||!ids.length||!visible()||modal()||Date.now()-lastPoll<2000)return;
+    if(inFlight||!ids.length||!visible()||Date.now()-lastPoll<2000)return;
     inFlight=true;lastPoll=Date.now();
+    const request=new host.AbortController(),abort=()=>request.abort(),deadline=host.setTimeout(abort,10000);controller.signal.addEventListener('abort',abort,{once:true});
     try{
-      const response=await fetch('/api/auto-editions/status',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_gids:ids}),signal:controller.signal});
+      const response=await fetch('/api/auto-editions/status',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_gids:ids}),signal:request.signal});
       const value=await response.json();if(!response.ok||!value.snapshot)throw Error('Unavailable');
-      retained.rows=value.rows;if(fingerprint(value.rows)!==baseline)pending=value;else pending=null;
+      updateRows(value.rows);if(fingerprint(value.rows)!==baseline)pending=value;else pending=null;
       force=false;
     }catch(error){if(error.name!=='AbortError'&&baseline!=='Unavailable')pending={unavailable:true};force=false;}
-    finally{inFlight=false;if(refreshAfter){refreshAfter=false;force=true;lastPoll=0;poll();}else flush();}
+    finally{host.clearTimeout(deadline);controller.signal.removeEventListener('abort',abort);inFlight=false;if(refreshAfter){refreshAfter=false;force=true;lastPoll=0;poll();}else flush();}
   }
   addEventListener('message',event=>{
     if(event.source!==host||event.data?.type!=='streamlit:render')return;
@@ -60,7 +77,7 @@
   const observer=new host.MutationObserver(()=>{restore();if(force&&!modal())poll();else flush();});
   const scope=root();if(scope)observer.observe(scope,{childList:true,subtree:true});
   timer=host.setInterval(()=>{const active=(retained.rows||[]).some(r=>['Pending Approval','Approving…'].includes(r.review_operation?.label));if(force||active||Date.now()-lastPoll>=25000)poll();},3000);
-  const lifecycle={poll,flush,safe,refresh(){force=true;lastPoll=0;if(inFlight){refreshAfter=true;return;}poll();},destroy(){host.clearInterval(timer);controller.abort();observer.disconnect();}};
+  const lifecycle={poll,flush,safe,acceptBatch,refresh(){force=true;lastPoll=0;if(inFlight){refreshAfter=true;return;}poll();},destroy(){host.clearInterval(timer);controller.abort();observer.disconnect();}};
   host.SportsCaveEditionStatus=lifecycle;
   addEventListener('pagehide',()=>{if(host.SportsCaveEditionStatus===lifecycle)lifecycle.destroy();},{once:true});
 })();

@@ -22,6 +22,8 @@ def store():
 
 def failure(error):
     import uuid,logging
+    if getattr(error,'sqlstate',None) in ('55P03','57014'):
+        return JSONResponse(dict(error='The queue is busy with another operation. Wait briefly and retry the same request; no duplicate job will be created.'),status_code=503,headers=HEADERS)
     known=isinstance(error,(PermissionError,ValueError))
     trace='WH-'+uuid.uuid4().hex[:12]
     if not known:logging.getLogger(__name__).warning('worker_health_unavailable trace=%s error_type=%s',trace,type(error).__name__)
@@ -74,5 +76,55 @@ async def logs(request):
     except Exception as error:return failure(error)
 
 
+async def jobs(request):
+    try:
+        await actor(request)
+        import worker_health_queue as queue
+        return JSONResponse(await run_in_threadpool(queue.page,store(),request.query_params.get('filter','All'),request.query_params.get('cursor','')),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+async def updates(request):
+    try:
+        await actor(request)
+        import worker_health_queue as queue,files_upload_api as files
+        body=await files._json_body(request)
+        if not isinstance(body,dict) or set(body)!={'filter','known','scanned_to'}:raise ValueError('Current filter and loaded job versions required.')
+        return JSONResponse(await run_in_threadpool(queue.changes,store(),body['filter'],body['known'],body['scanned_to']),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+async def search(request):
+    try:
+        await actor(request)
+        import worker_health_queue as queue
+        return JSONResponse(await run_in_threadpool(queue.search,store().connect,request.query_params.get('q','')),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+async def enqueue(request):
+    try:
+        user=await actor(request,write=True)
+        import worker_health_queue as queue,files_upload_api as files
+        body=await files._json_body(request)
+        if not isinstance(body,dict) or set(body)!={'product_gid','request_id','repair_confirmed'}:raise ValueError('Choose one mapped design and confirm any required repair.')
+        from worker_health_cache import invalidate
+        service=store();invalidate(service.connect)
+        try:result=await run_in_threadpool(queue.submit,service.connect,body['product_gid'],str(user['id']),body['request_id'],body['repair_confirmed'])
+        finally:invalidate(service.connect)
+        return JSONResponse(result,status_code=202,headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
+async def details(request):
+    try:
+        await actor(request)
+        import worker_health_queue as queue
+        return JSONResponse(await run_in_threadpool(queue.details,store().connect,request.query_params.get('product_gid')),headers=HEADERS)
+    except Exception as error:return failure(error)
+
+
 ROUTES=(('/worker-health',page,('GET',)),('/api/worker-health',snapshot,('GET',)),
-        ('/api/worker-health/control',pause,('POST',)),('/api/worker-health/diagnostics',logs,('GET',)))
+        ('/api/worker-health/control',pause,('POST',)),('/api/worker-health/diagnostics',logs,('GET',)),
+        ('/api/worker-health/jobs',jobs,('GET',)),('/api/worker-health/updates',updates,('POST',)),
+        ('/api/worker-health/search',search,('GET',)),('/api/worker-health/enqueue',enqueue,('POST',)),('/api/worker-health/details',details,('GET',)))

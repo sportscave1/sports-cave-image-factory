@@ -8,7 +8,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
 (async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
  for(const width of [1440,390])for(const choice of ['selected','select-loaded']){
   const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage(),jobs=new Map(),batches=new Map();let submissions=[],batchReads=0,individualReads=0,failSubmission=false;
-  await context.request.post('http://127.0.0.1:8645/fixture-stage',{data:{stage:'Queued',review_jobs:{}}});
+  await context.request.post('http://127.0.0.1:8645/fixture-stage',{data:{stage:'Queued',review_jobs:Object.fromEntries(products.map(r=>[r.product_gid,{hash:r.hash,label:'Needs Review'}]))}});
   await page.route('**/auto-editions/bulk',route=>route.fulfill({contentType:'text/html',body:html}));
   await page.route('**/bulk/list',route=>{
    const body=route.request().postDataJSON(),ids=new Set(body.product_gids),available=products.filter(r=>ids.has(r.product_gid)&&!['Pending','Processing','Approved'].includes(jobs.get(r.product_gid)?.state));
@@ -23,9 +23,9 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
    if(!batches.has(body.request_id)){
     batches.set(body.request_id,body.items);for(const item of body.items)jobs.set(item.product_gid,{...item,job_id:item.product_gid,state:'Pending',reason:''});
    }
-   const fixture=Object.fromEntries([...jobs].map(([pid,row])=>[pid,{hash:row.hash,label:'Pending Approval'}]));
+   const fixture=Object.fromEntries([...jobs].map(([pid,row])=>[pid,{hash:row.hash,label:'Approving…'}]));
    await context.request.post('http://127.0.0.1:8645/fixture-stage',{data:{stage:'Queued',review_jobs:fixture}});
-   await sleep(80);return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id}});
+   const rows=[...jobs.values()];await sleep(80);return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id,rows,counts:counts(rows),active:true}});
   });
   await page.route('**/bulk/progress',route=>{const body=route.request().postDataJSON(),items=body.batch_id?batches.get(body.batch_id):null;
    const rows=[...jobs.values()].filter(r=>!items||items.some(i=>i.product_gid===r.product_gid)).map(r=>({...r,current_status:r.state==='Approved'?'Cloud Ready':undefined,current_hash:r.hash}));
@@ -42,7 +42,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
   await review.locator('#grid input:not(:disabled)').first().waitFor();
   assert.equal(await review.locator('#all').count(),0);
   if(choice==='select-loaded'){
-   for(let i=0;i<60;i++){await review.locator('#grid figure').nth(i).scrollIntoViewIfNeeded();}
+   for(let i=0;i<60;i++){const card=review.locator('#grid figure').nth(i);await card.scrollIntoViewIfNeeded();await card.locator('input:not(:disabled)').waitFor();}
    await review.locator('#grid input:not(:disabled)').nth(59).waitFor();
    await review.locator('#select').click();
   }else{await review.locator('#grid input:not(:disabled)').nth(0).check();await review.locator('#grid input:not(:disabled)').nth(1).check();}
@@ -52,7 +52,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
   assert(await review.locator('#accept').isDisabled());await review.locator('#confirm').check();const started=Date.now();
   await review.locator('#accept').evaluate(b=>{b.click();b.click();});await page.getByRole('dialog',{name:'Bulk Review',exact:true}).waitFor({state:'detached'});
   assert.equal(submissions.length,1,'Double-click is one submission');assert.equal(jobs.size,choice==='select-loaded'?60:2);
-  const selected=[...jobs.keys()];await page.waitForFunction(pid=>window.SportsCaveEditionStatusState?.rows.some(r=>r.product_gid===pid&&r.review_operation?.label==='Pending Approval'),selected[0]);
+  const selected=[...jobs.keys()];await page.waitForFunction(ids=>ids.every(pid=>window.SportsCaveEditionStatusState?.rows.some(r=>r.product_gid===pid&&r.review_operation?.label==='Approving…')),selected);
   assert.equal(await page.getByText('fixture-main-runs:',{exact:false}).innerText(),before,'Only the fragment updates');
   assert.deepEqual(await scroll.evaluate(n=>({top:n.scrollTop,left:n.scrollLeft})),position,'Main scrolling is preserved');
   if(width>800)await page.getByText('1 unsaved change',{exact:false}).waitFor();
