@@ -136,15 +136,16 @@ class LifestyleMemoryHeadroomTests(unittest.TestCase):
                     exif[274] = orientation
                     image.save(stream, "PNG", exif=exif)
                 stream.seek(0)
-                # Reference the previous transform and export settings.
+                # Product Mockups retain the complete oriented image, with lossless WebP.
                 with Image.open(stream) as source:
                     transposed = ImageOps.exif_transpose(source)
                     rgb = transposed.convert("RGB")
-                    fitted = ImageOps.fit(rgb, (60, 60), method=Image.LANCZOS)
+                    fitted = rgb.copy()
+                    fitted.thumbnail((factory.MAX_EXPORT_EDGE, factory.MAX_EXPORT_EDGE), Image.LANCZOS)
                     expected = Path(directory) / "expected.jpg"
                     fitted.save(expected, "JPEG", quality=factory.EXPORT_JPG_QUALITY, optimize=True)
                     expected_webp = Path(directory) / "expected.webp"
-                    fitted.save(expected_webp, "WEBP", quality=factory.EXPORT_WEBP_QUALITY, method=factory.EXPORT_WEBP_METHOD)
+                    fitted.save(expected_webp, "WEBP", lossless=True, method=1)
                     expected_preview = Path(directory) / "expected-preview.webp"
                     preview = fitted.copy()
                     preview.thumbnail((factory.MAX_PREVIEW_EDGE, factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
