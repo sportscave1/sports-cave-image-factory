@@ -86,6 +86,7 @@ def progress(row, schema, at=None):
             label=('Recovered' if sid==latest else 'Clicked' if send.get('clicked')
                    else 'Opened' if send.get('opened') else 'Sent')
             value=cell(label+' ✓','green')
+            value['sent_at']=send.get('submitted_at')
         elif not col.get('published',True):
             value=cell('Not published',reason='Draft stage; publish successfully before it can join the live sequence')
         elif not col['enabled']:
@@ -114,8 +115,12 @@ def progress(row, schema, at=None):
             # later persisted deadline than the journey itself.
             deadlines=[d for d in (date(row.get('next_due_at')),date(send.get('due_at'))) if d]
             due=max(deadlines) if deadlines else None
-            value=cell('Countdown','gold','Scheduled by the worker',due) if due else cell('Awaiting worker')
+            value=(cell('Queued','gold','Persisted pending send; awaiting worker') if row.get('lifecycle') and status=='PENDING' and due and due<=at
+                   else cell('Countdown','gold','Scheduled by the worker',due) if due else cell('Awaiting worker'))
         else:value=cell('Unconfirmed','gold','No provider acceptance receipt recorded for this step')
+        if row.get('lifecycle') and index==current and value['label'] in ('Paused','Queued'):
+            deadlines=[d for d in (date(row.get('next_due_at')),date(send.get('due_at'))) if d]
+            if deadlines:value['scheduled_at']=max(deadlines).isoformat()
         result.append(value)
     return result
 

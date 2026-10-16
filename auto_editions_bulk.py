@@ -238,20 +238,20 @@ class PreviewBuilds:
 preview_builds=PreviewBuilds()
 # Listing snapshots avoid a metadata query for each image; short lived, bounded, actor scoped.
 snapshots=OrderedDict();snapshot_lock=threading.Lock()
-PAGE_SIZE=20
+PAGE_SIZE=10
 LIST_TIMEOUT_SECONDS=12
 READ_DEADLINE_SECONDS=6
 READ_SLOTS=threading.BoundedSemaphore(3)
 
 # Bound candidates BEFORE loading manifests, proof/receipt arrays or status laterals.
 # Ordinality is a stable cursor within the caller's fixed catalogue/search context.
-PAGE_SQL='''SELECT w.pid AS product_gid,w.position,last_review.state AS review_result,last_review.reason AS review_reason
+PAGE_SQL='''WITH candidates AS (SELECT w.pid AS product_gid,w.position,last_review.state AS review_result,last_review.reason AS review_reason
     FROM unnest(%s::text[]) WITH ORDINALITY AS w(pid,position)
     JOIN auto_edition_onboarding q ON q.product_gid=w.pid
     LEFT JOIN LATERAL (SELECT state,reason FROM auto_edition_review_jobs j
         WHERE j.product_gid=w.pid AND j.preparation_hash=q.preparation_hash
         ORDER BY created_at DESC,id DESC LIMIT 1) last_review ON true
-    WHERE w.position>%s AND q.preparation_hash IS NOT NULL
+    WHERE q.preparation_hash IS NOT NULL
       AND NOT EXISTS(SELECT 1 FROM auto_edition_review_jobs j
           WHERE j.product_gid=w.pid AND j.state IN ('Pending','Processing'))
       AND NOT EXISTS(SELECT 1 FROM auto_edition_layouts l
@@ -260,7 +260,8 @@ PAGE_SQL='''SELECT w.pid AS product_gid,w.position,last_review.state AS review_r
             AND COALESCE(l.approval->>'actor_id','')<>''
             AND l.approval->>'visual_approved'='true' AND l.approval->>'pixel_exact'='true'
             AND l.approval->>'test_only'='true')
-    ORDER BY w.position LIMIT %s'''
+    ), counted AS (SELECT *,count(*) OVER() AS total_remaining FROM candidates)
+    SELECT * FROM counted WHERE position>%s ORDER BY position LIMIT %s'''
 
 
 @contextmanager
@@ -375,6 +376,7 @@ def listing(connect,ids,user,cursor=0):
         snapshots.update(entries)
         while len(snapshots)>1000:snapshots.popitem(last=False)
     return dict(rows=public,next_cursor=next_cursor,scanned=len(page),page_size=PAGE_SIZE,
+                total_remaining=int(page[0]['total_remaining']) if page else 0,
                 metadata_queries=1+(1 if page else 0)+(1 if candidates else 0),
                 duration_ms=round((time.perf_counter()-start)*1000,2))
 

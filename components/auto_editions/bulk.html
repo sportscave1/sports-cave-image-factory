@@ -4,9 +4,9 @@ body{font:14px system-ui;margin:12px;color:#28323d;background:#fff}button{paddin
 small.approving::before{content:"";display:inline-block;width:10px;height:10px;border:2px solid #d9dfdd;border-top-color:#9c7b26;border-radius:50%;margin-right:5px;animation:review-spin .9s linear infinite}@keyframes review-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){small.approving::before{animation:none}}
 </style></head><body>
 <h2>Bulk Review</h2><small>Review artwork, plaque and number placement. Approval permits TEST previews only. Use Review / Repair for designs needing attention.</small>
-<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button></header>
+<header><button id="select">Select All Eligible in Batch</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button><button id="previous" disabled>Previous</button><button id="next" disabled>Next</button><small id="batch-count"></small></header>
 <div id="progress" role="status" aria-live="polite"></div><button id="retry-approval" hidden>Retry approval tracking</button>
-<div id="message" role="status" aria-live="polite">Loading review metadata…</div><div id="grid"></div><button id="more" hidden>Load more designs</button>
+<div id="message" role="status" aria-live="polite">Loading review metadata…</div><div id="grid"></div>
 <dialog id="large"><button id="close-large">Close preview</button><div id="large-status" role="status"></div><img id="large-image" alt="Larger artwork preview"></dialog>
 <dialog id="proof"><p id="confirmation"></p><label><input type="checkbox" id="confirm"> I have reviewed the selected artwork, plaques, edition numbers, borders and enlargement quality.</label><p>Current source, files and evidence will be rechecked. Supplier certification remains separate.</p><button id="cancel">Cancel</button> <button id="accept" disabled>Confirm TEST Approval</button></dialog>
 <script>
@@ -14,6 +14,8 @@ const $=id=>document.getElementById(id);
 const timings={};window.reviewTimings=timings;
 let ids=[],contextKey=null,rows=[],byId=new Map(),selected=new Set(),pending=[];
 let busy=false,loading=false,started=false,disposed=false,generation=0,cursor=0,hasMore=true;
+const batchSize=10;let pageStarts=[0],pageIndex=0,totalRemaining=null,totalAtOpen=null,refillTimer=null;
+const batchSelections=new Map(),batchScroll=new Map(),acceptedPreparations=new Set();
 let errorText='',resultText='',bootstrapTimer,largeTimer,activeImages=0,loadedImages=0,thumbnailStart=0;
 let approvalTimer=null,approvalFlight=false,approvalRequest=null,trackingFailures=0,trackingAgain=false,submissionInPopup=false;
 const operationStates=new Map(),restoredFailures=new Set(),failureQueue=[];let restoringFailures=false;
@@ -31,11 +33,10 @@ function cancelSpeculation(row){
 }
 const visibleImages=new IntersectionObserver(entries=>{for(const entry of entries){const row=entry.target._row;if(entry.isIntersecting)queueImage(row);}},{rootMargin:'0px'});
 const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){const row=entry.target._row;row.near=entry.isIntersecting;if(entry.isIntersecting)queueImage(row);else cancelSpeculation(row);}},{rootMargin:'0px 0px '+Math.min(600,Math.round(innerHeight*.75))+'px 0px'});
-const nearMore=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPage();},{rootMargin:'400px'});
-nearMore.observe($('more'));
 function summary(){
   const count=rows.filter(r=>r.eligible&&r.previewReady).length;
-  $('message').textContent=errorText||resultText||(rows.length?rows.length+' designs loaded · '+count+' eligible previews'+(loading?' · loading more…':hasMore?' · more designs load as you scroll':' · all pages loaded'):'Loading review metadata…');
+  $('message').textContent=errorText||resultText||(rows.length?rows.length+' designs in current batch · '+count+' eligible previews'+(loading?' · loading…':''):'Loading review metadata…');
+  $('batch-count').textContent=totalRemaining===null?'':'Batch '+(pageIndex+1)+' · '+totalRemaining+' remaining / '+totalAtOpen+' total';
   if(started&&!loading&&!rows.length&&!hasMore&&!errorText)$('message').textContent='No designs need review in this catalogue selection.';
 }
 function controls(defer=false){if(!defer){cancelAnimationFrame(controlsFrame);controlsFrame=0;updateControls();return;}if(!controlsFrame)controlsFrame=requestAnimationFrame(()=>{controlsFrame=0;updateControls();});}
@@ -44,7 +45,8 @@ function updateControls(){
   $('approve').disabled=busy||confirming||!selected.size;
   $('select').disabled=busy||confirming||!ready;$('clear').disabled=busy||confirming||!selected.size;
   $('reload').disabled=busy||confirming;$('retry').disabled=busy||loading;
-  $('retry').hidden=!errorText;$('more').hidden=!hasMore||!started;$('more').disabled=loading||busy||!!errorText;
+  $('retry').hidden=!errorText;$('previous').disabled=loading||busy||confirming||pageIndex===0;
+  $('next').disabled=loading||busy||confirming||!hasMore||!!errorText;
   for(const row of rows){const disabled=busy||confirming||!row.eligible||!row.previewReady,checked=selected.has(row.product_gid);if(row.box.disabled!==disabled)row.box.disabled=disabled;if(row.box.checked!==checked)row.box.checked=checked;}
 }
 async function api(path,body,timeout=10000,signal){
@@ -180,26 +182,57 @@ function append(data){
   }
   $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting'&&!row.previewStarted){visibleImages.observe(row.img);nearImages.observe(row.img);}
 }
-async function loadPage(){
-  if(disposed||!started||loading||busy||!hasMore||errorText)return;
-  const version=generation,previousCursor=cursor,start=performance.now();loading=true;controls();summary();
+let retryTarget=null;
+function rememberBatch(){
+  batchSelections.set(pageIndex,new Set(rows.filter(r=>selected.has(r.product_gid)).map(r=>r.product_gid+'|'+r.hash)));
+  batchScroll.set(pageIndex,scrollY);
+}
+function removeCard(row){
+  row.removed=true;clearTimeout(row.retryTimer);nearImages.unobserve(row.img);visibleImages.unobserve(row.img);
+  row.cancelImage?.();revokePreview(row);row.img.removeAttribute('src');row.card.remove();byId.delete(row.product_gid);selected.delete(row.product_gid);
+}
+async function loadPage(targetIndex=pageIndex,startCursor=pageStarts[targetIndex],refill=false){
+  if(disposed||!started||loading||busy||errorText)return;
+  const version=generation,start=performance.now();let appliedVersion=version;loading=true;retryTarget=[targetIndex,startCursor,refill];controls();summary();
   try{
-    const data=await api('list',{product_gids:ids,cursor});if(version!==generation||disposed)return;
-    if(!Array.isArray(data.rows)||data.rows.length>20||(data.next_cursor!==null&&(!Number.isInteger(data.next_cursor)||data.next_cursor<=previousCursor||data.next_cursor>ids.length)))throw Error('Review page changed unexpectedly. Refresh to retry.');
-    append(data.rows);hasMore=data.next_cursor!==null;if(hasMore)cursor=data.next_cursor;
+    const data=await api('list',{product_gids:ids,cursor:startCursor});if(version!==generation||disposed)return;
+    if(!Array.isArray(data.rows)||data.rows.length>batchSize||(data.next_cursor!==null&&(!Number.isInteger(data.next_cursor)||data.next_cursor<=startCursor||data.next_cursor>ids.length)))throw Error('Review page changed unexpectedly. Refresh to retry.');
+    if(refill){
+      const current=new Map(data.rows.map(r=>[r.product_gid,r.hash]));
+      for(const row of rows)if(current.get(row.product_gid)!==row.hash)removeCard(row);
+      rows=rows.filter(r=>!r.removed);
+    }else{
+      rememberBatch();generation++;appliedVersion=generation;cancelWork();rows=[];byId.clear();selected.clear();$('grid').replaceChildren();
+    }
+    pageIndex=targetIndex;pageStarts[pageIndex]=startCursor;hasMore=data.next_cursor!==null;cursor=data.next_cursor;
+    if(Number.isInteger(data.total_remaining)){totalRemaining=data.total_remaining;totalAtOpen ??= totalRemaining;}
+    append(data.rows);
+    if(!refill){const saved=batchSelections.get(pageIndex);selected=new Set(rows.filter(r=>r.eligible&&saved?.has(r.product_gid+'|'+r.hash)).map(r=>r.product_gid));scrollTo(0,batchScroll.get(pageIndex)||0);}
+    retryTarget=null;
     timings.serverMetadataMs=data.duration_ms;timings.lastMetadataMs=performance.now()-start;
     if(timings.galleryMetadataMs===undefined){timings.galleryMetadataMs=performance.now()-thumbnailStart;timings.firstPageRows=rows.length;}
-  }catch(error){if(version===generation&&!disposed&&error.name!=='AbortError')errorText=error.message;}
-  finally{
-    if(version===generation&&!disposed){loading=false;controls();summary();drainFailures();
-      // Empty candidate pages still advance exactly once; errors never auto-retry.
-      if(!errorText&&hasMore&&$('more').getBoundingClientRect().top<innerHeight+400)queueMicrotask(loadPage);
-    }
-  }
+    // Metadata-only empty pages may be skipped; no preview work is started for them.
+    if(!rows.length&&hasMore){pageStarts[pageIndex]=cursor;queueMicrotask(()=>loadPage(pageIndex,cursor,true));}
+    else if(!rows.length&&pageIndex>0){queueMicrotask(()=>loadPage(pageIndex-1));}
+  }catch(error){if(appliedVersion===generation&&!disposed&&error.name!=='AbortError')errorText=error.message;}
+  finally{if(appliedVersion===generation&&!disposed){loading=false;controls();summary();}}
+}
+function navigateBatch(delta){
+  if(loading||busy||$('proof').open||errorText)return;
+  const target=pageIndex+delta;if(target<0||delta>0&&!hasMore)return;
+  if(delta>0)pageStarts[target]=cursor;
+  loadPage(target);
+}
+function refillBatch(){
+  clearTimeout(refillTimer);refillTimer=setTimeout(()=>{
+    if(disposed)return;
+    if(busy||loading||$('proof').open){refillBatch();return;}
+    if(!errorText)loadPage(pageIndex,pageStarts[pageIndex],true);
+  },100);
 }
 function cancelWork(){for(const request of requests)request.abort();requests.clear();imageTasks.length=0;warmTasks.length=0;nearImages.disconnect();visibleImages.disconnect();for(const row of rows){clearTimeout(row.retryTimer);revokePreview(row);row.img.removeAttribute('src');}for(const cancel of [...imageCancels])cancel();clearTimeout(largeTimer);$('large-image').removeAttribute('src');}
 function reset(){
-  if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;loading=false;errorText='';resultText='';loadedImages=0;
+  if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;pageStarts=[0];pageIndex=0;batchSelections.clear();batchScroll.clear();acceptedPreparations.clear();totalRemaining=null;totalAtOpen=null;clearTimeout(refillTimer);loading=false;errorText='';resultText='';loadedImages=0;
   for(const key of Object.keys(timings))delete timings[key];thumbnailStart=performance.now();$('grid').replaceChildren();
   if(started){loadPage();recoverApprovals();}else requestContext();
 }
@@ -213,11 +246,11 @@ function confirmSelection(){
   if(approvalRequest){trackApprovals();return;}if(busy||$('proof').open)return;
   pending=rows.filter(r=>r.eligible&&r.previewReady&&selected.has(r.product_gid)).map(r=>({product_gid:r.product_gid,hash:r.hash}));
   if(!pending.length){resultText='No eligible previews are available. Retry Preview before approval.';controls();summary();return;}
-  $('confirmation').textContent='Approve '+pending.length+' loaded designs?'+(hasMore?' Additional designs have not been selected.':'');
+  $('confirmation').textContent='Approve '+pending.length+' designs in this batch?'+(hasMore?' Additional designs have not been selected.':'');
   $('confirm').checked=false;$('accept').disabled=true;$('proof').showModal();controls();summary();
 }
 $('select').onclick=selectAll;$('clear').onclick=()=>{selected.clear();controls();};$('approve').onclick=confirmSelection;
-$('reload').onclick=reset;$('retry').onclick=()=>{if(loading||busy)return;if(!hasMore||resultText.startsWith('Rechecking')){reset();return;}errorText='';if(started)loadPage();else requestContext();};$('more').onclick=loadPage;
+$('reload').onclick=reset;$('retry').onclick=()=>{if(loading||busy)return;errorText='';if(started)loadPage(...(retryTarget||[pageIndex]));else requestContext();};$('previous').onclick=()=>navigateBatch(-1);$('next').onclick=()=>navigateBatch(1);
 $('close-large').onclick=()=>{$('large').close();clearTimeout(largeTimer);$('large-image').removeAttribute('src');};
 $('large').addEventListener('close',()=>{clearTimeout(largeTimer);largeController?.abort();$('large-image').onload=$('large-image').onerror=null;$('large-image').removeAttribute('src');});
 $('cancel').onclick=()=>{$('proof').close();controls();};$('proof').addEventListener('cancel',()=>queueMicrotask(controls));$('confirm').onchange=()=>$('accept').disabled=!$('confirm').checked;
@@ -227,7 +260,7 @@ function clearRequest(){try{sessionStorage.removeItem(approvalStorage);}catch{}a
 function applyOperations(){
   for(const row of rows){const op=operationStates.get(row.product_gid);if(!op||op.hash!==row.hash)continue;
     const ready=['Cloud Ready','Production Ready'].includes(op.current_status)&&op.current_hash===row.hash;
-    if(op.state==='Approved'&&ready){row.removed=true;clearTimeout(row.retryTimer);nearImages.unobserve(row.img);visibleImages.unobserve(row.img);row.cancelImage?.();revokePreview(row);row.img.removeAttribute('src');row.card.remove();byId.delete(row.product_gid);selected.delete(row.product_gid);continue;}
+    if(op.state==='Approved'&&ready){const key=row.product_gid+'|'+row.hash;removeCard(row);if(!acceptedPreparations.has(key)){acceptedPreparations.add(key);if(totalRemaining!==null)totalRemaining=Math.max(0,totalRemaining-1);refillBatch();}continue;}
     const active=['Pending','Processing'].includes(op.state),key=JSON.stringify([op.state,op.reason,op.job_id]);
     row.operationText=active?'Approving…'+(op.state==='Pending'?' · Queued for validation':''):op.state==='Approved'?'TEST approval committed'+(op.current_status?' · '+op.current_status:''):op.state==='Failed'?'Approval Failed · '+op.reason:op.state+' · '+op.reason;
     row.eligible=active?false:row.reviewEligible;
@@ -242,12 +275,13 @@ function queueFailures(operations){
 }
 async function drainFailures(){
   if(restoringFailures||loading||disposed||!failureQueue.length)return;
-  const products=[...new Set(failureQueue.splice(0,20))].filter(pid=>!byId.has(pid));if(!products.length){queueMicrotask(drainFailures);return;}
-  restoringFailures=true;const version=generation;
-  try{const data=await api('list',{product_gids:products,cursor:0});if(version===generation&&!disposed){append(data.rows);controls();summary();}}
-  catch{if(!disposed){$('progress').textContent='Some failed approvals need review. Retry tracking to restore their cards.';$('retry-approval').hidden=false;}}
-  finally{restoringFailures=false;if(!disposed)drainFailures();}
+  // Failed operations remain visible through ordinary paged listing. Never append
+  // background failure cards outside the current ten-design selection scope.
+  failureQueue.length=0;
+  if(pageIndex===0)refillBatch();
+  else{resultText='Some approvals need attention. Use Previous or Refresh to review their batch.';summary();}
 }
+
 function showProgress(data,notify=true){
   operationStates.clear();for(const op of data.rows)operationStates.set(op.product_gid,op);applyOperations();
   const counts=data.counts,done=['Approved','Skipped','Needs Attention','Failed'].reduce((sum,k)=>sum+counts[k],0),total=data.rows.length;
@@ -312,7 +346,7 @@ $('accept').onclick=()=>{
   $('proof').close();submitApproval();
 };
 
-function dispose(){if(disposed)return;disposed=true;generation++;clearTimeout(bootstrapTimer);clearTimeout(approvalTimer);cancelAnimationFrame(controlsFrame);cancelWork();nearMore.disconnect();}
+function dispose(){if(disposed)return;disposed=true;generation++;clearTimeout(bootstrapTimer);clearTimeout(approvalTimer);cancelAnimationFrame(controlsFrame);cancelWork();clearTimeout(refillTimer);}
 addEventListener('pagehide',dispose);
 addEventListener('message',event=>{
   if(event.origin!==location.origin)return;

@@ -114,9 +114,9 @@ def test_real_http_browser_previews_and_reopen(review,tmp_path):
         return FileResponse(tmp_path/name,media_type='image/png')
     async def page(request):return HTMLResponse(Path('components/auto_editions/bulk.html').read_text())
     async def listing(request):
-        await bulk.actor(request);body=await request.json();start=body['cursor'];selected=cases[start:start+20]
+        await bulk.actor(request);body=await request.json();start=body['cursor'];selected=cases[start:start+10]
         for pid,digest,current in selected:bulk.snapshots[(str(ADMIN['id']),pid,digest)]=(time.monotonic()+900,current)
-        return JSONResponse(dict(rows=[dict(product_gid=pid,hash=digest,title='Synthetic plaque '+pid.rsplit('/',1)[1],eligible=True,reason='') for pid,digest,_ in selected],next_cursor=start+20 if start+20<len(cases) else None))
+        return JSONResponse(dict(rows=[dict(product_gid=pid,hash=digest,title='Synthetic plaque '+pid.rsplit('/',1)[1],eligible=True,reason='') for pid,digest,_ in selected],next_cursor=start+10 if start+10<len(cases) else None))
     async def progress(request):return JSONResponse(dict(found=False,rows=[],counts={},active=False))
     async def image(request):
         result=await bulk.image_api(request);image_responses.append(result.status_code);return result

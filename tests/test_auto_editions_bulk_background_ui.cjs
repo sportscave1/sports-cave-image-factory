@@ -12,7 +12,7 @@ async function fixture(context,state){
   const path=new URL(route.request().url()).pathname,body=path.endsWith('/image')?{}:route.request().postDataJSON();
   if(path==='/')return route.fulfill({contentType:'text/html',body:html.replace('<script>','<script>window.handoffs=[];addEventListener("message",e=>{if(e.data?.type==="sports-cave-bulk-accepted")handoffs.push(e.data.batch_id)});')});
   if(path.endsWith('/previews'))return route.fulfill({json:{rows:[]}});
-   if(path.endsWith('/list')){const cursor=body.cursor;const pending=new Set((state.items||[]).filter((r,n)=>!state.complete||n!==1).map(r=>r.product_gid)),available=products.filter(r=>!pending.has(r.product_gid)&&body.product_gids.includes(r.product_gid));return route.fulfill({json:{rows:available.slice(cursor,cursor+20),next_cursor:cursor+20<available.length?cursor+20:null}});}
+   if(path.endsWith('/list')){const cursor=body.cursor;const pending=new Set((state.items||[]).filter((r,n)=>!state.complete||n!==1).map(r=>r.product_gid)),available=products.filter(r=>!pending.has(r.product_gid)&&body.product_gids.includes(r.product_gid));return route.fulfill({json:{rows:available.slice(cursor,cursor+10),next_cursor:cursor+10<available.length?cursor+10:null}});}
   if(path.endsWith('/image')){if(state.previewFailure){state.previewFailure=false;return route.fulfill({status:503,body:'Temporary transfer error'});}return route.fulfill({contentType:'image/png',body:png});}
   if(path.endsWith('/approve')){
    state.submissions.push(body);assert.equal(body.confirm_visual_quality,true);

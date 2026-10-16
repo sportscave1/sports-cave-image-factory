@@ -43,7 +43,7 @@ def allocation(request):
 async def page(request):
     try:
         await actor(request);allocation(request)
-        return HTMLResponse((Path(__file__).parent/'components/auto_editions/download.html').read_text(),headers=HEADERS)
+        return HTMLResponse((Path(__file__).parent/'components/auto_editions/download.html').read_text(encoding='utf-8'),headers=HEADERS)
     except Exception as error:return failure(error)
 
 
@@ -84,6 +84,16 @@ async def status(request):
                              'filename':row['result']['filename'] if row['status']=='Ready' else None,
                              'test_only':row.get('result',{}).get('test_only',True) if row.get('result') else True},headers=HEADERS)
     except Exception as error:return failure(error)
+
+
+def download_feedback(request,response,outcome):
+    # Native attachment downloads have no reliable iframe load/completion event.
+    # This attempt-scoped receipt acknowledges response headers only, never saving.
+    token=request.query_params.get('download_token','')
+    if re.fullmatch(r'[a-f0-9]{32}',token):
+        response.set_cookie('sc-jpg-'+token,outcome,max_age=120,path='/',
+                            secure=request.url.scheme=='https',httponly=False,samesite='strict')
+    return response
 
 
 async def download(request):
@@ -142,10 +152,10 @@ async def download(request):
                             background=BackgroundTask(folder.cleanup))
         # Larger bounded chunks reduce thread-pool handoffs for 35-41 MB files.
         response.chunk_size=1024*1024
-        return response
+        return download_feedback(request,response,'started')
     except Exception as error:
         if folder:folder.cleanup()
-        return failure(error)
+        return download_feedback(request,failure(error),'error')
 
 
 

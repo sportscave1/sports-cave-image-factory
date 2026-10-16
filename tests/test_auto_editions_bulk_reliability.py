@@ -22,6 +22,16 @@ from tests.test_auto_editions_api import request
 USER=dict(id='synthetic-admin',role='admin',is_active=True,page_permissions=[])
 
 
+def historical_baseline():
+    # These comparisons measure the release before the reliability fix. HEAD now
+    # includes that fix, so using HEAD would compare the fixed code with itself.
+    revision='f586cbfa09e9f8e4283796cd9c90f18b861491bc'
+    result=subprocess.run(['git','show',revision+':auto_editions_bulk.py'],capture_output=True)
+    if result.returncode:
+        pytest.skip('Historical benchmark baseline unavailable in this Git checkout: '+revision)
+    return ast.parse(result.stdout.decode('utf-8'))
+
+
 @pytest.fixture
 def catalogue(ops,monkeypatch):
     jobs,sql,template,assets=ops;monkeypatch.setenv('AUTO_EDITIONS_V15_ENABLED','false')
@@ -121,7 +131,7 @@ def test_build_wait_does_not_requery_persistent_thumbnail_cache(ops):
     try:
         with patch.object(bulk,'thumbnails',bulk.ReviewCache()),patch.object(bulk,'preview_builds',builds):
             persistent=PreviewStore(jobs.connect)
-            baseline=ast.parse(subprocess.check_output(['git','show','HEAD:auto_editions_bulk.py']).decode('utf-8'))
+            baseline=historical_baseline()
             function=next(n for n in baseline.body if isinstance(n,ast.FunctionDef) and n.name=='cached_previews')
             namespace=dict(bulk.__dict__);exec(compile(ast.Module(body=[function],type_ignores=[]),'shipped-cache','exec'),namespace)
             with patch.object(persistent,'get_many',wraps=persistent.get_many) as reads:
@@ -138,7 +148,7 @@ def test_build_wait_does_not_requery_persistent_thumbnail_cache(ops):
 
 def test_measured_shipped_and_current_submission_ack(catalogue):
     jobs,sql,cases=catalogue;items=[item(r,pid) for pid,(r,_) in cases.items()]
-    baseline=ast.parse(subprocess.check_output(['git','show','HEAD:auto_editions_bulk.py']).decode('utf-8'))
+    baseline=historical_baseline()
     function=next(n for n in baseline.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='approve_api')
     with patch.object(bulk,'actor',new=AsyncMock(return_value=USER)),patch('auto_editions_bulk_runtime.connection',jobs.connect):
         namespace=dict(bulk.__dict__);exec(compile(ast.Module(body=[function],type_ignores=[]),'shipped-submit','exec'),namespace)
@@ -190,7 +200,7 @@ def test_measured_expired_binary_preview_recovery(catalogue):
         cache.put(ae.fingerprint(bulk.thumbnails.key(record)),jpeg)
         bulk.snapshots[(USER['id'],pid,record['hash'])]=(time.monotonic()-1,record)
     body=dict(items=[item(record,pid) for pid,(record,_) in group],binary=True)
-    baseline=ast.parse(subprocess.check_output(['git','show','HEAD:auto_editions_bulk.py']).decode('utf-8'))
+    baseline=historical_baseline()
     function=next(n for n in baseline.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='previews_api')
     with patch.object(bulk,'actor',new=AsyncMock(return_value=USER)),patch('auto_editions_bulk_runtime.connection',jobs.connect),patch('supabase_backend.read_connection',jobs.connect),patch.object(bulk.runtime,'storage',side_effect=AssertionError('No master downloads')):
         namespace=dict(bulk.__dict__);exec(compile(ast.Module(body=[function],type_ignores=[]),'shipped-preview','exec'),namespace)

@@ -16,8 +16,8 @@ def test_page_filter_precedes_status_and_full_record_reads(review):
     d,sql,record,assets=review
     with patch.object(bulk.statuses,'batch',wraps=bulk.statuses.batch) as states,patch.object(bulk,'records',wraps=bulk.records) as records:
         data=bulk.listing(d.connect,[record['manifest']['source']['product_gid']],ADMIN)
-    assert data['page_size']==20 and data['next_cursor'] is None
-    assert len(states.call_args.args[1])<=20 and len(records.call_args.args[1])<=20
+    assert data['page_size']==10 and data['next_cursor'] is None
+    assert len(states.call_args.args[1])<=10 and len(records.call_args.args[1])<=10
     assert data['rows'][0]['eligible']
 
 

@@ -135,7 +135,7 @@ def listing(store, row, *, search='', filter_by='All', sort=None, start=None, en
       EXISTS(SELECT 1 FROM crm_suppressions x WHERE x.shopify_customer_id=c.customer_id OR x.recipient_hash=c.recipient_hash) AS suppressed
       '''+order_fields+''' FROM crm_lifecycle_customers c LEFT JOIN purchases p ON p.customer_id=c.customer_id
       '''+extra+''' LEFT JOIN LATERAL(SELECT id,status,current_step,next_due_at,steps,stop_reason FROM crm_automation_enrollments
-      WHERE automation_id=%s AND shopify_customer_id=c.customer_id '''+("AND trigger_shopify_id=o.shopify_order_id " if order_kind else '')+'''ORDER BY created_at DESC LIMIT 1) j ON true
+      WHERE automation_id=%s AND (shopify_customer_id=c.customer_id OR steps->0->>'recipient_hash'=c.recipient_hash) '''+("AND trigger_shopify_id=o.shopify_order_id " if order_kind else '')+'''ORDER BY created_at DESC,id DESC LIMIT 1) j ON true
       LEFT JOIN LATERAL(SELECT status,first_submitted_at FROM crm_marketing_sends WHERE enrollment_id=j.id
       AND NOT test_send ORDER BY created_at DESC LIMIT 1) s ON true
       WHERE '''+' AND '.join(guards)+' ORDER BY '+SORTS[sort]+''',key LIMIT 51 OFFSET %s)

@@ -238,7 +238,7 @@ def test_local_48_design_metadata_and_approval_performance(store,tmp_path,monkey
             return dict(id=fid,rev='a1',size=path.stat().st_size,content_hash=ae.file_hash(path,dropbox=True),path_display=DropboxAssets.path(record['hash'],name))
         provider.integration.psd_open_metadata.side_effect=metadata;cases[pid]=(record,provider);items.append(dict(product_gid=pid,hash=digest))
     started=time.perf_counter();listing=bulk.listing(d.connect,list(cases),ADMIN);metadata_ms=(time.perf_counter()-started)*1000
-    assert len(listing['rows'])==20 and all(r['eligible'] for r in listing['rows'])
+    assert len(listing['rows'])==10 and listing['total_remaining']==48 and all(r['eligible'] for r in listing['rows'])
     seen=list(listing['rows']);cursor=listing['next_cursor']
     while cursor is not None:
         page=bulk.listing(d.connect,list(cases),ADMIN,cursor);seen.extend(page['rows']);cursor=page['next_cursor']
@@ -246,7 +246,7 @@ def test_local_48_design_metadata_and_approval_performance(store,tmp_path,monkey
     with patch('auto_editions_onboarding_api.candidate',side_effect=lambda pid,digest:cases[pid]):
         started=time.perf_counter();results=[bulk.approve_one(d.connect,item,'synthetic-admin') for item in items];approval_ms=(time.perf_counter()-started)*1000
     assert results==['Approved']*48
-    report=dict(designs=48,dimensions=[200,100],edition_total=2,metadata_queries=3,initial_page_size=20,metadata_ms=round(metadata_ms,3),approval_ms=round(approval_ms,3),provider='injected local bytes; no network latency',database='disposable PGlite')
+    report=dict(designs=48,dimensions=[200,100],edition_total=2,metadata_queries=3,initial_page_size=10,metadata_ms=round(metadata_ms,3),approval_ms=round(approval_ms,3),provider='injected local bytes; no network latency',database='disposable PGlite')
     Path('output/bulk-review').mkdir(parents=True,exist_ok=True);Path('output/bulk-review/backend-performance.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report))
 
 

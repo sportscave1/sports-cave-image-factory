@@ -86,3 +86,40 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             assets.output_response.assert_called_once_with(output)
             stream.close.assert_called_once()
             await response.background()
+
+    async def test_native_handoff_receipt_preserves_bytes_filename_and_access_checks(self):
+        import hashlib
+        from pathlib import Path
+        from auto_editions_asset_cache import output_assets
+        data=b'exact verified JPG fixture'
+        output=dict(file_id='id:receipt',revision='rev',bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+        stream=Mock();stream.iter_content.return_value=[data]
+        assets=Mock();assets.output_response.return_value=(dict(id='id:receipt',rev='rev',size=len(data)),stream)
+        row=dict(status='Ready',result=dict(output=output,filename='SC3287-005-TEST.jpg',retained=True))
+        token='b'*32
+        with patch.object(api,'stored_current',return_value=(VA,{'id':'a'*64},assets,row)) as checked,patch.object(api.runtime,'stores',return_value=(None,Mock())),patch.object(output_assets,'copy',return_value=False),patch.object(output_assets,'remember'):
+            response=await api.download(request(query='allocation_id=42&job_id='+'a'*64+'&download_token='+token))
+            self.assertEqual(Path(response.path).read_bytes(),data)
+            self.assertEqual(response.headers['content-disposition'],'attachment; filename="SC3287-005-TEST.jpg"')
+            self.assertEqual(response.chunk_size,1024*1024)
+            self.assertEqual(checked.call_count,2)
+            assets.verify_output.assert_called_once_with(output)
+            self.assertIn('sc-jpg-'+token+'=started',response.headers['set-cookie'])
+            self.assertIn('SameSite=strict',response.headers['set-cookie'])
+            self.assertIn('Secure',response.headers['set-cookie'])
+            self.assertNotIn('HttpOnly',response.headers['set-cookie'])
+            await response.background()
+
+    async def test_failed_access_acknowledges_error_without_cloud_or_success(self):
+        with patch.object(api,'stored_current',side_effect=PermissionError('Access revoked')),patch.object(api.runtime,'stores') as stores:
+            response=await api.download(request(query='allocation_id=42&job_id='+'a'*64+'&download_token='+'c'*32))
+            self.assertEqual(response.status_code,403)
+            self.assertIn('=error;',response.headers['set-cookie'])
+            self.assertNotIn('started',response.headers['set-cookie'])
+            stores.assert_not_called()
+
+    def test_receipts_are_opt_in_and_reject_untrusted_cookie_names(self):
+        from starlette.responses import Response
+        for token in ('','short','A'*32,'a'*32+'; injected=1','a'*33):
+            response=api.download_feedback(request(query='allocation_id=42&download_token='+token),Response(),'started')
+            self.assertNotIn('set-cookie',response.headers)
