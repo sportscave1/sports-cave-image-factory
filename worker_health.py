@@ -126,6 +126,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     jobs=[]
     for row in {r['product_gid']:r for r in rows}.values():
         state=states.get(row['product_gid'],{});label=state.get('status','Unavailable')
+        auto_approved=state.get('approval_status')=='Auto Approved'
         eligible=bool(row.get('eligible'))
         if eligible:counts['eligible']+=1
         completed=eligible and bool(state.get('uploaded')) and label in ('Cloud Ready','Production Ready','Needs Review','Review')
@@ -149,7 +150,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         proof_reason=state.get('reason') or row.get('reason')
         explanation=diagnostics.explain(proof_reason,stage)
         jobs.append(dict(id=row['product_gid'],design=str(row.get('product_title') or row['product_gid'])[:180],priority=row['priority'],
-            stage=stage,status=label,category=category,elapsed_seconds=elapsed if category=='Active' else None,duration_seconds=measured,
+            stage=stage,status='Auto Approved' if auto_approved and label=='Cloud Ready' else label,approval_status=state.get('approval_status'),category=category,elapsed_seconds=elapsed if category=='Active' else None,duration_seconds=measured,
             last_activity=sydney(row.get('updated_at')),last_activity_iso=stamp(row['updated_at']).isoformat(),
             checkpoint=__import__('auto_editions_status').CHECKPOINTS.get(row.get('latest_checkpoint'),state.get('checkpoint') or 'No checkpoint'),reason=explanation['description'] if category=='Failed' else state.get('reason',''),
             diagnostic=explanation if category=='Failed' or explanation['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','PROFILE_APPROVED','COLOUR_INCOMPATIBLE') else None,
@@ -281,7 +282,7 @@ class Health:
                     ORDER BY prev.id DESC LIMIT 1) AS last_checkpoint
                 FROM auto_edition_onboarding_audit a LEFT JOIN auto_edition_onboarding q ON q.product_gid=a.product_gid
                 LEFT JOIN edition_products p ON p.shopify_product_gid=a.product_gid
-                WHERE a.event IN ('diagnostic','Blocked','Needs PSD Repair','reset_failed','recovering','worker_paused','worker_resumed','colour_retry','colour_recovered')
+                WHERE a.event IN ('diagnostic','Blocked','Needs PSD Repair','reset_failed','recovering','worker_paused','worker_resumed','colour_retry','colour_recovered','automatic_visual_assessment')
                   AND (%s=0 OR a.id<%s) AND a.created_at>=%s AND a.created_at<%s AND (%s='' OR a.product_gid=%s)
                   AND (a.event NOT IN ('Blocked','Needs PSD Repair') OR NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit d WHERE d.product_gid=a.product_gid AND d.created_at=a.created_at AND d.event='diagnostic'))
                 ORDER BY a.id DESC LIMIT 200""",(int(cursor),int(cursor),start,end,design,design))

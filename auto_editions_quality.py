@@ -20,6 +20,9 @@ import auto_editions as ae
 POLICY = 'auto-editions-production-v16-1'
 STANDARDS = Path(__file__).parent / 'data/auto_editions_production_standards.json'
 
+class VisualEvidenceReview(ValueError):
+    """Only fixed safe comparison messages may cross the operator boundary."""
+
 
 def enabled():
     return os.getenv('AUTO_EDITIONS_V16_AUTO_APPROVAL_ENABLED', '').lower() == 'true'
@@ -85,13 +88,14 @@ def result(state, reason, manifest, standard=None, **evidence):
 
 
 @ae.serial_render
-def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records):
+def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records, *, visual=None, compare=None):
     """Background only. Every receipt and asset is revalidated; no I/O in tables.
 
     read_metadata/file fetch are injected existing Dropbox services. No upload,
     source edit, supplier action or allocation is possible through this interface.
     """
     m = record['manifest']
+    evidence_stage='preparation and source identity validation'
     try:
         ae.validate_manifest(m)
         digest = ae.fingerprint(m)
@@ -117,7 +121,9 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records)
             return result('Needs Review', 'Preparation has an unresolved processing state.', m)
         if checkpoint.get('conflicting_approval'):
             return result('Needs Review', 'A conflicting layout approval requires review.', m)
-        standard = standard_for(m, records)
+        # Visual-only callers supply a validated, exact owner policy. They can
+        # never obtain Production Ready or a supplier certificate through it.
+        standard = visual if visual is not None else standard_for(m, records)
         if not standard:
             return result('Needs Review', 'No exact owner-approved artwork and supplier standard.', m)
         spec = standard['output']
@@ -129,9 +135,10 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records)
             return result('Needs Repair', 'Number placement or source preservation is invalid.', m, standard)
         if m['dimensions'] != spec['dimensions']:
             return result('Needs Repair', 'Output dimensions differ from the approved supplier geometry.', m, standard)
-        ppi = [px * 25.4 / mm for px, mm in zip(m['source_dimensions'], spec['printable_mm'])]
-        if min(ppi) < spec['minimum_source_ppi']:
-            return result('Needs Repair', 'Native artwork resolution is below the supplier requirement.', m, standard)
+        if visual is None:
+            ppi = [px * 25.4 / mm for px, mm in zip(m['source_dimensions'], spec['printable_mm'])]
+            if min(ppi) < spec['minimum_source_ppi']:
+                return result('Needs Repair', 'Native artwork resolution is below the supplier requirement.', m, standard)
         layers=m.get('source_inspection', {}).get('layers', [])
         number=[l for l in layers if (l.get('path') or [{}])[-1].get('name')==m.get('number_layer_name')]
         plaques=[l for l in layers if (l.get('path') or [{}])[-1].get('name')==m.get('plaque_layer_name')]
@@ -166,6 +173,7 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records)
         with tempfile.TemporaryDirectory(prefix='sc-production-quality-') as folder:
             root = Path(folder)
             for asset in assets:
+                evidence_stage='Dropbox receipt and asset checksum validation'
                 receipt = by_name.get(asset['name'], {})
                 fresh = read_metadata(receipt.get('file_id'))
                 if (not fresh or fresh.get('id') != receipt.get('file_id')
@@ -180,6 +188,7 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records)
                 if path.stat().st_size != receipt['bytes'] or ae.file_hash(path, dropbox=True) != fresh.get('content_hash'):
                     return result('Failed', 'Prepared bytes differ from the current Dropbox receipt.', m, standard)
                 with Image.open(path) as image:
+                    evidence_stage='ICC profile and geometry validation'
                     image.load()
                     profile = image.info.get('icc_profile', b'')
                     try:
@@ -192,6 +201,12 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records)
                     if (image.format != 'PNG' or image.mode != 'RGB' or list(image.size) != expected
                             or ae.hashlib.sha256(profile).hexdigest() != spec['icc_sha256']):
                         return result('Needs Repair', 'Prepared colour profile, mode or dimensions are invalid.', m, standard)
+            if visual is not None:
+                evidence_stage='trusted original, numbered reference and Shopify comparison'
+                if compare is None:raise ValueError('Independent approved references are required.')
+                evidence=compare(root)
+                return result('Auto Approved','Automatic visual policy verified; supplier certification remains separate.',m,standard,
+                              receipts_verified=len(assets),print_ready=False,fulfilment_authorized=False,**evidence)
             # The reviewed standard pins EVERY number patch hash, not only samples.
             for number in sorted({1, m['edition_total']}):
                 path = root / 'output.jpg'
@@ -201,7 +216,11 @@ def assess(record, mapping, checkpoint, metadata, read_metadata, fetch, records)
                       scope=standard['variant_ids'], supplier_sku=standard['supplier_sku'], output=spec,
                       approval_basis='exact previously human-approved artwork and supplier standard',
                       print_ready=True, fulfilment_authorized=False)
-    except (ValueError, TypeError, KeyError, OSError, ImageCms.PyCMSError):
+    except (ValueError, TypeError, KeyError, OSError, ImageCms.PyCMSError) as error:
+        if visual is not None and isinstance(error,VisualEvidenceReview):
+            return result('Needs Review',str(error),m,visual)
+        if visual is not None:
+            return result('Failed','Automatic visual verification failed during '+evidence_stage+'.',m,visual)
         return result('Failed', 'Production evidence could not be conclusively validated.', m)
 
 

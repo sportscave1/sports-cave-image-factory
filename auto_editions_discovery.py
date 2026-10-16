@@ -267,6 +267,11 @@ def run(stop):
             LOG.warning('auto_editions_priority_failed error_type=%s',type(error).__name__)
             health_ok=False
         try:
+            from auto_editions_visual import enabled as visual_enabled
+            if visual_enabled():
+                from auto_editions_visual_store import Visual
+                from auto_editions_cloud import DropboxAssets
+                Visual(db.connect).run_one(DropboxAssets(context(),dropbox))
             from auto_editions_quality import enabled as quality_enabled
             if quality_enabled():
                 from auto_editions_quality_store import Quality

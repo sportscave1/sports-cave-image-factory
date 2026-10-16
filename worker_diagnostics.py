@@ -2,6 +2,11 @@
 import re
 
 RULES=(
+ ('VISUAL_AUTO_APPROVED','Photoshop',('auto approved:',),'Auto Approved under an exact owner-reviewed artwork policy.','Supplier certification remains separate; no human review was fabricated.'),
+ ('VISUAL_POLICY_PENDING','Photoshop',('visual policy awaiting approval',),'Trusted visual reference policy awaits owner approval.','Review the exact original, numbered references and Shopify relationship; colour approval alone is insufficient.'),
+ ('VISUAL_REFERENCE_CHANGED','Photoshop',('approved artwork reference bytes changed','differs from the approved original','storefront artwork comparison','live shopify product revision'),'Artwork or storefront reference evidence changed or is ambiguous.','Review the pinned reference comparison before approving this exact preparation.'),
+ ('VISUAL_PROVIDER_FAILED','Companion',('visual source, reference or provider verification','visual reference or shopify identity verification'),'Automatic visual evidence could not be verified.','Retry the bounded evidence check; retain the preparation and original files.'),
+ ('VISUAL_VALIDATION_FAILED','Photoshop',('automatic visual verification failed during',),'Automatic visual asset validation failed.','Inspect the recorded validation stage; retain the package and supplier safeguards.'),
  ('COLOUR_RECOVERED','Photoshop',('successful automatic colour recovery',),'Successful automatic colour recovery; verified package retained for visual review.','Complete the existing artwork and supplier reviews.'),
  ('PROFILE_APPROVED','Photoshop',('profile correction approved',),'Profile correction approved for this pinned source.','Preparation can reuse the approved source policy; supplier checks remain separate.'),
  ('COLOUR_POLICY_PENDING','Photoshop',('colour policy awaiting approval',),'Colour policy awaiting approval.','Review the proposed ICC profile against trusted print/reference evidence for this source group.'),
@@ -31,7 +36,7 @@ def explain(reason,stage='Unknown',component=None):
     for code,owner,patterns,message,action in RULES:
         if any(pattern in value for pattern in patterns):
             return dict(code=code,component=component if code=='CONNECTION_INTERRUPTED' and component in COMPONENTS else owner,description=message,recommended_action=action,
-                        stage=stage if stage in STAGES else 'Unknown',severity='info' if code in ('RECOVERY_RESUMED','COLOUR_RECOVERED','PROFILE_APPROVED') else 'warning' if code=='COLOUR_POLICY_PENDING' else 'error')
+                        stage=stage if stage in STAGES else 'Unknown',severity='info' if code in ('RECOVERY_RESUMED','COLOUR_RECOVERED','PROFILE_APPROVED','VISUAL_AUTO_APPROVED') else 'warning' if code in ('COLOUR_POLICY_PENDING','VISUAL_POLICY_PENDING','VISUAL_REFERENCE_CHANGED') else 'error')
     return dict(code='CAUSE_UNDETERMINED',component=component if component in COMPONENTS else 'Companion',
                 description='Cause not yet determined.',recommended_action='Inspect the referenced checkpoint and retained local diagnostics.',
                 stage=stage if stage in STAGES else 'Unknown',severity='error')
