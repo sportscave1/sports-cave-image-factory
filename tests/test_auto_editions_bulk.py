@@ -76,7 +76,7 @@ def test_missing_or_ambiguous_evidence_is_ineligible(tmp_path,change):
 
 @pytest.fixture
 def review(store,tmp_path):
-    d,sql=store;register(store);tick(store,[asset()]);record,assets=prepared(tmp_path)
+    d,sql=store;sql.execute(Path('supabase/migrations/20261016071758_auto_editions_bulk_operations.sql').read_text());register(store);tick(store,[asset()]);record,assets=prepared(tmp_path)
     sql.execute('UPDATE edition_products SET edition_total=2')
     sql.execute("INSERT INTO auto_edition_preparations VALUES(%s,%s::jsonb,%s::jsonb,%s::jsonb,'synthetic-admin',now())",(record['hash'],json.dumps(record['manifest']),json.dumps(record['proofs']),json.dumps(record['receipts'])))
     sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',preparation_hash=%s,source=%s::jsonb,edition_total=2 WHERE product_gid=%s",(record['hash'],json.dumps(record['manifest']['source']),PID))
@@ -220,7 +220,7 @@ def test_synthetic_performance(tmp_path):
 
 
 def test_local_48_design_metadata_and_approval_performance(store,tmp_path,monkeypatch):
-    d,sql=store;monkeypatch.setenv('AUTO_EDITIONS_V15_ENABLED','false')
+    d,sql=store;sql.execute(Path('supabase/migrations/20261016071758_auto_editions_bulk_operations.sql').read_text());monkeypatch.setenv('AUTO_EDITIONS_V15_ENABLED','false')
     template,assets=prepared(tmp_path);cases={};items=[]
     # Real SQL operations; tiny synthetic artwork and injected provider only.
     for n in range(1,49):

@@ -12,10 +12,11 @@ async function fixture(browser,{width=1280,clock=false,list,image,body=html}={})
  if(clock)await page.clock.install();
  await page.route('**/*',async route=>{const url=new URL(route.request().url());
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body});
-  if(url.pathname.endsWith('/list')){const request=route.request().postDataJSON();state.lists.push(request);if(list)return list(route,request,state);return route.fulfill({json:data(request.cursor||0)});}
+  if(url.pathname.endsWith('/previews'))return route.fulfill({json:{rows:[]}});
+   if(url.pathname.endsWith('/list')){const request=route.request().postDataJSON();state.lists.push(request);if(list)return list(route,request,state);return route.fulfill({json:data(request.cursor||0)});}
   if(url.pathname.endsWith('/image')){if(url.searchParams.has('large'))state.large++;else state.images++;state.active++;state.maxActive=Math.max(state.maxActive,state.active);if(image)return image(route,url,state);await sleep(15);state.active--;return route.fulfill({contentType:'image/png',body:png});}
   if(url.pathname.endsWith('/approve')){const body=route.request().postDataJSON();state.approvals.push(body);return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id}});}
-  if(url.pathname.endsWith('/progress')){const body=state.approvals.at(-1),items=body?.items||[];return route.fulfill({json:{found:true,active:false,counts:{Pending:0,Processing:0,Approved:items.length,Skipped:0,'Needs Attention':0,Failed:0},rows:items.map(i=>({...i,state:'Approved',reason:''}))}});}
+  if(url.pathname.endsWith('/progress')){const body=state.approvals.at(-1),items=body?.items||[];return route.fulfill({json:{found:true,active:false,counts:{Pending:0,Processing:0,Approved:items.length,Skipped:0,'Needs Attention':0,Failed:0},rows:items.map(i=>({...i,state:'Approved',current_status:'Cloud Ready',current_hash:i.hash,reason:''}))}});}
   return route.abort();
  });
  await page.goto('https://bulk-loading.local.test/');

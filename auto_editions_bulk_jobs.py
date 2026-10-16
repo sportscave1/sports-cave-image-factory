@@ -62,7 +62,7 @@ class ReviewJobs:
             if len(cur.fetchall())!=len(selected):raise RuntimeError('Concurrent review completed during submission. Reconcile this request before retrying.')
         return key
 
-    def progress(self,actor,*,batch_id=None,product_gids=None):
+    def progress(self,actor,*,batch_id=None,product_gids=None,active_review_only=False):
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("SET LOCAL statement_timeout='3000ms'; SET LOCAL lock_timeout='500ms'")
             if batch_id:
@@ -76,8 +76,9 @@ class ReviewJobs:
                 from auto_editions_status import identity
                 ids=list(dict.fromkeys(identity(p) for p in product_gids or []))
                 if len(ids)>1000:raise ValueError('Bounded recovery selection required.')
-                cur.execute("""SELECT DISTINCT ON(j.product_gid) j.* FROM auto_edition_review_jobs j
-                    WHERE j.product_gid=ANY(%s) ORDER BY j.product_gid,j.created_at DESC,j.id DESC""",(ids,))
+                cur.execute("""SELECT * FROM (SELECT DISTINCT ON(j.product_gid) j.* FROM auto_edition_review_jobs j
+                    WHERE j.product_gid=ANY(%s) ORDER BY j.product_gid,j.created_at DESC,j.id DESC) latest"""+
+                    (" WHERE state IN ('Pending','Processing','Failed','Needs Attention')" if active_review_only else ''),(ids,))
             rows=cur.fetchall()
         public=[dict(job_id=r['id'],product_gid=r['product_gid'],hash=r['preparation_hash'],state=r['state'],reason=r['reason']) for r in rows]
         counts={s:sum(r['state']==s for r in public) for s in STATES}
@@ -136,6 +137,13 @@ class PreviewStore:
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("SELECT encode(jpeg,'hex') AS jpeg FROM auto_edition_review_previews WHERE identity=%s",(key,));row=cur.fetchone()
             return bytes.fromhex(row['jpeg']) if row else None
+
+    def get_many(self,keys):
+        if len(keys)>8:raise ValueError('Bounded preview cache read required.')
+        if not keys:return {}
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("SELECT identity,encode(jpeg,'hex') AS jpeg FROM auto_edition_review_previews WHERE identity=ANY(%s)",(keys,))
+            return {row['identity']:bytes.fromhex(row['jpeg']) for row in cur.fetchall()}
 
     def put(self,key,data):
         if len(data)>524288:return

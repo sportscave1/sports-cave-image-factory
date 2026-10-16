@@ -263,7 +263,7 @@ def review_operations(connect,data):
         if not operation or operation['hash']!=row.get('preparation_hash'):continue
         # Authoritative Cloud/Production Ready and repair outcomes always take precedence.
         if row['status'] in ('Review','Needs Review'):
-            label={'Pending':'Pending Approval','Processing':'Approving…','Failed':'Approval Failed'}.get(operation['state'])
+            label={'Pending':'Pending Approval','Processing':'Approving…','Failed':'Approval Failed','Needs Attention':'Needs Review'}.get(operation['state'])
             if label:row['review_operation']=dict(label=label,reason=operation['reason'],job_id=operation['job_id'])
     return data
 

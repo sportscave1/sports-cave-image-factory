@@ -7,10 +7,11 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==','base64');
   await page.route('**/*',async route=>{const u=new URL(route.request().url());
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/auto_editions/bulk.html','utf8')});
+   if(u.pathname.endsWith('/previews'))return route.fulfill({json:{rows:[]}});
    if(u.pathname.endsWith('/list')){const cursor=route.request().postDataJSON().cursor||0;return route.fulfill({json:{rows:rows.slice(cursor,cursor+20),next_cursor:cursor+20<rows.length?cursor+20:null,metadata_queries:3,duration_ms:1}});}
    if(u.pathname.endsWith('/image')){if(u.searchParams.has('large'))large++;else downloads++;active++;maxActive=Math.max(active,maxActive);await new Promise(r=>setTimeout(r,15));active--;return route.fulfill({contentType:'image/png',body:png});}
    if(u.pathname.endsWith('/approve')){approvals++;const body=route.request().postDataJSON();assert.equal(body.confirm_visual_quality,true);assert.equal(body.items.length,40);acceptedItems=body.items;return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id}});}
-   if(u.pathname.endsWith('/progress')){return route.fulfill({json:{found:true,active:false,counts:{Pending:0,Processing:0,Approved:acceptedItems.length?39:0,Skipped:acceptedItems.length?1:0,'Needs Attention':0,Failed:0},rows:acceptedItems.map((i,n)=>({...i,state:n?'Approved':'Skipped',reason:''}))}});}
+   if(u.pathname.endsWith('/progress')){return route.fulfill({json:{found:true,active:false,counts:{Pending:0,Processing:0,Approved:acceptedItems.length?39:0,Skipped:acceptedItems.length?1:0,'Needs Attention':0,Failed:0},rows:acceptedItems.map((i,n)=>({...i,state:n?'Approved':'Skipped',current_status:n?'Cloud Ready':undefined,current_hash:i.hash,reason:''}))}});}
    throw Error('Unexpected request '+u.pathname);
   });
   await page.goto('https://bulk.local.test/');await page.evaluate(ids=>window.postMessage({type:'sports-cave-bulk-products',product_gids:ids},location.origin),rows.map(r=>r.product_gid));

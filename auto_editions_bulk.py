@@ -1,5 +1,6 @@
 """Explicit TEST visual review. No queue claims, generation, or supplier writes."""
 import asyncio
+import base64
 import io
 import json
 import re
@@ -84,21 +85,25 @@ class ReviewCache:
             while self.entries and sum(map(len,self.entries.values()))+len(data)>self.max_bytes:self.entries.popitem(last=False)
             if len(data)<=self.max_bytes:self.entries[key]=data
 
+    @staticmethod
+    def key(record,width=300):
+        return (ae.fingerprint(dict(renderer='review-jpeg-v2',hash=record['hash'],receipts=record['receipts'],source=record['manifest']['source'])),width)
+
     def get(self,record,fetch,width=300,store=None):
         if width not in (300,1200):raise ValueError('Fixed review sizes required.')
-        m=evidence(record);digest=record['hash'];key=(ae.fingerprint(dict(renderer='review-jpeg-v2',hash=digest,receipts=record['receipts'],source=m['source'])),width)
+        m=evidence(record);digest=record['hash'];key=self.key(record,width)
         with self.lock:
             if key in self.entries:
                 self.entries.move_to_end(key);return self.entries[key]
-        # Unrelated cached previews never wait behind a cold provider transfer.
+        persisted=store.get(ae.fingerprint(key)) if store else None
+        if persisted:
+            self.remember(key,persisted)
+            return persisted
+        # Serialize duplicate cold builds only, after both warm cache paths.
         with self.build_locks[int(key[0][:8],16)%len(self.build_locks)]:
             with self.lock:
                 if key in self.entries:
                     self.entries.move_to_end(key);return self.entries[key]
-            persisted=store.get(ae.fingerprint(key)) if store else None
-            if persisted:
-                self.remember(key,persisted)
-                return persisted
             with self.decoders, tempfile.TemporaryDirectory(prefix='sc-review-small-') as folder:
                 root=Path(folder);r=m['number_region'];profile=None
                 for asset,size in ((m['master'],m['dimensions']),(m['patches']['1'],[r[2]-r[0],r[3]-r[1]])):
@@ -140,10 +145,21 @@ READ_SLOTS=threading.BoundedSemaphore(3)
 
 # Bound candidates BEFORE loading manifests, proof/receipt arrays or status laterals.
 # Ordinality is a stable cursor within the caller's fixed catalogue/search context.
-PAGE_SQL='''SELECT w.pid AS product_gid,w.position
+PAGE_SQL='''SELECT w.pid AS product_gid,w.position,last_review.state AS review_result,last_review.reason AS review_reason
     FROM unnest(%s::text[]) WITH ORDINALITY AS w(pid,position)
     JOIN auto_edition_onboarding q ON q.product_gid=w.pid
+    LEFT JOIN LATERAL (SELECT state,reason FROM auto_edition_review_jobs j
+        WHERE j.product_gid=w.pid AND j.preparation_hash=q.preparation_hash
+        ORDER BY created_at DESC,id DESC LIMIT 1) last_review ON true
     WHERE w.position>%s AND q.preparation_hash IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM auto_edition_review_jobs j
+          WHERE j.product_gid=w.pid AND j.state IN ('Pending','Processing'))
+      AND NOT EXISTS(SELECT 1 FROM auto_edition_layouts l
+          WHERE l.product_gid=w.pid AND l.preparation_hash=q.preparation_hash
+            AND l.approval->>'preparation_hash'=q.preparation_hash
+            AND COALESCE(l.approval->>'actor_id','')<>''
+            AND l.approval->>'visual_approved'='true' AND l.approval->>'pixel_exact'='true'
+            AND l.approval->>'test_only'='true')
     ORDER BY w.position LIMIT %s'''
 
 
@@ -209,7 +225,8 @@ def listing(connect,ids,user,cursor=0):
         has_more=len(page)>PAGE_SIZE;page=page[:PAGE_SIZE]
         next_cursor=int(page[-1]['position']) if has_more else None
         data=statuses.batch(borrowed,[r['product_gid'] for r in page],writable=True)
-        candidates=[r for r in data['rows'] if r['status'] in ('Review','Needs Review')]
+        failures={r['product_gid']:r for r in page if r.get('review_result') in ('Failed','Needs Attention')}
+        candidates=[r for r in data['rows'] if r['status'] in ('Review','Needs Review') or (r['product_gid'] in failures and r['status'] not in ('Cloud Ready','Production Ready'))]
         found=records(borrowed,[r['product_gid'] for r in candidates]) if candidates else {}
     now=time.monotonic();entries={}
     for row in candidates:
@@ -219,6 +236,8 @@ def listing(connect,ids,user,cursor=0):
             except (ValueError,KeyError,TypeError):reason='Preparation proofs, geometry or receipts need attention.'
             key=(str(user['id']),row['product_gid'],record['hash'])
             entries[key]=(now+900,record)
+        failure=failures.get(row['product_gid'])
+        if failure:reason='Previous approval: '+failure['review_result']+'. '+failure['review_reason']
         public.append(dict(product_gid=row['product_gid'],hash=row['preparation_hash'],
                            title=record['product_title'] if record else row['product_gid'],eligible=eligible,reason=reason))
     # Do not hold the image lookup lock during manifest/policy validation.
@@ -373,6 +392,47 @@ async def image_api(request):
     except Exception as error:return api.failure(error)
 
 
+def cached_previews(entries,store):
+    """Cache hits only: no provider, PNG transfer or cold-build queue in this request."""
+    response=[];missing={}
+    for pid,digest,record in entries:
+        try:
+            evidence(record);key=thumbnails.key(record);identity=ae.fingerprint(key)
+            with thumbnails.lock:data=thumbnails.entries.get(key)
+            row=dict(product_gid=pid,hash=digest,jpeg=None);response.append(row)
+            if data:row['jpeg']=base64.b64encode(data).decode('ascii')
+            else:missing[identity]=(key,row)
+        except (ValueError,KeyError,TypeError):
+            response.append(dict(product_gid=pid,hash=digest,jpeg=None))
+    if missing:
+        for identity,data in store.get_many(list(missing)).items():
+            key,row=missing[identity];thumbnails.remember(key,data)
+            row['jpeg']=base64.b64encode(data).decode('ascii')
+    return response
+
+
+async def previews_api(request):
+    try:
+        import files_upload_api as files
+        from auto_editions_bulk_jobs import PreviewStore
+        from auto_editions_bulk_runtime import connection
+        started=time.perf_counter();user=await actor(request);body=await files._json_body(request)
+        if set(body)!={'items'} or not isinstance(body['items'],list) or not 1<=len(body['items'])<=8:
+            raise ValueError('At most eight cached preview identities required.')
+        entries=[]
+        with snapshot_lock:
+            for item in body['items']:
+                if not isinstance(item,dict) or set(item)!={'product_gid','hash'}:raise ValueError('Exact preview identities required.')
+                pid=statuses.identity(item['product_gid']);digest=item['hash']
+                entry=snapshots.get((str(user['id']),pid,digest))
+                if not entry or entry[0]<time.monotonic():raise ValueError('Refresh review metadata to renew preview access.')
+                entries.append((pid,digest,entry[1]))
+        rows=await run_in_threadpool(cached_previews,entries,PreviewStore(connection))
+        elapsed=round((time.perf_counter()-started)*1000,2)
+        return JSONResponse(dict(rows=rows,hits=sum(bool(r['jpeg']) for r in rows),duration_ms=elapsed),headers={**api.HEADERS,'Server-Timing':f'cached-previews;dur={elapsed}'})
+    except Exception as error:return api.failure(error)
+
+
 async def approve_api(request):
     try:
         import files_upload_api as files
@@ -399,7 +459,7 @@ async def progress_api(request):
         from auto_editions_bulk_runtime import connection
         user=await actor(request);body=await files._json_body(request)
         if set(body) not in ({'batch_id'},{'product_gids'}):raise ValueError('Batch identity or bounded catalogue required.')
-        result=await run_in_threadpool(ReviewJobs(connection).progress,str(user['id']),**body)
+        result=await run_in_threadpool(ReviewJobs(connection).progress,str(user['id']),active_review_only='product_gids' in body,**body)
         committed=[r['product_gid'] for r in result['rows'] if r['state']=='Approved']
         if committed:
             # Historical job success must never mask a newer source/quality change.
@@ -414,4 +474,4 @@ async def progress_api(request):
 
 
 ROUTES=(('/auto-editions/bulk',page,('GET',)),('/api/auto-editions/bulk/list',list_api,('POST',)),
-        ('/api/auto-editions/bulk/image',image_api,('GET',)),('/api/auto-editions/bulk/approve',approve_api,('POST',)),('/api/auto-editions/bulk/progress',progress_api,('POST',)))
+        ('/api/auto-editions/bulk/image',image_api,('GET',)),('/api/auto-editions/bulk/previews',previews_api,('POST',)),('/api/auto-editions/bulk/approve',approve_api,('POST',)),('/api/auto-editions/bulk/progress',progress_api,('POST',)))

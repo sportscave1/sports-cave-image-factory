@@ -17,7 +17,9 @@ async def statuses(request):
 
 
 async def change(request):
-    body=await request.json();state.stage=body['stage'];return JSONResponse({'ok':True})
+    body=await request.json();state.stage=body['stage']
+    if 'review_jobs' in body:state.review_jobs=body['review_jobs']
+    return JSONResponse({'ok':True})
 
 
 if __name__=='__main__':

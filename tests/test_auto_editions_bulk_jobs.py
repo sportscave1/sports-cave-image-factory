@@ -18,7 +18,7 @@ SCHEMA=Path('supabase/migrations/20261016071758_auto_editions_bulk_operations.sq
 
 @pytest.fixture
 def ops(review):
-    d,sql,record,assets=review;sql.execute(SCHEMA.read_text())
+    d,sql,record,assets=review
     sql.execute("CREATE TABLE os_users(id text PRIMARY KEY,role text,is_active boolean,account_status text,removed_at timestamptz)")
     sql.execute("INSERT INTO os_users VALUES('synthetic-admin','admin',true,'active',NULL)")
     bulk._verified_files.clear()
