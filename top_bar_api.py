@@ -891,21 +891,19 @@ def load_order_status(claims):
     summary = {"action_required_count": None, "badge_label": ""}
     notification = {}
     supabase_configured = False
-    supabase_summary_loaded = False
     try:
         import supabase_backend
 
         supabase_configured = supabase_backend.is_configured()
         if supabase_configured:
             summary = _cached_order_action_summary(supabase_backend)
-            supabase_summary_loaded = True
     except Exception as error:
         print(
             json.dumps(
                 {
                     "event": "orders_badge_summary_failed",
                     "error": error.__class__.__name__,
-                    "fallback": "local_orders_snapshot",
+                    "fallback": "retry_local_aggregate",
                 },
                 ensure_ascii=True,
             ),
@@ -926,8 +924,8 @@ def load_order_status(claims):
                 ),
                 flush=True,
             )
-        if supabase_summary_loaded:
-            return {**summary, "notification": notification}
+        # Never load the entire Orders table to rescue a failed sidebar count.
+        return {**summary, "notification": notification}
     try:
         import order_allocator
 

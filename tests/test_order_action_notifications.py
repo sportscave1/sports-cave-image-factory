@@ -504,7 +504,7 @@ class OrderStatusUiContractTests(unittest.TestCase):
     def test_badge_matches_numeric_and_gid_line_item_dispatch_identities(self):
         query_source = supabase_backend.ORDER_ACTION_ROWS_SQL
 
-        self.assertIn("dispatch.shopify_line_item_id = ANY", query_source)
+        self.assertIn("DISTINCT ON (REGEXP_REPLACE(dispatch.shopify_line_item_id", query_source)
         self.assertIn("REGEXP_REPLACE", query_source)
         self.assertIn("gid://shopify/LineItem/", query_source)
         self.assertIn("o.raw_json->>'fulfillment_status'", query_source)

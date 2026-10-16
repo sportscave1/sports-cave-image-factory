@@ -33,7 +33,7 @@ def order_is_relevant(row):
     row = {} if row is None else row
     status = canonical_status(row.get("financial_status") or "paid")
     cancelled = str(row.get("cancelled_at") or "").strip()
-    return status in PAID_ORDER_STATUSES and not cancelled and not order_refunds.blocked(row)
+    return status in PAID_ORDER_STATUSES and not cancelled and not order_refunds.state(row).get('cancelled_at') and not order_refunds.blocked(row)
 
 
 def certificate_step_is_complete(row):
@@ -110,14 +110,18 @@ def canonical_order_fulfilment_status(row):
         "internal_fulfillment_status",
         "marketplace_fulfilment_status",
         "marketplace_fulfillment_status",
-        "fulfillment_status",
-        "fulfilment_status",
-        "displayFulfillmentStatus",
     ):
         for source in (row, payload):
             status = str(source.get(key) or "").strip()
             if status:
                 return status
+    remote = order_refunds.state(row).get('fulfillment_status')
+    if remote:
+        return remote
+    for key in ('fulfillment_status', 'fulfilment_status', 'displayFulfillmentStatus'):
+        for source in (row, payload):
+            if str(source.get(key) or '').strip():
+                return str(source[key]).strip()
     return ""
 
 
@@ -165,6 +169,10 @@ def fulfilment_step_is_complete(row):
 def row_requires_action(row):
     row = {} if row is None else row
     if not order_is_relevant(row):
+        return False
+    quantities = order_refunds.state(row).get('line_current_quantities') or {}
+    line_id = str(row.get('shopify_line_item_id') or '').rsplit('/', 1)[-1]
+    if quantities.get(line_id) == 0:
         return False
     # Preserve the operational state users already completed in Sports Cave OS.
     # A terminal Prodigi/Sports Cave dispatch is authoritative; optional newer

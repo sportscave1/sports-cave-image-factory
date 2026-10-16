@@ -5,11 +5,11 @@ import json
 
 REFUND_QUERY = '''query OrderRefunds($ids: [ID!]!) {
   nodes(ids: $ids) { ... on Order {
-    id updatedAt displayFinancialStatus displayFulfillmentStatus
+    id updatedAt displayFinancialStatus displayFulfillmentStatus cancelledAt
     transactions(first: 250) { kind status }
     transactionsCount { count }
     lineItems(first: 250) {
-      nodes { unfulfilledQuantity }
+      nodes { id currentQuantity unfulfilledQuantity }
       pageInfo { hasNextPage }
     }
   } }
@@ -32,7 +32,18 @@ def projection(node):
     status = 'Refund Pending' if pending else 'Refunded' if closed else (
         'Partially Refunded' if financial == 'PARTIALLY_REFUNDED' else '')
     return {'status': status, 'closed': closed, 'blocked': pending or closed,
-            'remote_updated_at': node.get('updatedAt') or ''}
+            'remote_updated_at': node.get('updatedAt') or '',
+            'financial_status': financial,
+            'fulfillment_status': node.get('displayFulfillmentStatus') or '',
+            'cancelled_at': node.get('cancelledAt') or '',
+            'line_current_quantities': {str(line['id']).rsplit('/', 1)[-1]: int(line['currentQuantity'])
+                for line in lines.get('nodes') or []
+                if complete_evidence and line.get('id') and line.get('currentQuantity') is not None}}
+
+
+def semantic_state(value):
+    # Remote timestamps/heartbeat alone must not remount the Orders table.
+    return {k: v for k, v in (value or {}).items() if k != 'remote_updated_at'}
 
 
 def state(row):
@@ -67,10 +78,16 @@ def reconcile(order_ids=None, *, backend=None, shopify=None, limit=50):
                     ORDER BY COALESCE(raw_json->>'_orders_refund_checked_at', '') LIMIT 25''')
                 pending_ids = [r['shopify_order_id'] for r in cur.fetchall()]
                 cur.execute('''SELECT shopify_order_id FROM shopify_orders
+                    WHERE fulfillment_status IS NULL
+                      AND raw_json->'_orders_refund'->>'fulfillment_status' IS NULL
+                      AND shopify_order_id ~ '^(gid://shopify/Order/)?[0-9]+$'
+                    ORDER BY COALESCE(raw_json->>'_orders_refund_checked_at', '') LIMIT 100''')
+                missing_status_ids = [r['shopify_order_id'] for r in cur.fetchall()]
+                cur.execute('''SELECT shopify_order_id FROM shopify_orders
                     WHERE shopify_order_id ~ '^(gid://shopify/Order/)?[0-9]+$'
                     ORDER BY COALESCE(raw_json->>'_orders_refund_checked_at', ''), created_at DESC
                     LIMIT %s''', (limit,))
-                order_ids = pending_ids + [r['shopify_order_id'] for r in cur.fetchall()]
+                order_ids = pending_ids + missing_status_ids + [r['shopify_order_id'] for r in cur.fetchall()]
     ids = list(dict.fromkeys(shopify.shopify_gid('Order', i) for i in order_ids if i))
     changed = 0
     for offset in range(0, len(ids), 2):
@@ -102,14 +119,14 @@ def reconcile(order_ids=None, *, backend=None, shopify=None, limit=50):
                         financial_status=%s,
                         raw_json=COALESCE(raw_json, '{}'::jsonb) || %s::jsonb,
                         raw=COALESCE(raw, '{}'::jsonb) || %s::jsonb,
-                        updated_at=CASE WHEN raw_json->'_orders_refund' IS DISTINCT FROM %s::jsonb
+                        updated_at=CASE WHEN (raw_json->'_orders_refund' - 'remote_updated_at') IS DISTINCT FROM (%s::jsonb - 'remote_updated_at')
                             THEN now() ELSE updated_at END
                         WHERE shopify_order_id=%s
                           AND COALESCE(raw_json->'_orders_refund'->>'remote_updated_at', '') <= %s
                         RETURNING shopify_order_id''',
                         (node['displayFinancialStatus'], patch, patch, json.dumps(refund), node['id'], node['updatedAt']))
                     changed += len(cur.fetchall())
-                    if previous and previous.get('refund') != refund:
+                    if previous and cur.rowcount and semantic_state(previous.get('refund')) != semantic_state(refund):
                         cur.execute('''INSERT INTO app_settings(key, value, updated_at)
                             VALUES ('orders_refund_visibility', %s::jsonb, now())
                             ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()''',

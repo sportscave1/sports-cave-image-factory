@@ -2024,11 +2024,17 @@ def _render_ledger_diagnostics():
                 st.caption(f"Duplicate allocation diagnostics unavailable: {error}")
 
 
-def _display_rows(rows, *, normalised=False):
-    output = []
-    psd_mapping = psd_directory.page_directory(st)
+def _order_display_resources(rows):
+    """Overlap independent stored link reads; keep Streamlit calls on its thread."""
     import auto_editions_runtime
-    cloud_links = auto_editions_runtime.download_links(rows or [])
+    links = _ORDERS_LOAD_EXECUTOR.submit(auto_editions_runtime.download_links, rows or [])
+    mapping = psd_directory.page_directory(st)
+    return mapping, links.result()
+
+
+def _display_rows(rows, *, normalised=False, resources=None):
+    output = []
+    psd_mapping, cloud_links = resources if resources is not None else _order_display_resources(rows)
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
@@ -2245,8 +2251,8 @@ def _fulfilment_cell_style(value):
     return ""
 
 
-def _display_table_payload(rows, *, normalised=False):
-    display_rows = _display_rows(rows, normalised=normalised)
+def _display_table_payload(rows, *, normalised=False, resources=None):
+    display_rows = _display_rows(rows, normalised=normalised, **({"resources": resources} if resources is not None else {}))
     if getattr(st, "__name__", "") != "streamlit":
         return display_rows
     pandas_module = _pandas_module()
@@ -2725,12 +2731,12 @@ def _render_orders_table(rows):
         _render_mobile_orders(rows)
         return
     _render_inline_prodigi_actions(rows)
+    import auto_editions_runtime
+    resources = _order_display_resources(rows)
     selected_print_rows = _selected_rows_from_state(rows)
     if selected_print_rows:
-        import auto_editions_runtime
-        cloud_links=auto_editions_runtime.download_links(selected_print_rows)
+        mapping, cloud_links = resources
         with st.expander("Selected unit details / Print JPG", expanded=False):
-            mapping = psd_directory.page_directory(st)
             for selected in selected_print_rows:
                 status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
@@ -2749,7 +2755,7 @@ def _render_orders_table(rows):
                     st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
     with st.container(border=False, key="orders-table"):
         st.dataframe(
-            _display_table_payload(rows, normalised=True),
+            _display_table_payload(rows, normalised=True, resources=resources),
             hide_index=True,
             use_container_width=True,
             height=min(760, max(420, 28 * (len(rows) + 1))),
@@ -2778,14 +2784,13 @@ def _mobile_toggle(key, unit):
 
 
 def _render_mobile_orders(rows):
-    mapping = psd_directory.page_directory(st)
+    mapping, cloud_links = _order_display_resources(rows)
     refunded_cards = [f'.st-key-orders-mobile-card-{_mobile_unit_id(row)} p'
                       for row in rows if order_refunds.state(row).get('closed')]
     if refunded_cards:
         st.html('<style>' + ','.join(refunded_cards) +
                 '{color:#8b929a;text-decoration:line-through;}</style>')
     import auto_editions_runtime
-    cloud_links=auto_editions_runtime.download_links(rows)
     for row in rows:
         unit = _mobile_unit_id(row)
         key = 'orders-mobile-check-' + unit

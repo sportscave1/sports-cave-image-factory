@@ -20426,24 +20426,42 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
 
 
 ORDER_ACTION_ROWS_SQL = """
+    WITH dispatch_states AS MATERIALIZED (
+        SELECT DISTINCT ON (REGEXP_REPLACE(dispatch.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i'))
+            REGEXP_REPLACE(dispatch.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i') AS line_id,
+            dispatch.prodigi_status
+        FROM prodigi_dispatch_rows dispatch
+        ORDER BY REGEXP_REPLACE(dispatch.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i'),
+            CASE WHEN LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
+                ('complete', 'completed', 'fulfilled', 'fulfilled in shopify') THEN 0 ELSE 1 END,
+            dispatch.updated_at DESC NULLS LAST, dispatch.submitted_at DESC NULLS LAST
+    ), candidate_lines AS MATERIALIZED (
+        SELECT li.shopify_order_id, li.shopify_line_item_id, li.quantity,
+               COALESCE(pd.prodigi_status, '') AS prodigi_status
+        FROM shopify_order_lines li
+        LEFT JOIN dispatch_states pd
+          ON pd.line_id = REGEXP_REPLACE(li.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i')
+        WHERE LOWER(BTRIM(COALESCE(pd.prodigi_status, ''))) NOT IN
+              ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+    ), candidate_orders AS MATERIALIZED (
+        SELECT o.shopify_order_id, o.order_name, o.financial_status,
+               o.cancelled_at, o.fulfillment_status, o.raw_json
+        FROM shopify_orders o
+        JOIN (SELECT DISTINCT shopify_order_id FROM candidate_lines) ids USING (shopify_order_id)
+    )
     SELECT
         o.shopify_order_id,
         o.order_name,
         o.financial_status,
         o.cancelled_at,
         COALESCE(
-            NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
-            NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
-            NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
-            NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
-            NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
-            NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
             NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
             NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
             NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
             NULLIF(o.raw_json->>'internal_fulfillment_status', ''),
             NULLIF(o.raw_json->>'marketplace_fulfilment_status', ''),
             NULLIF(o.raw_json->>'marketplace_fulfillment_status', ''),
+            NULLIF(o.raw_json->'_orders_refund'->>'fulfillment_status', ''),
             NULLIF(o.fulfillment_status, ''),
             NULLIF(o.raw_json->>'fulfillment_status', ''),
             NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
@@ -20451,47 +20469,22 @@ ORDER_ACTION_ROWS_SQL = """
         ) AS fulfillment_status,
         li.shopify_line_item_id,
         li.quantity,
-        COALESCE(pd.prodigi_status, '') AS prodigi_status
-    FROM shopify_orders o
-    JOIN shopify_order_lines li
+        li.prodigi_status
+    FROM candidate_orders o
+    JOIN candidate_lines li
       ON li.shopify_order_id = o.shopify_order_id
-    LEFT JOIN LATERAL (
-        SELECT dispatch.prodigi_status
-        FROM prodigi_dispatch_rows dispatch
-        WHERE dispatch.shopify_line_item_id = ANY(
-            ARRAY[
-                li.shopify_line_item_id,
-                REGEXP_REPLACE(
-                    COALESCE(li.shopify_line_item_id, ''),
-                    '^gid://shopify/LineItem/',
-                    '',
-                    'i'
-                ),
-                'gid://shopify/LineItem/' || REGEXP_REPLACE(
-                    COALESCE(li.shopify_line_item_id, ''),
-                    '^gid://shopify/LineItem/',
-                    '',
-                    'i'
-                )
-            ]
-        )
-        ORDER BY CASE
-                     WHEN LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
-                          ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
-                     THEN 0 ELSE 1
-                 END,
-                 dispatch.updated_at DESC NULLS LAST,
-                 dispatch.submitted_at DESC NULLS LAST
-        LIMIT 1
-    ) pd ON TRUE
     WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid', 'partially_refunded')
       AND COALESCE(o.raw_json->'_orders_refund'->>'blocked', 'false') <> 'true'
       AND o.cancelled_at IS NULL
+      AND COALESCE(o.raw_json->'_orders_refund'->>'cancelled_at', '') = ''
+      AND COALESCE((o.raw_json->'_orders_refund'->'line_current_quantities'->>
+          REGEXP_REPLACE(li.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i'))::integer,
+          li.quantity, 1) > 0
 """
 
 
 def list_order_action_rows():
-    """Load local order status rows for diagnostics and rule-level verification."""
+    """Load incomplete-dispatch candidate rows for local action-rule diagnostics."""
     def load_rows(cur):
         cur.execute(ORDER_ACTION_ROWS_SQL)
         return cur.fetchall()
