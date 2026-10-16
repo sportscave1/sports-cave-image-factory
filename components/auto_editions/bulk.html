@@ -1,9 +1,11 @@
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><title>Bulk Review</title>
 <style>
 body{font:14px system-ui;margin:12px;color:#28323d;background:#fff}button{padding:7px 10px;background:#fff;border:1px solid #ccd2d9;border-radius:5px;cursor:pointer}button:disabled{opacity:.45;cursor:default}header{display:flex;gap:6px;flex-wrap:wrap;position:sticky;top:0;background:#fff;padding:6px 0;z-index:1}h2{font-size:17px;margin:0 0 5px}#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}figure{margin:0;border:1px solid #e0e4e8;border-radius:6px;padding:7px;min-width:0}figure img{width:100%;height:160px;object-fit:contain;cursor:zoom-in;background:#f6f7f8}figcaption{margin-top:5px;overflow-wrap:anywhere}small{display:block;color:#637083}dialog{max-width:95vw;max-height:95vh;border:1px solid #ccd2d9;border-radius:8px}dialog img{display:block;max-width:85vw;max-height:80vh}#message{margin:8px 0;color:#536274}#proof{width:min(700px,95vw)}
+small.approving::before{content:"";display:inline-block;width:10px;height:10px;border:2px solid #d9dfdd;border-top-color:#9c7b26;border-radius:50%;margin-right:5px;animation:review-spin .9s linear infinite}@keyframes review-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){small.approving::before{animation:none}}
 </style></head><body>
 <h2>Bulk Review</h2><small>Review artwork, plaque and number placement. Approval permits TEST previews only. Use Review / Repair for designs needing attention.</small>
-<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="all" disabled>Approve All Eligible</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button></header>
+<header><button id="select">Select All Eligible</button><button id="clear">Clear Selection</button><button id="approve" disabled>Approve Selected</button><button id="all" disabled>Approve All Loaded Eligible</button><button id="reload">Refresh</button><button id="retry" hidden>Retry</button></header>
+<div id="progress" role="status" aria-live="polite"></div><button id="retry-approval" hidden>Retry approval tracking</button>
 <div id="message" role="status" aria-live="polite">Loading review metadata…</div><div id="grid"></div><button id="more" hidden>Load more designs</button>
 <dialog id="large"><button id="close-large">Close preview</button><div id="large-status" role="status"></div><img id="large-image" alt="Larger artwork preview"></dialog>
 <dialog id="proof"><p id="confirmation"></p><label><input type="checkbox" id="confirm"> I have reviewed the selected artwork, plaques, edition numbers, borders and enlargement quality.</label><p>Current source, files and evidence will be rechecked. Supplier certification remains separate.</p><button id="cancel">Cancel</button> <button id="accept" disabled>Confirm TEST Approval</button></dialog>
@@ -13,6 +15,9 @@ const timings={};window.reviewTimings=timings;
 let ids=[],contextKey=null,rows=[],byId=new Map(),selected=new Set(),pending=[];
 let busy=false,loading=false,started=false,disposed=false,generation=0,cursor=0,hasMore=true;
 let errorText='',resultText='',bootstrapTimer,largeTimer,activeImages=0,loadedImages=0,thumbnailStart=0;
+let approvalTimer=null,approvalFlight=false,approvalRequest=null,trackingFailures=0,trackingAgain=false;
+const operationStates=new Map();
+const approvalStorage='sc-edition-review-request-v3';
 const requests=new Set(),imageTasks=[],imageCancels=new Set();
 const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){if(!entry.isIntersecting)continue;nearImages.unobserve(entry.target);queueImage(entry.target._row);}},{rootMargin:'350px'});
 const nearMore=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))loadPage();},{rootMargin:'400px'});
@@ -35,8 +40,8 @@ async function api(path,body,timeout=10000){
   const timer=setTimeout(()=>{timedOut=true;controller.abort();},timeout);
   try{
     const response=await fetch('/api/auto-editions/bulk/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:controller.signal});
-    const data=await response.json();if(!response.ok)throw Error(data.error||'Review unavailable. Retry.');return data;
-  }catch(error){if(timedOut)throw Error(path==='approve'?'Approval result was not received. Refresh to verify the current status before retrying.':'Review metadata timed out. Retry.');if(error.name==='SyntaxError')throw Error('Review returned an unreadable response. Retry.');if(error.name==='TypeError')throw Error('Review network request failed. Retry.');throw error;}
+    const data=await response.json();if(!response.ok){const failure=Error(data.error||'Review unavailable. Retry.');failure.status=response.status;throw failure;}return data;
+  }catch(error){if(timedOut)throw Error(path==='approve'?'Acknowledgement delayed. Checking the saved review request…':path==='progress'?'Progress temporarily unavailable. Accepted work continues in the background.':'Review metadata timed out. Retry.');if(error.name==='SyntaxError')throw Error('Review returned an unreadable response. Retry.');if(error.name==='TypeError')throw Error('Review network request failed. Retry.');throw error;}
   finally{clearTimeout(timer);requests.delete(controller);}
 }
 function imageURL(row,large=false){return '/api/auto-editions/bulk/image?'+new URLSearchParams({product_gid:row.product_gid,hash:row.hash,...(large?{large:'1'}:{})});}
@@ -53,8 +58,7 @@ function pumpImages(){
       if(!ok)row.img.removeAttribute('src');
       if(version===generation&&!disposed&&!cancelled){
         row.previewReady=ok;row.imageState=ok?'ready':'failed';
-        if(!ok){selected.delete(row.product_gid);row.detail.textContent='Preview unavailable. Click the image to retry, or use Review / Repair.';}
-        else row.detail.textContent=row.eligible?'Eligible for confirmed TEST review':row.reason;
+        if(!ok){selected.delete(row.product_gid);row.retryPreview.hidden=false;row.detail.textContent=row.operationText||'Preview unavailable. Retry Preview or use Review / Repair.';}else{row.retryPreview.hidden=true;row.detail.textContent=row.operationText||(row.eligible?'Eligible for confirmed TEST review':row.reason);}
         loadedImages++;timings.thumbnailLoads=loadedImages;if(ok&&timings.firstThumbnailMs===undefined)timings.firstThumbnailMs=performance.now()-thumbnailStart;
         if(loadedImages===Math.min(8,rows.length))timings.initialThumbnailsMs=performance.now()-thumbnailStart;
         timings.allThumbnailsMs=performance.now()-thumbnailStart;controls();summary();
@@ -76,14 +80,15 @@ function append(data){
   const fragment=document.createDocumentFragment();
   for(const value of data){
     if(byId.has(value.product_gid))continue;
-    const row={...value,previewReady:false,imageState:'waiting'},card=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),label=document.createElement('label'),box=document.createElement('input'),detail=document.createElement('small'),link=document.createElement('a');
+    const row={...value,previewReady:false,imageState:'waiting'},card=document.createElement('figure'),img=document.createElement('img'),caption=document.createElement('figcaption'),label=document.createElement('label'),box=document.createElement('input'),detail=document.createElement('small'),link=document.createElement('a'),retryPreview=document.createElement('button');
     img.alt=row.title;img.width=300;img.height=180;img.decoding='async';img._row=row;img.onclick=()=>largePreview(row);
     box.type='checkbox';box.value=row.product_gid;box.disabled=true;box.onchange=()=>{if(box.checked&&row.eligible&&row.previewReady)selected.add(row.product_gid);else selected.delete(row.product_gid);controls();};
     label.append(box,document.createTextNode(row.title));caption.append(label);detail.textContent=row.eligible?'Loading preview…':row.reason;
     link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';
-    Object.assign(row,{img,box,detail});card.append(img,caption,detail,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
+    retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>queueImage(row);
+    Object.assign(row,{img,box,detail,retryPreview});card.append(img,caption,detail,retryPreview,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
   }
-  $('grid').append(fragment);for(const row of rows)if(row.imageState==='waiting')nearImages.observe(row.img);
+  $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting')nearImages.observe(row.img);
 }
 async function loadPage(){
   if(disposed||!started||loading||busy||!hasMore||errorText)return;
@@ -106,7 +111,7 @@ function cancelWork(){for(const request of requests)request.abort();requests.cle
 function reset(){
   if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;loading=false;errorText='';resultText='';loadedImages=0;
   for(const key of Object.keys(timings))delete timings[key];thumbnailStart=performance.now();$('grid').replaceChildren();
-  if(started)loadPage();else requestContext();
+  if(started){loadPage();recoverApprovals();}else requestContext();
 }
 function requestContext(){
   clearTimeout(bootstrapTimer);errorText='';controls();summary();
@@ -115,7 +120,7 @@ function requestContext(){
 }
 function selectAll(){selected=new Set(rows.filter(r=>r.eligible&&r.previewReady).map(r=>r.product_gid));controls();}
 function confirmSelection(all){
-  if(busy||$('proof').open)return;if(all)selectAll();
+  if(approvalRequest){trackApprovals();return;}if(busy||$('proof').open)return;if(all)selectAll();
   pending=rows.filter(r=>r.eligible&&r.previewReady&&selected.has(r.product_gid)).map(r=>({product_gid:r.product_gid,hash:r.hash}));if(!pending.length)return;
   $('confirmation').textContent='Approve '+pending.length+' loaded designs?'+(hasMore?' Additional designs have not been selected.':'');
   $('confirm').checked=false;$('accept').disabled=true;$('proof').showModal();controls();
@@ -125,17 +130,71 @@ $('reload').onclick=reset;$('retry').onclick=()=>{if(loading||busy)return;if(!ha
 $('close-large').onclick=()=>{$('large').close();clearTimeout(largeTimer);$('large-image').removeAttribute('src');};
 $('large').addEventListener('close',()=>{clearTimeout(largeTimer);$('large-image').onload=$('large-image').onerror=null;$('large-image').removeAttribute('src');});
 $('cancel').onclick=()=>{$('proof').close();controls();};$('proof').addEventListener('cancel',()=>queueMicrotask(controls));$('confirm').onchange=()=>$('accept').disabled=!$('confirm').checked;
-$('accept').onclick=async()=>{
-  if(busy||!$('confirm').checked)return;busy=true;$('proof').close();resultText='Rechecking current files and approving eligible designs…';errorText='';controls();summary();const start=performance.now();
+
+function saveRequest(value){sessionStorage.setItem(approvalStorage,JSON.stringify(value));approvalRequest=value;}
+function clearRequest(){try{sessionStorage.removeItem(approvalStorage);}catch{}approvalRequest=null;}
+function applyOperations(){
+  for(const row of rows){const op=operationStates.get(row.product_gid);if(!op||op.hash!==row.hash)continue;
+    row.operationText=op.state==='Processing'?'Approving…':op.state==='Pending'?'Pending Approval':op.state==='Approved'?(op.current_status==='Cloud Ready'&&op.current_hash===row.hash?'Cloud Ready · TEST approval complete':'TEST approval committed'+(op.current_status?' · '+op.current_status:'')):op.state==='Failed'?'Approval Failed · '+op.reason:op.state+' · '+op.reason;
+    row.detail.textContent=row.operationText;row.detail.classList.toggle('approving',op.state==='Processing');
+    if(['Pending','Processing','Approved'].includes(op.state))row.eligible=false;selected.delete(row.product_gid);
+  }
+}
+function showProgress(data){
+  operationStates.clear();for(const op of data.rows)operationStates.set(op.product_gid,op);applyOperations();
+  const counts=data.counts,done=['Approved','Skipped','Needs Attention','Failed'].reduce((sum,k)=>sum+counts[k],0),total=data.rows.length;
+  $('progress').textContent=(data.active?'Approving '+Math.min(total,done+counts.Processing)+' of '+total+' designs… · ':'')+Object.entries(counts).map(([key,value])=>key+': '+value).join(' / ');
+  $('retry-approval').hidden=true;controls();summary();
+  parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);
+}
+async function trackApprovals(){
+  if(disposed||!started)return;
+  if(approvalFlight){trackingAgain=true;return;}
+  clearTimeout(approvalTimer);approvalFlight=true;
   try{
-    const data=await api('approve',{items:pending,confirm_visual_quality:true},120000);if(disposed)return;
-    timings.bulkApprovalMs=performance.now()-start;timings.serverApprovalMs=data.duration_ms;
-    for(const result of data.results){selected.delete(result.product_gid);const row=byId.get(result.product_gid);if(row){row.eligible=false;row.detail.textContent=result.result;}}
-    resultText=Object.entries(data.counts).map(([key,value])=>key+': '+value).join(' / ');parent.postMessage({type:'sports-cave-auto-edition-updated'},location.origin);
-  }catch(error){if(!disposed){errorText=error.message;if(error.name==='AbortError')errorText='Approval result was not received. Refresh to verify current status.';for(const item of pending){const row=byId.get(item.product_gid);selected.delete(item.product_gid);if(row){row.eligible=false;row.detail.textContent='Approval result unknown. Refresh to verify current status.';}}}}
-  finally{busy=false;if(!disposed){controls();summary();}}
+    const data=await api('progress',approvalRequest?{batch_id:approvalRequest.request_id}:{product_gids:ids},8000);if(disposed)return;
+    if(approvalRequest&&!data.found){
+      $('progress').textContent='Request not recorded yet. Retry submission using the same saved request ID.';
+      $('retry-approval').textContent='Reconcile and retry submission';$('retry-approval').hidden=false;return;
+    }
+    trackingFailures=0;showProgress(data);
+    if(!data.active){if(approvalRequest)clearRequest();return;}
+    approvalTimer=setTimeout(trackApprovals,3000);
+  }catch(error){if(!disposed){$('progress').textContent='Progress temporarily unavailable. Accepted work continues in the background. Retry tracking to retrieve recorded results.';$('retry-approval').textContent='Retry approval tracking';$('retry-approval').hidden=false;if(error.status!==403&&++trackingFailures<=3)approvalTimer=setTimeout(trackApprovals,[3000,6000,12000][trackingFailures-1]);}}
+  finally{approvalFlight=false;if(trackingAgain&&!disposed){trackingAgain=false;queueMicrotask(trackApprovals);}}
+}
+function recoverApprovals(){
+  try{const value=JSON.parse(sessionStorage.getItem(approvalStorage)||'null');if(value?.request_id&&Array.isArray(value.items))approvalRequest=value;}catch{}
+  trackApprovals();
+}
+async function submitApproval(){
+  if(busy||!approvalRequest||disposed)return;busy=true;controls();$('progress').textContent='Saving confirmed approval batch…';
+  try{
+    const start=performance.now(),data=await api('approve',{...approvalRequest,confirm_visual_quality:true},10000);if(disposed)return;
+    if(data.batch_id!==approvalRequest.request_id||!data.accepted)throw Error('Checking saved request…');
+    timings.batchAcknowledgementMs=performance.now()-start;
+    for(const item of approvalRequest.items)operationStates.set(item.product_gid,{...item,state:'Pending',reason:''});
+    applyOperations();$('progress').textContent='Pending Approval · '+approvalRequest.items.length+' designs accepted. You may close Bulk Review.';
+  }catch(error){if(!disposed)$('progress').textContent='Acknowledgement delayed. Reconciling the saved request before any retry…';}
+  finally{busy=false;if(!disposed){controls();trackApprovals();}}
+}
+$('retry-approval').onclick=async()=>{
+  if(busy||approvalFlight)return;
+  if(!approvalRequest){trackApprovals();return;}
+  try{
+    const data=await api('progress',{batch_id:approvalRequest.request_id},8000);
+    if(data.found){showProgress(data);if(data.active)approvalTimer=setTimeout(trackApprovals,3000);else clearRequest();}
+    else await submitApproval();
+  }catch(error){$('progress').textContent='Connection unavailable. Your saved request ID is retained; retry tracking when connected.';}
 };
-function dispose(){if(disposed)return;disposed=true;generation++;clearTimeout(bootstrapTimer);cancelWork();nearMore.disconnect();}
+$('accept').onclick=()=>{
+  if(busy||!$('confirm').checked)return;
+  try{saveRequest({request_id:crypto.randomUUID(),items:pending});}
+  catch{ $('progress').textContent='Browser storage unavailable. Enable session storage before submitting a recoverable batch.';return; }
+  $('proof').close();submitApproval();
+};
+
+function dispose(){if(disposed)return;disposed=true;generation++;clearTimeout(bootstrapTimer);clearTimeout(approvalTimer);cancelWork();nearMore.disconnect();}
 addEventListener('pagehide',dispose);
 addEventListener('message',event=>{
   if(event.origin!==location.origin)return;

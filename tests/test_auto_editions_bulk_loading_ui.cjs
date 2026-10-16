@@ -14,7 +14,8 @@ async function fixture(browser,{width=1280,clock=false,list,image,body=html}={})
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body});
   if(url.pathname.endsWith('/list')){const request=route.request().postDataJSON();state.lists.push(request);if(list)return list(route,request,state);return route.fulfill({json:data(request.cursor||0)});}
   if(url.pathname.endsWith('/image')){if(url.searchParams.has('large'))state.large++;else state.images++;state.active++;state.maxActive=Math.max(state.maxActive,state.active);if(image)return image(route,url,state);await sleep(15);state.active--;return route.fulfill({contentType:'image/png',body:png});}
-  if(url.pathname.endsWith('/approve')){const body=route.request().postDataJSON();state.approvals.push(body);return route.fulfill({json:{counts:{Approved:body.items.length,Skipped:0,'Needs Attention':0},results:body.items.map(i=>({...i,result:'Approved'})),duration_ms:1}});}
+  if(url.pathname.endsWith('/approve')){const body=route.request().postDataJSON();state.approvals.push(body);return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id}});}
+  if(url.pathname.endsWith('/progress')){const body=state.approvals.at(-1),items=body?.items||[];return route.fulfill({json:{found:true,active:false,counts:{Pending:0,Processing:0,Approved:items.length,Skipped:0,'Needs Attention':0,Failed:0},rows:items.map(i=>({...i,state:'Approved',reason:''}))}});}
   return route.abort();
  });
  await page.goto('https://bulk-loading.local.test/');
@@ -40,7 +41,7 @@ async function fixture(browser,{width=1280,clock=false,list,image,body=html}={})
   await page.locator('#more').scrollIntoViewIfNeeded();await page.waitForFunction(()=>document.querySelectorAll('#grid figure').length===60);
   assert.equal(new Set(await page.locator('#grid input').evaluateAll(nodes=>nodes.map(n=>n.value))).size,60);
   await page.locator('#approve').click();assert.equal(state.approvals.length,0);assert((await page.locator('#confirmation').innerText()).includes('1 loaded designs'));
-  await page.locator('#confirm').check();await page.locator('#accept').click();await page.getByText('Approved: 1 / Skipped: 0 / Needs Attention: 0',{exact:true}).waitFor();
+  await page.locator('#confirm').check();await page.locator('#accept').click();await page.getByText('Pending: 0 / Processing: 0 / Approved: 1 / Skipped: 0 / Needs Attention: 0 / Failed: 0',{exact:true}).waitFor();
   assert.equal(state.approvals.length,1);assert.equal(state.approvals[0].items[0].product_gid,firstId);assert.equal(state.approvals[0].items.length,1);
   assert(state.maxActive<=3);assert.equal(state.errors.length,0);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   report.push({scenario:'progressive gallery',width,first_gallery_ms:firstGallery,metadata_pages:state.lists.length,maximum_image_concurrency:state.maxActive,...await page.evaluate(()=>reviewTimings)});
@@ -84,7 +85,7 @@ async function fixture(browser,{width=1280,clock=false,list,image,body=html}={})
     state.active--;return route.fulfill({contentType:'image/png',body:png});
   }}),{page,state}=f;
   await f.start();await page.locator('#grid figure').first().waitFor();await sleep(50);await page.clock.fastForward(15100);
-  await page.locator('#grid figure').first().getByText('Preview unavailable. Click the image to retry, or use Review / Repair.',{exact:true}).waitFor();
+  await page.locator('#grid figure').first().getByText('Preview unavailable. Retry Preview or use Review / Repair.',{exact:true}).waitFor();
   assert(await page.locator('#grid input').first().isDisabled());await page.locator('#grid img').first().click();await page.waitForFunction(()=>!document.querySelector('#grid input').disabled);
   assert.equal(state.approvals.length,0);assert.equal(state.large,0);report.push({scenario:'thumbnail timeout',deadline_ms:15000,retry:'explicit image click'});await page.close();
  }

@@ -2,9 +2,9 @@
 (() => {
  const host=parent,doc=host.document;
  host.SportsCaveEditionReset?.destroy?.();
- const controller=new host.AbortController(),buttons=new Map(),permissions=new Map(),inFlight=new Set();
+ const controller=new host.AbortController(),buttons=new Map(),spinners=new Map(),operations=new Map(),permissions=new Map(),inFlight=new Set();
  const requests=host.SportsCaveEditionResetRequests||(host.SportsCaveEditionResetRequests=new Map());
- for(const row of host.SportsCaveEditionStatusState?.rows||[])permissions.set(row.product_gid,row.reset_allowed===true);
+ for(const row of host.SportsCaveEditionStatusState?.rows||[]){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);}
  let frame=0,dialog=null,focusBefore=null,resize=null,watched=null;
  const style=doc.createElement('style');style.textContent=`
  .sc-auto-reset{position:fixed;width:20px;height:24px;padding:0;border:0;border-radius:3px;background:var(--background-color,#fff);color:#687387;font:15px system-ui;line-height:24px;text-align:center;cursor:pointer;z-index:2}
@@ -14,9 +14,10 @@
  dialog.sc-auto-reset-confirm::backdrop{background:rgba(22,30,44,.18)}
  .sc-auto-reset-confirm p{margin:0 0 14px}.sc-auto-reset-confirm div{display:flex;justify-content:flex-end;gap:6px}
  .sc-auto-reset-confirm button{height:28px;padding:3px 10px;background:white;color:#243145;border:1px solid #ccd0d4;border-radius:4px;font:13px system-ui;cursor:pointer}
+ .sc-review-spinner{position:fixed;width:10px;height:10px;border:2px solid #dadfdc;border-top-color:#b3963f;border-radius:50%;pointer-events:none;z-index:2;animation:sc-review-spin .9s linear infinite}@keyframes sc-review-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.sc-review-spinner{animation:none}}
  `;doc.head.append(style);
  function close(){dialog?.remove();dialog=null;if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});focusBefore=null;}
- function clear(){for(const button of buttons.values())button.remove();buttons.clear();}
+ function clear(){for(const button of buttons.values())button.remove();buttons.clear();for(const spinner of spinners.values())spinner.remove();spinners.clear();}
  function pidFrom(value){try{const url=new URL(value,host.location.href);const pid=url.searchParams.get('product_gid');return url.origin===host.location.origin&&url.pathname==='/auto-editions/status'&&/^gid:\/\/shopify\/Product\/[1-9][0-9]*$/.test(pid||'')?pid:null;}catch{return null;}}
  async function reset(pid){
   if(inFlight.has(pid))return;
@@ -85,16 +86,21 @@
      const selected=pidFrom(current.props.getCellContent([column,row])?.data);
      if(selected!==pid){schedule();return;}if(selected)confirm(selected);
     });
-    button.classList.toggle('clipped',canvas.getContext('2d').measureText(cell.displayData||'').width>bounds.width-38);
+    if(operations.get(pid)==='Approving…'){
+     let spinner=spinners.get(key);if(!spinner){spinner=doc.createElement('span');spinner.className='sc-review-spinner';spinner.setAttribute('role','status');spinner.setAttribute('aria-label','Approving');doc.body.append(spinner);spinners.set(key,spinner);}
+     spinner.style.left=(bounds.x+bounds.width-40)+'px';spinner.style.top=(bounds.y+(bounds.height-14)/2)+'px';
+    }else{spinners.get(key)?.remove();spinners.delete(key);}
+    button.classList.toggle('clipped' ,canvas.getContext('2d').measureText(cell.displayData||'').width>bounds.width-38);
    }
    canvasIndex++;
   }
   for(const [key,button] of buttons)if(!seen.has(key)){button.remove();buttons.delete(key);}
+  for(const [key,spinner] of spinners)if(!seen.has(key)){spinner.remove();spinners.delete(key);}
  }
  function schedule(){if(!frame)frame=host.requestAnimationFrame(paint);}
  addEventListener('message',event=>{
   if(event.source!==host||event.data?.type!=='streamlit:render')return;
-  permissions.clear();for(const row of event.data.args?.rows||[])permissions.set(row.product_gid,row.reset_allowed===true);
+  permissions.clear();operations.clear();for(const row of event.data.args?.rows||[]){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);}
   schedule();
  },{signal:controller.signal});
  doc.addEventListener('scroll',()=>{clear();schedule();},{capture:true,passive:true,signal:controller.signal});

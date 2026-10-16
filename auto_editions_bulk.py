@@ -74,28 +74,39 @@ def inspect_asset(root, asset, expected, fetch, digest, receipts, expected_icc=N
 
 
 class ReviewCache:
-    """Bounded thumbnail bytes only; one cold decoder at a time, no PSD/JPG renders."""
+    """Bounded thumbnail bytes only; bounded cold decoders; durable derived JPEGs, no PSD/JPG renders."""
     def __init__(self,max_bytes=32*1024*1024):
-        self.entries=OrderedDict();self.lock=threading.Lock();self.build_lock=threading.Lock();self.max_bytes=max_bytes
+        self.entries=OrderedDict();self.lock=threading.Lock();self.build_locks=[threading.Lock() for _ in range(64)];self.decoders=threading.BoundedSemaphore(2);self.max_bytes=max_bytes
 
-    def get(self,record,fetch,width=300):
+    def remember(self,key,data):
+        with self.lock:
+            self.entries.pop(key,None)
+            while self.entries and sum(map(len,self.entries.values()))+len(data)>self.max_bytes:self.entries.popitem(last=False)
+            if len(data)<=self.max_bytes:self.entries[key]=data
+
+    def get(self,record,fetch,width=300,store=None):
         if width not in (300,1200):raise ValueError('Fixed review sizes required.')
-        m=evidence(record);digest=record['hash'];key=(digest,width)
+        m=evidence(record);digest=record['hash'];key=(ae.fingerprint(dict(renderer='review-jpeg-v2',hash=digest,receipts=record['receipts'],source=m['source'])),width)
         with self.lock:
             if key in self.entries:
                 self.entries.move_to_end(key);return self.entries[key]
-        with self.build_lock:
+        # Unrelated cached previews never wait behind a cold provider transfer.
+        with self.build_locks[int(key[0][:8],16)%len(self.build_locks)]:
             with self.lock:
                 if key in self.entries:
                     self.entries.move_to_end(key);return self.entries[key]
-            with tempfile.TemporaryDirectory(prefix='sc-review-small-') as folder:
+            persisted=store.get(ae.fingerprint(key)) if store else None
+            if persisted:
+                self.remember(key,persisted)
+                return persisted
+            with self.decoders, tempfile.TemporaryDirectory(prefix='sc-review-small-') as folder:
                 root=Path(folder);r=m['number_region'];profile=None
                 for asset,size in ((m['master'],m['dimensions']),(m['patches']['1'],[r[2]-r[0],r[3]-r[1]])):
                     p=inspect_asset(root,asset,size,fetch,digest,record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
                     if profile is not None and p!=profile:raise ValueError('Number ICC profile differs.')
                     profile=p
                 # Resize each existing verified asset before composition. Never build a full canvas/JPG.
-                scale=min(1,width/m['dimensions'][0],1200/m['dimensions'][1])
+                scale=min(1,1200/m['dimensions'][0],1200/m['dimensions'][1])
                 size=tuple(max(1,round(n*scale)) for n in m['dimensions'])
                 with Image.open(root/m['master']['name']) as master:
                     master.thumbnail(size,Image.Resampling.LANCZOS);small=master.copy()
@@ -106,12 +117,16 @@ class ReviewCache:
                             small.paste(number,(box[0],box[1]))
                     # Convert only the small review to browser sRGB; retain the source profile untouched.
                     with ImageCms.profileToProfile(small,ImageCms.ImageCmsProfile(io.BytesIO(profile)),ImageCms.createProfile('sRGB'),outputMode='RGB') as display:
-                        output=io.BytesIO();display.save(output,'JPEG',quality=78)
-                    data=output.getvalue()
+                        outputs={}
+                        for target in (1200,300):
+                            with display.copy() as scaled:
+                                scaled.thumbnail((target,1200),Image.Resampling.LANCZOS)
+                                output=io.BytesIO();scaled.save(output,'JPEG',quality=78);outputs[target]=output.getvalue()
+                    data=outputs[width]
                 finally:small.close()
-            with self.lock:
-                while self.entries and sum(map(len,self.entries.values()))+len(data)>self.max_bytes:self.entries.popitem(last=False)
-                self.entries[key]=data
+            if store:
+                for target,value in outputs.items():store.put(ae.fingerprint((key[0],target)),value)
+            for target,value in outputs.items():self.remember((key[0],target),value)
             return data
 
 
@@ -217,6 +232,9 @@ def listing(connect,ids,user,cursor=0):
                 duration_ms=round((time.perf_counter()-start)*1000,2))
 
 
+_verified_files=OrderedDict()
+_verified_lock=threading.Lock()
+
 def validate_files(record,assets):
     m=evidence(record);r=m['number_region'];profile=None
     with tempfile.TemporaryDirectory(prefix='sc-bulk-validate-') as folder:
@@ -227,14 +245,25 @@ def validate_files(record,assets):
             if (fresh.get('rev')!=receipt['revision'] or fresh.get('id')!=receipt['file_id']
                     or fresh.get('size')!=receipt['bytes']
                     or str(fresh.get('path_display','')).lower()!=DropboxAssets.path(record['hash'],a['name']).lower()):raise ValueError('Cloud receipt changed.')
+            cache_key=ae.fingerprint(dict(preparation=record['hash'],asset=a,receipt=receipt,current=fresh,
+                geometry=m['dimensions'] if a==m['master'] else r,icc=(m.get('colour_evidence') or {}).get('icc_sha256')))
+            with _verified_lock:cached=_verified_files.get(cache_key)
+            if cached:
+                if profile is not None and cached!=profile:raise ValueError('ICC profiles differ.')
+                profile=cached
+                continue
             p=inspect_asset(Path(folder),a,m['dimensions'] if a==m['master'] else [r[2]-r[0],r[3]-r[1]],assets.fetch,record['hash'],record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
+            p=ae.hashlib.sha256(p).hexdigest()  # Retain a bounded fingerprint, not potentially large ICC bytes.
             if profile is not None and p!=profile:raise ValueError('ICC profiles differ.')
             profile=p
             if ae.file_hash(Path(folder)/a['name'],dropbox=True)!=fresh.get('content_hash'):raise ValueError('Cloud file integrity differs.')
+            with _verified_lock:
+                _verified_files[cache_key]=p;_verified_files.move_to_end(cache_key)
+                while len(_verified_files)>2048:_verified_files.popitem(last=False)
             (Path(folder)/a['name']).unlink()
 
 
-def approve_one(connect,item,actor):
+def approve_one(connect,item,actor,*,job=None):
     from auto_editions_onboarding_api import candidate
     pid=statuses.identity(item['product_gid']);digest=item['hash']
     if not re.fullmatch('[a-f0-9]{64}',str(digest)):raise ValueError('Exact preparation hash required.')
@@ -245,47 +274,58 @@ def approve_one(connect,item,actor):
     record,assets=candidate(pid,digest);validate_files(record,assets)
     # Lock the same product -> mapping -> checkpoint order as the reset/quality paths.
     with connect() as conn,conn.cursor() as cur:
+        from auto_editions_bulk_jobs import ReviewJobs
+        if job:
+            ReviewJobs.fence(cur,job)
+            if job['product_gid']!=pid or job['preparation_hash']!=digest or job['actor_id']!=actor:raise ValueError('Approval job identity changed.')
+            import os_accounts
+            cur.execute('SELECT id,role,is_active,account_status,removed_at FROM os_users WHERE id=%s FOR SHARE',(actor,))
+            owner=cur.fetchone()
+            if not os_accounts.is_admin(owner) or not os_accounts.can_access_page(owner,'Edition Ops'):raise PermissionError('Approval owner access changed.')
+        def finish(result):
+            if job:ReviewJobs.terminal(cur,job,result,'Current evidence or source requires Review / Repair.' if result=='Needs Attention' else 'Preparation changed or existing approval retained.' if result=='Skipped' else '')
+            return result
         cur.execute('SELECT edition_total FROM edition_products WHERE shopify_product_gid=%s FOR SHARE',(pid,));products=cur.fetchall()
         cur.execute('SELECT dropbox_file_id FROM product_psd_mappings WHERE shopify_product_gid=%s FOR SHARE',(pid,));mapping=cur.fetchone()
         cur.execute('SELECT * FROM auto_edition_onboarding WHERE product_gid=%s FOR UPDATE',(pid,));q=cur.fetchone()
         m=record['manifest']
         if (len(products)!=1 or products[0]['edition_total']!=m['edition_total'] or not mapping or mapping['dropbox_file_id']!=m['source']['file_id']
                 or not q or q['preparation_hash']!=digest or q['source']!=m['source'] or q['status'] not in ('Blocked','Cloud Ready')
-                or (q.get('replacement') or {}).get('stage') in ('Discovering','Queued','Preparing','Failed')):return 'Skipped'
+                or (q.get('replacement') or {}).get('stage') in ('Discovering','Queued','Preparing','Failed')):return finish('Skipped')
         cur.execute('SELECT * FROM auto_edition_preparations WHERE hash=%s FOR SHARE',(digest,));current=cur.fetchone()
-        if not current or any(current[k]!=record[k] for k in ('manifest','proofs','receipts')):return 'Skipped'
+        if not current or any(current[k]!=record[k] for k in ('manifest','proofs','receipts')):return finish('Skipped')
         from auto_editions_quality import enabled
         if enabled():
             cur.execute('SELECT assessment FROM auto_edition_quality_checks WHERE preparation_hash=%s FOR SHARE',(digest,));check=cur.fetchone()
-            if check and check['assessment'].get('status') in ('Failed','Needs Repair'):return 'Needs Attention'
+            if check and check['assessment'].get('status') in ('Failed','Needs Repair'):return finish('Needs Attention')
         # Source can change while PNG checks run; fence again immediately before the atomic write.
         meta=assets.integration.psd_open_metadata(assets.token,m['source']['file_id'],include_preview=False)
         import psd_directory
-        if not psd_directory.approved_file(meta) or ae.source_identity(pid,meta)!=m['source']:return 'Skipped'
+        if not psd_directory.approved_file(meta) or ae.source_identity(pid,meta)!=m['source']:return finish('Skipped')
         cur.execute('LOCK TABLE auto_edition_layouts IN SHARE ROW EXCLUSIVE MODE')
         cur.execute('SELECT * FROM auto_edition_layouts WHERE product_gid=%s',(pid,));layouts=cur.fetchall()
-        if any(l['preparation_hash']!=digest for l in layouts):return 'Needs Attention'
+        if any(l['preparation_hash']!=digest for l in layouts):return finish('Needs Attention')
         # Reuse the current production projection inside our locked transaction.
         # This also fences newer visual assessments without opening another connection.
         @contextmanager
         def borrowed():yield conn
         fresh=statuses.batch(borrowed,[pid],writable=True)['rows'][0]
-        if fresh['preparation_hash']!=digest:return 'Skipped'
-        if not eligible_state(fresh):return 'Skipped' if fresh['status']=='Cloud Ready' else 'Needs Attention'
+        if fresh['preparation_hash']!=digest:return finish('Skipped')
+        if not eligible_state(fresh):return finish('Skipped' if fresh['status']=='Cloud Ready' else 'Needs Attention')
         evidence(record)  # Colour policy may have been revoked during file validation.
         old=next((l for l in layouts if l['variant_id']=='*'),None)
         if old:
             # Never broaden an existing restricted TEST approval on retry.
-            return 'Skipped' if ae.status(m,old['approval'])=='TEST READY' else 'Needs Attention'
-        if any(l['approval'].get('allocation_ids') is not None for l in layouts):return 'Needs Attention'
+            return finish('Skipped' if ae.status(m,old['approval'])=='TEST READY' else 'Needs Attention')
+        if any(l['approval'].get('allocation_ids') is not None for l in layouts):return finish('Needs Attention')
         approval=dict(actor_id=actor,preparation_hash=digest,visual_approved=True,pixel_exact=True,test_only=True)
-        if ae.status(m,approval)!='TEST READY':return 'Needs Attention'
+        if ae.status(m,approval)!='TEST READY':return finish('Needs Attention')
         cur.execute('''INSERT INTO auto_edition_layouts(product_gid,variant_id,preparation_hash,approval)
             VALUES(%s,'*',%s,%s::jsonb)''',(pid,digest,json.dumps(approval)))
         cur.execute("UPDATE auto_edition_onboarding SET status='Cloud Ready',reason='',updated_at=now() WHERE product_gid=%s",(pid,))
         cur.execute("INSERT INTO auto_edition_setup_audit(actor_id,preparation_hash,event,detail) VALUES(%s,%s,'approved_test_layout',%s::jsonb)",(actor,digest,json.dumps(dict(variant_id='*',bulk=True))))
         Queue.audit(cur,pid,actor,'visual_quality_approved',dict(hash=digest,test_only=True,bulk=True))
-    return 'Approved'
+        return finish('Approved')
 
 
 async def page(request):
@@ -326,7 +366,9 @@ async def image_api(request):
             nonlocal assets
             if assets is None:assets=runtime.storage()
             return assets.fetch(*args)
-        data=await run_in_threadpool(thumbnails.get,entry[1],fetch,width)
+        from auto_editions_bulk_jobs import PreviewStore
+        from auto_editions_bulk_runtime import connection
+        data=await run_in_threadpool(thumbnails.get,entry[1],fetch,width,PreviewStore(connection))
         return Response(data,media_type='image/jpeg',headers={**api.HEADERS,'Cache-Control':'private, max-age=900','Vary':'Cookie','ETag':'"'+ae.hashlib.sha256(data).hexdigest()+'"'})
     except Exception as error:return api.failure(error)
 
@@ -336,25 +378,40 @@ async def approve_api(request):
         import files_upload_api as files
         import supabase_backend as db
         user=await actor(request,write=True);body=await files._json_body(request)
-        if set(body)!={'items','confirm_visual_quality'} or body['confirm_visual_quality'] is not True or not isinstance(body['items'],list) or not 1<=len(body['items'])<=1000:
+        if set(body)!={'items','confirm_visual_quality','request_id'} or body['confirm_visual_quality'] is not True or not isinstance(body['items'],list) or not 1<=len(body['items'])<=1000:
             raise ValueError('Confirm the selected TEST compositions once before approval.')
         for item in body['items']:
             if not isinstance(item,dict) or set(item)!={'product_gid','hash'}:raise ValueError('Exact review identities required.')
             statuses.identity(item['product_gid'])
             if not re.fullmatch('[a-f0-9]{64}',str(item['hash'])):raise ValueError('Exact preparation hashes required.')
-        start=time.perf_counter();counts={'Approved':0,'Skipped':0,'Needs Attention':0};results=[];seen=set()
-        for item in body['items']:
-            pid=item['product_gid']
-            if pid in seen:continue
-            seen.add(pid)
-            try:result=await run_in_threadpool(approve_one,db.connect,item,str(user['id']))
-            except Exception:
-                __import__('logging').getLogger(__name__).exception('Bulk review validation failed product=%s',pid)
-                result='Needs Attention'
-            counts[result]+=1;results.append(dict(product_gid=pid,result=result))
-        return JSONResponse(dict(counts=counts,results=results,duration_ms=round((time.perf_counter()-start)*1000,2),print_ready=False),headers=api.HEADERS)
+        from auto_editions_bulk_jobs import ReviewJobs
+        from auto_editions_bulk_runtime import connection,wake
+        key=await run_in_threadpool(ReviewJobs(connection).submit,str(user['id']),body['request_id'],body['items'])
+        wake.set()
+        return JSONResponse(dict(batch_id=key,accepted=True,print_ready=False),status_code=202,headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
+async def progress_api(request):
+    try:
+        import files_upload_api as files
+        from auto_editions_bulk_jobs import ReviewJobs
+        from auto_editions_bulk_runtime import connection
+        user=await actor(request);body=await files._json_body(request)
+        if set(body) not in ({'batch_id'},{'product_gids'}):raise ValueError('Batch identity or bounded catalogue required.')
+        result=await run_in_threadpool(ReviewJobs(connection).progress,str(user['id']),**body)
+        committed=[r['product_gid'] for r in result['rows'] if r['state']=='Approved']
+        if committed:
+            # Historical job success must never mask a newer source/quality change.
+            current=await run_in_threadpool(statuses.batch,connection,committed,writable=True)
+            by_id={r['product_gid']:r for r in current['rows']}
+            for row in result['rows']:
+                if row['product_gid'] in by_id:
+                    value=by_id[row['product_gid']]
+                    row.update(current_status=value['status'],current_hash=value['preparation_hash'],current_reason=value['reason'])
+        return JSONResponse(result,headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 
 ROUTES=(('/auto-editions/bulk',page,('GET',)),('/api/auto-editions/bulk/list',list_api,('POST',)),
-        ('/api/auto-editions/bulk/image',image_api,('GET',)),('/api/auto-editions/bulk/approve',approve_api,('POST',)))
+        ('/api/auto-editions/bulk/image',image_api,('GET',)),('/api/auto-editions/bulk/approve',approve_api,('POST',)),('/api/auto-editions/bulk/progress',progress_api,('POST',)))

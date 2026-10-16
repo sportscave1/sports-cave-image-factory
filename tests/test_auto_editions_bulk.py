@@ -165,11 +165,13 @@ def test_bulk_api_admin_origin_confirmation_and_partial_results():
             assert (await bulk.approve_api(request('POST',origin='',body={}))).status_code==403
             assert (await bulk.approve_api(request('POST',body={'items':[],'confirm_visual_quality':False}))).status_code==409
             items=[dict(product_gid=f'gid://shopify/Product/{n}',hash='a'*64) for n in (1,2,3,1)]
-            with patch.object(bulk,'approve_one',side_effect=['Approved','Skipped',ValueError('source changed')]) as approve:
-                result=await bulk.approve_api(request('POST',body=dict(items=items,confirm_visual_quality=True)))
-            assert result.status_code==200
-            assert json.loads(result.body)['counts']=={'Approved':1,'Skipped':1,'Needs Attention':1}
-            assert approve.call_count==3
+            import uuid
+            key=str(uuid.uuid4())
+            with patch('auto_editions_bulk_jobs.ReviewJobs.submit',return_value=key) as submit,patch.object(bulk,'approve_one',side_effect=AssertionError('HTTP must not run approval')):
+                result=await bulk.approve_api(request('POST',body=dict(items=items,confirm_visual_quality=True,request_id=key)))
+            assert result.status_code==202
+            assert json.loads(result.body)['batch_id']==key
+            assert submit.call_count==1
     asyncio.run(run())
 
 

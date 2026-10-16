@@ -253,6 +253,21 @@ def verify_snapshot(value,user,ids):
     except (KeyError,TypeError,ValueError):return None
 
 
+def review_operations(connect,data):
+    if not data['rows']:return data
+    from auto_editions_bulk_jobs import ReviewJobs
+    operations=ReviewJobs(connect).progress('display',product_gids=[r['product_gid'] for r in data['rows']])
+    by_id={r['product_gid']:r for r in operations['rows']}
+    for row in data['rows']:
+        operation=by_id.get(row['product_gid'])
+        if not operation or operation['hash']!=row.get('preparation_hash'):continue
+        # Authoritative Cloud/Production Ready and repair outcomes always take precedence.
+        if row['status'] in ('Review','Needs Review'):
+            label={'Pending':'Pending Approval','Processing':'Approving…','Failed':'Approval Failed'}.get(operation['state'])
+            if label:row['review_operation']=dict(label=label,reason=operation['reason'],job_id=operation['job_id'])
+    return data
+
+
 async def statuses(request):
     try:
         import files_upload_api as files
@@ -261,6 +276,7 @@ async def statuses(request):
         body=await files._json_body(request)
         if set(body)!={'product_gids'} or not isinstance(body['product_gids'],list):raise ValueError('A bounded product batch is required.')
         data=await run_in_threadpool(batch,db.connect,body['product_gids'],writable=can_write(user))
+        data=await run_in_threadpool(review_operations,db.connect,data)
         return JSONResponse(signed(data,user),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 

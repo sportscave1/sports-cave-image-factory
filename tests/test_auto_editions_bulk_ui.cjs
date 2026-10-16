@@ -2,23 +2,24 @@
 const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});const report=[];try{
  for(const width of [1440,390]){
-  const page=await browser.newPage({viewport:{width,height:850}});let active=0,maxActive=0,downloads=0,large=0,approvals=0;
+  const page=await browser.newPage({viewport:{width,height:850}});let active=0,maxActive=0,downloads=0,large=0,approvals=0,acceptedItems=[];
   const rows=Array.from({length:48},(_,n)=>({product_gid:'gid://shopify/Product/'+(n+1),hash:'a'.repeat(64),title:'Synthetic artwork '+(n+1),eligible:n<40,reason:'Needs evidence'}));
   const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==','base64');
   await page.route('**/*',async route=>{const u=new URL(route.request().url());
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/auto_editions/bulk.html','utf8')});
    if(u.pathname.endsWith('/list')){const cursor=route.request().postDataJSON().cursor||0;return route.fulfill({json:{rows:rows.slice(cursor,cursor+20),next_cursor:cursor+20<rows.length?cursor+20:null,metadata_queries:3,duration_ms:1}});}
    if(u.pathname.endsWith('/image')){if(u.searchParams.has('large'))large++;else downloads++;active++;maxActive=Math.max(active,maxActive);await new Promise(r=>setTimeout(r,15));active--;return route.fulfill({contentType:'image/png',body:png});}
-   if(u.pathname.endsWith('/approve')){approvals++;const body=route.request().postDataJSON();assert.equal(body.confirm_visual_quality,true);assert.equal(body.items.length,40);return route.fulfill({json:{counts:{Approved:39,Skipped:1,'Needs Attention':0},results:body.items.map((i,n)=>({product_gid:i.product_gid,result:n?'Approved':'Skipped'})),duration_ms:3}});}
+   if(u.pathname.endsWith('/approve')){approvals++;const body=route.request().postDataJSON();assert.equal(body.confirm_visual_quality,true);assert.equal(body.items.length,40);acceptedItems=body.items;return route.fulfill({status:202,json:{accepted:true,batch_id:body.request_id}});}
+   if(u.pathname.endsWith('/progress')){return route.fulfill({json:{found:true,active:false,counts:{Pending:0,Processing:0,Approved:acceptedItems.length?39:0,Skipped:acceptedItems.length?1:0,'Needs Attention':0,Failed:0},rows:acceptedItems.map((i,n)=>({...i,state:n?'Approved':'Skipped',reason:''}))}});}
    throw Error('Unexpected request '+u.pathname);
   });
   await page.goto('https://bulk.local.test/');await page.evaluate(ids=>window.postMessage({type:'sports-cave-bulk-products',product_gids:ids},location.origin),rows.map(r=>r.product_gid));
-  await page.locator('#grid figure').first().waitFor();while(await page.locator('#grid figure').count()<48){const previous=await page.locator('#grid figure').count();await page.locator('#more').scrollIntoViewIfNeeded();await page.waitForFunction(n=>document.querySelectorAll('#grid figure').length>n,previous);}
+  await page.locator('#grid figure').first().waitFor();while(await page.locator('#grid figure').count()<48){const previous=await page.locator('#grid figure').count();await page.waitForFunction(()=>document.querySelectorAll('#grid figure').length===48||!document.getElementById('more').disabled);await page.locator('#more').evaluate(n=>{n.scrollIntoView();if(!n.hidden&&!n.disabled)n.click();});await page.waitForFunction(n=>document.querySelectorAll('#grid figure').length>n,previous);}
   for(let index=0;index<48;index++)await page.locator('#grid img').nth(index).scrollIntoViewIfNeeded();await page.waitForFunction(()=>[...document.querySelectorAll('#grid img')].every(img=>img._row.previewReady));
   assert(maxActive<=3,'Bounded thumbnail requests');assert.equal(downloads,48);assert.equal(large,0);assert.equal(approvals,0);
   assert.equal(await page.locator('#grid input:disabled').count(),8);await page.locator('#grid input').first().check();assert(await page.locator('#approve').isEnabled());
   await page.locator('#grid img').first().click();await page.locator('#large[open]').waitFor();await page.locator('#close-large').click();assert.equal(large,1);
-  await page.locator('#select').click();assert.equal(await page.locator('#grid input:checked').count(),40);await page.locator('#all').click();assert.equal(approvals,0);assert(await page.locator('#accept').isDisabled());await page.locator('#confirm').check();await page.locator('#accept').click();await page.getByText('Approved: 39 / Skipped: 1 / Needs Attention: 0',{exact:true}).waitFor();assert.equal(approvals,1);assert.equal(downloads,48);assert.equal(await page.locator('#grid input:checked').count(),0);
+  await page.locator('#select').click();assert.equal(await page.locator('#grid input:checked').count(),40);await page.locator('#all').click();assert.equal(approvals,0);assert(await page.locator('#accept').isDisabled());await page.locator('#confirm').check();await page.locator('#accept').click();await page.getByText('Pending: 0 / Processing: 0 / Approved: 39 / Skipped: 1 / Needs Attention: 0 / Failed: 0',{exact:true}).waitFor();assert.equal(approvals,1);assert.equal(downloads,48);assert.equal(await page.locator('#grid input:checked').count(),0);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No mobile overflow');
   const metrics=await page.evaluate(()=>reviewTimings);report.push({width,products:48,maxConcurrentThumbnails:maxActive,...metrics});fs.mkdirSync('output/bulk-review',{recursive:true});await page.screenshot({path:`output/bulk-review/gallery-${width}.png`,fullPage:true});await page.close();
  }
@@ -33,6 +34,13 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
  const scroll=page.locator('.dvn-scroller').first();await scroll.evaluate(n=>{n.scrollLeft=10000;n.scrollTop=500;});
  const menu=page.getByRole('button',{name:'Auto Editions menu: Bulk Review and Sort by'});await menu.waitFor();
  const before=await page.getByText('fixture-main-runs:',{exact:false}).innerText(),position=await scroll.evaluate(n=>({left:n.scrollLeft,top:n.scrollTop}));
+ await page.evaluate(()=>{
+  const frame=[...document.querySelectorAll('iframe')].find(f=>f.src.includes('edition_auto_live'));
+  const rows=(window.SportsCaveEditionStatusState.rows||[]).map(r=>({...r,review_operation:{label:'Approving'+String.fromCharCode(8230)}}));
+  frame.contentWindow.postMessage({type:'streamlit:render',args:{product_gids:rows.map(r=>r.product_gid),rows}},location.origin);
+ });
+ await page.locator('.sc-review-spinner').first().waitFor();
+ assert.equal(await page.getByText('fixture-main-runs:',{exact:false}).innerText(),before,'Spinner does not rerun app');
  await menu.click();for(const label of ['Failed First','Not Connected First','Queued First','Needs Review First','Synced / Cloud Ready First','Default Order'])assert(await page.getByRole('menuitem',{name:label,exact:true}).isVisible());
  await page.getByRole('menuitem',{name:'Needs Review First',exact:true}).click();await page.waitForFunction(()=>window.SportsCaveEditionStatusState?.nonce>0);await page.waitForTimeout(1000);
  assert.equal(await page.getByText('fixture-main-runs:',{exact:false}).innerText(),before,'Sorting stays in fragment');assert.deepEqual(await scroll.evaluate(n=>({left:n.scrollLeft,top:n.scrollTop})),position,'Scroll preserved');

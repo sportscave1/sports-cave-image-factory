@@ -111,7 +111,8 @@ class _WallPreviewAccessLogFilter(logging.Filter):
 
 
 logging.getLogger("uvicorn.access").addFilter(_WallPreviewAccessLogFilter())
-streamlit_app = App("app.py", routes=routes)
+from auto_editions_bulk_runtime import ReviewLifecycle
+streamlit_app = ReviewLifecycle(App("app.py", routes=routes))
 app = ConstantTimeHealthMiddleware(
     IdleLifecycle(app_branding.InitialDocumentBrandingMiddleware(StaticAssetCompression(streamlit_app)))
 )

@@ -29,7 +29,7 @@
     try{
       const response=await fetch('/api/auto-editions/status',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_gids:ids}),signal:controller.signal});
       const value=await response.json();if(!response.ok||!value.snapshot)throw Error('Unavailable');
-      if(fingerprint(value.rows)!==baseline)pending=value;else pending=null;
+      retained.rows=value.rows;if(fingerprint(value.rows)!==baseline)pending=value;else pending=null;
       force=false;
     }catch(error){if(error.name!=='AbortError'&&baseline!=='Unavailable')pending={unavailable:true};force=false;}
     finally{inFlight=false;if(refreshAfter){refreshAfter=false;force=true;lastPoll=0;poll();}else flush();}
@@ -59,7 +59,7 @@
   doc.addEventListener('visibilitychange',()=>{if(!doc.hidden)poll();},{signal:controller.signal});
   const observer=new host.MutationObserver(()=>{restore();if(force&&!modal())poll();else flush();});
   const scope=root();if(scope)observer.observe(scope,{childList:true,subtree:true});
-  timer=host.setInterval(poll,25000);
+  timer=host.setInterval(()=>{const active=(retained.rows||[]).some(r=>['Pending Approval','Approving…'].includes(r.review_operation?.label));if(force||active||Date.now()-lastPoll>=25000)poll();},3000);
   const lifecycle={poll,flush,safe,refresh(){force=true;lastPoll=0;if(inFlight){refreshAfter=true;return;}poll();},destroy(){host.clearInterval(timer);controller.abort();observer.disconnect();}};
   host.SportsCaveEditionStatus=lifecycle;
   addEventListener('pagehide',()=>{if(host.SportsCaveEditionStatus===lifecycle)lifecycle.destroy();},{once:true});

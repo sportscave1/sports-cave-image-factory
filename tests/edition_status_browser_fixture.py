@@ -14,6 +14,7 @@ ops._configured_supabase_backend=lambda:SimpleNamespace(connect=lambda:(_ for _ 
 ops._write_snapshot=lambda *args:None
 ops.record_activity_log=lambda *args,**kwargs:None
 edition_versions.kick=lambda:None
+status.review_operations=lambda connect,data:data
 status.batch=lambda connect,ids,**kwargs:{'rows':state.rows(ids),'query_count':1,'duration_ms':0}
 ops.psd_directory.directory=lambda:{'gid://shopify/Product/'+str(i):{'verified':True,'state':'Linked','dropbox_file_id':'id:'+str(i)} for i in range(1,335)}
 data=[_product(i) for i in range(1,335)]

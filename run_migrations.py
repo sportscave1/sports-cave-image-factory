@@ -68,6 +68,7 @@ REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
 WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql', '20261006084655_wall_preview_engagement.sql')
 EDITION_MIGRATIONS = ('20261008041452_edition_version_transitions.sql', '20261008045733_edition_version_guard_hardening.sql', '20261008065000_explicit_edition_cursor_override.sql', '20261008090000_edition_admin_cursor_repair.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20261016071758_auto_editions_bulk_operations.sql': 'c1c5be8493b9a6bfd5bb650ac21a945b39b0bf282c42cd5f8af467a2de8f1a89',
     '20261008041452_edition_version_transitions.sql': 'b35a3418b5f469e9a9ff00ae510c60c96fffcb854b292dfc4fd3cc8dbf502930',
     '20261008045733_edition_version_guard_hardening.sql': '37d46b43946f677711549690f4eae652e2aa51480573a5300966936b7fdd7aa8',
     '20261008065000_explicit_edition_cursor_override.sql': 'af6e4e02daddc5d10d12a221521e74ebea26d37fa9b98f4a5c8831098ba92fc1',
@@ -128,6 +129,7 @@ DEPLOYMENT_MIGRATIONS = (
     *REVIEWS_MIGRATIONS,
     *WALL_PREVIEW_MIGRATIONS,
     *EDITION_MIGRATIONS,
+    "20261016071758_auto_editions_bulk_operations.sql",
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
