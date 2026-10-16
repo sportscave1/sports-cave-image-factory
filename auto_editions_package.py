@@ -26,7 +26,10 @@ def unpack(archive,root,source,number,total):
         refs=sorted({1,number,total})
         allowed={'manifest.json','original.png'}|{f'reference-{n}.png' for n in refs}
         allowed|={manifest['master']['name']}|{p['name'] for p in manifest['patches'].values()}
-        if set(names)!=allowed:raise ValueError('Only the exact generated assets and pixel references are allowed.')
+        from auto_editions_transport import descriptor,reconstruct
+        deltas=descriptor(package,allowed)
+        if sum(e.file_size for e in entries)+sum(d['bytes'] for d in deltas.values())>MAX_PACKAGE_BYTES:
+            raise ValueError('Expanded preparation package exceeds its bounds.')
         for entry in entries:
             # No ZipFile.extract; symbolic links/directories cannot change destinations.
             if entry.is_dir() or entry.file_size>160*1024*1024:raise ValueError('Invalid generated asset.')
@@ -37,6 +40,7 @@ def unpack(archive,root,source,number,total):
                     if length>entry.file_size:raise ValueError('Generated asset length changed.')
                     output.write(block)
                 if length!=entry.file_size:raise ValueError('Generated asset is truncated.')
+    reconstruct(root,deltas)
     # Checksums for every numbered patch, not just the sample reference.
     for asset in [manifest['master']]+list(manifest['patches'].values()):ae.asset_path(root,asset)
     colour=manifest.get('colour_evidence')

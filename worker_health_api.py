@@ -42,7 +42,8 @@ async def snapshot(request):
         category=request.query_params.get('filter','All')
         if category not in ('All','Active','Queued','Failed','Needs Review','Completed'):raise ValueError('Invalid job filter.')
         offset=max(0,min(1000,int(request.query_params.get('offset','0'))))
-        data=await run_in_threadpool(store().snapshot)
+        from worker_health_cache import snapshot as cached_snapshot
+        data=await run_in_threadpool(cached_snapshot,store())
         jobs=data.pop('jobs');data['filters']={name:len([j for j in jobs if name=='All' or j['category']==name]) for name in ('All','Active','Queued','Failed','Needs Review','Completed')}
         if category!='All':jobs=[j for j in jobs if j['category']==category]
         data.update(jobs=jobs[offset:offset+25],offset=offset,total_rows=len(jobs),page_size=25)
@@ -55,7 +56,10 @@ async def pause(request):
         import files_upload_api as files
         user=await actor(request,write=True);body=await files._json_body(request)
         if not isinstance(body,dict) or set(body)!={'paused'} or type(body['paused']) is not bool:raise ValueError('Choose Pause or Resume.')
-        result=await run_in_threadpool(worker_health.set_pause,store().connect,body['paused'],str(user['id']))
+        from worker_health_cache import invalidate
+        service=store();invalidate(service.connect)
+        try:result=await run_in_threadpool(worker_health.set_pause,service.connect,body['paused'],str(user['id']))
+        finally:invalidate(service.connect)
         return JSONResponse(result,headers=HEADERS)
     except Exception as error:return failure(error)
 

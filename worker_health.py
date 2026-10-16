@@ -216,11 +216,10 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
 class Health:
     def __init__(self,connect):self.connect=connect
 
-    def snapshot(self):
-        from auto_editions_status import batch
-        start=time.perf_counter()
+    def _read_snapshot(self,include_beats):
         with self.connect() as conn,conn.cursor() as cur:
-            cur.execute("""SELECT q.*,p.product_title,
+            queue_sql="""SELECT q.product_gid,q.file_id,q.status,q.priority,q.reason,q.attempts,
+                q.preparation_hash,q.lease_until,q.updated_at,to_jsonb(q)->'replacement' AS replacement,p.product_title,
                 EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_retry') AS colour_affected,
                 EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_recovered'
                     AND ca.detail->>'preparation_hash'=q.preparation_hash) AS colour_recovered,
@@ -231,28 +230,42 @@ class Health:
                 (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='preparation_metrics' AND a.detail->>'preparation_hash'=q.preparation_hash ORDER BY created_at DESC,id DESC LIMIT 1) AS completed_at
                 FROM auto_edition_onboarding q JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
                 LEFT JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
-                ORDER BY q.product_gid LIMIT 1001""")
-            rows=[dict(r) for r in cur.fetchall()]
-            if len(rows)>1000:raise ValueError('Worker Health snapshot exceeds its reviewed 1000-row bound.')
-            pause=control(cur)
-            cur.execute("""SELECT a.id,a.product_gid,p.product_title,a.created_at,
+                ORDER BY q.product_gid LIMIT 1001"""
+            successes_sql="""SELECT a.id,a.product_gid,p.product_title,a.created_at,
                 EXTRACT(EPOCH FROM a.created_at-c.created_at) AS duration_seconds
                 FROM auto_edition_onboarding_audit a
                 LEFT JOIN edition_products p ON p.shopify_product_gid=a.product_gid
                 LEFT JOIN LATERAL(SELECT created_at FROM auto_edition_onboarding_audit c
                     WHERE c.product_gid=a.product_gid AND c.event='claimed' AND c.created_at<=a.created_at
                     ORDER BY c.created_at DESC,c.id DESC LIMIT 1)c ON true
-                WHERE a.event='preparation_metrics' ORDER BY a.id DESC LIMIT 20""")
-            successes=[dict(r) for r in cur.fetchall()]
-        beats=[];telemetry_error=not telemetry_enabled()
-        if telemetry_enabled():
-            try:
-                with self.connect() as conn,conn.cursor() as cur:
-                    cur.execute('SELECT * FROM auto_edition_worker_heartbeats ORDER BY seen_at DESC LIMIT 16');beats=[dict(r) for r in cur.fetchall()]
-            except Exception:telemetry_error=True
+                WHERE a.event='preparation_metrics' ORDER BY a.id DESC LIMIT 20"""
+            beats_sql="SELECT * FROM auto_edition_worker_heartbeats ORDER BY seen_at DESC LIMIT 16" if include_beats else "SELECT NULL WHERE false"
+            cur.execute("""WITH queue_rows AS ("""+queue_sql+"""), successes AS ("""+successes_sql+"""),
+                beats AS ("""+beats_sql+""") SELECT
+                COALESCE((SELECT jsonb_agg(to_jsonb(q)) FROM queue_rows q),'[]'::jsonb) AS rows,
+                COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM successes s),'[]'::jsonb) AS successes,
+                COALESCE((SELECT jsonb_agg(to_jsonb(b)) FROM beats b),'[]'::jsonb) AS beats,
+                COALESCE((SELECT jsonb_build_object('paused',COALESCE((detail->>'paused')::boolean,false),
+                    'requested_at',created_at,'audit_id',id) FROM auto_edition_onboarding_audit
+                    WHERE product_gid=%s AND event IN ('worker_paused','worker_resumed')
+                    ORDER BY created_at DESC,id DESC LIMIT 1),
+                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause""",(CONTROL,))
+            return dict(cur.fetchone())
+
+    def snapshot(self):
+        from auto_editions_status import batch
+        start=time.perf_counter();enabled=telemetry_enabled();telemetry_error=not enabled;reads=1
+        try:raw=self._read_snapshot(enabled)
+        except Exception:
+            if not enabled:raise
+            # A missing optional heartbeat table must not hide authoritative jobs.
+            # Retry in a NEW transaction after the failed optional read.
+            raw=self._read_snapshot(False);telemetry_error=True;reads+=1
+        rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause']
+        if len(rows)>1000:raise ValueError('Worker Health snapshot exceeds its reviewed 1000-row bound.')
         states=batch(self.connect,list(dict.fromkeys(r['product_gid'] for r in rows)),writable=True,evidence=True)
         result=project(rows,{r['product_gid']:r for r in states['rows']},beats,successes,pause,telemetry_error=telemetry_error)
-        result['cost']=dict(queries=5 if telemetry_enabled() else 4,dropbox_calls=0,duration_ms=round((time.perf_counter()-start)*1000,2))
+        result['cost']=dict(queries=reads+states['query_count'],dropbox_calls=0,duration_ms=round((time.perf_counter()-start)*1000,2))
         return result
 
     def logs(self,*,cursor=0,severity='',component='',design='',date_from='',date_to='',search=''):
