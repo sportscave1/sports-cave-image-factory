@@ -14,10 +14,23 @@ sys.path.insert(0, str(ROOT))
 import auto_editions as ae
 from auto_editions_performance import file_hashes,stage as measured,resources
 
+def native_cleanup_uncertain(output):
+    """Only a dispatch that started needs Photoshop cleanup evidence."""
+    output=Path(output)
+    if not (output/'photoshop-dispatch.json').exists():return False
+    try:return json.loads((output/'native-status.json').read_text(encoding='utf-8-sig')).get('owned_document_closed') is not True
+    except (OSError,ValueError,AttributeError):return True
 
-def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1):
+
+def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1,
+            export_strategy='duplicate_merged',native_benchmark=False):
     if type(scale) is not int or scale not in (1,2,3,4):
         raise ValueError('Choose native, 2x, 3x or 4x TEST preparation.')
+    if export_strategy not in ('duplicate_merged','history_merged_crop') or (export_strategy!='duplicate_merged' and native_benchmark is not True):
+        raise ValueError('Unverified export strategy is restricted to an isolated native benchmark.')
+    if native_benchmark is True:
+        from scripts.benchmark_auto_editions_native_v19 import require_native_owner
+        require_native_owner(source,output)
     from scripts.photoshop_dispatch import run
     source, output = Path(source).resolve(), Path(output).resolve()
     if output.exists():
@@ -49,14 +62,23 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     request = dict(stage_root=str(stage),input=str(staged),output_root=str(output),
                    icc_path=str(expected_icc),
                    report=str(output/'preparation.json'),number_layer_name=number_layer,
-                   plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale)
+                   plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale,
+                   export_strategy=export_strategy,native_benchmark=native_benchmark is True)
     script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
     script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
     script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
-    with measured(timings,'photoshop_prepare',path=output):
-        result = run(script)
-    if ae.file_hash(source) != before or ae.file_hash(staged) != staged_hash:
-        raise ValueError('Source preservation check failed.')
+    # Durable intent distinguishes pre-COM failures from uncertain RPC cleanup.
+    # It is local diagnostic evidence, never part of the preparation identity.
+    with (output/'photoshop-dispatch.json').open('x',encoding='utf-8') as dispatched:
+        json.dump(dict(export_strategy=export_strategy,started=True),dispatched)
+        dispatched.flush();__import__('os').fsync(dispatched.fileno())
+    try:
+        with measured(timings,'photoshop_prepare',path=output):
+            result = run(script)
+    finally:
+        # A failed export must retain the same original/staged integrity fence.
+        if ae.file_hash(source) != before or ae.file_hash(staged) != staged_hash:
+            raise ValueError('Source preservation check failed.')
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
         raise ValueError('Photoshop did not confirm preparation.')
     report=json.loads((output/'preparation.json').read_text(encoding='utf-8-sig'))
@@ -74,6 +96,15 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
         policy=policy,assignment=assignment,restored_exports=restored,source_sha256=before,pixels_converted=False)
     # Measurements must never change the reusable artwork identity.
     timings.update(report.pop('timings',{}))
+    native_status=output/'native-status.json'
+    if native_benchmark and not native_status.exists():
+        raise ValueError('Native benchmark cleanup evidence is unavailable; retain processor ownership.')
+    if native_status.exists():
+        status=json.loads(native_status.read_text(encoding='utf-8-sig'))
+        if status.get('completed') is not True or status.get('owned_document_closed') is not True:
+            raise ValueError('Photoshop cleanup is incomplete; retain processor ownership for review.')
+        timings.update(status['timings'])
+        timings['dispatch_and_final_trace_seconds']=round(max(0,timings['photoshop_prepare_seconds']-timings['native_total_ms']/1000),6)
     def asset(name):
         return dict(name=name,sha256=ae.file_hash(output/name))
     with measured(timings,'asset_checksums'):

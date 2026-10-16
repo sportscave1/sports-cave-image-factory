@@ -548,7 +548,7 @@ def safe_diagnostic(message,stage):
 
 
 def prepare_worker(key,roles,scale=1):
-    lease=None
+    lease=None;output=None
     try:
         from scripts.prepare_auto_editions import prepare as build
         from auto_editions_package import MAX_PACKAGE_BYTES
@@ -589,7 +589,13 @@ def prepare_worker(key,roles,scale=1):
         detail=failure_detail(JOBS[key],'Preparation',error)
         JOBS[key].update(status='Blocked',error='Preparation failed: '+detail+'. Existing PSD and mapping are preserved.')
     finally:
-        if lease:lease.unlink(missing_ok=True)
+        if lease:
+            from scripts.prepare_auto_editions import native_cleanup_uncertain
+            if output is not None and native_cleanup_uncertain(output):
+                JOBS[key]['error']+=' Photoshop cleanup is unproven; processor lock retained for owner review.'
+                JOBS[key]['diagnostic']=safe_diagnostic('processor lock ownership is uncertain','Recovery')
+                journal(JOBS[key])
+            else:lease.unlink(missing_ok=True)
     report_failure(JOBS[key])
 
 
