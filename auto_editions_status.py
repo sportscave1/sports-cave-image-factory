@@ -32,6 +32,7 @@ CHECKPOINTS={'queued':'Queued','mapping_confirmed':'Mapping saved','claimed':'Co
     'Needs PSD Repair':'PSD repair required','visual_quality_approved':'Visual review approved',
     'preparation_metrics':'Preparation uploaded','priority':'Priority updated','retry':'Retry queued','prepare_now':'Prepare Now queued'}
 CHECKPOINTS['automatic_visual_assessment']='Automatic visual assessment'
+CHECKPOINTS['reset_cleared']='Reset — manually Add PSD'
 
 SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priority,
  q.preparation_hash,q.source,q.reason,q.attempts,q.lease_until,q.updated_at,
@@ -163,6 +164,8 @@ def project(row, *, writable=False, now=None, evidence=False):
             state='Needs Review';why=reason((check or {}).get('reason')) or 'Artwork or supplier evidence requires review.'
             actions=['review']+(['recheck'] if check else [])
     reset=row.get('replacement') or {}
+    if reset.get('manual_required') and not mapped:
+        state='Not Connected';why='Reset; manually Add the PSD to start again.';actions=[]
     from auto_editions_discovery import enabled as discovery_enabled
     if reset.get('stage') in ('Discovering','Queued','Preparing','Failed'):
         state={'Discovering':'Queued','Queued':'Queued','Preparing':'Preparing','Failed':reset.get('failure_status','Failed')}[reset['stage']]
@@ -334,7 +337,7 @@ async def reset_action(request):
         user=await actor(request,write=True)
         body=await files._json_body(request)
         if set(body)!={'product_gid','request_id'}:raise ValueError('Reset selects one design only.')
-        stage=await run_in_threadpool(Reset(db.connect).request,identity(body['product_gid']),body['request_id'],str(user['id']))
+        stage=await run_in_threadpool(Reset(db.connect).clear,identity(body['product_gid']),body['request_id'],str(user['id']))
         return JSONResponse({'ok':True,'stage':stage},headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 

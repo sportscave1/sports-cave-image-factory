@@ -149,4 +149,4 @@ class PreviewStore:
         if len(data)>524288:return
         with self.connect() as conn,conn.cursor() as cur:
             # Decode hex server-side for both psycopg and disposable PostgreSQL transport.
-            cur.execute("INSERT INTO auto_edition_review_previews(identity,jpeg) VALUES(%s,decode(%s,'hex')) ON CONFLICT DO NOTHING",(key,data.hex()))
+            cur.execute("INSERT INTO auto_edition_review_previews(identity,jpeg) VALUES(%s,decode(%s,'hex')) ON CONFLICT(identity) DO UPDATE SET jpeg=EXCLUDED.jpeg WHERE auto_edition_review_previews.jpeg<>EXCLUDED.jpeg",(key,data.hex()))

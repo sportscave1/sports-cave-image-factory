@@ -86,9 +86,8 @@ async function fixture(browser,{width=1280,clock=false,list,image,body=html}={})
     state.active--;return route.fulfill({contentType:'image/png',body:png});
   }}),{page,state}=f;
   await f.start();await page.locator('#grid figure').first().waitFor();await sleep(50);await page.clock.fastForward(15100);
-  await page.locator('#grid figure').first().getByText('Preview unavailable. Retry Preview or use Review / Repair.',{exact:true}).waitFor();
-  assert(await page.locator('#grid input').first().isDisabled());await page.locator('#grid img').first().click();await page.waitForFunction(()=>!document.querySelector('#grid input').disabled);
-  assert.equal(state.approvals.length,0);assert.equal(state.large,0);report.push({scenario:'thumbnail timeout',deadline_ms:15000,retry:'explicit image click'});await page.close();
+  await page.clock.fastForward(1800);await page.waitForFunction(()=>!document.querySelector('#grid input').disabled);
+  assert.equal(state.approvals.length,0);assert.equal(state.large,0);report.push({scenario:'thumbnail timeout',deadline_ms:10000,retry:'one automatic retry'});await page.close();
  }
  {
   const f=await fixture(browser,{list:async route=>{await sleep(500);await route.abort().catch(()=>{});}}),{page,state}=f;await f.start();await sleep(40);

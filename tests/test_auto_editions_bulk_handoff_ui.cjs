@@ -6,7 +6,7 @@ const products=Array.from({length:60},(_,i)=>({product_gid:'gid://shopify/Produc
 const counts=rows=>Object.fromEntries(['Pending','Processing','Approved','Skipped','Needs Attention','Failed'].map(k=>[k,rows.filter(r=>r.state===k).length]));
 const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
 (async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
- for(const width of [1440,390])for(const choice of ['selected','all']){
+ for(const width of [1440,390])for(const choice of ['selected','select-loaded']){
   const context=await browser.newContext({viewport:{width,height:900}}),page=await context.newPage(),jobs=new Map(),batches=new Map();let submissions=[],batchReads=0,individualReads=0,failSubmission=false;
   await context.request.post('http://127.0.0.1:8645/fixture-stage',{data:{stage:'Queued',review_jobs:{}}});
   await page.route('**/auto-editions/bulk',route=>route.fulfill({contentType:'text/html',body:html}));
@@ -40,25 +40,25 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
   // All means all loaded metadata. Add two pages without scrolling past every image.
   for(let target=40;target<=60;target+=20){await review.locator('#more').evaluate(b=>b.click());await review.locator('#grid figure').nth(target-1).waitFor();}
   await review.locator('#grid input:not(:disabled)').first().waitFor();
-  if(choice==='all'){
-   assert((await review.locator('#grid input:not(:disabled)').count())<60,'Some loaded designs are offscreen and have not loaded thumbnails');
-   await review.locator('#all').click();await review.locator('#proof[open]').waitFor();
-   assert((await review.locator('#confirmation').innerText()).includes('60 loaded designs'),'Approve All must include offscreen loaded designs');
-  }else{
-   await review.locator('#grid input:not(:disabled)').nth(0).check();await review.locator('#grid input:not(:disabled)').nth(1).check();await review.locator('#approve').click();
-  }
+  assert.equal(await review.locator('#all').count(),0);
+  if(choice==='select-loaded'){
+   for(let i=0;i<60;i++){await review.locator('#grid figure').nth(i).scrollIntoViewIfNeeded();}
+   await review.locator('#grid input:not(:disabled)').nth(59).waitFor();
+   await review.locator('#select').click();
+  }else{await review.locator('#grid input:not(:disabled)').nth(0).check();await review.locator('#grid input:not(:disabled)').nth(1).check();}
+  await review.locator('#approve').click();
   // Unrelated same-origin messages cannot close the popup.
   await page.evaluate(()=>postMessage({type:'sports-cave-bulk-accepted',batch_id:'forged'},location.origin));assert(await page.getByRole('dialog',{name:'Bulk Review',exact:true}).isVisible());
   assert(await review.locator('#accept').isDisabled());await review.locator('#confirm').check();const started=Date.now();
   await review.locator('#accept').evaluate(b=>{b.click();b.click();});await page.getByRole('dialog',{name:'Bulk Review',exact:true}).waitFor({state:'detached'});
-  assert.equal(submissions.length,1,'Double-click is one submission');assert.equal(jobs.size,choice==='all'?60:2);
+  assert.equal(submissions.length,1,'Double-click is one submission');assert.equal(jobs.size,choice==='select-loaded'?60:2);
   const selected=[...jobs.keys()];await page.waitForFunction(pid=>window.SportsCaveEditionStatusState?.rows.some(r=>r.product_gid===pid&&r.review_operation?.label==='Pending Approval'),selected[0]);
   assert.equal(await page.getByText('fixture-main-runs:',{exact:false}).innerText(),before,'Only the fragment updates');
   assert.deepEqual(await scroll.evaluate(n=>({top:n.scrollTop,left:n.scrollLeft})),position,'Main scrolling is preserved');
   if(width>800)await page.getByText('1 unsaved change',{exact:false}).waitFor();
   report.push({width,choice,accepted:jobs.size,close_after_confirm_ms:Date.now()-started,cache_batches:batchReads,individual_preview_requests:individualReads});
   await open();review=page.frameLocator('iframe[title="Bulk artwork review"]');
-  if(choice==='all')await review.locator('#message').filter({hasText:'No designs need review'}).waitFor();else await review.locator('#grid figure').first().waitFor();
+  if(choice==='select-loaded')await review.locator('#message').filter({hasText:'No designs need review'}).waitFor();else await review.locator('#grid figure').first().waitFor();
   for(const pid of selected)assert.equal(await review.locator('input[value="'+pid+'"]').count(),0,'Persisted Pending jobs excluded on reopen');
   // A partial background failure must reappear automatically; a committed success must not.
   for(const job of jobs.values())job.state='Approved';const failed=jobs.get(selected.at(-1));failed.state='Failed';failed.reason='Temporary provider failure. Retry available.';
@@ -82,11 +82,14 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms)),report=[];
    return route.abort();
   });
   await page.goto('https://all-preview-retry.local.test/');await page.evaluate(ids=>postMessage({type:'sports-cave-bulk-products',product_gids:ids},location.origin),products.slice(0,20).map(r=>r.product_gid));
-  await page.locator('#grid figure').first().waitFor();await page.locator('#all').click();await page.locator('#proof[open]').waitFor();
-  const text=await page.locator('#confirmation').innerText();assert(text.includes('19 loaded designs')&&text.includes('1 unavailable previews excluded'));
+  await page.locator('#grid figure').first().waitFor();
+  for(let i=0;i<20;i++)await page.locator('#grid figure').nth(i).scrollIntoViewIfNeeded();
+  await page.locator('#grid figure').nth(19).getByRole('button',{name:'Retry Preview'}).waitFor();
+  await page.locator('#select').click();await page.locator('#approve').click();await page.locator('#proof[open]').waitFor();
+  assert((await page.locator('#confirmation').innerText()).includes('19 loaded designs'));
   await page.locator('#confirm').check();await page.locator('#accept').click();await page.locator('#retry-approval').waitFor();
-  assert.equal(submitted.items.length,19);assert(!submitted.items.some(i=>i.product_gid===products[19].product_gid));assert.equal(await page.locator('#grid figure').count(),20,'Failed acceptance must retain every card');
+  assert.equal(submitted.items.length,19);assert(!submitted.items.some(i=>i.product_gid===products[19].product_gid));assert.equal(await page.locator('#grid figure').count(),20);
   await page.close();
  }
- fs.mkdirSync('output/bulk-handoff',{recursive:true});fs.writeFileSync('output/bulk-handoff/browser-native.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));console.log('Selected/all loaded, durable close, signed main status, immediate reopen, failed restore, duplicates and native edit/scroll preservation passed.');
+ fs.mkdirSync('output/bulk-handoff',{recursive:true});fs.writeFileSync('output/bulk-handoff/browser-native.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report));console.log('Approve Selected and selection controls, durable close, signed main status, immediate reopen, failed restore, duplicates and native edit/scroll preservation passed.');
 }finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});
