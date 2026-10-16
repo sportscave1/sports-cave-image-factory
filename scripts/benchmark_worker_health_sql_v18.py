@@ -52,4 +52,3 @@ def main():
     Path(args.output).write_text(json.dumps(results,indent=2));print(json.dumps(results))
 
 if __name__=='__main__':main()
-
