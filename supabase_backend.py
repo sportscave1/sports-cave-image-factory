@@ -10,7 +10,7 @@ import threading
 import time
 import traceback
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -655,6 +655,12 @@ def connect():
     )
 
 
+def read_connection():
+    from database_read_pool import connection
+    return connection(_database_url_with_ssl(),
+                      statement_timeout_ms=_db_statement_timeout_ms())
+
+
 def _database_error_sqlstate(error):
     return str(getattr(error, "sqlstate", "") or getattr(error, "pgcode", "") or "").strip()
 
@@ -686,6 +692,7 @@ def _database_error_category(error):
     if (
         sqlstate == "57014"
         or isinstance(error, TimeoutError)
+        or error.__class__.__name__ in {"PoolTimeout", "TooManyRequests"}
         or "echeckouttimeout" in message
         or "unable to check out connection from the pool" in message
     ):
@@ -717,11 +724,11 @@ def _rollback_read_connection(conn):
         conn.rollback()
     except Exception:
         # The connection is discarded below. Never return a failed transaction for reuse.
-        pass
+        _close_read_connection(conn)
 
 
 def _close_read_connection(conn):
-    if conn is None:
+    if conn is None or bool(getattr(conn, "closed", False)):
         return
     try:
         conn.close()
@@ -734,7 +741,7 @@ def _discard_cached_read_connection(conn=None):
     _close_read_connection(conn)
 
 
-def _run_read_operation(operation, read_callable):
+def _run_read_operation(operation, read_callable, *, connection_factory=None, deadline_seconds=None):
     """Run one bounded read on an isolated connection.
 
     Supabase's transaction pool can accept the client connection and then wait up
@@ -744,8 +751,8 @@ def _run_read_operation(operation, read_callable):
     Do not share a connection between Streamlit sessions, the Orders loader and
     top-bar polling.  A process-wide cached connection serialized unrelated
     reads and allowed a cancelled badge/marker query to delay the latest-50
-    reader.  Each operation now owns, rolls back and closes its connection on
-    success, failure and retry.
+    reader. Each operation owns an exclusive lease, rolls back before returning
+    it, and discards timed-out or broken connections. No query results are cached.
     """
     started = time.perf_counter()
     shared_cursor = _ACTIVE_DATABASE_READ_CURSOR.get()
@@ -791,19 +798,20 @@ def _run_read_operation(operation, read_callable):
     first_error_type = ""
     for attempt in range(2):
         conn = None
+        read_stack = ExitStack()
         deadline_timer = None
         deadline_fired = threading.Event()
         connection_ms = 0
         query_started = None
         try:
             connect_started = time.perf_counter()
-            conn = connect()
+            conn = read_stack.enter_context((connection_factory or read_connection)())
             connection_ms = int((time.perf_counter() - connect_started) * 1000)
 
-            def cancel_overdue_read():
-                deadline_fired.set()
-                safe_cancel = getattr(conn, "cancel_safe", None)
-                cancel = safe_cancel or getattr(conn, "cancel", None)
+            def cancel_overdue_read(connection=conn, fired=deadline_fired):
+                fired.set()
+                safe_cancel = getattr(connection, "cancel_safe", None)
+                cancel = safe_cancel or getattr(connection, "cancel", None)
                 if not callable(cancel):
                     return
                 try:
@@ -816,14 +824,17 @@ def _run_read_operation(operation, read_callable):
                     # failed cancellation must never create a second failure.
                     pass
 
-            deadline_seconds = _db_read_deadline_seconds()
-            deadline_timer = threading.Timer(deadline_seconds, cancel_overdue_read)
+            read_deadline = _db_read_deadline_seconds() if deadline_seconds is None else deadline_seconds
+            deadline_timer = threading.Timer(read_deadline, cancel_overdue_read)
             deadline_timer.daemon = True
             deadline_timer.start()
             query_started = time.perf_counter()
             with conn.cursor() as cur:
                 value = read_callable(cur)
             deadline_timer.cancel()
+            deadline_timer.join(timeout=1.5)
+            if deadline_fired.is_set():
+                raise TimeoutError("Database read deadline exceeded")
             _rollback_read_connection(conn)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             diagnostic = {
@@ -850,6 +861,8 @@ def _run_read_operation(operation, read_callable):
                 deadline_timer.cancel()
             _rollback_read_connection(conn)
             category = "request_timeout" if deadline_fired.is_set() else _database_error_category(error)
+            if category in {"request_timeout", "stale_connection", "database_unavailable"}:
+                _close_read_connection(conn)
             exception_class = error.__class__.__name__
             sqlstate = _database_error_sqlstate(error)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -886,7 +899,12 @@ def _run_read_operation(operation, read_callable):
         finally:
             if deadline_timer is not None:
                 deadline_timer.cancel()
-            _close_read_connection(conn)
+                # A callback already in flight must finish before this exclusive
+                # lease can be handed to another request.
+                deadline_timer.join(timeout=1.5)
+            if deadline_fired.is_set() or (conn is not None and query_started is None):
+                _close_read_connection(conn)
+            read_stack.close()
 
 
 @contextmanager

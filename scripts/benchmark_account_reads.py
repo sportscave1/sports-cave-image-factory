@@ -40,7 +40,7 @@ def main():
     results = {"simulated_round_trip_ms": 20, "users": 20}
     for method, args in (("get_user", ("fixture",)), ("list_users", ())):
         cur = Cursor()
-        with patch.object(store, "ensure_schema"), patch.object(store, "_connect", return_value=Connection(cur)):
+        with patch.object(store, "ensure_schema"), patch.object(store, "_connect", return_value=Connection(cur)), patch.object(store, "_read_connection", return_value=Connection(cur)):
             start = time.perf_counter()
             getattr(store, method)(*args)
             results[method] = {"queries": cur.calls, "ms": round((time.perf_counter()-start)*1000, 2)}

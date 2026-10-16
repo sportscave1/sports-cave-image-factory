@@ -20,6 +20,8 @@ def main(samples=20):
     import order_allocator
     import psd_directory
     import auto_editions_runtime
+    import database_read_pool
+    import os_accounts
 
     counts = {'sql': 0, 'api': 0}
     original = psycopg.Cursor.execute
@@ -69,6 +71,13 @@ def main(samples=20):
         result['jpg_status'] = measure(lambda: auto_editions_runtime.download_links(rows))
         result['render_preparation'] = measure(lambda: orders._display_rows(rows, normalised=True))
         result['snapshot_reuse'] = measure(lambda: orders._apply_latest_product_numbers(rows))
+        # Skip schema creation in this read-only profiler, never normal auth.
+        account_id, _ = db._run_read_operation('benchmark.account_id', lambda cur: (
+            cur.execute('SELECT id FROM os_users ORDER BY created_at LIMIT 1'), cur.fetchone())[1])
+        if account_id:
+            with patch.object(os_accounts.DEFAULT_STORE, 'ensure_schema'):
+                result['account_validation'] = measure(lambda: os_accounts.DEFAULT_STORE.get_user(account_id['id']))
+        result['read_pools'] = database_read_pool.stats()
     print('ORDERS_BENCHMARK_JSON=' + json.dumps(result, sort_keys=True))
     return result
 

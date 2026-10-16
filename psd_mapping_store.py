@@ -58,14 +58,20 @@ class PostgresMappings:
 
     def read(self):
         """One indexed revision query per page; one batch read on revision changes."""
-        try:
-            with self._lock, self.connect() as conn, conn.cursor() as cur:
+        def load(cur):
+            with self._lock:
                 cur.execute('SELECT COALESCE(max(id),0) AS revision FROM public.product_psd_mapping_audit')
                 revision = cur.fetchone()['revision']
                 if revision != self._revision:
                     mapping = self._all(cur)
                     self._cache, self._revision = mapping, revision
                 return dict(self._cache)
+        try:
+            if self._connect:
+                with self.connect() as conn, conn.cursor() as cur:
+                    return load(cur)
+            import supabase_backend
+            return supabase_backend._run_read_operation('orders.psd_directory', load)[0]
         except Exception as error:
             raise MappingUnavailable('PSD directory is unavailable. Check database activation or retry.') from error
 

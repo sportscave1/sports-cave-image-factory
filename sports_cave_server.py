@@ -141,6 +141,8 @@ if __name__ == "__main__":
         warm_renderer()
         from auto_editions_runtime import start_worker
         start_worker()
+        from database_read_pool import warm_application_reads
+        warm_application_reads()
     uvicorn.run(
         app,
         host=os.getenv("HOST", "0.0.0.0"),

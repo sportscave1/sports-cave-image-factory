@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 import os_accounts
+import supabase_backend
 from scripts.benchmark_account_reads import Connection, Cursor
 
 
@@ -23,9 +24,9 @@ class Phase3ReadTests(unittest.TestCase):
     def test_account_refresh_autocommit_only_single_statement(self):
         store = os_accounts.PostgresAccountStore()
         cur = Cursor()
-        with patch.object(store, 'ensure_schema'), patch.object(store, '_connect', return_value=Connection(cur)) as connect, patch('scripts.benchmark_account_reads.time.sleep'):
+        with patch.object(store, 'ensure_schema'), patch.object(store, '_read_connection', return_value=Connection(cur)) as connect, patch('scripts.benchmark_account_reads.time.sleep'):
             store.get_user('fixture')
-        connect.assert_called_once_with(autocommit=True)
+        connect.assert_called_once_with()
         self.assertEqual(cur.calls, 1)
         self.assertIn('p.user_id=u.id', cur.sql)
 
@@ -45,8 +46,9 @@ class Phase3ReadTests(unittest.TestCase):
         conn.__enter__ = Mock(return_value=conn)
         conn.__exit__ = Mock(return_value=False)
         conn.cursor.side_effect = RuntimeError('fixture timeout')
-        with patch.object(store, 'ensure_schema'), patch.object(store, '_connect', return_value=conn):
-            with self.assertRaisesRegex(RuntimeError, 'fixture timeout'): store.get_user('fixture')
+        with patch.object(store, 'ensure_schema'), patch.object(store, '_read_connection', return_value=conn):
+            with self.assertRaises(supabase_backend.DatabaseReadError) as error: store.get_user('fixture')
+        self.assertEqual(str(error.exception.__cause__), 'fixture timeout')
         conn.__exit__.assert_called_once()
 
     def test_parallel_registration_preserves_cadence(self):

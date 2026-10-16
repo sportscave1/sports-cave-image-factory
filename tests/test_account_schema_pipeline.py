@@ -27,6 +27,8 @@ class AccountSchemaPipelineTests(unittest.TestCase):
         self.store = os_accounts.PostgresAccountStore()
         patcher = patch.object(self.store, '_connect', side_effect=self.connect)
         patcher.start(); self.addCleanup(patcher.stop)
+        reader = patch.object(self.store, '_read_connection', side_effect=lambda: self.connect(autocommit=True))
+        reader.start(); self.addCleanup(reader.stop)
         configured = patch.object(self.store, 'is_configured', return_value=True)
         configured.start(); self.addCleanup(configured.stop)
 
@@ -70,12 +72,11 @@ class AccountSchemaPipelineTests(unittest.TestCase):
                         result = super().execute(*args, **kwargs)
                         states.append(cursor.connection.info.transaction_status)
                         return result
-                def connect(**kwargs):
-                    self.assertTrue(kwargs['autocommit'])
+                def connect():
                     conn = self.connect(autocommit=autocommit, cursor_factory=Cursor)
                     connections.append(conn)
                     return conn
-                with patch.object(self.store, '_connect', side_effect=connect):
+                with patch.object(self.store, '_read_connection', side_effect=connect):
                     self.assertEqual(self.store.get_user(uuid.uuid4()), {})
                 self.assertEqual(states, [TransactionStatus.IDLE if autocommit else TransactionStatus.INTRANS])
                 self.assertTrue(connections[0].closed)

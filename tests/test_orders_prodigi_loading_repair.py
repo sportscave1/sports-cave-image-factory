@@ -1,3 +1,4 @@
+from tests.read_connection_fakes import disposable_read_connection
 import inspect
 import threading
 import time
@@ -166,7 +167,7 @@ class OrdersProdigiLoadingRepairTests(unittest.TestCase):
                 self.closed = True
 
         started = time.perf_counter()
-        with patch.object(supabase_backend, "connect", return_value=Connection()), patch.object(
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=Connection()), patch.object(
             supabase_backend, "_db_read_deadline_seconds", return_value=0.01
         ):
             with self.assertRaises(supabase_backend.DatabaseReadError) as raised:

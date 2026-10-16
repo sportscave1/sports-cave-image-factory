@@ -1,3 +1,4 @@
+from tests.read_connection_fakes import disposable_read_connection
 import time
 import unittest
 from unittest.mock import patch
@@ -130,7 +131,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
     def _load(self, order_count=100_000):
         database = ProductionCardinalityDatabase(order_count=order_count)
         started = time.perf_counter()
-        with patch.object(supabase_backend, "connect", side_effect=database.connect):
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", side_effect=database.connect):
             rows = supabase_backend.list_hybrid_order_rows(limit=50)
         return database, rows, (time.perf_counter() - started) * 1000
 
@@ -215,7 +216,7 @@ class OrdersBoundedReaderRegressionTests(unittest.TestCase):
 
     def test_visibility_marker_is_also_limited_before_aggregation(self):
         database = ProductionCardinalityDatabase()
-        with patch.object(supabase_backend, "connect", side_effect=database.connect):
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", side_effect=database.connect):
             marker = supabase_backend.orders_visibility_marker(ensure_schema_first=False)
 
         self.assertIn("WITH latest_orders AS", database.statements[0][0])

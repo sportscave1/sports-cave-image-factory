@@ -1,3 +1,4 @@
+from tests.read_connection_fakes import disposable_read_connection
 import inspect
 import json
 from copy import deepcopy
@@ -4643,7 +4644,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         stale = self.Connection(self.Cursor(error=RuntimeError("EDBHANDLEREXITED connection to database closed")))
         fresh = self.Connection(self.Cursor(rows=[{"ok": 1}]))
 
-        with patch.object(supabase_backend, "connect", side_effect=[stale, fresh]) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", side_effect=[stale, fresh]) as connect:
             value, diagnostic = supabase_backend._run_read_operation("orders.test", lambda cur: cur.read())
 
         self.assertEqual(value, [{"ok": 1}])
@@ -4658,7 +4659,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
     def test_permanent_sql_error_is_not_retried_or_hidden(self):
         failed = self.Connection(self.Cursor(error=ValueError("syntax error near SELECT")))
 
-        with patch.object(supabase_backend, "connect", return_value=failed) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=failed) as connect:
             with self.assertRaises(supabase_backend.DatabaseReadError) as raised:
                 supabase_backend._run_read_operation("orders.test", lambda cur: cur.read())
 
@@ -4675,7 +4676,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         connection = self.Connection(
             self.Cursor(row_batches=[selected, base, []], statements=statements)
         )
-        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=connection) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50)
 
         self.assertEqual(1, connect.call_count)
@@ -4709,7 +4710,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
             self.Cursor(row_batches=[selected, base, []], statements=[])
         )
 
-        with patch.object(supabase_backend, "connect", side_effect=[stale, fresh]) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", side_effect=[stale, fresh]) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50)
 
         self.assertEqual(2, connect.call_count)
@@ -4727,7 +4728,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         statements = []
         connection = self.Connection(self.Cursor(rows=[], statements=statements))
 
-        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=connection) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50)
 
         self.assertEqual([], rows)
@@ -4741,7 +4742,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         supabase_backend._set_marketplace_order_read_capability(False)
         legacy_statements = []
         legacy_connection = self.Connection(self.Cursor(rows=[], statements=legacy_statements))
-        with patch.object(supabase_backend, "connect", return_value=legacy_connection):
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=legacy_connection):
             supabase_backend.list_hybrid_order_rows(limit=25, search="Etsy")
 
         self.assertIn("WHERE LOWER(COALESCE(o.order_name", legacy_statements[0][0])
@@ -4757,7 +4758,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
             diag = SimpleNamespace(column_name="unexpected_column")
 
         failed = self.Connection(self.Cursor(error=UndefinedColumn("unexpected column")))
-        with patch.object(supabase_backend, "connect", return_value=failed) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=failed) as connect:
             with self.assertRaises(supabase_backend.DatabaseReadError):
                 supabase_backend.list_hybrid_order_rows(limit=50)
 
@@ -4808,7 +4809,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
             )
         )
 
-        with patch.object(supabase_backend, "connect", return_value=connection) as connect:
+        with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", return_value=connection) as connect:
             rows = supabase_backend.list_hybrid_order_rows(limit=50, search="#SC2906")
 
         self.assertEqual(connect.call_count, 1)
