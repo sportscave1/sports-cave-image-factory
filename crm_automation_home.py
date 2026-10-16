@@ -384,7 +384,7 @@ def table(shop,store,user,script=None):
             with st.container(horizontal=True,key='auto-row-'+str(row['id'])):
                 with st.container(width='stretch'):
                     label=TRIGGERS.get(row['trigger_type'],('','Legacy flow'))[1]
-                    category='Active' if publication.get('state')=='LIVE' else row['category'].rstrip('s')
+                    category=row['category'].rstrip('s')
                     target='?'+urlencode({'page':'CRM Automations','automation':str(row['id'])})
                     glyph,colour={'welcome':(7,'blue'),'post_purchase':(8,'gold'),'fulfilled':(8,'green'),'winback':(4,'rose')}.get(row['trigger_type'],(0,'gold'))
                     from crm_flow_builder import display_name
