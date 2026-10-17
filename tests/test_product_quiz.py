@@ -3,7 +3,7 @@ import json
 import unittest
 from contextlib import contextmanager
 from copy import deepcopy
-from unittest.mock import patch
+from unittest.mock import patch,Mock,MagicMock,call
 from product_quiz import DEFAULT,validate,classify,digest
 from product_quiz_publish import sync,publish,revert,compile_catalogue,snippets
 from product_quiz_api import clean
@@ -35,6 +35,28 @@ class MemoryAssets:
 
 
 class QuizContracts(unittest.TestCase):
+    def test_transient_shopify_reads_retry_without_hiding_permanent_errors(self):
+        from product_quiz_worker import retry_read
+        from shopify_sync import ShopifyAPIError
+        read=Mock(side_effect=[ShopifyAPIError('Status: 503'),ShopifyAPIError('THROTTLED'),{'products':[]}])
+        with patch('product_quiz_worker.time.sleep') as sleep:
+            self.assertEqual(retry_read(read),{'products':[]})
+            self.assertEqual(sleep.call_args_list,[call(1),call(2)])
+        with patch('product_quiz_worker.time.sleep') as sleep:
+            with self.assertRaises(ShopifyAPIError): retry_read(Mock(side_effect=ShopifyAPIError('Access denied')))
+            sleep.assert_not_called()
+        with patch('product_quiz_worker.time.sleep') as sleep:
+            read=Mock(side_effect=ShopifyAPIError('Status: 503'))
+            with self.assertRaises(ShopifyAPIError): retry_read(read)
+            self.assertEqual(read.call_count,7)
+            self.assertEqual(sleep.call_count,6)
+    def test_reconciliation_keeps_snapshot_when_cursor_does_not_advance(self):
+        from product_quiz_worker import refresh_mirror
+        store=MemoryStore();store.put_state('present_product_ids',['previous'])
+        store.db=MagicMock()
+        with patch('shopify_sync.fetch_catalog_page',return_value={'products':[],'has_next_page':True,'end_cursor':None}),patch('shopify_sync.get_config',return_value={}),patch('supabase_backend._upsert_shopify_product_display_row'):
+            with self.assertRaises(ValueError): refresh_mirror(store)
+        self.assertEqual(store.get_state('present_product_ids'),['previous'])
     def test_reconciliation_uses_one_existing_host_without_starting_in_tests(self):
         from product_quiz_worker import enabled,start_app_reconciler
         with patch.dict('os.environ',{'PRODUCT_QUIZ_ENABLED':'true','PRODUCT_QUIZ_RECONCILER_HOST':'app'}):

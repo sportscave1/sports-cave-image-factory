@@ -49,19 +49,21 @@ def start_app_reconciler():
 
 def refresh_mirror(store):
     """Recover missed product events; never calls allocation or Shopify mutations."""
-    from shopify_sync import iter_catalog_pages,graphql_request,get_config
+    from shopify_sync import fetch_catalog_page,graphql_request,get_config
     from supabase_backend import _upsert_shopify_product_display_row
     seen=set()
     config=dict(get_config())
     config['max_products']=100000
     last_page=None
     # An empty search includes archived/draft rows, unlike the active-only operational sync.
-    for page in iter_catalog_pages(search='',page_size=5,config=config):
+    after=None
+    while len(seen)<config['max_products']:
+        page=retry_read(lambda:fetch_catalog_page(after=after,search='',page_size=5,config=config))
         last_page=page
         policies={}
         ids=[p['shopify_product_id'] for p in page['products']]
         for offset in range(0,len(ids),3):
-            data,_=graphql_request(SELLING_QUERY,variables={'ids':ids[offset:offset+3]},config=config)
+            data,_=retry_read(lambda:graphql_request(SELLING_QUERY,variables={'ids':ids[offset:offset+3]},config=config))
             policies.update({p['id']:selling_policy(p) for p in data.get('nodes') or [] if p})
         with store.db() as conn:
             with conn.cursor() as cur:
@@ -69,11 +71,28 @@ def refresh_mirror(store):
                     product['quiz_sellable']=policies.get(product['shopify_product_id'])
                     _upsert_shopify_product_display_row(cur,product)
                     seen.add(product['shopify_product_id'])
+        if not page.get('has_next_page'): break
+        cursor=page.get('end_cursor')
+        if not cursor or cursor==after: raise ValueError('Catalogue cursor did not advance; previous ID snapshot preserved')
+        after=cursor
     if last_page and last_page.get('has_next_page'):
         raise ValueError('Catalogue listing did not reach its end; previous ID snapshot preserved')
     # Tombstone deleted products only after a successful complete listing.
     # Do not alter the shared mirror: private exclusions disappear if an ID reappears.
     store.put_state('present_product_ids',sorted(seen))
+
+
+def retry_read(call):
+    """Retry only transient Shopify reads, without losing the current page cursor."""
+    from shopify_sync import ShopifyAPIError
+    for attempt in range(7):
+        try: return call()
+        except ShopifyAPIError as exc:
+            message=str(exc).casefold()
+            transient=any(marker in message for marker in ('throttled','status: 429','status: 500','status: 502','status: 503','status: 504','status: unknown'))
+            if not transient or attempt==6: raise
+            logging.getLogger(__name__).warning('product_quiz_read_retry attempt=%s',attempt+1)
+            time.sleep(min(2**attempt,30))
 
 
 def cycle(store,assets,*,reconcile=False):
