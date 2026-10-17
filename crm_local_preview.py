@@ -117,6 +117,7 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
     base['blocks']=[]
     commit_middle(base,[dict(id='preview-slot',type='html',html_number=1,visible=True,html='<div>SC_LOCAL_PREVIEW_SLOT_7D26</div>')])
     base=personalise(base,personal)
+    hydrated_sections={}
     if lifecycle:
         shell=lifecycle_shell(base,cfg,st.session_state)
         hydrated_sections={s['id']:s for s in middle_sections(hydrated_document)}
@@ -184,8 +185,13 @@ def model(doc,cfg,store=None,*,hydrated_document=None):
     replacements['SC_FRAME_BANNER_URL']=''
     context_data=[data,cfg,collector,personal]
     if smart_enabled(doc):context_data.append([st.session_state.get('_smart_preview_customer'),hydrated_document])
+    # Browser layout edits reuse server-formatted copy, never rewrite product facts.
+    from crm_catalogue import collection_display_title
+    catalogue_titles={p['title']:collection_display_title(p['title'])
+                      for s in [*sections,*hydrated_sections.values()] if s.get('type')=='catalogue'
+                      for p in s.get('products',[])}
     return dict(context_token=digest(context_data),shell=shell,resolved=resolved,errors=errors,error_sections=error_sections,items=items,replacements=replacements,collector=collector,offer=doc.get('recovery_discount'),association_independent=True,
-                personalisation=html_values(personal),tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
+                catalogue_titles=catalogue_titles,personalisation=html_values(personal),tags=sorted(TAGS),css=sorted(CSS),theme=rules(default_html()),element=element()['settings'])
 
 
 def canvas(doc,cfg,key,store=None,*,hydrated_document=None):

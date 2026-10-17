@@ -1,0 +1,20 @@
+/* Only the innermost native dialog is the surface. Never style its overlay. */
+/* React Aria adds a separately painted modal wrapper around the dialog. */
+[data-testid="stDialog"]>div[data-rac]:has(>section[data-sc-publication-dialog]){width:fit-content!important;min-width:0!important;max-width:calc(100vw - 32px)!important;padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important}
+[data-sc-publication-dialog]{box-sizing:border-box!important;min-width:0!important;width:min(420px,calc(100vw - 32px))!important;max-width:calc(100vw - 32px)!important;max-height:calc(100dvh - 32px)!important;overflow:auto!important;background:#faf9f6!important;color:#242424!important;border:1px solid #dedbd4!important;border-radius:10px!important;box-shadow:0 8px 28px #0003}
+[data-sc-publication-dialog] :is(h2,h3){font:600 19px/1.4 'Segoe UI',Arial,sans-serif!important;color:#242424!important;margin:0!important}
+.st-key-sc-publication-body{min-width:0!important;width:100%!important;gap:12px!important}
+.st-key-sc-publication-body [data-testid="stVerticalBlock"]{gap:12px!important}
+.st-key-sc-publication-body [data-testid="stElementContainer"]{min-width:0!important;max-width:100%!important}
+.st-key-sc-publication-body :is(p,span,strong){overflow-wrap:anywhere;white-space:normal;font-family:'Segoe UI',Arial,sans-serif}
+.st-key-sc-publication-body .sc-publication-summary{display:flex;flex-direction:column;gap:4px;padding:12px;background:#f2f0e9;border:1px solid #e4dfd2;border-radius:6px;font-size:14px;line-height:1.5;color:#242424}
+.st-key-sc-publication-body .sc-publication-summary span{font-size:12px;color:#626258}
+.st-key-sc-publication-body [data-testid="stAlert"]{position:static!important;width:100%!important;box-sizing:border-box;max-height:40dvh;overflow:auto}
+.st-key-sc-publication-body [data-testid="stHorizontalBlock"]{flex-wrap:nowrap!important;gap:8px!important}
+.st-key-sc-publication-body [data-testid="stColumn"]{min-width:0!important;flex:1!important}
+.st-key-sc-publication-body button{position:static!important;min-height:38px!important;height:auto!important;padding:8px 12px!important;border-radius:6px!important;box-shadow:none!important}
+.st-key-sc-publication-body button p{font-size:14px!important;line-height:20px!important;margin:0!important;color:inherit!important}
+[data-sc-publication-dialog] .st-key-sc-publication-body .st-key-automation-publication-cancel button[kind="secondary"]{background:#faf9f6!important;color:#242424!important;border:1px solid #cfcbbf!important}
+[data-sc-publication-dialog] .st-key-sc-publication-body .st-key-automation-publication-confirm button[kind="primary"]{background:#c8a346!important;color:#171717!important;border:1px solid #b99436!important}
+.st-key-sc-publication-body button:focus-visible{outline:2px solid #8e6c25!important;outline-offset:2px}
+.st-key-sc-publication-body button:disabled{opacity:.55;cursor:wait}

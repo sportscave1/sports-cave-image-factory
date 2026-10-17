@@ -94,11 +94,11 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         step=next(s for s in row['config']['draft']['emails'] if s['step_id']==selected)
         email_state=step_state(row,step)
         live_step=next((s for s in row['steps'] if s['step_id']==selected),None)
-        badge_label=email_state.title()+(' · v'+str(live_step['template_version']) if live_step else '')
+        badge_label=email_state.title()+(' · v'+str(live_step['template_version']) if live_step else '')+' · Flow '+('Active' if row['status']=='ACTIVE' else 'Disabled')
         if live_step and pending:badge_label+=' · Unpublished changes'
-        current_label={'LIVE':'Published · Up to date','PAUSED':'Published · Paused','DRAFT':'Draft','DISABLED':'Disabled · Excluded from publication'}[email_state]
+        current_label={'LIVE':'Published · Up to date','PAUSED':'Published · Paused','PUBLISHED':'Published · Flow disabled','DRAFT':'Draft','DISABLED':'Draft · Publish to include this email'}[email_state]
     elif row['status']=='PAUSED' and version:current_label='Published · Paused'
-    if excluded:current_label='Published · '+str(len(excluded))+' disabled / excluded' if version else 'Draft · Disabled emails excluded'
+    if excluded and not selected:current_label='Published · '+str(len(excluded))+' disabled / excluded' if version else 'Draft · Disabled emails excluded'
     publication=row['config'].get('publication',{});busy=publication.get('state')=='PUBLISHING';archived=status(row)=='ARCHIVED'
     blockers=[];resume_blockers=[]
     if row['trigger_type']!='abandoned' and not busy and (pending or row['status']=='PAUSED'):
@@ -108,9 +108,9 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
         scoped=publication_flow(store,row,selected)
         blockers=readiness_blockers(store,{'trigger_type':scoped['trigger'],'config':{'draft':scoped}})
         resume_blockers=readiness_blockers(store,row,published=True) if row['status']=='PAUSED' else []
-        try:preflight(row,row['config']['revision'],scoped)
+        try:preflight(row,row['config']['revision'],scoped,step_id=selected)
         except ValueError as exc:
-            if str(exc)!='Enable at least one email before publishing.':blockers.append(str(exc))
+            blockers.append(str(exc))
     st.html('''<style>
     .st-key-automation-toolbar{gap:8px!important;align-items:center!important;flex-wrap:wrap!important;margin:0 0 8px!important}
     .st-key-automation-toolbar>[data-testid="stElementContainer"]{width:auto!important;flex:0 0 auto!important}
@@ -142,6 +142,7 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             if flow_view:
                 from crm_flow_inline import title_control
                 title_control(store,user,row,title)
+                st.html('<span class="automation-state">Flow '+('Active' if row['status']=='ACTIVE' else 'Disabled')+'</span>')
             else:
                 st.html('<div class="automation-title"><strong title="'+escape(title,quote=True)+'">'+escape(title)+'</strong>'+badge+'</div>')
             if flow_view:
@@ -175,7 +176,8 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
                         from crm_automation_diagnostic_ui import control
                         from crm_shopify import Shopify
                         control(Shopify(),store,user,row['trigger_type'],key+'flow_',automation=row)
-            if busy:st.html('<span class="automation-current automation-publishing" role="status">Publishing changes…</span>')
+            if busy and flow_view and publication.get('step_id'):st.caption('Email publication in progress')
+            elif busy:st.html('<span class="automation-current automation-publishing" role="status">Publishing changes…</span>')
             elif not pending and not dirty and not excluded:st.html('<span class="automation-current" role="status">'+current_label+'</span>')
             else:
                 if excluded:st.caption(current_label)
@@ -188,17 +190,17 @@ def toolbar(store,user,identity,*,editor=None,key='',cfg=None,flow_view=False):
             signature=(str(identity),row['status'],version,publication.get('state'))
             previous=st.session_state.get('flow-status-observed')
             st.session_state['flow-status-observed']=signature
-            if previous and previous[0]==str(identity) and previous!=signature:
+            if previous and previous[0]==str(identity) and previous!=signature and not publication.get('step_id'):
                 from crm_flow_page import refresh_control
                 refresh_control('flow-step-metrics-refresh')
         if flow_view and st.session_state.pop('flow-period-dirty',False):
             from crm_flow_page import refresh_control
             refresh_control('flow-analytics-refresh')
-        if publication.get('state')=='FAILED':st.html('<span role="status" style="font-size:12px;color:#9c3c36">Publishing failed · '+escape(publication.get('error') or 'Retry publishing.')+'</span>')
+        if publication.get('state')=='FAILED' and not (flow_view and publication.get('step_id')):st.html('<span role="status" style="font-size:12px;color:#9c3c36">Publishing failed · '+escape(publication.get('error') or 'Retry publishing.')+'</span>')
         if blockers:
             with st.popover('Publication requirements',icon=':material/warning:'):
                 for reason in blockers:st.caption(reason)
-        if busy:
+        if busy and not (flow_view and publication.get('step_id')):
             from crm_automation_publication import progress,progress_text
             try:st.caption(progress_text(progress(store,identity)))
             except StoreUnavailable:st.caption('Publication status temporarily unavailable. Checking again; success is not yet confirmed.')

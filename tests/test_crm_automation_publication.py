@@ -48,8 +48,14 @@ class PublicationUiTests(unittest.TestCase):
         from crm_automation_home import status_html,status_region
         for category,pub,label in [('Draft',{},'Draft'),('Active',{},'Live'),('Paused',{},'Paused'),
           ('Archived',{},'Archived'),('Active',{'state':'PUBLISHING','revision':8},'Publishing'),
-          ('Active',{'state':'FAILED','error':'Review the email.'},'Publish failed')]:
+          ('Active',{'state':'FAILED','error':'Review the email.'},'Publish failed'),
+          ('Draft',{'state':'LIVE'},'Published · Disabled'),('Paused',{'state':'LIVE'},'Paused')]:
             self.assertIn(label,status_html(category,pub))
+        self.assertNotIn('active',status_html('Draft',{'state':'LIVE'}))
+        from crm_automation_home import table
+        table_code=inspect.getsource(table)
+        self.assertIn("category=row['category'].rstrip('s')",table_code)
+        self.assertNotIn("category='Active' if publication",table_code)
         code=inspect.getsource(status_region)
         self.assertIn('@settling_fragment',code);self.assertNotIn('summary(',code)
         self.assertNotIn('secret-value',safe_reason(RuntimeError('secret-value')))

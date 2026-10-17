@@ -10,9 +10,10 @@ let queue=Promise.resolve();
 const server=http.createServer(async(req,res)=>{
  let body='';for await(const chunk of req)body+=chunk;
  queue=queue.then(async()=>{
-  try {const {sql,args=[]}=JSON.parse(body);const result=await db.query(sql,args);
+  try {const {sql,args=[]}=JSON.parse(body);const result=args.length ? await db.query(sql,args) : (await db.exec(sql)).at(-1)||{rows:[]};
    res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify(result));
   } catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message}));}
  });
 });
+server.keepAliveTimeout=30000;
 server.listen(0,'127.0.0.1',()=>console.log(server.address().port));

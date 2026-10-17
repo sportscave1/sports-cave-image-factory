@@ -176,7 +176,9 @@ def status_html(category,publication):
     if category=='Archived':label,colour='Archived',''
     elif state=='PUBLISHING':label,colour='Publishing…','publishing'
     elif state=='FAILED':label,colour='Publish failed','failed'
-    else:label,colour=('Live','active') if category=='Active' or state=='LIVE' else (category,'')
+    elif category=='Active':label,colour='Live','active'
+    elif state=='LIVE' and category=='Draft':label,colour='Published · Disabled',''
+    else:label,colour=category,''
     title='Publishing saved revision '+str(publication.get('revision')) if state=='PUBLISHING' else publication.get('error','')
     requested=date(publication.get('requested_at'))
     if state=='PUBLISHING' and requested and (now()-requested).total_seconds()>600:
@@ -382,7 +384,7 @@ def table(shop,store,user,script=None):
             with st.container(horizontal=True,key='auto-row-'+str(row['id'])):
                 with st.container(width='stretch'):
                     label=TRIGGERS.get(row['trigger_type'],('','Legacy flow'))[1]
-                    category='Active' if publication.get('state')=='LIVE' else row['category'].rstrip('s')
+                    category=row['category'].rstrip('s')
                     target='?'+urlencode({'page':'CRM Automations','automation':str(row['id'])})
                     glyph,colour={'welcome':(7,'blue'),'post_purchase':(8,'gold'),'fulfilled':(8,'green'),'winback':(4,'rose')}.get(row['trigger_type'],(0,'gold'))
                     from crm_flow_builder import display_name

@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 import subprocess
 import threading
-import urllib.request
-import urllib.error
+import http.client
+from contextvars import ContextVar
+from datetime import datetime
 
 import pytest
 import auto_editions as ae
@@ -20,10 +21,16 @@ def database():
     child=subprocess.Popen(['node',str(Path(__file__).with_name('auto_editions_postgres_server.mjs'))],
         stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+    transport=None
     try:
         port=child.stdout.readline().strip()
         assert port.isdigit(), child.stderr.read()
         lock=threading.RLock()
+        transactions=threading.Condition()
+        scope=ContextVar('synthetic-pglite-transaction',default=None)
+        owner_state=dict(owner=None,depth=0,serial=0)
+        # Repeated isolated suites must not exhaust Windows ephemeral sockets.
+        transport=http.client.HTTPConnection('127.0.0.1',int(port),timeout=10)
         class Cursor:
             rows=[]
             def __enter__(self):return self
@@ -31,28 +38,75 @@ def database():
             def execute(self,sql,args=()):
                 parts=sql.split('%s')
                 sql=parts[0]+''.join('$'+str(i)+p for i,p in enumerate(parts[1:],1))
-                request=urllib.request.Request('http://127.0.0.1:'+port,
-                    data=json.dumps(dict(sql=sql,args=args)).encode(),headers={'Content-Type':'application/json'})
-                try:
-                    with urllib.request.urlopen(request,timeout=10) as response:self.rows=json.load(response)['rows']
-                except urllib.error.HTTPError as error:
-                    with error:raise RuntimeError(json.load(error)['error']) from None
+                body=json.dumps(dict(sql=sql,args=args),default=lambda v:v.isoformat() if isinstance(v,datetime) else str(v)).encode()
+                with transactions:
+                    while owner_state['owner'] is not None and owner_state['owner'] is not scope.get():transactions.wait()
+                    with lock:
+                        transport.request('POST','/',body=body,headers={'Content-Type':'application/json'})
+                        response=transport.getresponse();result=json.loads(response.read())
+                        if response.status>=400:raise RuntimeError(result['error'])
+                        self.rows=result['rows']
+                        # Match psycopg's top-level timestamp values; JSONB stays JSON.
+                        dates={f['name'] for f in result.get('fields',[]) if f.get('dataTypeID') in (1114,1184)}
+                        for row in self.rows:
+                            for key in dates:
+                                if isinstance(row.get(key),str):row[key]=datetime.fromisoformat(row[key].replace('Z','+00:00'))
             def fetchone(self):return self.rows[0] if self.rows else None
             def fetchall(self):return self.rows
         class Connection:
-            def __enter__(self):lock.acquire();Cursor().execute('BEGIN');return self
+            def __enter__(self):
+                # AnyIO propagates this context into its worker thread. Nested
+                # calls may borrow the single synthetic connection without
+                # deadlocking the async caller; unrelated transactions wait.
+                self.owner=scope.get() or object();self.scope_token=scope.set(self.owner)
+                with transactions:
+                    while owner_state['owner'] not in (None,self.owner):transactions.wait()
+                    self.nested=owner_state['depth']>0
+                    owner_state.update(owner=self.owner,depth=owner_state['depth']+1,serial=owner_state['serial']+1)
+                    self.savepoint='fixture_'+str(owner_state['serial'])
+                try:Cursor().execute('SAVEPOINT '+self.savepoint if self.nested else 'BEGIN')
+                except BaseException:self.release();raise
+                return self
+            def release(self):
+                with transactions:
+                    owner_state['depth']-=1
+                    if not owner_state['depth']:owner_state['owner']=None
+                    transactions.notify_all()
+                scope.reset(self.scope_token)
             def __exit__(self,typ,*args):
-                try:Cursor().execute('ROLLBACK' if typ else 'COMMIT')
-                finally:lock.release()
+                try:
+                    if self.nested:
+                        if typ:Cursor().execute('ROLLBACK TO SAVEPOINT '+self.savepoint)
+                        Cursor().execute('RELEASE SAVEPOINT '+self.savepoint)
+                    else:Cursor().execute('ROLLBACK' if typ else 'COMMIT')
+                finally:self.release()
             def cursor(self):return Cursor()
+        Connection.test_url='http://127.0.0.1:'+port
         yield Jobs(Connection),Cursor()
     finally:
+        if transport:transport.close()
         child.terminate();child.communicate(timeout=10)
 
 
 def job():
     identity=dict(allocation=42,number=5)
     return dict(id=ae.fingerprint(identity),identity=identity)
+
+
+def test_synthetic_connection_nested_async_worker_rollback_does_not_deadlock(database):
+    import asyncio
+    from starlette.concurrency import run_in_threadpool
+    jobs,sql=database;sql.execute('CREATE TABLE fixture_nested(id int)')
+    def nested():
+        with jobs.connect() as conn,conn.cursor() as cur:
+            cur.execute('INSERT INTO fixture_nested VALUES(2)')
+            raise ValueError('Nested rollback fixture')
+    async def check():
+        with jobs.connect() as conn,conn.cursor() as cur:
+            cur.execute('INSERT INTO fixture_nested VALUES(1)')
+            with pytest.raises(ValueError,match='Nested rollback'):await run_in_threadpool(nested)
+            cur.execute('SELECT sum(id) AS n FROM fixture_nested');assert cur.fetchone()['n']==1
+    asyncio.run(check());sql.execute('SELECT sum(id) AS n FROM fixture_nested');assert sql.fetchone()['n']==1
 
 
 def test_idempotent_queue_reclaims_expired_lease_and_rejects_old_worker(database):
@@ -194,5 +248,5 @@ def test_bound_read_observes_current_allocation_without_mapping_queries(database
 
 def eligibility_tables(sql,manifest):
     sql.execute('CREATE TABLE product_psd_mappings(shopify_product_gid text PRIMARY KEY,dropbox_file_id text)')
-    sql.execute('CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text)')
+    sql.execute("CREATE TABLE auto_edition_onboarding(product_gid text,status text,source jsonb,preparation_hash text,reason text DEFAULT '',lease_until timestamptz,updated_at timestamptz)")
     sql.execute('INSERT INTO product_psd_mappings VALUES(%s,%s)',(manifest['source']['product_gid'],manifest['source']['file_id']))

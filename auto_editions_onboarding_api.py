@@ -68,10 +68,31 @@ async def heartbeat(request):
         if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
         user=await preparation_actor(request)
         body=await files._json_body(request)
+        await run_in_threadpool(host_health,request,body.pop('health',None))
         if body:
             if set(body)!={'product_gid','lease_token','stage'}:raise ValueError('Exact preparation lease required.')
             await run_in_threadpool(queue().heartbeat,body['product_gid'],body['lease_token'],str(user['id']),body['stage'])
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
+def host_health(request,value):
+    if value is None:return
+    token=request.headers.get('x-sports-cave-preparation-host')
+    if not token:raise PermissionError('Scoped preparation host required for telemetry.')
+    from worker_health import record_heartbeat
+    record_heartbeat(queue().connect,'Companion',hashlib.sha256(token.encode()).hexdigest()[:24],value)
+async def cancellation(request):
+    try:
+        import files_upload_api as files
+        from auto_editions_cancellation import Cancellation
+        user=await preparation_actor(request)
+        body=await files._json_body(request)
+        if set(body)!={'product_gid','lease_token','stopped'} or type(body['stopped']) is not bool:
+            raise ValueError('Exact preparation lease and safe-stop acknowledgement required.')
+        cancelled=await run_in_threadpool(Cancellation(queue().connect).poll,
+            body['product_gid'],body['lease_token'],str(user['id']),body['stopped'])
+        return JSONResponse(dict(cancelled=cancelled),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 
@@ -179,10 +200,10 @@ async def fail(request):
         ctx=setup['context']
         if not ctx.get('automatic'):raise ValueError('A product preparation grant is required.')
         body=await files._json_body(request)
-        if set(body)!={'reason','repair'} or not isinstance(body['reason'],str) or len(body['reason'])>500:
+        if set(body) not in ({'reason','repair'},{'reason','repair','diagnostic'}) or not isinstance(body['reason'],str) or len(body['reason'])>500:
             raise ValueError('A bounded preparation failure reason is required.')
         await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
-            'Needs PSD Repair' if body['repair'] is True else 'Blocked',body['reason'])
+            'Needs PSD Repair' if body['repair'] is True else 'Blocked',body['reason'],diagnostic=body.get('diagnostic'))
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
@@ -235,6 +256,9 @@ async def summary(request):
         public=[{**{k:r[k] for k in ('product_gid','product_title','status','reason','preparation_hash','attempts')},
                  'priority':r['priority'],
                  'status':'Deferred' if r['status']=='Awaiting preparation' and r['priority']==0 else r['status']} for r in rows]
+        for item,row in zip(public,rows):
+            if (row.get('reset_cancellation') or {}).get('stage') in ('Cancelling','Confirmed'):
+                item.update(status='Cancelling'+chr(8230),reason='Waiting for Companion to confirm a safe stop; Reset resumes automatically.')
         from auto_editions_status import reason as public_reason
         for item in public:item['reason']=public_reason(item.get('reason'))
         from auto_editions_discovery import enabled,waiting_rows
@@ -295,9 +319,19 @@ async def claim(request):
     try:
         import files_upload_api as files
         user=await preparation_actor(request)
-        if await files._json_body(request)!={}:raise ValueError('Preparation reads authoritative product identities.')
+        body=await files._json_body(request)
+        await run_in_threadpool(host_health,request,body.pop('health',None))
+        if body!={}:raise ValueError('Preparation reads authoritative product identities.')
         from auto_editions_priority import refresh
         store=queue()
+        import os
+        if os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true':
+            from auto_editions_colour_recovery import recover
+            # A bad/missing optional policy must never prevent other eligible jobs.
+            try:await run_in_threadpool(recover,store,str(user['id']),dry_run=False)
+            except Exception as error:
+                import logging
+                logging.getLogger(__name__).warning('colour_recovery_unavailable error_type=%s',type(error).__name__)
         from auto_editions_discovery import enabled
         if not enabled():
             await run_in_threadpool(refresh,store,str(user['id']),limit=100 if __import__('auto_editions_v17').enabled() else None)
@@ -314,7 +348,7 @@ async def claim(request):
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
         if host:record.v6_setup['host_token_hash']=hashlib.sha256(host.encode()).hexdigest()
-        return JSONResponse(dict(context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
+        return JSONResponse(dict(package_transport=1,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
             ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:
         if row:
@@ -354,6 +388,7 @@ async def reconnect(request):
         import files_upload_api as files
         if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
         user=await preparation_actor(request);body=await files._json_body(request)
+        await run_in_threadpool(host_health,request,body.pop('health',None))
         if set(body)!={'product_gid','lease_token'}:raise ValueError('Exact active preparation lease required.')
         store=queue()
         with store.connect() as conn,conn.cursor() as cur:
@@ -376,7 +411,7 @@ async def reconnect(request):
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
             host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())
-        return JSONResponse(dict(grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
+        return JSONResponse(dict(package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 
@@ -398,7 +433,7 @@ async def discrepancies(request):
     except Exception as error:return api.failure(error)
 
 
-ROUTES=(('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
+ROUTES=(('/api/auto-editions/onboarding/cancellation',cancellation,('POST',)),('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
         ('/api/auto-editions/onboarding',summary,('GET',)),
         ('/api/auto-editions/onboarding/discrepancies',discrepancies,('GET',)),
         ('/api/auto-editions/onboarding/prepare-now',prepare_now,('POST',)),

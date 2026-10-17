@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 import fulfilment_handoff
+import order_refunds
 import ui_loading
 
 
@@ -89,10 +90,17 @@ LOAD_ERROR_KEY = "orders_load_error"
 LOAD_FUTURE_KEY = "orders_load_future"
 LOAD_REQUEST_KEY = "orders_load_request"
 LOAD_STARTED_KEY = "orders_load_started_at"
+LOAD_SCOPE_KEY = "orders_load_account_scope"
+LOAD_GENERATION_KEY = "orders_load_generation"
+LIVE_CHECKED_AT_KEY = "orders_visibility_checked_at"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
 ORDERS_PAGE_LOAD_TIMEOUT_SECONDS = 8
+# Covers the measured 1.03s p95 Latest 50 read without a loading-poll rerun.
+# Requests exceeding this short grace period keep the asynchronous fallback.
+ORDERS_INLINE_READ_WAIT_SECONDS = 1.2
 HYBRID_FAST_ORDERS_ENABLED = True
-_ORDERS_LOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="orders-ledger-read")
+from orders_read_executor import OrdersReadExecutor, ReadQueueFull
+_ORDERS_LOAD_EXECUTOR = OrdersReadExecutor()
 _PANDAS_MODULE = None
 _PANDAS_IMPORT_ATTEMPTED = False
 ALLOCATION_BLOCKER_STATUSES = {
@@ -341,6 +349,9 @@ def _start_snapshot_load(search="", *, force=False):
         current.cancel()
     st.session_state[LOAD_ERROR_KEY] = ""
     st.session_state[LOAD_REQUEST_KEY] = query
+    user = st.session_state.get('sports_cave_current_user') or {}
+    st.session_state[LOAD_SCOPE_KEY] = (str(user.get('id') or ''), user.get('session_version'))
+    st.session_state[LOAD_GENERATION_KEY] = int(st.session_state.get(LOAD_GENERATION_KEY) or 0) + 1
     st.session_state[LOAD_STARTED_KEY] = time.monotonic()
     future = _ORDERS_LOAD_EXECUTOR.submit(
         _read_orders_snapshot,
@@ -360,7 +371,20 @@ def _consume_snapshot_load():
     future = st.session_state.get(LOAD_FUTURE_KEY)
     if future is None:
         return "idle"
+    user = st.session_state.get('sports_cave_current_user') or {}
+    scope = (str(user.get('id') or ''), user.get('session_version'))
+    if (st.session_state.get(LOAD_SCOPE_KEY, scope) != scope
+            or st.session_state.get('current_page', 'Orders') != 'Orders'):
+        future.cancel()
+        st.session_state[LOAD_FUTURE_KEY] = None
+        return 'superseded'
     query = str(st.session_state.get(LOAD_REQUEST_KEY) or "")
+    def still_current():
+        current_user = st.session_state.get('sports_cave_current_user') or {}
+        return (st.session_state.get(LOAD_FUTURE_KEY) is future
+                and (str(current_user.get('id') or ''), current_user.get('session_version')) == scope
+                and st.session_state.get('current_page', 'Orders') == 'Orders')
+
     started = float(st.session_state.get(LOAD_STARTED_KEY) or time.monotonic())
     elapsed = time.monotonic() - started
     if not future.done():
@@ -381,9 +405,13 @@ def _consume_snapshot_load():
     try:
         payload = future.result()
     except Exception as error:
+        if not still_current():
+            return 'superseded'
         _record_snapshot_load_error(error, query)
         status = "error"
     else:
+        if not still_current():
+            return 'superseded'
         st.session_state[LOAD_ERROR_KEY] = ""
         _apply_snapshot_payload(payload)
         st.session_state[LOADED_QUERY_KEY] = query
@@ -782,10 +810,18 @@ def _apply_snapshot_payload(payload):
 
 def _reload_orders_from_source():
     query = str(st.session_state.get(LOADED_QUERY_KEY) or "").strip()
+    generation = st.session_state.get(LOAD_GENERATION_KEY)
+    user = dict(st.session_state.get('sports_cave_current_user') or {})
+    page = st.session_state.get('current_page', 'Orders')
     payload = _read_orders_snapshot(search=query, limit=DEFAULT_VISIBLE_ROW_LIMIT)
+    if (st.session_state.get(LOAD_GENERATION_KEY) != generation
+            or dict(st.session_state.get('sports_cave_current_user') or {}) != user
+            or st.session_state.get('current_page', 'Orders') != page):
+        return False
     _apply_snapshot_payload(payload)
     st.session_state[LOADED_QUERY_KEY] = query
     st.session_state[SNAPSHOT_LOADED_KEY] = True
+    return True
 
 
 def _certificate_action_in_progress():
@@ -803,12 +839,19 @@ def _orders_supabase_visibility_marker():
 
 
 def _check_orders_supabase_live_refresh():
-    if _certificate_action_in_progress():
+    if st.session_state.get('current_page', 'Orders') != 'Orders':
         return
+    if _certificate_action_in_progress() or st.session_state.get(LOAD_FUTURE_KEY) is not None:
+        return
+    checked_at = float(st.session_state.get(LIVE_CHECKED_AT_KEY) or 0)
+    if checked_at and time.monotonic() - checked_at < ORDERS_SUPABASE_LIVE_CHECK_SECONDS:
+        return
+    st.session_state[LIVE_CHECKED_AT_KEY] = time.monotonic()
     # A parallel check may finish after navigation or an account change. Never
     # let that stale result invalidate the new workspace or interrupt an action.
     page = st.session_state.get("current_page")
     user = dict(st.session_state.get("sports_cave_current_user") or {})
+    generation = st.session_state.get(LOAD_GENERATION_KEY)
     try:
         marker = _orders_supabase_visibility_marker()
     except Exception as error:
@@ -816,6 +859,8 @@ def _check_orders_supabase_live_refresh():
         return
     if (st.session_state.get("current_page") != page
             or dict(st.session_state.get("sports_cave_current_user") or {}) != user
+            or st.session_state.get(LOAD_GENERATION_KEY) != generation
+            or st.session_state.get(LOAD_FUTURE_KEY) is not None
             or _certificate_action_in_progress()):
         return
     if not marker:
@@ -831,8 +876,9 @@ def _check_orders_supabase_live_refresh():
         f"status=completed old_marker={previous} new_marker={marker}",
         flush=True,
     )
+    if _reload_orders_from_source() is False:
+        return
     st.session_state[ORDERS_SUPABASE_LIVE_MARKER_KEY] = marker
-    _reload_orders_from_source()
     print("ORDERS SYNC: orders_snapshot_invalidated source=supabase_live_refresh", flush=True)
     st.rerun()
 
@@ -2023,11 +2069,23 @@ def _render_ledger_diagnostics():
                 st.caption(f"Duplicate allocation diagnostics unavailable: {error}")
 
 
-def _display_rows(rows, *, normalised=False):
+def _order_display_resources(rows):
+    """Overlap independent stored link reads; keep Streamlit calls on its thread."""
+    from orders_display_reads import download_links
+    links = _ORDERS_LOAD_EXECUTOR.submit(download_links, rows or [])
+    mapping = psd_directory.page_directory(st)
+    try:
+        cloud_links = links.result()
+    except ReadQueueFull:
+        # A loaded page must keep accurate link states even under queue pressure.
+        # This still uses the same bounded database pool and read watchdog.
+        cloud_links = download_links(rows or [])
+    return mapping, cloud_links
+
+
+def _display_rows(rows, *, normalised=False, resources=None):
     output = []
-    psd_mapping = psd_directory.page_directory(st)
-    import auto_editions_runtime
-    cloud_links = auto_editions_runtime.download_links(rows or [])
+    psd_mapping, cloud_links = resources if resources is not None else _order_display_resources(rows)
     for row in (rows or []) if normalised else [_normalise_row(item) for item in rows or []]:
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         display_row["file"] = psd_directory.display_link(row, psd_mapping)
@@ -2231,6 +2289,8 @@ def _column_config():
 
 def _fulfilment_cell_style(value):
     status = str(value or "").strip()
+    if status in {"Refunded", "Refund Pending"}:
+        return "color: #c92a2a; font-weight: 600;"
     if status == "Complete":
         return "color: #2f9e44; font-weight: 600;"
     if status == "Needs certificate":
@@ -2242,15 +2302,27 @@ def _fulfilment_cell_style(value):
     return ""
 
 
-def _display_table_payload(rows, *, normalised=False):
-    display_rows = _display_rows(rows, normalised=normalised)
+def _display_table_payload(rows, *, normalised=False, resources=None):
+    display_rows = _display_rows(rows, normalised=normalised, **({"resources": resources} if resources is not None else {}))
     if getattr(st, "__name__", "") != "streamlit":
         return display_rows
     pandas_module = _pandas_module()
     if pandas_module is None:
         return display_rows
     frame = pandas_module.DataFrame(display_rows, columns=VISIBLE_COLUMNS)
-    return frame.style.map(_fulfilment_cell_style, subset=["prodigi"])
+    def refund_row_style(row):
+        return ['color: #8b929a; text-decoration: line-through;' if row.get('prodigi') == 'Refunded' else '' for _ in row]
+    styled = frame.style.apply(refund_row_style, axis=1).map(_fulfilment_cell_style, subset=["prodigi"])
+    # Streamlit's canvas grid supports Styler colors but ignores CSS text-decoration.
+    # Format display text only; underlying values, search, sort, IDs and links stay intact.
+    refunded_indices = frame.index[frame['prodigi'] == 'Refunded']
+    if len(refunded_indices):
+        text_columns = [column for column in VISIBLE_COLUMNS if column not in {'file', 'print_jpg'}]
+        styled = styled.format(
+            lambda value: ''.join(character + '\u0336' for character in str(value)),
+            subset=pandas_module.IndexSlice[refunded_indices, text_columns],
+        )
+    return styled
 
 
 def _manual_edition_eligibility(row, backend):
@@ -2336,8 +2408,8 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     backend = _configured_supabase_backend()
     open_url = _first_pdf_url(selected_rows)
     fulfilment_order_reference = _fulfilment_qa_order_reference(selected_rows)
-    can_dispatch = bool(fulfilment_order_reference)
-    can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") for row in selected_rows)
+    can_dispatch = bool(fulfilment_order_reference) and not any(order_refunds.blocked(r) for r in selected_rows)
+    can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") and not order_refunds.blocked(row) for row in selected_rows)
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
     st.session_state[ORDER_SYNC_BACKFILL_KEY] = False
@@ -2374,7 +2446,7 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
         st.caption(f"{selected_count} selected")
     if not backend:
         st.caption("Orders are temporarily unavailable.")
-    if selected_rows and not can_generate:
+    if selected_rows and not can_generate and not any(order_refunds.blocked(row) for row in selected_rows):
         st.caption("Assign edition number before certificate generation.")
 
 
@@ -2710,12 +2782,12 @@ def _render_orders_table(rows):
         _render_mobile_orders(rows)
         return
     _render_inline_prodigi_actions(rows)
+    import auto_editions_runtime
+    resources = _order_display_resources(rows)
     selected_print_rows = _selected_rows_from_state(rows)
     if selected_print_rows:
-        import auto_editions_runtime
-        cloud_links=auto_editions_runtime.download_links(selected_print_rows)
+        mapping, cloud_links = resources
         with st.expander("Selected unit details / Print JPG", expanded=False):
-            mapping = psd_directory.page_directory(st)
             for selected in selected_print_rows:
                 status = print_jpg.state(selected, mapping.get(psd_directory.product_id(selected)))
                 st.caption(f"{selected.get('order')} · {selected.get('edition')} · {selected.get('product')}")
@@ -2734,7 +2806,7 @@ def _render_orders_table(rows):
                     st.link_button('Auto Editions setup','/auto-editions/setup?allocation_id='+allocation_id)
     with st.container(border=False, key="orders-table"):
         st.dataframe(
-            _display_table_payload(rows, normalised=True),
+            _display_table_payload(rows, normalised=True, resources=resources),
             hide_index=True,
             use_container_width=True,
             height=min(760, max(420, 28 * (len(rows) + 1))),
@@ -2763,9 +2835,13 @@ def _mobile_toggle(key, unit):
 
 
 def _render_mobile_orders(rows):
-    mapping = psd_directory.page_directory(st)
+    mapping, cloud_links = _order_display_resources(rows)
+    refunded_cards = [f'.st-key-orders-mobile-card-{_mobile_unit_id(row)} p'
+                      for row in rows if order_refunds.state(row).get('closed')]
+    if refunded_cards:
+        st.html('<style>' + ','.join(refunded_cards) +
+                '{color:#8b929a;text-decoration:line-through;}</style>')
     import auto_editions_runtime
-    cloud_links=auto_editions_runtime.download_links(rows)
     for row in rows:
         unit = _mobile_unit_id(row)
         key = 'orders-mobile-check-' + unit
@@ -2774,7 +2850,10 @@ def _render_mobile_orders(rows):
             if row.get('admin_url'): st.link_button('Open Order', row['admin_url'])
             st.markdown(f"**{row.get('product')}**")
             st.caption(f"{row.get('customer')} · {row.get('variant_full')}")
-            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {row.get('prodigi')}")
+            fulfilment = row.get('prodigi')
+            if fulfilment in {'Refunded', 'Refund Pending'}:
+                fulfilment = f':red[{fulfilment}]'
+            st.caption(f"Shipping: {row.get('shipping_method')} · Date: {row.get('date')} · Fulfilment: {fulfilment}")
             link = psd_directory.link(row, mapping)
             if link: st.link_button('Open PSD', link + '#Open PSD')
             else: st.caption('PSD: Not linked')
@@ -2923,6 +3002,19 @@ def render_page():
             _start_snapshot_load(search_text, force=True)
         elif not st.session_state.get(SNAPSHOT_LOADED_KEY) and st.session_state.get(LOAD_FUTURE_KEY) is None:
             _start_snapshot_load("")
+        if st.session_state.get(LOAD_FUTURE_KEY) is not None:
+            # Fast reads can finish in this event's render, avoiding a timer
+            # tick and a second app rerun. Slow reads keep the existing bounded
+            # asynchronous loader and its unchanged loading/error presentation.
+            future = st.session_state[LOAD_FUTURE_KEY]
+            try:
+                future.result(timeout=ORDERS_INLINE_READ_WAIT_SECONDS)
+            except FutureTimeoutError:
+                pass
+            except Exception:
+                # _consume_snapshot_load retains the established error path.
+                pass
+            _consume_snapshot_load()
         if st.session_state.get(LOAD_FUTURE_KEY) is not None:
             _render_orders_loading_fragment()
             _perf_log("page shell", page_started, state="loading")

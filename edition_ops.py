@@ -2463,6 +2463,8 @@ def _render_table():
     auto_rows=visible
     auto_status=auto_ui.snapshot(st,backend,auto_rows,force=auto_force)
     if auto_filter!='All':visible=[r for r in visible if auto_status.get(psd_directory.product_id(r),{}).get('status')==auto_filter]
+    from auto_editions_bulk import sorted_rows
+    visible=sorted_rows(visible,auto_status,st.session_state.get('edition-auto-sort','Default Order'),psd_directory.product_id)
     criteria=(selected,status,auto_filter)
     if st.session_state.get('edition-grid-criteria')!=criteria:
         st.session_state['edition-grid-criteria']=criteria;st.session_state['edition-grid-page']=0;st.session_state.pop(EDITOR_KEY,None)

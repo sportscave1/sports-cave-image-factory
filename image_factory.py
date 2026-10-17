@@ -2201,12 +2201,18 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
                             rgb_image = working_image
                             working_image = None
 
-                        export_edge = max(1, min(MAX_EXPORT_EDGE, rgb_image.width, rgb_image.height))
-                        image_export = ImageOps.fit(
-                            rgb_image,
-                            (export_edge, export_edge),
-                            method=Image.LANCZOS,
-                        )
+                        if should_save_webp:
+                            # Product Mockups: keep the complete scene and rigid frame.
+                            # This protects the import, not artwork recreated upstream.
+                            image_export = rgb_image.copy()
+                            image_export.thumbnail((MAX_EXPORT_EDGE, MAX_EXPORT_EDGE), Image.LANCZOS)
+                        else:
+                            export_edge = max(1, min(MAX_EXPORT_EDGE, rgb_image.width, rgb_image.height))
+                            image_export = ImageOps.fit(
+                                rgb_image,
+                                (export_edge, export_edge),
+                                method=Image.LANCZOS,
+                            )
             finally:
                 close_image(rgb_image)
                 close_image(working_image)
@@ -2230,9 +2236,19 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
             image_export.save(
                 webp_output_path,
                 format="WEBP",
-                quality=EXPORT_WEBP_QUALITY,
-                method=EXPORT_WEBP_METHOD,
+                lossless=True,
+                method=1,
             )
+            # Decode before the staged files can replace a previous good import.
+            # Never label this as verification against the original product.
+            from PIL import ImageChops
+            with Image.open(webp_output_path) as encoded:
+                if encoded.format != "WEBP" or encoded.size != image_export.size:
+                    raise ValueError("Product Mockups WebP validation failed; previous files retained.")
+                with encoded.convert("RGB") as decoded:
+                    with ImageChops.difference(image_export, decoded) as difference:
+                        if difference.getbbox() is not None:
+                            raise ValueError("Product Mockups WebP changed imported pixels; previous files retained.")
         else:
             with suppress(FileNotFoundError, PermissionError):
                 webp_output_path.unlink()

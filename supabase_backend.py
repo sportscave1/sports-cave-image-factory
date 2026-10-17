@@ -10,7 +10,7 @@ import threading
 import time
 import traceback
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -655,6 +655,12 @@ def connect():
     )
 
 
+def read_connection():
+    from database_read_pool import connection
+    return connection(_database_url_with_ssl(),
+                      statement_timeout_ms=_db_statement_timeout_ms())
+
+
 def _database_error_sqlstate(error):
     return str(getattr(error, "sqlstate", "") or getattr(error, "pgcode", "") or "").strip()
 
@@ -686,6 +692,7 @@ def _database_error_category(error):
     if (
         sqlstate == "57014"
         or isinstance(error, TimeoutError)
+        or error.__class__.__name__ in {"PoolTimeout", "TooManyRequests"}
         or "echeckouttimeout" in message
         or "unable to check out connection from the pool" in message
     ):
@@ -717,11 +724,11 @@ def _rollback_read_connection(conn):
         conn.rollback()
     except Exception:
         # The connection is discarded below. Never return a failed transaction for reuse.
-        pass
+        _close_read_connection(conn)
 
 
 def _close_read_connection(conn):
-    if conn is None:
+    if conn is None or bool(getattr(conn, "closed", False)):
         return
     try:
         conn.close()
@@ -734,7 +741,7 @@ def _discard_cached_read_connection(conn=None):
     _close_read_connection(conn)
 
 
-def _run_read_operation(operation, read_callable):
+def _run_read_operation(operation, read_callable, *, connection_factory=None, deadline_seconds=None):
     """Run one bounded read on an isolated connection.
 
     Supabase's transaction pool can accept the client connection and then wait up
@@ -744,8 +751,8 @@ def _run_read_operation(operation, read_callable):
     Do not share a connection between Streamlit sessions, the Orders loader and
     top-bar polling.  A process-wide cached connection serialized unrelated
     reads and allowed a cancelled badge/marker query to delay the latest-50
-    reader.  Each operation now owns, rolls back and closes its connection on
-    success, failure and retry.
+    reader. Each operation owns an exclusive lease, rolls back before returning
+    it, and discards timed-out or broken connections. No query results are cached.
     """
     started = time.perf_counter()
     shared_cursor = _ACTIVE_DATABASE_READ_CURSOR.get()
@@ -791,19 +798,20 @@ def _run_read_operation(operation, read_callable):
     first_error_type = ""
     for attempt in range(2):
         conn = None
+        read_stack = ExitStack()
         deadline_timer = None
         deadline_fired = threading.Event()
         connection_ms = 0
         query_started = None
         try:
             connect_started = time.perf_counter()
-            conn = connect()
+            conn = read_stack.enter_context((connection_factory or read_connection)())
             connection_ms = int((time.perf_counter() - connect_started) * 1000)
 
-            def cancel_overdue_read():
-                deadline_fired.set()
-                safe_cancel = getattr(conn, "cancel_safe", None)
-                cancel = safe_cancel or getattr(conn, "cancel", None)
+            def cancel_overdue_read(connection=conn, fired=deadline_fired):
+                fired.set()
+                safe_cancel = getattr(connection, "cancel_safe", None)
+                cancel = safe_cancel or getattr(connection, "cancel", None)
                 if not callable(cancel):
                     return
                 try:
@@ -816,14 +824,17 @@ def _run_read_operation(operation, read_callable):
                     # failed cancellation must never create a second failure.
                     pass
 
-            deadline_seconds = _db_read_deadline_seconds()
-            deadline_timer = threading.Timer(deadline_seconds, cancel_overdue_read)
+            read_deadline = _db_read_deadline_seconds() if deadline_seconds is None else deadline_seconds
+            deadline_timer = threading.Timer(read_deadline, cancel_overdue_read)
             deadline_timer.daemon = True
             deadline_timer.start()
             query_started = time.perf_counter()
             with conn.cursor() as cur:
                 value = read_callable(cur)
             deadline_timer.cancel()
+            deadline_timer.join(timeout=1.5)
+            if deadline_fired.is_set():
+                raise TimeoutError("Database read deadline exceeded")
             _rollback_read_connection(conn)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             diagnostic = {
@@ -850,6 +861,8 @@ def _run_read_operation(operation, read_callable):
                 deadline_timer.cancel()
             _rollback_read_connection(conn)
             category = "request_timeout" if deadline_fired.is_set() else _database_error_category(error)
+            if category in {"request_timeout", "stale_connection", "database_unavailable"}:
+                _close_read_connection(conn)
             exception_class = error.__class__.__name__
             sqlstate = _database_error_sqlstate(error)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -886,7 +899,12 @@ def _run_read_operation(operation, read_callable):
         finally:
             if deadline_timer is not None:
                 deadline_timer.cancel()
-            _close_read_connection(conn)
+                # A callback already in flight must finish before this exclusive
+                # lease can be handed to another request.
+                deadline_timer.join(timeout=1.5)
+            if deadline_fired.is_set() or (conn is not None and query_started is None):
+                _close_read_connection(conn)
+            read_stack.close()
 
 
 @contextmanager
@@ -12211,7 +12229,10 @@ def _prodigi_payload_from_db_row(row):
 
 def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, limit=1000, search=""):
     limit_value = max(min(int(limit or 1000), 5000), 1)
-    where_clauses = []
+    where_clauses = ["""NOT EXISTS (SELECT 1 FROM shopify_orders refund_order
+        WHERE (refund_order.shopify_order_id=prodigi_dispatch_rows.shopify_order_id
+            OR refund_order.order_name=prodigi_dispatch_rows.shopify_order_name)
+        AND refund_order.raw_json->'_orders_refund'->>'blocked'='true')"""]
     params = []
     clean_status = str(status or "").strip()
     if clean_status == "Submitted":
@@ -12352,6 +12373,8 @@ def upsert_prodigi_dispatch_rows(rows, *, ensure_schema_first=True):
                 row_id = str(row.get("row_id") or "").strip()
                 if not row_id:
                     continue
+                import order_refunds
+                order_refunds.assert_processing_allowed(cur, row.get('shopify_order_id'))
                 cur.execute(
                     """
                     INSERT INTO prodigi_dispatch_rows(
@@ -13043,6 +13066,9 @@ def _truthy_shopify_flag(value):
 
 def shopify_order_eligibility(order, *, tracking_start=None, allow_historical=False):
     """Return the shared paid-order policy for every source channel."""
+    import order_refunds
+    if order.get('refund_pending') or order_refunds.blocked(order):
+        return {'eligible': False, 'reason': 'refund_processing_hold'}
     return edition_ledger.paid_order_eligibility(
         order,
         tracking_start=tracking_start,
@@ -14830,18 +14856,18 @@ def _upsert_order(cur, order):
             remote_updated_at=EXCLUDED.remote_updated_at,
             processed_at=EXCLUDED.processed_at,
             cancelled_at=EXCLUDED.cancelled_at,
-            raw_json=CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
+            raw_json=(CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
                 THEN EXCLUDED.raw_json || jsonb_build_object(
                     '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
                     'shipping_method', shopify_orders.raw_json->'shipping_method',
                     'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
-                ELSE EXCLUDED.raw_json END,
-            raw=CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
+                ELSE EXCLUDED.raw_json END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')),
+            raw=(CASE WHEN shopify_orders.raw_json ? '_fulfilment_shipping_override'
                 THEN EXCLUDED.raw || jsonb_build_object(
                     '_fulfilment_shipping_override', shopify_orders.raw_json->'_fulfilment_shipping_override',
                     'shipping_method', shopify_orders.raw_json->'shipping_method',
                     'shipping_carrier', shopify_orders.raw_json->'shipping_carrier')
-                ELSE EXCLUDED.raw END,
+                ELSE EXCLUDED.raw END) || jsonb_strip_nulls(jsonb_build_object('_orders_refund', shopify_orders.raw_json->'_orders_refund', '_orders_refund_checked_at', shopify_orders.raw_json->'_orders_refund_checked_at', '_orders_workflow_status', shopify_orders.raw_json->'_orders_workflow_status')),
             synced_at=now(),
             updated_at=now()
         """,
@@ -15766,6 +15792,8 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
 
 
 def _generate_certificate_for_assignment(cur, assignment, *, force=False):
+    import order_refunds
+    order_refunds.assert_processing_allowed(cur, assignment.get('shopify_order_id'))
     from edition_cancellation import require_certificate_allocation
     require_certificate_allocation(cur, assignment)
     manual_certificate = str(assignment.get("id") or "").startswith(MANUAL_ORDER_LINE_EDITION_REFERENCE_PREFIX)
@@ -16802,6 +16830,13 @@ def process_paid_order(
     changed_handles = set()
     generated_certificates = 0
     errors = []
+    if order.get('refund_pending') or str(order.get('financial_status') or '').upper() == 'REFUNDED':
+        import order_refunds
+        order_refunds.reconcile([order['shopify_order_id']])
+        return {'assignments_created': 0, 'existing_assignments_skipped': 0,
+                'missing_mapping_skipped': 0, 'generated_certificates': 0,
+                'changed_handles': [], 'errors': [], 'ingestion_status': 'on_hold',
+                'import_result': 'refund_pending'}
     _persist_order_snapshot(order)
     mapping_methods = set()
 
@@ -20409,24 +20444,42 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, clai
 
 
 ORDER_ACTION_ROWS_SQL = """
+    WITH dispatch_states AS MATERIALIZED (
+        SELECT DISTINCT ON (REGEXP_REPLACE(dispatch.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i'))
+            REGEXP_REPLACE(dispatch.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i') AS line_id,
+            dispatch.prodigi_status
+        FROM prodigi_dispatch_rows dispatch
+        ORDER BY REGEXP_REPLACE(dispatch.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i'),
+            CASE WHEN LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
+                ('complete', 'completed', 'fulfilled', 'fulfilled in shopify') THEN 0 ELSE 1 END,
+            dispatch.updated_at DESC NULLS LAST, dispatch.submitted_at DESC NULLS LAST
+    ), candidate_lines AS MATERIALIZED (
+        SELECT li.shopify_order_id, li.shopify_line_item_id, li.quantity,
+               COALESCE(pd.prodigi_status, '') AS prodigi_status
+        FROM shopify_order_lines li
+        LEFT JOIN dispatch_states pd
+          ON pd.line_id = REGEXP_REPLACE(li.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i')
+        WHERE LOWER(BTRIM(COALESCE(pd.prodigi_status, ''))) NOT IN
+              ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
+    ), candidate_orders AS MATERIALIZED (
+        SELECT o.shopify_order_id, o.order_name, o.financial_status,
+               o.cancelled_at, o.fulfillment_status, o.raw_json
+        FROM shopify_orders o
+        JOIN (SELECT DISTINCT shopify_order_id FROM candidate_lines) ids USING (shopify_order_id)
+    )
     SELECT
         o.shopify_order_id,
         o.order_name,
         o.financial_status,
         o.cancelled_at,
         COALESCE(
-            NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
-            NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
-            NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
-            NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
-            NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
-            NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
             NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
             NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
             NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
             NULLIF(o.raw_json->>'internal_fulfillment_status', ''),
             NULLIF(o.raw_json->>'marketplace_fulfilment_status', ''),
             NULLIF(o.raw_json->>'marketplace_fulfillment_status', ''),
+            NULLIF(o.raw_json->'_orders_refund'->>'fulfillment_status', ''),
             NULLIF(o.fulfillment_status, ''),
             NULLIF(o.raw_json->>'fulfillment_status', ''),
             NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
@@ -20434,46 +20487,22 @@ ORDER_ACTION_ROWS_SQL = """
         ) AS fulfillment_status,
         li.shopify_line_item_id,
         li.quantity,
-        COALESCE(pd.prodigi_status, '') AS prodigi_status
-    FROM shopify_orders o
-    JOIN shopify_order_lines li
+        li.prodigi_status
+    FROM candidate_orders o
+    JOIN candidate_lines li
       ON li.shopify_order_id = o.shopify_order_id
-    LEFT JOIN LATERAL (
-        SELECT dispatch.prodigi_status
-        FROM prodigi_dispatch_rows dispatch
-        WHERE dispatch.shopify_line_item_id = ANY(
-            ARRAY[
-                li.shopify_line_item_id,
-                REGEXP_REPLACE(
-                    COALESCE(li.shopify_line_item_id, ''),
-                    '^gid://shopify/LineItem/',
-                    '',
-                    'i'
-                ),
-                'gid://shopify/LineItem/' || REGEXP_REPLACE(
-                    COALESCE(li.shopify_line_item_id, ''),
-                    '^gid://shopify/LineItem/',
-                    '',
-                    'i'
-                )
-            ]
-        )
-        ORDER BY CASE
-                     WHEN LOWER(BTRIM(COALESCE(dispatch.prodigi_status, ''))) IN
-                          ('complete', 'completed', 'fulfilled', 'fulfilled in shopify')
-                     THEN 0 ELSE 1
-                 END,
-                 dispatch.updated_at DESC NULLS LAST,
-                 dispatch.submitted_at DESC NULLS LAST
-        LIMIT 1
-    ) pd ON TRUE
-    WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid')
+    WHERE LOWER(COALESCE(o.financial_status, '')) IN ('paid', 'partially_paid', 'partially paid', 'partially_refunded')
+      AND COALESCE(o.raw_json->'_orders_refund'->>'blocked', 'false') <> 'true'
       AND o.cancelled_at IS NULL
+      AND COALESCE(o.raw_json->'_orders_refund'->>'cancelled_at', '') = ''
+      AND COALESCE((o.raw_json->'_orders_refund'->'line_current_quantities'->>
+          REGEXP_REPLACE(li.shopify_line_item_id, '^gid://shopify/LineItem/', '', 'i'))::integer,
+          li.quantity, 1) > 0
 """
 
 
 def list_order_action_rows():
-    """Load local order status rows for diagnostics and rule-level verification."""
+    """Load incomplete-dispatch candidate rows for local action-rule diagnostics."""
     def load_rows(cur):
         cur.execute(ORDER_ACTION_ROWS_SQL)
         return cur.fetchall()
@@ -20651,7 +20680,8 @@ def orders_visibility_marker(*, ensure_schema_first=True):
                 ORDER BY created_at DESC
                 LIMIT 50
             )
-            SELECT COUNT(*) AS order_count,
+            SELECT (SELECT value->>'changed_at' FROM app_settings WHERE key='orders_refund_visibility') AS refund_marker,
+                   COUNT(*) AS order_count,
                    COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
             FROM latest_orders
             """
@@ -20663,7 +20693,7 @@ def orders_visibility_marker(*, ensure_schema_first=True):
     return {
         "order_count": int(row.get("order_count") or 0),
         "latest_order_update": _datetime_to_setting(latest) if latest else "",
-        "marker": f"{int(row.get('order_count') or 0)}|{_datetime_to_setting(latest) if latest else ''}",
+        "marker": f"{int(row.get('order_count') or 0)}|{_datetime_to_setting(latest) if latest else ''}" + (f"|{row['refund_marker']}" if row.get('refund_marker') else ''),
     }
 
 
@@ -22520,57 +22550,35 @@ def list_hybrid_order_rows(limit=50, search=""):
 
     operation_prefix = "orders.search" if raw_search else "orders.latest_50"
 
-    def load_order_ids(cur):
-        cur.execute(
-            f"""
-            SELECT o.shopify_order_id
-            FROM shopify_orders o
-            {search_where}
-            ORDER BY o.created_at DESC
-            LIMIT %s
-            """,
-            (*search_params, limit_value),
-        )
-        return cur.fetchall()
-
-    selected_rows, id_diagnostic = _run_read_operation(
-        f"{operation_prefix}.ids",
-        load_order_ids,
-    )
-    selected_order_ids = [
-        str(row.get("shopify_order_id") or "").strip()
-        for row in selected_rows
-        if str(row.get("shopify_order_id") or "").strip()
-    ]
-    if not selected_order_ids:
-        diagnostic = {
-            "operation": operation_prefix,
-            "category": "ok",
-            "exception_class": "",
-            "sqlstate": "",
-            "attempts": int(id_diagnostic.get("attempts") or 1),
-            "query_count": 1,
-            "recovered": bool(id_diagnostic.get("recovered")),
-            "duration_ms": int((time.perf_counter() - total_started) * 1000),
-            "phase_ms": {"ids": int(id_diagnostic.get("duration_ms") or 0)},
-            "marketplace_schema_optional": True,
-        }
-        _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
-        return []
+    manual_table_available = None
 
     def load_base_rows(cur):
+        nonlocal manual_table_available
         cur.execute(
-            """
+            f"""
+            WITH selected_order_ids AS MATERIALIZED (
+                SELECT o.shopify_order_id FROM shopify_orders o
+                {search_where}
+                ORDER BY o.created_at DESC LIMIT %s
+            ), selected_orders AS MATERIALIZED (
+                SELECT o.*, to_jsonb(o) AS optional_columns
+                FROM shopify_orders o
+                WHERE o.shopify_order_id IN (
+                    SELECT BTRIM(shopify_order_id) FROM selected_order_ids
+                    WHERE BTRIM(COALESCE(shopify_order_id, '')) <> ''
+                )
+            )
             SELECT
+                to_regclass('public.manual_order_line_editions') IS NOT NULL AS _manual_table_available,
                 o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
                 o.customer_name, o.customer_email, o.financial_status,
                 COALESCE(
-                    NULLIF(to_jsonb(o)->>'sports_cave_fulfilment_status', ''),
-                    NULLIF(to_jsonb(o)->>'sports_cave_fulfillment_status', ''),
-                    NULLIF(to_jsonb(o)->>'internal_fulfilment_status', ''),
-                    NULLIF(to_jsonb(o)->>'internal_fulfillment_status', ''),
-                    NULLIF(to_jsonb(o)->>'marketplace_fulfilment_status', ''),
-                    NULLIF(to_jsonb(o)->>'marketplace_fulfillment_status', ''),
+                    NULLIF(o.optional_columns->>'sports_cave_fulfilment_status', ''),
+                    NULLIF(o.optional_columns->>'sports_cave_fulfillment_status', ''),
+                    NULLIF(o.optional_columns->>'internal_fulfilment_status', ''),
+                    NULLIF(o.optional_columns->>'internal_fulfillment_status', ''),
+                    NULLIF(o.optional_columns->>'marketplace_fulfilment_status', ''),
+                    NULLIF(o.optional_columns->>'marketplace_fulfillment_status', ''),
                     NULLIF(o.raw_json->>'sports_cave_fulfilment_status', ''),
                     NULLIF(o.raw_json->>'sports_cave_fulfillment_status', ''),
                     NULLIF(o.raw_json->>'internal_fulfilment_status', ''),
@@ -22582,15 +22590,17 @@ def list_hybrid_order_rows(limit=50, search=""):
                     NULLIF(o.raw_json->>'displayFulfillmentStatus', ''),
                     ''
                 ) AS fulfillment_status,
-                COALESCE(NULLIF(to_jsonb(o)->>'source_name', ''),
+                COALESCE(NULLIF(o.optional_columns->>'source_name', ''),
                          NULLIF(o.raw_json->>'source_display', ''),
                          NULLIF(o.raw_json->>'source_name', ''), '') AS source_name,
-                COALESCE(NULLIF(to_jsonb(o)->>'ingestion_status', ''), 'schema_optional') AS ingestion_status,
-                COALESCE(to_jsonb(o)->>'ingestion_result', '') AS ingestion_result,
-                COALESCE(to_jsonb(o)->>'ingestion_reason', '') AS ingestion_reason,
+                COALESCE(NULLIF(o.optional_columns->>'ingestion_status', ''), 'schema_optional') AS ingestion_status,
+                COALESCE(o.optional_columns->>'ingestion_result', '') AS ingestion_result,
+                COALESCE(o.optional_columns->>'ingestion_reason', '') AS ingestion_reason,
                 o.total_price, o.currency, o.created_at, o.remote_updated_at,
                 o.processed_at, o.cancelled_at, o.synced_at,
-                o.raw_json AS order_raw_json,
+                CASE WHEN ROW_NUMBER() OVER (
+                    PARTITION BY o.shopify_order_id ORDER BY li.id ASC NULLS LAST
+                )=1 THEN o.raw_json END AS order_raw_json,
                 li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
                 li.assignment_status, li.last_error,
                 COALESCE(NULLIF(to_jsonb(li)->>'mapping_method', ''),
@@ -22610,23 +22620,40 @@ def list_hybrid_order_rows(limit=50, search=""):
                 ''::text AS prodigi_status,
                 ''::text AS prodigi_row_id,
                 COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
-            FROM shopify_orders o
+            FROM selected_orders o
             LEFT JOIN shopify_order_lines li
               ON li.shopify_order_id=o.shopify_order_id
             LEFT JOIN shopify_products sp
               ON sp.handle=li.shopify_handle
-            WHERE o.shopify_order_id=ANY(%s)
             ORDER BY o.created_at DESC,
                      li.id ASC NULLS LAST
             """,
-            (selected_order_ids,),
+            (*search_params, limit_value),
         )
-        return cur.fetchall()
+        from copy import deepcopy
+        rows = cur.fetchall()
+        for row in rows:
+            available = row.pop('_manual_table_available', None)
+            if available is not None:
+                manual_table_available = bool(available)
+        # Transport the full authoritative order JSON once per order, then
+        # restore independent row values before any existing merge/status logic.
+        raw_orders = {str(row.get("shopify_order_id") or ""): row["order_raw_json"]
+                      for row in rows if row.get("order_raw_json") is not None}
+        for row in rows:
+            if row.get("order_raw_json") is None:
+                row["order_raw_json"] = deepcopy(raw_orders.get(str(row.get("shopify_order_id") or "")))
+        return rows
 
     base_rows, base_diagnostic = _run_read_operation(
         f"{operation_prefix}.base",
         load_base_rows,
     )
+    selected_order_ids = list(dict.fromkeys(
+        str(row.get("shopify_order_id") or "").strip() for row in base_rows
+        if str(row.get("shopify_order_id") or "").strip()))
+    id_diagnostic = {"attempts": 0, "duration_ms": 0}
+    enrichment_readers = {}
     line_id_lookup_values = sorted({
         candidate
         for row in base_rows
@@ -22670,12 +22697,9 @@ def list_hybrid_order_rows(limit=50, search=""):
                 """,
                 (line_id_lookup_values,),
             )
-            return cur.fetchall()
+            return True
 
-        fulfilment_rows, fulfilment_diagnostic = _run_read_operation(
-            f"{operation_prefix}.fulfilment",
-            load_fulfilment_rows,
-        )
+        enrichment_readers["fulfilment"] = load_fulfilment_rows
 
     edition_rows = []
     allocation_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
@@ -22750,19 +22774,18 @@ def list_hybrid_order_rows(limit=50, search=""):
                 """,
                 tuple(params),
             )
-            return cur.fetchall()
+            return True
 
-        edition_rows, allocation_diagnostic = _run_read_operation(
-            f"{operation_prefix}.allocations",
-            load_edition_rows,
-        )
+        enrichment_readers["allocations"] = load_edition_rows
 
     manual_edition_rows = []
     manual_edition_diagnostic = {"duration_ms": 0, "attempts": 0, "recovered": False}
     if line_id_lookup_values:
         def load_manual_edition_rows(cur):
-            if not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
-                return []
+            if manual_table_available is False:
+                return False
+            if manual_table_available is None and not table_exists(cur, MANUAL_ORDER_LINE_EDITION_TABLE):
+                return False
             cur.execute(
                 """
                 SELECT
@@ -22830,12 +22853,22 @@ def list_hybrid_order_rows(limit=50, search=""):
                 """,
                 (line_id_lookup_values,),
             )
-            return cur.fetchall()
+            return True
 
-        manual_edition_rows, manual_edition_diagnostic = _run_read_operation(
-            f"{operation_prefix}.manual_editions",
-            load_manual_edition_rows,
-        )
+        enrichment_readers["manual_editions"] = load_manual_edition_rows
+
+    from orders_read_batch import read_batch
+    batch, enrichment_diagnostic = _run_read_operation(
+        f"{operation_prefix}.enrichments", lambda cur: read_batch(cur, enrichment_readers))
+    fulfilment_rows = batch['rows'].get('fulfilment', [])
+    edition_rows = batch['rows'].get('allocations', [])
+    manual_edition_rows = batch['rows'].get('manual_editions', [])
+    def phase(name):
+        return {'duration_ms': 0, 'attempts': int(name in batch['executed']),
+                'recovered': False, 'pipelined': True}
+    fulfilment_diagnostic = phase('fulfilment')
+    allocation_diagnostic = phase('allocations')
+    manual_edition_diagnostic = phase('manual_editions')
 
     merge_started = time.perf_counter()
     fulfilment_by_line = {}
@@ -22989,7 +23022,7 @@ def list_hybrid_order_rows(limit=50, search=""):
         "phase_ms": {
             name: int(value.get("duration_ms") or 0)
             for name, value in phase_diagnostics.items()
-        } | {"merge": merge_ms},
+        } | {"enrichments": enrichment_diagnostic["duration_ms"], "merge": merge_ms},
         "selected_order_count": len(selected_order_ids),
         "base_row_count": len(base_rows),
         "marketplace_schema_optional": True,
@@ -23274,7 +23307,10 @@ def get_order_summary():
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
                      WHERE c.id IS NULL AND eo.allocation_valid
-                       AND eo.status NOT IN ('cancelled','voided','refunded','superseded')) AS certificates_missing,
+                       AND eo.status NOT IN ('cancelled','voided','refunded','superseded')
+                       AND NOT EXISTS (SELECT 1 FROM shopify_orders refund_order
+                           WHERE refund_order.shopify_order_id=eo.shopify_order_id
+                             AND refund_order.raw_json->'_orders_refund'->>'blocked'='true')) AS certificates_missing,
                     (SELECT COUNT(*) FROM line_handles lh
                      LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
                      WHERE COALESCE(lh.shopify_handle, '') <> ''
@@ -23349,7 +23385,10 @@ def get_dashboard_summary():
                           AND pa.is_primary IS DISTINCT FROM FALSE
                           AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '') <> ''
                      )) AS missing_psd,
-                    (SELECT COUNT(*) FROM edition_orders WHERE certificate_status <> 'Certificate Ready') AS certificates_missing,
+                    (SELECT COUNT(*) FROM edition_orders eo WHERE certificate_status <> 'Certificate Ready'
+                       AND NOT EXISTS (SELECT 1 FROM shopify_orders refund_order
+                           WHERE refund_order.shopify_order_id=eo.shopify_order_id
+                             AND refund_order.raw_json->'_orders_refund'->>'blocked'='true')) AS certificates_missing,
                     (SELECT COUNT(*) FROM app_errors WHERE created_at > now() - interval '7 days') AS recent_errors,
                     (SELECT COUNT(*) FROM shopify_orders) AS orders_synced
                 """
@@ -23619,6 +23658,8 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
                             assignment = cur.fetchone()
                         if not assignment:
                             raise ValueError("Edition order was not found.")
+                        import order_refunds
+                        order_refunds.assert_processing_allowed(cur, assignment.get('shopify_order_id'))
                         set_certificate_log_context(
                             source_page=source_page,
                             order_name=assignment.get("order_name") or assignment.get("shopify_order_name") or "",

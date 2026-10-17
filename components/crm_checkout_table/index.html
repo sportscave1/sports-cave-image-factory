@@ -8,6 +8,7 @@ td:first-child,th:first-child{width:32px;min-width:32px;padding:4px 6px;position
 td:nth-child(2),th:nth-child(2){min-width:180px;max-width:280px;position:sticky;left:32px;z-index:2;box-shadow:1px 0 #e4e2da}
 th:first-child,th:nth-child(2){z-index:4}td:nth-child(3){width:80px;min-width:80px;color:#696a63}
 .email{min-width:120px;font-variant-numeric:tabular-nums}.green{color:#28633e}.red{color:#a13a32}.gold{color:#826222}.muted{color:#73756d}
+.email .stage-detail,.email .stage-timing{display:block;font-size:11px;line-height:14px;font-weight:400;color:#73756d}.email .stage-timing{max-width:230px;white-space:normal}
 input{accent-color:#92712f;cursor:pointer;width:16px;height:16px;margin:0;vertical-align:middle}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0;text-align:left}
 .customer{font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis;display:block}button:hover{text-decoration:underline}
@@ -167,7 +168,7 @@ function render(){const rows=args.rows||[],cols=(args.columns||[]).map((col,inde
   const head=table.createTHead().insertRow(),th=cell(head,'','th'),all=document.createElement('input');all.type='checkbox';all.setAttribute('aria-label',args.table_label?'Select visible records':'Select visible checkouts');
   all.title='Select visible records; uncheck to deselect all records across pages';
   all.onchange=()=>{const clear=!all.checked||!shownRows().length;if(clear)selected.clear();else shownRows().forEach(r=>all.checked?selected.add(r.key):selected.delete(r.key));selection();event(null,null,false,clear)};th.append(all);
-  cell(head,'Customer','th');cell(head,args.date_label||'Created','th');for(const col of cols){const h=cell(head,col.label,'th');h.title=col.name+(col.enabled?'':' · Disabled for new enrollments');h.scope='col';h.className='email';}
+  cell(head,'Customer','th');cell(head,args.date_label||'Created','th');for(const col of cols){const h=cell(head,col.label,'th');h.title=col.name+(col.enabled?'':' · Disabled for new enrollments');h.scope='col';h.className='email';if(col.timing){const timing=document.createElement('small');timing.className='stage-timing';timing.textContent=col.timing;h.append(timing);}}
   const body=table.createTBody();for(const r of shown){const tr=body.insertRow(),check=document.createElement('input');check.type='checkbox';check.dataset.rowKey=r.key;check.setAttribute('aria-label','Select '+r.customer);
    check.onchange=()=>{check.checked?selected.add(r.key):selected.delete(r.key);selection();event()};cell(tr,'').append(check);
    const customer=cell(tr,''),link=document.createElement('button');link.className='customer';link.dataset.rowKey=r.key;link.onclick=()=>event(args.detail_key===r.key?null:r.key,null,false,false,args.detail_key===r.key);link.setAttribute('aria-label','Details '+r.customer);customer.append(link);
@@ -185,12 +186,13 @@ function render(){const rows=args.rows||[],cols=(args.columns||[]).map((col,inde
  for(const r of shown){const n=nodes.get(r.key);text(n.link,r.customer);n.link.title=r.customer;n.link.setAttribute('aria-label','Details '+r.customer);n.link.setAttribute('aria-expanded',String(args.detail_key===r.key));
   text(n.created,r.created);n.created.title=r.created_full;requestProgress(n.request,r);
   n.cells.forEach((td,i)=>{const c=(r.cells||[])[cols[i].index]||{label:'—',tone:'muted'};td.className='email '+(['green','red','gold','muted'].includes(c.tone)?c.tone:'muted');td.title=c.reason||c.label;
-   td.dataset.due=c.due_at||'';text(td,c.due_at?remaining(c.due_at):c.label);});
+   const detailed=Boolean(c.detail);if(detailed!==Boolean(td.querySelector('.stage-value'))){td.replaceChildren();if(detailed){const value=document.createElement('span'),detail=document.createElement('small');value.className='stage-value';detail.className='stage-detail';td.append(value,detail);}}
+   const value=detailed?td.querySelector('.stage-value'):td;td.dataset.due='';value.dataset.due=c.due_at||'';value.dataset.prefix=c.countdown_label||'';text(value,c.due_at?(c.countdown_label||'')+remaining(c.due_at):c.label);if(detailed)text(td.querySelector('.stage-detail'),c.detail);});
  }
  selection();tick(false);height();
 }
 function tick(poll=true){if(document.hidden||!inView)return;
- for(const n of nodes.values())for(const td of n.cells)if(td.dataset.due)text(td,remaining(td.dataset.due));
+ for(const n of nodes.values())for(const td of n.cells){const value=td.querySelector('.stage-value')||td;if(value.dataset.due)text(value,(value.dataset.prefix||'')+remaining(value.dataset.due));}
  const fresh=root.querySelector('.freshness'),age=serverTime()-Date.parse(args.read_at||args.server_now);
  if(fresh)text(fresh,args.phase==='ERROR'||args.phase==='TIMED_OUT'||(args.refresh_seconds!==0&&age>45000)?'Status update delayed — last verified records shown. Retry recipients if the update does not recover.':'');
  if(poll&&args.refresh_seconds!==0&&args.server_now&&performance.now()-lastPoll>=Math.max(15,Number(args.refresh_seconds)||15)*1000){lastPoll=performance.now();event(null,null,true)}

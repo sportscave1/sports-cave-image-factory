@@ -72,7 +72,7 @@ def add_candidate(record):
 def email_cells(record,flow,at=None):
     from crm_checkout_progress import columns,progress,cell
     schema=columns(flow.get('emails',[]));at=at or now()
-    row={**record,'checkout_key':record['key'],'flow_status':record.get('flow_state'),
+    row={**record,'checkout_key':record['key'],'flow_status':record.get('flow_state'),'lifecycle':True,
         'automation_status':record.get('automation_status','ACTIVE'),'analytics':{'email':record.get('email'),'shopify_abandoned':True}}
     if record.get('enrollment_id'):
         values=progress(row,schema,at)

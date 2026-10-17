@@ -75,6 +75,10 @@ async def shopify_hook(request:Request):
         if not expected or normalize_store_domain(request.headers.get('x-shopify-shop-domain',''))!=expected:return Response(status_code=403)
         payload=json.loads(raw)
         await run_in_threadpool(receive_shopify,Store(),request.headers.get('x-shopify-topic',''),request.headers.get('x-shopify-event-id') or request.headers.get('x-shopify-webhook-id',''),payload,request.headers.get('x-shopify-triggered-at'),expected)
+        if request.headers.get('x-shopify-topic','') in {'orders/updated', 'orders/cancelled'}:
+            import order_refunds
+            from shopify_sync import shopify_gid
+            await run_in_threadpool(order_refunds.reconcile, [shopify_gid('Order', payload.get('id'))])
         return Response(status_code=200)
     except (ValueError,TypeError):return Response(status_code=400)
     except Exception:return Response(status_code=503)

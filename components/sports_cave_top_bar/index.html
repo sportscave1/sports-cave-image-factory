@@ -2012,19 +2012,28 @@
         later(refreshOrderStatus, Math.min(remaining, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS));
         return;
       }
-      writeStatusCache("orders", readStatusCache("orders").payload || {});
+      const previousOrders = readStatusCache("orders");
+      const confirmedAt = Number(previousOrders.payload?.confirmed_at || previousOrders.checked_at || 0);
+      const expireOrdersBadge = () => {
+        if (Date.now() - confirmedAt > 2 * ORDER_STATUS_REFRESH_MS) updateOrdersBadge(0, "");
+      };
+      expireOrdersBadge();
+      writeStatusCache("orders", {...(previousOrders.payload || {}), confirmed_at: confirmedAt});
       try {
         const payload = await requestJson(state.config.orderStatusUrl);
         if (Number.isInteger(payload.action_required_count)) {
           writeStatusCache("orders", {
             action_required_count: payload.action_required_count,
             badge_label: String(payload.badge_label || ""),
+            confirmed_at: Date.now(),
           });
           updateOrdersBadge(payload.action_required_count, payload.badge_label);
         }
+        else expireOrdersBadge();
         showOrderToast(payload.notification);
       } catch (_error) {
-        // Keep the last visible local state when the lightweight status read is unavailable.
+        // A temporary failure cannot keep an unverified count visible indefinitely.
+        expireOrdersBadge();
       } finally {
         later(refreshOrderStatus, (state.config.emailEnabled || state.config.wallInboxEnabled) ? EMAIL_HEARTBEAT_MS : ORDER_STATUS_REFRESH_MS);
       }
@@ -3179,7 +3188,7 @@
           const cachedWall = readStatusCache('wall').payload;
           if (Number.isInteger(cachedWall?.wall_unread_count)) updateSidebarBadge('social_media_wall_previews',cachedWall.wall_unread_count,'');
           const cachedOrders = readStatusCache("orders");
-          if (cachedOrders.payload) {
+          if (cachedOrders.payload && Date.now() - Number(cachedOrders.payload.confirmed_at || cachedOrders.checked_at || 0) <= 2 * ORDER_STATUS_REFRESH_MS) {
             updateOrdersBadge(
               cachedOrders.payload.action_required_count,
               cachedOrders.payload.badge_label,

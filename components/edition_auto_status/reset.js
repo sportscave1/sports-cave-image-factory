@@ -2,9 +2,9 @@
 (() => {
  const host=parent,doc=host.document;
  host.SportsCaveEditionReset?.destroy?.();
- const controller=new host.AbortController(),buttons=new Map(),permissions=new Map(),inFlight=new Set();
+ const controller=new host.AbortController(),buttons=new Map(),spinners=new Map(),operations=new Map(),permissions=new Map(),labels=new Map(),liveLabels=new Map(),inFlight=new Set();
  const requests=host.SportsCaveEditionResetRequests||(host.SportsCaveEditionResetRequests=new Map());
- for(const row of host.SportsCaveEditionStatusState?.rows||[])permissions.set(row.product_gid,row.reset_allowed===true);
+ for(const row of host.SportsCaveEditionStatusState?.rows||[]){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);}
  let frame=0,dialog=null,focusBefore=null,resize=null,watched=null;
  const style=doc.createElement('style');style.textContent=`
  .sc-auto-reset{position:fixed;width:20px;height:24px;padding:0;border:0;border-radius:3px;background:var(--background-color,#fff);color:#687387;font:15px system-ui;line-height:24px;text-align:center;cursor:pointer;z-index:2}
@@ -14,9 +14,15 @@
  dialog.sc-auto-reset-confirm::backdrop{background:rgba(22,30,44,.18)}
  .sc-auto-reset-confirm p{margin:0 0 14px}.sc-auto-reset-confirm div{display:flex;justify-content:flex-end;gap:6px}
  .sc-auto-reset-confirm button{height:28px;padding:3px 10px;background:white;color:#243145;border:1px solid #ccd0d4;border-radius:4px;font:13px system-ui;cursor:pointer}
+ .sc-review-spinner{position:fixed;width:10px;height:10px;border:2px solid #dadfdc;border-top-color:#b3963f;border-radius:50%;pointer-events:none;z-index:2;animation:sc-review-spin .9s linear infinite}@keyframes sc-review-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.sc-review-spinner{animation:none}}
+ .sc-review-live-label{position:fixed;box-sizing:border-box;background:var(--background-color,#fff);color:#687387;font:13px system-ui;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;pointer-events:none;z-index:2;padding:4px}
  `;doc.head.append(style);
  function close(){dialog?.remove();dialog=null;if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});focusBefore=null;}
- function clear(){for(const button of buttons.values())button.remove();buttons.clear();}
+ function clear(){for(const button of buttons.values())button.remove();buttons.clear();for(const spinner of spinners.values())spinner.remove();spinners.clear();for(const label of labels.values())label.remove();labels.clear();}
+ function updateRows(rows){
+  for(const row of rows){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);liveLabels.set(row.product_gid,row);}
+  schedule();
+ }
  function pidFrom(value){try{const url=new URL(value,host.location.href);const pid=url.searchParams.get('product_gid');return url.origin===host.location.origin&&url.pathname==='/auto-editions/status'&&/^gid:\/\/shopify\/Product\/[1-9][0-9]*$/.test(pid||'')?pid:null;}catch{return null;}}
  async function reset(pid){
   if(inFlight.has(pid))return;
@@ -28,13 +34,19 @@
   if(!id)id=host.crypto.randomUUID();requests.set(pid,id);try{host.sessionStorage.setItem(key,id);}catch{}
   try{
    const response=await fetch('/api/auto-editions/status/reset',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_gid:pid,request_id:id})});
-   if(response.ok){requests.delete(pid);try{host.sessionStorage.removeItem(key);}catch{}}
+   const result=response.ok?await response.json():{};
+   if(response.ok&&result.stage!=='Cancelling'){requests.delete(pid);try{host.sessionStorage.removeItem(key);}catch{}}
+   else if(!response.ok){let data={};try{data=await response.json();}catch{}throw Error(data.error||'Reset could not complete. Retry after the active operation finishes.');}
+  }catch(error){
+   close();dialog=doc.createElement('dialog');dialog.className='sc-auto-reset-confirm';dialog.setAttribute('aria-label','Reset unavailable');
+   const text=doc.createElement('p');text.textContent=error.message||'Reset request interrupted. Retry uses the same saved request identity.';
+   const button=doc.createElement('button');button.textContent='Close';button.onclick=close;dialog.append(text,button);doc.body.append(dialog);dialog.showModal();
   }finally{inFlight.delete(pid);host.SportsCaveEditionStatus?.refresh();schedule();}
  }
  function confirm(pid){
   if(dialog||!permissions.get(pid)||inFlight.has(pid))return;
   focusBefore=doc.activeElement;dialog=doc.createElement('dialog');dialog.className='sc-auto-reset-confirm';dialog.setAttribute('aria-label','Reset design?');
-  const text=doc.createElement('p');text.textContent='Reset design?';
+  const text=doc.createElement('p');text.textContent='Reset this design and clear its PSD mapping? You must enter the PSD name again using Add. Previous mapping and approval history will be retained.';
   const actions=doc.createElement('div'),cancel=doc.createElement('button'),accept=doc.createElement('button');
   cancel.textContent='Cancel';accept.textContent='Reset';cancel.onclick=close;accept.onclick=()=>reset(pid).catch(()=>{});
   actions.append(cancel,accept);dialog.append(text,actions);doc.body.append(dialog);dialog.showModal();
@@ -60,7 +72,7 @@
   if(!button){button=doc.createElement('button');button.type='button';button.className='sc-auto-reset';button.textContent='↻';button.setAttribute('aria-label','Reset design');
    button.onpointerdown=e=>e.stopPropagation();doc.body.append(button);buttons.set(key,button);}
   button.onclick=e=>{e.preventDefault();e.stopPropagation();activate();};
-  button.dataset.productGid=pid;button.disabled=!permissions.get(pid)||inFlight.has(pid);button.style.left=(bounds.x+bounds.width-22)+'px';button.style.top=(bounds.y+(bounds.height-24)/2)+'px';
+  button.title=inFlight.has(pid)?'Cancelling…':'';button.dataset.productGid=pid;button.disabled=!permissions.get(pid)||inFlight.has(pid);button.style.left=(bounds.x+bounds.width-22)+'px';button.style.top=(bounds.y+(bounds.height-24)/2)+'px';
   return button;
  }
  function paint(){
@@ -85,16 +97,33 @@
      const selected=pidFrom(current.props.getCellContent([column,row])?.data);
      if(selected!==pid){schedule();return;}if(selected)confirm(selected);
     });
-    button.classList.toggle('clipped',canvas.getContext('2d').measureText(cell.displayData||'').width>bounds.width-38);
+    if(operations.get(pid)==='Approving…'){
+     let spinner=spinners.get(key);if(!spinner){spinner=doc.createElement('span');spinner.className='sc-review-spinner';spinner.setAttribute('role','status');spinner.setAttribute('aria-label','Approving');doc.body.append(spinner);spinners.set(key,spinner);}
+     spinner.style.left=(bounds.x+bounds.width-40)+'px';spinner.style.top=(bounds.y+(bounds.height-14)/2)+'px';
+    }else{spinners.get(key)?.remove();spinners.delete(key);}
+    const value=liveLabels.get(pid);
+    if(value){
+     let label=labels.get(key);if(!label){label=doc.createElement('span');label.className='sc-review-live-label';doc.body.append(label);labels.set(key,label);}
+     const text=value.review_operation?.label||(value.status==='Cloud Ready'?'✓ Cloud Ready':value.status==='Review'?'Needs Review':value.status);
+     if(label.textContent!==text)label.textContent=text;label.title=value.review_operation?.reason||value.reason||'';label.dataset.productGid=pid;
+     label.style.left=(Math.max(bounds.x,viewport.left)+3)+'px';label.style.top=(bounds.y+2)+'px';label.style.height=(bounds.height-4)+'px';label.style.width=Math.max(0,bounds.x+bounds.width-Math.max(bounds.x,viewport.left)-45)+'px';
+    }else{labels.get(key)?.remove();labels.delete(key);}
+    button.classList.toggle('clipped' ,canvas.getContext('2d').measureText(cell.displayData||'').width>bounds.width-38);
    }
    canvasIndex++;
   }
   for(const [key,button] of buttons)if(!seen.has(key)){button.remove();buttons.delete(key);}
+  for(const [key,spinner] of spinners)if(!seen.has(key)){spinner.remove();spinners.delete(key);}
+  for(const [key,label] of labels)if(!seen.has(key)){label.remove();labels.delete(key);}
  }
  function schedule(){if(!frame)frame=host.requestAnimationFrame(paint);}
  addEventListener('message',event=>{
   if(event.source!==host||event.data?.type!=='streamlit:render')return;
-  permissions.clear();for(const row of event.data.args?.rows||[])permissions.set(row.product_gid,row.reset_allowed===true);
+  liveLabels.clear();
+  permissions.clear();operations.clear();for(const row of event.data.args?.rows||[]){
+   permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);
+   if(row.cancelling===false){requests.delete(row.product_gid);try{host.sessionStorage.removeItem('sc-design-reset:'+row.product_gid);}catch{}}
+  }
   schedule();
  },{signal:controller.signal});
  doc.addEventListener('scroll',()=>{clear();schedule();},{capture:true,passive:true,signal:controller.signal});
@@ -103,7 +132,7 @@
  doc.addEventListener('pointerup',schedule,{capture:true,passive:true,signal:controller.signal});
  doc.addEventListener('keydown',schedule,{capture:true,passive:true,signal:controller.signal});
  const observer=new host.MutationObserver(schedule);const scope=doc.querySelector('.st-key-edition-workspace');if(scope)observer.observe(scope,{childList:true,subtree:true});
- const lifecycle={paint,schedule,destroy(){close();clear();observer.disconnect();resize?.disconnect();controller.abort();style.remove();if(frame)host.cancelAnimationFrame(frame);}};
+ const lifecycle={paint,schedule,updateRows,destroy(){close();clear();observer.disconnect();resize?.disconnect();controller.abort();style.remove();if(frame)host.cancelAnimationFrame(frame);}};
  host.SportsCaveEditionReset=lifecycle;
  addEventListener('pagehide',()=>{if(host.SportsCaveEditionReset===lifecycle)lifecycle.destroy();},{once:true});
  schedule();

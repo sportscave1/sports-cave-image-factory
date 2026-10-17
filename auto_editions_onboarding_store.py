@@ -53,7 +53,8 @@ class Queue:
             ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
             preparation_hash=NULL,status='Awaiting preparation',reason='',attempts=0,priority=excluded.priority,
             lease_token=NULL,lease_until=NULL,updated_at=now()
-            WHERE auto_edition_onboarding.file_id<>excluded.file_id RETURNING product_gid''',(pid,file_id,2 if newly_linked else 1 if v17.enabled() else 0))
+            WHERE auto_edition_onboarding.file_id<>excluded.file_id
+            AND COALESCE(to_jsonb(auto_edition_onboarding)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed') RETURNING product_gid''',(pid,file_id,2 if newly_linked else 1 if v17.enabled() else 0))
         if cur.fetchone():
             cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
             pending=(cur.fetchone() or {}).get('replacement') or {}
@@ -93,6 +94,8 @@ class Queue:
                 GROUP BY m.shopify_product_gid HAVING count(*)=1)"""
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
+            from worker_health import control
+            if control(cur)['paused']:return None
             cur.execute("""SELECT product_gid FROM auto_edition_onboarding q WHERE lease_until>now()
                 AND (status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing') LIMIT 1""")
             if cur.fetchone():return None
@@ -110,6 +113,8 @@ class Queue:
                 lease_token=NULL,lease_until=NULL,updated_at=now()
                 WHERE status='Preparing' AND lease_until<now() AND attempts>=3""")
             cur.execute(f"""SELECT * FROM auto_edition_onboarding q WHERE
+                COALESCE(to_jsonb(q)->'replacement'->>'manual_required','false')<>'true' AND
+                COALESCE(to_jsonb(q)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed') AND
                 (((to_jsonb(q)->'replacement'->>'stage'='Queued' OR
                   (to_jsonb(q)->'replacement'->>'stage'='Preparing' AND lease_until<now()))
                    AND COALESCE((to_jsonb(q)->'replacement'->>'attempts')::int,0)<3)
@@ -168,7 +173,7 @@ class Queue:
             self.audit(cur,pid,actor,'recovering')
 
     def heartbeat(self,pid,token,actor,stage):
-        if stage not in ('Preparing','Uploading','Recovering'):raise ValueError('Unsupported preparation stage.')
+        if stage not in ('Claimed','Photoshop','Preparing','Uploading','Verifying','Recovering'):raise ValueError('Unsupported preparation stage.')
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
             cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit WHERE product_gid=%s AND actor_id=%s
@@ -184,7 +189,7 @@ class Queue:
                 AND (status='Preparing' OR to_jsonb(auto_edition_onboarding)->'replacement'->>'stage'='Preparing') RETURNING product_gid""",(stage,pid,token))
             if not cur.fetchone():raise ValueError('Preparation lease was superseded or completed.')
 
-    def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None, metrics=None):
+    def checkpoint(self, pid, token, actor, status, reason='', source=None, total=None, digest=None, metrics=None, diagnostic=None):
         if status not in ('Preparing','Needs PSD Repair','Blocked','Cloud Ready'):
             raise ValueError('Unsupported preparation status.')
         with self.connect() as conn,conn.cursor() as cur:
@@ -209,12 +214,25 @@ class Queue:
                 source=COALESCE(%s::jsonb,source),edition_total=COALESCE(%s,edition_total),
                 preparation_hash=COALESCE(%s,preparation_hash),updated_at=now()
                 WHERE product_gid=%s AND lease_token=%s AND lease_until>now()
-                AND status='Preparing' RETURNING product_gid""",
+                AND status='Preparing' RETURNING product_gid,attempts""",
                 (status,reason,json.dumps(source) if source else None,total,digest,pid,token))
-            if not cur.fetchone():raise ValueError('Preparation lease expired or was superseded.')
+            checkpoint_row=cur.fetchone()
+            if not checkpoint_row:raise ValueError('Preparation lease expired or was superseded.')
             self.audit(cur,pid,actor,status,{'reason':reason,'preparation_hash':digest})
+            if status in ('Blocked','Needs PSD Repair') and not digest:
+                from worker_diagnostics import explain,accepted
+                value=accepted(diagnostic) if diagnostic else explain(reason)
+                value['attempt']=checkpoint_row['attempts']
+                self.audit(cur,pid,actor,'diagnostic',value)
             if metrics is not None:
                 self.audit(cur,pid,actor,'preparation_metrics',dict(metrics,preparation_hash=digest))
+                cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit a
+                    JOIN auto_edition_onboarding q ON q.product_gid=a.product_gid
+                    WHERE a.product_gid=%s AND a.event='colour_retry' AND a.detail->'source'=q.source
+                    AND NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit done WHERE done.product_gid=a.product_gid
+                        AND done.event='colour_recovered' AND done.detail->>'preparation_hash'=%s) LIMIT 1""",(pid,digest))
+                if digest and cur.fetchone():
+                    self.audit(cur,pid,actor,'colour_recovered',dict(preparation_hash=digest,reason='Successful automatic colour recovery'))
 
     def completed_receipt(self,pid,token,actor):
         """Recover an acknowledged import only for its original owner and lease."""
@@ -242,6 +260,8 @@ class Queue:
             cur.execute("""UPDATE auto_edition_onboarding SET status='Awaiting preparation',reason='',
                 attempts=0,priority=10,lease_token=NULL,lease_until=NULL,source=NULL,preparation_hash=NULL,updated_at=now()
                 WHERE product_gid=%s AND status IN ('Blocked','Needs PSD Repair') AND preparation_hash IS NULL
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'replacement'->>'manual_required','false')<>'true'
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'reset_cancellation'->>'stage','') NOT IN ('Cancelling','Confirmed')
                 RETURNING product_gid""",(pid,))
             if not cur.fetchone():raise ValueError('Only a failed preparation can be retried.')
             self.audit(cur,pid,actor,'retry')
@@ -256,6 +276,7 @@ class Queue:
     def prepare_now(self,pid,actor):
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("""UPDATE auto_edition_onboarding SET priority=10,reason='Administrator Prepare Now',updated_at=now()
-                WHERE product_gid=%s AND status='Awaiting preparation' RETURNING product_gid""",(pid,))
+                WHERE product_gid=%s AND status='Awaiting preparation'
+                AND COALESCE(to_jsonb(auto_edition_onboarding)->'replacement'->>'manual_required','false')<>'true' RETURNING product_gid""",(pid,))
             if not cur.fetchone():raise ValueError('Only an awaiting or deferred product can be prioritised. Review failed or prepared artwork separately.')
             self.audit(cur,pid,actor,'prepare_now')

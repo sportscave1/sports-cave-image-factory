@@ -48,6 +48,7 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
+    {"key": "worker_health", "route": "Worker Health", "label": "Worker Health", "worker_assignable": False, "top_level": True},
     {"key": "developer_studio", "route": "Developer Studio", "label": "Dev Mode", "worker_assignable": False, "top_level": True},
     {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
@@ -410,6 +411,7 @@ def can_access_page(user, route_or_key):
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
     if page and page["key"] == "developer_studio":
         return is_reporting_owner(user)
+    if page and page['key']=='worker_health':return is_admin(user)
     if page and page['key']=='crm_settings_view':
         return is_admin(user) or any(key in permission_keys(user) for key,_,_ in crm_navigation.PAGES)
     if page and page["key"] == REPORTING_PAGE_KEY:
@@ -683,6 +685,10 @@ class PostgresAccountStore:
         except Exception as error:
             raise AccountStorageError("Accounts could not connect right now.") from error
 
+    def _read_connection(self):
+        from database_read_pool import connection
+        return connection(self._database_url(), statement_timeout_ms=4000, connect_timeout=4)
+
     def ensure_schema(self):
         if self._schema_ready:
             return
@@ -874,28 +880,31 @@ class PostgresAccountStore:
         # This single SELECT includes permissions in the same statement snapshot.
         # Avoid BEGIN/COMMIT round trips without caching security-sensitive data.
         # All mutation and schema callers retain transactional connections.
-        with self._connect(autocommit=True) as conn:
+        def load(cur):
             query_started = time.perf_counter()
-            with conn.cursor() as cur:
-                if include_removed:
-                    cur.execute("""SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+            if include_removed:
+                cur.execute("""SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
+                    WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
+                    FROM os_users u WHERE id=%s LIMIT 1""", (str(user_id),))
+            else:
+                cur.execute(
+                    """
+                    SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
                         WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
-                        FROM os_users u WHERE id=%s LIMIT 1""", (str(user_id),))
-                else:
-                    cur.execute(
-                        """
-                        SELECT u.*, ARRAY(SELECT p.page_key FROM os_user_page_permissions p
-                            WHERE p.user_id=u.id AND p.can_access IS TRUE ORDER BY p.page_key) AS _page_permissions
-                        FROM os_users u
-                        WHERE id=%s
-                          AND account_status <> 'removed'
-                        LIMIT 1
-                        """,
-                        (str(user_id),),
-                    )
-                row = cur.fetchone()
-                logging.info("PERF Accounts current_user_query_ms=%.2f", (time.perf_counter() - query_started) * 1000)
-                return self._clean_read_user(row)
+                    FROM os_users u
+                    WHERE id=%s
+                      AND account_status <> 'removed'
+                    LIMIT 1
+                    """,
+                    (str(user_id),),
+                )
+            row = cur.fetchone()
+            logging.info("PERF Accounts current_user_query_ms=%.2f", (time.perf_counter() - query_started) * 1000)
+            return self._clean_read_user(row)
+
+        from supabase_backend import _run_read_operation
+        return _run_read_operation(
+            "accounts.current_user", load, connection_factory=self._read_connection, deadline_seconds=4)[0]
 
     def find_user_by_login(self, login):
         self.ensure_schema()

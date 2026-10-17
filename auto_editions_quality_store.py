@@ -29,6 +29,11 @@ class Quality:
     def run_one(self, assets, records=None):
         if not quality.enabled():
             return False
+        # Admission happens before provider I/O. An already admitted validation
+        # finishes its existing transaction; a pause prevents the next one.
+        from worker_health import control
+        with self.connect() as conn,conn.cursor() as cur:
+            if control(cur)['paused']:return False
         records = quality.standards() if records is None else records
         policy_hash = ae.fingerprint(records)
         with self.connect() as conn, conn.cursor() as cur:
@@ -127,9 +132,10 @@ class Quality:
                     preparation_hash=row['preparation_hash'],visual_approved=True,pixel_exact=True),
                     production=check,variant_ids=[str(unit['shopify_variant_id'])])
 
-    def index(self):
+    def index(self,*,product_ids=None):
         if not quality.enabled():
             return {}
+        product_filter = ' AND c.product_gid=ANY(%s)' if product_ids is not None else ''
         with self.connect() as conn,conn.cursor() as cur:
             cur.execute("""SELECT c.assessment,p.manifest,c.product_gid
                 FROM auto_edition_quality_checks c
@@ -142,7 +148,8 @@ class Quality:
                 AND m.dropbox_file_id=p.manifest->'source'->>'file_id'
                 AND ep.edition_total=(p.manifest->>'edition_total')::int
                 AND NOT EXISTS(SELECT 1 FROM auto_edition_layouts l WHERE l.product_gid=c.product_gid
-                    AND l.preparation_hash<>p.hash)""")
+                    AND l.preparation_hash<>p.hash)""" + product_filter,
+                    (list(product_ids),) if product_ids is not None else ())
             rows=cur.fetchall()
         records=quality.standards();result={}
         for row in rows:

@@ -113,6 +113,7 @@ def test_connect_only_recovers_missing_checkpoint_without_remapping_or_approval(
 
 def test_status_access_and_connect_origin_admin_permissions(store):
     d,sql=store
+    sql.execute(Path("supabase/migrations/20261016071758_auto_editions_bulk_operations.sql").read_text())
     async def check():
         with patch('files_upload_api._request_user',return_value={**VA,'page_permissions':['edition_ops']}),\
                 patch('supabase_backend.connect',d.connect):

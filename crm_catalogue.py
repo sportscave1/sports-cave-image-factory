@@ -262,6 +262,15 @@ def image_alt(p):
     return value if value.casefold() not in ('','image','product image','wall art image') else p['title']
 
 
+def collection_display_title(title):
+    """Email collection copy only; keep canonical product facts untouched."""
+    cleaned, count = re.subn(r'\bwall\s+art\b', '', title, flags=re.IGNORECASE)
+    if not count:
+        return title
+    cleaned = ' '.join(cleaned.split()).strip(' -–—|:;,/·•')
+    return cleaned or title
+
+
 def catalogue_html(section, *, campaign_key=''):
     """Snapshot-only pairs with shared field rows, including Word email clients.
 
@@ -283,7 +292,7 @@ def catalogue_html(section, *, campaign_key=''):
         if display['image']:
             result['image']='<a '+link+' style="display:block;text-decoration:none"><img src="'+e(p['image'])+'" alt="'+e(image_alt(p))+'" width="274" border="0" style="display:block;width:100%;max-width:100%;height:auto;border:0"></a>'
         if display['title']:
-            result['title']=paragraph('<a '+link+' style="color:#faf6eb;text-decoration:none">'+e(p['title'])+'</a>',
+            result['title']=paragraph('<a '+link+' style="color:#faf6eb;text-decoration:none">'+e(collection_display_title(p['title']))+'</a>',
                 'font-size:14px;line-height:19px;font-weight:700;word-wrap:break-word')
         ed=p['edition']
         if ed:

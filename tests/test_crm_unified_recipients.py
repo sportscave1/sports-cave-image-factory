@@ -127,7 +127,7 @@ class SharedStateTests(unittest.TestCase):
                 self.assertEqual([c['id'] for c in columns if 'id' in c],[s['step_id'] for s in flow['emails']])
                 self.assertEqual(len(rows[0]['cells']),len(columns));self.assertEqual(record,original)
                 if kind=='welcome':
-                    self.assertEqual([c['label'] for c in columns if c.get('visible',True)],['Flow','Purchased'])
+                    self.assertEqual([c['label'] for c in columns if c.get('visible',True)],['Flow','Purchased','Email 1','Email 2','Email 3'])
                     self.assertIn('Email',[c['label'] for c in columns])
                     self.assertIn('Consent',[c['label'] for c in columns])
                     self.assertIn('Source',[c['label'] for c in columns])

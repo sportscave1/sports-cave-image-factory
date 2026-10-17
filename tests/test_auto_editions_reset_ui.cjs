@@ -3,14 +3,16 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=r
 const base='http://127.0.0.1:8645';
 (async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
  for(const width of [1440,390]){
-  const page=await browser.newPage({viewport:{width,height:900}});let resets=[],batches=0,release;
+  const page=await browser.newPage({viewport:{width,height:900}});let resets=[],batches=0,release,blocked=false;
   page.on('request',request=>{if(request.url().endsWith('/api/auto-editions/status'))batches++;});
   await page.route('**/api/auto-editions/status/reset',async route=>{
    resets.push(route.request().postDataJSON());
+   if(blocked)return route.fulfill({status:409,json:{error:'This design is currently approving. Wait for approval recovery to finish before resetting.'}});
    await new Promise(resolve=>{release=resolve;});
-   await route.fulfill({json:{ok:true,stage:'Discovering'}});
+   await page.request.post(base+'/fixture-stage',{data:{stage:'Queued',mapping_overrides:{[resets.at(-1).product_gid]:null}}});
+   await route.fulfill({json:{ok:true,stage:'Complete'}});
   });
-  await page.request.post(base+'/fixture-stage',{data:{stage:'Queued'}});
+  await page.request.post(base+'/fixture-stage',{data:{stage:'Queued',mapping_overrides:{}}});
   await page.goto(base);await page.locator('[data-testid=stDataFrame] canvas').first().waitFor();
   const grid=page.locator('[data-testid=stDataFrame]'),scroll=page.locator('.dvn-scroller').first();
   if(width<800)await scroll.evaluate(n=>n.scrollLeft=10000);
@@ -29,8 +31,8 @@ const base='http://127.0.0.1:8645';
   let icon=page.locator('.sc-auto-reset:not(:disabled)').first();await icon.waitFor();
   const pid=await icon.getAttribute('data-product-gid');assert.notEqual(pid,'gid://shopify/Product/1','Scrolled row identity must be current');
   await icon.click();const modal=page.getByRole('dialog',{name:'Reset design?',exact:true});await modal.waitFor();
-  assert.equal(await modal.locator('p').innerText(),'Reset design?');assert.equal(await modal.getByRole('button').count(),2);
-  assert((await modal.boundingBox()).height<130,'Compact popup');assert((await modal.boundingBox()).width<270);
+  assert((await modal.locator('p').innerText()).includes('clear its PSD mapping'));assert((await modal.locator('p').innerText()).includes('enter the PSD name again using Add'));assert.equal(await modal.getByRole('button').count(),2);
+  assert((await modal.boundingBox()).height<230,'Compact popup');assert((await modal.boundingBox()).width<270);
   await page.screenshot({path:`output/reset/popup-${width}.png`});
   await modal.getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(await page.getByRole('dialog').count(),0);assert.equal(resets.length,0);
   assert.deepEqual(await scroll.evaluate(n=>({top:n.scrollTop,left:n.scrollLeft})),position);
@@ -44,7 +46,12 @@ const base='http://127.0.0.1:8645';
   assert((await page.locator('body').innerText()).includes('fixture-main-runs: 1'),'No whole-page rerun');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   const counts=await page.evaluate(()=>({columns:document.querySelectorAll('[data-testid="stDataFrame"]').length,buttons:document.querySelectorAll('.sc-auto-reset').length}));assert.equal(counts.columns,1);
-  await page.close();console.log('Reset native-grid popup, identity, cancel, immediate close, edits and scrolling passed',width);
+  const fileForPid=pid=>{const canvas=document.querySelector('[data-testid=stDataFrame] canvas');if(!canvas)return null;const key=Object.keys(canvas).find(k=>k.startsWith('__reactFiber'));let fiber=canvas[key];if(!fiber)return null;let root=fiber;while(root.return)root=root.return;if(root.stateNode?.current!==root&&fiber.alternate)fiber=fiber.alternate;for(let n=0;fiber&&n<25;n++,fiber=fiber.return){const p=fiber.memoizedProps;if(!p?.columns||typeof p.getCellContent!=='function')continue;const a=p.columns.findIndex(c=>c.title==='Auto Editions'),f=p.columns.findIndex(c=>c.title==='File');if(a<0||f<0)continue;for(let row=0;row<p.rows;row++){try{if(new URL(p.getCellContent([a,row]).data,location.href).searchParams.get('product_gid')===pid)return p.getCellContent([f,row]).data;}catch{}}}return null;};
+  await page.waitForFunction(({pid,code})=>eval('('+code+')')(pid)?.endsWith('#Add'),{pid,code:fileForPid.toString()});
+  blocked=true;icon=page.locator('.sc-auto-reset[data-product-gid="'+pid+'"]');await icon.click();await page.getByRole('dialog',{name:'Reset design?',exact:true}).getByRole('button',{name:'Reset',exact:true}).click();
+  await page.getByRole('dialog',{name:'Reset unavailable',exact:true}).getByText('This design is currently approving.',{exact:false}).waitFor();await page.getByRole('dialog',{name:'Reset unavailable',exact:true}).getByRole('button',{name:'Close',exact:true}).click();
+  await page.reload();await page.locator('[data-testid=stDataFrame] canvas').first().waitFor();await page.waitForFunction(({pid,code})=>eval('('+code+')')(pid)?.endsWith('#Add'),{pid,code:fileForPid.toString()});
+  await page.close();console.log('Reset native grid, mapping cleared to Add, reload, blocked reason, edits and scroll preservation passed',width);
  }
  // A reset completing during an older status read must cause one fresh read,
  // rather than waiting for the next 25-second timer or flashing stale data.

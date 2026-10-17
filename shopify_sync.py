@@ -1398,6 +1398,7 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: O
       cancelledAt
       note
       displayFinancialStatus
+      transactions(first: 250) { kind status }
       displayFulfillmentStatus
       email
       totalPriceSet {
@@ -1512,6 +1513,7 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
       cancelledAt
       note
       displayFinancialStatus
+      transactions(first: 250) { kind status }
       displayFulfillmentStatus
       email
       totalPriceSet {
@@ -1625,6 +1627,7 @@ query SportsCaveOrdersLight($first: Int!, $after: String, $query: String, $sortK
       test
       cancelledAt
       displayFinancialStatus
+      transactions(first: 250) { kind status }
       displayFulfillmentStatus
       email
       customer {
@@ -1707,6 +1710,7 @@ query SportsCaveOrdersByIds($ids: [ID!]!) {
       cancelledAt
       note
       displayFinancialStatus
+      transactions(first: 250) { kind status }
       displayFulfillmentStatus
       email
       totalPriceSet {
@@ -3598,6 +3602,7 @@ def normalize_order(node, store_domain):
         "test": bool(node.get("test")),
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
         "financial_status": financial_status,
+        "refund_pending": any(t.get("kind") == "REFUND" and t.get("status") in {"PENDING", "AWAITING_RESPONSE", "UNKNOWN"} for t in node.get("transactions") or []),
         "fulfillment_status": node.get("displayFulfillmentStatus") or "",
         "customer_name": customer_name,
         "customer_email": customer_email,

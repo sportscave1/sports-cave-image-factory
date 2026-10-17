@@ -25,6 +25,7 @@ ROOT=Path(__file__).parents[1]
 def design(store,tmp_path):
     d,sql=store
     sql.execute((ROOT/'supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
+    sql.execute((ROOT/'supabase/migrations/20261016210905_auto_editions_reset_cancellation.sql').read_text())
     register(store);tick(store,[asset()])
     manifest=package(tmp_path);manifest['source']=ae.source_identity(PID,asset());digest=ae.fingerprint(manifest)
     registry=Preparations(d.connect)
