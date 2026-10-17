@@ -82,6 +82,11 @@ class Supervisor:
         self.children.clear()
 
     def run(self):
+        from product_quiz_worker import enabled as quiz_enabled, run as quiz_run
+        quiz_thread = None
+        if quiz_enabled():
+            quiz_thread = threading.Thread(target=quiz_run,args=(self.stop,),name='product-quiz-reconciliation',daemon=True)
+            quiz_thread.start()
         from auto_editions_discovery import enabled, run as discovery_run
         discovery_thread = None
         if enabled():
@@ -97,6 +102,8 @@ class Supervisor:
             self.shutdown()
             if discovery_thread:
                 discovery_thread.join(timeout=SHUTDOWN_SECONDS)
+            if quiz_thread:
+                quiz_thread.join(timeout=SHUTDOWN_SECONDS)
         return 0
 
 

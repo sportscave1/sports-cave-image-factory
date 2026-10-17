@@ -1,0 +1,34 @@
+C:\Dev\SportsCaveWorktrees\sports-cave-integrations-find-your-edition-product-quiz-20261016-dc6e78ee\tests\test_product_quiz.py:135: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient
+2026-10-17 10:57:02.664 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-17 10:57:03.203 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-17 10:57:03.237 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-17 10:57:03.251 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-10-17 10:57:03.259 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-17 10:57:03,313 WARNING wall_preview_archive_config_missing keys=DROPBOX_REFRESH_TOKEN,DROPBOX_ACCESS_TOKEN refresh_token_or_access_token_required=true
+2026-10-17 10:57:03,317 INFO checkout_requests_reconciled completed=0 expired=0
+2026-10-17 10:57:04,087 WARNING wall_preview_archive_cycle_failed type=SupabaseNotConfigured
+2026-10-17 10:57:04,099 WARNING wall_preview_worker_cycle_failed type=SupabaseNotConfigured
+2026-10-17 10:57:04,100 WARNING wall_preview_customer_cycle_failed type=SupabaseNotConfigured
+2026-10-17 10:57:04,108 WARNING review_worker_cycle_failed type=TypeError
+2026-10-17 10:57:04,122 INFO crm_worker_run_start
+2026-10-17 10:57:04,133 WARNING automation_capability_check_unavailable
+2026-10-17 10:57:04,144 WARNING automation_publication_cycle_failed error_class=AttributeError
+2026-10-17 10:57:04,152 WARNING checkout_cache_sync_failed type=TypeError
+2026-10-17 10:57:04,153 INFO crm_worker_run_end completed=True duration_ms=31.2
+----------------------------------------------------------------------
+Ran 51 tests in 2.114s
+
+OK

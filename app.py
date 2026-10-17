@@ -8950,6 +8950,8 @@ def _sidebar_route_button(
 
 def _active_sidebar_group(route):
     import crm_navigation
+    if route in {"Developer", "Worker Health", "Product Quiz"}:
+        return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
     return navigation_runtime.active_disclosure_group(
@@ -9152,10 +9154,16 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if 'Worker Health' in allowed_routes and disclosure('developer','Developer',':material/developer_mode:','Worker Health'):
-        children=st.container(key='sidebar-developer-children')
+    if ('Worker Health' in allowed_routes or 'Developer' in allowed_routes) and disclosure(
+        'developer','Developer',':material/developer_mode:','Worker Health',
+        can_open_overview='Worker Health' in allowed_routes,
+    ):
+        children=st.container(key="sidebar-developer-children")
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
-        child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Worker Health' in allowed_routes:
+            child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Product Quiz' in history_routes:
+            child_button(children, "Product Quiz", "Product Quiz")
         if 'Developer Studio' in allowed_routes:
             children.container(key='sidebar-row-developer_studio').link_button('Dev Mode',
                 '?page=Developer%20Studio&dev_mode=1',use_container_width=True,icon=SIDEBAR_ICON_BY_ROUTE['Developer Studio'],
@@ -9295,7 +9303,7 @@ def render_sidebar():
         and current_page not in analytics_nav.ANALYTICS_ROUTES
         and current_page not in seo_nav.SEO_ROUTES
         and current_page not in ads_nav.ADS_ROUTES
-        and current_page != "Accounts & Access"
+        and current_page not in {"Accounts & Access", "Product Quiz"}
         and os_accounts.is_admin(user)
     ):
         st.sidebar.caption(f"{SIDEBAR_NAV_LABELS.get(current_page, current_page)} open")
@@ -15918,7 +15926,7 @@ def render_selected_page(current_page):
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
         "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
-        "Developer Studio", "Developer", "Worker Health", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Developer Studio", "Developer", "Worker Health", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -16038,6 +16046,9 @@ def render_selected_page(current_page):
         get_ads_posting_page().render_page()
     elif current_page == ads_nav.META_REVIEW_ROUTE:
         get_ads_meta_review_page().render_page()
+    elif current_page == "Product Quiz":
+        from product_quiz_page import render_page
+        render_page(current_os_user())
     elif current_page in {"Settings", "Developer"}:
         render_settings_page()
     else:
