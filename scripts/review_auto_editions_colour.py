@@ -6,8 +6,13 @@ approve --proposal proposal.json --reviewed-hash HASH --owner OWNER --output app
 template --source staged-template.psd --identity identity.json --policy approved.json --output new-template.psd
 audit --catalogue checkpoint-snapshot.json --output colour-audit.json
 
+member --source copy.psd --identity source.json --policy approved.json
+       --provenance independent-evidence.json --verified-by OPERATOR --output member.json
+
 A proposal request contains group, profile_path, members [{source,provenance}],
-references/comparisons [{path,purpose}]. No default profile is suggested.
+references/comparisons [{path,purpose}], and an optional explicit workflow scope.
+No profile is guessed. Workflow defaults need owner approval, independently
+verified membership receipts and explicit app/Companion configuration.
 """
 import argparse
 import json
@@ -30,7 +35,8 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='action',required=True)
     for name,options in dict(inspect=['sources'],propose=['request'],approve=['proposal','reviewed-hash','owner'],
-                             template=['source','identity','policy'],audit=['catalogue']).items():
+                             template=['source','identity','policy'],audit=['catalogue'],
+                             member=['source','identity','policy','provenance','verified-by']).items():
         command=sub.add_parser(name)
         for option in options:command.add_argument('--'+option,required=True)
         command.add_argument('--output',required=True)
@@ -49,7 +55,7 @@ def main():
     elif args.action=='propose':
         request=read(args.request)
         evidence=lambda key:[evidence_file(e['path'],e['purpose']) for e in request[key]]
-        proposal=propose(request['group'],Path(request['profile_path']).read_bytes(),request['members'],evidence('references'),evidence('comparisons'))
+        proposal=propose(request['group'],Path(request['profile_path']).read_bytes(),request['members'],evidence('references'),evidence('comparisons'),scope=request.get('scope'))
         write(args.output,proposal)
         print('Review proposal fingerprint: '+fingerprint(proposal))
     elif args.action=='approve':
@@ -64,6 +70,9 @@ def main():
     elif args.action=='audit':
         from auto_editions_colour_recovery import audit
         write(args.output,audit(read(args.catalogue)))
+    elif args.action=='member':
+        from auto_editions_colour_workflows import verified_membership
+        write(args.output,verified_membership(read(args.policy),args.source,read(args.identity),read(args.provenance),args.verified_by))
 
 
 if __name__=='__main__':main()

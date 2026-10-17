@@ -25,7 +25,7 @@ def evidence_file(path, purpose):
     return dict(name=path.name,sha256=_hash(path),purpose=purpose)
 
 
-def propose(group, icc, members, references, comparisons):
+def propose(group, icc, members, references, comparisons, *, scope=None):
     """Comparisons are human-reviewed reference/proof artifacts, not auto approval."""
     if not group or not members or not references or not comparisons:
         raise ValueError('Provide source group, verified members, trusted references and comparison evidence.')
@@ -43,8 +43,12 @@ def propose(group, icc, members, references, comparisons):
         if (not isinstance(item,dict) or not item.get('name') or not item.get('purpose')
                 or not re.fullmatch(r'[a-f0-9]{64}',str(item.get('sha256','')))):
             raise ValueError('Evidence needs a purpose and SHA-256.')
-    return dict(schema=1,group=group,profile=profile_info(icc),icc_base64=base64.b64encode(icc).decode(),
+    result=dict(schema=1,group=group,profile=profile_info(icc),icc_base64=base64.b64encode(icc).decode(),
                 members=members,references=references,comparisons=comparisons,status='awaiting_approval',print_ready=False)
+    if scope is not None:
+        from auto_editions_colour_workflows import validate_scope
+        validate_scope(scope);result.update(schema=2,scope=scope)
+    return result
 
 
 def approve(proposal, owner, reviewed_hash):
@@ -52,7 +56,7 @@ def approve(proposal, owner, reviewed_hash):
         raise ValueError('Approve the exact reviewed proposal with an identified owner.')
     # Revalidate the proposal before persisting an approval.
     checked=propose(proposal['group'],base64.b64decode(proposal['icc_base64'],validate=True),
-                    proposal['members'],proposal['references'],proposal['comparisons'])
+                    proposal['members'],proposal['references'],proposal['comparisons'],scope=proposal.get('scope'))
     if checked!=proposal:raise ValueError('Colour review content changed.')
     approved={**proposal,'status':'approved','owner':owner,'approved_at':datetime.now(timezone.utc).isoformat(),
               'reviewed_hash':reviewed_hash}
@@ -60,6 +64,11 @@ def approve(proposal, owner, reviewed_hash):
 
 
 def validate(policy):
+    if policy.get('schema') not in (1,2) or (policy.get('schema')==2)!=('scope' in policy):
+        raise ColourReview('Colour policy awaiting approval: unsupported policy scope.')
+    if policy.get('schema')==2:
+        from auto_editions_colour_workflows import validate_scope
+        validate_scope(policy['scope'])
     content={k:v for k,v in policy.items() if k!='approval_hash'}
     if policy.get('status')!='approved' or not policy.get('owner') or fingerprint(content)!=policy.get('approval_hash'):
         raise ColourReview('Colour policy awaiting approval: no unchanged owner approval.')
@@ -83,11 +92,19 @@ def load_policies():
     return policies
 
 
-def resolve(source, policies=None):
+def resolve(source, policies=None, *, memberships=None, default_group=None):
+    if policies is None and os.getenv('AUTO_EDITIONS_COLOUR_POLICY_BACKEND')=='audit':
+        import supabase_backend
+        from auto_editions_colour_store import configuration
+        config=configuration(supabase_backend.read_connection)
+        policies=config['policies']
+        if memberships is None:memberships=config['memberships']
+        if default_group is None:default_group=config['default_group']
     policies=load_policies() if policies is None else policies
-    matches=[p for p in policies if any(m['source']==source for m in p.get('members',[]))]
+    from auto_editions_colour_workflows import matches
+    matches=matches(source,policies,memberships=memberships,default_group=default_group)
     if not matches:raise ColourReview('Colour policy awaiting approval: missing source profile; verified source-group approval required.')
     if len(matches)!=1:raise ColourReview('Colour policy awaiting approval: conflicting source-group memberships.')
     policy=matches[0];icc=validate(policy)
-    return icc,dict(group=policy['group'],approval_hash=policy['approval_hash'],
+    return icc,dict(group=policy['group'],approval_hash=policy['approval_hash'],**({'scope':policy['scope']} if 'scope' in policy else {}),
                     owner=policy['owner'],icc_sha256=policy['profile']['sha256'],pixels_converted=False)
