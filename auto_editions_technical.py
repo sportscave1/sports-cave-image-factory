@@ -340,4 +340,3 @@ class Technical:
                 from auto_editions_onboarding_store import Queue
                 Queue.audit(cur,pid,actor,'technical_retry',dict(hash=q['preparation_hash']))
             return True
-
