@@ -126,6 +126,10 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     jobs=[]
     for row in {r['product_gid']:r for r in rows}.values():
         state=states.get(row['product_gid'],{});label=state.get('status','Unavailable')
+        replacement=row.get('replacement') or {}
+        if replacement.get('stage')=='Failed':
+            label='Failed'
+            state={**state,'uploaded':False,'reason':replacement.get('reason') or 'Replacement preparation failed; previous assets retained.'}
         auto_approved=state.get('approval_status')=='Auto Approved'
         eligible=bool(row.get('eligible'))
         if eligible:counts['eligible']+=1
@@ -134,7 +138,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         validation_pending=label=='Preparing' and row['status']!='Preparing' and (row.get('replacement') or {}).get('stage')!='Preparing'
         category=('Active' if label in ('Preparing','Uploading','Recovering') else 'Queued' if label in ('Queued','Deferred','Connect') else
                   'Needs Review' if label in ('Review','Needs Review') else 'Completed' if label in ('Cloud Ready','Production Ready') else 'Failed')
-        replacement_stage=(row.get('replacement') or {}).get('stage')
+        replacement_stage=replacement.get('stage')
         preparation_owned=row['status']=='Preparing' or replacement_stage=='Preparing'
         lease_expired=bool(preparation_owned and (not row.get('lease_until') or stamp(row['lease_until'])<=now))
         if __import__('auto_editions_technical').enabled() and label=='Uploading':

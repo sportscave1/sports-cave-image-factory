@@ -129,12 +129,16 @@ def test_replacement_requires_a_current_preparation_lease_to_count_as_running(mo
     assert value['health'][-1]['status']==('Monitoring' if live else 'Degraded')
 
 
-def test_failed_replacement_retains_failure_and_does_not_count_as_running(monkeypatch):
+@pytest.mark.parametrize('projected',['Failed','Uploading','Cloud Ready'])
+def test_failed_replacement_retains_failure_and_does_not_count_as_running(monkeypatch,projected):
     monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
-    args=sample('Failed');args[0][0].update(status='Blocked',replacement=dict(stage='Failed'),lease_until=NOW-timedelta(days=1))
+    args=sample(projected);args[0][0].update(status='Blocked',replacement=dict(stage='Failed',reason='The exact edition-number font is unavailable.'),lease_until=NOW-timedelta(days=1))
+    args[1][args[0][0]['product_gid']].update(substage='Queued technical verification',uploaded=True)
     value=health.project(*args,now=NOW,expected_revision='abcdef12')
     assert value['counts']['failed']==1 and value['counts']['active']==0
+    assert value['counts']['queued']==0 and value['counts']['completed']==0
     assert value['jobs'][0]['status']=='Failed' and not value['jobs'][0]['lease_expired']
+    assert value['jobs'][0]['diagnostic']['code']=='FONT_MISSING'
 
 
 def test_independent_stale_heartbeats_versions_and_no_output_are_visible():
