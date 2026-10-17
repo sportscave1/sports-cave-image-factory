@@ -34,7 +34,9 @@ def failure(error):
 async def page(request):
     try:
         await actor(request)
-        return HTMLResponse((Path(__file__).parent/'components/worker_health/index.html').read_text(encoding='utf-8'),headers=HEADERS)
+        html=(Path(__file__).parent/'components/worker_health/index.html').read_text(encoding='utf-8')
+        if __import__('auto_editions_technical').enabled():html=html.replace('<option>Needs Review</option>','')
+        return HTMLResponse(html,headers=HEADERS)
     except Exception as error:return failure(error)
 
 
@@ -112,6 +114,9 @@ async def enqueue(request):
         service=store();invalidate(service.connect)
         try:result=await run_in_threadpool(queue.submit,service.connect,body['product_gid'],str(user['id']),body['request_id'],body['repair_confirmed'])
         finally:invalidate(service.connect)
+        if __import__('auto_editions_technical').enabled() and result.get('accepted') and result.get('status') in ('Pending','Awaiting preparation','Preparing','Blocked'):
+            from auto_editions_status import batch
+            result['status']=batch(service.connect,[body['product_gid']])['rows'][0]['status']
         return JSONResponse(result,status_code=202,headers=HEADERS)
     except Exception as error:return failure(error)
 

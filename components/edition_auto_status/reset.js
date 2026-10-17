@@ -4,7 +4,7 @@
  host.SportsCaveEditionReset?.destroy?.();
  const controller=new host.AbortController(),buttons=new Map(),spinners=new Map(),operations=new Map(),permissions=new Map(),labels=new Map(),liveLabels=new Map(),inFlight=new Set();
  const requests=host.SportsCaveEditionResetRequests||(host.SportsCaveEditionResetRequests=new Map());
- for(const row of host.SportsCaveEditionStatusState?.rows||[]){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);}
+ for(const row of host.SportsCaveEditionStatusState?.rows||[]){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.status==='Uploading'?'Uploading':row.review_operation?.label);}
  let frame=0,dialog=null,focusBefore=null,resize=null,watched=null;
  const style=doc.createElement('style');style.textContent=`
  .sc-auto-reset{position:fixed;width:20px;height:24px;padding:0;border:0;border-radius:3px;background:var(--background-color,#fff);color:#687387;font:15px system-ui;line-height:24px;text-align:center;cursor:pointer;z-index:2}
@@ -20,7 +20,7 @@
  function close(){dialog?.remove();dialog=null;if(focusBefore?.isConnected)focusBefore.focus({preventScroll:true});focusBefore=null;}
  function clear(){for(const button of buttons.values())button.remove();buttons.clear();for(const spinner of spinners.values())spinner.remove();spinners.clear();for(const label of labels.values())label.remove();labels.clear();}
  function updateRows(rows){
-  for(const row of rows){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);liveLabels.set(row.product_gid,row);}
+  for(const row of rows){permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.status==='Uploading'?'Uploading':row.review_operation?.label);liveLabels.set(row.product_gid,row);}
   schedule();
  }
  function pidFrom(value){try{const url=new URL(value,host.location.href);const pid=url.searchParams.get('product_gid');return url.origin===host.location.origin&&url.pathname==='/auto-editions/status'&&/^gid:\/\/shopify\/Product\/[1-9][0-9]*$/.test(pid||'')?pid:null;}catch{return null;}}
@@ -97,8 +97,8 @@
      const selected=pidFrom(current.props.getCellContent([column,row])?.data);
      if(selected!==pid){schedule();return;}if(selected)confirm(selected);
     });
-    if(operations.get(pid)==='Approving…'){
-     let spinner=spinners.get(key);if(!spinner){spinner=doc.createElement('span');spinner.className='sc-review-spinner';spinner.setAttribute('role','status');spinner.setAttribute('aria-label','Approving');doc.body.append(spinner);spinners.set(key,spinner);}
+    if(['Uploading','Approving…'].includes(operations.get(pid))){
+     let spinner=spinners.get(key);if(!spinner){spinner=doc.createElement('span');spinner.className='sc-review-spinner';spinner.setAttribute('role','status');spinner.setAttribute('aria-label',operations.get(pid));doc.body.append(spinner);spinners.set(key,spinner);}
      spinner.style.left=(bounds.x+bounds.width-40)+'px';spinner.style.top=(bounds.y+(bounds.height-14)/2)+'px';
     }else{spinners.get(key)?.remove();spinners.delete(key);}
     const value=liveLabels.get(pid);
@@ -121,7 +121,7 @@
   if(event.source!==host||event.data?.type!=='streamlit:render')return;
   liveLabels.clear();
   permissions.clear();operations.clear();for(const row of event.data.args?.rows||[]){
-   permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.review_operation?.label);
+   permissions.set(row.product_gid,row.reset_allowed===true);operations.set(row.product_gid,row.status==='Uploading'?'Uploading':row.review_operation?.label);
    if(row.cancelling===false){requests.delete(row.product_gid);try{host.sessionStorage.removeItem('sc-design-reset:'+row.product_gid);}catch{}}
   }
   schedule();

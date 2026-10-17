@@ -160,6 +160,7 @@ async def package(request):
                 imported_state=await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])
                 await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
                     imported_state,'Existing exact preparation approval retained.' if imported_state=='Cloud Ready' else
+                    'Technical verification pending.' if __import__('auto_editions_technical').enabled() else
                     'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
             setup['imported']=digest
             # Optional derived cache only, after durable import/checkpoint. The
@@ -174,7 +175,12 @@ async def package(request):
             # Disabled by default. Reuse the exact imported files and fresh cloud
             # receipts; never regenerate or upload during visual reconciliation.
             from auto_editions_visual import enabled as visual_enabled
-            if ctx.get('automatic') and visual_enabled():
+            if ctx.get('automatic') and __import__('auto_editions_technical').enabled():
+                from auto_editions_technical import Technical
+                # The checkpoint is already durable. A crash here is recovered
+                # by the existing preparation worker, using the same job key.
+                await run_in_threadpool(Technical(registry.connect).run_one,assets,pid=ctx['product_gid'],local_root=assets_root)
+            elif ctx.get('automatic') and visual_enabled():
                 visual_started=time.monotonic()
                 try:
                     from auto_editions_visual_store import Visual
@@ -186,8 +192,8 @@ async def package(request):
                     __import__('logging').getLogger(__name__).warning('automatic_visual_pending preparation=%s',digest)
                 timings['automatic_visual_seconds']=round(time.monotonic()-visual_started,3)
             timings['total_seconds']=round(time.monotonic()-started,3)
-        response_status='Awaiting visual approval'
-        if ctx.get('automatic') and visual_enabled():
+        response_status='Uploading' if __import__('auto_editions_technical').enabled() else 'Awaiting visual approval'
+        if ctx.get('automatic') and (__import__('auto_editions_technical').enabled() or visual_enabled()):
             # Report the durable exact-hash decision, never infer success from a
             # completed comparison call or fabricate a human approval.
             try:

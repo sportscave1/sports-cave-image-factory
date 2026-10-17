@@ -48,7 +48,8 @@ class Preparations:
                 WHERE (%s::text IS NULL OR m.shopify_product_gid=%s){product_filter}""".format(
                     receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean', product_filter=product_filter),params)
             rows=cur.fetchall()
-        return resolve_layouts(rows)
+        from auto_editions_technical import colour_snapshot
+        with colour_snapshot(self.connect):return resolve_layouts(rows)
 
     def for_unit(self,unit):
         from auto_editions_quality_store import Quality

@@ -118,6 +118,13 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
         cur.execute(PRODUCT_SQL+" WHERE COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=%s",(pid,));found=cur.fetchall()
         if len(found)>1:raise ValueError('Product identity is ambiguous. Resolve the duplicate records before queueing.')
         row=found[0] if len(found)==1 else None
+        if __import__('auto_editions_technical').enabled() and row and row.get('preparation_hash'):
+            @contextmanager
+            def borrowed():yield conn
+            from auto_editions_technical import Technical
+            Technical(borrowed).retry(pid,actor)
+            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,technical=True))
+            return dict(accepted=True,duplicate=False,product_gid=pid,status='Uploading',request_id=request_id)
         reason=eligibility(row,repair_confirmed)
         if reason:raise ValueError(reason)
         now=health.datetime.now(health.timezone.utc);lease=health.stamp(row.get('lease_until'));owned=bool(lease and lease>now)

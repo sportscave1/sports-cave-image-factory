@@ -24,8 +24,8 @@ from auto_editions_onboarding_store import Queue
 
 LOG=logging.getLogger(__name__)
 
-SORTS={'Failed First':('Failed',), 'Not Connected First':('Not Connected','Connect'),
-       'Queued First':('Queued','Deferred'), 'Needs Review First':('Needs Review','Review'),
+SORTS={'Not Mapped First':('Not Mapped',),'Uploading First':('Uploading',),'Failed First':('Failed',), 'Not Connected First':('Not Mapped','Not Connected','Connect'),
+       'Queued First':('Uploading','Queued','Deferred'), 'Needs Review First':('Needs Review','Review'),
        'Synced / Cloud Ready First':('Cloud Ready','Production Ready'), 'Default Order':()}
 
 
@@ -350,24 +350,27 @@ def listing(connect,ids,user,cursor=0):
         @contextmanager
         def borrowed():yield conn
         with conn.cursor() as cur:
-            cur.execute(PAGE_SQL,(ids,cursor,PAGE_SIZE+1));page=cur.fetchall()
+            sql=PAGE_SQL
+            if __import__('auto_editions_technical').enabled():
+                sql=PAGE_SQL[:PAGE_SQL.index('      AND NOT EXISTS')]+PAGE_SQL[PAGE_SQL.index('    ), counted'): ]
+            cur.execute(sql,(ids,cursor,PAGE_SIZE+1));page=cur.fetchall()
         has_more=len(page)>PAGE_SIZE;page=page[:PAGE_SIZE]
         next_cursor=int(page[-1]['position']) if has_more else None
         data=statuses.batch(borrowed,[r['product_gid'] for r in page],writable=True)
         failures={r['product_gid']:r for r in page if r.get('review_result') in ('Failed','Needs Attention')}
-        candidates=[r for r in data['rows'] if r['status'] in ('Review','Needs Review') or (r['product_gid'] in failures and r['status'] not in ('Cloud Ready','Production Ready'))]
+        candidates=[r for r in data['rows'] if __import__('auto_editions_technical').enabled() or r['status'] in ('Review','Needs Review') or (r['product_gid'] in failures and r['status'] not in ('Cloud Ready','Production Ready'))]
         found=records(borrowed,[r['product_gid'] for r in candidates]) if candidates else {}
     now=time.monotonic();entries={}
     for row in candidates:
         record=found.get(row['product_gid']);eligible=False;reason=row['reason']
         if record:
-            try:evidence(record);eligible=eligible_state(row)
+            try:evidence(record);eligible=eligible_state(row) and not __import__('auto_editions_technical').enabled()
             except (ValueError,KeyError,TypeError):reason='Preparation proofs, geometry or receipts need attention.'
             key=(str(user['id']),row['product_gid'],record['hash'])
             entries[key]=(now+900,record)
         failure=failures.get(row['product_gid'])
         if failure:reason='Previous approval: '+failure['review_result']+'. '+failure['review_reason']
-        public.append(dict(product_gid=row['product_gid'],hash=row['preparation_hash'],
+        public.append(dict(product_gid=row['product_gid'],hash=row['preparation_hash'],status=row['status'],
                            title=record['product_title'] if record else row['product_gid'],eligible=eligible,reason=reason))
     # Do not hold the image lookup lock during manifest/policy validation.
     with snapshot_lock:
@@ -384,7 +387,7 @@ def listing(connect,ids,user,cursor=0):
 _verified_files=OrderedDict()
 _verified_lock=threading.Lock()
 
-def validate_files(record,assets):
+def validate_files(record,assets,*,expected_icc=None):
     m=evidence(record);r=m['number_region'];profile=None
     with tempfile.TemporaryDirectory(prefix='sc-bulk-validate-') as folder:
         for a in [m['master'],*m['patches'].values()]:
@@ -395,13 +398,13 @@ def validate_files(record,assets):
                     or fresh.get('size')!=receipt['bytes']
                     or str(fresh.get('path_display','')).lower()!=DropboxAssets.path(record['hash'],a['name']).lower()):raise ValueError('Cloud receipt changed.')
             cache_key=ae.fingerprint(dict(preparation=record['hash'],asset=a,receipt=receipt,current=fresh,
-                geometry=m['dimensions'] if a==m['master'] else r,icc=(m.get('colour_evidence') or {}).get('icc_sha256')))
+                geometry=m['dimensions'] if a==m['master'] else r,icc=expected_icc or (m.get('colour_evidence') or {}).get('icc_sha256')))
             with _verified_lock:cached=_verified_files.get(cache_key)
             if cached:
                 if profile is not None and cached!=profile:raise ValueError('ICC profiles differ.')
                 profile=cached
                 continue
-            p=inspect_asset(Path(folder),a,m['dimensions'] if a==m['master'] else [r[2]-r[0],r[3]-r[1]],assets.fetch,record['hash'],record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
+            p=inspect_asset(Path(folder),a,m['dimensions'] if a==m['master'] else [r[2]-r[0],r[3]-r[1]],assets.fetch,record['hash'],record['receipts'],expected_icc or (m.get('colour_evidence') or {}).get('icc_sha256'))
             p=ae.hashlib.sha256(p).hexdigest()  # Retain a bounded fingerprint, not potentially large ICC bytes.
             if profile is not None and p!=profile:raise ValueError('ICC profiles differ.')
             profile=p
@@ -480,7 +483,10 @@ def approve_one(connect,item,actor,*,job=None):
 async def page(request):
     try:
         await actor(request)
-        return HTMLResponse((Path(__file__).parent/'components/auto_editions/bulk.html').read_text(encoding='utf-8'),headers=api.HEADERS)
+        html=(Path(__file__).parent/'components/auto_editions/bulk.html').read_text(encoding='utf-8')
+        if __import__('auto_editions_technical').enabled():
+            html=html.replace('<script>','<script>window.technicalOnly=true;</script><style>#select,#clear,#approve,#proof,#retry-approval,input[type=checkbox]{display:none!important}</style><script>',1).replace('Review artwork, plaque and number placement. Approval permits TEST previews only. Use Review / Repair for designs needing attention.','Artwork previews. Technical processing is automatic; use design details for progress and repair. Supplier certification remains separate.')
+        return HTMLResponse(html,headers=api.HEADERS)
     except Exception as error:
         # This endpoint is an iframe document, not a JSON API. Keep diagnostic
         # details server-side, including UnicodeDecodeError (a ValueError).
@@ -676,6 +682,7 @@ async def approve_api(request):
         import files_upload_api as files
         import supabase_backend as db
         user=await actor(request,write=True);body=await files._json_body(request)
+        if __import__('auto_editions_technical').enabled():raise ValueError('Artwork approval is no longer required. Technical processing continues automatically.')
         if set(body)!={'items','confirm_visual_quality','request_id'} or body['confirm_visual_quality'] is not True or not isinstance(body['items'],list) or not 1<=len(body['items'])<=1000:
             raise ValueError('Confirm the selected TEST compositions once before approval.')
         for item in body['items']:

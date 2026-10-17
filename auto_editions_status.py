@@ -14,7 +14,7 @@ import auto_editions_api as api
 import auto_editions_runtime as runtime
 from auto_editions_onboarding_store import Queue
 
-LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Needs Review','Cloud Ready','Production Ready','Needs Repair','Failed','Unavailable','Uploading','Recovering')
+LABELS=('Not Connected','Connect','Queued','Deferred','Preparing','Review','Needs Review','Cloud Ready','Production Ready','Needs Repair','Failed','Unavailable','Uploading','Recovering','Not Mapped')
 ICONS=dict(zip(LABELS,('○','↗','◷','–','↻','◇','◇','✅','✅','⚒','!','?')))
 
 ICONS['Cancelling'+chr(8230)]=chr(8635)
@@ -23,6 +23,7 @@ ICONS.update(Uploading=chr(8593),Recovering=chr(8635))
 
 
 def labels():
+    if __import__('auto_editions_technical').enabled():return ('Not Mapped','Uploading','Cloud Ready','Failed')
     from auto_editions_quality import enabled as quality_enabled
     from auto_editions_v17 import enabled as continuous
     hidden=('Review','Cloud Ready') if quality_enabled() else ('Review','Production Ready') if continuous() else ('Needs Review','Production Ready')
@@ -43,7 +44,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
  prep.manifest->'edition_total' AS prepared_total,prep.hash AS stored_hash,
  proof.pixel_exact,proof.outside_exact,proof.bound,
  approval.approved,approval.hash_count,a.event AS checkpoint,a.created_at AS checkpoint_at,
- {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS reset_cancellation {quality_select} {visual_select}
+ {receipts} AS receipts_valid,{observed} AS observed_source,to_jsonb(q)->'replacement' AS replacement,to_jsonb(q)->'reset_cancellation' AS reset_cancellation {quality_select} {visual_select} {technical_select}
  FROM unnest(%s::text[]) w(pid)
  LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=w.pid
  LEFT JOIN auto_edition_onboarding q ON q.product_gid=w.pid
@@ -66,6 +67,7 @@ SQL="""SELECT w.pid AS product_gid,m.dropbox_file_id,q.file_id,q.status,q.priori
    WHERE product_gid=w.pid ORDER BY created_at DESC,id DESC LIMIT 1) a ON true
  {inventory}
  {quality_join}
+ {technical_join}
  {visual_join}
 """
 
@@ -107,6 +109,9 @@ def project(row, *, writable=False, now=None, evidence=False):
         and row.get('pixel_exact') is True and row.get('outside_exact') is True and row.get('bound') is True)
     observed=row.get('observed_source')
     if observed and observed!=row.get('prepared_source'):valid=False
+    from auto_editions_technical import enabled as technical_enabled,project as technical_project
+    if technical_enabled():
+        return technical_project(row,valid,bool(valid and row.get('receipts_valid')),writable=writable,now=now)
     automatic=False
     from auto_editions_visual import enabled as visual_enabled,current_identity as visual_current
     if visual_enabled() and row.get('automatic_approval'):
@@ -205,23 +210,28 @@ def batch(connect, ids, *, writable=False, evidence=False):
     from auto_editions_discovery import enabled
     from auto_editions_quality import enabled as quality_enabled
     observed="jsonb_build_object('product_gid',w.pid,'file_id',i.file_id,'revision',i.metadata->>'rev','content_hash',i.metadata->>'content_hash')"
+    from auto_editions_technical import enabled as technical_enabled
     sql=SQL.format(observed=f"CASE WHEN i.file_id IS NOT NULL THEN {observed} WHEN c.complete THEN jsonb_build_object('missing',true) END" if enabled() else 'NULL::jsonb',
                    inventory='LEFT JOIN auto_edition_source_inventory i ON i.file_id=m.dropbox_file_id LEFT JOIN auto_edition_discovery_cursor c ON c.id=1' if enabled() else '',
-                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if __import__('auto_editions_v17').enabled() or evidence else 'NULL::boolean',
-                   quality_select=', qc.assessment AS quality_assessment,qc.next_check_at>now() AS quality_fresh,prep.manifest AS quality_manifest' if quality_enabled() else '',
-                   quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() else '',
-                   visual_select=", CASE WHEN va.detail IS NULL THEN NULL ELSE jsonb_build_object('status',va.detail->'assessment'->>'status','reason',va.detail->'assessment'->>'reason') END AS visual_assessment,prep.manifest->'dimensions' AS visual_dimensions,prep.manifest->'colour_evidence' AS visual_colour,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.preparation_hash=prep.hash AND l.variant_id='*' AND l.approval->>'method'='auto-editions-visual-v1') AS automatic_approval" if __import__('auto_editions_visual').enabled() else '',
-                   visual_join="LEFT JOIN (SELECT DISTINCT ON(preparation_hash) preparation_hash,detail FROM auto_edition_setup_audit WHERE event='automatic_visual_assessment' ORDER BY preparation_hash,id DESC) va ON va.preparation_hash=prep.hash" if __import__('auto_editions_visual').enabled() else '')
+                   receipts=__import__('auto_editions_v17').receipt_sql('prep') if technical_enabled() or __import__('auto_editions_v17').enabled() or evidence else 'NULL::boolean',
+                   technical_select=", tc.state AS technical_state,tc.reason AS technical_reason,tc.lease_until AS technical_lease_until,tc.updated_at AS technical_updated_at,prep.manifest->'colour_evidence' AS technical_colour,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.preparation_hash=prep.hash AND l.variant_id='*' AND l.approval->>'method'='auto-editions-technical-v1') AS technical_approval" if technical_enabled() else '',
+                   technical_join='LEFT JOIN auto_edition_technical_checks tc ON tc.product_gid=w.pid AND tc.preparation_hash=q.preparation_hash AND tc.checkpoint_at=q.updated_at' if technical_enabled() else '',
+                   quality_select=', qc.assessment AS quality_assessment,qc.next_check_at>now() AS quality_fresh,prep.manifest AS quality_manifest' if quality_enabled() and not technical_enabled() else '',
+                   quality_join='LEFT JOIN auto_edition_quality_checks qc ON qc.preparation_hash=q.preparation_hash AND qc.product_gid=w.pid' if quality_enabled() and not technical_enabled() else '',
+                   visual_select=", CASE WHEN va.detail IS NULL THEN NULL ELSE jsonb_build_object('status',va.detail->'assessment'->>'status','reason',va.detail->'assessment'->>'reason') END AS visual_assessment,prep.manifest->'dimensions' AS visual_dimensions,prep.manifest->'colour_evidence' AS visual_colour,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.preparation_hash=prep.hash AND l.variant_id='*' AND l.approval->>'method'='auto-editions-visual-v1') AS automatic_approval" if __import__('auto_editions_visual').enabled() and not technical_enabled() else '',
+                   visual_join="LEFT JOIN (SELECT DISTINCT ON(preparation_hash) preparation_hash,detail FROM auto_edition_setup_audit WHERE event='automatic_visual_assessment' ORDER BY preparation_hash,id DESC) va ON va.preparation_hash=prep.hash" if __import__('auto_editions_visual').enabled() and not technical_enabled() else '')
     start=time.perf_counter()
     with connect() as conn,conn.cursor() as cur:
         cur.execute(sql,(ids,));raw=cur.fetchall()
     groups={pid:[] for pid in ids}
     for row in raw:groups[row['product_gid']].append(dict(row))
     result=[]
-    for pid,rows in groups.items():
-        if len(rows)!=1:result.append(unavailable(pid))
-        else:result.append(project(rows[0],writable=writable,evidence=evidence))
-    return {'rows':result,'companion_connected':any(r.get('companion_connected') for r in raw),'query_count':1,'duration_ms':round((time.perf_counter()-start)*1000,2)}
+    from auto_editions_technical import colour_snapshot
+    with colour_snapshot(connect):
+        for pid,rows in groups.items():
+            if len(rows)!=1:result.append(unavailable(pid))
+            else:result.append(project(rows[0],writable=writable,evidence=evidence))
+    return {'rows':result,'companion_connected':any(r.get('companion_connected') for r in raw),'query_count':1+int(technical_enabled() and os.getenv('AUTO_EDITIONS_COLOUR_POLICY_BACKEND')=='audit'),'duration_ms':round((time.perf_counter()-start)*1000,2)}
 
 
 async def actor(request, *, write=False):
@@ -263,6 +273,7 @@ def verify_snapshot(value,user,ids):
 
 
 def review_operations(connect,data):
+    if __import__('auto_editions_technical').enabled():return data
     if not data['rows']:return data
     from auto_editions_bulk_jobs import ReviewJobs
     operations=ReviewJobs(connect).progress('display',product_gids=[r['product_gid'] for r in data['rows']])

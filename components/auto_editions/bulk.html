@@ -179,6 +179,7 @@ function append(data){
     link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';
     retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>{if(['queued','loading'].includes(row.imageState))return;row.cacheChecked=false;row.previewStarted=0;row.previewPolls=0;row.transientRetries=0;row.warmRetries=0;queueImage(row);};
     Object.assign(row,{img,box,detail,retryPreview,card});card.append(img,caption,detail,retryPreview,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
+    if(window.technicalOnly){row.operationText=row.status+' · '+row.reason;detail.textContent=row.operationText;detail.classList.toggle('approving',row.status==='Uploading');link.textContent='Details / Repair';}
   }
   $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting'&&!row.previewStarted){visibleImages.observe(row.img);nearImages.observe(row.img);}
 }
@@ -234,7 +235,7 @@ function cancelWork(){for(const request of requests)request.abort();requests.cle
 function reset(){
   if(busy)return;generation++;cancelWork();rows=[];byId.clear();selected.clear();cursor=0;hasMore=true;pageStarts=[0];pageIndex=0;batchSelections.clear();batchScroll.clear();acceptedPreparations.clear();totalRemaining=null;totalAtOpen=null;clearTimeout(refillTimer);loading=false;errorText='';resultText='';loadedImages=0;
   for(const key of Object.keys(timings))delete timings[key];thumbnailStart=performance.now();$('grid').replaceChildren();
-  if(started){loadPage();recoverApprovals();}else requestContext();
+  if(started){loadPage();if(!window.technicalOnly)recoverApprovals();}else requestContext();
 }
 function requestContext(){
   clearTimeout(bootstrapTimer);errorText='';controls();summary();
@@ -358,5 +359,25 @@ addEventListener('message',event=>{
   const next=[...new Set(event.data.product_gids)],key=JSON.stringify(next);if(started&&key===contextKey)return;
   ids=next;contextKey=key;started=true;clearTimeout(bootstrapTimer);reset();
 });
-controls();requestContext();
+const detailPID=new URLSearchParams(location.search).get('product_gid');if(window.technicalOnly&&detailPID){ids=[detailPID];started=true;reset();}else{controls();requestContext();}
+// The preview gallery observes technical work; it never submits artwork approval.
+if(window.technicalOnly){
+ let flight=false;const stop=new AbortController();
+ const timer=setInterval(async()=>{
+  if(disposed||document.hidden||flight||!rows.some(r=>r.status==='Uploading'))return;
+  flight=true;const request=new AbortController(),deadline=setTimeout(()=>request.abort(),8000);
+  const abort=()=>request.abort();stop.signal.addEventListener('abort',abort,{once:true});
+  try{
+   const response=await fetch('/api/auto-editions/status',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({product_gids:rows.map(r=>r.product_gid)}),signal:request.signal});
+   const data=await response.json();if(!response.ok)throw Error('Status temporarily unavailable');
+   for(const current of data.rows||[]){const row=byId.get(current.product_gid);if(!row||row.hash!==current.preparation_hash)continue;
+    row.status=current.status;row.reason=current.reason;row.operationText=current.status+' · '+current.reason;
+    row.detail.classList.toggle('approving',current.status==='Uploading');
+    if(row.detail.textContent!==row.operationText)row.detail.textContent=row.operationText;
+   }
+  }catch(error){/* Existing artwork stays visible; next bounded poll reconciles. */}
+  finally{clearTimeout(deadline);stop.signal.removeEventListener('abort',abort);flight=false;}
+ },4000);
+ addEventListener('pagehide',()=>{clearInterval(timer);stop.abort();},{once:true});
+}
 </script></body></html>

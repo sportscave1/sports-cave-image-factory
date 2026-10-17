@@ -29,9 +29,9 @@ class Queue:
             NOT EXISTS(SELECT 1 FROM auto_edition_layouts other WHERE other.product_gid=l.product_gid
                 AND other.preparation_hash<>l.preparation_hash) AS single_hash FROM auto_edition_layouts l
             JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
-            WHERE l.product_gid=%s AND p.manifest->'source'->>'file_id'=%s LIMIT 1'''.format(receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean'),(pid,file_id))
+            WHERE l.product_gid=%s AND p.manifest->'source'->>'file_id'=%s LIMIT 1'''.format(receipts=v17.receipt_sql('p') if v17.enabled() or __import__('auto_editions_technical').enabled() else 'NULL::boolean'),(pid,file_id))
         approved=cur.fetchone()
-        if approved and v17.enabled():
+        if approved and (v17.enabled() or __import__('auto_editions_technical').enabled()):
             import auto_editions as ae
             if (approved['variant_id']!='*' or not approved['single_hash'] or not approved['receipts_valid']
                 or ae.status(approved['manifest'],approved['approval'])!='TEST READY'):approved=None
@@ -45,9 +45,9 @@ class Queue:
             ORDER BY created_at DESC LIMIT 1""",(pid,file_id))
         prepared=cur.fetchone()
         if prepared:
-            cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,source,preparation_hash)
-                VALUES(%s,%s,'Blocked','Prepared assets retained; review current source and visual quality.',%s::jsonb,%s)
-                ON CONFLICT DO NOTHING""",(pid,file_id,json.dumps(prepared['manifest']['source']),prepared['hash']))
+            cur.execute("""INSERT INTO auto_edition_onboarding(product_gid,file_id,status,reason,source,preparation_hash,priority)
+                VALUES(%s,%s,'Blocked','Prepared assets retained; verify current source and technical evidence.',%s::jsonb,%s,%s)
+                ON CONFLICT DO NOTHING""",(pid,file_id,json.dumps(prepared['manifest']['source']),prepared['hash'],2 if __import__('auto_editions_technical').enabled() else 0))
             return
         cur.execute('''INSERT INTO auto_edition_onboarding(product_gid,file_id,priority) VALUES(%s,%s,%s)
             ON CONFLICT(product_gid) DO UPDATE SET file_id=excluded.file_id,source=NULL,
@@ -87,6 +87,16 @@ class Queue:
             # next claim even over a manual catalogue Prepare Now request.
             ordering='CASE WHEN priority=8 THEN 11 ELSE priority END'
             eligibility="""priority>=0 AND q.preparation_hash IS NULL AND EXISTS(
+                SELECT 1 FROM product_psd_mappings m JOIN edition_products p
+                ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=m.shopify_product_gid
+                WHERE m.shopify_product_gid=q.product_gid AND m.dropbox_file_id=q.file_id
+                AND p.edition_total BETWEEN 1 AND 1000
+                GROUP BY m.shopify_product_gid HAVING count(*)=1)"""
+        from auto_editions_technical import enabled as technical_enabled
+        if technical_enabled():
+            # Explicitly deferred/excluded checkpoints are never released by
+            # automatic technical completion, including under the V17 policy.
+            eligibility="""priority>0 AND q.preparation_hash IS NULL AND EXISTS(
                 SELECT 1 FROM product_psd_mappings m JOIN edition_products p
                 ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=m.shopify_product_gid
                 WHERE m.shopify_product_gid=q.product_gid AND m.dropbox_file_id=q.file_id
@@ -154,9 +164,9 @@ class Queue:
                 JOIN auto_edition_preparations p ON p.hash=l.preparation_hash
                 WHERE l.product_gid=%s AND l.variant_id='*' AND l.preparation_hash=%s
                 AND NOT EXISTS(SELECT 1 FROM auto_edition_layouts other
-                    WHERE other.product_gid=l.product_gid AND other.preparation_hash<>l.preparation_hash)""".format(receipts=v17.receipt_sql('p') if v17.enabled() else 'NULL::boolean'),(pid,digest))
+                    WHERE other.product_gid=l.product_gid AND other.preparation_hash<>l.preparation_hash)""".format(receipts=v17.receipt_sql('p') if v17.enabled() or __import__('auto_editions_technical').enabled() else 'NULL::boolean'),(pid,digest))
             row=cur.fetchone()
-        if (row and (not v17.enabled() or row.get('receipts_valid') is True) and row['manifest']['source']==source and row['approval'].get('test_only') is True
+        if (row and (not (v17.enabled() or __import__('auto_editions_technical').enabled()) or row.get('receipts_valid') is True) and row['manifest']['source']==source and row['approval'].get('test_only') is True
             and ae.status(row['manifest'],row['approval'])=='TEST READY'):return 'Cloud Ready'
         return 'Blocked'
 

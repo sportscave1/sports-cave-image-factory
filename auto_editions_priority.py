@@ -27,6 +27,8 @@ LEFT JOIN LATERAL (
 
 def priority(row, current=0):
     from auto_editions_v17 import enabled
+    if __import__('auto_editions_technical').enabled():
+        if current==0:return 0,'Deliberately deferred/excluded'
     if enabled() and row['outstanding']:return 8, 'Outstanding customer orders'
     if current == 10:return 10, 'Administrator Prepare Now'
     if row['outstanding']:return 8, 'Outstanding customer orders'
@@ -34,7 +36,7 @@ def priority(row, current=0):
     if row['recent'] or row['sales'] > 1:return 6, 'Recent or repeat sales'
     if row['sales']:return 5, 'Historical sale'
     if row['advertised']:return 4, 'Active mapped advertisement'
-    if current == 2 and row['active']:return 2, 'Newly linked active product'
+    if current == 2 and (row['active'] or __import__('auto_editions_technical').enabled()):return 2, 'Newly linked active product'
     if enabled():return 1, 'Continuous mapped catalogue'
     return 0, 'Deferred until an order, active advertisement or Prepare Now'
 

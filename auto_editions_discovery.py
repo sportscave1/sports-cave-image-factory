@@ -275,7 +275,11 @@ def run(stop):
             health_ok=False
         try:
             from auto_editions_visual import enabled as visual_enabled
-            if visual_enabled():
+            from auto_editions_technical import enabled as technical_enabled,Technical
+            if technical_enabled():
+                from auto_editions_cloud import DropboxAssets
+                Technical(db.connect).run_one(DropboxAssets(context(),dropbox))
+            elif visual_enabled():
                 from auto_editions_visual_store import Visual
                 from auto_editions_cloud import DropboxAssets
                 Visual(db.connect).run_one(DropboxAssets(context(),dropbox))

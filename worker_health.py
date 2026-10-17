@@ -134,6 +134,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         validation_pending=label=='Preparing' and row['status']!='Preparing' and (row.get('replacement') or {}).get('stage')!='Preparing'
         category=('Active' if label in ('Preparing','Uploading','Recovering') else 'Queued' if label in ('Queued','Deferred','Connect') else
                   'Needs Review' if label in ('Review','Needs Review') else 'Completed' if label in ('Cloud Ready','Production Ready') else 'Failed')
+        if __import__('auto_editions_technical').enabled() and label=='Uploading' and (row['status']=='Awaiting preparation' or state.get('substage')=='Queued technical verification'):category='Queued'
         if validation_pending:category='Queued';label='Queued'
         if category=='Queued' and not eligible:category='Failed';label='Needs Repair'
         if category=='Active':counts['active']+=1
@@ -146,14 +147,15 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         finished=row.get('completed_at') if row.get('preparation_hash') else row.get('updated_at') if row['status'] in ('Blocked','Needs PSD Repair') else None
         measured=max(0,(stamp(finished)-stamp(start)).total_seconds()) if finished and start else None
         stage=row.get('reason') if row.get('reason') in diagnostics.STAGES else 'Preparing' if category=='Active' else 'Review' if category=='Needs Review' else 'Claimed' if category=='Queued' else 'Unknown'
+        if __import__('auto_editions_technical').enabled() and state.get('substage'):stage=state['substage']
         if validation_pending:stage='Verifying'
-        recorded=row.get('last_diagnostic') or {}
+        recorded={} if __import__('auto_editions_technical').enabled() and row.get('preparation_hash') else row.get('last_diagnostic') or {}
         if category=='Failed':stage=recorded.get('stage') if recorded.get('stage') in diagnostics.STAGES else stage
         proof_reason=state.get('reason') or row.get('reason')
         explanation=diagnostics.operator_details(proof_reason,stage,recorded.get('code') if category=='Failed' else None)
         if stage=='Unknown':stage='Stage unavailable'
         jobs.append(dict(id=row['product_gid'],design=str(row.get('product_title') or row['product_gid'])[:180],priority=row['priority'],
-            stage=stage,status='Pending' if row.get('wh_requested') and row['status']=='Awaiting preparation' and category=='Queued' else 'Auto Approved' if auto_approved and label=='Cloud Ready' else label,approval_status=state.get('approval_status'),category=category,elapsed_seconds=elapsed if category=='Active' else None,duration_seconds=measured,
+            stage=stage,status='Uploading' if __import__('auto_editions_technical').enabled() and category in ('Active','Queued') else 'Pending' if row.get('wh_requested') and row['status']=='Awaiting preparation' and category=='Queued' else 'Auto Approved' if auto_approved and label=='Cloud Ready' else label,approval_status=state.get('approval_status'),category=category,elapsed_seconds=elapsed if category=='Active' else None,duration_seconds=measured,
             last_activity=sydney(row.get('updated_at')),last_activity_iso=stamp(row['updated_at']).isoformat(),
             checkpoint=__import__('auto_editions_status').CHECKPOINTS.get(row.get('latest_checkpoint'),state.get('checkpoint') or 'No checkpoint'),reason=explanation['description'] if category=='Failed' else state.get('reason',''),
             diagnostic=explanation if category=='Failed' or explanation['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','PROFILE_APPROVED','COLOUR_INCOMPATIBLE') else None,
@@ -161,6 +163,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
             validation_pending=validation_pending,actions=state.get('actions',[]),lease_expired=bool(row.get('lease_until') and stamp(row['lease_until'])<=now and row['status']=='Preparing')))
         jobs[-1].update(retry_eligible=bool(eligible and row['status'] in ('Blocked','Needs PSD Repair') and not row.get('preparation_hash') and not (row.get('replacement') or {}).get('manual_required')),
             repair_required=row['status']=='Needs PSD Repair' or explanation['manual_repair'])
+        if __import__('auto_editions_technical').enabled() and row.get('preparation_hash') and label=='Failed' and 'retry' in state.get('actions',[]):jobs[-1]['retry_eligible']=True
     counts['remaining']=counts['queued']+counts['active']
     current=next((j for j in jobs if j['category']=='Active'),None)
     durations=[float(s['duration_seconds']) for s in successes if s.get('duration_seconds') is not None and 1<=float(s['duration_seconds'])<=86400]

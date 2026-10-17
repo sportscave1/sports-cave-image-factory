@@ -257,6 +257,9 @@ def status(manifest=None, approval=None):
         validate_manifest(manifest)
     except (ValueError, TypeError, KeyError):
         return 'NOT CONFIGURED'
+    if approval and approval.get('method')=='auto-editions-technical-v1':
+        from auto_editions_technical import current
+        return 'TEST READY' if current(approval,manifest) else 'NOT CONFIGURED'
     if approval and approval.get('method')=='auto-editions-visual-v1':
         from auto_editions_visual import current
         return 'TEST READY' if current(approval,manifest) else 'NOT CONFIGURED'

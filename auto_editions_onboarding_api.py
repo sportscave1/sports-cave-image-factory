@@ -156,7 +156,14 @@ def candidate(pid,digest):
 async def page(request):
     try:
         await api.actor(request,setup=True)
-        return HTMLResponse((Path(__file__).parent/'components/auto_editions/onboarding.html').read_text(encoding='utf-8'),headers=api.HEADERS)
+        if __import__('auto_editions_technical').enabled() and request.query_params.get('product_gid'):
+            from starlette.responses import RedirectResponse
+            from urllib.parse import quote
+            return RedirectResponse('/auto-editions/status?product_gid='+quote(request.query_params['product_gid'],safe=''),headers=api.HEADERS)
+        html=(Path(__file__).parent/'components/auto_editions/onboarding.html').read_text(encoding='utf-8')
+        if __import__('auto_editions_technical').enabled():
+            html=html.replace('</head>','<style>#approve,#quality p{display:none!important}</style></head>',1).replace('New or altered artwork needs review; supplier validation is required for production.','Mapped artwork runs required technical checks automatically; supplier certification remains separate.').replace('Review prepared artwork','Preview prepared artwork')
+        return HTMLResponse(html,headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 
@@ -181,6 +188,7 @@ async def approve(request):
     try:
         import files_upload_api as files
         user=await api.actor(request,setup=True,write=True)
+        if __import__('auto_editions_technical').enabled():raise ValueError('Artwork approval is no longer required. Technical processing continues automatically.')
         body=await files._json_body(request)
         if set(body)!={'product_gid','hash','confirm_visual_quality'} or body['confirm_visual_quality'] is not True:
             raise ValueError('Review composition, plaque, number, faces, borders and enlargement quality first.')
@@ -383,7 +391,9 @@ async def retry(request):
         user=await api.actor(request,setup=True,write=True)
         body=await files._json_body(request)
         if set(body)!={'product_gid'}:raise ValueError('Select one failed product.')
-        await run_in_threadpool(queue().retry,body['product_gid'],str(user['id']))
+        from auto_editions_technical import enabled as technical_enabled,Technical
+        retained=technical_enabled() and await run_in_threadpool(Technical(queue().connect).retry,body['product_gid'],str(user['id']))
+        if not retained:await run_in_threadpool(queue().retry,body['product_gid'],str(user['id']))
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 

@@ -46,4 +46,4 @@ def live(ui,rows,values):
     import streamlit.components.v1 as components
     component=components.declare_component('edition_auto_live',path=str(Path(__file__).parent/'components/edition_auto_status'))
     ids=list(dict.fromkeys(pid for r in rows if (pid:=psd_directory.product_id(r))))
-    component(product_gids=ids,rows=[values.get(pid,status.unavailable(pid)) for pid in ids],key='edition-auto-live',default=None)
+    component(technical_only=__import__('auto_editions_technical').enabled(),product_gids=ids,rows=[values.get(pid,status.unavailable(pid)) for pid in ids],key='edition-auto-live',default=None)

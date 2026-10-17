@@ -76,7 +76,7 @@
   doc.addEventListener('visibilitychange',()=>{if(!doc.hidden)poll();},{signal:controller.signal});
   const observer=new host.MutationObserver(()=>{restore();if(force&&!modal())poll();else flush();});
   const scope=root();if(scope)observer.observe(scope,{childList:true,subtree:true});
-  timer=host.setInterval(()=>{const active=(retained.rows||[]).some(r=>['Pending Approval','Approving…'].includes(r.review_operation?.label));if(force||active||Date.now()-lastPoll>=25000)poll();},3000);
+  timer=host.setInterval(()=>{const active=(retained.rows||[]).some(r=>r.status==='Uploading'||['Pending Approval','Approving…'].includes(r.review_operation?.label));if(force||active||Date.now()-lastPoll>=25000)poll();},3000);
   const lifecycle={poll,flush,safe,acceptBatch,refresh(){force=true;lastPoll=0;if(inFlight){refreshAfter=true;return;}poll();},destroy(){host.clearInterval(timer);controller.abort();observer.disconnect();}};
   host.SportsCaveEditionStatus=lifecycle;
   addEventListener('pagehide',()=>{if(host.SportsCaveEditionStatus===lifecycle)lifecycle.destroy();},{once:true});
