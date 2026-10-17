@@ -8,4 +8,6 @@ Live verification found that the embedded browser can leave Clipboard API permis
 
 The browser integration verifier covers a never-settling Clipboard promise, denied clipboard, real fallback, all manual modes, resumable chunk transfer, navigation, source recovery, queue/technical completion and responsive layout. This suite uses local provider doubles and is separate from live native evidence. No Photoshop worker scripts, templates, colour rules, existing mappings, editions or certificates are changed by this code repair.
 
+Find Mockups live verification also exposed path normalisation corrupting stable Dropbox IDs (`id:...` became `/id:...`). The existing metadata helper now passes validated file/folder IDs unchanged while retaining normal path handling. Adapter tests use the real helper with a stub SDK client, covering both folder ID re-resolution and source metadata reads. The production product-images folder was independently verified by path and ID.
+
 Operator recovery evidence, live draft/source identities, exact deployment and preparation receipts, preservation checks and final live result are retained in this task's ignored `output/companion-recovery/` directory. Historical failure journals remain intact; recovery does not mark them successful or automatically retry the backlog.
