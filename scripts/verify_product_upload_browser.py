@@ -39,6 +39,15 @@ def main():
             expect(page.locator('#copy')).to_have_text('Copied');expect(page.locator('#return')).to_be_hidden()
             text=page.evaluate('navigator.clipboard.readText()');assert '[ENTER PRODUCT NAME ABOVE]' not in text
             assert 'SELECTED ACTION:' in text
+        # Some embedded browsers leave the permission request pending forever.
+        # A timeout must expose the same real copy fallback without unlocking
+        # the product field just because the Clipboard promise was started.
+        page.evaluate("() => {window.savedClipboard=navigator.clipboard.writeText.bind(navigator.clipboard);navigator.clipboard.writeText=()=>new Promise(()=>{});}")
+        page.locator('#copy').click();expect(page.locator('#copy')).to_be_disabled()
+        expect(page.locator('#fallback')).to_be_visible(timeout=7000)
+        expect(page.locator('#return')).to_be_hidden()
+        page.locator('#fallback-copy').click();expect(page.locator('#fallback')).to_be_hidden()
+        page.evaluate('navigator.clipboard.writeText=window.savedClipboard')
         page.locator('#manual').click();page.locator('#mode').select_option('DRAFT')
         def interrupt(route):
             if 'offset=0' not in route.request.url:route.abort()

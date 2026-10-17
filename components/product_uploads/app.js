@@ -38,7 +38,7 @@
     try{
       if(!/\.psd$/i.test(file.name)||file.size<40||file.size>1073741824)throw new Error('Choose a layered PSD up to 1 GiB.');
       if(row?.basic_validated)throw new Error('Use Start another upload before selecting a different PSD. Your saved upload is retained.');
-      const id=row?.id||crypto.randomUUID();$('summary').hidden=false;$('filename').textContent=file.name;$('stage').textContent='Checking file identity';$('detail').textContent='Reading bounded chunks to identify this exact PSD.';$('choose').disabled=true;resize();
+      const id=row?.id||crypto.randomUUID();$('summary').hidden=false;$('filename').textContent=file.name;$('stage').textContent='Checking file identity';$('progress').value=0;$('progress').hidden=false;$('detail').textContent='Reading bounded chunks to identify this exact PSD.';$('choose').disabled=true;resize();
       const hash=await fileHash(file);
       row=(await request('start',{id,mode:$('mode').value,name:file.name,size:file.size,content_hash:hash})).upload;render();
       while(row.offset<file.size){const offset=row.offset,chunk=file.slice(offset,Math.min(file.size,offset+CHUNK));let result;
@@ -52,7 +52,7 @@
     if(copyMode!==$('mode').value||copyID!==(manual?'':row?.id))throw new Error('The selected action changed. Copy the current prompt again.');
     if(!manual)row=(await action('copied')).upload;$('copy').textContent='Copied';$('fallback').close();render();setTimeout(()=>{$('copy').textContent='Copy Prompt';},2200);
   }
-  async function copy(){clear();try{promptText=(await action('prompt',{id:manual?null:row?.id})).prompt;copyMode=$('mode').value;copyID=manual?'':row?.id;try{await navigator.clipboard.writeText(promptText);}catch(e){$('fallback-text').value=promptText;$('fallback').showModal();$('fallback-text').select();fail(new Error('Clipboard access was blocked. Use the copy fallback to continue.'));return;}await copied();}catch(e){fail(e);}}
+  async function copy(){if(busy)return;busy=true;clear();render();$('copy').textContent='Preparing prompt…';try{promptText=(await action('prompt',{id:manual?null:row?.id})).prompt;copyMode=$('mode').value;copyID=manual?'':row?.id;let deadline;try{await Promise.race([navigator.clipboard.writeText(promptText),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Clipboard request timed out.')),2500);})]);}catch(e){$('fallback-text').value=promptText;$('fallback').showModal();$('fallback-text').select();fail(new Error('Clipboard access was blocked or did not respond. Use the copy fallback to continue.'));return;}finally{clearTimeout(deadline);}await copied();}catch(e){fail(e);}finally{busy=false;if($('copy').textContent!=='Copied')$('copy').textContent='Copy Prompt';render();}}
   $('fallback-copy').onclick=async()=>{try{$('fallback-text').select();if(!document.execCommand('copy'))throw new Error('Press Ctrl+C while the prompt is selected.');await copied();clear();}catch(e){fail(e);}};
   $('fallback-text').addEventListener('copy',e=>{const t=$('fallback-text');if(e.isTrusted&&t.value.slice(t.selectionStart,t.selectionEnd)===promptText)queueMicrotask(()=>copied().catch(fail));});
   async function link(pid){if(busy)return;busy=true;clear();render();try{row=(await action(pid?'link':'resolve',pid?{product_id:pid}:{value:$('product').value})).upload;
