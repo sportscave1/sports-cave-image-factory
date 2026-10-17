@@ -15,7 +15,7 @@ def now(): return datetime.now(timezone.utc).isoformat()
 def asset_base():
     from crm_tracking import public_https
     value=os.getenv('PRODUCT_QUIZ_ASSET_BASE','').rstrip('/')
-    if not public_https(value) or '?' in value or '#' in value: raise ValueError('Configure a dedicated public HTTPS R2 asset base before publishing.')
+    if not public_https(value) or '?' in value or '#' in value: raise ValueError('Configure the public HTTPS quiz asset base on the existing Render service before publishing.')
     return value
 
 
@@ -138,5 +138,5 @@ def verify_public(assets):
         if expected_type not in response.headers.get('Content-Type','').lower(): raise ValueError('Unexpected public asset content type.')
         if path.endswith('.json') and response.headers.get('Access-Control-Allow-Origin') not in {'*','https://sportscaveshop.com'}:
             raise ValueError('Public quiz CORS is not ready.')
-        if path=='manifest.json' and response.json()!=expected: raise ValueError('Public quiz pointer has not reached the CDN yet.')
+        if path=='manifest.json' and response.json()!=expected: raise ValueError('Public quiz pointer has not reached the asset cache yet.')
     return expected

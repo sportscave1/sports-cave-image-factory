@@ -25,14 +25,13 @@ catalogue acceptance and exact snippets require verified public hosting; they ar
 not implied by a successful OS code deploy. Production quiz workers remain off
 until their required public asset configuration is ready.
 
-## Public asset gateway prepared
+## Render public asset delivery adjustment
 
-`cloudflare/product-quiz-assets.mjs` is a credential-free, read-only gateway for
-Cloudflare Workers. Bind `QUIZ_ASSETS` to the existing private R2 assets bucket.
-Only the exact loader, manifest, catalogue index, and hashed config/runtime/sport
-shards are readable. All other paths and all write methods are rejected before
-R2 access. CORS permits public JSON reads; mutable pointers cache for 60 seconds,
-immutable assets for one year. No shared bucket public-access setting is changed.
-Three offline Node tests verify path isolation, headers/conditional requests,
-method rejection and R2/size failure handling. Its deployment requires access to
-the Cloudflare account; no Cloudflare login/API token was available initially.
+The user explicitly selected existing Render hosting, accepted temporary OS-outage
+unavailability, and prohibited a new hosting provider or public R2 buckets. The
+prepared external gateway was removed. `/product-quiz/` routes on the existing OS
+serve only the loader, manifests and exact hashed published files from private R2.
+No drafts, private artwork, credentials, customer data or arbitrary storage paths
+are exposed. Published configuration survives restarts through existing R2 and
+private database storage. ETags, bounded server caches and public cache directives
+support routine updates and deployment restarts; browse fallbacks handle outages.

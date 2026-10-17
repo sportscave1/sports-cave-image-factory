@@ -107,7 +107,7 @@ def render_page(user,store=None):
         st.info('Starts, shown questions, answers, completions and product clicks are measured when analytics consent is available. Compare distinct sessions by question to assess drop-off. Add-to-cart, purchases and revenue attribution are unavailable in this first version. Intended purchase attribution window: 7 days, currently inactive. No incremental revenue claim is made.')
     with installation:
         st.write('Manual installation only')
-        st.caption('These controls never edit a Shopify theme or create a storefront page. Snippets become installable only after approved deployment, public R2/CORS setup and a successful quiz publication.')
+        st.caption('These controls never edit a Shopify theme or create a storefront page. Snippets become installable only after approved deployment, Render public asset setup and a successful quiz publication.')
         st.write('Collection context mappings')
         st.caption('Map an exact existing collection handle to its verified sport. Customers can change the preselected sport.')
         mapping_rows=edit_records(pairs(config['collections']),['Value','Maps to'],num_rows='dynamic',key='pq-collections')
@@ -118,7 +118,7 @@ def render_page(user,store=None):
                 st.session_state['product-quiz-installation']={'base':base,'published':published}
             except Exception:
                 st.session_state.pop('product-quiz-installation',None)
-                st.error('Public delivery could not be verified. Check publication, CDN and CORS settings.')
+                st.error('Public delivery could not be verified. Check publication, public asset routes and CORS settings.')
         installation_state=st.session_state.get('product-quiz-installation')
         if installation_state:
             st.caption('Verified published version: '+installation_state['published']['version'])

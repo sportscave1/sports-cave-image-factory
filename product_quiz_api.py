@@ -4,12 +4,69 @@ import os
 import re
 import threading
 import time
+import hashlib
+from pathlib import Path
 from uuid import UUID
 from starlette.responses import JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
 
 _LOCK=threading.Lock()
 _BUCKETS={}
+_ASSETS={}
+_PUBLIC_PATH=re.compile(r'(?:loader\.js|manifest\.json|catalogue\.json|(?:config|catalogue)/[a-f0-9]{24}\.json|runtime/[a-f0-9]{24}\.js)\Z')
+
+
+def public_bytes(path):
+    """Read exact published objects only; private R2 never becomes public."""
+    immutable=bool(re.search(r'/[a-f0-9]{24}\.',path))
+    at=time.monotonic()
+    with _LOCK:
+        cached=_ASSETS.get(path)
+        if cached and cached['expires']>at: return cached
+    if path=='loader.js':
+        data=(Path(__file__).parent/'static/product-quiz/loader.js').read_bytes()
+    else:
+        if path.startswith(('config/','runtime/')):
+            manifest=json.loads(public_bytes('manifest.json')['body'])
+            previous=manifest.get('previous') or {}
+            allowed={manifest.get('config'),manifest.get('runtime'),previous.get('config'),previous.get('runtime')}
+            if path not in allowed: raise FileNotFoundError
+        from product_quiz_publish import Assets
+        assets=Assets()
+        try:
+            response=assets.client.get_object(Bucket=assets.bucket,Key='product-quiz/'+path)
+        except Exception as exc:
+            if getattr(exc,'response',{}).get('Error',{}).get('Code') in ('NoSuchKey','404'): raise FileNotFoundError from None
+            raise
+        body=response['Body']
+        try: data=body.read(250001)
+        finally: body.close()
+    if len(data)>250000: raise ValueError('Public quiz asset exceeds its size limit')
+    result={'body':data,'etag':'"'+hashlib.sha256(data).hexdigest()+'"','expires':at+(3600 if immutable else 30)}
+    with _LOCK:
+        if len(_ASSETS)>=64:
+            oldest=min(_ASSETS,key=lambda k:_ASSETS[k]['expires']);_ASSETS.pop(oldest,None)
+        _ASSETS[path]=result
+    return result
+
+
+async def asset(request):
+    path=request.path_params.get('asset','')
+    headers={'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET, HEAD, OPTIONS',
+             'Access-Control-Allow-Headers':'If-None-Match','Access-Control-Expose-Headers':'ETag',
+             'X-Content-Type-Options':'nosniff','Cache-Control':'no-store'}
+    if not _PUBLIC_PATH.fullmatch(path): return Response(status_code=404,headers=headers)
+    if request.method=='OPTIONS': return Response(status_code=204,headers=headers)
+    try:
+        result=await run_in_threadpool(public_bytes,path)
+        headers['ETag']=result['etag']
+        headers['Cache-Control']='public,max-age=31536000,immutable' if re.search(r'/[a-f0-9]{24}\.',path) else 'public,max-age=60,must-revalidate'
+        if request.headers.get('if-none-match')==result['etag']: return Response(status_code=304,headers=headers)
+        headers['Content-Length']=str(len(result['body']))
+        return Response(b'' if request.method=='HEAD' else result['body'],headers=headers,
+                        media_type='text/javascript' if path.endswith('.js') else 'application/json')
+    except FileNotFoundError: return Response(status_code=404,headers=headers)
+    except Exception: return Response(status_code=503,headers=headers)
 
 
 def clean(payload):
@@ -53,4 +110,5 @@ async def ingest(request):
     except Exception: return JSONResponse({'ok':False},status_code=503,headers=headers)
 
 
-ROUTES=(('/api/product-quiz/events',ingest,('POST','OPTIONS')),)
+ROUTES=(('/api/product-quiz/events',ingest,('POST','OPTIONS')),
+        ('/product-quiz/{asset:path}',asset,('GET','HEAD','OPTIONS')))

@@ -31,15 +31,19 @@ def enabled(): return os.getenv('PRODUCT_QUIZ_ENABLED')=='true'
 
 def refresh_mirror(store):
     """Recover missed product events; never calls allocation or Shopify mutations."""
-    from shopify_sync import iter_catalog_pages,graphql_request
+    from shopify_sync import iter_catalog_pages,graphql_request,get_config
     from supabase_backend import _upsert_shopify_product_display_row
     seen=set()
+    config=dict(get_config())
+    config['max_products']=100000
+    last_page=None
     # An empty search includes archived/draft rows, unlike the active-only operational sync.
-    for page in iter_catalog_pages(search='',page_size=5):
+    for page in iter_catalog_pages(search='',page_size=5,config=config):
+        last_page=page
         policies={}
         ids=[p['shopify_product_id'] for p in page['products']]
         for offset in range(0,len(ids),3):
-            data,_=graphql_request(SELLING_QUERY,variables={'ids':ids[offset:offset+3]})
+            data,_=graphql_request(SELLING_QUERY,variables={'ids':ids[offset:offset+3]},config=config)
             policies.update({p['id']:selling_policy(p) for p in data.get('nodes') or [] if p})
         with store.db() as conn:
             with conn.cursor() as cur:
@@ -47,6 +51,8 @@ def refresh_mirror(store):
                     product['quiz_sellable']=policies.get(product['shopify_product_id'])
                     _upsert_shopify_product_display_row(cur,product)
                     seen.add(product['shopify_product_id'])
+    if last_page and last_page.get('has_next_page'):
+        raise ValueError('Catalogue listing did not reach its end; previous ID snapshot preserved')
     # Tombstone deleted products only after a successful complete listing.
     # Do not alter the shared mirror: private exclusions disappear if an ID reappears.
     store.put_state('present_product_ids',sorted(seen))

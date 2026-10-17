@@ -148,6 +148,60 @@ class QuizContracts(unittest.TestCase):
                 self.assertEqual(client.post('/events',headers=headers,content='x'*3000).status_code,413)
                 self.assertEqual(client.post('/events',headers=headers,json={**event,'email':'private@example.test'}).status_code,400)
 
+    def test_render_public_assets_allowlist_cache_cors_and_private_isolation(self):
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from starlette.testclient import TestClient
+        from product_quiz_api import asset
+        data={'body':b'{"version":"published"}','etag':'"public-only"'}
+        with patch('product_quiz_api.public_bytes',return_value=data) as read:
+            with TestClient(Starlette(routes=[Route('/product-quiz/{asset:path}',asset,methods=['GET','HEAD','OPTIONS'])])) as client:
+                for path in ('draft.json','admin','../../private-artwork.psd','config/private.json','catalogue/a.json','runtime/'+('a'*24)+'.js/private'):
+                    self.assertEqual(client.get('/product-quiz/'+path).status_code,404)
+                read.assert_not_called()
+                response=client.get('/product-quiz/manifest.json')
+                self.assertEqual(response.status_code,200);self.assertEqual(response.json(),{'version':'published'})
+                self.assertEqual(response.headers['access-control-allow-origin'],'*')
+                self.assertNotIn('set-cookie',response.headers)
+                self.assertIn('max-age=60',response.headers['cache-control'])
+                self.assertEqual(client.get('/product-quiz/manifest.json',headers={'If-None-Match':'"public-only"'}).status_code,304)
+                self.assertEqual(client.head('/product-quiz/manifest.json').content,b'')
+                response=client.get('/product-quiz/config/'+('a'*24)+'.json')
+                self.assertIn('immutable',response.headers['cache-control'])
+                self.assertEqual(client.post('/product-quiz/manifest.json').status_code,405)
+                self.assertEqual(client.options('/product-quiz/manifest.json').status_code,204)
+
+    def test_render_public_assets_use_private_durable_storage_and_fail_closed(self):
+        from product_quiz_api import public_bytes,_ASSETS
+        from types import SimpleNamespace
+        _ASSETS.clear()
+        path='catalogue/'+('b'*24)+'.json'
+        body=io.BytesIO(b'{"title":"Published quiz"}')
+        client=unittest.mock.Mock()
+        client.get_object.return_value={'Body':body}
+        with patch('product_quiz_publish.Assets',return_value=SimpleNamespace(client=client,bucket='existing-private-assets')):
+            self.assertEqual(public_bytes(path)['body'],b'{"title":"Published quiz"}')
+            client.get_object.assert_called_once_with(Bucket='existing-private-assets',Key='product-quiz/'+path)
+            public_bytes(path);client.get_object.assert_called_once()
+        _ASSETS.clear()
+        client.get_object.return_value={'Body':io.BytesIO(b'x'*250001)}
+        with patch('product_quiz_publish.Assets',return_value=SimpleNamespace(client=client,bucket='existing-private-assets')):
+            with self.assertRaises(ValueError):public_bytes(path)
+        _ASSETS.clear()
+
+    def test_unpublished_config_hash_cannot_be_read(self):
+        from product_quiz_api import public_bytes,_ASSETS
+        from types import SimpleNamespace
+        _ASSETS.clear()
+        manifest={'config':'config/'+('a'*24)+'.json','runtime':'runtime/'+('a'*24)+'.js'}
+        client=unittest.mock.Mock()
+        client.get_object.return_value={'Body':io.BytesIO(json.dumps(manifest).encode())}
+        with patch('product_quiz_publish.Assets',return_value=SimpleNamespace(client=client,bucket='private-assets')):
+            with self.assertRaises(FileNotFoundError):public_bytes('config/'+('b'*24)+'.json')
+            self.assertEqual(client.get_object.call_count,1)
+            self.assertEqual(client.get_object.call_args.kwargs['Key'],'product-quiz/manifest.json')
+        _ASSETS.clear()
+
     def test_snippets_are_minimal_and_manual(self):
         embeds=snippets('https://assets.example.test')
         for code in embeds.values():

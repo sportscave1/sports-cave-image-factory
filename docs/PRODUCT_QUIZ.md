@@ -78,16 +78,19 @@ Inventory quantity alone is never used to determine customer availability.
 
 ## Public delivery and publication
 
-Reuse the existing R2 assets bucket through its public CDN/custom domain; no new
-primary service. Set, in a separately approved release:
+The existing Sports Cave OS Render service serves public quiz assets through an
+exact allowlist at `/product-quiz/`. R2 remains private and stores durable published
+configuration and versioned assets internally. No new provider, public bucket,
+Cloudflare login or service is required. Configure in the authorised release:
 
 - Existing R2 connection variables and `R2_BUCKET_ASSETS`.
-- `PRODUCT_QUIZ_ASSET_BASE`: the public HTTPS bucket base, **without** `/product-quiz`.
+- `PRODUCT_QUIZ_ASSET_BASE`: `https://sports-cave-image-factory.onrender.com`, **without** `/product-quiz`.
 - `PRODUCT_QUIZ_ENABLED=true` on the existing main app and worker only when ready.
 - Optional `PRODUCT_QUIZ_ANALYTICS_URL`: the deployed app's `/api/product-quiz/events`.
 - `PRODUCT_QUIZ_ALLOWED_ORIGINS`: exact HTTPS storefront origins, comma-separated;
   defaults are the bare and www Sports Cave shop domains.
-- Public R2 GET access and CORS for JSON fetches from both storefront origins.
+- The Render public quiz routes provide public GET/HEAD/OPTIONS and CORS. Shared
+  R2 buckets retain their private access configuration.
 
 `product-quiz/loader.js` is the stable deferred loader. Button placement makes no
 configuration/catalogue/runtime request before the customer launches it. Inline
@@ -103,11 +106,16 @@ the pointer will refer to a complete old or new version. Revert switches back to
 the previous configuration; catalogue availability stays independently current.
 Concurrent OS publishers/reconcilers use one Postgres advisory lock.
 
-The public assets/config/catalogue are served from R2 independently of the OS
-process. A temporary OS outage does not require the OS to serve those files.
-For safe edition availability, a catalogue older than two hours fails closed to
-the browse fallback. Shopify itself and R2/CDN must still be reachable. Analytics
-failure never blocks the quiz.
+Published files persist in private R2 and version history persists in the existing
+private database across Render restarts and deployments. Render exposes only the
+loader, manifests and exact hashed quiz files, never drafts, admin routes, customer
+data or private artwork. Server memory caches are bounded; responses carry ETags,
+60-second caching for mutable pointers and one-year caching for immutable assets.
+The OS is required to serve these files. Independent outage resilience is not
+claimed for this version: an OS outage may temporarily prevent the quiz loading.
+Existing embed fallback links and the component's browse fallback remain available.
+A catalogue older than two hours also fails closed. Analytics failure never blocks
+quiz participation.
 
 ## Exact installation snippets and Shopify placement
 
