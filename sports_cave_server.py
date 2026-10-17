@@ -143,6 +143,8 @@ if __name__ == "__main__":
     # Readiness logging is diagnostic only. Never delay port binding on a
     # Shopify Admin API call during a process restart.
     collector_vault.log_collector_vault_readiness(check_shopify=False)
+    from product_quiz_worker import start_app_reconciler
+    start_app_reconciler()
     if os.getenv('RENDER'):
         from crm_thumbnail_cache import warm_renderer
         warm_renderer()

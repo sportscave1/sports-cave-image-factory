@@ -35,3 +35,7 @@ No drafts, private artwork, credentials, customer data or arbitrary storage path
 are exposed. Published configuration survives restarts through existing R2 and
 private database storage. ETags, bounded server caches and public cache directives
 support routine updates and deployment restarts; browse fallbacks handle outages.
+
+The supporting worker has no R2 credentials. Reconciliation therefore runs as an
+opt-in daemon in the existing primary OS process, which already holds the private
+storage access. The worker quiz loop is disabled; no credentials are copied.

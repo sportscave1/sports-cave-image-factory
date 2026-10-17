@@ -35,6 +35,12 @@ class MemoryAssets:
 
 
 class QuizContracts(unittest.TestCase):
+    def test_reconciliation_uses_one_existing_host_without_starting_in_tests(self):
+        from product_quiz_worker import enabled,start_app_reconciler
+        with patch.dict('os.environ',{'PRODUCT_QUIZ_ENABLED':'true','PRODUCT_QUIZ_RECONCILER_HOST':'app'}):
+            self.assertTrue(enabled(role='app'));self.assertFalse(enabled())
+        with patch.dict('os.environ',{'PRODUCT_QUIZ_ENABLED':'false'}):
+            self.assertFalse(start_app_reconciler())
     def test_empty_reconciliation_snapshot_is_not_treated_as_missing(self):
         from product_quiz_store import QuizStore
         store=QuizStore()

@@ -56,7 +56,8 @@ classifications are flagged. The existing PSD mapping store was inspected: it ma
 Shopify IDs to private file identity/path, not authoritative subject/era/style
 fields. No PSD scan, mapping approval gate or private file URL enters the quiz.
 
-When explicitly enabled, the existing worker runs a quiz reconciliation thread:
+When explicitly enabled, the existing OS process runs a quiz reconciliation thread
+using its existing private R2 access:
 it consumes the existing mirror changes every 60 seconds and does a complete,
 paginated, read-only Shopify reconciliation hourly to recover missed events and
 deleted/unpublished products. The complete-list ID snapshot is updated only after
@@ -85,7 +86,9 @@ Cloudflare login or service is required. Configure in the authorised release:
 
 - Existing R2 connection variables and `R2_BUCKET_ASSETS`.
 - `PRODUCT_QUIZ_ASSET_BASE`: `https://sports-cave-image-factory.onrender.com`, **without** `/product-quiz`.
-- `PRODUCT_QUIZ_ENABLED=true` on the existing main app and worker only when ready.
+- `PRODUCT_QUIZ_ENABLED=true` on the existing main app.
+- `PRODUCT_QUIZ_RECONCILER_HOST=app` keeps reconciliation in that process; the
+  supporting worker does not need new credentials or a quiz loop.
 - Optional `PRODUCT_QUIZ_ANALYTICS_URL`: the deployed app's `/api/product-quiz/events`.
 - `PRODUCT_QUIZ_ALLOWED_ORIGINS`: exact HTTPS storefront origins, comma-separated;
   defaults are the bare and www Sports Cave shop domains.

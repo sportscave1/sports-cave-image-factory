@@ -26,7 +26,25 @@ def selling_policy(product):
     return False
 
 
-def enabled(): return os.getenv('PRODUCT_QUIZ_ENABLED')=='true'
+def enabled(*,role='worker'):
+    return os.getenv('PRODUCT_QUIZ_ENABLED')=='true' and os.getenv('PRODUCT_QUIZ_RECONCILER_HOST','app')==role
+
+
+_APP_THREAD=None
+
+
+def start_app_reconciler():
+    """Reuse the existing app's private storage access; never copy credentials."""
+    global _APP_THREAD
+    if not enabled(role='app'): return False
+    if _APP_THREAD is not None and _APP_THREAD.is_alive(): return True
+    import atexit
+    import threading
+    stop=threading.Event()
+    _APP_THREAD=threading.Thread(target=run,args=(stop,'app'),name='product-quiz-catalogue',daemon=True)
+    atexit.register(stop.set)
+    _APP_THREAD.start()
+    return True
 
 
 def refresh_mirror(store):
@@ -73,8 +91,8 @@ def cycle(store,assets,*,reconcile=False):
         raise
 
 
-def run(stop):
-    if not enabled(): return
+def run(stop,role='worker'):
+    if not enabled(role=role): return
     from product_quiz_store import QuizStore
     from product_quiz_publish import Assets
     next_reconcile=0
