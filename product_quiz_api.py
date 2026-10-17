@@ -61,7 +61,9 @@ async def asset(request):
         result=await run_in_threadpool(public_bytes,path)
         headers['ETag']=result['etag']
         headers['Cache-Control']='public,max-age=31536000,immutable' if re.search(r'/[a-f0-9]{24}\.',path) else 'public,max-age=60,must-revalidate'
-        if request.headers.get('if-none-match')==result['etag']: return Response(status_code=304,headers=headers)
+        candidates=request.headers.get('if-none-match','').split(',')
+        if any(tag.strip()=='*' or tag.strip().removeprefix('W/')==result['etag'] for tag in candidates):
+            return Response(status_code=304,headers=headers)
         headers['Content-Length']=str(len(result['body']))
         return Response(b'' if request.method=='HEAD' else result['body'],headers=headers,
                         media_type='text/javascript' if path.endswith('.js') else 'application/json')

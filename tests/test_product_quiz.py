@@ -171,6 +171,8 @@ class QuizContracts(unittest.TestCase):
                 self.assertNotIn('set-cookie',response.headers)
                 self.assertIn('max-age=60',response.headers['cache-control'])
                 self.assertEqual(client.get('/product-quiz/manifest.json',headers={'If-None-Match':'"public-only"'}).status_code,304)
+                self.assertEqual(client.get('/product-quiz/manifest.json',headers={'If-None-Match':'W/"public-only"'}).status_code,304)
+                self.assertEqual(client.get('/product-quiz/manifest.json',headers={'If-None-Match':'"old", W/"public-only"'}).status_code,304)
                 self.assertEqual(client.head('/product-quiz/manifest.json').content,b'')
                 response=client.get('/product-quiz/config/'+('a'*24)+'.json')
                 self.assertIn('immutable',response.headers['cache-control'])
