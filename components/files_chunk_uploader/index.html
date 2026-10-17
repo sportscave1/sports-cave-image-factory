@@ -518,7 +518,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         return payload;
       }
       let verifiedColourWorkflow=null;
-      const workflowLabel=document.createElement('label');workflowLabel.style.cssText='display:block;font:12px system-ui;margin:6px';
+      const workflowLabel=document.createElement('label');workflowLabel.style.cssText='font:12px system-ui;margin:6px';
       workflowLabel.textContent='Verified PSD workflow (administrator): ';
       const workflowInput=document.createElement('input');workflowInput.type='file';workflowInput.accept='.json';workflowInput.title='Independent creation/export manifest, up to 64 KB. Leave empty for ordinary uploads.';
       workflowLabel.append(workflowInput);workflowLabel.hidden=true;document.body.append(workflowLabel);
