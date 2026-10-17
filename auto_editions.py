@@ -263,6 +263,9 @@ def status(manifest=None, approval=None):
     if approval and approval.get('method')=='auto-editions-visual-v1':
         from auto_editions_visual import current
         return 'TEST READY' if current(approval,manifest) else 'NOT CONFIGURED'
+    if approval and approval.get('method')=='product-upload-technical-v1':
+        from product_upload_readiness import current
+        return 'TEST READY' if current(approval,manifest) else 'NOT CONFIGURED'
     if (not approval or approval.get('preparation_hash') != fingerprint(manifest)
             or not approval.get('actor_id') or approval.get('visual_approved') is not True
             or approval.get('pixel_exact') is not True):

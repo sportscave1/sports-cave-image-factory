@@ -30,6 +30,7 @@ from auto_editions_status import ROUTES as AUTO_EDITIONS_STATUS_ROUTES
 from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
 from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
 from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
+from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
 
 
 
@@ -44,6 +45,7 @@ routes = [
         *PRODUCT_QUIZ_ROUTES,
         *AUTO_EDITIONS_BULK_ROUTES,
         *WORKER_HEALTH_ROUTES,
+        *PRODUCT_UPLOAD_ROUTES,
 
         *COLLECTOR_VAULT_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,

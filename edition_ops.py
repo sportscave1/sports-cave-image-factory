@@ -757,6 +757,20 @@ def _write_snapshot(rows, originals=None, meta=None):
 
 
 def _hydrate_from_snapshot_once():
+    # An intake uses the normal product sync. Invalidate its existing snapshot
+    # when visiting/rerunning Edition Ops, without a reload or discarding edits.
+    from product_upload_services import enabled as intake_enabled, catalog_revision
+    if intake_enabled():
+        backend = _configured_supabase_backend()
+        if backend:
+            revision = catalog_revision(backend.connect)
+            if st.session_state.get('product_upload_catalog_revision') != revision:
+                delta = st.session_state.get(EDITOR_KEY) or {}
+                if not (isinstance(delta, dict) and delta.get('edited_rows')) and not _changed_rows(
+                        st.session_state.get(EDITOR_ROWS_KEY) or st.session_state.get(ROWS_KEY) or [],
+                        st.session_state.get(ORIGINAL_ROWS_KEY) or []):
+                    _invalidate_edition_ops_cache()
+                    st.session_state['product_upload_catalog_revision'] = revision
     if st.session_state.get(SNAPSHOT_LOADED_KEY):
         loaded_at = st.session_state.setdefault("edition_ops_snapshot_checked_at", time.monotonic())
         if time.monotonic() - loaded_at < EDITION_OPS_CACHE_TTL_SECONDS:

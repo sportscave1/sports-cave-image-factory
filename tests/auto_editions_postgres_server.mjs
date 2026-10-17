@@ -15,5 +15,5 @@ const server=http.createServer(async(req,res)=>{
   } catch(error){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:error.message}));}
  });
 });
-server.keepAliveTimeout=30000;
+server.keepAliveTimeout=300000; // Interactive loopback integration QA can pause between requests.
 server.listen(0,'127.0.0.1',()=>console.log(server.address().port));

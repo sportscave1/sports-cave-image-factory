@@ -801,94 +801,12 @@ Preserve every other price and product field.
         self.assertEqual(kwargs["metadata"]["status"], "success")
         self.assertTrue(kwargs["event_key"].startswith("product-upload-prompt:"))
 
-    def test_product_uploads_page_loads_without_mutating_widget_key_after_creation(self):
-        fake_st, rendered_prompts, _, _ = render_product_uploads_page_for_test(
-            product_name="",
-            submitted=False,
-        )
 
-        self.assertIn("product-upload-product-name", fake_st.session_state.rendered_widget_keys)
-        self.assertEqual(rendered_prompts[0]["title"], "UPLOAD TO DRAFT")
-        self.assertIn(
-            f"PRODUCT NAME: {app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER}",
-            rendered_prompts[0]["prompt_text"],
-        )
 
-    def test_product_upload_prompt_preview_is_visible_before_submit(self):
-        _, rendered_prompts, render_prompt, record_prompt = render_product_uploads_page_for_test(
-            submitted=False,
-        )
 
-        render_prompt.assert_called_once()
-        record_prompt.assert_not_called()
-        self.assertEqual(len(rendered_prompts), 1)
-        self.assertIn("SOP 07B", rendered_prompts[0]["prompt_text"])
-        self.assertNotIn("SOP 07C", rendered_prompts[0]["prompt_text"])
 
-    def test_update_existing_preview_shows_only_existing_prompt_before_submit(self):
-        _, rendered_prompts, _, record_prompt = render_product_uploads_page_for_test(
-            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
-            submitted=False,
-        )
 
-        record_prompt.assert_not_called()
-        self.assertEqual(rendered_prompts[0]["title"], "Update Existing Product Prompt")
-        self.assertIn("SOP 07C", rendered_prompts[0]["prompt_text"])
-        self.assertNotIn("SOP 07B", rendered_prompts[0]["prompt_text"])
 
-    def test_switching_product_upload_operation_changes_visible_preview(self):
-        _, new_rendered, _, _ = render_product_uploads_page_for_test(
-            upload_type=app.PRODUCT_UPLOAD_NEW_TYPE,
-            product_name="Switch Test",
-        )
-        _, existing_rendered, _, _ = render_product_uploads_page_for_test(
-            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
-            product_name="Switch Test",
-        )
-
-        self.assertEqual(new_rendered[0]["title"], "UPLOAD TO DRAFT")
-        self.assertEqual(existing_rendered[0]["title"], "Update Existing Product Prompt")
-        self.assertIn("SOP 07B", new_rendered[0]["prompt_text"])
-        self.assertIn("SOP 07C", existing_rendered[0]["prompt_text"])
-
-    def test_typing_product_name_updates_preview_before_submit(self):
-        _, rendered_prompts, _, record_prompt = render_product_uploads_page_for_test(
-            product_name="  O'Connor  SÃ£o-Paulo â€” Legends #9  ",
-            submitted=False,
-        )
-
-        record_prompt.assert_not_called()
-        prompt = rendered_prompts[0]["prompt_text"]
-        self.assertIn("PRODUCT NAME: O'Connor  SÃ£o-Paulo â€” Legends #9", prompt)
-        self.assertNotIn(app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER, prompt)
-
-    def test_blank_submission_is_rejected_without_hiding_preview(self):
-        fake_st, rendered_prompts, render_prompt, record_prompt = render_product_uploads_page_for_test(
-            product_name="   ",
-            submitted=True,
-        )
-
-        render_prompt.assert_called_once()
-        record_prompt.assert_not_called()
-        self.assertIn(app.PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE, fake_st.warnings)
-        self.assertIn(
-            f"PRODUCT NAME: {app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER}",
-            rendered_prompts[0]["prompt_text"],
-        )
-
-    def test_valid_submission_records_exact_product_name_from_page(self):
-        _, rendered_prompts, _, record_prompt = render_product_uploads_page_for_test(
-            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
-            product_name="  MÃ¼ller O'Connor â€” 1984 #7  ",
-            submitted=True,
-        )
-
-        self.assertIn("PRODUCT NAME: MÃ¼ller O'Connor â€” 1984 #7", rendered_prompts[0]["prompt_text"])
-        record_prompt.assert_called_once_with(
-            {"id": "user-123", "display_name": "Nathan"},
-            product_name="MÃ¼ller O'Connor â€” 1984 #7",
-            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
-        )
 
     def test_product_upload_prompt_activity_populates_existing_dashboard_columns(self):
         record = app.sports_cave_dashboard.activity_table_record(
@@ -910,38 +828,30 @@ Preserve every other price and product field.
         self.assertEqual(record["Details"], "Update existing product")
         self.assertEqual(record["Result/Status"], "success")
 
-    def test_product_upload_ui_uses_single_submit_selected_prompt_and_no_drive_workflow(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
-        page_source = source[
-            source.index("def render_product_uploads_page():") :
-            source.index("\n\ndef test_google_drive_connection")
-        ]
-        self.assertEqual(app.PRODUCT_UPLOAD_TYPE_OPTIONS, ("New product", "UPLOAD & PUBLISH LIVE", "Update existing product"))
-        self.assertIn('"Upload type"', page_source)
-        self.assertIn("PRODUCT_UPLOAD_TYPE_OPTIONS", page_source)
-        self.assertIn('"Product name"', page_source)
-        self.assertIn('"Submit"', page_source)
-        self.assertIn("PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE", (ROOT / "app.py").read_text(encoding="utf-8"))
-        self.assertNotIn("st.form(", page_source)
-        self.assertNotIn("form_submit_button", page_source)
-        self.assertEqual(page_source.count("render_copyable_prompt("), 1)
-        self.assertIn("config[\"title\"]", page_source)
-        self.assertIn("preview=True", page_source)
-        self.assertIn("PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER", source)
-        after_widget = page_source[page_source.index("product_name_input = st.text_input") :]
-        self.assertNotIn('st.session_state["product-upload-product-name"] =', after_widget)
-        self.assertIn('st.session_state["product-upload-submitted-prompt"]', page_source)
-        self.assertIn("record_product_upload_prompt_generation", page_source)
-        self.assertIn("selecting the exact Dropbox product folder", page_source)
-        self.assertIn("connected Dropbox and Shopify integrations", page_source)
-        self.assertNotIn("shopify-uploads", page_source)
-        self.assertNotIn("Google Drive", page_source)
-        self.assertNotIn("st.file_uploader", page_source)
-        self.assertNotIn("_render_mockup_folder_picker", page_source)
-        self.assertEqual(
-            page_source.count("prompt_transform=lambda prompt: apply_product_upload_prompt_updates("),
-            1,
-        )
+
+    def test_compact_page_mounts_same_origin_intake_without_legacy_fields(self):
+        from unittest.mock import Mock
+        fake=Mock()
+        with patch.object(app,'st',fake),patch.object(app,'get_components_module') as components:
+            app.render_product_uploads_page()
+        markup=fake.markdown.call_args.args[0]
+        self.assertIn('src="/product-uploads"',markup)
+        fake.text_input.assert_not_called()
+        self.assertIn('event.source!==frame.contentWindow',components.return_value.html.call_args.args[0])
+
+    def test_compact_markup_and_saved_prompts_have_the_new_input_contract(self):
+        from product_upload_prompts import build
+        markup=(ROOT/'components/product_uploads/index.html').read_text(encoding='utf-8')
+        self.assertIn('id="return" hidden',markup)
+        self.assertEqual(markup.count('type="text"'),1)
+        self.assertNotIn('maxlength=',markup)
+        for text in ('Find Mockups','Use manual workflow','Shopify product name','How to'):
+            self.assertIn(text,markup)
+        for selected in ('DRAFT','LIVE','UPDATE'):
+            text=build(selected,load=lambda key,default,**kw:default)
+            self.assertNotIn('[ENTER PRODUCT NAME ABOVE]',text)
+            self.assertIn('RETURN TO PRODUCT UPLOADS',text)
+
 
 
 if __name__ == "__main__":

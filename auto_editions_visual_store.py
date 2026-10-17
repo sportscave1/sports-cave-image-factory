@@ -74,7 +74,7 @@ class Visual:
                 WHERE q.status IN ('Blocked','Cloud Ready') AND (%s::text IS NULL OR q.product_gid=%s)
                 AND COALESCE(to_jsonb(q)->'replacement'->>'stage','') NOT IN ('Discovering','Queued','Preparing')
                 AND NOT EXISTS(SELECT 1 FROM auto_edition_layouts l WHERE l.product_gid=q.product_gid AND l.preparation_hash=p.hash
-                    AND l.approval->>'visual_approved'='true')
+                    AND (l.approval->>'visual_approved'='true' OR l.approval->>'method'='product-upload-technical-v1'))
                 AND (v.created_at IS NULL OR v.created_at<now()-interval '24 hours' OR v.detail->>'catalogue_hash'<>%s)
                 ORDER BY v.created_at NULLS FIRST,q.priority DESC,q.updated_at LIMIT 1""",(EVENT,pid,pid,catalogue_hash))
             row=cur.fetchone()

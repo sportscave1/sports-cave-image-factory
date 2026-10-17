@@ -1034,7 +1034,7 @@ def _dropbox_context(*, force=False):
         return dict(context)
 
 
-def _request_user(request):
+def _request_user(request, *, required_page='Files'):
     token = str(request.cookies.get(sc_auth.AUTH_COOKIE_NAME) or "")
     password = sc_auth.DEFAULT_APP_PASSWORD
     extra_secret = str(os.getenv("SPORTS_CAVE_AUTH_SECRET") or "").strip()
@@ -1054,7 +1054,7 @@ def _request_user(request):
             except (TypeError,ValueError): return 1
         reason = ('account_unavailable' if not user else
                   'session_revoked' if str(user.get('id') or '') != str(payload.get('sub') or '') or version(user.get('session_version')) != version(payload.get('sv')) else
-                  'files_permission_denied' if not os_accounts.can_access_page(user,'Files') else '')
+                  'page_permission_denied' if not os_accounts.can_access_page(user,required_page) else '')
         if not reason:
             return user
         logging.getLogger(__name__).warning('FILES_AUTH denied reason=%s',reason)

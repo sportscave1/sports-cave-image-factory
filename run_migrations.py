@@ -69,6 +69,7 @@ WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_pre
 EDITION_MIGRATIONS = ('20261008041452_edition_version_transitions.sql', '20261008045733_edition_version_guard_hardening.sql', '20261008065000_explicit_edition_cursor_override.sql', '20261008090000_edition_admin_cursor_repair.sql')
 REVIEWED_MIGRATION_SHA256 = {
     '20261017001547_auto_editions_technical_completion.sql': '07cad75344b5df4d522a2b161e7093bf109d20eebf8961d477f347dd2cd4c7e3',
+    '20261017010350_product_upload_intakes.sql': 'f64c1637c5d045eb0e8c40a0e36b9dd86cb6f86d4a9d28dd6f08cfde49fa0322',
     '20261016120000_auto_editions_reset_mapping_permissions.sql': '8c9c671e5a2f35b9728fb6d0b5a9b0166a8b43e2250db1e0e18bd4f0bebce6d4',
     '20261016071758_auto_editions_bulk_operations.sql': 'c1c5be8493b9a6bfd5bb650ac21a945b39b0bf282c42cd5f8af467a2de8f1a89',
     '20261008041452_edition_version_transitions.sql': 'b35a3418b5f469e9a9ff00ae510c60c96fffcb854b292dfc4fd3cc8dbf502930',
@@ -138,6 +139,7 @@ DEPLOYMENT_MIGRATIONS = (
     "20261016071758_auto_editions_bulk_operations.sql",
     "20261016120000_auto_editions_reset_mapping_permissions.sql",
     "20261017001547_auto_editions_technical_completion.sql",
+    "20261017010350_product_upload_intakes.sql",
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {

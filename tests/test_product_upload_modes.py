@@ -71,18 +71,14 @@ class ModeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.prompt('MAYBE')
         with self.assertRaises(ValueError): app.get_product_upload_prompt(source_context(),update_existing=True,publication_mode='LIVE')
 
-    def test_live_confirmation_gate_exports_no_prompt_until_confirmed(self):
-        for confirmed in (False,True):
-            fake=ProductUploadFakeStreamlit(upload_type=app.PRODUCT_UPLOAD_LIVE_TYPE,product_name='Approved Product')
-            fake.checkbox=lambda *a,**k:confirmed
-            with patch.object(app,'st',fake),patch.object(app,'current_product_upload_source_metadata',return_value=source_context()),patch.object(app,'log_app_memory'),patch.object(app,'render_copyable_prompt') as render:
-                app.render_product_uploads_page()
-            if not confirmed:
-                render.assert_not_called()
-                self.assertTrue(any('confirm live publication' in w for w in fake.warnings))
-            else:
-                self.assertEqual(render.call_args.args[0],'UPLOAD & PUBLISH LIVE')
-                self.assertIn(modes.LIVE_FINAL,render.call_args.args[1])
+    def test_compact_selected_live_mode_uses_existing_live_finalisation(self):
+        from product_upload_prompts import build
+        live=build('LIVE',load=lambda key,default,**kw:default)
+        draft=build('DRAFT',load=lambda key,default,**kw:default)
+        self.assertIn('SELECTED ACTION: Upload to Live',live)
+        self.assertIn(modes.LIVE_FINAL,live)
+        self.assertNotIn(modes.LIVE_FINAL,draft)
+        self.assertIn(modes.DRAFT_FINAL,draft)
 
 
 if __name__=='__main__': unittest.main()

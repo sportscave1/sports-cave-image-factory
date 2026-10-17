@@ -7547,7 +7547,7 @@ def _safe_existing_product_updates(existing, product, by_handle):
     return updates
 
 
-def _plan_edition_product_incremental_sync(products, existing_rows):
+def _plan_edition_product_incremental_sync(products, existing_rows, *, include_intake_drafts=False):
     indexes = _index_existing_edition_products(existing_rows)
     by_id = indexes["by_id"]
     by_handle = indexes["by_handle"]
@@ -7556,7 +7556,7 @@ def _plan_edition_product_incremental_sync(products, existing_rows):
     actions = []
     seen_products = set()
     for product in products or []:
-        if not _live_edition_product(product):
+        if not _live_edition_product(product) and not (include_intake_drafts and str(product.get('status','')).upper() == 'DRAFT'):
             continue
         candidates = _shopify_product_identity_candidates(product)
         handle = str(product.get("handle") or "").strip()
@@ -8174,13 +8174,17 @@ def upsert_shopify_products_to_edition_products(
     sync_variants=True,
     missing_only=False,
     discovery_event=None,
+    include_intake_drafts=False,
 ):
     """Shared Shopify product -> edition_products upsert path.
 
     Existing rows only receive Shopify identity/display updates. Edition counters
     remain owned by Edition Ops and order allocation.
     """
-    active_draft_products = [product for product in (products or []) if _live_edition_product(product)]
+    if include_intake_drafts and source != 'product_upload_draft':
+        raise ValueError('Draft registration is restricted to explicit Product Uploads intake.')
+    active_draft_products = [product for product in (products or []) if _live_edition_product(product)
+                            or (include_intake_drafts and str(product.get('status','')).upper() == 'DRAFT')]
     summary = {
         "source": source,
         "products_checked": len(active_draft_products),
@@ -8203,7 +8207,8 @@ def upsert_shopify_products_to_edition_products(
             # This transaction contains database work only, never Shopify requests.
             cur.execute("LOCK TABLE edition_products IN SHARE ROW EXCLUSIVE MODE")
             existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
-            actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
+            actions = (_plan_edition_product_incremental_sync(active_draft_products, existing_rows, include_intake_drafts=True)
+                       if include_intake_drafts else _plan_edition_product_incremental_sync(active_draft_products, existing_rows))
             if missing_only:
                 for action in actions:
                     if action.get("action") == "update":

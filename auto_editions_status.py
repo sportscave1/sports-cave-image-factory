@@ -27,6 +27,8 @@ def labels():
     from auto_editions_quality import enabled as quality_enabled
     from auto_editions_v17 import enabled as continuous
     hidden=('Review','Cloud Ready') if quality_enabled() else ('Review','Production Ready') if continuous() else ('Needs Review','Production Ready')
+    from product_upload_services import enabled as intake_enabled
+    if intake_enabled():hidden=tuple(label for label in hidden if label!='Cloud Ready')
     return tuple(label for label in LABELS if label not in hidden)
 
 
@@ -114,6 +116,12 @@ def project(row, *, writable=False, now=None, evidence=False):
         return technical_project(row,valid,bool(valid and row.get('receipts_valid')),writable=writable,now=now)
     automatic=False
     from auto_editions_visual import enabled as visual_enabled,current_identity as visual_current
+    intake_technical=False
+    if row.get('intake_approval') and row.get('intake_manifest'):
+        from product_upload_readiness import current as intake_current
+        if intake_current(row['intake_approval'],row['intake_manifest']):
+            intake_technical=True
+            row=dict(row,approved=True)
     if visual_enabled() and row.get('automatic_approval'):
         automatic=visual_current(row['automatic_approval'],digest,dict(source=source,dimensions=row.get('visual_dimensions'),edition_total=row.get('prepared_total'),colour_evidence=row.get('visual_colour')))
         row=dict(row,approved=row.get('approved') is True or automatic)
@@ -159,7 +167,7 @@ def project(row, *, writable=False, now=None, evidence=False):
     if visual_enabled() and row.get('automatic_approval') and not automatic and valid and state=='Failed':
         state='Needs Review';why='Automatic visual evidence expired or its owner policy changed; recheck required.';actions=['review']
     from auto_editions_quality import enabled as quality_enabled,current_certificate,standards,standard_for
-    if quality_enabled() and digest and valid and state in ('Review','Cloud Ready'):
+    if quality_enabled() and not intake_technical and digest and valid and state in ('Review','Cloud Ready'):
         check=row.get('quality_assessment')
         if check and row.get('quality_fresh') and current_certificate(check,row.get('quality_manifest') or {},standards()):
             state='Production Ready';why='Validated supplier assets for the approved variant scope.';actions=[]
@@ -221,6 +229,9 @@ def batch(connect, ids, *, writable=False, evidence=False):
                    visual_select=", CASE WHEN va.detail IS NULL THEN NULL ELSE jsonb_build_object('status',va.detail->'assessment'->>'status','reason',va.detail->'assessment'->>'reason') END AS visual_assessment,prep.manifest->'dimensions' AS visual_dimensions,prep.manifest->'colour_evidence' AS visual_colour,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.preparation_hash=prep.hash AND l.variant_id='*' AND l.approval->>'method'='auto-editions-visual-v1') AS automatic_approval" if __import__('auto_editions_visual').enabled() and not technical_enabled() else '',
                    visual_join="LEFT JOIN (SELECT DISTINCT ON(preparation_hash) preparation_hash,detail FROM auto_edition_setup_audit WHERE event='automatic_visual_assessment' ORDER BY preparation_hash,id DESC) va ON va.preparation_hash=prep.hash" if __import__('auto_editions_visual').enabled() and not technical_enabled() else '')
     start=time.perf_counter()
+    from product_upload_services import enabled as intake_enabled
+    if intake_enabled():
+        sql=sql.replace(' FROM unnest', ",prep.manifest AS intake_manifest,(SELECT l.approval FROM auto_edition_layouts l WHERE l.product_gid=w.pid AND l.variant_id='*' AND l.preparation_hash=prep.hash AND l.approval->>'method'='product-upload-technical-v1') AS intake_approval FROM unnest",1)
     with connect() as conn,conn.cursor() as cur:
         cur.execute(sql,(ids,));raw=cur.fetchall()
     groups={pid:[] for pid in ids}

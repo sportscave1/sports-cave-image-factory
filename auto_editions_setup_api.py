@@ -118,6 +118,7 @@ async def context(request):
 
 
 async def package(request):
+    intake_ready=False
     acquired=False
     setup=None
     import time
@@ -163,6 +164,10 @@ async def package(request):
                     'Technical verification pending.' if __import__('auto_editions_technical').enabled() else
                     'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
             setup['imported']=digest
+            from product_upload_services import enabled as intake_enabled
+            if ctx.get('automatic') and intake_enabled():
+                from product_upload_readiness import complete
+                intake_ready=await run_in_threadpool(complete,registry.connect,ctx['product_gid'])
             # Optional derived cache only, after durable import/checkpoint. The
             # existing bounded preview pool retains private local file links.
             try:
@@ -192,7 +197,7 @@ async def package(request):
                     __import__('logging').getLogger(__name__).warning('automatic_visual_pending preparation=%s',digest)
                 timings['automatic_visual_seconds']=round(time.monotonic()-visual_started,3)
             timings['total_seconds']=round(time.monotonic()-started,3)
-        response_status='Uploading' if __import__('auto_editions_technical').enabled() else 'Awaiting visual approval'
+        response_status='Cloud Ready' if intake_ready else 'Uploading' if __import__('auto_editions_technical').enabled() else 'Awaiting visual approval'
         if ctx.get('automatic') and (__import__('auto_editions_technical').enabled() or visual_enabled()):
             # Report the durable exact-hash decision, never infer success from a
             # completed comparison call or fabricate a human approval.

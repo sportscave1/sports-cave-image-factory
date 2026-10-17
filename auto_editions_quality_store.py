@@ -52,7 +52,7 @@ class Quality:
                 LEFT JOIN auto_edition_quality_checks c ON c.preparation_hash=p.hash
                 WHERE q.status IN ('Blocked','Cloud Ready') AND
                   NOT EXISTS(SELECT 1 FROM auto_edition_layouts technical WHERE technical.product_gid=q.product_gid
-                    AND technical.preparation_hash=p.hash AND technical.approval->>'method'='auto-editions-technical-v1') AND
+                    AND technical.preparation_hash=p.hash AND technical.approval->>'method' IN ('auto-editions-technical-v1','product-upload-technical-v1')) AND
                   (c.preparation_hash IS NULL OR c.next_check_at<=now() OR c.policy_hash<>%s)
                 ORDER BY c.next_check_at NULLS FIRST,q.updated_at LIMIT 1""", (policy_hash,))
             row = cur.fetchone()
