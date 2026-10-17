@@ -134,7 +134,15 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         validation_pending=label=='Preparing' and row['status']!='Preparing' and (row.get('replacement') or {}).get('stage')!='Preparing'
         category=('Active' if label in ('Preparing','Uploading','Recovering') else 'Queued' if label in ('Queued','Deferred','Connect') else
                   'Needs Review' if label in ('Review','Needs Review') else 'Completed' if label in ('Cloud Ready','Production Ready') else 'Failed')
-        if __import__('auto_editions_technical').enabled() and label=='Uploading' and (row['status']=='Awaiting preparation' or state.get('substage')=='Queued technical verification'):category='Queued'
+        replacement_stage=(row.get('replacement') or {}).get('stage')
+        preparation_owned=row['status']=='Preparing' or replacement_stage=='Preparing'
+        lease_expired=bool(preparation_owned and (not row.get('lease_until') or stamp(row['lease_until'])<=now))
+        if __import__('auto_editions_technical').enabled() and label=='Uploading':
+            if (row['status']=='Awaiting preparation' or state.get('substage')=='Queued technical verification'
+                    or replacement_stage in ('Discovering','Queued')):category='Queued'
+            if lease_expired:
+                category='Failed';label='Failed'
+                state={**state,'reason':'Companion lease expired. Durable worker recovery is pending.'}
         if validation_pending:category='Queued';label='Queued'
         if category=='Queued' and not eligible:category='Failed';label='Needs Repair'
         if category=='Active':counts['active']+=1
@@ -160,7 +168,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
             checkpoint=__import__('auto_editions_status').CHECKPOINTS.get(row.get('latest_checkpoint'),state.get('checkpoint') or 'No checkpoint'),reason=explanation['description'] if category=='Failed' else state.get('reason',''),
             diagnostic=explanation if category=='Failed' or explanation['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','PROFILE_APPROVED','COLOUR_INCOMPATIBLE') else None,
             colour_recovered=bool(row.get('colour_recovered')),colour_affected=bool(row.get('colour_affected')),attempts=row['attempts'],completed=completed,
-            validation_pending=validation_pending,actions=state.get('actions',[]),lease_expired=bool(row.get('lease_until') and stamp(row['lease_until'])<=now and row['status']=='Preparing')))
+            validation_pending=validation_pending,actions=state.get('actions',[]),lease_expired=lease_expired))
         jobs[-1].update(retry_eligible=bool(eligible and row['status'] in ('Blocked','Needs PSD Repair') and not row.get('preparation_hash') and not (row.get('replacement') or {}).get('manual_required')),
             repair_required=row['status']=='Needs PSD Repair' or explanation['manual_repair'])
         if __import__('auto_editions_technical').enabled() and row.get('preparation_hash') and label=='Failed' and 'retry' in state.get('actions',[]):jobs[-1]['retry_eligible']=True
@@ -182,7 +190,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if counts['remaining'] and health_lookup['Companion']['status']=='Offline':overall='Offline'
     starts=[stamp(r.get('claimed_at')) for r in rows if r.get('claimed_at')]
     last_output=stamp(last['created_at']) if last else min(starts) if starts else None
-    stalled=bool(counts['remaining'] and last_output and seconds(last_output,now)>2700)
+    stalled=bool(not pause['paused'] and counts['remaining'] and last_output and seconds(last_output,now)>2700)
     if any(h['status'] in ('Degraded','Offline','Unavailable','Failed','Recovering') for h in subsystem) or counts['unavailable'] or stalled or telemetry_error:
         if overall!='Offline':overall='Degraded'
     if counts['eligible'] and not counts['remaining'] and not counts['completed'] and counts['failed']+counts['repair']:
