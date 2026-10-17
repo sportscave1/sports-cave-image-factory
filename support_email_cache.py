@@ -13,6 +13,7 @@ class DisplayLRU:
     def __init__(self, state, name, *, limit, byte_limit):
         self.data = state.setdefault(name, {"entries": OrderedDict(), "bytes": 0})
         self.limit, self.byte_limit = limit, byte_limit
+        self.pinned = set()
 
     def get(self, key):
         entry = self.data["entries"].get(key)
@@ -28,9 +29,14 @@ class DisplayLRU:
             return False
         self.data["entries"][key] = {"value": value, "size": size}
         self.data["bytes"] += size
-        while len(self.data["entries"]) > self.limit or self.data["bytes"] > self.byte_limit:
-            _, old = self.data["entries"].popitem(last=False)
-            self.data["bytes"] -= old["size"]
+        while len(self.data["entries"]) > max(self.limit, len(self.pinned)) or self.data["bytes"] > self.byte_limit:
+            victim = next((k for k in self.data['entries'] if k not in self.pinned), None)
+            if victim is None:
+                # A viewed conversation must not evict its own earlier messages
+                # and trigger an endless auto-fetch cycle. Retain the byte cap.
+                self.remove(key)
+                return False
+            self.remove(victim)
         return True
 
     def remove(self, key):

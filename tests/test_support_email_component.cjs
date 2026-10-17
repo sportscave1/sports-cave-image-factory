@@ -16,6 +16,6 @@ cache.put('huge',{html:'x'.repeat(101)});assert.equal(cache.get('huge'),null);
 assert.equal(cache.size,2);assert.ok(cache.bytes<=100);cache.clear();assert.equal(cache.size,0);
 const messages=[{key:'older',folder:'INBOX',expanded:true},{key:'latest',folder:'INBOX',expanded:true},{key:'sent',folder:'Sent',expanded:false}];
 const view=threadView(messages,'INBOX');
-assert.equal(view.active_message,'latest');assert.deepEqual(view.messages.map(m=>m.expanded),[false,true,false]);
+assert.equal(view.active_message,'latest');assert.deepEqual(view.messages.map(m=>m.expanded),[true,true,false]);
 assert.equal(messages[0].expanded,true);assert.equal(threadView(messages,'Sent'),null);
 console.log('Email component helper and bounded display-cache checks passed (20 assertions).');

@@ -5,7 +5,7 @@ const source=fs.readFileSync(process.argv[2]||'components/support_email/mail.js'
 let writes=0;
 const scroll={scrollTop:123}, pane={querySelector:()=>scroll,querySelectorAll:()=>[],set innerHTML(value){writes++;}};
 const node={querySelector:()=>scroll,classList:{toggle(){}},scrollTop:0};
-const ctx={readerStamp:require('../components/support_email/mail.js').readerStamp,patchReadFlags(){},model:{configured:true,mailbox:'fixture',view:'mail',folder:'INBOX',threads:[],messages:[],settings:{},roles:{}},
+const ctx={readerStamp:require('../components/support_email/mail.js').readerStamp,bindEmailFrame:require('../components/support_email/mail.js').bindEmailFrame,patchReadFlags(){},model:{configured:true,mailbox:'fixture',view:'mail',folder:'INBOX',threads:[],messages:[],settings:{},roles:{}},
  root:{querySelector(s){return s==='.reading'?pane:s==='.reading button:disabled'?{}:node;},querySelectorAll:()=>[],classList:{remove(){}}},
  readingStamp:'',selectionControlsDisabled:false,listStamp:'',folderStamp:'',toolbarStamp:'',
  busy:false,pending:'',pendingSignal:'',seenSignal:'',signalRetryTimer:null,pendingAction:'',queued:null,localDraft:null,collapsed:false,mobileReading:false,
