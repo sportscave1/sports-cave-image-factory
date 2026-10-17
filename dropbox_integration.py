@@ -510,9 +510,17 @@ def get_file_response(access_token, path):
 
 
 def get_file_metadata(access_token, path):
+    # Dropbox IDs are stable identifiers, not absolute paths. In particular,
+    # normalise_path('id:...') would silently request the unrelated '/id:...'.
+    target = str(path or '').strip()
+    if target.startswith('id:'):
+        if not re.fullmatch(r'id:[A-Za-z0-9_-]+', target):
+            raise ValueError('Invalid Dropbox file or folder ID.')
+    else:
+        target = normalize_dropbox_path(path)
     try:
         metadata = team_space_client(access_token).files_get_metadata(
-            normalize_dropbox_path(path),
+            target,
             include_media_info=False,
             include_deleted=False,
         )
