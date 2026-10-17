@@ -42,7 +42,7 @@ def evidence(record):
         if colour.get('pixels_converted') is not False or not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256'))):
             raise ValueError('Current source colour evidence required.')
         if colour.get('policy'):
-            from auto_editions_colour_policy import resolve
+            from auto_editions_technical import resolve_colour as resolve
             _,active=resolve(m['source'])
             if active!=colour['policy']:raise ValueError('Source colour policy changed.')
     proofs=record.get('proofs') or []
@@ -119,7 +119,8 @@ class ReviewCache:
         if width not in (300,1200):raise ValueError('Fixed review sizes required.')
         metrics={} if metrics is None else metrics;started=time.perf_counter()
         metrics.update(queue_wait_ms=round((started-queued_at)*1000,3) if queued_at else 0,asset_fetch_ms=0,decode_compose_ms=0,persistence_ms=0)
-        m=evidence(record);digest=record['hash'];key=self.key(record,width)
+        from auto_editions_preview_evidence import evidence as preview_evidence,inspect_asset as inspect_preview_asset
+        m=preview_evidence(record);digest=record['hash'];key=self.key(record,width)
         with self.lock:
             if key in self.entries:
                 self.entries.move_to_end(key);metrics['cache']='memory';return self.entries[key]
@@ -154,7 +155,7 @@ class ReviewCache:
                         phase=time.perf_counter()
                         root=Path(folder);r=m['number_region'];profile=None
                         for asset,size in ((m['master'],m['dimensions']),(m['patches']['1'],[r[2]-r[0],r[3]-r[1]])):
-                            p=inspect_asset(root,asset,size,(lambda *a:None) if local_root is not None else fetch,digest,record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
+                            p=inspect_preview_asset(root,asset,size,(lambda *a:None) if local_root is not None else fetch,digest,record['receipts'],(m.get('colour_evidence') or {}).get('icc_sha256'))
                             if profile is not None and p!=profile:raise ValueError('Number ICC profile differs.')
                             profile=p
                         metrics['asset_fetch_ms']=round((time.perf_counter()-phase)*1000,3)
@@ -173,7 +174,9 @@ class ReviewCache:
                                 with patch.resize((max(1,box[2]-box[0]),max(1,box[3]-box[1])),Image.Resampling.LANCZOS) as number:
                                     small.paste(number,(box[0],box[1]))
                             # Convert only the small review to browser sRGB; retain the source profile untouched.
-                            with ImageCms.profileToProfile(small,ImageCms.ImageCmsProfile(io.BytesIO(profile)),ImageCms.createProfile('sRGB'),outputMode='RGB') as display:
+                            # Untagged legacy previews retain their RGB values. No
+                            # ICC is assigned and no readiness evidence is created.
+                            with (ImageCms.profileToProfile(small,ImageCms.ImageCmsProfile(io.BytesIO(profile)),ImageCms.createProfile('sRGB'),outputMode='RGB') if profile else small.copy()) as display:
                                 outputs={}
                                 for target in (1200,300):
                                     with display.copy() as scaled:
@@ -205,7 +208,8 @@ class PreviewBuilds:
         self.lock=threading.Lock();self.pending={};self.pool=ThreadPoolExecutor(max_workers=2,thread_name_prefix='review-preview')
 
     def read(self,record,fetch,width,store,cache_checked=False):
-        evidence(record);key=thumbnails.key(record,width)
+        from auto_editions_preview_evidence import evidence as preview_evidence
+        preview_evidence(record);key=thumbnails.key(record,width)
         with thumbnails.lock:data=thumbnails.entries.get(key)
         if data:return data
         # Both display sizes come from one build. HTTP retries cannot duplicate it.
@@ -371,7 +375,8 @@ def listing(connect,ids,user,cursor=0):
         failure=failures.get(row['product_gid'])
         if failure:reason='Previous approval: '+failure['review_result']+'. '+failure['review_reason']
         public.append(dict(product_gid=row['product_gid'],hash=row['preparation_hash'],status=row['status'],
-                           title=record['product_title'] if record else row['product_gid'],eligible=eligible,reason=reason))
+                           title=record['product_title'] if record else row['product_gid'],eligible=eligible,reason=reason,
+                           preview_note='Legacy preview: colour verification is unavailable.' if record and not record['manifest'].get('colour_evidence') else ''))
     # Do not hold the image lookup lock during manifest/policy validation.
     with snapshot_lock:
         for key in list(snapshots):
@@ -613,7 +618,8 @@ def cached_previews(entries,store,raw=False,prefetch=False):
     response=[];missing={}
     for pid,digest,record in entries:
         try:
-            evidence(record);key=thumbnails.key(record);identity=ae.fingerprint(key)
+            from auto_editions_preview_evidence import evidence as preview_evidence
+            preview_evidence(record);key=thumbnails.key(record);identity=ae.fingerprint(key)
             with thumbnails.lock:data=thumbnails.entries.get(key)
             row=dict(product_gid=pid,hash=digest,jpeg=None);response.append(row)
             if data:row['jpeg']=data if raw else base64.b64encode(data).decode('ascii')

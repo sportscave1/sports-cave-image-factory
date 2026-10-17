@@ -35,7 +35,7 @@ const visibleImages=new IntersectionObserver(entries=>{for(const entry of entrie
 const nearImages=new IntersectionObserver(entries=>{for(const entry of entries){const row=entry.target._row;row.near=entry.isIntersecting;if(entry.isIntersecting)queueImage(row);else cancelSpeculation(row);}},{rootMargin:'0px 0px '+Math.min(600,Math.round(innerHeight*.75))+'px 0px'});
 function summary(){
   const count=rows.filter(r=>r.eligible&&r.previewReady).length;
-  $('message').textContent=errorText||resultText||(rows.length?rows.length+' designs in current batch · '+count+' eligible previews'+(loading?' · loading…':''):'Loading review metadata…');
+  $('message').textContent=errorText||resultText||(rows.length?rows.length+' designs in current batch · '+(window.technicalOnly?rows.filter(r=>r.previewReady).length+' previews loaded':count+' eligible previews')+(loading?' · loading…':''):'Loading review metadata…');
   $('batch-count').textContent=totalRemaining===null?'':'Batch '+(pageIndex+1)+' · '+totalRemaining+' remaining / '+totalAtOpen+' total';
   if(started&&!loading&&!rows.length&&!hasMore&&!errorText)$('message').textContent='No designs need review in this catalogue selection.';
 }
@@ -178,7 +178,9 @@ function append(data){
     label.append(box,document.createTextNode(row.title));caption.append(label);detail.textContent=row.eligible?'Loading preview…':row.reason;
     link.textContent='Review / Repair';link.href='/auto-editions/status?'+new URLSearchParams({product_gid:row.product_gid});link.target='_blank';link.rel='noopener';
     retryPreview.textContent='Retry Preview';retryPreview.hidden=true;retryPreview.onclick=()=>{if(['queued','loading'].includes(row.imageState))return;row.cacheChecked=false;row.previewStarted=0;row.previewPolls=0;row.transientRetries=0;row.warmRetries=0;queueImage(row);};
-    Object.assign(row,{img,box,detail,retryPreview,card});card.append(img,caption,detail,retryPreview,link);fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
+    Object.assign(row,{img,box,detail,retryPreview,card});card.append(img,caption,detail,retryPreview,link);
+    if(row.preview_note){const note=document.createElement('small');note.className='preview-note';note.textContent=row.preview_note;card.append(note);}
+    fragment.append(card);byId.set(row.product_gid,row);rows.push(row);
     if(window.technicalOnly){row.operationText=row.status+' · '+row.reason;detail.textContent=row.operationText;detail.classList.toggle('approving',row.status==='Uploading');link.textContent='Details / Repair';}
   }
   $('grid').append(fragment);applyOperations();for(const row of rows)if(row.imageState==='waiting'&&!row.previewStarted){visibleImages.observe(row.img);nearImages.observe(row.img);}

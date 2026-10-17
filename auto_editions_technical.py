@@ -25,7 +25,7 @@ def enabled():
 def colour_snapshot(connect):
     """One policy read per status/layout batch, never one database read per row."""
     config=None
-    if enabled() and os.getenv('AUTO_EDITIONS_COLOUR_POLICY_BACKEND')=='audit':
+    if enabled():
         from auto_editions_colour_store import configuration
         config=configuration(connect)
     token=_colour_snapshot.set(config)
@@ -172,6 +172,29 @@ def backlog(connect):
 class Technical:
     def __init__(self,connect):self.connect=connect
 
+    def repair_exports(self,pid,actor,request_id):
+        """Explicit failed-only repair; reuse the preserved replacement pipeline.
+
+        Nothing is unlinked. The normal discovery, source, Photoshop, upload and
+        final-generation fences still run before the retained package is replaced.
+        """
+        from auto_editions_store import Preparations
+        with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("""SELECT q.*,t.state AS technical_state,t.reason AS technical_reason
+                FROM auto_edition_onboarding q JOIN auto_edition_technical_checks t
+                ON t.product_gid=q.product_gid AND t.preparation_hash=q.preparation_hash AND t.checkpoint_at=q.updated_at
+                WHERE q.product_gid=%s""",(pid,));row=cur.fetchone()
+        if not row or row['status']!='Blocked' or row['technical_state']!='Failed' or row['priority']<=0:
+            raise ValueError('Only an unsuccessful retained technical preparation can be repaired.')
+        from worker_diagnostics import explain
+        if explain(row['technical_reason'])['code'] not in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','ICC_MISMATCH') and row['technical_reason']!='Embedded ICC profile required.':
+            raise ValueError('This failure requires separate repair evidence.')
+        record=Preparations(self.connect).read(row['preparation_hash'])
+        if not record or record['manifest']['source']!=row['source']:raise ValueError('Repair preparation identity changed.')
+        with colour_snapshot(self.connect):certificate(record)  # Exact existing policy, roles and preservation proofs.
+        from auto_editions_reset import Reset
+        return Reset(self.connect).request(pid,request_id,actor,expected_source=row['source'],expected_checkpoint=(row['preparation_hash'],row['updated_at']))
+
     def seed(self):
         if not enabled():return
         with self.connect() as conn,conn.cursor() as cur:
@@ -207,6 +230,12 @@ class Technical:
             return claimed
 
     def run_one(self,assets,*,pid=None,local_root=None):
+        # The authorised technical rollout reuses the existing approved registry
+        # even if this worker has no separate colour-registry environment flag.
+        with colour_snapshot(self.connect):
+            return self._run_one(assets,pid=pid,local_root=local_root)
+
+    def _run_one(self,assets,*,pid=None,local_root=None):
         self.seed();job=self.claim(pid)
         if not job:return None
         pid=job['product_gid'];digest=job['preparation_hash']
@@ -283,7 +312,8 @@ class Technical:
                 self.terminal(cur,job,'Superseded','Preparation, mapping, reset or queue state changed.');return 'Superseded'
             cur.execute('SELECT * FROM auto_edition_preparations WHERE hash=%s FOR UPDATE',(digest,));fresh=cur.fetchone()
             if not fresh or any(fresh[k]!=original[k] for k in ('manifest','proofs','receipts')):raise ValueError('Preparation evidence changed during verification.')
-            certificate(record)  # Recheck current colour policy inside the fence.
+            with colour_snapshot(self.connect):
+                certificate(record)  # Fresh policy check inside the final fence.
             cur.execute('LOCK TABLE auto_edition_layouts IN SHARE ROW EXCLUSIVE MODE')
             cur.execute('SELECT * FROM auto_edition_layouts WHERE product_gid=%s',(pid,));layouts=cur.fetchall()
             if any(l['preparation_hash']!=digest for l in layouts):raise ValueError('Conflicting retained layout. Use explicit reset/repair; no layout was replaced.')

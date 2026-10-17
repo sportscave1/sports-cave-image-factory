@@ -113,8 +113,9 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
         prior=cur.fetchone()
         if prior:
             if prior['actor_id']!=actor or prior['product_gid']!=pid:raise ValueError('Queue request identity is already used for another selection.')
-            cur.execute('SELECT status,reason FROM auto_edition_onboarding WHERE product_gid=%s',(pid,));row=cur.fetchone()
-            return dict(accepted=True,duplicate=True,product_gid=pid,status='Pending' if row and row['status']=='Awaiting preparation' else row['status'] if row else 'Stage unavailable')
+            cur.execute("SELECT status,reason,to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,));row=cur.fetchone()
+            repairing=row and (row.get('replacement') or {}).get('stage') in ('Discovering','Queued','Preparing')
+            return dict(accepted=True,duplicate=True,product_gid=pid,status='Uploading' if repairing else 'Pending' if row and row['status']=='Awaiting preparation' else row['status'] if row else 'Stage unavailable')
         cur.execute(PRODUCT_SQL+" WHERE COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=%s",(pid,));found=cur.fetchall()
         if len(found)>1:raise ValueError('Product identity is ambiguous. Resolve the duplicate records before queueing.')
         row=found[0] if len(found)==1 else None
@@ -122,8 +123,10 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
             @contextmanager
             def borrowed():yield conn
             from auto_editions_technical import Technical
-            Technical(borrowed).retry(pid,actor)
-            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,technical=True))
+            if repair_confirmed:
+                Technical(borrowed).repair_exports(pid,actor,request_id)
+            else:Technical(borrowed).retry(pid,actor)
+            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,technical=True,repair_exports=repair_confirmed))
             return dict(accepted=True,duplicate=False,product_gid=pid,status='Uploading',request_id=request_id)
         reason=eligibility(row,repair_confirmed)
         if reason:raise ValueError(reason)

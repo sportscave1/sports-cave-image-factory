@@ -77,7 +77,7 @@ class Reset:
                 replacement=excluded.replacement,updated_at=now()""",(pid,json.dumps(marker)))
         return 'Complete'
 
-    def request(self,pid,request_id,actor):
+    def request(self,pid,request_id,actor,*,expected_source=None,expected_checkpoint=None):
         from auto_editions_discovery import enabled
         if not enabled():raise ValueError('Automatic PSD discovery is disabled.')
         if (not psd.product_id({'shopify_product_gid':pid}) or not isinstance(request_id,str)
@@ -106,6 +106,16 @@ class Reset:
                     return {'reset_completed':'Complete','reset_failed':'Failed','reset_queued':'Queued'}.get(prior['event'],'Discovering')
             if row:
                 pending=row.get('replacement') or {}
+                if expected_source is not None and (row.get('source')!=expected_source or not mapping or mapping['dropbox_file_id']!=expected_source['file_id'] or row['status'] not in ('Blocked','Needs PSD Repair') or row['priority']<=0):
+                    raise ValueError('Pinned repair source changed, is active, successful or deliberately deferred.')
+                if expected_source is not None:
+                    if expected_checkpoint is not None and (row.get('preparation_hash'),row.get('updated_at'))!=expected_checkpoint:
+                        raise ValueError('Retained repair generation changed. Refresh before retrying.')
+                    cur.execute('SELECT 1 FROM auto_edition_onboarding WHERE product_gid=%s AND lease_until>now()',(pid,))
+                    if cur.fetchone():raise ValueError('Owned Companion lease must finish before export repair can be queued.')
+                    cur.execute('SELECT state FROM auto_edition_technical_checks WHERE product_gid=%s AND preparation_hash=%s AND checkpoint_at=%s FOR UPDATE',(pid,row['preparation_hash'],row['updated_at']))
+                    technical=cur.fetchone()
+                    if not technical or technical['state']!='Failed':raise ValueError('Technical verification must finish before export repair can be queued.')
                 if pending.get('manual_required'):raise ValueError('Manually Add the PSD before starting preparation again.')
                 if pending.get('id')==request_id:return pending['stage']
                 if row['status']=='Preparing' or pending.get('stage') in BUSY:
@@ -120,6 +130,7 @@ class Reset:
             pending=dict(id=request_id,actor=actor,stage='Discovering',attempts=0,reason='',
                          inventory_lease=str(cursor.get('lease_token') or ''),
                          previous=snapshot(row),mapping_before=_record(mapping) if mapping else None)
+            if expected_source is not None:pending['expected_source']=expected_source
             save(cur,pid,pending)
             cur.execute('UPDATE auto_edition_discovery_cursor SET next_poll_at=now() WHERE id=1')
             Queue.audit(cur,pid,actor,'reset_requested',dict(request_id=request_id,previous=snapshot(row)))
@@ -156,6 +167,8 @@ class Reset:
                 cur.execute('SELECT * FROM auto_edition_onboarding WHERE product_gid=%s FOR UPDATE',(pid,))
                 row=cur.fetchone();pending=(row or {}).get('replacement') or {}
                 if pending.get('id')!=request['pending']['id'] or pending.get('stage')!='Discovering':continue
+                if fresh and pending.get('expected_source') and ae.source_identity(pid,fresh)!=pending['expected_source']:
+                    fresh=None;why='Pinned repair source changed. The retained preparation and mapping were left untouched.'
                 cur.execute('SELECT * FROM product_psd_mappings WHERE shopify_product_gid=%s',(pid,))
                 mapping=cur.fetchone()
                 same_mapping=json.dumps(_record(mapping) if mapping else None,sort_keys=True,default=str)==json.dumps(pending['mapping_before'],sort_keys=True,default=str)
