@@ -1,0 +1,1660 @@
+[
+  {
+    "schema": 1,
+    "group": "designs-canvas-template-only",
+    "profile": {
+      "sha256": "2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e",
+      "description": "sRGB IEC61966-2.1",
+      "name": "IEC 61966-2.1 Default RGB colour space - sRGB"
+    },
+    "icc_base64": "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",
+    "members": [
+      {
+        "source": {
+          "template_id": "designs-canvas",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAALQ",
+          "revision": "0165db12ed0d0f5000000036d367e13",
+          "content_hash": "f17ee2832cb59dfabef79ed78b75d05c1da51251dc2ec44c715b833a8c5ad15a"
+        },
+        "provenance": {
+          "name": "designs-canvas.psd",
+          "sha256": "fb24e209f3fb6013e38cef2a8603728fa7eb30411584745a3779c3b584cd77a0",
+          "purpose": "Pinned original template; proposed standard for future derivatives that retain embedded ICC."
+        }
+      }
+    ],
+    "references": [
+      {
+        "name": "#001-At Last Dale EarnHardt Sr.jpg",
+        "sha256": "b9a72ca8407f59f87a9c47bfa1c1536afe248dea8d8d393c30265cf8af600721",
+        "purpose": "Historical Sports Cave RGB export with embedded sRGB; physical acceptance not verified."
+      }
+    ],
+    "comparisons": [
+      {
+        "name": "template-integrity.json",
+        "sha256": "dded3252d358ff2b4c13c99c67cde8ca78aaa557a2df08b1b83c015796095a97",
+        "purpose": "Byte-level preservation and unchanged merged composite. Owner must review intended appearance."
+      }
+    ],
+    "status": "approved",
+    "print_ready": false,
+    "owner": "Sports Cave owner \u2014 explicit chat approval 2026-10-16",
+    "approved_at": "2026-10-15T22:11:35.390688+00:00",
+    "reviewed_hash": "904bb099537bfeb0a1059a442116ba210fa9f4dd3223122ecf78d2765c064f02",
+    "approval_hash": "2d2e8f3d5520b047efac577098d5080fd69aa1e75000ec05ac6a685375c542b8"
+  },
+  {
+    "schema": 1,
+    "group": "legacy-untagged-rgb8-2835x2004-20261016",
+    "profile": {
+      "sha256": "2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e",
+      "description": "sRGB IEC61966-2.1",
+      "name": "IEC 61966-2.1 Default RGB colour space - sRGB"
+    },
+    "icc_base64": "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",
+    "members": [
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10130210914611",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAT8A",
+          "revision": "0165da1c205e1c1000000036d367e13",
+          "content_hash": "bfa9fa8704cae7f38a098d1a79ea3262ebe38e88bbdb919d5ea1d3fc3b9a781b"
+        },
+        "provenance": {
+          "name": "10130210914611.json",
+          "sha256": "b7b6869e6beab1965ebe1efef46f7443584897b76899a88d85d3611e6d55c2d4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10134728409395",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAVBg",
+          "revision": "0165da1ca86d361000000036d367e13",
+          "content_hash": "b342d42510bafe1bafb54c1f146e3bde5d1988934e8d260b7606971a283fae48"
+        },
+        "provenance": {
+          "name": "10134728409395.json",
+          "sha256": "45ca44fd6532ae00dd91134f767815314299a6a42a8a2f155115aad40f1c4079",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10135792779571",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAVmg",
+          "revision": "0165da1c21c1c5a000000036d367e13",
+          "content_hash": "76a81c104b1edc26ece86ea6138028811a6165a86bf18b44f2d57ad2c707ad1d"
+        },
+        "provenance": {
+          "name": "10135792779571.json",
+          "sha256": "1f28f3f9a236cc5001d972d08cc80f3f707ed687b1cb361ed94bb4954193b61e",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10153140846899",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAT8Q",
+          "revision": "0165da2487f5441000000036d367e13",
+          "content_hash": "3413209f5db3cf0ea15ad323b84b10372343c40d9996dc191ec3d9efd72f86b2"
+        },
+        "provenance": {
+          "name": "10153140846899.json",
+          "sha256": "dff05a78b4678046580dc63f3129b18ad30fd5f4ab92106ed3bf0f4767ffefb6",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10153146777907",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAT8w",
+          "revision": "0165da1c76ab0c3000000036d367e13",
+          "content_hash": "d0fb55bf8f5a8c5e933e88e9c2075abf2564c4e5b46986428fe8f635afc1e53e"
+        },
+        "provenance": {
+          "name": "10153146777907.json",
+          "sha256": "0e547ce43f3943b7cb3fb825be65f994749f99a4125a727ecf11fc6bf057b1b1",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10164993950003",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABLw",
+          "revision": "0165da1c7fe7a77000000036d367e13",
+          "content_hash": "584262b7df62991dc24b8f7ea803000e79f13d9f6dc7ec9a9f500dc5c9cba61b"
+        },
+        "provenance": {
+          "name": "10164993950003.json",
+          "sha256": "eb032a358d1691d695413e71525c727e83996fb1097c111c2cfd9ffaf94dd60b",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10165003845939",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABLg",
+          "revision": "0165da1c79d66bd000000036d367e13",
+          "content_hash": "5daebd6c4ffdfcb2bb28ddb4181252783d5774a3dbaea545e4f03c0075546a5b"
+        },
+        "provenance": {
+          "name": "10165003845939.json",
+          "sha256": "83a949426556410b728c8187998d111840391f54f5687e628c487cd21e39cca4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10360696111411",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAW8g",
+          "revision": "0165da1c7051701000000036d367e13",
+          "content_hash": "f95c0434aa3b96989f02e6629e871ead4e66907fa7a0047bac5d6bdac91d50d0"
+        },
+        "provenance": {
+          "name": "10360696111411.json",
+          "sha256": "2de7e76b1855a153e9fdebe9f18d2735364f6503d74a2689fd55e163c716531f",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10360743133491",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAW9Q",
+          "revision": "0165da1bc93d997000000036d367e13",
+          "content_hash": "4099904cd402ca8abe2f11ac96c1b39753e34915aabe6e3211ed0deb942fcfff"
+        },
+        "provenance": {
+          "name": "10360743133491.json",
+          "sha256": "050067068df9cebab6f6d88938114f584167eadb241e51f48e744b31c7de4975",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10364813574451",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAXsQ",
+          "revision": "0165da1bc1e8784000000036d367e13",
+          "content_hash": "905135a8b7d4761bdcde30eef35a6075e4fe0c776d6df98ca2cae3e905f1c33a"
+        },
+        "provenance": {
+          "name": "10364813574451.json",
+          "sha256": "b0a22c528fa42c7e9d3795c5289aa62c85e9b1f6f93f00e34c603b3a3c8e33fc",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10364823699763",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAXsA",
+          "revision": "0165da1c75c1152000000036d367e13",
+          "content_hash": "605154becb37c58020c14ad07c9dea7baa8207d7c7fabf57c30a55e7a3b7e82f"
+        },
+        "provenance": {
+          "name": "10364823699763.json",
+          "sha256": "6fe229f45bb0577c0a75e3bf22f041b268fe89d80c51cefb54146fc9c9f8def6",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10382559772979",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAZ4A",
+          "revision": "0165da1c1fb115c000000036d367e13",
+          "content_hash": "ab45604e478dc265702ad20cec5cbf655783591387d26e38aa73a33d23823d28"
+        },
+        "provenance": {
+          "name": "10382559772979.json",
+          "sha256": "41f426b3b3d3be2c084fb5e6f6871a663224f50844343c2fc957dbf7a0fb3f0c",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10384532242739",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAaOQ",
+          "revision": "0165da1c20dd5bd000000036d367e13",
+          "content_hash": "d3ec44390d13577ee4bca8a2fd9c547a82b2e2f0022311ee2379e8d3c9a60215"
+        },
+        "provenance": {
+          "name": "10384532242739.json",
+          "sha256": "5562ea2687d6806a06c69d66e527484dcc4fbc91a215edc665838d7c17bea06d",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10386254987571",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAaZQ",
+          "revision": "0165da1bc345559000000036d367e13",
+          "content_hash": "3858c4ff82921ded9548cb1d2787476a4fbf37d4ab551d3f8b5736cce31ddd8b"
+        },
+        "provenance": {
+          "name": "10386254987571.json",
+          "sha256": "7e6d7b8bb008bf6b94ecbb545dc1422782ffa2961bb279eafb7b34f1df1e4e04",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10389202731315",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAawg",
+          "revision": "0165da1c83b4851000000036d367e13",
+          "content_hash": "71455ec57c56ad4b4b12d6d9a105fb45b04bbca1a8dfea70f1b9c9760f0f450a"
+        },
+        "provenance": {
+          "name": "10389202731315.json",
+          "sha256": "3b4488d5bb5626552af63af7ed0d9c92b26dd92c78016e955958d7271edc46ee",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10395348599091",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAbtQ",
+          "revision": "0165da1cb060173000000036d367e13",
+          "content_hash": "45fb01146efef64aac7d2957b1265c00a072761215b664c233b732aa8118b290"
+        },
+        "provenance": {
+          "name": "10395348599091.json",
+          "sha256": "17effdb3e15f3ab15d3c174e787c67f45227a80f29eadd2993e4e8eaa1424e13",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10398720753971",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAb5A",
+          "revision": "0165da1c1d6b916000000036d367e13",
+          "content_hash": "064c49f8e147e95228928ef09366d33d715b95a729497fff9b8e2eb138b89301"
+        },
+        "provenance": {
+          "name": "10398720753971.json",
+          "sha256": "922488f0d39ecdca9414db4a31f4712d6c1f713a9d4858673964be5beb07a432",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10399847252275",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAcIA",
+          "revision": "0165da1caabb898000000036d367e13",
+          "content_hash": "7199a4806ea361f46a8ea4187c89870eb1f1e4de4f05c23b9f11eb49b0a9a7ce"
+        },
+        "provenance": {
+          "name": "10399847252275.json",
+          "sha256": "f88c76fa28deb3f7dd830e1836c93f95fb3d54c7ccee724c6c70bf630bb2d8e4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10399863341363",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAcHw",
+          "revision": "0165da247e2809a000000036d367e13",
+          "content_hash": "e01b5ac5066f1e0fd06f431761c4de9e14481d64675b68607be2dede6564293b"
+        },
+        "provenance": {
+          "name": "10399863341363.json",
+          "sha256": "819feccfdcdde135758a7d581a8810602d7169739c56445220b420c9effe3944",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10405383242035",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAc2A",
+          "revision": "0165a4fb3769dfb000000036d367e13",
+          "content_hash": "7f117295d2005c293b1a098f6c0f1a601a192244cb6d13939bec69fd22b10401"
+        },
+        "provenance": {
+          "name": "10405383242035.json",
+          "sha256": "22e499725f7c55f81e5aff3385adfbe498cd4136777251b9f16d1ac1627bc673",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10405399167283",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAc1w",
+          "revision": "0165da1c16229ca000000036d367e13",
+          "content_hash": "a4aeba07e53dee0d339cdfece26cf5aeb4e4b972845acc39f11f4c0fe2912866"
+        },
+        "provenance": {
+          "name": "10405399167283.json",
+          "sha256": "db6823642ec4e4949fd9680d57918bdf61040fa3aafaa39b6bdcb01ff477fc36",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10417197842739",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdGA",
+          "revision": "0165da1c7a8a68d000000036d367e13",
+          "content_hash": "7be527ac149e38575e9a23bbe7fa62a061a62c7f927449b6e1f0ab007f98c4f5"
+        },
+        "provenance": {
+          "name": "10417197842739.json",
+          "sha256": "f22c4b6be0db9c3deec01d45e34570cc63b8b9f7119c490cd6eb13bbb9f27c23",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10417285398835",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdQA",
+          "revision": "0165da1bca3e345000000036d367e13",
+          "content_hash": "211caa780f1195b266f4de8620fc1051fbdc16182e9d7b0d9c22699d5050915f"
+        },
+        "provenance": {
+          "name": "10417285398835.json",
+          "sha256": "d2ace959924d7c48b333b541f4a0183f8fe49b5c9f2b7caa4b9a0c8cd40f62e3",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10420319355187",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdaQ",
+          "revision": "0165a63f329cec3000000036d367e13",
+          "content_hash": "1b4d593453778a8510ea1860aba120f0c9e077e4bcc0cbeb35dd9c08cf8e2ddc"
+        },
+        "provenance": {
+          "name": "10420319355187.json",
+          "sha256": "888bbdbebb9475054d417987cb484b4d1915612f913b151487617dc580445bb8",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10420350910771",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdaA",
+          "revision": "0165da1c15edaed000000036d367e13",
+          "content_hash": "c5adf7a06ae3ddc7bdd6d24195211013ac9959fac917b431e09752bb88c27d23"
+        },
+        "provenance": {
+          "name": "10420350910771.json",
+          "sha256": "94297e0bc69ece2ee3fb0c7cc87db1880f33ac1bd2df3e78a414a643bd40532b",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10439563378995",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAfpQ",
+          "revision": "0165da24847c87c000000036d367e13",
+          "content_hash": "8bb319956e1c4384b8176840d6d641f883da820f2cf7192991d5927b1676729c"
+        },
+        "provenance": {
+          "name": "10439563378995.json",
+          "sha256": "ac75db1a0bcdeb7ade1377840f155379c55e8eb33ee0615d451e0298d19be2d2",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10441911173427",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAfpA",
+          "revision": "0165da1c78690b8000000036d367e13",
+          "content_hash": "bb39d782bf7b05494682e8922bd36c405bd2eac7be0aef4b1d63fd4035d4a3f7"
+        },
+        "provenance": {
+          "name": "10441911173427.json",
+          "sha256": "9e4ab8ff7d3e2739247940deb0b984eeda0e1360aa25704436afb7f5ff683ff2",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10442006823219",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAgWQ",
+          "revision": "0165da1c7945b17000000036d367e13",
+          "content_hash": "1a127d18d8c52e4c856668143c9275f829b6fbbb7fe5b6c09999bfa236df5158"
+        },
+        "provenance": {
+          "name": "10442006823219.json",
+          "sha256": "3b67586f0776593b1fe02867f4eca41d16f6f2c6c27e4066300e87c87a0da4e5",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10442061873459",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAfog",
+          "revision": "0165da1c2152ad8000000036d367e13",
+          "content_hash": "0e533728dafd67c3c471324d73ecf4af99504421047789088cfa0105dece766f"
+        },
+        "provenance": {
+          "name": "10442061873459.json",
+          "sha256": "8cd56fbfbf4968bd73e3c152e9957fa408846d25c7296cfd37daeee37e170bc6",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10445487341875",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAgVw",
+          "revision": "0165da1c1872803000000036d367e13",
+          "content_hash": "fbb497b77c8e075ac76cd9a42a4c33bfc4a5396ca99e2aa86bd3b11415ccf8a4"
+        },
+        "provenance": {
+          "name": "10445487341875.json",
+          "sha256": "4a96f3842b1e21e2a82f8e42aa266759fc4c1efe51b36f1af3f41c034ef64768",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10449350426931",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAhIw",
+          "revision": "0165da1c81fc9bb000000036d367e13",
+          "content_hash": "8228f3993ccc1a68c5364ad0475eae652c615f64448952edaa415dce04c40f06"
+        },
+        "provenance": {
+          "name": "10449350426931.json",
+          "sha256": "3d8e368b8b5a18748fa158b890bd4ea25885daf18b5ba12ebeae831fe77dccc3",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10449431953715",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAhIg",
+          "revision": "0165da1c7619428000000036d367e13",
+          "content_hash": "e79a366e959b678a0e6a6deac483b0fc448b7ae50b953288c5aa83ccb107b6bd"
+        },
+        "provenance": {
+          "name": "10449431953715.json",
+          "sha256": "1eb02e09eb2aadc68a527c5f55fda2250a68b3e73f00e726c234308c72fb2339",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10452289093939",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAhNw",
+          "revision": "0165da1bc0ae1e5000000036d367e13",
+          "content_hash": "c3a57ec537fc2aa47d19b833489f3e16270839c65b5b22d457f91edfabce8887"
+        },
+        "provenance": {
+          "name": "10452289093939.json",
+          "sha256": "0111ef5251ce0919e2b531c17ef90621ea32cb08f85d36ce53125b8ac8e8a3e1",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10456287052083",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAiAA",
+          "revision": "0165da1bcc593f7000000036d367e13",
+          "content_hash": "fc9fcee5a7b7bf400e822b1e061d0bb86a5a500330b109cbfa939035947254ff"
+        },
+        "provenance": {
+          "name": "10456287052083.json",
+          "sha256": "8241995c7dc8b213841f30d97a5b68edf3f05260fb84dd0d7bcba01e6accde13",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10458702774579",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAi5Q",
+          "revision": "0165da1ca6ed76b000000036d367e13",
+          "content_hash": "ea7d5a7a3334e7bd1f8eb97c47e56663b64194026513b7bb4e8516470d328d59"
+        },
+        "provenance": {
+          "name": "10458702774579.json",
+          "sha256": "0b315904c87ba8ab769d7aa4ab5d9b94b1e81f58e2e3063f1e32ea4b29965724",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10463319228723",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAjrA",
+          "revision": "0165da1cb1561a2000000036d367e13",
+          "content_hash": "209230ad5f5f5030b94c4a596f2c446156d5edae1543b5f7f56a684f9bfbada2"
+        },
+        "provenance": {
+          "name": "10463319228723.json",
+          "sha256": "6e98424a3d2ff1f074f5fa3d462e3fa3e839843766e277cd6782c60939bf0f45",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10463354421555",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAjrQ",
+          "revision": "0165da1bd5b12e3000000036d367e13",
+          "content_hash": "9d5ade4bc3e8eec04f47ba37e8350001bf7cad0ab730e3d886da98c197274f60"
+        },
+        "provenance": {
+          "name": "10463354421555.json",
+          "sha256": "36daf6809f853ec2250b0461d45bb3562127b3bfa99f5818efeda10cb7f00937",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10468403806515",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk_Q",
+          "revision": "0165da1bd5ea6b3000000036d367e13",
+          "content_hash": "1d218a5173e15c0390df084e7c5ecf754bb79917a37e3404b6fc52a61c3221d7"
+        },
+        "provenance": {
+          "name": "10468403806515.json",
+          "sha256": "9d6592ba23c30571168b4b8bc3410ed3bd188abe4d0a151d788effeba93148ab",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10473893855539",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk_A",
+          "revision": "0165da1bc6dcd70000000036d367e13",
+          "content_hash": "fa1e9878bb8c9ffb50f4792e6a0c93e40163988a393cd9b2748b8e5c6b43cf51"
+        },
+        "provenance": {
+          "name": "10473893855539.json",
+          "sha256": "0d6c21a1ecf9c79be5f18645b1106fd51c22bd94452b4eb5b4991ea63214acac",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10473903522099",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk-w",
+          "revision": "0165da1c7de488b000000036d367e13",
+          "content_hash": "7273370fe14b6333a613c79f58f76a31d40e63d4f1cb42041386a3d4e7ecbf25"
+        },
+        "provenance": {
+          "name": "10473903522099.json",
+          "sha256": "0d62f0632fe595fb18fd57384381034fd75db8fb57dcc8d42396e019b936a908",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10473923313971",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk-g",
+          "revision": "0165da1bcfd1d1d000000036d367e13",
+          "content_hash": "c55bb784ea541e69b7c935af5f3e90f2ea860458aac9005a93ed185349cdcd25"
+        },
+        "provenance": {
+          "name": "10473923313971.json",
+          "sha256": "20eef802a34e28479b9f81767cfddbae9ecd8ea5f656378fc8d7955db3eeaa54",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10474824073523",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAldA",
+          "revision": "0165da1c71dec77000000036d367e13",
+          "content_hash": "5471253373a3ee745b421e6bc48f70e77e86aeffc0a077a2b42f8540b9e03ced"
+        },
+        "provenance": {
+          "name": "10474824073523.json",
+          "sha256": "bfa4792a4e312d421e437f7f2ad0ceff9cbcc376b542440e11f4e6a6a74d710a",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10474850189619",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAlcw",
+          "revision": "0165da1c6d2eaf2000000036d367e13",
+          "content_hash": "96469ac03261db132afc95252640fe9f96d77685e6a4be7616dc78f6482a7f32"
+        },
+        "provenance": {
+          "name": "10474850189619.json",
+          "sha256": "866ab21855e51ebac220e7dc65b995daec3117e5ff5e87895926c4b3dc69cc7e",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10479446655283",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAlyQ",
+          "revision": "0165da247bf6625000000036d367e13",
+          "content_hash": "278ea584549b974ead58558973346e89dbf16d243207bf10a661c2757ad148ea"
+        },
+        "provenance": {
+          "name": "10479446655283.json",
+          "sha256": "486538f1dbacf7b8dea74a8253f532e730446e14be22f3b2ea7224c19cd6ba3a",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10479492464947",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAl1g",
+          "revision": "0165da1bd52c677000000036d367e13",
+          "content_hash": "63589f442011b6ad8740608540fdd261ce53a7d52419a41a9f3167b2789183e4"
+        },
+        "provenance": {
+          "name": "10479492464947.json",
+          "sha256": "9771e0480c2154808947f77bc3dc4a892c94bee5c9b4b2ac84912e8af77e976e",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15395937124659",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAl_g",
+          "revision": "0165da1c7297786000000036d367e13",
+          "content_hash": "4ac37f1230e260deb98891783c835cb2aee8f13baa40b0781da81409f49a9f21"
+        },
+        "provenance": {
+          "name": "15395937124659.json",
+          "sha256": "72fcddba1cf04fea47e42acb215a4402dfb46a3eb4f24d387cddc4cba85d882b",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15395961241907",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAoeg",
+          "revision": "0165da1c0969bc0000000036d367e13",
+          "content_hash": "cc7b6cd96b0d7cc40abdeaf277496841d959cf6c9d380c86b8f28115a0092f8f"
+        },
+        "provenance": {
+          "name": "15395961241907.json",
+          "sha256": "eab378ca87e0cc42c6aa9ea07d4105018afaab88f8e8c7595b16e01d8e9d5399",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15396968628531",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAn_A",
+          "revision": "0165da1c1dcebef000000036d367e13",
+          "content_hash": "2e5f729e261ecdbfd71d35c5aa023cdc9615ff2d864e0868a6bff604cb2e4477"
+        },
+        "provenance": {
+          "name": "15396968628531.json",
+          "sha256": "f6df280464044226cf39c97342038747438fd5721f4a1f38ddbb58c770af23ee",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15398217515315",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAquA",
+          "revision": "0165da248297cdb000000036d367e13",
+          "content_hash": "799eb15cb309d71f12ca54068fe1055a340fdd18263a115d35328efec49c6f43"
+        },
+        "provenance": {
+          "name": "15398217515315.json",
+          "sha256": "3ae2cc5e7967bd03df61e24caa645c311f74a13fd7eb92800051b65ecf40b90a",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8119085269299",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABOA",
+          "revision": "0165da1caf4cc29000000036d367e13",
+          "content_hash": "68ba1ca20b63f6c913880435ebcfa981a443f2d7db8cb7d5f17469e6f9118df2"
+        },
+        "provenance": {
+          "name": "8119085269299.json",
+          "sha256": "52ec18dceb0b5a6239395f99f3d5b6ac4622a51d4abf415b94dcdcd3e692011c",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8545323057459",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAY4w",
+          "revision": "0165da1c1a268eb000000036d367e13",
+          "content_hash": "eaabd4e4008f434072552e86be3ce7888a23499a2931a8e34bd33814a4dfb9d5"
+        },
+        "provenance": {
+          "name": "8545323057459.json",
+          "sha256": "ff126d5d431ec6275fba963ff878699318eee52cd5088136d5433969ab687c41",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8595358875955",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABIg",
+          "revision": "0165da1bc888255000000036d367e13",
+          "content_hash": "1d3bb2d3c03b20a24937d9d81869eb1e2156c5fb1b0871f4fcd0c6a3784bbe7c"
+        },
+        "provenance": {
+          "name": "8595358875955.json",
+          "sha256": "dba60915671eef0f3eff156811ddad61d3d9e1e49040674ce5c04623a2094193",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8730355564851",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABHQ",
+          "revision": "0165da2481f8543000000036d367e13",
+          "content_hash": "7783153af61ebe3b8bad03c63960b4b74f6ea48337e67e95c2e525b8d9c551f5"
+        },
+        "provenance": {
+          "name": "8730355564851.json",
+          "sha256": "ed3f7a01694478ec3d8a9ee20cf4e367037645a8ad547612955ee4779d9ddfa4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8910113440051",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABGw",
+          "revision": "0165da1c231fe8b000000036d367e13",
+          "content_hash": "d640f5b5438d027577ba9b05aa84abb83626ca8f74f9e044b8033d7dd112e9bd"
+        },
+        "provenance": {
+          "name": "8910113440051.json",
+          "sha256": "99ac4d79aa8dfa9e4951d0ae475c142e1a866a1315319c2ca7ce00b6c7cc0d9d",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/9319178993971",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAY4A",
+          "revision": "0165da1bd23d8ef000000036d367e13",
+          "content_hash": "2ab232da1f1d4d4dab0c5a0fbd5990e068c5419bbb2fef9162bbac55fc789f0c"
+        },
+        "provenance": {
+          "name": "9319178993971.json",
+          "sha256": "368f18cfc262e1b38de13444b510fa3dc01e67d8fe0d47959bdd963e2c0ca589",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/9743477637427",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAV8g",
+          "revision": "0165da1c0dec9d7000000036d367e13",
+          "content_hash": "ca814424bcf96e7fd2f525ce0611f4d25a97168bd808cca0424492e34312852a"
+        },
+        "provenance": {
+          "name": "9743477637427.json",
+          "sha256": "c76a488ab7b7f0af761141dbc02718f6fe92e812d6cfa7303ea62e8aeaea6998",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      }
+    ],
+    "references": [
+      {
+        "name": "#001-At Last Dale EarnHardt Sr.jpg",
+        "sha256": "b9a72ca8407f59f87a9c47bfa1c1536afe248dea8d8d393c30265cf8af600721",
+        "purpose": "Historical Sports Cave sRGB export practice; physical print acceptance not verified."
+      },
+      {
+        "name": "template-policy-APPROVED.json",
+        "sha256": "277dbc33b2b52258c31f168a45384234648b1ecf6c714f3558e3632332493e90",
+        "purpose": "Owner approved sRGB for the new template only; this does not approve legacy colour intent."
+      }
+    ],
+    "comparisons": [
+      {
+        "name": "10130210914611-original-UNTAGGED.png",
+        "sha256": "137478784b426cbce2004b4e73424e178407f1d8d54ed6ac321fcb5ae93281ff",
+        "purpose": "Representative view: untagged RGB values versus proposed sRGB interpretation. No source pixels converted; not proof of historical colour intent."
+      },
+      {
+        "name": "10130210914611-PROPOSED-sRGB.png",
+        "sha256": "8b4b2ce18204aa3d329a8d0dc55239224a768d042c29763397e6f0941db37ac7",
+        "purpose": "Representative view: untagged RGB values versus proposed sRGB interpretation. No source pixels converted; not proof of historical colour intent."
+      },
+      {
+        "name": "10130210914611-comparison-evidence.json",
+        "sha256": "779f50d7e437b945b85b800363a3c2c99ba7ec87fdd425ddef4dcd9861cfcad0",
+        "purpose": "Preview interpretation and source identity evidence."
+      },
+      {
+        "name": "10134728409395-original-UNTAGGED.png",
+        "sha256": "cdb66ee6918370eadfeb5034189c5a24466a753abcfa33ff47c175fbdff17f88",
+        "purpose": "Representative view: untagged RGB values versus proposed sRGB interpretation. No source pixels converted; not proof of historical colour intent."
+      },
+      {
+        "name": "10134728409395-PROPOSED-sRGB.png",
+        "sha256": "1c53bc9950c0c5f1f087df81a8f1c63073b010561ead4c8ccec1cd519deb288a",
+        "purpose": "Representative view: untagged RGB values versus proposed sRGB interpretation. No source pixels converted; not proof of historical colour intent."
+      },
+      {
+        "name": "10134728409395-comparison-evidence.json",
+        "sha256": "5d975fa5b9655da9104fb08241a8d8627cab6b489cadfabcd1627b70c37d046a",
+        "purpose": "Preview interpretation and source identity evidence."
+      }
+    ],
+    "status": "approved",
+    "print_ready": false,
+    "owner": "Sports Cave owner \u2014 explicit chat approval",
+    "approved_at": "2026-10-15T22:36:21.602751+00:00",
+    "reviewed_hash": "5112d5325f203a42e1cbd88068208b533d653dee1cafcc1875d15122c9926749",
+    "approval_hash": "bad6824badae5897f12c4ddb9510cfe4ba025e9583b6af1bd10d3a79e0975163"
+  },
+  {
+    "schema": 2,
+    "group": "legacy-rgb8-verified-workflow-default",
+    "profile": {
+      "sha256": "2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e",
+      "description": "sRGB IEC61966-2.1",
+      "name": "IEC 61966-2.1 Default RGB colour space - sRGB"
+    },
+    "icc_base64": "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",
+    "members": [
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10130210914611",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAT8A",
+          "revision": "0165da1c205e1c1000000036d367e13",
+          "content_hash": "bfa9fa8704cae7f38a098d1a79ea3262ebe38e88bbdb919d5ea1d3fc3b9a781b"
+        },
+        "provenance": {
+          "name": "10130210914611.json",
+          "sha256": "b7b6869e6beab1965ebe1efef46f7443584897b76899a88d85d3611e6d55c2d4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10134728409395",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAVBg",
+          "revision": "0165da1ca86d361000000036d367e13",
+          "content_hash": "b342d42510bafe1bafb54c1f146e3bde5d1988934e8d260b7606971a283fae48"
+        },
+        "provenance": {
+          "name": "10134728409395.json",
+          "sha256": "45ca44fd6532ae00dd91134f767815314299a6a42a8a2f155115aad40f1c4079",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10135792779571",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAVmg",
+          "revision": "0165da1c21c1c5a000000036d367e13",
+          "content_hash": "76a81c104b1edc26ece86ea6138028811a6165a86bf18b44f2d57ad2c707ad1d"
+        },
+        "provenance": {
+          "name": "10135792779571.json",
+          "sha256": "1f28f3f9a236cc5001d972d08cc80f3f707ed687b1cb361ed94bb4954193b61e",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10153140846899",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAT8Q",
+          "revision": "0165da2487f5441000000036d367e13",
+          "content_hash": "3413209f5db3cf0ea15ad323b84b10372343c40d9996dc191ec3d9efd72f86b2"
+        },
+        "provenance": {
+          "name": "10153140846899.json",
+          "sha256": "dff05a78b4678046580dc63f3129b18ad30fd5f4ab92106ed3bf0f4767ffefb6",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10153146777907",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAT8w",
+          "revision": "0165da1c76ab0c3000000036d367e13",
+          "content_hash": "d0fb55bf8f5a8c5e933e88e9c2075abf2564c4e5b46986428fe8f635afc1e53e"
+        },
+        "provenance": {
+          "name": "10153146777907.json",
+          "sha256": "0e547ce43f3943b7cb3fb825be65f994749f99a4125a727ecf11fc6bf057b1b1",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10164993950003",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABLw",
+          "revision": "0165da1c7fe7a77000000036d367e13",
+          "content_hash": "584262b7df62991dc24b8f7ea803000e79f13d9f6dc7ec9a9f500dc5c9cba61b"
+        },
+        "provenance": {
+          "name": "10164993950003.json",
+          "sha256": "eb032a358d1691d695413e71525c727e83996fb1097c111c2cfd9ffaf94dd60b",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10165003845939",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABLg",
+          "revision": "0165da1c79d66bd000000036d367e13",
+          "content_hash": "5daebd6c4ffdfcb2bb28ddb4181252783d5774a3dbaea545e4f03c0075546a5b"
+        },
+        "provenance": {
+          "name": "10165003845939.json",
+          "sha256": "83a949426556410b728c8187998d111840391f54f5687e628c487cd21e39cca4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10360696111411",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAW8g",
+          "revision": "0165da1c7051701000000036d367e13",
+          "content_hash": "f95c0434aa3b96989f02e6629e871ead4e66907fa7a0047bac5d6bdac91d50d0"
+        },
+        "provenance": {
+          "name": "10360696111411.json",
+          "sha256": "2de7e76b1855a153e9fdebe9f18d2735364f6503d74a2689fd55e163c716531f",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10360743133491",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAW9Q",
+          "revision": "0165da1bc93d997000000036d367e13",
+          "content_hash": "4099904cd402ca8abe2f11ac96c1b39753e34915aabe6e3211ed0deb942fcfff"
+        },
+        "provenance": {
+          "name": "10360743133491.json",
+          "sha256": "050067068df9cebab6f6d88938114f584167eadb241e51f48e744b31c7de4975",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10364813574451",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAXsQ",
+          "revision": "0165da1bc1e8784000000036d367e13",
+          "content_hash": "905135a8b7d4761bdcde30eef35a6075e4fe0c776d6df98ca2cae3e905f1c33a"
+        },
+        "provenance": {
+          "name": "10364813574451.json",
+          "sha256": "b0a22c528fa42c7e9d3795c5289aa62c85e9b1f6f93f00e34c603b3a3c8e33fc",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10364823699763",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAXsA",
+          "revision": "0165da1c75c1152000000036d367e13",
+          "content_hash": "605154becb37c58020c14ad07c9dea7baa8207d7c7fabf57c30a55e7a3b7e82f"
+        },
+        "provenance": {
+          "name": "10364823699763.json",
+          "sha256": "6fe229f45bb0577c0a75e3bf22f041b268fe89d80c51cefb54146fc9c9f8def6",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10382559772979",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAZ4A",
+          "revision": "0165da1c1fb115c000000036d367e13",
+          "content_hash": "ab45604e478dc265702ad20cec5cbf655783591387d26e38aa73a33d23823d28"
+        },
+        "provenance": {
+          "name": "10382559772979.json",
+          "sha256": "41f426b3b3d3be2c084fb5e6f6871a663224f50844343c2fc957dbf7a0fb3f0c",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10384532242739",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAaOQ",
+          "revision": "0165da1c20dd5bd000000036d367e13",
+          "content_hash": "d3ec44390d13577ee4bca8a2fd9c547a82b2e2f0022311ee2379e8d3c9a60215"
+        },
+        "provenance": {
+          "name": "10384532242739.json",
+          "sha256": "5562ea2687d6806a06c69d66e527484dcc4fbc91a215edc665838d7c17bea06d",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10386254987571",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAaZQ",
+          "revision": "0165da1bc345559000000036d367e13",
+          "content_hash": "3858c4ff82921ded9548cb1d2787476a4fbf37d4ab551d3f8b5736cce31ddd8b"
+        },
+        "provenance": {
+          "name": "10386254987571.json",
+          "sha256": "7e6d7b8bb008bf6b94ecbb545dc1422782ffa2961bb279eafb7b34f1df1e4e04",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10389202731315",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAawg",
+          "revision": "0165da1c83b4851000000036d367e13",
+          "content_hash": "71455ec57c56ad4b4b12d6d9a105fb45b04bbca1a8dfea70f1b9c9760f0f450a"
+        },
+        "provenance": {
+          "name": "10389202731315.json",
+          "sha256": "3b4488d5bb5626552af63af7ed0d9c92b26dd92c78016e955958d7271edc46ee",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10395348599091",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAbtQ",
+          "revision": "0165da1cb060173000000036d367e13",
+          "content_hash": "45fb01146efef64aac7d2957b1265c00a072761215b664c233b732aa8118b290"
+        },
+        "provenance": {
+          "name": "10395348599091.json",
+          "sha256": "17effdb3e15f3ab15d3c174e787c67f45227a80f29eadd2993e4e8eaa1424e13",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10398720753971",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAb5A",
+          "revision": "0165da1c1d6b916000000036d367e13",
+          "content_hash": "064c49f8e147e95228928ef09366d33d715b95a729497fff9b8e2eb138b89301"
+        },
+        "provenance": {
+          "name": "10398720753971.json",
+          "sha256": "922488f0d39ecdca9414db4a31f4712d6c1f713a9d4858673964be5beb07a432",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10399847252275",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAcIA",
+          "revision": "0165da1caabb898000000036d367e13",
+          "content_hash": "7199a4806ea361f46a8ea4187c89870eb1f1e4de4f05c23b9f11eb49b0a9a7ce"
+        },
+        "provenance": {
+          "name": "10399847252275.json",
+          "sha256": "f88c76fa28deb3f7dd830e1836c93f95fb3d54c7ccee724c6c70bf630bb2d8e4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10399863341363",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAcHw",
+          "revision": "0165da247e2809a000000036d367e13",
+          "content_hash": "e01b5ac5066f1e0fd06f431761c4de9e14481d64675b68607be2dede6564293b"
+        },
+        "provenance": {
+          "name": "10399863341363.json",
+          "sha256": "819feccfdcdde135758a7d581a8810602d7169739c56445220b420c9effe3944",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10405383242035",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAc2A",
+          "revision": "0165a4fb3769dfb000000036d367e13",
+          "content_hash": "7f117295d2005c293b1a098f6c0f1a601a192244cb6d13939bec69fd22b10401"
+        },
+        "provenance": {
+          "name": "10405383242035.json",
+          "sha256": "22e499725f7c55f81e5aff3385adfbe498cd4136777251b9f16d1ac1627bc673",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10405399167283",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAc1w",
+          "revision": "0165da1c16229ca000000036d367e13",
+          "content_hash": "a4aeba07e53dee0d339cdfece26cf5aeb4e4b972845acc39f11f4c0fe2912866"
+        },
+        "provenance": {
+          "name": "10405399167283.json",
+          "sha256": "db6823642ec4e4949fd9680d57918bdf61040fa3aafaa39b6bdcb01ff477fc36",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10417197842739",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdGA",
+          "revision": "0165da1c7a8a68d000000036d367e13",
+          "content_hash": "7be527ac149e38575e9a23bbe7fa62a061a62c7f927449b6e1f0ab007f98c4f5"
+        },
+        "provenance": {
+          "name": "10417197842739.json",
+          "sha256": "f22c4b6be0db9c3deec01d45e34570cc63b8b9f7119c490cd6eb13bbb9f27c23",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10417285398835",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdQA",
+          "revision": "0165da1bca3e345000000036d367e13",
+          "content_hash": "211caa780f1195b266f4de8620fc1051fbdc16182e9d7b0d9c22699d5050915f"
+        },
+        "provenance": {
+          "name": "10417285398835.json",
+          "sha256": "d2ace959924d7c48b333b541f4a0183f8fe49b5c9f2b7caa4b9a0c8cd40f62e3",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10420319355187",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdaQ",
+          "revision": "0165a63f329cec3000000036d367e13",
+          "content_hash": "1b4d593453778a8510ea1860aba120f0c9e077e4bcc0cbeb35dd9c08cf8e2ddc"
+        },
+        "provenance": {
+          "name": "10420319355187.json",
+          "sha256": "888bbdbebb9475054d417987cb484b4d1915612f913b151487617dc580445bb8",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10420350910771",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAdaA",
+          "revision": "0165da1c15edaed000000036d367e13",
+          "content_hash": "c5adf7a06ae3ddc7bdd6d24195211013ac9959fac917b431e09752bb88c27d23"
+        },
+        "provenance": {
+          "name": "10420350910771.json",
+          "sha256": "94297e0bc69ece2ee3fb0c7cc87db1880f33ac1bd2df3e78a414a643bd40532b",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10439563378995",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAfpQ",
+          "revision": "0165da24847c87c000000036d367e13",
+          "content_hash": "8bb319956e1c4384b8176840d6d641f883da820f2cf7192991d5927b1676729c"
+        },
+        "provenance": {
+          "name": "10439563378995.json",
+          "sha256": "ac75db1a0bcdeb7ade1377840f155379c55e8eb33ee0615d451e0298d19be2d2",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10441911173427",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAfpA",
+          "revision": "0165da1c78690b8000000036d367e13",
+          "content_hash": "bb39d782bf7b05494682e8922bd36c405bd2eac7be0aef4b1d63fd4035d4a3f7"
+        },
+        "provenance": {
+          "name": "10441911173427.json",
+          "sha256": "9e4ab8ff7d3e2739247940deb0b984eeda0e1360aa25704436afb7f5ff683ff2",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10442006823219",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAgWQ",
+          "revision": "0165da1c7945b17000000036d367e13",
+          "content_hash": "1a127d18d8c52e4c856668143c9275f829b6fbbb7fe5b6c09999bfa236df5158"
+        },
+        "provenance": {
+          "name": "10442006823219.json",
+          "sha256": "3b67586f0776593b1fe02867f4eca41d16f6f2c6c27e4066300e87c87a0da4e5",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10442061873459",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAfog",
+          "revision": "0165da1c2152ad8000000036d367e13",
+          "content_hash": "0e533728dafd67c3c471324d73ecf4af99504421047789088cfa0105dece766f"
+        },
+        "provenance": {
+          "name": "10442061873459.json",
+          "sha256": "8cd56fbfbf4968bd73e3c152e9957fa408846d25c7296cfd37daeee37e170bc6",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10445487341875",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAgVw",
+          "revision": "0165da1c1872803000000036d367e13",
+          "content_hash": "fbb497b77c8e075ac76cd9a42a4c33bfc4a5396ca99e2aa86bd3b11415ccf8a4"
+        },
+        "provenance": {
+          "name": "10445487341875.json",
+          "sha256": "4a96f3842b1e21e2a82f8e42aa266759fc4c1efe51b36f1af3f41c034ef64768",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10449350426931",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAhIw",
+          "revision": "0165da1c81fc9bb000000036d367e13",
+          "content_hash": "8228f3993ccc1a68c5364ad0475eae652c615f64448952edaa415dce04c40f06"
+        },
+        "provenance": {
+          "name": "10449350426931.json",
+          "sha256": "3d8e368b8b5a18748fa158b890bd4ea25885daf18b5ba12ebeae831fe77dccc3",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10449431953715",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAhIg",
+          "revision": "0165da1c7619428000000036d367e13",
+          "content_hash": "e79a366e959b678a0e6a6deac483b0fc448b7ae50b953288c5aa83ccb107b6bd"
+        },
+        "provenance": {
+          "name": "10449431953715.json",
+          "sha256": "1eb02e09eb2aadc68a527c5f55fda2250a68b3e73f00e726c234308c72fb2339",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10452289093939",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAhNw",
+          "revision": "0165da1bc0ae1e5000000036d367e13",
+          "content_hash": "c3a57ec537fc2aa47d19b833489f3e16270839c65b5b22d457f91edfabce8887"
+        },
+        "provenance": {
+          "name": "10452289093939.json",
+          "sha256": "0111ef5251ce0919e2b531c17ef90621ea32cb08f85d36ce53125b8ac8e8a3e1",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10456287052083",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAiAA",
+          "revision": "0165da1bcc593f7000000036d367e13",
+          "content_hash": "fc9fcee5a7b7bf400e822b1e061d0bb86a5a500330b109cbfa939035947254ff"
+        },
+        "provenance": {
+          "name": "10456287052083.json",
+          "sha256": "8241995c7dc8b213841f30d97a5b68edf3f05260fb84dd0d7bcba01e6accde13",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10458702774579",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAi5Q",
+          "revision": "0165da1ca6ed76b000000036d367e13",
+          "content_hash": "ea7d5a7a3334e7bd1f8eb97c47e56663b64194026513b7bb4e8516470d328d59"
+        },
+        "provenance": {
+          "name": "10458702774579.json",
+          "sha256": "0b315904c87ba8ab769d7aa4ab5d9b94b1e81f58e2e3063f1e32ea4b29965724",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10463319228723",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAjrA",
+          "revision": "0165da1cb1561a2000000036d367e13",
+          "content_hash": "209230ad5f5f5030b94c4a596f2c446156d5edae1543b5f7f56a684f9bfbada2"
+        },
+        "provenance": {
+          "name": "10463319228723.json",
+          "sha256": "6e98424a3d2ff1f074f5fa3d462e3fa3e839843766e277cd6782c60939bf0f45",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10463354421555",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAjrQ",
+          "revision": "0165da1bd5b12e3000000036d367e13",
+          "content_hash": "9d5ade4bc3e8eec04f47ba37e8350001bf7cad0ab730e3d886da98c197274f60"
+        },
+        "provenance": {
+          "name": "10463354421555.json",
+          "sha256": "36daf6809f853ec2250b0461d45bb3562127b3bfa99f5818efeda10cb7f00937",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10468403806515",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk_Q",
+          "revision": "0165da1bd5ea6b3000000036d367e13",
+          "content_hash": "1d218a5173e15c0390df084e7c5ecf754bb79917a37e3404b6fc52a61c3221d7"
+        },
+        "provenance": {
+          "name": "10468403806515.json",
+          "sha256": "9d6592ba23c30571168b4b8bc3410ed3bd188abe4d0a151d788effeba93148ab",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10473893855539",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk_A",
+          "revision": "0165da1bc6dcd70000000036d367e13",
+          "content_hash": "fa1e9878bb8c9ffb50f4792e6a0c93e40163988a393cd9b2748b8e5c6b43cf51"
+        },
+        "provenance": {
+          "name": "10473893855539.json",
+          "sha256": "0d6c21a1ecf9c79be5f18645b1106fd51c22bd94452b4eb5b4991ea63214acac",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10473903522099",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk-w",
+          "revision": "0165da1c7de488b000000036d367e13",
+          "content_hash": "7273370fe14b6333a613c79f58f76a31d40e63d4f1cb42041386a3d4e7ecbf25"
+        },
+        "provenance": {
+          "name": "10473903522099.json",
+          "sha256": "0d62f0632fe595fb18fd57384381034fd75db8fb57dcc8d42396e019b936a908",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10473923313971",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAk-g",
+          "revision": "0165da1bcfd1d1d000000036d367e13",
+          "content_hash": "c55bb784ea541e69b7c935af5f3e90f2ea860458aac9005a93ed185349cdcd25"
+        },
+        "provenance": {
+          "name": "10473923313971.json",
+          "sha256": "20eef802a34e28479b9f81767cfddbae9ecd8ea5f656378fc8d7955db3eeaa54",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10474824073523",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAldA",
+          "revision": "0165da1c71dec77000000036d367e13",
+          "content_hash": "5471253373a3ee745b421e6bc48f70e77e86aeffc0a077a2b42f8540b9e03ced"
+        },
+        "provenance": {
+          "name": "10474824073523.json",
+          "sha256": "bfa4792a4e312d421e437f7f2ad0ceff9cbcc376b542440e11f4e6a6a74d710a",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10474850189619",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAlcw",
+          "revision": "0165da1c6d2eaf2000000036d367e13",
+          "content_hash": "96469ac03261db132afc95252640fe9f96d77685e6a4be7616dc78f6482a7f32"
+        },
+        "provenance": {
+          "name": "10474850189619.json",
+          "sha256": "866ab21855e51ebac220e7dc65b995daec3117e5ff5e87895926c4b3dc69cc7e",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10479446655283",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAlyQ",
+          "revision": "0165da247bf6625000000036d367e13",
+          "content_hash": "278ea584549b974ead58558973346e89dbf16d243207bf10a661c2757ad148ea"
+        },
+        "provenance": {
+          "name": "10479446655283.json",
+          "sha256": "486538f1dbacf7b8dea74a8253f532e730446e14be22f3b2ea7224c19cd6ba3a",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10479492464947",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAl1g",
+          "revision": "0165da1bd52c677000000036d367e13",
+          "content_hash": "63589f442011b6ad8740608540fdd261ce53a7d52419a41a9f3167b2789183e4"
+        },
+        "provenance": {
+          "name": "10479492464947.json",
+          "sha256": "9771e0480c2154808947f77bc3dc4a892c94bee5c9b4b2ac84912e8af77e976e",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15395937124659",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAl_g",
+          "revision": "0165da1c7297786000000036d367e13",
+          "content_hash": "4ac37f1230e260deb98891783c835cb2aee8f13baa40b0781da81409f49a9f21"
+        },
+        "provenance": {
+          "name": "15395937124659.json",
+          "sha256": "72fcddba1cf04fea47e42acb215a4402dfb46a3eb4f24d387cddc4cba85d882b",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15395961241907",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAoeg",
+          "revision": "0165da1c0969bc0000000036d367e13",
+          "content_hash": "cc7b6cd96b0d7cc40abdeaf277496841d959cf6c9d380c86b8f28115a0092f8f"
+        },
+        "provenance": {
+          "name": "15395961241907.json",
+          "sha256": "eab378ca87e0cc42c6aa9ea07d4105018afaab88f8e8c7595b16e01d8e9d5399",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15396968628531",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAn_A",
+          "revision": "0165da1c1dcebef000000036d367e13",
+          "content_hash": "2e5f729e261ecdbfd71d35c5aa023cdc9615ff2d864e0868a6bff604cb2e4477"
+        },
+        "provenance": {
+          "name": "15396968628531.json",
+          "sha256": "f6df280464044226cf39c97342038747438fd5721f4a1f38ddbb58c770af23ee",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/15398217515315",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAquA",
+          "revision": "0165da248297cdb000000036d367e13",
+          "content_hash": "799eb15cb309d71f12ca54068fe1055a340fdd18263a115d35328efec49c6f43"
+        },
+        "provenance": {
+          "name": "15398217515315.json",
+          "sha256": "3ae2cc5e7967bd03df61e24caa645c311f74a13fd7eb92800051b65ecf40b90a",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8119085269299",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABOA",
+          "revision": "0165da1caf4cc29000000036d367e13",
+          "content_hash": "68ba1ca20b63f6c913880435ebcfa981a443f2d7db8cb7d5f17469e6f9118df2"
+        },
+        "provenance": {
+          "name": "8119085269299.json",
+          "sha256": "52ec18dceb0b5a6239395f99f3d5b6ac4622a51d4abf415b94dcdcd3e692011c",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8545323057459",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAY4w",
+          "revision": "0165da1c1a268eb000000036d367e13",
+          "content_hash": "eaabd4e4008f434072552e86be3ce7888a23499a2931a8e34bd33814a4dfb9d5"
+        },
+        "provenance": {
+          "name": "8545323057459.json",
+          "sha256": "ff126d5d431ec6275fba963ff878699318eee52cd5088136d5433969ab687c41",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8595358875955",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABIg",
+          "revision": "0165da1bc888255000000036d367e13",
+          "content_hash": "1d3bb2d3c03b20a24937d9d81869eb1e2156c5fb1b0871f4fcd0c6a3784bbe7c"
+        },
+        "provenance": {
+          "name": "8595358875955.json",
+          "sha256": "dba60915671eef0f3eff156811ddad61d3d9e1e49040674ce5c04623a2094193",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8730355564851",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABHQ",
+          "revision": "0165da2481f8543000000036d367e13",
+          "content_hash": "7783153af61ebe3b8bad03c63960b4b74f6ea48337e67e95c2e525b8d9c551f5"
+        },
+        "provenance": {
+          "name": "8730355564851.json",
+          "sha256": "ed3f7a01694478ec3d8a9ee20cf4e367037645a8ad547612955ee4779d9ddfa4",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/8910113440051",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAABGw",
+          "revision": "0165da1c231fe8b000000036d367e13",
+          "content_hash": "d640f5b5438d027577ba9b05aa84abb83626ca8f74f9e044b8033d7dd112e9bd"
+        },
+        "provenance": {
+          "name": "8910113440051.json",
+          "sha256": "99ac4d79aa8dfa9e4951d0ae475c142e1a866a1315319c2ca7ce00b6c7cc0d9d",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/9319178993971",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAY4A",
+          "revision": "0165da1bd23d8ef000000036d367e13",
+          "content_hash": "2ab232da1f1d4d4dab0c5a0fbd5990e068c5419bbb2fef9162bbac55fc789f0c"
+        },
+        "provenance": {
+          "name": "9319178993971.json",
+          "sha256": "368f18cfc262e1b38de13444b510fa3dc01e67d8fe0d47959bdd963e2c0ca589",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      },
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/9743477637427",
+          "file_id": "id:u1tYiAa2O-AAAAAAAAAV8g",
+          "revision": "0165da1c0dec9d7000000036d367e13",
+          "content_hash": "ca814424bcf96e7fd2f525ce0611f4d25a97168bd808cca0424492e34312852a"
+        },
+        "provenance": {
+          "name": "9743477637427.json",
+          "sha256": "c76a488ab7b7f0af761141dbc02718f6fe92e812d6cfa7303ea62e8aeaea6998",
+          "purpose": "Exact current revision/content hash and retained structural evidence; colour intent requires owner review."
+        }
+      }
+    ],
+    "references": [
+      {
+        "name": "#001-At Last Dale EarnHardt Sr.jpg",
+        "sha256": "b9a72ca8407f59f87a9c47bfa1c1536afe248dea8d8d393c30265cf8af600721",
+        "purpose": "Historical trusted Sports Cave export with embedded sRGB; same file SHA as prior owner-reviewed reference"
+      },
+      {
+        "name": "owner-approval-20261017.txt",
+        "sha256": "ca73c5cfb225269640fd7263830639f182fdbcea8edc51c4d3c833aeb3203eaa",
+        "purpose": "Explicit owner-approved interpretation, not evidence of unknown creator intent"
+      }
+    ],
+    "comparisons": [
+      {
+        "name": "real-source-comparisons.json",
+        "sha256": "576462a7a212d02fcb63957a0639c974eb9d760973158f7d0bc0da1ac1f5c3a4",
+        "purpose": "Isolated exact source hashes; zero changed merged RGB pixels; metadata-only ICC assignment and layer/pixel tail equality; no native certification"
+      }
+    ],
+    "status": "approved",
+    "print_ready": false,
+    "scope": {
+      "kind": "verified_workflow",
+      "workflow_id": "legacy-sportscave-rgb8",
+      "mode": "RGB",
+      "depth": 8,
+      "identity": "file_id+content_hash",
+      "default_for_untagged_rgb": true
+    },
+    "owner": "owner:explicit-chat-approval:20261017",
+    "approved_at": "2026-10-17T00:00:25.597318+00:00",
+    "reviewed_hash": "7c8e9d500531692e87d885be069026609c814910a531a8d2ba4f5c094e3343d4",
+    "approval_hash": "fac7ff72ed00e370365ca269e86f763057faa32df988450c7780fcaa774b287e"
+  },
+  {
+    "schema": 1,
+    "group": "volkanovski-owner-interpretation-20261017",
+    "profile": {
+      "sha256": "2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e",
+      "description": "sRGB IEC61966-2.1",
+      "name": "IEC 61966-2.1 Default RGB colour space - sRGB"
+    },
+    "icc_base64": "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",
+    "members": [
+      {
+        "source": {
+          "product_gid": "gid://shopify/Product/10071572578611",
+          "file_id": "id:u1tYiAa2O-AAAAAAAABgxA",
+          "revision": "0165dfd6f449ede000000036d367e13",
+          "content_hash": "1a8848cef905588ea0a80389bb1a2b76b35f57babb50e9d6616d95f4e54ba48b"
+        },
+        "provenance": {
+          "name": "owner-approval-20261017.txt",
+          "sha256": "ca73c5cfb225269640fd7263830639f182fdbcea8edc51c4d3c833aeb3203eaa",
+          "purpose": "Owner-approved exact-source interpretation; no claim of verified legacy workflow membership"
+        }
+      }
+    ],
+    "references": [
+      {
+        "name": "#001-At Last Dale EarnHardt Sr.jpg",
+        "sha256": "b9a72ca8407f59f87a9c47bfa1c1536afe248dea8d8d393c30265cf8af600721",
+        "purpose": "Historical trusted Sports Cave export with embedded sRGB; same file SHA as prior owner-reviewed reference"
+      },
+      {
+        "name": "owner-approval-20261017.txt",
+        "sha256": "ca73c5cfb225269640fd7263830639f182fdbcea8edc51c4d3c833aeb3203eaa",
+        "purpose": "Explicit owner-approved interpretation, not evidence of unknown creator intent"
+      }
+    ],
+    "comparisons": [
+      {
+        "name": "real-source-comparisons.json",
+        "sha256": "576462a7a212d02fcb63957a0639c974eb9d760973158f7d0bc0da1ac1f5c3a4",
+        "purpose": "Isolated exact source hashes; zero changed merged RGB pixels; metadata-only ICC assignment and layer/pixel tail equality; no native certification"
+      }
+    ],
+    "status": "approved",
+    "print_ready": false,
+    "owner": "owner:explicit-chat-approval:20261017",
+    "approved_at": "2026-10-17T00:00:25.599757+00:00",
+    "reviewed_hash": "cbaf368ec5da4ea2a363c8b461631ac4198e620124b74edea0d78980fdf526b1",
+    "approval_hash": "58db82d6388b9423cfee7c4ee36bd2f9735f6dad5912fd0fe206009f0ce8e490"
+  }
+]

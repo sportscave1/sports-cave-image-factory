@@ -82,6 +82,7 @@ class ChunkUploadRecord:
     metadata: dict = field(default_factory=dict)
     error: str = ""
     activity_recorded: bool = False
+    colour_workflow: dict = field(default_factory=dict,repr=False)
     operation_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
@@ -94,6 +95,9 @@ class DropboxChunkUploadManager:
         cutoff = time.monotonic() - FILES_UPLOAD_SESSION_SECONDS
         for upload_id, record in list(self._records.items()):
             if record.updated_at < cutoff:
+                if record.colour_workflow:
+                    from auto_editions_colour_upload import discard
+                    discard(record.colour_workflow)
                 self._records.pop(upload_id, None)
 
     def start(
@@ -106,6 +110,7 @@ class DropboxChunkUploadManager:
         size,
         conflict,
         user,
+        colour_workflow=None,
     ):
         clean_root = dropbox_integration.normalize_dropbox_path(root_path)
         clean_folder = dropbox_integration.normalize_dropbox_path(current_path)
@@ -140,6 +145,11 @@ class DropboxChunkUploadManager:
             user=dict(user or {}),
             root_path=clean_root,
         )
+        if colour_workflow:
+            from auto_editions_colour_upload import begin
+            try:record.colour_workflow=begin(colour_workflow,user,total_size)
+            except PermissionError as error:raise FilesUploadError(str(error),status_code=403) from error
+            except ValueError as error:raise FilesUploadError(str(error)) from error
         with self._lock:
             self._cleanup()
             self._records[record.upload_id] = record
@@ -227,6 +237,17 @@ class DropboxChunkUploadManager:
                     record.destination,
                     mode=record.mode,
                 )
+                if record.colour_workflow:
+                    try:
+                        from auto_editions_colour_upload import capture,finish
+                        import supabase_backend
+                        capture(record.colour_workflow,record.offset,chunk)
+                        metadata={**metadata,'colour_workflow':finish(record.colour_workflow,metadata,supabase_backend.connect)}
+                    except Exception as error:
+                        from auto_editions_colour_upload import discard
+                        discard(record.colour_workflow)
+                        logging.getLogger(__name__).warning('workflow_provenance_pending error_type=%s',type(error).__name__)
+                        metadata={**metadata,'colour_workflow':{'status':'needs_verification'}}
                 with self._lock:
                     record.offset += len(chunk)
                     record.metadata = dict(metadata or {})
@@ -252,6 +273,12 @@ class DropboxChunkUploadManager:
                     chunk,
                 )
             with self._lock:
+                if record.colour_workflow:
+                    try:
+                        from auto_editions_colour_upload import capture
+                        capture(record.colour_workflow,record.offset,chunk)
+                    except Exception:
+                        record.colour_workflow['error']='Provenance capture interrupted; upload remains valid.'
                 record.offset += len(chunk)
                 record.updated_at = time.monotonic()
             return self.public_status(record)
@@ -300,6 +327,9 @@ class DropboxChunkUploadManager:
 
     def remove(self, upload_id, upload_secret):
         record = self._record(upload_id, upload_secret)
+        if record.colour_workflow:
+            from auto_editions_colour_upload import discard
+            discard(record.colour_workflow)
         with self._lock:
             self._records.pop(record.upload_id, None)
 
@@ -1887,6 +1917,7 @@ async def start_files_upload(request: Request):
             size=payload.get("size"),
             conflict=payload.get("conflict"),
             user=user,
+            colour_workflow=payload.get('colour_workflow'),
         )
         return JSONResponse({"ok": True, **result})
     except Exception as error:

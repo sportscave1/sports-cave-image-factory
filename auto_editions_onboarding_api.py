@@ -76,6 +76,18 @@ async def heartbeat(request):
     except Exception as error:return api.failure(error)
 
 
+async def colour_configuration(request):
+    try:
+        if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
+        await preparation_actor(request)
+        import files_upload_api as files
+        if await files._json_body(request)!={}:raise ValueError('Read-only policy configuration request required.')
+        from auto_editions_colour_store import configuration
+        value=await run_in_threadpool(configuration,queue().connect)
+        return JSONResponse(value,headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 def host_health(request,value):
     if value is None:return
     token=request.headers.get('x-sports-cave-preparation-host')
@@ -328,7 +340,12 @@ async def claim(request):
         if os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true':
             from auto_editions_colour_recovery import recover
             # A bad/missing optional policy must never prevent other eligible jobs.
-            try:await run_in_threadpool(recover,store,str(user['id']),dry_run=False)
+            def colour_recover():
+                from auto_editions_colour_store import configuration
+                config=configuration(store.connect);auth=files._dropbox_context()
+                return recover(store,str(user['id']),dry_run=False,limit=3,**config,
+                    read_metadata=lambda fid:files.dropbox_integration.psd_open_metadata(auth['access_token'],fid,include_preview=False))
+            try:await run_in_threadpool(colour_recover)
             except Exception as error:
                 import logging
                 logging.getLogger(__name__).warning('colour_recovery_unavailable error_type=%s',type(error).__name__)
@@ -433,7 +450,8 @@ async def discrepancies(request):
     except Exception as error:return api.failure(error)
 
 
-ROUTES=(('/api/auto-editions/onboarding/cancellation',cancellation,('POST',)),('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
+ROUTES=(('/api/auto-editions/onboarding/colour-configuration',colour_configuration,('POST',)),
+        ('/api/auto-editions/onboarding/cancellation',cancellation,('POST',)),('/api/auto-editions/onboarding/heartbeat',heartbeat,('POST',)),
         ('/api/auto-editions/onboarding',summary,('GET',)),
         ('/api/auto-editions/onboarding/discrepancies',discrepancies,('GET',)),
         ('/api/auto-editions/onboarding/prepare-now',prepare_now,('POST',)),

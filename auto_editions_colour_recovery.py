@@ -16,7 +16,7 @@ def audit(rows):
     return dict(designs=len(unique),groups={code:dict(count=len(ids),products=ids) for code,ids in groups.items()})
 
 
-def recover(queue,actor,*,policies=None,limit=10,dry_run=True):
+def recover(queue,actor,*,policies=None,limit=10,dry_run=True,memberships=None,default_group=None,read_metadata=None):
     """Release gate is separate from profile approval; default is a read-only plan.
 
     Missing profiles need an approved exact membership. Inspection errors,
@@ -30,7 +30,9 @@ def recover(queue,actor,*,policies=None,limit=10,dry_run=True):
     from auto_editions_colour_policy import resolve,load_policies
     policies=load_policies() if policies is None else policies
     if not policies:return []
-    members=[m['source'] for policy in policies for m in policy.get('members',[])]
+    from auto_editions_colour_workflows import recovery_sources
+    selectors=recovery_sources(policies,memberships=memberships,default_group=default_group)
+    if not selectors:return []
     selected=[]
     with queue.connect() as conn,conn.cursor() as cur:
         # Shared queue lock serializes claims/pause/recovery. No prepared assets,
@@ -41,21 +43,30 @@ def recover(queue,actor,*,policies=None,limit=10,dry_run=True):
         cur.execute("""SELECT q.* FROM auto_edition_onboarding q
             JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid AND m.dropbox_file_id=q.file_id
             WHERE q.status IN ('Blocked','Needs PSD Repair') AND q.preparation_hash IS NULL
-              AND q.source IN (SELECT value FROM jsonb_array_elements(%s::jsonb))
+              AND EXISTS(SELECT 1 FROM jsonb_array_elements(%s::jsonb) member
+                WHERE member->'source'=q.source OR (member->>'content_identity'='true'
+                    AND member->'source'->>'file_id'=q.source->>'file_id'
+                    AND member->'source'->>'content_hash'=q.source->>'content_hash'))
               AND (q.lease_until IS NULL OR q.lease_until<now())
               AND COALESCE(to_jsonb(q)->'replacement'->>'stage','') IN ('','Complete')
               AND NOT EXISTS(SELECT 1 FROM auto_edition_preparations p WHERE p.manifest->'source'->>'product_gid'=q.product_gid)
-              AND NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='colour_retry')
+              AND NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='colour_retry'
+                AND (NOT a.detail ? 'source' OR (a.detail->'source'->>'file_id'=q.source->>'file_id'
+                    AND a.detail->'source'->>'content_hash'=q.source->>'content_hash')))
               AND (lower(q.reason) LIKE '%%colour policy awaiting approval%%'
                 OR lower(q.reason) LIKE '%%colour profile is unavailable%%'
                 OR lower(q.reason) LIKE '%%source_profile_requires_review%%'
                 OR lower(q.reason) LIKE '%%colour settings require owner review%%')
             ORDER BY CASE WHEN q.priority=8 THEN 11 ELSE q.priority END DESC,q.created_at
-            LIMIT 50 FOR UPDATE OF q""",(json.dumps(members),))
+            LIMIT 50 FOR UPDATE OF q""",(json.dumps(selectors),))
         for row in cur.fetchall():
             code=explain(row.get('reason'))['code']
             if code not in ('PROFILE_MISSING','COLOUR_POLICY_PENDING'):continue
-            try:_,policy=resolve(row.get('source'),policies)
+            try:
+                _,policy=resolve(row.get('source'),policies,memberships=memberships,default_group=default_group)
+                if read_metadata:
+                    import auto_editions as ae
+                    if ae.source_identity(row['product_gid'],read_metadata(row['file_id']))!=row['source']:continue
             except ValueError:continue
             selected.append(dict(product_gid=row['product_gid'],source=row['source'],policy=policy))
             if not dry_run:

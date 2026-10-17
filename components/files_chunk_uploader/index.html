@@ -517,6 +517,13 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
         }
         return payload;
       }
+      let verifiedColourWorkflow=null;
+      const workflowLabel=document.createElement('label');workflowLabel.style.cssText='display:block;font:12px system-ui;margin:6px';
+      workflowLabel.textContent='Verified PSD workflow (administrator): ';
+      const workflowInput=document.createElement('input');workflowInput.type='file';workflowInput.accept='.json';workflowInput.title='Independent creation/export manifest, up to 64 KB. Leave empty for ordinary uploads.';
+      workflowLabel.append(workflowInput);workflowLabel.hidden=true;document.body.append(workflowLabel);
+      fetch('/api/auto-editions/status/colour-workflows',{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(d=>{workflowLabel.hidden=!d?.workflows?.length;}).catch(()=>{});
+      workflowInput.onchange=async()=>{verifiedColourWorkflow=null;const f=workflowInput.files[0];if(!f)return;try{if(f.size>65536)throw Error('Workflow manifest must be at most 64 KB.');const v=JSON.parse(await f.text());if(v.verified_workflow!==true||!v.workflow_id||!/^[a-f0-9]{64}$/.test(v.content_hash||'')||!Array.isArray(v.provenance)||!v.provenance.length)throw Error('Manifest requires verified_workflow, workflow_id, the exact Dropbox content_hash and independent hashed provenance.');verifiedColourWorkflow=v;}catch(e){workflowInput.value='';alert(e.message);}};
       async function startUpload(row) {
         const payload = await apiJson("/api/files-upload/start", {
           method: "POST",
@@ -524,6 +531,7 @@ html[data-sc-table-host="uploads"] .upload-row .cell { border-right: 0; }
           body: JSON.stringify({
             current_path: row.destinationPath,
             relative_path: row.relativePath,
+            ...(row.relativePath.toLowerCase().endsWith(".psd") && verifiedColourWorkflow ? {colour_workflow:verifiedColourWorkflow} : {}),
             size: row.size,
             conflict: conflictInput.value || "cancel",
           }),

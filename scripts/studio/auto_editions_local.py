@@ -143,6 +143,20 @@ def host_request(config,path,body):
     response.raise_for_status();return response.json()
 
 
+def sync_colour_configuration(config):
+    # Only the authenticated app supplies approvals. Atomic local snapshots are
+    # shared by inspection and preparation; an active job never refreshes them.
+    value=host_request(config,'/api/auto-editions/onboarding/colour-configuration',{})
+    from auto_editions_colour_policy import validate
+    if set(value)!={'policies','memberships','default_group'} or len(value['policies'])>200 or len(value['memberships'])>1000:
+        raise ValueError('Invalid colour configuration.')
+    for policy in value['policies']:validate(policy)
+    root=HOST_FILE.parent/'colour-configuration';root.mkdir(exist_ok=True)
+    for key,name in (('policies','AUTO_EDITIONS_COLOUR_POLICIES_FILE'),('memberships','AUTO_EDITIONS_COLOUR_WORKFLOWS_FILE')):
+        path=root/(key+'.json');atomic_json(path,value[key]);os.environ[name]=str(path)
+    os.environ['AUTO_EDITIONS_UNTAGGED_RGB_DEFAULT']=value['default_group']
+
+
 def recover_retained(config):
     # No grants/secrets in journals. Reissue only the same host-owned lease.
     # Rotate the bounded read window: retained completed history must never hide
@@ -232,6 +246,7 @@ def host_loop():
             elif recover_retained(config):state='Recovering'
             else:
                 retry_verified_cleanup()
+                sync_colour_configuration(config)
                 claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):

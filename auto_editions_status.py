@@ -149,8 +149,8 @@ def project(row, *, writable=False, now=None, evidence=False):
     # Missing/uncertain colour evidence is a review decision, not proof of PSD damage.
     if status in ('Blocked','Needs PSD Repair') and not digest:
         from worker_diagnostics import explain
-        if explain(row.get('reason'))['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','COLOUR_INCOMPATIBLE'):
-            state='Needs Review';why=reason(row.get('reason'));actions=[]
+        if explain(row.get('reason'))['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','COLOUR_INCOMPATIBLE','ICC_MISMATCH'):
+            state='Needs Review';why=reason(row.get('reason'));actions=['colour-review']
     if visual_enabled() and row.get('automatic_approval') and not automatic and valid and state=='Failed':
         state='Needs Review';why='Automatic visual evidence expired or its owner policy changed; recheck required.';actions=['review']
     from auto_editions_quality import enabled as quality_enabled,current_certificate,standards,standard_for
@@ -356,7 +356,48 @@ async def detail_page(request):
     except Exception as error:return api.failure(error)
 
 
+async def colour_review(request):
+    try:
+        user=await actor(request,write=request.method=='POST')
+        if not can_write(user):raise PermissionError('Colour evidence review requires an authorised administrator.')
+        if request.url.path.endswith('/colour-workflows'):
+            import supabase_backend as db
+            from auto_editions_colour_store import configuration
+            config=await run_in_threadpool(configuration,db.read_connection)
+            return JSONResponse(dict(workflows=[dict(workflow_id=p['scope']['workflow_id'],profile=p['profile']['description'])
+                for p in config['policies'] if p.get('scope') and p['group']==config['default_group']]),headers=api.HEADERS)
+        pid=identity(request.query_params.get('product_gid'))
+        if request.url.path.endswith('/colour-review'):
+            return HTMLResponse((Path(__file__).parent/'components/auto_editions/colour-review.html').read_text(encoding='utf-8'),headers=api.HEADERS)
+        import supabase_backend as db
+        from auto_editions_colour_review import snapshot,proposal
+        if request.method=='POST':
+            import files_upload_api as files
+            body=await files._json_body(request)
+            if request.url.path.endswith(('/colour-approve','/colour-resume')):
+                from auto_editions_colour_store import approve_and_resume,resume_existing
+                from auto_editions_onboarding_api import queue
+                def apply():
+                    auth=files._dropbox_context()
+                    read=lambda fid:files.dropbox_integration.psd_open_metadata(auth['access_token'],fid,include_preview=False)
+                    if request.url.path.endswith('/colour-approve'):
+                        return approve_and_resume(queue(),pid,body,str(user['id']),read)
+                    if set(body)!={'source'}:raise ValueError('Pinned source required.')
+                    return resume_existing(queue(),pid,body['source'],str(user['id']),read)
+                return JSONResponse(await run_in_threadpool(apply),headers=api.HEADERS)
+            return JSONResponse(await run_in_threadpool(proposal,db.read_connection,pid,body),headers=api.HEADERS)
+        value=await run_in_threadpool(snapshot,db.read_connection,pid)
+        return JSONResponse(value,headers=api.HEADERS)
+    except Exception as error:return api.failure(error)
+
+
 ROUTES=(('/api/auto-editions/status',statuses,('POST',)),
+        ('/auto-editions/colour-review',colour_review,('GET',)),
+        ('/api/auto-editions/status/colour',colour_review,('GET',)),
+        ('/api/auto-editions/status/colour-workflows',colour_review,('GET',)),
+        ('/api/auto-editions/status/colour-proposal',colour_review,('POST',)),
+        ('/api/auto-editions/status/colour-approve',colour_review,('POST',)),
+        ('/api/auto-editions/status/colour-resume',colour_review,('POST',)),
         ('/api/auto-editions/status/connect',connect_action,('POST',)),
         ('/api/auto-editions/status/recheck',recheck_action,('POST',)),
         ('/api/auto-editions/status/reset',reset_action,('POST',)),

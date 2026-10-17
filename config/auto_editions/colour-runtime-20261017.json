@@ -1,0 +1,9 @@
+{
+  "default_group": "legacy-rgb8-verified-workflow-default",
+  "interpretation": "Explicit owner-approved sRGB interpretation; creator intent remains unknown.",
+  "excluded": [
+    "CMYK",
+    "conflicting embedded profiles",
+    "unverified workflow membership"
+  ]
+}
