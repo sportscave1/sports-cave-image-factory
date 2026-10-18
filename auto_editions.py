@@ -100,7 +100,7 @@ def inspect_layout(inspection):
         raise ValueError('The edition number must be editable text.')
     if not number.get('fonts') or any(f.get('installed') is not True for f in number['fonts']):
         raise ValueError('The original fonts are unavailable; substitution is forbidden.')
-    match = re.fullmatch(r'(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)',
+    match = re.fullmatch(r'(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)',
                          str(number.get('text', '')), re.I)
     if not match or not (1 <= int(match[2]) <= int(match[4]) <= 1000):
         raise ValueError('Edition number/total is ambiguous or unsupported.')

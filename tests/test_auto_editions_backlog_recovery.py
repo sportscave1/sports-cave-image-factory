@@ -12,6 +12,12 @@ from tests.test_worker_health_queue import operations,telemetry,continuous,store
 CONFIG=dict(policies=[],memberships=[],default_group='')
 
 
+@pytest.fixture(autouse=True)
+def fixture_recovery_scope(monkeypatch):
+    # Disposable test products are explicitly selected; no production scope read.
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{'gid://shopify/Product/'+str(n):1 for n in range(1,3000)})
+
+
 @pytest.fixture
 def backlog(operations,monkeypatch):
     d,sql=operations
@@ -164,3 +170,14 @@ def test_recovery_health_has_wait_reason_and_review_resolution(backlog,monkeypat
     assert 'manual role review' in next(j for j in result['jobs'] if j['id']==pid)['reason']
     state=next(h for h in result['health'] if h['component']=='Recovery')
     assert state['status']=='Waiting' and 'No eligible failures' in state['reason']
+
+
+def test_ordered_scope_excludes_peer_and_preserves_priority(backlog,monkeypatch):
+    d,sql=backlog;outside,_=source_job(d,sql,1000);selected,_=source_job(d,sql,1001)
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{selected:231})
+    before=next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[selected]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)==before
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==selected)['priority']==8

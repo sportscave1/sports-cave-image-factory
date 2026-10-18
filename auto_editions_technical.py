@@ -52,7 +52,7 @@ def certificate(record):
         if doc.get('mode') not in ('RGB','DocumentMode.RGB') or doc.get('bits_per_channel') not in (8,'BitsPerChannelType.EIGHT'):
             raise ValueError('Approved untagged policy requires verified legacy RGB8 source evidence. CMYK conversion is not authorised.')
     from auto_editions_onboarding import detect
-    roles=detect(inspection,m['edition_total'],colour_policy=policy)
+    roles=detect(inspection,m['edition_total'],colour_policy=policy,source=m['source'])
     if roles['number_layer']!=m.get('number_layer_name') or roles['plaque_layer']!=m.get('plaque_layer_name'):
         raise ValueError('Stored editable-number/plaque roles differ from the verified inspection.')
     return dict(method=METHOD,actor_id=ACTOR,preparation_hash=record['hash'],

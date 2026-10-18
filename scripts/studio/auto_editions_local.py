@@ -508,7 +508,8 @@ def inspect(key):
         item=manifest['items'][0]
         if any(item.get(k)!=meta[v] for k,v in [('dropbox_id','id'),('revision','rev'),('content_hash','content_hash')]):
             raise ValueError('The linked source changed.')
-        if not 0<meta['size']<=1024*1024*1024:raise ValueError('Source exceeds the preparation transfer limit.')
+        from auto_editions_source_limits import check_source
+        check_source(meta['size'],folder)
         req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),
                     headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
         from auto_editions_local_cache import reuse_source,cached_inspection,inspection_receipt
@@ -580,7 +581,7 @@ def inspect(key):
             policy=None
             if row['inspection']['document'].get('profile_state')=='untagged':
                 _,policy=resolve(row['context']['source'])
-            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy)
+            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy,source=row['context']['source'])
             prepare_worker(key,dict(number=roles['number_layer'],plaque=roles['plaque_layer']),
                            preparation_scale(roles['source_dimensions']))
         except Exception as error:

@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "verification": "Read-only PSD layer tree, nested embedded-object inspection and labelled cached composite review; no source edits. Only exact source/layer identities are admitted.",
+  "resolutions": [
+    {
+      "source": {
+        "product_gid": "gid://shopify/Product/10048122552627",
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAA0w",
+        "revision": "0165da2485567ff000000036d367e13",
+        "content_hash": "cfa06029bf486a5b09298e04a66a8f2f45e08395224247af37bcc3a4f0b61b0f"
+      },
+      "number": {
+        "name": "#093/100",
+        "layer_id": 246,
+        "bounds_px": [
+          1655,
+          2236,
+          1888,
+          2262
+        ],
+        "kind": "text"
+      },
+      "plaque": {
+        "name": "Generative Fill",
+        "layer_id": 267,
+        "bounds_px": [
+          1543,
+          2194,
+          2001,
+          2349
+        ],
+        "kind": "smart_object"
+      },
+      "evidence": "Mentality labelled C: central collector plaque; D: sole visible editable edition number. B spans both signature panels and is not selected."
+    },
+    {
+      "source": {
+        "product_gid": "gid://shopify/Product/10057331147059",
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAA3A",
+        "revision": "0165da247c922b1000000036d367e13",
+        "content_hash": "66b462ce6edfe97c7ea50df94adc1ae6b3c3f0cd6f548f892662d0ef70acb329"
+      },
+      "number": {
+        "name": "No. 001 / 100",
+        "layer_id": 308,
+        "bounds_px": [
+          1532,
+          2308,
+          2011,
+          2341
+        ],
+        "kind": "text"
+      },
+      "plaque": {
+        "name": "Layer 2",
+        "layer_id": 307,
+        "bounds_px": [
+          1238,
+          2193,
+          2303,
+          2378
+        ],
+        "kind": "raster"
+      },
+      "evidence": "Messi/Ronaldo labelled D: central plaque; E: sole visible editable edition-number text; F: separate LIMITED EDITION heading. Preserve heading and prefix."
+    }
+  ]
+}

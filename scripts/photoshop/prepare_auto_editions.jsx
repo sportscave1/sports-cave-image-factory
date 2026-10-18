@@ -122,7 +122,7 @@ var SCAutoEditionsPreparation = (function () {
             timed("original_export_ms",function(){savePNG(doc, "original.png");});
             app.fonts.getByName(layer.textItem.font);
             var text = layer.textItem.contents;
-            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
+            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
             if (!m || parseInt(m[4], 10) !== r.edition_total || r.edition_total < 1 || r.edition_total > 1000)
                 throw Error("edition_total_mismatch");
             var total = r.edition_total, w = doc.width.as("px"), h = doc.height.as("px");
