@@ -9,4 +9,3 @@ def check_source(size,folder):
     # Allow source + staged source + package workspace, plus Photoshop headroom.
     if shutil.disk_usage(folder).free < size*3+SCRATCH_RESERVE:
         raise ValueError('Insufficient free staging/scratch storage for this PSD; source retained.')
-

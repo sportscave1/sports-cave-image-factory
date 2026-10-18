@@ -26,4 +26,3 @@ Shane Warne: registered existing approved RGB8 workflow membership after verifyi
 Initial focused suite: 91 passed against disposable PGlite (no production providers). New role/parser/size/scope checks: 17 passed; scope SQL regression and combined revision checks recorded in external release evidence. Render topology validation passed. Tests isolate host capabilities and never touch the registered Companion host.
 
 Merge the exact tested change with the current live 5af8499e application revision, preserving Product Uploads additions. Release only to existing sports-cave-os and sports-cave-seo-worker. Update Companion from the immutable tested revision only when no preparation, pending checkpoint or processor lease remains. The automatic scanner then admits eligible scoped jobs once under the existing guarded service. Do not mass-requeue blocked artwork. Confirm completion only from current source-bound export proofs, profiles and cloud upload receipts.
-

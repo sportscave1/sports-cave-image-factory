@@ -83,4 +83,3 @@ def test_large_source_shared_fix_is_bounded_and_not_package_retry():
     assert recovery.classify(row,cfg)['action']=='retry'
     assert recovery.classify({**row,'inventory_metadata':{'size':MAX_SOURCE_BYTES+1}},cfg)['action'] is None
     assert recovery.classify({**row,'reason':'Preparation failed: Prepared package exceeds the cloud transfer limit.'},cfg)['action'] is None
-

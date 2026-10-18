@@ -28,4 +28,3 @@ def plaque(inspection,source):
                 or row.get('kind')!=expected['kind'] or not row.get('visible') or row.get('smart_object_chain')):
             raise ValueError('Pinned '+role+' evidence changed; artwork review required.')
     return selected['plaque']['name']
-
