@@ -34,6 +34,12 @@ Shane Warne: registered existing approved RGB8 workflow membership after verifyi
 
 ## Validation and activation
 
+### Existing mapped filenames during repair
+
+Source-pinned export repairs reuse their existing approved mapping even when a product display title differs from its original PSD filename. The repair and host-context paths check the full unchanged mapping, exclusive source ownership, retained preparation generation, approved original location, revision and content hash. A failed discovery with zero native attempts can reuse its existing request ID through the same guarded Retry service; it does not remap a product or certify the old exports. Ordinary reset/rematching retains the original filename rules, and the three-attempt native cap is unchanged. This resolves Dale Earnhardt/Jeff Gordon's historical `Not linked` replacement without renaming its PSD or product.
+
+Black Caviar/Winx already has an owned queued replacement. Michael Dunlop remains separate: the current original is untagged RGB8, its historical revisions contain the same bytes, and the found 1,000px lifestyle mockup is also untagged. It does not establish the existing approved colour policy's scope. No automatic profile assignment or repeated retry is permitted until an original embedded profile or independent verified workflow/production-export evidence is supplied.
+
 Initial focused suite: 91 passed against disposable PGlite (no production providers). New role/parser/size/scope checks: 17 passed; scope SQL regression and combined revision checks recorded in external release evidence. Render topology validation passed. Tests isolate host capabilities and never touch the registered Companion host.
 
 Merge the exact tested change with the current live 5af8499e application revision, preserving Product Uploads additions. Release only to existing sports-cave-os and sports-cave-seo-worker. Update Companion from the immutable tested revision only when no preparation, pending checkpoint or processor lease remains. The automatic scanner then admits eligible scoped jobs once under the existing guarded service. Do not mass-requeue blocked artwork. Confirm completion only from current source-bound export proofs, profiles and cloud upload receipts.
