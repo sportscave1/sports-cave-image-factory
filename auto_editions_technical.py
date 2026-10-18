@@ -260,7 +260,14 @@ class Technical:
                 # be repaired by metadata lookup. Other checks still fail below.
                 receipts=[]
                 for asset in [m['master'],*m['patches'].values()]:
-                    meta=assets.integration.psd_open_metadata(assets.token,DropboxAssets.path(digest,asset['name']),include_preview=False)
+                    # The source metadata helper accepts immutable IDs only.
+                    # Missing receipts require a bounded canonical package path
+                    # lookup, followed by the normal byte/profile validation.
+                    destination=DropboxAssets.path(digest,asset['name'])
+                    client=assets.integration.team_space_client(assets.token)
+                    meta=assets.integration._metadata_to_dict(client.files_get_metadata(destination))
+                    if (meta.get('path_display') or meta.get('path_lower') or '').lower()!=destination.lower():
+                        raise ValueError('Recovered upload receipt path differs from the retained package.')
                     receipts.append(dict(name=asset['name'],file_id=meta['id'],revision=meta['rev'],bytes=meta['size']))
                 record={**record,'receipts':dict(preparation_hash=digest,assets=receipts)}
                 evidence(record)

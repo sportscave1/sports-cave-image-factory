@@ -116,6 +116,17 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
             cur.execute("SELECT status,reason,to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,));row=cur.fetchone()
             repairing=row and (row.get('replacement') or {}).get('stage') in ('Discovering','Queued','Preparing')
             return dict(accepted=True,duplicate=True,product_gid=pid,status='Uploading' if repairing else 'Pending' if row and row['status']=='Awaiting preparation' else row['status'] if row else 'Stage unavailable')
+        @contextmanager
+        def borrowed():yield conn
+        from auto_editions_reset import Reset
+        # All retry entry points use the same replacement guard, including a
+        # failed first preparation with no retained package.
+        cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
+        pending=((cur.fetchone() or {}).get('replacement') or {})
+        if pending.get('stage') in ('Failed','Discovering','Queued','Preparing'):
+            if Reset(borrowed).retry_failed(pid,actor):
+                Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,native_replacement=True))
+                return dict(accepted=True,duplicate=pending.get('stage')!='Failed',product_gid=pid,status='Uploading',request_id=request_id)
         cur.execute(PRODUCT_SQL+" WHERE COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=%s",(pid,));found=cur.fetchall()
         if len(found)>1:raise ValueError('Product identity is ambiguous. Resolve the duplicate records before queueing.')
         row=found[0] if len(found)==1 else None
@@ -123,7 +134,8 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
             @contextmanager
             def borrowed():yield conn
             from auto_editions_technical import Technical
-            from auto_editions_reset import Reset
+            lease=health.stamp(row.get('lease_until'))
+            if lease and lease>health.datetime.now(health.timezone.utc):raise ValueError('An active lease protects this retained checkpoint.')
             replacement=Reset(borrowed).retry_failed(pid,actor)
             if not replacement:
                 if repair_confirmed:Technical(borrowed).repair_exports(pid,actor,request_id)
