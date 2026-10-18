@@ -1190,11 +1190,19 @@ def copy_path(access_token, source_path, destination_path, *, root_path):
 
 def move_path(access_token, source_path, destination_path, *, root_path):
     clean_root = normalize_dropbox_path(root_path)
-    source = normalize_dropbox_path(source_path)
+    source = str(source_path or '').strip()
+    if source.startswith('id:'):
+        metadata = get_file_metadata(access_token, source)
+        if metadata.get('id') != source or metadata.get('.tag') != 'file' or not metadata.get('path_display'):
+            raise ValueError('The exact source file could not be verified for this move.')
+        source_location = normalize_dropbox_path(metadata['path_display'])
+    else:
+        source = normalize_dropbox_path(source)
+        source_location = source
     destination = normalize_dropbox_path(destination_path)
     if (
-        source.casefold() == clean_root.casefold()
-        or not path_is_within_root(source, clean_root)
+        source_location.casefold() == clean_root.casefold()
+        or not path_is_within_root(source_location, clean_root)
         or not path_is_within_root(destination, clean_root)
     ):
         raise ValueError("This move is outside the shared Files folder.")

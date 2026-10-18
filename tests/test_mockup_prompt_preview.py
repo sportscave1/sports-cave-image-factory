@@ -586,7 +586,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             mockups_page.index('generate_clicked = st.button("Generate Core Shopify Images"'),
         )
         self.assertIn("final_prompt_items=final_prompt_items", mockups_page)
-        self.assertIn("render_generation_result(st.session_state.last_generation_result)", mockups_page)
+        self.assertIn("render_generation_result(_mockups_result())", mockups_page)
 
     def test_generated_previews_render_above_post_generation_prompt_cards(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -606,7 +606,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             generation_result.index("render_prompt_cards("),
         )
         self.assertIn("render_final_zip_download(result)", prompt_fragment)
-        self.assertIn("render_generation_result(st.session_state.last_generation_result)", mockups_page)
+        self.assertIn("render_generation_result(_mockups_result())", mockups_page)
         self.assertNotIn("render_lifestyle_cards=False", mockups_page)
         self.assertNotIn("render_zip=False", mockups_page)
 

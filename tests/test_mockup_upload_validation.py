@@ -144,7 +144,7 @@ class MockupUploadValidationTests(unittest.TestCase):
 
     def test_other_processing_failure_gets_generic_safe_error(self):
         upload = Upload(image_bytes())
-        with patch.object(image_factory.ImageOps, "fit", side_effect=OSError("private detail")):
+        with patch.object(image_factory.ImageOps, "exif_transpose", side_effect=OSError("private detail")):
             with self.assertRaises(OSError) as caught:
                 self.save(upload)
         self.assertEqual(app._safe_lifestyle_upload_error(caught.exception), "Could not save the lifestyle image for this prompt.")

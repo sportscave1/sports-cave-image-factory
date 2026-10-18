@@ -42,7 +42,8 @@ def failure(error):
 async def page(request):
     try:
         await actor(request, automatic=False)
-        return HTMLResponse((Path(__file__).parent/'components/product_uploads/index.html').read_text(encoding='utf-8'), headers=HEADERS)
+        from starlette.responses import RedirectResponse
+        return RedirectResponse('/?page=product_uploads', headers=HEADERS)
     except Exception as error:
         return failure(error)
 
@@ -61,7 +62,8 @@ async def state(request):
         import os_accounts
         if not enabled() or not os_accounts.can_attach_missing_psd(user):
             return JSONResponse(dict(enabled=False, upload=None), headers=HEADERS)
-        row = await run_in_threadpool(Intakes(connect).read, request.query_params.get('id'), user['id'])
+        key = request.query_params.get('id')
+        row = await run_in_threadpool(Intakes(connect).read, key, user['id']) if key else None
         if row and row['data'].get('product_gid'):
             row = await run_in_threadpool(reconcile, row, connect)
             # Persist the exact technical completion for refresh/recovery; polling
@@ -98,7 +100,12 @@ async def action(request):
             row = await run_in_threadpool(store.read, key, uid) if key else None
             if key and (not row or not row['data'].get('basic_validated') or row['mode'] != body.get('mode')):
                 raise ValueError('Finish the PSD upload and copy the current action.')
+            if row and row['data'].get('workflow_version')==2 and not row['data'].get('mockups_exported'):
+                raise ValueError('Save or download the completed design images before copying the Shopify prompt.')
             prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'] if row else '')
+            if row and row['data'].get('mockups_context'):
+                import json
+                prompt = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(row['data']['mockups_context'], ensure_ascii=False) + '\nOpen the exact saved folder or downloaded package and attach its images to ChatGPT. Copy Prompt copies text only.\n\n' + prompt
             return JSONResponse(dict(prompt=prompt), headers=HEADERS)
         elif op == 'mockups':
             import os_accounts
@@ -176,6 +183,8 @@ async def preview(request):
         return failure(error)
 
 
-ROUTES = (('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+from product_upload_render import ROUTES as RENDER_ROUTES
+
+ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),
           ('/api/product-uploads/preview', preview, ('GET',)), ('/api/product-uploads/{action}', action, ('POST',)))

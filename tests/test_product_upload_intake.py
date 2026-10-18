@@ -40,6 +40,8 @@ class DiskDropbox:
     def destination(self,key):
         import psd_directory
         return psd_directory.ROOT+'/product-upload-'+key+'.psd'
+    def archive(self,key,source):
+        return self.metadata_if_present(source['id'])
     def start(self):
         sid=uuid.uuid4().hex;self.sessions[sid]=self.root/sid;self.sessions[sid].touch();return sid
     def append(self,sid,offset,data):
@@ -96,7 +98,10 @@ def saved(env,selected='DRAFT',data=None):
     store,sql,provider=env;data=psd() if data is None else data;key=str(uuid.uuid4())
     store.create(key,ADMIN['id'],selected,'Design.psd',len(data),provider,digest(data))
     for offset in range(0,len(data),CHUNK):store.chunk(key,ADMIN['id'],offset,data[offset:offset+CHUNK],provider)
-    row=store.finish(key,ADMIN['id'],provider);store.copied(key,ADMIN['id'],selected)
+    row=store.finish(key,ADMIN['id'],provider)
+    # Legacy handoff fixtures stand in for a completed image/export stage.
+    with store.locked(key,ADMIN['id']) as (current,cur):current['data']['mockups_exported']=True
+    store.copied(key,ADMIN['id'],selected)
     return store.read(key,ADMIN['id'])
 
 
@@ -213,7 +218,7 @@ def test_http_auth_chunk_and_disabled_manual_route(env,monkeypatch):
     monkeypatch.setattr(files,'_request_user',lambda request,**kwargs:ADMIN)
     app=Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])
     with TestClient(app) as client:
-        assert client.get('/product-uploads').status_code==200
+        assert client.get('/product-uploads',follow_redirects=False).status_code==307
         assert client.post('/api/product-uploads/start',json={}).status_code==403
         key=str(uuid.uuid4());data=psd();headers={'Origin':'http://testserver'}
         response=client.post('/api/product-uploads/start',json=dict(id=key,mode='DRAFT',name='Design.psd',size=len(data),content_hash=digest(data)),headers=headers)
@@ -222,7 +227,7 @@ def test_http_auth_chunk_and_disabled_manual_route(env,monkeypatch):
         assert client.post('/api/product-uploads/finish',json=dict(id=key),headers=headers).json()['upload']['basic_validated']
         assert client.get('/api/product-uploads/state?id='+key).json()['upload']['copied'] is False
         monkeypatch.setenv('PRODUCT_UPLOAD_AUTOMATIC_ENABLED','false')
-        assert client.get('/product-uploads').status_code==200
+        assert client.get('/product-uploads',follow_redirects=False).status_code==307
         assert client.get('/api/product-uploads/state').json()['enabled'] is False
         assert client.post('/api/product-uploads/start',json={},headers=headers).status_code==409
 
@@ -280,7 +285,7 @@ def test_prompt_only_account_keeps_access_and_expired_session_is_rejected(monkey
     token=sc_auth.create_user_auth_token(user['id'],password='synthetic-password',extra_secret='synthetic-secret')
     client=TestClient(Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES]))
     client.cookies.set(sc_auth.AUTH_COOKIE_NAME,token)
-    assert client.get('/product-uploads').status_code==200
+    assert client.get('/product-uploads',follow_redirects=False).status_code==307
     assert client.get('/api/product-uploads/state').json()==dict(enabled=False,upload=None)
     headers={'Origin':'http://testserver'}
     assert client.post('/api/product-uploads/prompt',json={'mode':'DRAFT'},headers=headers).status_code==200

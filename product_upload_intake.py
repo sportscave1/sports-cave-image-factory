@@ -111,7 +111,7 @@ class Intakes:
                 return dict(old)
             data = dict(name=name, size=size, content_hash=content_hash, offset=0, blocks=[], structure={}, state='Uploading PSD',
                         session=provider.start(), destination=provider.destination(key),
-                        expires=(datetime.now(timezone.utc) + timedelta(days=6)).isoformat(), copied=False)
+                        expires=(datetime.now(timezone.utc) + timedelta(days=6)).isoformat(), copied=False, workflow_version=2)
             cur.execute('INSERT INTO product_upload_intakes(id,actor_id,mode,data) VALUES(%s,%s,%s,%s::jsonb) RETURNING *',
                         (key, str(actor), selected, json.dumps(data)))
             return dict(cur.fetchone())
@@ -182,6 +182,8 @@ class Intakes:
         with self.locked(key, actor) as (row, cur):
             if row['mode'] != selected or not row['data'].get('basic_validated'):
                 raise ValueError('Upload or action changed. Copy the current prompt again.')
+            if row['data'].get('workflow_version')==2 and not row['data'].get('mockups_exported'):
+                raise ValueError('Save or download the completed image package before the Shopify handoff.')
             row['data']['copied'] = True
             return row
 
@@ -193,4 +195,4 @@ def public(row):
     # No provider session, tokens, storage path or raw worker errors in the UI.
     return dict(id=str(row['id']), mode=row['mode'], **{k:d.get(k) for k in (
         'name','size','offset','state','basic_validated','copied','lookup','choices','product_title',
-        'preparation_hash','reason','preview_url','product_url','companion_connected')})
+        'preparation_hash','reason','preview_url','product_url','companion_connected','shopify_completion')})

@@ -1,3 +1,73 @@
+# Local Mockups integration — 18 October 2026
+
+This section supersedes the historical UI/lifecycle description below. The owner
+authorised commit, deployment and the coordinated immutable Companion update on
+18 October after isolated native acceptance passed. Release identities and live
+verification are recorded separately; local acceptance is not a production write.
+
+Product Uploads mounts two small account-authenticated component sections around
+**the existing Streamlit Mockups renderer**. `image_factory.generate_product_images`,
+the five templates, three lifestyle cards, room/angle selections, image handling,
+canonical eight-image manifest, ZIP builder and Dropbox picker/save rules are reused.
+The standalone Mockups route and its accepted JPG/PNG/WebP formats remain intact.
+Results are page-scoped; a new visit is empty, while reactive rerenders keep the
+active PSD. Removal releases only its temporary web-image run and object URLs.
+Saved Dropbox PSDs and submitted jobs are retained. Late results are rejected.
+
+The pre-Shopify native web render is an intake checkpoint consumed by the existing
+exclusive preparation host when eligible product work is idle. It uses the same
+host authentication, transfer manager, colour policy resolver and processor lease.
+Native Photoshop renders a working copy, checks its embedded profile, converts
+only the web render to sRGB and exports a bounded PNG. Untagged sources require an
+existing applicable approval; unknown colour is actionable, never guessed. A
+failed/uncertain Photoshop close retains the safety lock. Reconnection uploads a
+verified cached render instead of rendering it again. Explicit safe retries are
+bounded. This helper must be released together with the web change. Long native
+renders send existing authenticated heartbeat telemetry without claiming or
+renewing another product job. Archival uses a verified stable file ID; the Files
+move service checks its actual shared-root location before moving it.
+
+Original PSD intake now stages in the configured `product_upload_assets` area
+(the existing `06 Product Upload Assets` folder). Only after a verified Shopify
+identity and selected Draft/Live status does it move, retaining stable file ID and
+content, into `psd_directory.ROOT`:
+`/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED`.
+Both verified drafts and live products use this existing downstream preparation
+location, consistent with the previous draft-supporting mapping service. Live
+requires ACTIVE plus the existing online-store publication evidence. The mapping
+and edition-preparation queue services are unchanged; no second product is created.
+The deterministic archive target recovers a lost move response. Old intake rows
+retain their previous path and behaviour.
+
+A completed image export unlocks the existing Dev Mode Shopify prompt. Export and
+clipboard actions do not confirm Shopify completion. The current design/sport,
+canonical filenames and exact saved folder are additional inert prompt context.
+Numbered Dropbox saves reserve their target once; retries reuse the same target.
+Opening the saved folder from this integrated route uses a new tab, retaining the
+active workflow. Structural template/number/font acceptance still occurs through
+the established product-linked native preparation gates, not the web render.
+
+Local isolated preview: run `scripts/product_upload_mockups_preview.py --port 8683`
+with `AUTO_EDITIONS_TEST_PGLITE` pointing to an installed PGlite dist/index.js.
+This allowlisted, loopback-only harness blocks external requests and simulates
+Photoshop, Dropbox and Shopify boundaries. It does not launch the production
+server, installed Companion or native Photoshop. Actual Mockups generation and
+ZIP packaging still run. Evidence: `output/product-upload-mockups-checks/`.
+
+Explicit native acceptance: with production claims paused and Companion normally
+stopped, run `scripts/accept_product_uploads_native.py --output output/v19/<short-name>`
+with the same PGlite setting. It refuses active Companion ownership before COM.
+The successful 18 October run (`output/v19/pu5/acceptance.json`) used a new synthetic
+layered PSD and actual Photoshop render, colour conversion, transparency handling,
+100-number preparation and independent pixel proofs. The real local package
+importer and current technical certificate reached Cloud Ready with 101 verified
+disk-provider receipts; duplicate import was rejected. All 294 existing journals
+and the before/after document inventory were unchanged. No production artwork,
+Shopify product, mapping or cloud file was used or written. Earlier failed harness
+attempts (Windows path budget and an overinclusive test archive) remain preserved.
+
+---
+
 # Product Uploads implementation and local evidence
 
 The owner authorised publication on 17 October 2026. This report preserves the
