@@ -220,6 +220,24 @@ def test_failed_replacement_status_never_waits_for_old_technical_checkpoint(monk
     assert value['reason']=='The exact edition-number font is unavailable.' and 'retry' in value['actions']
 
 
+@pytest.mark.parametrize('repair_confirmed',[False,True])
+def test_worker_health_retry_reuses_failed_native_operation(design,monkeypatch,repair_confirmed):
+    import worker_health_queue as health_queue
+    from auto_editions_technical import Technical
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    d,sql,reset,old=design
+    sql.execute((ROOT/'supabase/migrations/20261016071758_auto_editions_bulk_operations.sql').read_text())
+    pending=failed_native(design);before=protected(sql);active=snapshot(selected(sql))
+    request_id=str(uuid.uuid4())
+    with patch.object(Technical,'retry',side_effect=AssertionError('Retained package is protected')),patch.object(Technical,'repair_exports',side_effect=AssertionError('Retained package is protected')):
+        assert health_queue.submit(d.connect,PID,'admin',request_id,repair_confirmed)['accepted']
+        assert health_queue.submit(d.connect,PID,'admin',request_id,repair_confirmed)['duplicate']
+    assert selected(sql)['replacement']['id']==pending['id']
+    assert selected(sql)['replacement']['stage']=='Queued' and selected(sql)['replacement']['attempts']==1
+    assert protected(sql)==before and snapshot(selected(sql))==active
+    assert len([r for r in rows(sql,'auto_edition_onboarding_audit') if r['event']=='reset_retry'])==1
+
+
 def test_active_job_and_uncertain_expired_processing_cannot_be_reset(design):
     d,sql,reset,old=design
     for lease in ("now()+interval '30 minutes'","now()-interval '1 minute'"):

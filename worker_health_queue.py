@@ -123,10 +123,13 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
             @contextmanager
             def borrowed():yield conn
             from auto_editions_technical import Technical
-            if repair_confirmed:
-                Technical(borrowed).repair_exports(pid,actor,request_id)
-            else:Technical(borrowed).retry(pid,actor)
-            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,technical=True,repair_exports=repair_confirmed))
+            from auto_editions_reset import Reset
+            replacement=Reset(borrowed).retry_failed(pid,actor)
+            if not replacement:
+                if repair_confirmed:Technical(borrowed).repair_exports(pid,actor,request_id)
+                else:Technical(borrowed).retry(pid,actor)
+            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,
+                technical=not replacement,native_replacement=replacement,repair_exports=repair_confirmed and not replacement))
             return dict(accepted=True,duplicate=False,product_gid=pid,status='Uploading',request_id=request_id)
         reason=eligibility(row,repair_confirmed)
         if reason:raise ValueError(reason)
