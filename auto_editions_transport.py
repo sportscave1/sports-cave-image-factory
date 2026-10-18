@@ -64,6 +64,9 @@ def build_package(root,names,destination,*,compact=False):
                 z.writestr(DESCRIPTOR,json.dumps(dict(version=VERSION,deltas=deltas),sort_keys=True))
                 for name,data in payloads.items():z.writestr(name,data)
         from auto_editions_package import MAX_PACKAGE_BYTES
+        with zipfile.ZipFile(temporary) as encoded:
+            expanded=sum(e.file_size for e in encoded.infolist())+sum(d['bytes'] for d in deltas.values())
+        if expanded>MAX_PACKAGE_BYTES:raise ValueError('Expanded preparation package exceeds its bounds.')
         if temporary.stat().st_size>MAX_PACKAGE_BYTES:raise ValueError('Prepared package exceeds transfer limit.')
         temporary.replace(destination)
     finally:temporary.unlink(missing_ok=True)

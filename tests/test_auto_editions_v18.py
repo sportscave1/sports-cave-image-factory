@@ -70,6 +70,17 @@ def test_shared_reference_cannot_bypass_exact_icc_verification(tmp_path):
     target=tmp_path/'conflict';target.mkdir()
     with pytest.raises(ValueError,match='ICC export mismatch'):unpack(altered,target,m['source'],1,100)
 
+
+def test_wire_sized_packet_rejected_locally_when_reconstructed_references_exceed_bound(tmp_path):
+    original=tmp_path/'original.png';original.write_bytes(b'x'*80000)
+    (tmp_path/'reference-1.png').write_bytes(original.read_bytes())
+    archive=tmp_path/'prepared.zip'
+    with patch('auto_editions_package.MAX_PACKAGE_BYTES',120000):
+        with pytest.raises(ValueError,match='Expanded'):
+            build_package(tmp_path,['original.png','reference-1.png'],archive,compact=True)
+    assert not archive.exists() and not archive.with_name('prepared.zip.partial').exists()
+    assert original.read_bytes()==b'x'*80000
+
 @pytest.mark.parametrize('size',[0,1024,4*1024*1024+37])
 def test_combined_checksums_are_identical_to_existing_hashes(tmp_path,size):
     p=tmp_path/'bytes';p.write_bytes(b'x'*size);h=file_hashes(p)

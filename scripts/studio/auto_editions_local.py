@@ -373,6 +373,12 @@ def find_reusable_package(ctx):
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
                 if sum(info.file_size for info in archive.infolist())>MAX_PACKAGE_BYTES:continue
+                from auto_editions_transport import DESCRIPTOR
+                if DESCRIPTOR in archive.namelist():
+                    if archive.getinfo(DESCRIPTOR).file_size>16384:continue
+                    transport=json.loads(archive.read(DESCRIPTOR))
+                    expanded=sum(info.file_size for info in archive.infolist())+sum(d['bytes'] for d in transport['deltas'].values())
+                    if expanded>MAX_PACKAGE_BYTES:continue
                 manifest=json.loads(archive.read('manifest.json'))
             colour=manifest.get('colour_evidence') or {}
             import re
@@ -383,7 +389,7 @@ def find_reusable_package(ctx):
             if (manifest.get('source')==ctx['source'] and manifest.get('edition_total')==ctx['total']
                     and manifest.get('preparation_geometry',{}).get('scale',1)==expected):
                 return package
-        except (OSError,ValueError,KeyError,zipfile.BadZipFile):continue
+        except (OSError,ValueError,KeyError,TypeError,AttributeError,zipfile.BadZipFile):continue
     return None
 
 

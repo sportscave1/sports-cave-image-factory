@@ -88,6 +88,24 @@ def test_legacy_oversized_or_unprofiled_package_is_preserved_but_never_reuploade
         assert archive.exists()
 
 
+def test_reusable_compact_archive_counts_reconstructed_bytes_and_preserves_checkpoint(tmp_path):
+    import zipfile
+    root=tmp_path/'host';folder=root/('b'*48);folder.mkdir(parents=True)
+    ctx={'automatic':True,'source':{'file_id':'id:a','revision':'rev1'},'total':100}
+    manifest={'source':ctx['source'],'edition_total':100,'source_dimensions':[2835,2004],
+              'preparation_geometry':{'scale':4},'colour_evidence':{'icc_sha256':'a'*64,'pixels_converted':False}}
+    archive=folder/'prepared.zip'
+    with zipfile.ZipFile(archive,'w') as z:
+        z.writestr('manifest.json',json.dumps(manifest))
+        z.writestr('original.png',b'x'*80000)
+        z.writestr('transport.json',json.dumps({'version':1,'deltas':{'reference-1.png':{'bytes':80000}}}))
+    before=archive.read_bytes()
+    assert archive.stat().st_size<120000
+    with patch.object(local,'HOST_FILE',root/'host.dpapi'),patch('auto_editions_package.MAX_PACKAGE_BYTES',120000):
+        assert local.find_reusable_package(ctx) is None
+    assert archive.read_bytes()==before
+
+
 def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):
     import requests
     from unittest.mock import Mock
