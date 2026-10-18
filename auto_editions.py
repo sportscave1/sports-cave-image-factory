@@ -178,6 +178,9 @@ def compose(manifest, root, number, *, timings=None):
     x0, y0, x1, y1 = manifest['number_region']
     started=time.monotonic()
     with Image.open(asset_path(root, manifest['master'])) as source:
+        if source.mode=='RGBA' and source.getchannel('A').getextrema()[0]<255:
+            low,high=source.getchannel('A').getextrema()
+            raise ValueError(f'Saved artwork exports RGBA with non-opaque alpha ({low}-{high}). An approved opaque composition is required; no background was guessed or painted.')
         if source.format != 'PNG' or source.mode != 'RGB' or list(source.size) != canvas:
             raise ValueError('Master must be a lossless RGB PNG at the prepared size.')
         result = source.copy()

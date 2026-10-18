@@ -181,3 +181,12 @@ def test_ordered_scope_excludes_peer_and_preserves_priority(backlog,monkeypatch)
         assert recovery.scan(d.connect,metadata)==[]
     assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)==before
     assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==selected)['priority']==8
+
+
+def test_next_claim_uses_sales_within_existing_priority_band(backlog,monkeypatch):
+    d,sql=backlog;first,_=source_job(d,sql,1000);higher,_=source_job(d,sql,1001)
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{first:2,higher:139})
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[higher,first]
+    claim=__import__('auto_editions_onboarding_store').Queue(d.connect).claim('operator')
+    assert claim['product_gid']==higher and claim['priority']==8

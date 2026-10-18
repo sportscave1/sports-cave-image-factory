@@ -91,3 +91,17 @@ def test_large_source_shared_fix_is_bounded_and_not_package_retry():
     assert recovery.classify(row,cfg)['action']=='retry'
     assert recovery.classify({**row,'inventory_metadata':{'size':MAX_SOURCE_BYTES+1}},cfg)['action'] is None
     assert recovery.classify({**row,'reason':'Preparation failed: Prepared package exceeds the cloud transfer limit.'},cfg)['action'] is None
+
+
+def test_transparent_artwork_is_reported_and_never_flattened(tmp_path):
+    from PIL import Image
+    import auto_editions as ae
+    from tests.test_auto_editions import package
+    manifest=package(tmp_path)
+    path=tmp_path/'master.png'
+    Image.new('RGBA',(200,100),(10,20,30,99)).save(path)
+    manifest['master']['sha256']=ae.file_hash(path)
+    before=path.read_bytes()
+    with pytest.raises(ValueError,match='approved opaque composition'):
+        ae.compose(manifest,tmp_path,1)
+    assert path.read_bytes()==before
