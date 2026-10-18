@@ -73,6 +73,13 @@ def eligibility(row,repair_confirmed=False):
     if pending.get('stage') in ('Discovering','Queued','Preparing'):return 'An explicit reset/reprocess is already in progress.'
     if row['status']=='Preparing':return 'An owned worker lease or recovery operation is still present. Wait for its recovery; do not force a retry.'
     if row['reviewing']:return 'An approval operation is pending or processing. Wait for its authoritative result.'
+    if pending.get('stage')=='Failed':
+        if row['status'] not in ('Blocked','Needs PSD Repair','Cloud Ready') or pending.get('attempts',0)>=3:
+            return 'The failed replacement requires separate review before another native attempt.'
+        if not repair_confirmed:return 'Review the failed replacement and confirm the required correction before retrying.'
+        # Availability only. submit always calls Reset.retry_failed, which locks
+        # and revalidates the original mapping, source, checkpoint and budget.
+        return ''
     if row['approved'] or row.get('preparation_hash') or row['retained']:return 'Prepared or approved artwork is protected. Use existing Review / Repair or the explicit reset/reprocess workflow.'
     if row.get('file_id') and row['file_id']!=row['dropbox_file_id']:return 'The mapped PSD differs from the queue source. Resolve the mapping explicitly first.'
     import auto_editions_v17

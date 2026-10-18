@@ -190,8 +190,10 @@ def test_pinned_export_repair_reuses_original_mapping_without_filename_rematch(d
 
 def test_failed_pinned_discovery_can_retry_once_without_a_native_attempt(design):
     d,sql,reset,old=design;pending=pinned_repair(design,'Failed');before=protected(sql)
-    assert reset.retry_failed(PID,'admin') is True
-    assert reset.retry_failed(PID,'admin') is True
+    import worker_health_queue as queue
+    rid=str(uuid.uuid4())
+    assert queue.submit(d.connect,PID,'admin',rid,repair_confirmed=True)['accepted']
+    assert queue.submit(d.connect,PID,'admin',rid,repair_confirmed=True)['duplicate']
     current=selected(sql)['replacement']
     assert current['source']==old['source'] and current['file_id']==old['source']['file_id']
     assert current['id']==pending['id'] and current['attempts']==0
