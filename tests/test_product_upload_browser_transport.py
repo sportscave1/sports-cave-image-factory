@@ -46,9 +46,9 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
         page.goto(client.base);expect(page.locator('#summary')).to_be_hidden()
         assert page.locator('input[type=file]').count()==0
         page.locator('#choose').click();expect(page.locator('#picker')).to_be_visible()
-        expect(page.locator('#picker-path')).to_have_text(REVIEW)
-        page.get_by_role('button',name='▸ Subfolder',exact=True).click();expect(page.locator('#picker-path')).to_have_text(sub['path_display'])
-        page.locator('#picker-up').click();expect(page.locator('#picker-path')).to_have_text(REVIEW)
+        expect(page.locator('#picker-path')).to_have_attribute('title',REVIEW)
+        page.get_by_role('button',name='▸ Subfolder',exact=True).click();expect(page.locator('#picker-path')).to_have_attribute('title',sub['path_display'])
+        page.locator('#picker-path').get_by_role('button',name='Review',exact=True).click();expect(page.locator('#picker-path')).to_have_attribute('title',REVIEW)
         page.locator('#picker-search').fill('First');expect(page.locator('#picker-items button')).to_have_count(1)
         page.get_by_role('button',name='First.psd',exact=True).click()
         expect(page.locator('#filename')).to_have_text('First.psd');expect(page.locator('#preview img')).to_be_visible()
@@ -64,16 +64,27 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
         page.locator('#choose').click();page.locator('#picker-search').fill('Second');expect(page.locator('#picker-items button')).to_have_count(1)
         page.get_by_role('button',name='Second.psd',exact=True).click();expect(page.locator('#filename')).to_have_text('Second.psd')
         assert page.evaluate('productUploadMetrics.selections.filter(x=>x.selection_to_bound_ms!==undefined).at(-1).id')!=key
+        page.locator('#product').evaluate("el=>el.value='Preserved form'")
+        selected_name=page.locator('#filename').inner_text();held_metadata=[]
+        page.route('**/api/product-uploads/browse',lambda route:held_metadata.append(route))
+        page.locator('#choose').click();expect(page.locator('#picker-status')).to_have_text('Loading Dropbox metadata…')
+        expect(page.get_by_role('button',name='Close Dropbox picker',exact=True)).to_be_visible()
+        assert page.get_by_role('button',name='Up',exact=True).count()==0
+        page.get_by_role('button',name='Close Dropbox picker',exact=True).click();expect(page.locator('#picker')).not_to_be_visible()
+        expect(page.locator('#choose')).to_be_focused();expect(page.locator('#filename')).to_have_text(selected_name)
+        assert page.locator('#product').input_value()=='Preserved form'
+        page.unroute('**/api/product-uploads/browse')
+        page.locator('#choose').click();page.keyboard.press('Escape');expect(page.locator('#picker')).not_to_be_visible();expect(page.locator('#choose')).to_be_focused()
         page.reload();expect(page.locator('#summary')).to_be_hidden();assert page.locator('#preview img').count()==0
         page.set_viewport_size(dict(width=390,height=844));page.locator('#choose').click();expect(page.locator('#picker')).to_be_visible()
-        expect(page.locator('#picker-path')).to_have_text(REVIEW)
+        expect(page.locator('#picker-path')).to_have_attribute('title',REVIEW)
         expect(page.locator('#picker-items button')).to_have_count(3)
         page.screenshot(path=str(out/'picker-mobile.png'),full_page=True)
         assert not page.evaluate('document.documentElement.scrollWidth>innerWidth')
         page.route('**/__frame',lambda route:route.fulfill(content_type='text/html',body='''<iframe title="Product Upload" src="/" style="width:100%;height:280px;border:0"></iframe><script>addEventListener('message',e=>{if(e.data.type==='sports-cave-product-upload-height')document.querySelector('iframe').style.height=e.data.height+'px';});</script>'''))
         page.goto(client.base+'/__frame');frame=page.frame_locator('iframe')
-        frame.locator('#choose').click();expect(frame.locator('#picker-path')).to_have_text(REVIEW)
-        assert page.locator('iframe').bounding_box()['height']>=500
+        frame.locator('#choose').click();expect(frame.locator('#picker-path')).to_have_attribute('title',REVIEW)
+        page.wait_for_function("() => {const f=document.querySelector('iframe'),p=f.contentDocument.querySelector('#picker');return p.getBoundingClientRect().bottom<=f.getBoundingClientRect().height;}")
         assert frame.locator('#picker').bounding_box()['height']>400
         frame.locator('#picker-close').click();expect(frame.locator('#picker')).to_be_hidden()
         assert not any('/chunk' in url or '/start' in url or '/finish' in url for url in requests)

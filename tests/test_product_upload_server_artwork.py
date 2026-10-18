@@ -111,7 +111,8 @@ def test_missing_profile_requires_approved_recovery_and_truncated_composite_reje
     with pytest.raises(ValueError,match='truncated'):artwork.decode(truncated,tmp_path/'never.png',row,store.connect)
 
 
-def test_product_upload_generate_button_uses_server_artwork_and_original_engine(env,tmp_path,monkeypatch):
+@pytest.mark.parametrize('switch_selection',[False,True])
+def test_product_upload_generate_button_uses_server_artwork_and_original_engine(env,tmp_path,monkeypatch,switch_selection):
     import ast
     from contextlib import nullcontext
     from types import SimpleNamespace
@@ -128,7 +129,14 @@ def test_product_upload_generate_button_uses_server_artwork_and_original_engine(
         alphabetize_options=lambda values,**k:values,SPORT_OPTIONS=['Football'],get_sport_category=lambda a,b:a,
         MOCKUPS_GENERATION_SEMAPHORE=__import__('threading').Semaphore(1),BASE_DIR=tmp_path,
         build_mockup_final_prompt_items=lambda *a:[],normalize_generation_result=lambda r:r,render_generation_result=lambda r:None)
+    row=artwork.prepare(store.connect,provider,key,ADMIN['id'])
     generate=Mock(return_value=dict(product_name='Same',sport_category='Football'))
+    if switch_selection:
+        def changed(**kwargs):
+            state['_product_upload_active']='newer-selection'
+            return dict(product_name='Same',sport_category='Football')
+        generate.side_effect=changed
+    discarded=Mock();monkeypatch.setattr('product_upload_mockups.release_transient',discarded)
     monkeypatch.setattr(image_factory,'generate_product_images',generate)
     tree=ast.parse((Path(__file__).resolve().parents[1]/'product_upload_mockups_ui.py').read_text(encoding='utf-8'))
     fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='render_design')
@@ -137,6 +145,8 @@ def test_product_upload_generate_button_uses_server_artwork_and_original_engine(
     scope['render_design'](app,row,ADMIN)
     generate.assert_called_once()
     with Image.open(generate.call_args.kwargs['artwork_file_path']) as image:assert image.size==(640,480)
+    if switch_selection:
+        assert not held.get('result');discarded.assert_called_once();return
     assert held['result']['_product_upload_intake']==key
     assert held['result']['_product_upload_source_hash']==meta['content_hash']
     assert store.read(key,ADMIN['id'])['data']['server_artwork']['state']=='Ready'

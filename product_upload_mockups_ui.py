@@ -87,7 +87,8 @@ def render_design(app,row,user):
         st.info('Choose a Dropbox PSD for server preparation. This saved legacy workflow is retained.');return
     spec=row['data'].get('server_artwork') or {}
     generated=bool(result)
-    clicked=st.button('Generate Core Shopify Images',type='primary',key='product-upload-generate-'+key,disabled=not name.strip() or not sport or spec.get('state')=='Rendering')
+    if spec.get('state')!='Ready':st.session_state.pop('product-upload-generate-requested-'+key,None)
+    clicked=st.button('Generate Core Shopify Images',type='primary',key='product-upload-generate-'+key,disabled=not name.strip() or not sport or spec.get('state')!='Ready') and spec.get('state')=='Ready'
     if clicked:
         st.session_state['product-upload-generate-requested-'+key]=True
         if generated and (result['product_name']!=name.strip() or result['sport_category']!=sport):
@@ -98,22 +99,22 @@ def render_design(app,row,user):
             from product_upload_mockups import release_transient
             release_transient(result)
             app._set_mockups_result(None);result=None;generated=False
-        if spec.get('state')!='Ready':
-            try:
-                from product_upload_artwork import prepare
-                row=prepare(connect,Dropbox(),key,user['id']);spec=row['data']['server_artwork']
-            except Exception as error:st.error(str(error));return
-    if spec.get('state') in ('Selected','Preparing'):
-        st.info('Preparing artwork on the server.' if spec['state']=='Preparing' else 'Selected Dropbox PSD. Prepare artwork on the server with Generate Core Shopify Images.')
+    if spec.get('state')=='Preparing':
+        st.info('Preparing original PSD artwork on the server. Generate Core Shopify Images will be enabled when it is ready.')
         poll_render(key,user['id'],spec['state'])
-    elif spec.get('state')=='Failed':
-        st.error(spec.get('reason') or 'PSD render needs review. The original and workflow are retained.')
-        if st.button('Retry artwork preparation',key='product-upload-artwork-retry-'+key):
+    elif spec.get('state') in ('Selected','Failed'):
+        if spec['state']=='Failed':st.error(spec.get('reason') or 'Artwork preparation failed. Retry preparation; the original and workflow are retained.')
+        else:st.info('PSD selected. Prepare its original artwork before generating core images.')
+        if st.button('Retry artwork preparation' if spec['state']=='Failed' else 'Prepare artwork',key='product-upload-artwork-retry-'+key):
+            st.session_state.pop('product-upload-generation-failed-'+key,None)
+            st.session_state.pop('product-upload-generate-requested-'+key,None)
             try:
                 from product_upload_artwork import prepare
-                prepare(connect,Dropbox(),key,user['id'])
+                prepare(connect,None,key,user['id'],provider_factory=Dropbox)
             except Exception as error:st.error(str(error));return
             st.rerun()
+        poll_render(key,user['id'],spec['state'])
+    elif spec.get('state')=='Ready':st.info('Artwork ready. Generate Core Shopify Images to continue.')
     failed_key='product-upload-generation-failed-'+key
     if clicked:st.session_state.pop(failed_key,None)
     if st.session_state.get(failed_key):
@@ -139,6 +140,10 @@ def render_design(app,row,user):
                 current(provider,row)
                 result=app.normalize_generation_result(result)
                 result.update(_product_upload_intake=key,_product_upload_actor_id=str(user['id']),_product_upload_source_hash=row['data']['source']['content_hash'])
+                latest=Intakes(connect).read(key,user['id'])
+                if st.session_state.get('_product_upload_active')!=key or latest['data']['source']!=row['data']['source']:
+                    from product_upload_mockups import release_transient
+                    release_transient(result);return
                 app._set_mockups_result(result)
         except Exception as error:
             st.session_state[failed_key]=str(error);st.error(str(error));return

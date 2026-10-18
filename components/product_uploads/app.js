@@ -11,14 +11,14 @@
   function reset(){stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('product').value='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('choices').replaceChildren();$('preview').textContent='Preview pending';$('fallback').close();clear();render();notify();}
   const fail=e=>{if(e.name==='AbortError')return;$('error').textContent=e.message||String(e);$('error').hidden=false;};
   const clear=()=>{$('error').hidden=true;};
-  async function request(path,body){
+  async function request(path,body,signal=controller.signal){
     const generation=epoch,started=Date.now();
-    const response=await fetch('/api/product-uploads/'+path,{method:body?'POST':'GET',credentials:'same-origin',signal:controller.signal,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
+    const response=await fetch('/api/product-uploads/'+path,{method:body?'POST':'GET',credentials:'same-origin',signal,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});
     const data=await response.json();if(generation!==epoch)throw abortError();
     record(metrics.requests,{operation:path.split('?')[0],elapsed_ms:Date.now()-started,status:response.status});
-    if(!response.ok)throw new Error(data.error||'Dropbox request failed. Retry.');return data;
+    if(!response.ok)throw Object.assign(new Error(data.error||'Dropbox request failed. Retry.'),{upload:data.upload});return data;
   }
-  const action=(name,extra={})=>request(name,{id:row?.id,mode:$('mode').value,...extra});
+  const action=(name,extra={},signal)=>request(name,{id:row?.id,mode:$('mode').value,...extra},signal);
   function schedule(){clearTimeout(timer);if(!manual&&row?.basic_validated&&!['Cloud Ready','Failed','Uploaded','Error'].includes(row.state)&&!busy&&!document.hidden&&!stopped)timer=setTimeout(refresh,5000);}
   function render(){
     $('drop').hidden=manual;$('manual').textContent=manual&&enabled?'Use automatic workflow':'Use manual workflow';$('manual').disabled=!enabled||busy;
@@ -38,6 +38,7 @@
     if(row?.basic_validated&&!row.preview_url)$('preview').textContent=row.state==='Failed'?'Preview unavailable':row.product_title?'Preview waiting':'PSD saved';
     if(row?.preview_url&&previewKey!==row.preview_url)loadPreview(row.preview_url);
     $('remove').hidden=!row;
+    $('artwork-retry').hidden=manual||!row||!['Error','Selected'].includes(row.state);$('artwork-retry').disabled=busy;
     if(section==='upload'){$('prompt').hidden=true;$('return').hidden=true;$('terminal').hidden=true;$('retry').hidden=true;}
     if(section==='handoff'){$('setup').hidden=true;$('automatic').hidden=true;$('footer').hidden=true;$('remove').hidden=true;}
     if(row?.state==='Ready'&&selectedAt&&!timedReady.has(row.id)){timedReady.add(row.id);record(metrics.selections,{id:row.id,selection_to_mockup_ready_ms:Date.now()-selectedAt});}
@@ -46,31 +47,37 @@
   function resize(){if(parent!==window){const height=Math.ceil(Math.max(document.body.getBoundingClientRect().height,$('picker').open?Math.min(720,($('picker').scrollHeight||480)+64):0));if(height===lastHeight)return;lastHeight=height;parent.postMessage({type:'sports-cave-product-upload-height',height},location.origin);if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height},'*');}}
   window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data?.type==='sports-cave-product-upload-measure')resize();});
   async function refresh(){const current=epoch,requested=row?.id;try{const data=await request('state'+(row?.id?'?id='+encodeURIComponent(row.id):''));if(current!==epoch||requested!==row?.id)return;const previousManual=manual;enabled=data.enabled;row=data.upload;manual=!enabled||manual;if(previousManual!==manual)notify();if(row)$('mode').value=row.mode;render();}catch(e){if(current===epoch&&e.name!=='AbortError')fail(e);clearTimeout(timer);}}
-  let pickerRoot='review',pickerPath='',pickerPage='',pickerEpoch=0,pickerBusy=false;
+  let pickerRoot='review',pickerPath='',pickerPage='',pickerEpoch=0,pickerBusy=false,pickerController=new AbortController();
+  function closePicker(){pickerEpoch++;pickerController.abort();pickerBusy=false;clearTimeout($('picker-search').timer);if($('picker').open)$('picker').close();$('choose').focus({preventScroll:true});resize();}
+  function breadcrumbs(data){
+    const nav=$('picker-path'),base=data.roots[pickerRoot].path;nav.replaceChildren();nav.title=data.path;
+    const parts=[pickerRoot==='review'?'Review':'Designs Live',...data.path.slice(base.length).split('/').filter(Boolean)];let target=base;
+    parts.forEach((part,index)=>{if(index)target+='/'+part;const path=target,b=document.createElement('button');b.type='button';b.textContent=part;b.disabled=index===parts.length-1;b.onclick=()=>browse(path);nav.append(b);});
+  }
   async function browse(path='',page=''){
-    const sequence=++pickerEpoch;pickerBusy=true;if(!page)$('picker-items').replaceChildren();$('picker-more').disabled=true;$('picker-status').textContent='Loading Dropbox metadata…';
+    pickerController.abort();pickerController=new AbortController();const sequence=++pickerEpoch;pickerBusy=true;if(!page)$('picker-items').replaceChildren();$('picker-more').disabled=true;$('picker-status').textContent='Loading Dropbox metadata…';
     try{
-      const data=await action('browse',{root:pickerRoot,path,page,search:$('picker-search').value});
+      const data=await action('browse',{root:pickerRoot,path,page,search:$('picker-search').value},pickerController.signal);
       if(sequence!==pickerEpoch)return;pickerPath=data.path;pickerPage=data.next_page;
-      $('picker-path').textContent=pickerPath;$('picker-more').hidden=!data.has_more;
-      $('picker-up').disabled=pickerPath===data.roots[pickerRoot].path;
+      breadcrumbs(data);$('picker-more').hidden=!data.has_more;
       if(!page)$('picker-items').replaceChildren();
       for(const item of data.items){const b=document.createElement('button');b.textContent=(item['.tag']==='folder'?'▸ ':'')+item.name;
         b.onclick=()=>item['.tag']==='folder'?browse(item.path_display):selectPSD(item);$('picker-items').append(b);}
       $('picker-status').textContent=data.has_more?'More metadata available. Load more to continue this folder search.':'Folder metadata loaded.';
-    }catch(e){if(sequence===pickerEpoch)$('picker-status').textContent=e.message;}
+    }catch(e){if(sequence===pickerEpoch&&e.name!=='AbortError')$('picker-status').textContent=e.message;}
     finally{if(sequence===pickerEpoch){pickerBusy=false;$('picker-more').disabled=false;}resize();}
   }
   async function selectPSD(item){
-    $('picker').close();reset();selectedAt=Date.now();const current=epoch;busy=true;render();
+    closePicker();reset();selectedAt=Date.now();const current=epoch;busy=true;render();
     try{const selected=await action('select',{id:crypto.randomUUID(),file_id:item.id,revision:item.rev});
       if(current!==epoch)return;row=selected.upload;record(metrics.selections,{id:row.id,selection_to_bound_ms:Date.now()-selectedAt});busy=false;render();notify();row.state='Preparing';render();const prepared=await action('prepare');if(current!==epoch)return;row=prepared.upload;notify();
-    }catch(e){if(current===epoch)fail(e);}finally{if(current===epoch){busy=false;render();}}
+    }catch(e){if(current===epoch){if(e.upload){row=e.upload;notify();}fail(e);}}finally{if(current===epoch){busy=false;render();}}
   }
-  $('picker-close').onclick=()=>{$('picker').close();pickerEpoch++;resize();};$('picker').addEventListener('close',resize);
+  $('picker-close').onclick=closePicker;$('picker').addEventListener('close',resize);
+  $('picker').addEventListener('cancel',event=>{event.preventDefault();closePicker();});
+  $('artwork-retry').onclick=async()=>{if(busy||!row)return;const current=epoch;busy=true;clear();row.state='Preparing';row.reason='';render();try{const result=await action('prepare');if(current!==epoch)return;row=result.upload;notify();}catch(e){if(current===epoch){if(e.upload)row=e.upload;else await refresh();notify();fail(e);}}finally{if(current===epoch){busy=false;render();}}};
   $('picker-root').onchange=()=>{pickerRoot=$('picker-root').value;$('picker-search').value='';browse();};
   $('picker-search').oninput=()=>{clearTimeout($('picker-search').timer);$('picker-search').timer=setTimeout(()=>browse(pickerPath),250);};
-  $('picker-up').onclick=()=>browse(pickerPath.slice(0,pickerPath.lastIndexOf('/')));
   $('picker-more').onclick=()=>{if(!pickerBusy)browse(pickerPath,pickerPage);};
   async function copied(){
     if(copyMode!==$('mode').value||copyID!==(manual?'':row?.id))throw new Error('The selected action changed. Copy the current prompt again.');

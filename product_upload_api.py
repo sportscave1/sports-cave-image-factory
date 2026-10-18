@@ -64,6 +64,9 @@ def failure(error):
     from product_upload_relay import RelayBusy
     if isinstance(error, RelayBusy):
         return JSONResponse(dict(error=str(error)), status_code=503, headers={**HEADERS, 'Retry-After':'1'})
+    from product_upload_artwork import PreparationError
+    if isinstance(error, PreparationError):
+        return JSONResponse(dict(error=str(error), **({'upload':error.upload} if hasattr(error,'upload') else {})), status_code=error.status_code, headers=HEADERS)
     known = isinstance(error, (ValueError, PermissionError, FilesUploadError))
     return JSONResponse(dict(error=str(error) if known else 'The service is temporarily unavailable. Your saved upload is retained; retry shortly.'),
                         status_code=403 if isinstance(error, PermissionError) else error.status_code if isinstance(error, FilesUploadError) else 409 if known else 503,
@@ -136,7 +139,7 @@ async def action(request):
         elif op == 'prepare':
             from product_upload_artwork import prepare
             from product_upload_dropbox import status
-            row = await run_in_threadpool(prepare,connect,await run_in_threadpool(Dropbox),key,uid)
+            row = await run_in_threadpool(prepare,connect,None,key,uid,provider_factory=Dropbox)
             row = await run_in_threadpool(status,row,connect)
         elif op == 'mode':
             row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))

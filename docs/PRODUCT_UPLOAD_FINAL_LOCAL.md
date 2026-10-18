@@ -1,5 +1,69 @@
 # Product Uploads — consolidated local upload optimisation
 
+## Preparation failure and picker follow-up — 19 October 2026 (local only)
+
+Release follow-up: the user subsequently authorised committing/pushing both latest
+updates, deploying the existing Render services and updating the installed Companion.
+The local-only notes below describe implementation-stage verification. The original
+production exception remains unrecoverable; deployment adds diagnostics without
+claiming that the earlier 503 has been reproduced on Render. Release evidence is
+recorded in `output/product-upload-picker-release-20261019/`.
+
+Verified the existing task `20261018-4b18037e` and owner on its existing branch;
+starting worktree was clean. No commit, push, deployment or installed worker change.
+
+The affected Jake Bauers PSD is accessible read-only: Dropbox ID
+`id:u1tYiAa2O-AAAAAAAABw6w`, revision `0165e251a26bf2f000000036d367e13`,
+285,917,118 bytes, Dropbox content hash
+`c5c9b3192d5cb6a5c42a70ef465f02cae5fcc1d8a2a14fd7fa4b964ec74da72e`.
+A fresh server-side Dropbox download and the synced original both match this hash.
+Document: 2835×2004, RGB8, embedded ICC 3144 bytes. Production Pillow 10.4
+successfully decodes the full composite, preserves colour conversion and prepares
+2000×1414 PNG artwork. The real shared Mockups engine produces all five core assets
+from that exact artwork with actual repository scene templates and no Companion.
+The standalone Mockups uploader accepts JPG/PNG/WebP in both this branch and the
+current main snapshot; it has no separate PSD decoder to reuse. Neither it nor
+`image_factory.py` was modified.
+
+**The original production failure's precise operation remains unconfirmed.**
+Runtime request logs show POST preparation 503 at 2026-10-18 22:47:35 UTC.
+The old handler discarded the exception/stack and stored a generic composite error.
+That evidence cannot be reconstructed from its saved text. Local baseline preparation
+of the exact PSD also passed before these changes. No evidence justifies resaving
+the PSD, changing colour policy, increasing memory/timeouts or adding a decoder.
+The local correction therefore preserves decoding and retrieval, fixes error/retry
+state and adds stage/type/stack/reference diagnostics without credentials, provider
+response bodies or signed URLs. Future failures identify download, validation,
+decode, preview, storage or checkpoint stages rather than blaming the composite.
+The generic HTTP error and stored preparation reason now agree.
+
+Retries clear previous failure state, reuse verified assets, join an already running
+request and fence completion/failure by source and attempt. Generate Core Shopify
+Images is disabled until artwork is Ready; selected and failed artwork has a separate
+Prepare/Retry control. Late generation results are discarded after a new selection.
+The picker close icon is at top-right, labelled Close Dropbox picker. Close and Escape
+cancel only metadata browsing, preserve the selected PSD/form and return focus to
+Choose PSD. Review/Live remain; breadcrumbs replace Up. How To is updated briefly.
+
+Evidence: ignored `output/product-upload-preparation-fix/` contains baseline decode,
+complete retrieval verification, real-PSD timings and focused verification. Timings
+use a disposable database/provider metadata and a byte copy from the verified
+retrieval; they do not reproduce Render resources or prove the production 503 is
+resolved. Original Dropbox files and live Shopify products remain untouched.
+
+Verification: 160 distinct tests plus 49 subtests passed (159-test regression,
+then 21 focused tests after final error-bootstrap changes, including one new test).
+Node state/syntax, Studio Verify, topology and diff checks passed. Actual Chromium
+checks cover pending metadata close, Escape/focus, breadcrumbs, retained form,
+selection changes, desktop/mobile and iframe fit. Decoder AST, standalone Mockups,
+shared engine and infrastructure files are unchanged.
+
+Changed files: `product_upload_artwork.py`, `product_upload_api.py`,
+`product_upload_mockups_ui.py`, `components/product_uploads/app.js`,
+`components/product_uploads/index.html`, `tests/test_product_upload_artwork_recovery.py`,
+`tests/test_product_upload_server_artwork.py`, `tests/test_product_upload_browser_transport.py`,
+`tests/test_product_upload_state.cjs` and this existing How To/report.
+
 ## Release authorised — 19 October 2026
 
 The user authorised publishing both Dropbox selection and server-side PSD
