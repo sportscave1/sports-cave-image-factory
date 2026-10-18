@@ -361,7 +361,9 @@ async def claim(request):
         if not enabled():
             await run_in_threadpool(refresh,store,str(user['id']),limit=100 if __import__('auto_editions_v17').enabled() else None)
         row=await run_in_threadpool(store.claim,str(user['id']))
-        if not row:return JSONResponse(dict(grant=None),headers=api.HEADERS)
+        if not row:
+            from product_upload_services import enabled as uploads_enabled
+            return JSONResponse(dict(grant=None,product_mockup_renders=uploads_enabled()),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,row['product_gid'],str(row['lease_token']))
         await run_in_threadpool(store.checkpoint,row['product_gid'],str(row['lease_token']),str(user['id']),
                                 'Preparing',source=ctx['source'],total=ctx['total'])

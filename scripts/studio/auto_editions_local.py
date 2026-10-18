@@ -255,6 +255,10 @@ def host_loop():
                     timings['claim_seconds']=round(time.monotonic()-claim_started,6)
                     if HOST_LAST_COMPLETED_AT is not None:timings['completed_to_claim_request_seconds']=round(claim_started-HOST_LAST_COMPLETED_AT,6)
                     state='Preparing'
+                elif data.get('product_mockup_renders') is True:
+                    import sys
+                    from product_upload_render_local import run_one
+                    if run_one(config,sys.modules[__name__]):state='Rendering product mockups'
             failures=0
             HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
