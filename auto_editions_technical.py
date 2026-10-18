@@ -124,6 +124,10 @@ def project(row,valid,uploaded,*,writable=False,now=None):
         if explain(why)['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','COLOUR_INCOMPATIBLE','ICC_MISMATCH'):actions+=['colour-review']
     if reset.get('stage') in ('Discovering','Queued','Preparing'):
         state='Uploading';stage=reset['stage'];why='Existing explicit reset/reprocess is running.';actions=[]
+    elif reset.get('stage')=='Failed':
+        state='Failed';stage=reset.get('failure_status') or 'Failed'
+        why=reason(reset.get('reason')) or 'Native replacement failed; the retained preparation is protected.'
+        actions=['retry']
     if cancel.get('stage') in ('Cancelling','Confirmed'):
         state='Uploading';stage='Cancelling';why='Waiting for owned Companion safe-stop acknowledgement.';actions=[]
     return dict(product_gid=row['product_gid'],status=state,icon='✓' if state=='Cloud Ready' else '',reason=why,

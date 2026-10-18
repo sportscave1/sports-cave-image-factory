@@ -152,6 +152,74 @@ def test_latest_revision_same_id_and_failure_does_not_switch_active_state(design
     assert snapshot(selected(sql))==active and protected(sql)==before
 
 
+def failed_native(design):
+    d,sql,reset,old=design
+    reset.request(PID,str(uuid.uuid4()),'admin');discover(design)
+    job=d.queue.claim('host')
+    d.queue.checkpoint(PID,str(job['lease_token']),'host','Blocked','Cinzel-Medium is unavailable.')
+    return selected(sql)['replacement']
+
+
+def test_failed_native_retry_reuses_operation_and_preserves_design(design,tmp_path):
+    d,sql,reset,old=design;pending=failed_native(design)
+    before=protected(sql);active=snapshot(selected(sql))
+    assert pending['stage']=='Failed' and pending['attempts']==1
+    assert reset.retry_failed(PID,'admin') is True
+    assert reset.retry_failed(PID,'admin') is True
+    queued=selected(sql)['replacement']
+    assert queued['id']==pending['id'] and queued['attempts']==1 and queued['stage']=='Queued'
+    assert protected(sql)==before and snapshot(selected(sql))==active
+    sql.execute("SELECT count(*) n FROM auto_edition_onboarding_audit WHERE event='reset_retry'")
+    assert sql.fetchone()['n']==1
+    job=d.queue.claim('host');assert job and job['replacement']['attempts']==2
+    assert d.queue.claim('competing-host') is None
+    assert reset.retry_failed(PID,'admin') is True # A response lost after the claim is harmless.
+    complete(design,job['lease_token'],tmp_path)
+    assert selected(sql)['replacement']['stage']=='Complete'
+    assert protected(sql)==before
+    assert reset.retry_failed(PID,'admin') is False # Completed work is never queued again.
+
+
+@pytest.mark.parametrize('change',['mapping','checkpoint','revision','missing','ambiguous','active','attempts','cancelling'])
+def test_failed_native_retry_rejects_changed_or_unsafe_ownership(design,change):
+    d,sql,reset,old=design;pending=failed_native(design)
+    if change=='mapping':sql.execute("UPDATE product_psd_mappings SET dropbox_file_id='id:changed' WHERE shopify_product_gid=%s",(PID,))
+    if change=='checkpoint':sql.execute("UPDATE auto_edition_onboarding SET reason='A new retained design',preparation_hash=NULL WHERE product_gid=%s",(PID,))
+    if change=='revision':sql.execute("UPDATE auto_edition_source_inventory SET metadata=jsonb_set(metadata,'{rev}','\"a2\"')")
+    if change=='missing':sql.execute('DELETE FROM auto_edition_source_inventory')
+    if change=='ambiguous':sql.execute("UPDATE edition_products SET product_title='Different title' WHERE shopify_product_gid=%s",(PID,))
+    if change=='active':sql.execute("UPDATE auto_edition_onboarding SET status='Preparing' WHERE product_gid='gid://shopify/Product/1000'")
+    if change=='attempts':sql.execute("UPDATE auto_edition_onboarding SET replacement=jsonb_set(replacement,'{attempts}','3') WHERE product_gid=%s",(PID,))
+    if change=='cancelling':sql.execute("UPDATE auto_edition_onboarding SET reset_cancellation='{\"stage\":\"Cancelling\"}' WHERE product_gid=%s",(PID,))
+    before=protected(sql);row=selected(sql)
+    with pytest.raises(ValueError):reset.retry_failed(PID,'admin')
+    assert selected(sql)==row and protected(sql)==before
+
+
+def test_native_retry_api_does_not_verify_retained_old_package(design):
+    d,sql,reset,old=design;pending=failed_native(design)
+    import files_upload_api as files
+    from auto_editions_technical import Technical
+    async def check():
+        with patch.object(api,'queue',return_value=d.queue),patch.object(api.api.runtime,'enabled',return_value=True),patch.object(files,'_request_user',return_value=ADMIN),patch.object(Technical,'retry',side_effect=AssertionError('Old technical package must not be retried')):
+            response=await api.retry(request('POST',body={'product_gid':PID}))
+            assert response.status_code==200,response.body
+    asyncio.run(check())
+    assert selected(sql)['replacement']['id']==pending['id']
+    assert selected(sql)['replacement']['stage']=='Queued'
+
+
+def test_failed_replacement_status_never_waits_for_old_technical_checkpoint(monkeypatch):
+    from auto_editions_technical import project
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    row=dict(product_gid=PID,status='Blocked',file_id='id:original',dropbox_file_id='id:original',
+        priority=10,preparation_hash='a'*64,technical_state='Pending',
+        replacement=dict(stage='Failed',reason='The exact edition-number font is unavailable.'))
+    value=project(row,True,True,writable=True)
+    assert value['status']=='Failed' and value['substage']=='Failed'
+    assert value['reason']=='The exact edition-number font is unavailable.' and 'retry' in value['actions']
+
+
 def test_active_job_and_uncertain_expired_processing_cannot_be_reset(design):
     d,sql,reset,old=design
     for lease in ("now()+interval '30 minutes'","now()-interval '1 minute'"):

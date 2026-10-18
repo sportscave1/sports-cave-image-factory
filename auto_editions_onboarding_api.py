@@ -391,9 +391,12 @@ async def retry(request):
         user=await api.actor(request,setup=True,write=True)
         body=await files._json_body(request)
         if set(body)!={'product_gid'}:raise ValueError('Select one failed product.')
+        from auto_editions_reset import Reset
+        replacement=await run_in_threadpool(Reset(queue().connect).retry_failed,body['product_gid'],str(user['id']))
         from auto_editions_technical import enabled as technical_enabled,Technical
-        retained=technical_enabled() and await run_in_threadpool(Technical(queue().connect).retry,body['product_gid'],str(user['id']))
-        if not retained:await run_in_threadpool(queue().retry,body['product_gid'],str(user['id']))
+        if not replacement:
+            retained=technical_enabled() and await run_in_threadpool(Technical(queue().connect).retry,body['product_gid'],str(user['id']))
+            if not retained:await run_in_threadpool(queue().retry,body['product_gid'],str(user['id']))
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 

@@ -32,6 +32,51 @@ def save(cur,pid,pending):
 class Reset:
     def __init__(self,connect):self.connect=connect
 
+    def retry_failed(self,pid,actor):
+        """Retry the same failed native replacement, retaining its active design.
+
+        A retained preparation is not the failed replacement's checkpoint. Never
+        redirect this action to verification of that older package or clear its
+        mapping. Fresh Dropbox verification still runs when the host claims it.
+        """
+        from auto_editions_status import identity
+        identity(pid)
+        if not actor:raise PermissionError('An identified administrator is required.')
+        with self.connect() as conn,conn.cursor() as cur:
+            locks(cur);PostgresMappings.product(cur,pid)
+            cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
+            cur.execute('SELECT * FROM auto_edition_onboarding WHERE product_gid=%s FOR UPDATE',(pid,))
+            row=cur.fetchone();pending=(row or {}).get('replacement') or {}
+            if pending.get('stage') in BUSY:return True  # Lost-response/double-click retry.
+            if pending.get('stage')!='Failed':return False
+            if (row['status'] not in ('Blocked','Needs PSD Repair','Cloud Ready') or pending.get('manual_required')
+                    or (row.get('reset_cancellation') or {}).get('stage') in ('Cancelling','Confirmed')):
+                raise ValueError('This replacement requires separate recovery before retrying.')
+            if pending.get('attempts',0)>=3:
+                raise ValueError('Three native attempts failed. Review this design before starting a new replacement.')
+            cur.execute("SELECT 1 FROM auto_edition_onboarding q WHERE status='Preparing' OR to_jsonb(q)->'replacement'->>'stage'='Preparing' LIMIT 1")
+            if cur.fetchone():raise ValueError('Wait for the owned Companion operation to finish before retrying.')
+            cur.execute('SELECT * FROM product_psd_mappings WHERE shopify_product_gid=%s',(pid,));mapping=cur.fetchone()
+            same_mapping=json.dumps(_record(mapping) if mapping else None,sort_keys=True,default=str)==json.dumps(pending.get('mapping_before'),sort_keys=True,default=str)
+            if not same_mapping or snapshot(row)!=pending.get('previous'):
+                raise ValueError('The retained design changed. Review its mapping before retrying.')
+            source=pending.get('source') or {}
+            cur.execute('SELECT metadata FROM auto_edition_source_inventory WHERE file_id=%s',(pending.get('file_id'),));meta=cur.fetchone()
+            if (not meta or not psd.approved_file(meta['metadata'])
+                    or ae.source_identity(pid,meta['metadata'])!=source):
+                raise ValueError('The replacement source changed. Review the exact PSD before retrying.')
+            from auto_editions_discovery import Discovery
+            chosen,_,_=Discovery.candidate(cur,pid,rematch=True)
+            if not chosen or ae.source_identity(pid,chosen)!=source:
+                raise ValueError('The original PSD is no longer uniquely matched. Review the mapping.')
+            previous_reason=pending.get('reason','')
+            pending.update(stage='Queued',reason='')
+            pending.pop('failure_status',None)
+            save(cur,pid,pending)
+            Queue.audit(cur,pid,actor,'reset_retry',dict(request_id=pending['id'],source=source,
+                previous_reason=previous_reason,completed_attempts=pending.get('attempts',0)))
+            return True
+
     def clear(self,pid,request_id,actor):
         """Clear active state atomically; legacy replacement recovery remains supported below."""
         from auto_editions_status import identity
