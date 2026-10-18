@@ -35,6 +35,8 @@ def flow(store,tmp_path,monkeypatch):
         path=tmp_path/name
         return dict(id='id:'+name,rev='a1',size=path.stat().st_size,content_hash=ae.file_hash(path,dropbox=True),path_display=DropboxAssets.path(digest,name))
     assets.integration.psd_open_metadata.side_effect=metadata
+    assets.integration.team_space_client.return_value.files_get_metadata.side_effect=lambda path:metadata(None,path)
+    assets.integration._metadata_to_dict.side_effect=lambda value:value
     Preparations(d.connect).save(m,record['proofs'],record['receipts'],'owner')
     sql.execute("UPDATE edition_products SET edition_total=2")
     sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason='Prepared; visual review required',source=%s::jsonb,preparation_hash=%s,priority=2",(json.dumps(m['source']),digest))

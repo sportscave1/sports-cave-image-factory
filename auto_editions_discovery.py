@@ -274,6 +274,12 @@ def run(stop):
             LOG.warning('auto_editions_priority_failed error_type=%s',type(error).__name__)
             health_ok=False
         try:
+            from auto_editions_recovery import scan
+            scan(db.connect,lambda fid:dropbox.psd_open_metadata(context(),fid,include_preview=False))
+        except Exception as error:
+            LOG.warning('auto_editions_backlog_recovery_failed error_type=%s',type(error).__name__)
+            health_ok=False
+        try:
             from auto_editions_visual import enabled as visual_enabled
             from auto_editions_technical import enabled as technical_enabled,Technical
             if technical_enabled():

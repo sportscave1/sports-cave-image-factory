@@ -274,7 +274,10 @@ class Health:
                     'requested_at',created_at,'audit_id',id) FROM auto_edition_onboarding_audit
                     WHERE product_gid=%s AND event IN ('worker_paused','worker_resumed')
                     ORDER BY created_at DESC,id DESC LIMIT 1),
-                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause""",(after,CONTROL))
+                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause,
+                (SELECT jsonb_build_object('created_at',created_at,'detail',detail)
+                    FROM auto_edition_onboarding_audit WHERE product_gid=%s AND event='backlog_recovery_scan'
+                    ORDER BY id DESC LIMIT 1) AS recovery_scan""",(after,CONTROL,CONTROL))
             return dict(cur.fetchone())
 
     def snapshot(self):
@@ -286,7 +289,7 @@ class Health:
             # A missing optional heartbeat table must not hide authoritative jobs.
             # Retry in a NEW transaction after the failed optional read.
             raw=self._read_snapshot(False);telemetry_error=True;reads+=1
-        rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause']
+        rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause'];scan=raw.get('recovery_scan')
         while len(raw['rows'])==500:
             raw=self._read_snapshot(False,raw['rows'][-1]['product_gid']);reads+=1;rows.extend(raw['rows'])
         state_rows=[];state_reads=0
@@ -296,6 +299,41 @@ class Health:
             state_rows.extend(part['rows']);state_reads+=part['query_count']
         states=dict(rows=state_rows,query_count=state_reads)
         result=project(rows,{r['product_gid']:r for r in states['rows']},beats,successes,pause,telemetry_error=telemetry_error)
+        from auto_editions_recovery import enabled as recovery_enabled
+        # Read-only durable scanner telemetry. Missing/stale scans never imply
+        # completion, and blocked backlog is never labelled healthy Monitoring.
+        automatic=next(h for h in result['health'] if h['component']=='Recovery')
+        current_failed={j['id'] for j in result['jobs'] if j['category'] in ('Failed','Needs Review')}
+        blocked=(scan or {}).get('detail',{}).get('needs_review',{})
+        recovering=sum(j['category']=='Active' for j in result['jobs'])
+        runnable=sum(j['category']=='Queued' for j in result['jobs'])
+        fresh=bool(scan and seconds(scan['created_at'],datetime.now(timezone.utc))<=180)
+        if fresh and recovery_enabled():
+            for job in result['jobs']:
+                if job['id'] in blocked and job['category']=='Failed':
+                    bucket='repair' if job['status']=='Needs Repair' else 'unavailable' if job['status']=='Unavailable' else 'failed'
+                    result['counts'][bucket]-=1
+                    result['counts']['review']+=1
+                    job.update(category='Needs Review',status='Needs Review',reason=blocked[job['id']])
+            result['jobs'].sort(key=lambda j:({'Active':0,'Failed':1,'Needs Review':2,'Queued':3,'Completed':4}[j['category']],-j['priority'],j['design']))
+        result['recovery']=dict(enabled=recovery_enabled(),fresh=fresh,
+            needs_review=len(current_failed.intersection(blocked)) if fresh else None,
+            recovering=recovering,runnable=runnable,verified=result['counts']['completed'],
+            categories=scan['detail'].get('categories',{}) if fresh else {},
+            eligible=scan['detail'].get('eligible') if fresh else None)
+        if not recovery_enabled():
+            automatic.update(status='Disabled',reason='Backlog recovery awaits the reviewed release and AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED=true.')
+        elif not fresh:
+            automatic.update(status='Unavailable',reason='No fresh full-backlog scan. Check the existing Render discovery worker.')
+        elif pause['paused']:
+            automatic.update(status='Paused',reason='Administrator paused new claims; retained checkpoints remain protected.')
+        elif current_failed and not recovering and not runnable:
+            why='Eligible failures await guarded admission/backoff.' if scan['detail'].get('eligible') or scan['detail'].get('backoff') else 'No eligible failures remain. Needs review designs require the recorded source, provenance or diagnostic resolution.'
+            automatic.update(status='Waiting',reason=why)
+        elif recovering or runnable:
+            automatic.update(status='Recovering',reason='Queued or owned work is progressing; completion requires verified exports and cloud receipts.')
+        else:
+            automatic.update(status='Monitoring',reason='No failed backlog requires recovery.')
         result['cost']=dict(queries=reads+states['query_count'],dropbox_calls=0,duration_ms=round((time.perf_counter()-start)*1000,2))
         return result
 
