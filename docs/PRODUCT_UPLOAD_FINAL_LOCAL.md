@@ -1,5 +1,71 @@
 # Product Uploads — consolidated local upload optimisation
 
+## Original download HTTP 400 — 19 October 2026 (local, deployment held)
+
+Release follow-up: the owner subsequently authorised committing and pushing this
+verified fix to GitHub/main and deploying the existing Render services. The
+local-only/deployment-held statements below describe the implementation stage.
+Exact release SHA, deploy IDs and health results are recorded separately under
+`output/product-upload-original-retrieval/` and in the Studio task registry.
+
+The owner reproduced the original request inside canonical Render service
+`sports-cave-os` with its existing credentials and Dropbox SDK 12.2.3. Dropbox
+returned HTTP 400, request ID `d5ef2597c30f4b15bbc596086ad5571d`, explicitly
+rejecting the deprecated separate `Rev` parameter and requiring `rev:{rev}` in
+the path. This confirms the retrieval failure; it is not evidence of a damaged
+PSD or missing permission. Historical reference `63f6f9f94221` records the same
+operation and `BadInputError` for the selected file ID and revision.
+
+Product Upload now reuses Files' corrected original-PSD streaming helper. It
+requests `rev:<selected revision>` through the existing rooted client, verifies
+the returned stable file ID and revision before streaming, and compares size and
+content hash metadata. Timeout and provider retry counts are bounded. Streaming
+checks the byte count and PSD signature, closes the response and deletes partial
+temporary outputs on failure. Preparation still verifies the complete Dropbox
+content hash before the unchanged full-composite/ICC decoder and shared Mockups
+engine. The companion and browser do not transfer or prepare the PSD.
+
+How To: keep the selected PSD and product form, then use **Retry artwork
+preparation** after this correction is installed. Wait for **Ready** before
+**Generate Core Shopify Images**. If identity changed, refresh the Dropbox picker
+and reselect the current revision. The close icon, Escape, focus return, Review/
+Live selector and breadcrumbs remain unchanged.
+
+Local verification and its network boundary are recorded under ignored
+`output/product-upload-original-retrieval/`. SDK/HTTP regression tests isolate
+upstream transport; the affected original is read-only. The owner subsequently
+ran the corrected revision-path request in the same Render Shell: HTTP 200,
+request ID `c8e4da4f496940308d566ffc6ad558e0`, 285,917,118 bytes, verified PSD
+signature and content hash
+`c5c9b3192d5cb6a5c42a70ef465f02cae5fcc1d8a2a14fd7fa4b964ec74da72e`,
+in 6.42 seconds. This verifies the complete original download with the actual
+application credentials, SDK 12.2.3 and team-root context; no reconnection is
+required for this request.
+
+Separately, the corrected local adapter streamed the exact affected PSD through
+full composite/ICC preparation and the unchanged shared core mockup engine,
+with companion claims prohibited. All five core images were generated and the
+preview and framed/unframed/size-guide outputs visually inspected. The final
+local measured run prepared artwork in 1.80 seconds and generated core mockups
+in 4.27 seconds, excluding real network transfer. These measurements are from
+different runtimes and must not be added into a claimed Render end-to-end time.
+Render's full UI preparation/generation has not run with the undeployed patch.
+
+132 distinct focused tests plus eight subtests passed across the final regression
+and follow-up checks; Node picker state, JavaScript syntax, Studio static checks
+and diff whitespace checks passed. Two additional checks fail identically on
+the unchanged baseline: a non-admin Photoshop-access expectation and a missing
+local `approved_dropbox_psds_282.csv` snapshot. They remain unrelated and unchanged.
+
+Changed files: `dropbox_integration.py`, `product_upload_services.py`,
+`product_upload_artwork.py`, `tests/test_product_upload_original_download.py`,
+`tests/test_product_upload_artwork_recovery.py`, `tests/test_psd_universal.py`
+and this How To/report. `app.py`, `image_factory.py`, picker code, infrastructure
+and companion code remain unchanged.
+
+No commit, push, deployment, original artwork change or live Shopify write is
+performed in this continuation. The owner explicitly placed deployment on hold.
+
 ## Preparation failure and picker follow-up — 19 October 2026 (local only)
 
 Release follow-up: the user subsequently authorised committing/pushing both latest

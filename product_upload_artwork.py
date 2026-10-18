@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 import threading
@@ -33,6 +34,8 @@ class PreparationError(ValueError):
 
 def diagnosis(error, stage, reference):
     import image_factory
+    from dropbox_integration import DropboxOriginalDownloadError
+    if isinstance(error, DropboxOriginalDownloadError):return str(error)
     # These stages contain our own validation messages, not provider responses.
     if isinstance(error, image_factory.MemoryLimitExceededError):return str(error)
     if isinstance(error, ValueError) and stage in ('validate source', 'verify download', 'decode original PSD', 'verify preparation'):
@@ -59,9 +62,20 @@ def diagnosis(error, stage, reference):
 def log_failure(error, stage, reference, row):
     # Stack frames and error class provide the failing operation without logging
     # response bodies, credentials, signed URLs, locals or arbitrary error text.
-    _log.error('product_artwork_failed reference=%s workflow=%s file_id=%s revision=%s stage=%s error_type=%s stack=\n%s',
+    status=None;request_id=None;cause=error
+    # The shared adapter retains the SDK exception as its cause. Record only
+    # bounded identifiers/status, never provider bodies or arbitrary messages.
+    for _ in range(6):
+        candidate=getattr(cause,'status_code',None)
+        if type(candidate) is int and 100<=candidate<=599:status=candidate
+        candidate=getattr(cause,'request_id',None)
+        if isinstance(candidate,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}',candidate):request_id=candidate
+        cause=getattr(cause,'__cause__',None)
+        if cause is None:break
+    _log.error('product_artwork_failed reference=%s workflow=%s file_id=%s revision=%s stage=%s error_type=%s provider_status=%s provider_request_id=%s stack=\n%s',
                reference, row['id'], source(row)['file_id'], source(row)['revision'], stage,
-               type(error).__module__+'.'+type(error).__name__, ''.join(traceback.format_list(traceback.extract_tb(error.__traceback__))))
+               type(error).__module__+'.'+type(error).__name__, status, request_id,
+               ''.join(traceback.format_list(traceback.extract_tb(error.__traceback__))))
 
 
 def source(row):

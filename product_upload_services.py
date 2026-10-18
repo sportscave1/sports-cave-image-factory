@@ -49,8 +49,32 @@ class Dropbox:
         return self.destination(key).removesuffix('.psd') + '-mockup-render-v1.png'
 
     def download(self, metadata, destination):
-        # The Dropbox SDK streams into a file, not a second full PSD in memory.
-        self.api.team_space_client(self.token).files_download_to_file(str(destination), metadata['id'], rev=metadata['rev'])
+        # Reuse Files' authenticated, revision-pinned content download. The
+        # original stays server-side; reject metadata mismatches before writing.
+        from pathlib import Path
+        actual, response = self.api.get_psd_file_response(self.token, metadata['id'], metadata['rev'])
+        created = False
+        try:
+            if any(actual.get(k) != metadata.get(k) for k in ('id', 'rev', 'size', 'content_hash')):
+                raise self.api.DropboxSourceChangedError('The original does not match the selected PSD revision. Refresh the Dropbox picker and reselect the PSD.')
+            written = 0
+            signature = bytearray()
+            with Path(destination).open('xb') as output:
+                created = True
+                for chunk in response.iter_content(chunk_size=64*1024):
+                    written += len(chunk)
+                    if written > metadata['size']:
+                        raise self.api.DropboxOriginalDownloadError('Dropbox returned more bytes than the selected PSD. Retry artwork preparation.')
+                    signature.extend(chunk[:max(0, 6-len(signature))])
+                    output.write(chunk)
+            if written != metadata['size'] or signature != b'8BPS\x00\x01':
+                raise self.api.DropboxOriginalDownloadError('Dropbox returned an incomplete or invalid original PSD. Retry artwork preparation.')
+        except Exception:
+            if created:
+                Path(destination).unlink(missing_ok=True)
+            raise
+        finally:
+            response.close()
 
     def save_render(self, key, path):
         target = self.render_destination(key)

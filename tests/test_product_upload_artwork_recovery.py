@@ -12,30 +12,35 @@ from unittest.mock import Mock
 import uuid
 import pytest
 import requests
+from dropbox.exceptions import BadInputError
 from PIL import Image
 from tests.test_product_upload_server_artwork import database, env, ADMIN, source_fixture
 from tests.test_product_upload_dropbox import provider_fixture
 import product_upload_artwork as artwork
 
 
-def test_download_failure_is_actionable_logged_and_retry_clears_state(env, tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize('error,expected_message', [
+    (requests.ConnectionError('Bearer secret-value https://private/?token=secret-value'), 'download was interrupted'),
+    (BadInputError('isolated-request', "'Rev' parameter is deprecated. Bearer secret-value"), 'could not retrieve'),
+])
+def test_download_failure_is_actionable_logged_and_retry_clears_state(env, tmp_path, monkeypatch, caplog, error, expected_message):
     store, sql, provider = env
     row, meta, original = source_fixture(env, tmp_path, monkeypatch)
     key = str(row['id'])
-    provider.download.side_effect = requests.ConnectionError('Bearer secret-value https://private/?token=secret-value')
+    provider.download.side_effect = error
     with caplog.at_level(logging.ERROR), pytest.raises(artwork.PreparationError) as caught:
         artwork.prepare(store.connect, provider, key, ADMIN['id'])
     failed = store.read(key, ADMIN['id'])
     assert failed['data']['state'] == 'Error'
     assert failed['data']['server_artwork']['stage'] == 'retrieve original PSD'
-    assert 'download was interrupted' in str(caught.value)
+    assert expected_message in str(caught.value)
     from product_upload_api import failure
     response = failure(caught.value)
     body = json.loads(response.body)
     assert response.status_code == 503 and body['error'] == body['upload']['reason']
     assert body['upload']['id'] == key
     assert 'secret-value' not in caplog.text + response.body.decode()
-    assert 'ConnectionError' in caplog.text and 'provider.download' in caplog.text
+    assert type(error).__name__ in caplog.text and 'provider.download' in caplog.text
     assert failed['data']['server_artwork']['reference'] in caplog.text
     def restarted(metadata, destination):
         current = store.read(key, ADMIN['id'])
@@ -115,16 +120,18 @@ def test_sdk_adapter_pins_id_revision_and_streams_complete_response(tmp_path, mo
     import dropbox_integration as integration
     from product_upload_services import Dropbox
     client = dropbox.Dropbox(oauth2_access_token='isolated-token')
-    chunks = [b'8BPS', b'full original document bytes']
+    chunks = [b'8B', b'PS\x00\x01full original document bytes']
     response = Mock(iter_content=Mock(return_value=iter(chunks)))
-    client.request = Mock(return_value=(object(), response))
+    metadata = dict(id='id:exact', rev='0165e251a26bf2f000000036d367e13', size=sum(map(len, chunks)), content_hash='a'*64)
+    request = Mock(return_value=(metadata, response))
+    monkeypatch.setattr(dropbox.Dropbox, 'request', request)
     monkeypatch.setattr(integration, 'team_space_client', lambda token: client)
     provider = object.__new__(Dropbox); provider.api = integration; provider.token = 'isolated-token'
-    provider.download(dict(id='id:exact', rev='0165e251a26bf2f000000036d367e13'), tmp_path/'original.psd')
-    arg = client.request.call_args.args[2]
-    assert arg.path == 'id:exact' and arg.rev == '0165e251a26bf2f000000036d367e13'
+    provider.download(metadata, tmp_path/'original.psd')
+    arg = request.call_args.args[2]
+    assert arg.path == 'rev:0165e251a26bf2f000000036d367e13' and arg.rev is None
     assert (tmp_path/'original.psd').read_bytes() == b''.join(chunks)
-    response.iter_content.assert_called_once_with(65536)
+    response.iter_content.assert_called_once_with(chunk_size=65536)
     response.close.assert_called_once()
 
 
@@ -169,7 +176,21 @@ def test_readonly_affected_psd_selection_preparation_and_shared_core_engine(env,
     meta = add('id:u1tYiAa2O-AAAAAAAABw6w', 'the-eleventh-pitch-jake-bauers.psd', '0165e251a26bf2f000000036d367e13')
     meta.update(content_hash=expected, size=original.stat().st_size)
     provider.files[meta['id']] = meta; provider.files[meta['path_display']] = meta
-    provider.download = Mock(side_effect=lambda metadata, destination:shutil.copyfile(original, destination))
+    # Exercise the corrected application adapter and the real SDK revision
+    # request. Only upstream transport is isolated; full original bytes stream.
+    import dropbox
+    import dropbox_integration as integration
+    from product_upload_services import Dropbox
+    client = dropbox.Dropbox(oauth2_access_token='isolated-token').with_path_root(dropbox.common.PathRoot.root('12345'))
+    def request(scoped, route, namespace, arg, binary):
+        assert arg.path == 'rev:' + meta['rev'] and arg.rev is None
+        assert scoped._headers['Dropbox-API-Path-Root'] == client._headers['Dropbox-API-Path-Root']
+        stream = original.open('rb')
+        return meta, SimpleNamespace(iter_content=lambda chunk_size:iter(lambda:stream.read(chunk_size), b''), close=stream.close)
+    monkeypatch.setattr(dropbox.Dropbox, 'request', request)
+    monkeypatch.setattr(integration, 'team_space_client', lambda token:client)
+    adapter = object.__new__(Dropbox); adapter.api = integration; adapter.token = 'isolated-token'
+    provider.download = Mock(side_effect=adapter.download)
     monkeypatch.setattr('product_upload_render.Renders.claim', Mock(side_effect=AssertionError('Companion disconnected')))
     monkeypatch.setenv('SPORTS_CAVE_TEMP_DIR', str(tmp_path/'server'))
     monkeypatch.setattr(image_factory.prompt_store, 'get_prompt', lambda key, default='', **kwargs:default)
@@ -188,7 +209,10 @@ def test_readonly_affected_psd_selection_preparation_and_shared_core_engine(env,
     assert file_hash(original, dropbox=True) == expected
     metrics = dict(revision=meta['rev'], content_hash=expected, preparation_ms=preparation_ms,
         generation_ms=round((perf_counter()-started)*1000, 2), assets=len(result['assets']),
-        boundaries='Exact affected PSD, production Pillow 10.4, actual repository scene templates/shared Mockups engine; disposable SQL and provider metadata, byte copy from verified server-side retrieval. No Companion, original writes or production DB.')
-    output = Path(__file__).parents[1]/'output/product-upload-preparation-fix'
+        boundaries='Exact affected PSD, production Pillow 10.4, actual SDK/application download adapter with revision path and rooted context, full streamed bytes from read-only local original; disposable SQL/provider metadata and isolated upstream transport. Actual repository templates/shared Mockups engine. No Companion, original writes or production DB; authenticated Render download still requires verification.')
+    output = Path(__file__).parents[1]/'output/product-upload-original-retrieval'
     output.mkdir(parents=True, exist_ok=True)
     (output/'real-psd-timings.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
+    shutil.copyfile(prepared/'preview.webp', output/'affected-preview.webp')
+    shutil.copyfile(prepared/'artwork.png', output/'affected-artwork.png')
+    (output/'generated-assets.json').write_text(json.dumps(result, default=str, indent=2), encoding='utf-8')

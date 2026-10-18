@@ -51,6 +51,14 @@ class DropboxApiError(RuntimeError):
     pass
 
 
+class DropboxOriginalDownloadError(ValueError):
+    """Safe application validation failure for original PSD downloads."""
+
+
+class DropboxSourceChangedError(DropboxOriginalDownloadError):
+    """The returned original is not the selected stable file and revision."""
+
+
 class DropboxFolderAccessError(DropboxApiError):
     """The configured shared folder is outside the app's visible Dropbox root."""
 
@@ -1300,13 +1308,26 @@ def psd_open_metadata(access_token, file_id, *, include_preview=True):
 
 
 def get_psd_file_response(access_token, file_id, revision):
-    """Pin the already verified master by immutable ID and revision; SDK streams."""
-    if not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')) or not revision:
+    """Download the pinned revision and verify its stable ID before streaming."""
+    if (not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')) or
+            not re.fullmatch(r'[0-9a-f]{9,}',str(revision or ''))):
         raise ValueError('Invalid PSD identity.')
+    response = None
     try:
-        metadata, response = team_space_client(access_token).files_download(file_id,rev=revision)
-        return _metadata_to_dict(metadata), response
+        # Dropbox now rejects the deprecated separate rev argument with HTTP400.
+        # Clone retains the Files account, connection pool and team path-root.
+        client = team_space_client(access_token).clone(
+            timeout=60, max_retries_on_error=2, max_retries_on_rate_limit=2)
+        metadata, response = client.files_download('rev:' + revision)
+        metadata = _metadata_to_dict(metadata)
+        if metadata.get('id') != file_id or metadata.get('rev') != revision:
+            raise DropboxSourceChangedError('The original does not match the selected PSD revision. Refresh the Dropbox picker and reselect the PSD.')
+        return metadata, response
     except Exception as error:
+        if response is not None:
+            response.close()
+        if isinstance(error, DropboxSourceChangedError):
+            raise
         raise _dropbox_error(error,'Dropbox original is unavailable.') from error
 
 
