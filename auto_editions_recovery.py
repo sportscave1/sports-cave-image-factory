@@ -193,7 +193,7 @@ def plan(connect, config):
             waiting = budget(history(cur, row['product_gid'], fingerprint), decision['max_attempts']) if decision['action'] else ''
             from worker_health import stamp
             lease=stamp(row.get('lease_until'))
-            if lease and lease>datetime.now(timezone.utc):
+            if decision['action'] and lease and lease>datetime.now(timezone.utc):
                 waiting='An active lease protects this checkpoint.'
             result.append(dict(row=row, decision=decision, fingerprint=fingerprint, waiting=waiting))
     return result

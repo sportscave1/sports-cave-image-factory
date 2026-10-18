@@ -154,11 +154,13 @@ def test_source_revision_reassessment_requires_changed_bytes():
 def test_recovery_health_has_wait_reason_and_review_resolution(backlog,monkeypatch):
     import worker_health as health
     d,sql=backlog;pid,_=source_job(d,sql,reason='A unique recognised collector plaque is required; manual role review needed.')
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()+interval '1 hour' WHERE product_gid=%s",(pid,))
     with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
         assert recovery.scan(d.connect,metadata)==[]
     result=health.Health(d.connect).snapshot()
     assert result['recovery']['needs_review']==1
     assert result['recovery']['runnable']==0 and result['recovery']['verified']==0
     assert next(j for j in result['jobs'] if j['id']==pid)['category']=='Needs Review'
+    assert 'manual role review' in next(j for j in result['jobs'] if j['id']==pid)['reason']
     state=next(h for h in result['health'] if h['component']=='Recovery')
     assert state['status']=='Waiting' and 'No eligible failures' in state['reason']
