@@ -48,7 +48,10 @@ def fix_revision(category):
 
 def classify(row, config):
     """Conservative eligibility from authoritative current checkpoint evidence."""
-    reason = row.get('technical_reason') or (row.get('replacement') or {}).get('reason') or row.get('reason') or ''
+    replacement = row.get('replacement') or {}
+    # A failed replacement is the current native attempt. Its retained package's
+    # older technical error must never hide a newer deterministic failure.
+    reason = (replacement.get('reason') if replacement.get('stage')=='Failed' else None) or row.get('technical_reason') or row.get('reason') or ''
     code = explain(reason)['code']
     lower = reason.lower()
     transient=code in TRANSIENT or 'transfer failed: timeouterror' in lower

@@ -84,6 +84,16 @@ def test_unknown_colour_and_ambiguous_artwork_fail_closed():
         assert recovery.classify({**base,'reason':reason},CONFIG)['action'] is None
 
 
+def test_current_replacement_failure_supersedes_retained_technical_error():
+    source=dict(product_gid='gid://shopify/Product/987',file_id='id:original',revision='a1',content_hash='a'*64)
+    row=dict(status='Blocked',priority=8,source=source,dropbox_file_id='id:original',
+        preparation_hash='a'*64,technical_reason='Embedded ICC profile required.',
+        replacement=dict(stage='Failed',source=source,reason='The exact edition-number font is unavailable.'))
+    result=recovery.classify(row,CONFIG)
+    assert result['category']=='Plaque/layers' and result['action'] is None
+    assert 'font is unavailable' in result['reason']
+
+
 def test_relevant_fix_and_policy_changes_reassess_without_unrelated_revision(monkeypatch):
     row=dict(source={'file_id':'id:x'},preparation_hash=None)
     decision=dict(category='Colour/provenance')
