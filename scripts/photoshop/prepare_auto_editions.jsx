@@ -109,6 +109,15 @@ var SCAutoEditionsPreparation = (function () {
             if (inspection.document.profile_state !== "tagged") throw Error("profile_inspector_failure");
             timed("icc_witness_ms",function(){profileWitness(doc,r.output_root,r.icc_path);});
             var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
+            var hidden = null, approvedHidden = r.approved_hidden_number;
+            if (approvedHidden) {
+                var hiddenMatches=[];named(doc,approvedHidden.name,hiddenMatches);
+                if(hiddenMatches.length!==1)throw Error("approved_hidden_number_changed");
+                hidden=hiddenMatches[0];
+                if(hidden.id!==approvedHidden.layer_id || hidden.kind!==LayerKind.TEXT || hidden.parent!==doc
+                    || !hidden.visible || SCPSDInspector.encode(box(hidden))!==SCPSDInspector.encode(approvedHidden.bounds_px))
+                    throw Error("approved_hidden_number_changed");
+            }
             var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
             timings.layer_inspection_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
@@ -119,10 +128,11 @@ var SCAutoEditionsPreparation = (function () {
             if (scale !== 1) timed("layered_resize_ms",function(){doc.resizeImage(UnitValue(sourceDimensions[0]*scale,"px"),
                 UnitValue(sourceDimensions[1]*scale,"px"), null, ResampleMethod.BICUBICSMOOTHER);});
             // Keep the untouched composite as an independent outside-number proof.
+            if(hidden){savePNG(doc,"uncorrected.png");hidden.visible=false;}
             timed("original_export_ms",function(){savePNG(doc, "original.png");});
             app.fonts.getByName(layer.textItem.font);
             var text = layer.textItem.contents;
-            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
+            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
             if (!m || parseInt(m[4], 10) !== r.edition_total || r.edition_total < 1 || r.edition_total > 1000)
                 throw Error("edition_total_mismatch");
             var total = r.edition_total, w = doc.width.as("px"), h = doc.height.as("px");

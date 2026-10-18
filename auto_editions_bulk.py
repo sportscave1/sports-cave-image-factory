@@ -34,7 +34,7 @@ def sorted_rows(rows, values, choice, identity):
     return sorted(rows,key=lambda r:values.get(identity(r),{}).get('status') not in preferred)
 
 
-def evidence(record):
+def evidence(record,*,require_receipts=True):
     m=record['manifest'];ae.validate_manifest(m);digest=ae.fingerprint(m)
     if record['hash']!=digest:raise ValueError('Preparation identity changed.')
     colour=m.get('colour_evidence')
@@ -55,7 +55,7 @@ def evidence(record):
         raise ValueError('Plaque geometry or source preservation needs attention.')
     assets=[m['master'],*m['patches'].values()]
     receipts=record.get('receipts') or {};rows=receipts.get('assets') or []
-    if (receipts.get('preparation_hash')!=digest or len(rows)!=len(assets)
+    if require_receipts and (receipts.get('preparation_hash')!=digest or len(rows)!=len(assets)
             or {r.get('name') for r in rows}!={a['name'] for a in assets}
             or len({r.get('file_id') for r in rows})!=len(rows)
             or any(not str(r.get('file_id','')).startswith('id:') or not r.get('revision') or type(r.get('bytes')) is not int or r['bytes']<=0 for r in rows)):

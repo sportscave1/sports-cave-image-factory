@@ -12,6 +12,12 @@ from tests.test_worker_health_queue import operations,telemetry,continuous,store
 CONFIG=dict(policies=[],memberships=[],default_group='')
 
 
+@pytest.fixture(autouse=True)
+def fixture_recovery_scope(monkeypatch):
+    # Disposable test products are explicitly selected; no production scope read.
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{'gid://shopify/Product/'+str(n):1 for n in range(1,3000)})
+
+
 @pytest.fixture
 def backlog(operations,monkeypatch):
     d,sql=operations
@@ -139,6 +145,24 @@ def test_pause_and_disabled_scanner_never_mutate(backlog,monkeypatch):
     assert rows(sql,'auto_edition_onboarding')[0]['status']=='Blocked'
 
 
+def test_broken_historical_receipts_get_fresh_export_not_false_completion(flow,monkeypatch):
+    from auto_editions_technical import Technical
+    d,sql,record,assets,root=flow
+    sql.execute(Path('supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED','true')
+    sql.execute("UPDATE auto_edition_preparations SET receipts='{}'::jsonb WHERE hash=%s",(record['hash'],))
+    service=Technical(d.connect);service.seed();job=service.claim()
+    service.fail(job,'Complete immutable upload receipts required.',False)
+    before=deepcopy(rows(sql,'auto_edition_preparations'))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,lambda fid:dict(id=fid,rev='a1',content_hash='a'*64))==[job['product_gid']]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert rows(sql,'auto_edition_preparations')==before
+    q=rows(sql,'auto_edition_onboarding')[0]
+    assert q['status']=='Blocked' and q['replacement']['stage']=='Discovering'
+    assert not rows(sql,'auto_edition_layouts')
+
+
 def test_source_revision_reassessment_requires_changed_bytes():
     from tests.test_auto_editions_discovery import asset
     base=dict(product_gid='gid://shopify/Product/987',status='Needs PSD Repair',priority=8,
@@ -164,3 +188,23 @@ def test_recovery_health_has_wait_reason_and_review_resolution(backlog,monkeypat
     assert 'manual role review' in next(j for j in result['jobs'] if j['id']==pid)['reason']
     state=next(h for h in result['health'] if h['component']=='Recovery')
     assert state['status']=='Waiting' and 'No eligible failures' in state['reason']
+
+
+def test_ordered_scope_excludes_peer_and_preserves_priority(backlog,monkeypatch):
+    d,sql=backlog;outside,_=source_job(d,sql,1000);selected,_=source_job(d,sql,1001)
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{selected:231})
+    before=next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[selected]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)==before
+    assert next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==selected)['priority']==8
+
+
+def test_next_claim_uses_sales_within_existing_priority_band(backlog,monkeypatch):
+    d,sql=backlog;first,_=source_job(d,sql,1000);higher,_=source_job(d,sql,1001)
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{first:2,higher:139})
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[higher,first]
+    claim=__import__('auto_editions_onboarding_store').Queue(d.connect).claim('operator')
+    assert claim['product_gid']==higher and claim['priority']==8

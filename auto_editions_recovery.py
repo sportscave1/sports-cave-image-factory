@@ -29,6 +29,15 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def ordered_scope():
+    """Owner-selected product IDs; unavailable/invalid scope admits nothing."""
+    try:
+        data=json.loads((Path(__file__).parent/'config/auto_editions/ordered-recovery-scope-20261018.json').read_text())
+        if data.get('schema')!=1 or not isinstance(data.get('products'),list):return {}
+        return {r['product_gid']:r['orders'] for r in data['products']}
+    except (OSError,ValueError,KeyError,TypeError):return {}
+
+
 def fix_revision(category):
     # Relevant implementation, not every deployment: unrelated releases must not
     # replenish deterministic retry budgets.
@@ -37,9 +46,14 @@ def fix_revision(category):
         files += ['auto_editions_colour.py', 'auto_editions_colour_policy.py',
                   'scripts/prepare_auto_editions.py', 'scripts/photoshop/prepare_auto_editions.jsx']
     elif category == 'Plaque/layers':
-        files += ['auto_editions_onboarding.py']
+        files += ['auto_editions_onboarding.py','auto_editions_role_evidence.py',
+                  'auto_editions_artwork_recovery.py','scripts/prepare_auto_editions.py',
+                  'config/auto_editions/ordered-source-roles-20261018.json',
+                  'scripts/photoshop/prepare_auto_editions.jsx']
     elif category == 'Upload/receipts':
         files += ['auto_editions_technical.py', 'auto_editions_cloud.py']
+    elif category in ('Transfer limits','Upload/network'):
+        files += ['scripts/studio/auto_editions_local.py','auto_editions_source_limits.py']
     else:
         files += ['scripts/studio/auto_editions_local.py']
     root = Path(__file__).parent
@@ -81,28 +95,35 @@ def classify(row, config):
         if changed and changed.get('content_hash')!=source.get('content_hash'):
             return {**result,'category':'Stale/source','action':'retry',
                     'reason':'Mapped source has a new inventoried revision; inspect it under the current guarded pipeline.'}
+    if not row.get('preparation_hash') and ('source exceeds the preparation transfer limit' in lower or lower.startswith('psd transfer failed: valueerror')):
+        from auto_editions_source_limits import MAX_SOURCE_BYTES
+        size=(row.get('inventory_metadata') or {}).get('size')
+        if type(size) is int and 1024**3<size<=MAX_SOURCE_BYTES:
+            return {**result,'category':'Transfer limits','action':'retry',
+                    'reason':'Pinned source exceeded the old 1 GiB bound and fits the reviewed streamed 2 GiB path; disk/pixel/colour checks remain mandatory.'}
     if category == 'Upload/network' and transient:
         return {**result, 'action': 'retry', 'max_attempts': 3}
     if category == 'Upload/receipts' and row.get('preparation_hash'):
-        import auto_editions as ae
-        manifest=row.get('manifest') or {}
         try:
-            ae.validate_manifest(manifest)
-            if ae.fingerprint(manifest)!=row['preparation_hash'] or manifest['source']!=source:
+            from auto_editions_technical import repair_evidence,_colour_snapshot
+            if row['manifest']['source']!=source:
                 raise ValueError('Retained package/source identity changed. Restore its evidence.')
-            return {**result,'action':'retry'}
-        except ValueError as error:
+            token=_colour_snapshot.set(config)
+            try:repair_evidence(dict(hash=row['preparation_hash'],manifest=row['manifest'],proofs=row['proofs'],receipts=row['receipts']))
+            finally:_colour_snapshot.reset(token)
+            return {**result,'action':'repair_exports'}
+        except (ValueError,KeyError,TypeError) as error:
             return {**result,'reason':str(error)}
     if category == 'Colour/provenance':
         try:
             if row.get('preparation_hash'):
-                # Reuse the exact certificate checks, including receipts, roles,
-                # RGB8 evidence and existing colour policy. Tagged sources keep
-                # their embedded ICC; never resolve a default for them.
-                from auto_editions_technical import certificate, _colour_snapshot
+                # Fresh-export admission checks source, roles, RGB8, pixel proofs
+                # and approved policy. Historical receipts cannot certify success.
+                # Tagged sources keep their embedded ICC; never infer a default.
+                from auto_editions_technical import repair_evidence, _colour_snapshot
                 token = _colour_snapshot.set(config)
                 try:
-                    certificate(dict(hash=row['preparation_hash'], manifest=row['manifest'],
+                    repair_evidence(dict(hash=row['preparation_hash'], manifest=row['manifest'],
                                      proofs=row['proofs'], receipts=row['receipts']))
                 finally:
                     _colour_snapshot.reset(token)
@@ -124,7 +145,17 @@ def classify(row, config):
         except ValueError:
             pass
     if category == 'Plaque/layers':
+        from auto_editions_role_evidence import resolution
+        if code in ('NUMBER_LAYER','PLAQUE_AMBIGUOUS') and resolution(source):
+            return {**result,'action':'retry_roles',
+                    'reason':'Exact source-bound role evidence and shared number parser fix are available; native validation remains mandatory.'}
         return {**result, 'reason': reason + ' Resolve the exact editable number and collector plaque in the source; no artwork target is inferred.'}
+    if code=='ARTWORK_ALPHA' or 'master must be a lossless rgb png' in lower:
+        from auto_editions_role_evidence import resolution
+        selected=resolution(source)
+        if selected and selected.get('opaque_backing'):
+            return {**result,'category':'Plaque/layers','action':'retry_roles',
+                    'reason':'Owner-approved black presentation matches the existing production export for this exact source. Originals and unbacked exports remain preserved.'}
     return {**result, 'reason': reason + ' Retain diagnostics and establish a matching shared fix or source correction before retrying.'}
 
 
@@ -186,9 +217,13 @@ def plan(connect, config):
     with connect() as conn, conn.cursor() as cur:
         cur.execute(SQL + " WHERE q.status IN ('Blocked','Needs PSD Repair') ORDER BY CASE WHEN q.priority=8 THEN 11 ELSE q.priority END DESC,q.created_at,q.product_gid")
         rows = cur.fetchall()
+        scope=ordered_scope()
+        rows=sorted(rows,key=lambda r:(-(11 if r.get('priority')==8 else r.get('priority',0)),-scope.get(r['product_gid'],0),str(r.get('created_at')),r['product_gid']))
         result = []
         for row in rows:
             decision = classify(row, config)
+            if row['product_gid'] not in scope:
+                decision={**decision,'action':None,'reason':'Outside the owner-selected ordered-product recovery scope; left untouched.'}
             fingerprint = key(row, decision, config)
             waiting = budget(history(cur, row['product_gid'], fingerprint), decision['max_attempts']) if decision['action'] else ''
             from worker_health import stamp
@@ -257,7 +292,8 @@ def scan(connect, read_metadata, *, limit=3):
                 if budget(events, decision['max_attempts']):
                     continue
                 request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, pid + fingerprint + str(len(events))))
-                submit(borrowed, pid, ACTOR, request_id, repair_confirmed=decision['action'] == 'repair_exports')
+                if pid not in ordered_scope():continue
+                submit(borrowed, pid, ACTOR, request_id, repair_confirmed=decision['action'] in ('repair_exports','retry_roles'))
                 Queue.audit(cur, pid, ACTOR, EVENT, dict(fingerprint=fingerprint, attempt=len(events)+1,
                     action=decision['action'], category=decision['category'], source=source,
                     previous_reason=decision['reason'], request_id=request_id))

@@ -128,7 +128,7 @@ var SCNumberLayer = (function () {
     function pattern(text, named) {
         text=String(text||"");
         if(/[\r\n]/.test(text))return null; // Separated numbers require operator review.
-        var m=/^\s*((?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})\s*$/i.exec(text);
+        var m=/^\s*((?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})\s*$/i.exec(text);
         if(m){var n=parseInt(m[2],10),total=parseInt(m[4],10);
             return {text:text,number:n,total:total,number_width:m[2].length,valid:total>0&&n<=total,
                 possible_date:!/[#A-Za-z]/.test(m[1])&&n>0&&n<=31&&total<=31};

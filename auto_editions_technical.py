@@ -43,6 +43,27 @@ def resolve_colour(source):
 def certificate(record):
     from auto_editions_bulk import evidence
     m=evidence(record)
+    from auto_editions_artwork_recovery import require_export_evidence
+    require_export_evidence(m)
+    policy=_verified_source_roles(m)
+    return dict(method=METHOD,actor_id=ACTOR,preparation_hash=record['hash'],
+                source=record['manifest']['source'],test_only=True,
+                evidence_hash=ae.fingerprint(dict(proofs=record['proofs'],receipts=record['receipts'])),
+                technical_verified=True,colour=record['manifest'].get('colour_evidence'),colour_policy=policy)
+
+
+def repair_evidence(record):
+    """Admission for a fresh native export, never a completion certificate.
+
+    Broken historical receipts are preserved and cannot certify any upload.
+    The replacement pipeline must create and verify an entirely new package.
+    """
+    from auto_editions_bulk import evidence
+    m=evidence(record,require_receipts=False)
+    return dict(repair_only=True,source=m['source'],colour_policy=_verified_source_roles(m))
+
+
+def _verified_source_roles(m):
     inspection=m.get('source_inspection') or {};doc=inspection.get('document') or {}
     if doc.get('mode') not in ('RGB','DocumentMode.RGB'):
         raise ValueError('Source colour mode is not verified RGB. CMYK conversion requires the existing explicit colour policy; no profile was reassigned.')
@@ -52,13 +73,10 @@ def certificate(record):
         if doc.get('mode') not in ('RGB','DocumentMode.RGB') or doc.get('bits_per_channel') not in (8,'BitsPerChannelType.EIGHT'):
             raise ValueError('Approved untagged policy requires verified legacy RGB8 source evidence. CMYK conversion is not authorised.')
     from auto_editions_onboarding import detect
-    roles=detect(inspection,m['edition_total'],colour_policy=policy)
+    roles=detect(inspection,m['edition_total'],colour_policy=policy,source=m['source'])
     if roles['number_layer']!=m.get('number_layer_name') or roles['plaque_layer']!=m.get('plaque_layer_name'):
         raise ValueError('Stored editable-number/plaque roles differ from the verified inspection.')
-    return dict(method=METHOD,actor_id=ACTOR,preparation_hash=record['hash'],
-                source=record['manifest']['source'],test_only=True,
-                evidence_hash=ae.fingerprint(dict(proofs=record['proofs'],receipts=record['receipts'])),
-                technical_verified=True,colour=record['manifest'].get('colour_evidence'),colour_policy=policy)
+    return policy
 
 
 def current(value,manifest):
@@ -191,11 +209,11 @@ class Technical:
         if not row or row['status']!='Blocked' or row['technical_state']!='Failed' or row['priority']<=0:
             raise ValueError('Only an unsuccessful retained technical preparation can be repaired.')
         from worker_diagnostics import explain
-        if explain(row['technical_reason'])['code'] not in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','ICC_MISMATCH') and row['technical_reason']!='Embedded ICC profile required.':
+        if explain(row['technical_reason'])['code'] not in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','ICC_MISMATCH') and row['technical_reason'] not in ('Embedded ICC profile required.','Complete immutable upload receipts required.','Invalid Dropbox file id.'):
             raise ValueError('This failure requires separate repair evidence.')
         record=Preparations(self.connect).read(row['preparation_hash'])
         if not record or record['manifest']['source']!=row['source']:raise ValueError('Repair preparation identity changed.')
-        with colour_snapshot(self.connect):certificate(record)  # Exact existing policy, roles and preservation proofs.
+        with colour_snapshot(self.connect):repair_evidence(record)  # Exact source, policy, roles and pixel proofs; no completion authority.
         from auto_editions_reset import Reset
         return Reset(self.connect).request(pid,request_id,actor,expected_source=row['source'],expected_checkpoint=(row['preparation_hash'],row['updated_at']))
 
