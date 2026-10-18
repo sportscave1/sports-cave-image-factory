@@ -345,10 +345,13 @@ def package_finished(row,ctx):
                 manifest.get('preparation_geometry',{}).get('scale',1)!=preparation_scale(manifest.get('source_dimensions',manifest['dimensions']))
                 or (ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id'])):continue
             ae.validate_manifest(manifest)
+            from auto_editions_artwork_recovery import verify_package
+            verify_package(folder,manifest)
             refs=sorted({1,ctx['number'],ctx['total']})
             for n in refs:ae.compare_reference(manifest,folder,n,folder/f'reference-{n}.png')
             ae.compare_original_outside_number(manifest,folder,ctx['number'],folder/'original.png')
             names=['manifest.json','master.png','original.png']+[p['name'] for p in manifest['patches'].values()]+[f'reference-{n}.png' for n in refs]
+            if (manifest.get('artwork_recovery') or {}).get('hidden_number'):names.append('uncorrected.png')
             archive=row['folder']/'prepared.zip'
             if archive.exists():return None
             from auto_editions_transport import build_package
@@ -673,6 +676,7 @@ def prepare_worker(key,roles,scale=1):
         names=['manifest.json','master.png','original.png']
         names += [p['name'] for p in manifest['patches'].values()]
         names += [f'reference-{n}.png' for n in sorted({1,ctx['number'],ctx['total']})]
+        if (manifest.get('artwork_recovery') or {}).get('hidden_number'):names.append('uncorrected.png')
         archive=row['folder']/'prepared.zip'
         from auto_editions_transport import build_package,digest
         from auto_editions_performance import stage as measured

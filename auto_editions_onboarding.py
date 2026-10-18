@@ -31,7 +31,8 @@ def detect_roles(inspection,total,*,source=None):
     """Structural review evidence only; never authorises colour or preparation."""
     doc=inspection.get('document',{})
     canvas = ae.dimensions([doc.get('width_px'), doc.get('height_px')])
-    rows = inspection.get('layers', [])
+    from auto_editions_role_evidence import reviewed_rows
+    rows = reviewed_rows(inspection,source)
     candidates = []
     for row in rows:
         match = NUMBER.fullmatch(row.get('text') or '') if row.get('kind') == 'text' else None

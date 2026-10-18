@@ -31,7 +31,45 @@
         ],
         "kind": "smart_object"
       },
-      "evidence": "Mentality labelled C: central collector plaque; D: sole visible editable edition number. B spans both signature panels and is not selected."
+      "evidence": "Mentality labelled C: central collector plaque; D: sole visible editable edition number. B spans both signature panels and is not selected.",
+      "opaque_backing": {
+        "rgb": [
+          0,
+          0,
+          0
+        ],
+        "approval": "Owner: Match the existing black-backed production export, after verification",
+        "reference_file_id": "id:u1tYiAa2O-AAAAAAAAAruw",
+        "reference_sha256": "9a88dbf5a5544c551ba69981f7d60d9cd751e96685fe11f0b68329e981069708",
+        "comparison": {
+          "source_sha256": "49a59a921c83f0de65de7f75b19ab1943a9baec51bac9a7884e34fc930ae69c2",
+          "reference_sha256": "9a88dbf5a5544c551ba69981f7d60d9cd751e96685fe11f0b68329e981069708",
+          "source_dimensions": [
+            3543,
+            2505
+          ],
+          "reference_dimensions": [
+            14172,
+            10020
+          ],
+          "reference_icc_sha256": "2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e",
+          "outside_mae": 0.39506086707115173,
+          "outside_rmse": 1.17461359500885,
+          "p99": 3.0,
+          "mask": [
+            1640,
+            2221,
+            1903,
+            2277
+          ],
+          "backing": [
+            0,
+            0,
+            0
+          ],
+          "method": "Read-only black alpha composite; existing production reference resampled to source dimensions for comparison. No source or artwork modified."
+        }
+      }
     },
     {
       "source": {
@@ -44,10 +82,10 @@
         "name": "No. 001 / 100",
         "layer_id": 308,
         "bounds_px": [
-        1523,
-        2301,
-        2015,
-        2347
+          1523,
+          2301,
+          2015,
+          2347
         ],
         "kind": "text"
       },
@@ -63,6 +101,79 @@
         "kind": "raster"
       },
       "evidence": "Messi/Ronaldo labelled D: central plaque; E: sole visible editable edition-number text; F: separate LIMITED EDITION heading. Bounds confirmed by live Photoshop 27.10 inspection 8002b9ab510712c9486baf4b00ffb31435ac2f3e9932fdd5 after exact Cinzel-Medium availability repair, replacing stale cached-preview text bounds. Preserve heading and prefix."
+    },
+    {
+      "source": {
+        "product_gid": "gid://shopify/Product/10180244439347",
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAAyw",
+        "revision": "0165a4cd649f4e3000000036d367e13",
+        "content_hash": "7cb591993ce4c738db007f86b06f93027e1933ea3e269e124f20d8a1e43d3346"
+      },
+      "evidence": "Owner selected labelled E, No. 027 / 100 below LIMITED EDITION. Existing production #058 confirms this layout. Hide obsolete A only in disposable Photoshop document; exact outside-plaque pixel proof required. Native Photoshop 27.10 inspection confirms exact installed font and current bounds.",
+      "number": {
+        "layer_id": 308,
+        "kind": "text",
+        "bounds_px": [
+          3064,
+          4506,
+          3947,
+          4592
+        ],
+        "name": "No. 027 / 100"
+      },
+      "plaque": {
+        "layer_id": 307,
+        "kind": "smart_object",
+        "bounds_px": [
+          2585,
+          4325,
+          4432,
+          4637
+        ],
+        "name": "Layer 2"
+      },
+      "hidden_number": {
+        "layer_id": 246,
+        "kind": "text",
+        "bounds_px": [
+          3279,
+          4427,
+          3738,
+          4481
+        ],
+        "name": "#054/100"
+      }
+    },
+    {
+      "source": {
+        "product_gid": "gid://shopify/Product/10231127441715",
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAA2A",
+        "revision": "0165da1c1184379000000036d367e13",
+        "content_hash": "4bedb00665fc1db95fee28c5083fda79487cc3e0a9cd84fd62add9d2e3a9ef03"
+      },
+      "evidence": "Read-only native Photoshop inspection and labelled cached composite: root smart object LIMITED EDITION (458) is the independent collector plaque; root editable text 001 / 100 (456) is its sole number. Full artwork Layer 9 is not selected. No source edits.",
+      "number": {
+        "layer_id": 456,
+        "kind": "text",
+        "bounds_px": [
+          1880,
+          2202,
+          2177,
+          2245
+        ],
+        "name": "001 / 100"
+      },
+      "plaque": {
+        "layer_id": 458,
+        "kind": "smart_object",
+        "bounds_px": [
+          1418,
+          2017,
+          2398,
+          2337
+        ],
+        "name": "LIMITED EDITION"
+      }
     }
   ]
 }

@@ -17,7 +17,15 @@ Read-only staged PSD review inspected root layers, groups and embedded smart obj
 
 The Mentality has one visible editable #093/100 layer (246) and a separate central plaque smart object Generative Fill (267). The full signature strip is not selected. Messi/Ronaldo has one visible editable No. 001 / 100 layer (308) and its central plaque Layer 2 (307). Each source is content-hash and revision bound in the role registry.
 
-Kobe/Jordan has two visible editable number layers and remains blocked pending a labelled visual choice and preservation checks. Six Laps Ahead has its plaque embedded in larger artwork; no independent root plaque was guessed. No opaque background, plaque geometry or typography was invented.
+The owner selected labelled E (`No. 027 / 100`) for Kobe/Jordan. The disposable Photoshop document hides only the exact obsolete A field; the PSD is never saved. Both local preparation and server package ingestion independently compare the before/after export outside its existing plaque. Changed source revision, layer identity, bounds or unapproved extra number layers fail closed.
+
+Gaethje's current native inspection and labelled composite identify the separate root `LIMITED EDITION` smart object (458), containing the sole `001 / 100` text layer (456). This exact source now uses the same role-evidence mechanism; the full-artwork Layer 9 is never selected.
+
+The owner approved matching Mentality's existing black-backed production export after verification. The current source over black matches production reference `id:u1tYiAa2O-AAAAAAAAAruw` (SHA256 `9a88dbf5a5544c551ba69981f7d60d9cd751e96685fe11f0b68329e981069708`), outside-number MAE 0.395 and RMSE 1.175. Only this exact source may composite its RGBA exports over black. Embedded output ICC bytes remain identical. Unbacked exports and Kobe's before-correction export are kept outside temporary cleanup directories. No general alpha flattening is enabled.
+
+Six Laps Ahead retains its blocker: its plaque is embedded in larger artwork and no independent root plaque was guessed. Jackie Robinson's current original has no editable text layers. These need suitable approved layered originals.
+
+Historical missing/invalid upload receipts no longer prevent a safe fresh native export when source identity, approved colour provenance, editable roles and pixel proofs validate. This admission returns repair-only evidence, never a completion certificate. Old packages and receipts remain preserved. Every replacement still needs new independently verified cloud receipts before Cloud Ready.
 
 Shane Warne: registered existing approved RGB8 workflow membership after verifying the current PSD bytes and an independent tagged production export (#024). Reference ICC SHA256 is 2b3aa1645779a9e634744faf9b01e9102b0c9b88fd6deced7934df86b949af7e. Outside the edition-number mask, raw RGB source versus downsampled JPEG reference MAE=0.541 and RMSE=1.463. The approved policy is fac7ff72ed00e370365ca269e86f763057faa32df988450c7780fcaa774b287e. Original creator intent is not claimed. The original remains untagged and untouched; only the guarded staged export may apply that policy. Queueing is not completion.
 

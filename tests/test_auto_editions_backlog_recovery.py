@@ -145,6 +145,24 @@ def test_pause_and_disabled_scanner_never_mutate(backlog,monkeypatch):
     assert rows(sql,'auto_edition_onboarding')[0]['status']=='Blocked'
 
 
+def test_broken_historical_receipts_get_fresh_export_not_false_completion(flow,monkeypatch):
+    from auto_editions_technical import Technical
+    d,sql,record,assets,root=flow
+    sql.execute(Path('supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
+    monkeypatch.setenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED','true')
+    sql.execute("UPDATE auto_edition_preparations SET receipts='{}'::jsonb WHERE hash=%s",(record['hash'],))
+    service=Technical(d.connect);service.seed();job=service.claim()
+    service.fail(job,'Complete immutable upload receipts required.',False)
+    before=deepcopy(rows(sql,'auto_edition_preparations'))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,lambda fid:dict(id=fid,rev='a1',content_hash='a'*64))==[job['product_gid']]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert rows(sql,'auto_edition_preparations')==before
+    q=rows(sql,'auto_edition_onboarding')[0]
+    assert q['status']=='Blocked' and q['replacement']['stage']=='Discovering'
+    assert not rows(sql,'auto_edition_layouts')
+
+
 def test_source_revision_reassessment_requires_changed_bytes():
     from tests.test_auto_editions_discovery import asset
     base=dict(product_gid='gid://shopify/Product/987',status='Needs PSD Repair',priority=8,

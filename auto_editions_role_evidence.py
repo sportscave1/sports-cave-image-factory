@@ -19,7 +19,7 @@ def plaque(inspection,source):
     selected=resolution(source)
     if not selected:return None
     rows=inspection.get('layers',[])
-    for role in ('number','plaque'):
+    for role in ('number','plaque')+ (('hidden_number',) if selected.get('hidden_number') else ()):
         expected=selected[role]
         found=[r for r in rows if len(r.get('path',[]))==1 and r['path'][0].get('name')==expected['name']]
         if len(found)!=1:raise ValueError('Pinned '+role+' identity changed; artwork review required.')
@@ -27,4 +27,20 @@ def plaque(inspection,source):
         if (row.get('layer_id')!=expected['layer_id'] or row.get('bounds_px')!=expected['bounds_px']
                 or row.get('kind')!=expected['kind'] or not row.get('visible') or row.get('smart_object_chain')):
             raise ValueError('Pinned '+role+' evidence changed; artwork review required.')
+        if role=='hidden_number':
+            b=row['bounds_px'];p=selected['plaque']['bounds_px']
+            if not (p[0]<=b[0]<b[2]<=p[2] and p[1]<=b[1]<b[3]<=p[3]):
+                raise ValueError('Approved obsolete number extends outside its plaque.')
     return selected['plaque']['name']
+
+
+def reviewed_rows(inspection,source):
+    """Only an owner-selected obsolete field may be ignored on a staged copy."""
+    selected=resolution(source)
+    if not selected or not selected.get('hidden_number'):return inspection.get('layers',[])
+    plaque(inspection,source)
+    from copy import deepcopy
+    rows=deepcopy(inspection['layers'])
+    for row in rows:
+        if row.get('layer_id')==selected['hidden_number']['layer_id']:row['visible']=False
+    return rows

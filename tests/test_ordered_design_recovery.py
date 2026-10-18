@@ -19,7 +19,7 @@ def resolved_inspection(entry):
              kind=entry['plaque']['kind'],visible=True,bounds_px=entry['plaque']['bounds_px'])])
 
 
-@pytest.mark.parametrize('index',[0,1])
+@pytest.mark.parametrize('index',[0,1,3])
 def test_exact_reviewed_roles_preserve_existing_targets(index):
     entry=json.loads(roles.REGISTRY.read_text())['resolutions'][index]
     result=onboarding.detect(resolved_inspection(entry),100,source=entry['source'])

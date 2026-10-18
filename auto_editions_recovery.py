@@ -47,6 +47,7 @@ def fix_revision(category):
                   'scripts/prepare_auto_editions.py', 'scripts/photoshop/prepare_auto_editions.jsx']
     elif category == 'Plaque/layers':
         files += ['auto_editions_onboarding.py','auto_editions_role_evidence.py',
+                  'auto_editions_artwork_recovery.py','scripts/prepare_auto_editions.py',
                   'config/auto_editions/ordered-source-roles-20261018.json',
                   'scripts/photoshop/prepare_auto_editions.jsx']
     elif category == 'Upload/receipts':
@@ -103,25 +104,26 @@ def classify(row, config):
     if category == 'Upload/network' and transient:
         return {**result, 'action': 'retry', 'max_attempts': 3}
     if category == 'Upload/receipts' and row.get('preparation_hash'):
-        import auto_editions as ae
-        manifest=row.get('manifest') or {}
         try:
-            ae.validate_manifest(manifest)
-            if ae.fingerprint(manifest)!=row['preparation_hash'] or manifest['source']!=source:
+            from auto_editions_technical import repair_evidence,_colour_snapshot
+            if row['manifest']['source']!=source:
                 raise ValueError('Retained package/source identity changed. Restore its evidence.')
-            return {**result,'action':'retry'}
-        except ValueError as error:
+            token=_colour_snapshot.set(config)
+            try:repair_evidence(dict(hash=row['preparation_hash'],manifest=row['manifest'],proofs=row['proofs'],receipts=row['receipts']))
+            finally:_colour_snapshot.reset(token)
+            return {**result,'action':'repair_exports'}
+        except (ValueError,KeyError,TypeError) as error:
             return {**result,'reason':str(error)}
     if category == 'Colour/provenance':
         try:
             if row.get('preparation_hash'):
-                # Reuse the exact certificate checks, including receipts, roles,
-                # RGB8 evidence and existing colour policy. Tagged sources keep
-                # their embedded ICC; never resolve a default for them.
-                from auto_editions_technical import certificate, _colour_snapshot
+                # Fresh-export admission checks source, roles, RGB8, pixel proofs
+                # and approved policy. Historical receipts cannot certify success.
+                # Tagged sources keep their embedded ICC; never infer a default.
+                from auto_editions_technical import repair_evidence, _colour_snapshot
                 token = _colour_snapshot.set(config)
                 try:
-                    certificate(dict(hash=row['preparation_hash'], manifest=row['manifest'],
+                    repair_evidence(dict(hash=row['preparation_hash'], manifest=row['manifest'],
                                      proofs=row['proofs'], receipts=row['receipts']))
                 finally:
                     _colour_snapshot.reset(token)
@@ -148,6 +150,12 @@ def classify(row, config):
             return {**result,'action':'retry_roles',
                     'reason':'Exact source-bound role evidence and shared number parser fix are available; native validation remains mandatory.'}
         return {**result, 'reason': reason + ' Resolve the exact editable number and collector plaque in the source; no artwork target is inferred.'}
+    if code=='ARTWORK_ALPHA' or 'master must be a lossless rgb png' in lower:
+        from auto_editions_role_evidence import resolution
+        selected=resolution(source)
+        if selected and selected.get('opaque_backing'):
+            return {**result,'category':'Plaque/layers','action':'retry_roles',
+                    'reason':'Owner-approved black presentation matches the existing production export for this exact source. Originals and unbacked exports remain preserved.'}
     return {**result, 'reason': reason + ' Retain diagnostics and establish a matching shared fix or source correction before retrying.'}
 
 
