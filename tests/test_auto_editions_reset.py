@@ -171,7 +171,7 @@ def pinned_repair(design,stage='Discovering'):
     return selected(sql)['replacement']
 
 
-def test_pinned_export_repair_reuses_original_mapping_without_filename_rematch(design):
+def test_pinned_export_repair_reuses_original_mapping_without_filename_rematch(design,tmp_path):
     d,sql,reset,old=design;pending=pinned_repair(design);before=protected(sql)
     assert discover(design)['stage']=='Queued'
     current=selected(sql)['replacement']
@@ -186,6 +186,12 @@ def test_pinned_export_repair_reuses_original_mapping_without_filename_rematch(d
             integration=SimpleNamespace(psd_open_metadata=lambda *a,**kw:asset(path_display='/Prepared/Unapproved.psd')),token='synthetic')):
         with pytest.raises(ValueError):api.product_context(PID,str(job['lease_token']))
     assert d.queue.claim('duplicate-host') is None
+    # Exercise the final checkpoint switch as well as admission and host context:
+    # a valid uploaded package must not be rejected by a second title rematch.
+    manifest=complete(design,job['lease_token'],tmp_path)
+    assert selected(sql)['replacement']['stage']=='Complete'
+    assert selected(sql)['preparation_hash']==ae.fingerprint(manifest)
+    assert protected(sql)==before
 
 
 def test_failed_pinned_discovery_can_retry_once_without_a_native_attempt(design):
@@ -411,7 +417,7 @@ def test_reset_never_reuses_a_package_from_before_this_request(tmp_path):
     root=tmp_path/'jobs';folder=root/'old';folder.mkdir(parents=True)
     source=ae.source_identity(PID,asset());rid=str(uuid.uuid4())
     manifest=dict(source=source,edition_total=2,dimensions=[11340,8016],source_dimensions=[2835,2004],
-                  preparation_geometry={'scale':4})
+                  preparation_geometry={'scale':4},colour_evidence={'icc_sha256':'a'*64,'pixels_converted':False})
     ctx=dict(automatic=True,source=source,total=2,reset_id=rid)
     def write():
         with zipfile.ZipFile(folder/'prepared.zip','w') as z:z.writestr('manifest.json',json.dumps(manifest))

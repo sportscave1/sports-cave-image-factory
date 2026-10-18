@@ -100,6 +100,33 @@ class Reset:
             if not chosen or ae.source_identity(pid,chosen)!=source:
                 raise ValueError('The original PSD is no longer uniquely matched. Review the mapping.')
             previous_reason=pending.get('reason','')
+            if (pending.get('expected_source') and previous_reason==
+                    'Original PSD matching is now ambiguous. The working design is retained.'):
+                cur.execute("SELECT * FROM auto_edition_preparations WHERE manifest->>'reset_request_id'=%s ORDER BY created_at DESC LIMIT 2",(pending['id'],))
+                imported=cur.fetchall()
+                if len(imported)>1:raise ValueError('Multiple retained replacement packages require review; no package was selected.')
+                if imported:
+                    record=imported[0]
+                    if record['manifest'].get('source')!=source:
+                        raise ValueError('Retained replacement package source changed.')
+                    # Package import already validated native pixels/ICC and
+                    # published these exact assets. Recheck all current proof,
+                    # role, colour and receipt evidence without rendering or
+                    # uploading again. This is not a Cloud Ready certificate:
+                    # the normal technical worker must verify cloud bytes.
+                    from contextlib import contextmanager
+                    from auto_editions_colour_store import configuration
+                    from auto_editions_technical import certificate,_colour_snapshot
+                    @contextmanager
+                    def borrowed():yield conn
+                    config=configuration(borrowed);context=_colour_snapshot.set(config)
+                    try:certificate(record)
+                    finally:_colour_snapshot.reset(context)
+                    finish(cur,row,record['hash'],actor,'Technical verification pending.')
+                    Queue.audit(cur,pid,actor,'reset_checkpoint_resumed',dict(request_id=pending['id'],
+                        preparation_hash=record['hash'],native_attempts=pending.get('attempts',0),
+                        reason='Validated uploaded replacement retained after the repaired final mapping check.'))
+                    return True
             pending.update(stage='Queued',reason='',source=source,file_id=source['file_id'])
             pending.pop('failure_status',None)
             save(cur,pid,pending)
@@ -287,8 +314,7 @@ def finish(cur,row,digest,actor,reason,metrics=None):
     if not meta or ae.source_identity(pid,meta['metadata'])!=pending['source'] or not psd.approved_file(meta['metadata']):
         raise ValueError('Original PSD changed during replacement.')
     meta=meta['metadata']
-    from auto_editions_discovery import Discovery
-    chosen,_,_=Discovery.candidate(cur,pid,rematch=True)
+    chosen,_,_=repair_candidate(cur,pid,pending)
     if not chosen or ae.source_identity(pid,chosen)!=pending['source']:
         raise ValueError('Original PSD matching is now ambiguous. The working design is retained.')
     path=meta.get('path_display') or meta['path_lower']

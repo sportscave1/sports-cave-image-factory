@@ -364,13 +364,19 @@ def package_finished(row,ctx):
 def find_reusable_package(ctx):
     """Only reuse exact source/edition identities. The server revalidates pixels."""
     if not ctx.get('automatic'):return None
+    from auto_editions_package import MAX_PACKAGE_BYTES
     root=HOST_FILE.parent.resolve()
     for package in sorted(root.glob('*/prepared.zip'),key=lambda p:p.stat().st_mtime,reverse=True):
         if package.is_symlink() or package.parent.is_symlink():continue
         try:
+            if package.stat().st_size>MAX_PACKAGE_BYTES:continue
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
+                if sum(info.file_size for info in archive.infolist())>MAX_PACKAGE_BYTES:continue
                 manifest=json.loads(archive.read('manifest.json'))
+            colour=manifest.get('colour_evidence') or {}
+            import re
+            if not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256',''))) or colour.get('pixels_converted') is not False:continue
             if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:continue
             from auto_editions_onboarding import preparation_scale
             expected=preparation_scale(manifest.get('source_dimensions',manifest.get('dimensions',[])))
