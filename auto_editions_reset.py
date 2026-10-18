@@ -29,6 +29,37 @@ def save(cur,pid,pending):
                 (json.dumps(pending,default=str),pid))
 
 
+def repair_candidate(cur,pid,pending):
+    """Reuse an unchanged approved mapping for a source-pinned export repair.
+
+    Display titles need not equal the original filename. This never grants a
+    new association: the mapping, retained generation and exact source must
+    still be the ones accepted by the repair service.
+    """
+    source=pending.get('expected_source')
+    if not source:
+        from auto_editions_discovery import Discovery
+        return Discovery.candidate(cur,pid,rematch=True)
+    cur.execute('SELECT * FROM product_psd_mappings WHERE shopify_product_gid=%s',(pid,))
+    mapping=cur.fetchone()
+    cur.execute('SELECT * FROM auto_edition_onboarding WHERE product_gid=%s',(pid,))
+    row=cur.fetchone()
+    same_mapping=json.dumps(_record(mapping) if mapping else None,sort_keys=True,default=str)==json.dumps(pending.get('mapping_before'),sort_keys=True,default=str)
+    if (not mapping or not same_mapping
+            or mapping['dropbox_file_id']!=source.get('file_id')
+            or not row or snapshot(row)!=pending.get('previous') or row.get('source')!=source):
+        return None,'Needs mapping review','Pinned repair mapping or retained design changed.'
+    cur.execute('SELECT shopify_product_gid FROM product_psd_mappings WHERE dropbox_file_id=%s',(source['file_id'],))
+    owners=cur.fetchall()
+    if len(owners)!=1 or owners[0]['shopify_product_gid']!=pid:
+        return None,'Needs mapping review','Pinned repair source ownership is ambiguous.'
+    cur.execute('SELECT metadata FROM auto_edition_source_inventory WHERE file_id=%s',(source['file_id'],))
+    found=cur.fetchone();meta=(found or {}).get('metadata')
+    if not meta or not psd.approved_file(meta) or ae.source_identity(pid,meta)!=source:
+        return None,'Needs mapping review','Pinned repair source identity or approved location changed.'
+    return meta,'Mapped',''
+
+
 class Reset:
     def __init__(self,connect):self.connect=connect
 
@@ -60,17 +91,43 @@ class Reset:
             same_mapping=json.dumps(_record(mapping) if mapping else None,sort_keys=True,default=str)==json.dumps(pending.get('mapping_before'),sort_keys=True,default=str)
             if not same_mapping or snapshot(row)!=pending.get('previous'):
                 raise ValueError('The retained design changed. Review its mapping before retrying.')
-            source=pending.get('source') or {}
-            cur.execute('SELECT metadata FROM auto_edition_source_inventory WHERE file_id=%s',(pending.get('file_id'),));meta=cur.fetchone()
+            source=pending.get('source') or pending.get('expected_source') or {}
+            cur.execute('SELECT metadata FROM auto_edition_source_inventory WHERE file_id=%s',(source.get('file_id'),));meta=cur.fetchone()
             if (not meta or not psd.approved_file(meta['metadata'])
                     or ae.source_identity(pid,meta['metadata'])!=source):
                 raise ValueError('The replacement source changed. Review the exact PSD before retrying.')
-            from auto_editions_discovery import Discovery
-            chosen,_,_=Discovery.candidate(cur,pid,rematch=True)
+            chosen,_,_=repair_candidate(cur,pid,pending)
             if not chosen or ae.source_identity(pid,chosen)!=source:
                 raise ValueError('The original PSD is no longer uniquely matched. Review the mapping.')
             previous_reason=pending.get('reason','')
-            pending.update(stage='Queued',reason='')
+            if (pending.get('expected_source') and previous_reason==
+                    'Original PSD matching is now ambiguous. The working design is retained.'):
+                cur.execute("SELECT * FROM auto_edition_preparations WHERE manifest->>'reset_request_id'=%s ORDER BY created_at DESC LIMIT 2",(pending['id'],))
+                imported=cur.fetchall()
+                if len(imported)>1:raise ValueError('Multiple retained replacement packages require review; no package was selected.')
+                if imported:
+                    record=imported[0]
+                    if record['manifest'].get('source')!=source:
+                        raise ValueError('Retained replacement package source changed.')
+                    # Package import already validated native pixels/ICC and
+                    # published these exact assets. Recheck all current proof,
+                    # role, colour and receipt evidence without rendering or
+                    # uploading again. This is not a Cloud Ready certificate:
+                    # the normal technical worker must verify cloud bytes.
+                    from contextlib import contextmanager
+                    from auto_editions_colour_store import configuration
+                    from auto_editions_technical import certificate,_colour_snapshot
+                    @contextmanager
+                    def borrowed():yield conn
+                    config=configuration(borrowed);context=_colour_snapshot.set(config)
+                    try:certificate(record)
+                    finally:_colour_snapshot.reset(context)
+                    finish(cur,row,record['hash'],actor,'Technical verification pending.')
+                    Queue.audit(cur,pid,actor,'reset_checkpoint_resumed',dict(request_id=pending['id'],
+                        preparation_hash=record['hash'],native_attempts=pending.get('attempts',0),
+                        reason='Validated uploaded replacement retained after the repaired final mapping check.'))
+                    return True
+            pending.update(stage='Queued',reason='',source=source,file_id=source['file_id'])
             pending.pop('failure_status',None)
             save(cur,pid,pending)
             Queue.audit(cur,pid,actor,'reset_retry',dict(request_id=pending['id'],source=source,
@@ -195,7 +252,7 @@ class Reset:
         for request in rows:
             pid=request['product_gid'];candidate=None;fresh=None
             with self.connect() as conn,conn.cursor() as cur:
-                candidate,_,why=Discovery.candidate(cur,pid,rematch=True)
+                candidate,_,why=repair_candidate(cur,pid,request['pending'])
             if candidate:
                 try:
                     fresh=read_metadata(candidate['id'])
@@ -224,7 +281,7 @@ class Reset:
                     # then rerun the unchanged validated filename/ownership rules.
                     cur.execute('UPDATE auto_edition_source_inventory SET metadata=%s::jsonb WHERE file_id=%s',
                                 (json.dumps(fresh),fresh['id']))
-                    chosen,_,why=Discovery.candidate(cur,pid,rematch=True)
+                    chosen,_,why=repair_candidate(cur,pid,pending)
                     if not chosen or chosen['id']!=fresh['id']:fresh=None
                 if fresh:
                     pending.update(stage='Queued',source=ae.source_identity(pid,fresh),file_id=fresh['id'],reason='')
@@ -257,8 +314,7 @@ def finish(cur,row,digest,actor,reason,metrics=None):
     if not meta or ae.source_identity(pid,meta['metadata'])!=pending['source'] or not psd.approved_file(meta['metadata']):
         raise ValueError('Original PSD changed during replacement.')
     meta=meta['metadata']
-    from auto_editions_discovery import Discovery
-    chosen,_,_=Discovery.candidate(cur,pid,rematch=True)
+    chosen,_,_=repair_candidate(cur,pid,pending)
     if not chosen or ae.source_identity(pid,chosen)!=pending['source']:
         raise ValueError('Original PSD matching is now ambiguous. The working design is retained.')
     path=meta.get('path_display') or meta['path_lower']

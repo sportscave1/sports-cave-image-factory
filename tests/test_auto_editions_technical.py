@@ -311,3 +311,63 @@ def test_same_hash_new_reset_generation_cannot_accept_old_result(flow):
     assert t.commit(old,r,r,technical.certificate(r))=='Superseded'
     assert t.commit(new,r,r,technical.certificate(r))=='Cloud Ready'
     assert sorted(x['state'] for x in rows(sql,'auto_edition_technical_checks'))==['Succeeded','Superseded']
+
+
+def retained_pinned_import(flow,fault=None):
+    import uuid
+    from auto_editions_reset import Reset
+    d,sql,original,assets,root=flow
+    sql.execute(Path('supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
+    reset=Reset(d.connect);request_id=str(uuid.uuid4());reset.request(PID,request_id,'admin')
+    sql.execute("UPDATE edition_products SET product_title='Reviewed original with different display title'")
+    record=deepcopy(original);record['manifest']['reset_request_id']=request_id
+    if fault=='source':record['manifest']['source']['content_hash']='b'*64
+    if fault=='font':record['manifest']['source_inspection']['layers'][0]['fonts'][0]['installed']=False
+    if fault=='colour':record['manifest']['source_inspection']['document']['profile']=''
+    record['hash']=ae.fingerprint(record['manifest'])
+    for proof in record['proofs']:proof['preparation_hash']=record['hash']
+    record['receipts']['preparation_hash']=record['hash']
+    if fault=='proof':record['proofs'][0]['pixel_exact']=False
+    if fault=='receipt':record['receipts']['assets']=record['receipts']['assets'][:-1]
+    Preparations(d.connect).save(record['manifest'],record['proofs'],record['receipts'],'host')
+    pending=dict(expected_source=original['manifest']['source'],source=original['manifest']['source'],
+        file_id='id:original',stage='Failed',attempts=1,
+        reason='Original PSD matching is now ambiguous. The working design is retained.')
+    sql.execute("UPDATE auto_edition_onboarding SET replacement=replacement || %s::jsonb",(json.dumps(pending),))
+    def metadata(token,fid,**kw):
+        if fid=='id:original':return asset()
+        name=fid.rsplit('/',1)[-1] if fid.startswith('/') else fid.removeprefix('id:')
+        path=root/name
+        return dict(id='id:'+name,rev='a1',size=path.stat().st_size,content_hash=ae.file_hash(path,dropbox=True),path_display=DropboxAssets.path(record['hash'],name))
+    assets.integration.psd_open_metadata.side_effect=metadata
+    assets.integration.team_space_client.return_value.files_get_metadata.side_effect=lambda path:metadata(None,path)
+    return record,reset
+
+
+def test_pinned_uploaded_checkpoint_resumes_without_native_claim_or_duplicate_upload(flow):
+    import uuid
+    import worker_health_queue as queue
+    d,sql,original,assets,root=flow;record,reset=retained_pinned_import(flow);before=protected(sql)
+    request_id=str(uuid.uuid4())
+    assert queue.submit(d.connect,PID,'admin',request_id,True)['accepted']
+    assert queue.submit(d.connect,PID,'admin',request_id,True)['duplicate']
+    q=rows(sql,'auto_edition_onboarding')[0]
+    assert q['preparation_hash']==record['hash'] and q['status']=='Blocked'
+    assert q['replacement']['stage']=='Complete' and q['replacement']['attempts']==1
+    assert d.queue.claim('unnecessary-native-host') is None
+    assert not rows(sql,'auto_edition_layouts')
+    assert len(rows(sql,'auto_edition_preparations'))==2
+    assert technical.Technical(d.connect).run_one(assets,pid=PID)=='Cloud Ready'
+    assert protected(sql)==before
+    assert sum(a['event']=='reset_checkpoint_resumed' for a in rows(sql,'auto_edition_onboarding_audit'))==1
+    assert sum(a['event']=='technical_cloud_ready' for a in rows(sql,'auto_edition_onboarding_audit'))==1
+    assets.publish_preparation.assert_not_called()
+
+
+@pytest.mark.parametrize('fault',['source','font','colour','proof','receipt'])
+def test_retained_checkpoint_resume_rejects_incomplete_or_unapproved_evidence(flow,fault):
+    d,sql,original,assets,root=flow;record,reset=retained_pinned_import(flow,fault)
+    before=deepcopy(rows(sql,'auto_edition_onboarding'))
+    with pytest.raises(ValueError):reset.retry_failed(PID,'admin')
+    assert rows(sql,'auto_edition_onboarding')==before
+    assert not rows(sql,'auto_edition_layouts')

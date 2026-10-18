@@ -160,6 +160,74 @@ def failed_native(design):
     return selected(sql)['replacement']
 
 
+def pinned_repair(design,stage='Discovering'):
+    d,sql,reset,old=design
+    reset.request(PID,str(uuid.uuid4()),'admin')
+    # Simulate the source pin accepted by Technical.repair_exports. Changing the
+    # display title must not erase an existing approved file association.
+    sql.execute("UPDATE edition_products SET product_title='Owner renamed display title' WHERE shopify_product_gid=%s",(PID,))
+    sql.execute("UPDATE auto_edition_onboarding SET replacement=replacement || %s::jsonb WHERE product_gid=%s",
+                (json.dumps(dict(expected_source=old['source'],stage=stage,reason='Not linked' if stage=='Failed' else '')),PID))
+    return selected(sql)['replacement']
+
+
+def test_pinned_export_repair_reuses_original_mapping_without_filename_rematch(design,tmp_path):
+    d,sql,reset,old=design;pending=pinned_repair(design);before=protected(sql)
+    assert discover(design)['stage']=='Queued'
+    current=selected(sql)['replacement']
+    assert current['source']==old['source'] and current['id']==pending['id']
+    assert protected(sql)==before
+    job=d.queue.claim('host');assert job['file_id']==old['source']['file_id']
+    with patch.object(api,'queue',return_value=d.queue),patch.object(api.runtime,'storage',return_value=SimpleNamespace(
+            integration=SimpleNamespace(psd_open_metadata=lambda *a,**kw:asset()),token='synthetic')):
+        context=api.product_context(PID,str(job['lease_token']))
+    assert context['source']==old['source'] and context['reset_id']==pending['id']
+    with patch.object(api,'queue',return_value=d.queue),patch.object(api.runtime,'storage',return_value=SimpleNamespace(
+            integration=SimpleNamespace(psd_open_metadata=lambda *a,**kw:asset(path_display='/Prepared/Unapproved.psd')),token='synthetic')):
+        with pytest.raises(ValueError):api.product_context(PID,str(job['lease_token']))
+    assert d.queue.claim('duplicate-host') is None
+    # Exercise the final checkpoint switch as well as admission and host context:
+    # a valid uploaded package must not be rejected by a second title rematch.
+    manifest=complete(design,job['lease_token'],tmp_path)
+    assert selected(sql)['replacement']['stage']=='Complete'
+    assert selected(sql)['preparation_hash']==ae.fingerprint(manifest)
+    assert protected(sql)==before
+
+
+def test_failed_pinned_discovery_can_retry_once_without_a_native_attempt(design):
+    d,sql,reset,old=design;pending=pinned_repair(design,'Failed');before=protected(sql)
+    import worker_health_queue as queue
+    rid=str(uuid.uuid4())
+    assert queue.submit(d.connect,PID,'admin',rid,repair_confirmed=True)['accepted']
+    assert queue.submit(d.connect,PID,'admin',rid,repair_confirmed=True)['duplicate']
+    current=selected(sql)['replacement']
+    assert current['source']==old['source'] and current['file_id']==old['source']['file_id']
+    assert current['id']==pending['id'] and current['attempts']==0
+    assert protected(sql)==before
+
+
+@pytest.mark.parametrize('change',['mapping','checkpoint','revision','hash','missing','unapproved','attempts'])
+def test_pinned_repair_retry_rejects_changed_mapping_source_or_budget(design,change):
+    d,sql,reset,old=design;pinned_repair(design,'Failed')
+    if change=='mapping':sql.execute("UPDATE product_psd_mappings SET file_path=file_path||'.changed.psd' WHERE shopify_product_gid=%s",(PID,))
+    if change=='checkpoint':sql.execute("UPDATE auto_edition_onboarding SET preparation_hash=NULL WHERE product_gid=%s",(PID,))
+    if change=='revision':sql.execute("UPDATE auto_edition_source_inventory SET metadata=jsonb_set(metadata,'{rev}','\"a2\"')")
+    if change=='hash':sql.execute("UPDATE auto_edition_source_inventory SET metadata=jsonb_set(metadata,'{content_hash}',to_jsonb(%s::text))",('b'*64,))
+    if change=='missing':sql.execute('DELETE FROM auto_edition_source_inventory')
+    if change=='unapproved':sql.execute("UPDATE auto_edition_source_inventory SET metadata=jsonb_set(metadata,'{path_display}','\"/Prepared/Unapproved.psd\"')")
+    if change=='attempts':sql.execute("UPDATE auto_edition_onboarding SET replacement=jsonb_set(replacement,'{attempts}','3') WHERE product_gid=%s",(PID,))
+    before=selected(sql)
+    with pytest.raises(ValueError):reset.retry_failed(PID,'admin')
+    assert selected(sql)==before
+
+
+def test_pinned_repair_discovery_rechecks_fresh_source_and_retains_original(design):
+    d,sql,reset,old=design;pinned_repair(design);before=protected(sql)
+    assert discover(design,asset(rev='a2',content_hash='b'*64))['stage']=='Failed'
+    assert selected(sql)['preparation_hash']==ae.fingerprint(old)
+    assert protected(sql)==before
+
+
 def test_failed_native_retry_reuses_operation_and_preserves_design(design,tmp_path):
     d,sql,reset,old=design;pending=failed_native(design)
     before=protected(sql);active=snapshot(selected(sql))
@@ -349,7 +417,7 @@ def test_reset_never_reuses_a_package_from_before_this_request(tmp_path):
     root=tmp_path/'jobs';folder=root/'old';folder.mkdir(parents=True)
     source=ae.source_identity(PID,asset());rid=str(uuid.uuid4())
     manifest=dict(source=source,edition_total=2,dimensions=[11340,8016],source_dimensions=[2835,2004],
-                  preparation_geometry={'scale':4})
+                  preparation_geometry={'scale':4},colour_evidence={'icc_sha256':'a'*64,'pixels_converted':False})
     ctx=dict(automatic=True,source=source,total=2,reset_id=rid)
     def write():
         with zipfile.ZipFile(folder/'prepared.zip','w') as z:z.writestr('manifest.json',json.dumps(manifest))

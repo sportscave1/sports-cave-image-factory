@@ -34,6 +34,18 @@ Shane Warne: registered existing approved RGB8 workflow membership after verifyi
 
 ## Validation and activation
 
+### Existing mapped filenames during repair
+
+Source-pinned export repairs reuse their existing approved mapping even when a product display title differs from its original PSD filename. The repair and host-context paths check the full unchanged mapping, exclusive source ownership, retained preparation generation, approved original location, revision and content hash. A failed discovery with zero native attempts can reuse its existing request ID through the same guarded Retry service; it does not remap a product or certify the old exports. Ordinary reset/rematching retains the original filename rules, and the three-attempt native cap is unchanged. This resolves Dale Earnhardt/Jeff Gordon's historical `Not linked` replacement without renaming its PSD or product.
+
+The Worker Health queue selector exposes that same corrected failed-replacement retry after explicit correction acknowledgement. Retained successful packages without a failed replacement remain protected. The selector only reports availability; submission still runs the full locking and source/checkpoint checks in `Reset.retry_failed` and preserves the replacement operation ID.
+
+19 October follow-up: the final imported checkpoint now uses the same pinned mapping guard as discovery and host context. A retained, uniquely identified uploaded replacement rejected only by the obsolete final filename check may resume through guarded Retry after current source, mapping, roles, colour, pixel proofs and all receipt records validate. Its existing hash/assets and native-attempt count are preserved; the technical worker still verifies provider bytes before Cloud Ready. The new regression exercises the full checkpoint switch and real technical completion, not only queue admission.
+
+Blue Heaven and Aikman/Emmitt had repeatedly reused legacy archives above the unchanged 256 MiB transfer/expanded bound and without recorded ICC evidence. Companion now preserves but rejects those archives for reuse and performs a fresh guarded inspection instead. No size cap or colour authority is relaxed. Unknown source profiles remain review blockers; an old archive is never a reason to assign sRGB.
+
+Black Caviar/Winx already has an owned queued replacement. Michael Dunlop remains separate: the current original is untagged RGB8, its historical revisions contain the same bytes, and the found 1,000px lifestyle mockup is also untagged. It does not establish the existing approved colour policy's scope. No automatic profile assignment or repeated retry is permitted until an original embedded profile or independent verified workflow/production-export evidence is supplied.
+
 Initial focused suite: 91 passed against disposable PGlite (no production providers). New role/parser/size/scope checks: 17 passed; scope SQL regression and combined revision checks recorded in external release evidence. Render topology validation passed. Tests isolate host capabilities and never touch the registered Companion host.
 
 Merge the exact tested change with the current live 5af8499e application revision, preserving Product Uploads additions. Release only to existing sports-cave-os and sports-cave-seo-worker. Update Companion from the immutable tested revision only when no preparation, pending checkpoint or processor lease remains. The automatic scanner then admits eligible scoped jobs once under the existing guarded service. Do not mass-requeue blocked artwork. Confirm completion only from current source-bound export proofs, profiles and cloud upload receipts.
