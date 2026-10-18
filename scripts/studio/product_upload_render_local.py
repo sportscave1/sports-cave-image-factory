@@ -49,6 +49,13 @@ def run_one(config, host):
                 raise ValueError('Retained rendered source changed.')
         else:
             if output.exists():raise ValueError('Interrupted native render retained. Review Photoshop ownership before retrying.')
+            from product_upload_local_source import reuse_synced
+            from auto_editions_local_cache import reuse_source, verified
+            if source.exists() and not verified(source,job['source'],job['metadata']['size']):
+                raise ValueError('Retained PSD bytes differ from the pinned source; manual review required.')
+            if not source.exists():
+                reused = reuse_synced(job['metadata'],source)
+                if not reused: reuse_source(host.HOST_FILE.parent,source,job['source'],job['metadata']['size'])
             if not source.exists():
                 grant=job['grant'];manifest=host.transfer.get(grant,'/api/files-native-transfer/manifest?'+urlencode({'ticket':grant['ticket']}))
                 if len(manifest['items'])!=1:raise ValueError('One exact PSD is required.')
@@ -67,7 +74,14 @@ def run_one(config, host):
             lease=host.processor_lease()
             try:
                 from scripts.render_product_upload_psd import render
+                structure = None
+                if job.get('workflow_version') == 3:
+                    from product_upload_dropbox import validate_structure
+                    structure = validate_structure(source)
                 path,receipt=render(source,output,job['source'])
+                if structure:
+                    receipt['structure'] = structure
+                    host.atomic_json(receipt_file,receipt)
             finally:
                 # A COM/RPC interruption retains the same safety fence as other
                 # native work. Release only proven cleanup or pre-dispatch work.

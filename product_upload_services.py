@@ -215,6 +215,10 @@ class Handoff:
         import auto_editions as ae
         import shopify_sync
         shopify = self.shopify or shopify_sync
+        selected = self.store.read(key, actor['id'])
+        if selected and selected['data'].get('workflow_version') == 3:
+            from product_upload_lifecycle import confirm
+            return confirm(self, key, actor, pid, shopify)
         with self.store.locked(key, actor['id']) as (row, cur):
             d = row['data']
             if d.get('product_gid') == pid:

@@ -31,6 +31,9 @@ def render_page(app):
         return
     if not key: return
     row=Intakes(connect).read(key,user['id'])
+    if row and row['data'].get('workflow_version') == 3:
+        from product_upload_dropbox import status
+        row = status(row, connect)
     if not row or not row['data'].get('basic_validated'): return
     st.html('<style>'+ (app.BASE_DIR/'mockups_page.css').read_text(encoding='utf-8')+'</style>')
     with st.container(key='mockups-workspace'):
@@ -52,15 +55,20 @@ def poll_render(key, actor, state):
     from product_upload_intake import Intakes
     if not st.session_state.get('_product_upload_visible',True):return
     row=Intakes(connect).read(key,actor)
-    if row and (row['data'].get('mockup_render') or {}).get('state')!=state:st.rerun()
+    if row and row['data'].get('workflow_version') == 3:
+        from product_upload_dropbox import status
+        row = status(row, connect)
+    if row and (row['data'].get('server_artwork') or {}).get('state')!=state:st.rerun()
 
 
 def render_design(app,row,user):
     from product_upload_api import connect,Dropbox
     from product_upload_intake import Intakes
-    from product_upload_render import Renders
     import image_factory
     key=str(row['id']);row=Intakes(connect).read(key,user['id'])
+    if row['data'].get('workflow_version') == 3:
+        from product_upload_dropbox import status
+        row = status(row, connect)
     if st.session_state.get('_product_upload_active')!=key:return
     result=app._mockups_result()
     if result and result.get('_product_upload_intake')!=key:
@@ -75,10 +83,13 @@ def render_design(app,row,user):
     option=st.selectbox('Sport category',options=options,index=options.index(inferred) if inferred in options else 0,key='product-upload-sport-'+key)
     custom=st.text_input('Custom sport category',key='product-upload-custom-'+key) if option=='Custom' else ''
     sport=app.get_sport_category(option,custom)
-    spec=row['data'].get('mockup_render') or {}
+    if row['data'].get('workflow_version')!=3:
+        st.info('Choose a Dropbox PSD for server preparation. This saved legacy workflow is retained.');return
+    spec=row['data'].get('server_artwork') or {}
     generated=bool(result)
     clicked=st.button('Generate Core Shopify Images',type='primary',key='product-upload-generate-'+key,disabled=not name.strip() or not sport or spec.get('state')=='Rendering')
     if clicked:
+        st.session_state['product-upload-generate-requested-'+key]=True
         if generated and (result['product_name']!=name.strip() or result['sport_category']!=sport):
             with Intakes(connect).locked(key,user['id']) as (current,cur):
                 if current['data'].get('product_gid'):
@@ -88,23 +99,27 @@ def render_design(app,row,user):
             release_transient(result)
             app._set_mockups_result(None);result=None;generated=False
         if spec.get('state')!='Ready':
-            try:Renders(connect).request(key,user['id'])
-            except ValueError as error:st.error(str(error))
-            st.rerun()
-    if spec.get('state') in ('Queued','Rendering'):
-        st.info('Waiting for Companion' if spec['state']=='Queued' else 'Rendering PSD in Photoshop. Your original is preserved; waiting for a verified colour-managed image.')
+            try:
+                from product_upload_artwork import prepare
+                row=prepare(connect,Dropbox(),key,user['id']);spec=row['data']['server_artwork']
+            except Exception as error:st.error(str(error));return
+    if spec.get('state') in ('Selected','Preparing'):
+        st.info('Preparing artwork on the server.' if spec['state']=='Preparing' else 'Selected Dropbox PSD. Prepare artwork on the server with Generate Core Shopify Images.')
         poll_render(key,user['id'],spec['state'])
     elif spec.get('state')=='Failed':
         st.error(spec.get('reason') or 'PSD render needs review. The original and workflow are retained.')
-        if spec.get('retryable') and st.button('Retry PSD render',key='product-upload-render-retry-'+key):
-            try:Renders(connect).request(key,user['id'],retry=True)
-            except ValueError as error:st.error(str(error));return
+        if st.button('Retry artwork preparation',key='product-upload-artwork-retry-'+key):
+            try:
+                from product_upload_artwork import prepare
+                prepare(connect,Dropbox(),key,user['id'])
+            except Exception as error:st.error(str(error));return
             st.rerun()
     failed_key='product-upload-generation-failed-'+key
     if clicked:st.session_state.pop(failed_key,None)
     if st.session_state.get(failed_key):
         st.error(st.session_state[failed_key])
-    if spec.get('state')=='Ready' and not generated and not st.session_state.get(failed_key):
+    requested = st.session_state.get('product-upload-generate-requested-'+key)
+    if spec.get('state')=='Ready' and requested and not generated and not st.session_state.get(failed_key):
         image_factory.cleanup_stale_temp_runs()
         parent=image_factory.create_temp_run_parent()
         import tempfile
@@ -112,14 +127,16 @@ def render_design(app,row,user):
             st.info('Another image generation is running. This PSD render is retained; try again when it finishes.');return
         try:
             with tempfile.TemporaryDirectory(dir=parent,prefix='product-upload-render-') as folder:
-                source=Path(folder)/'artwork.png';provider=Dropbox();provider.download(spec['output'],source)
-                import auto_editions as ae
-                if ae.file_hash(source,dropbox=True)!=spec['output']['content_hash']:
-                    raise ValueError('Rendered artwork checksum changed. Keep the PSD and review its saved render.')
+                provider=Dropbox()
+                from product_upload_artwork import ensure_ready
+                row,prepared=ensure_ready(row,connect,provider)
+                source=prepared/'artwork.png'
                 with st.status('Generating Core Shopify Images…'):
                     result=image_factory.generate_product_images(product_name=name.strip(),sport_category=sport,artwork_file_path=source,
                         base_dir=app.BASE_DIR,output_root=parent,
                         final_prompt_items=app.build_mockup_final_prompt_items(name.strip(),sport))
+                from product_upload_artwork import current
+                current(provider,row)
                 result=app.normalize_generation_result(result)
                 result.update(_product_upload_intake=key,_product_upload_actor_id=str(user['id']),_product_upload_source_hash=row['data']['source']['content_hash'])
                 app._set_mockups_result(result)

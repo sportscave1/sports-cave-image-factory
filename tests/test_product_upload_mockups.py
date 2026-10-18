@@ -217,6 +217,9 @@ def test_native_rpc_failure_retains_owned_lock_and_marks_intake_failed(tmp_path,
     lock=home/'Documents/SportsCavePrintJobs/processor.lock';lock.parent.mkdir();lock.write_text('preserved-owner')
     job=dict(id=str(uuid.uuid4()),source={'content_hash':'a'*64},metadata={'size':100},token='lease',attempt=1)
     folder=base/('product-upload-'+job['id']+'-attempt-1');folder.mkdir();(folder/'input.psd').write_bytes(b'preserve original')
+    import auto_editions as ae
+    job['metadata']['size']=(folder/'input.psd').stat().st_size
+    job['source']['content_hash']=ae.file_hash(folder/'input.psd',dropbox=True)
     host=SimpleNamespace(HOST_FILE=base/'host.dpapi',JOBS={},atomic_json=lambda path,value:path.write_text(json.dumps(value)),processor_lease=Mock(return_value=SimpleNamespace(unlink=Mock())))
     calls=[]
     def request(config,path,body):

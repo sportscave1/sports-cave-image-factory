@@ -1,5 +1,77 @@
 # Product Uploads — consolidated local upload optimisation
 
+## Release authorised — 19 October 2026
+
+The user authorised publishing both Dropbox selection and server-side PSD
+preparation updates to Git/Render and updating the installed Companion.
+The local-only statements below record the implementation-stage boundary.
+Release verification includes production Pillow 10.4 compatibility, unchanged
+standalone Mockups, canonical Render topology and preserving current recovery
+fixes from main. Deployment and installed-release evidence is recorded separately
+in the task output and Studio registry. No original artwork or live Shopify
+product is used as a release test.
+
+## Dropbox PSD correction — 19 October 2026 (local only)
+
+Choose PSD opens the in-app Dropbox picker. Review defaults to the verified
+`99_PSD_NEEDS_REVIEW_DO_NOT_DELETE` folder inside
+`/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED`.
+The real folder remains unchanged. Files metadata is paginated; PSD bytes never
+travel through the browser. Product details, prompts, lifestyle controls, exports
+and Shopify actions retain their existing workflow.
+
+Tracing this worktree found that `app.render_mockups_page` accepts JPG/PNG/WebP
+and calls `image_factory.generate_product_images`, whose working-artwork loader
+also accepts those formats. It did not contain an independent PSD implementation.
+Both `app.py` and `image_factory.py` remain unchanged. Product Upload therefore
+uses a small server PSD adapter before that exact shared generation engine.
+
+Selection binds immutable Dropbox ID, revision, hash and current path. The browser
+then requests server preparation using JSON only. The app server downloads the
+pinned original to disposable staging, verifies size/content hash, reads the
+full-resolution saved PSD composite through Pillow, preserves approved ICC
+handling through LittleCMS, and creates a lossless sRGB PNG up to the shared
+2000px working limit. The unchanged engine creates the core product images,
+lifestyle references, prompts and export assets. Generate Core Shopify Images
+remains explicit. No thumbnail is used for production artwork.
+
+Preparation uses the same image-dimension and memory admission checks as Mockups.
+RGB8 PSD raw/RLE saved composites are supported. Unsupported encoding, missing or
+truncated composites, unsupported colour modes/depth, unapproved untagged sources,
+changed revisions and insufficient resources fail clearly. The decoder reads the
+saved merged composite; it does not recomposite arbitrary live layer effects.
+Existing reviewed colour-recovery policies remain required and unchanged.
+
+Disposable prepared PNG/preview assets are reused only after source, processing
+settings, Pillow/code/colour-policy fingerprints and output checksums match.
+Expired or corrupt caches rebuild from the pinned source. One server preparation
+runs at a time per process, with source-specific DB deduplication. Fresh pages
+remain empty and stale selection responses cannot replace the current design.
+
+**Companion is not used for selection, preview, PSD preparation or generation.**
+It remains only the trigger for the separate durable post-Shopify rename/move
+handoff. Offline handoff stays queued and does not block mockups or Shopify
+confirmation. Drafts remain in Review; publication/media gates and conflict,
+revision, pause and processing protections still apply to file operations.
+
+Focused verification uses disposable PostgreSQL, actual synthetic PSD bytes,
+real Pillow/ICC conversion, real shared generation with isolated scene templates,
+and Chromium desktop/mobile/embedded-frame UI. No Companion is connected or
+invoked. Exact prepared-preview pixels, cache reuse/invalidation, truncated
+composites, approved colour recovery, stale sources and generation-button wiring
+are checked. Measurements and the full verification/file list are under
+`output/product-upload-server-correction/`; browser measurements are under
+`output/product-upload-dropbox/`. These are local synthetic measurements, not
+production Dropbox bandwidth or large-design timing. Main bottlenecks remain
+source transfer, full-resolution decode and existing server memory/pixel limits.
+
+No commit, push, deployment, installed Companion change, live Shopify mutation
+or original Dropbox file modification was performed. Previous uncommitted work
+is retained, with a before-correction snapshot in the ignored output directory.
+
+The binary-transfer results below are historical; that transport is no longer
+Product Upload's PSD source-selection path.
+
 Status: Implemented locally. Not committed, pushed, merged or deployed.
 Task `20261018-4b18037e`, owner `codex-products-mockups-20261018`, existing branch
 `codex/task/products-product-uploads-integrated-existing-mockup-20261018-4b18037e`.

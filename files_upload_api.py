@@ -503,12 +503,14 @@ class NativeTransferManager:
             self._records[ticket] = record
         return record
 
-    def create_psd(self, *, access_token, root_path, user, metadata):
+    def create_psd(self, *, access_token, root_path, user, metadata, product_upload=False):
         """Create an existing native grant from fresh server-validated ID metadata."""
         import psd_directory
         path = str(metadata.get('path_display') or metadata.get('path_lower') or '')
         root = dropbox_integration.normalize_dropbox_path(root_path)
-        if not psd_directory.approved_file(metadata) or not dropbox_integration.path_is_within_root(path, root):
+        from product_upload_dropbox import approved as upload_approved
+        allowed = upload_approved(metadata) if product_upload else psd_directory.approved_file(metadata)
+        if not allowed or not dropbox_integration.path_is_within_root(path, root):
             raise FilesUploadError('The linked master is outside the approved Dropbox folder.', status_code=403, code='psd_scope_denied')
         relative = _validated_relative_path(path[len(root):].lstrip('/'), root)
         if relative != path or not re.fullmatch(r'[a-fA-F0-9]{64}',str(metadata.get('content_hash') or '')):
@@ -712,7 +714,7 @@ def _directory_entries(access_token, path, *, force=False, root_path="", user_id
     return list(entries)
 
 
-def _directory_page(access_token, path, *, root_path, user_id, force=False, page_token="", limit=None):
+def _directory_page(access_token, path, *, root_path, user_id, force=False, page_token="", limit=None, bounded=False):
     clean_path = dropbox_integration.normalize_dropbox_path(path)
     cache_key = _directory_cache_key(clean_path, root_path=root_path, user_id=user_id)
     page_limit = max(1, min(int(limit or FILES_DIRECTORY_PAGE_SIZE), 2000))
@@ -734,7 +736,7 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
                     code="folder_page_expired",
                 )
             cursor = str(page.get("cursor") or "")
-    elif not force:
+    elif not force and not bounded:
         with _DIRECTORY_CACHE_LOCK:
             cached = _directory_cache_payload(cache_key, now)
             if cached is not None:
@@ -781,7 +783,7 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
             result = _DIRECTORY_PAGE_RESULTS.get(request_key)
             if result and result[0] > time.monotonic():
                 return dict(result[1])
-            cached = _directory_cache_payload(cache_key)
+            cached = None if bounded else _directory_cache_payload(cache_key)
             if cached is not None:
                 return {
                     "entries": cached,

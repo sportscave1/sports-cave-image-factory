@@ -95,7 +95,10 @@ async def state(request):
             return JSONResponse(dict(enabled=False, upload=None), headers=HEADERS)
         key = request.query_params.get('id')
         row = await run_in_threadpool(Intakes(connect).read, key, user['id']) if key else None
-        if row and row['data'].get('product_gid'):
+        if row and row['data'].get('workflow_version') == 3:
+            from product_upload_dropbox import status
+            row = await run_in_threadpool(status, row, connect)
+        elif row and row['data'].get('product_gid'):
             row = await run_in_threadpool(reconcile, row, connect)
             # Persist the exact technical completion for refresh/recovery; polling
             # has no provider side effects and cannot approve other jobs.
@@ -120,14 +123,21 @@ async def action(request):
         body = await files._json_body(request)
         operation_started = perf_counter()
         store = Intakes(connect); key = body.get('id'); uid = user['id']
-        if op == 'start':
+        if op in ('browse', 'select'):
+            from product_upload_dropbox import browse, select, status
             provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
-            row = await run_in_threadpool(store.create, key, uid, body.get('mode'), body.get('name'), body.get('size'), provider, body.get('content_hash'))
-        elif op == 'resume':
-            from product_upload_relay import settled
-            row = await run_in_threadpool(settled, store, key, uid)
-        elif op == 'finish':
-            row = await run_in_threadpool(store.finish, key, uid, MeasuredStorage(await run_in_threadpool(Dropbox), timings))
+            if op == 'browse':
+                result = await run_in_threadpool(browse, provider, uid, body.get('root','review'), body.get('path',''), body.get('page',''), body.get('search',''))
+                return measured_response(JSONResponse(result, headers=HEADERS), timings, started, op)
+            row = await run_in_threadpool(select, connect, provider, key, uid, body.get('mode'), body.get('file_id'), body.get('revision'))
+            row = await run_in_threadpool(status, row, connect)
+        elif op in ('start', 'finish', 'resume'):
+            raise ValueError('Choose an existing PSD from Dropbox. Manual PSD transfers have been removed.')
+        elif op == 'prepare':
+            from product_upload_artwork import prepare
+            from product_upload_dropbox import status
+            row = await run_in_threadpool(prepare,connect,await run_in_threadpool(Dropbox),key,uid)
+            row = await run_in_threadpool(status,row,connect)
         elif op == 'mode':
             row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
         elif op == 'copied':
@@ -137,7 +147,7 @@ async def action(request):
             row = await run_in_threadpool(store.read, key, uid) if key else None
             if key and (not row or not row['data'].get('basic_validated') or row['mode'] != body.get('mode')):
                 raise ValueError('Finish the PSD upload and copy the current action.')
-            if row and row['data'].get('workflow_version')==2 and not row['data'].get('mockups_exported'):
+            if row and row['data'].get('workflow_version') in (2,3) and not row['data'].get('mockups_exported'):
                 raise ValueError('Save or download the completed design images before copying the Shopify prompt.')
             prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'] if row else '')
             if row and row['data'].get('mockups_context'):
@@ -155,6 +165,14 @@ async def action(request):
             service = Handoff(connect, provider)
             row = await run_in_threadpool(service.resolve if op == 'resolve' else service.link, key, user,
                                           body.get('value') if op == 'resolve' else body.get('product_id'))
+        elif op == 'retry-file':
+            def retry_file():
+                with store.locked(key, uid) as (current, cur):
+                    task = current['data'].get('lifecycle')
+                    if not task or task['state'] != 'Error': raise ValueError('No failed file handoff needs retrying.')
+                    task.update(state='Queued', checked_at=None, reason='')
+                    return current
+            row = await run_in_threadpool(retry_file)
         elif op == 'retry':
             row = await run_in_threadpool(store.read, key, uid)
             if not row or not row['data'].get('product_gid'):
@@ -179,20 +197,7 @@ async def action(request):
 
 
 async def chunk(request):
-    started = perf_counter(); timings = {}
-    try:
-        user = await actor(request, write=True)
-        timings['auth'] = (perf_counter() - started) * 1000
-        adapter = perf_counter()
-        provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
-        timings['adapter'] = (perf_counter() - adapter) * 1000
-        from product_upload_relay import transfer
-        row = await transfer(request, Intakes(connect), request.query_params['id'], user['id'],
-                             int(request.query_params['offset']), provider, timings, perf_counter)
-        timings['checks_db'] = max(0, timings.get('intake', 0) - timings.get('storage', 0))
-        return measured_response(JSONResponse(dict(upload=public(row)), headers=HEADERS), timings, started, 'chunk')
-    except Exception as error:
-        return measured_response(failure(error), timings, started, 'chunk')
+    return failure(ValueError('Manual PSD transfers have been removed. Choose PSD from Dropbox.'))
 
 
 async def preview(request):
@@ -223,6 +228,29 @@ async def preview(request):
 
 from product_upload_render import ROUTES as RENDER_ROUTES
 
+
+async def source_preview(request):
+    try:
+        user = await actor(request)
+        row = await run_in_threadpool(Intakes(connect).read, request.query_params['id'], user['id'])
+        if not row or row['data'].get('workflow_version') != 3: raise ValueError('Select a Dropbox PSD first.')
+        provider = await run_in_threadpool(Dropbox)
+        expected = row['data']['source']
+        meta = await run_in_threadpool(provider.metadata_if_present, expected['id'])
+        if not meta or any(meta.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
+            raise ValueError('The selected revision changed. Select its current PSD again.')
+        if (row['data'].get('server_artwork') or {}).get('state') == 'Ready':
+            from product_upload_artwork import ready
+            folder = await run_in_threadpool(ready,row,connect,provider)
+            return Response(await run_in_threadpool((folder/'preview.webp').read_bytes),media_type='image/webp',headers=HEADERS)
+        data = await run_in_threadpool(provider.api.get_psd_thumbnail_bytes, provider.token, meta['id'])
+        after = await run_in_threadpool(provider.metadata_if_present, expected['id'])
+        if not after or any(after.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
+            raise ValueError('PSD revision changed while loading the preview. Choose its current revision again.')
+        return Response(data, media_type='image/jpeg', headers=HEADERS)
+    except Exception as error: return failure(error)
+
 ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+          ('/api/product-uploads/source-preview', source_preview, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),
           ('/api/product-uploads/preview', preview, ('GET',)), ('/api/product-uploads/{action}', action, ('POST',)))

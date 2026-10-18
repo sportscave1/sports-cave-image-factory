@@ -222,10 +222,10 @@ def test_http_auth_chunk_and_disabled_manual_route(env,monkeypatch):
         assert client.post('/api/product-uploads/start',json={}).status_code==403
         key=str(uuid.uuid4());data=psd();headers={'Origin':'http://testserver'}
         response=client.post('/api/product-uploads/start',json=dict(id=key,mode='DRAFT',name='Design.psd',size=len(data),content_hash=digest(data)),headers=headers)
-        assert response.status_code==200,response.text
-        assert client.post('/api/product-uploads/chunk?id='+key+'&offset=0',content=data,headers=headers).status_code==200
-        assert client.post('/api/product-uploads/finish',json=dict(id=key),headers=headers).json()['upload']['basic_validated']
-        assert client.get('/api/product-uploads/state?id='+key).json()['upload']['copied'] is False
+        assert response.status_code==409 and 'Manual PSD transfers' in response.text
+        assert client.post('/api/product-uploads/chunk?id='+key+'&offset=0',content=data,headers=headers).status_code==409
+        assert client.post('/api/product-uploads/finish',json=dict(id=key),headers=headers).status_code==409
+        assert not env[2].sessions and not env[2].calls
         monkeypatch.setenv('PRODUCT_UPLOAD_AUTOMATIC_ENABLED','false')
         assert client.get('/product-uploads',follow_redirects=False).status_code==307
         assert client.get('/api/product-uploads/state').json()['enabled'] is False
@@ -295,41 +295,19 @@ def test_prompt_only_account_keeps_access_and_expired_session_is_rejected(monkey
     assert client.get('/product-uploads').status_code==403
 
 
-def test_stream_timing_transient_status_and_single_chunk_memory_contract(env, monkeypatch):
+def test_selection_timing_preserves_transient_auth_failure_and_no_binary_transfer(env, monkeypatch):
     import product_upload_api as api
     import files_upload_api as files
     from files_upload_api import FilesUploadError
     monkeypatch.setattr(api, 'connect', env[0].connect)
-    monkeypatch.setattr(api, 'Dropbox', lambda: env[2])
-    monkeypatch.setattr(files, '_request_user', lambda request, **kwargs: ADMIN)
+    monkeypatch.setattr(files, '_request_user', lambda *a, **k: (_ for _ in ()).throw(
+        FilesUploadError('temporary authentication backend outage', status_code=503)))
     app = Starlette(routes=[Route(p, e, methods=list(m)) for p, e, m in api.ROUTES])
-    headers = {'Origin': 'http://testserver'}
     with TestClient(app) as client:
-        key = str(uuid.uuid4()); data = psd(CHUNK + 73)
-        started = client.post('/api/product-uploads/start', headers=headers, json=dict(
-            id=key, mode='DRAFT', name='a.psd', size=len(data), content_hash=digest(data)))
-        assert 'storage;dur=' in started.headers['server-timing']
-        # Authentication still runs for every chunk; instrumentation does not cache permissions.
-        monkeypatch.setattr(files, '_request_user', lambda *a, **k: (_ for _ in ()).throw(
-            FilesUploadError('temporary authentication backend outage', status_code=503)))
-        failed = client.post(f'/api/product-uploads/chunk?id={key}&offset=0', headers=headers, content=data[:CHUNK])
-        assert failed.status_code == 503  # Must remain retryable, never be rewritten as 409.
+        failed = client.post('/api/product-uploads/select', headers={'Origin':'http://testserver'},json={})
+        assert failed.status_code == 503
         assert 'total;dur=' in failed.headers['server-timing']
         assert not env[2].calls
-        monkeypatch.setattr(files, '_request_user', lambda request, **kwargs: ADMIN)
-        too_big = client.post(f'/api/product-uploads/chunk?id={key}&offset=0', headers=headers, content=b'x'*(2*CHUNK+1))
-        assert too_big.status_code == 409 and not env[2].calls
-        for offset in range(0, len(data), CHUNK):
-            response = client.post(f'/api/product-uploads/chunk?id={key}&offset={offset}', headers=headers, content=data[offset:offset+CHUNK])
-            assert response.status_code == 200, response.text
-            timing = response.headers['server-timing']
-            for stage in ('auth', 'receive', 'adapter', 'storage', 'checks_db', 'intake', 'total'):
-                assert stage+';dur=' in timing
-        assert sum(kind=='append' for kind, _ in env[2].calls) == 2
-        response = client.post('/api/product-uploads/finish', headers=headers, json=dict(id=key))
-        assert response.json()['upload']['basic_validated']
-        assert 'operation;dur=' in response.headers['server-timing']
-        assert 'session' not in response.text and 'access_token' not in response.text
 
 
 def test_large_layer_section_crosses_many_chunks_without_decoding(env):

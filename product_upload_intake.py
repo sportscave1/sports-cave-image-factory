@@ -196,7 +196,7 @@ class Intakes:
         with self.locked(key, actor) as (row, cur):
             if row['mode'] != selected or not row['data'].get('basic_validated'):
                 raise ValueError('Upload or action changed. Copy the current prompt again.')
-            if row['data'].get('workflow_version')==2 and not row['data'].get('mockups_exported'):
+            if row['data'].get('workflow_version') in (2,3) and not row['data'].get('mockups_exported'):
                 raise ValueError('Save or download the completed image package before the Shopify handoff.')
             row['data']['copied'] = True
             return row
@@ -207,6 +207,12 @@ def public(row):
         return None
     d = row['data']
     # No provider session, tokens, storage path or raw worker errors in the UI.
-    return dict(id=str(row['id']), mode=row['mode'], transport_chunk_bytes=TRANSPORT_CHUNK, relay_resume=True, **{k:d.get(k) for k in (
+    result = dict(id=str(row['id']), mode=row['mode'], transport_chunk_bytes=TRANSPORT_CHUNK, relay_resume=True, **{k:d.get(k) for k in (
         'name','size','offset','state','basic_validated','copied','lookup','choices','product_title',
-        'preparation_hash','reason','preview_url','product_url','companion_connected','shopify_completion')})
+        'preparation_hash','reason','preview_url','product_url','companion_connected','shopify_completion',
+        'selected_at')})
+    if d.get('workflow_version') == 3:
+        result['source'] = {k:d['source'].get(k) for k in ('id','rev','content_hash','path_display','name','size')}
+        if d.get('lifecycle'):
+            result['lifecycle'] = {k:d['lifecycle'].get(k) for k in ('state','reason','history','queued_at','checked_at')}
+    return result
