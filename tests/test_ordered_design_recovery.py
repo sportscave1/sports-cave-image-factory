@@ -11,7 +11,8 @@ from auto_editions_source_limits import check_source,MAX_SOURCE_BYTES,SCRATCH_RE
 
 
 def resolved_inspection(entry):
-    return dict(document=dict(width_px=3543,height_px=2506),layers=[
+    canvas=entry.get('source_dimensions',[3543,2506])
+    return dict(document=dict(width_px=canvas[0],height_px=canvas[1]),layers=[
         dict(layer_id=entry['number']['layer_id'],path=[dict(name=entry['number']['name'])],kind='text',
              text=entry['number']['name'],visible=True,editable=True,locked=False,fonts=[dict(installed=True)],
              layout=dict(font='ExactExistingFont'),bounds_px=entry['number']['bounds_px']),
@@ -19,7 +20,7 @@ def resolved_inspection(entry):
              kind=entry['plaque']['kind'],visible=True,bounds_px=entry['plaque']['bounds_px'])])
 
 
-@pytest.mark.parametrize('index',[0,1,3])
+@pytest.mark.parametrize('index',[0,1,3,4,5,6,7,8])
 def test_exact_reviewed_roles_preserve_existing_targets(index):
     entry=json.loads(roles.REGISTRY.read_text())['resolutions'][index]
     result=onboarding.detect(resolved_inspection(entry),100,source=entry['source'])
@@ -105,3 +106,50 @@ def test_transparent_artwork_is_reported_and_never_flattened(tmp_path):
     with pytest.raises(ValueError,match='approved opaque composition'):
         ae.compose(manifest,tmp_path,1)
     assert path.read_bytes()==before
+
+
+def healthy_native(monkeypatch):
+    from datetime import datetime,timezone
+    from worker_health import code_hash
+    monkeypatch.setenv('RENDER_GIT_COMMIT','a'*40)
+    return dict(seen_at=datetime.now(timezone.utc),payload=dict(state='Idle',protocol=1,
+        revision='a'*40,code_hash=code_hash(),checkpoint_pending=False,processor_lock=False,recovery_failures=0))
+
+
+def test_legacy_native_error_gets_one_current_guarded_attempt(monkeypatch):
+    observed=healthy_native(monkeypatch)
+    source=dict(product_gid='gid://shopify/Product/1',file_id='id:original',revision='a1',content_hash='a'*64)
+    row=dict(product_gid=source['product_gid'],status='Blocked',priority=8,source=source,dropbox_file_id=source['file_id'],reason='Photoshop inspection failed: OSError. Retry after checking Photoshop.')
+    cfg=dict(policies=[],memberships=[],default_group='')
+    assert recovery.classify(row,cfg)['action'] is None
+    decision=recovery.classify(row,cfg,runtime=observed)
+    assert decision['action']=='retry_native' and decision['max_attempts']==1
+    for k,v in [('state','Recovering'),('code_hash','b'*64),('revision','b'*40),('processor_lock',True),('checkpoint_pending',True),('recovery_failures',1),('protocol',2)]:
+        changed=deepcopy(observed);changed['payload'][k]=v
+        assert recovery.classify(row,cfg,runtime=changed)['action'] is None
+    assert recovery.classify({**row,'priority':0},cfg,runtime=observed)['action'] is None
+    assert recovery.classify({**row,'status':'Cloud Ready'},cfg,runtime=observed)['action'] is None
+    row['reason']='Existing number formatting cannot hold the full edition range unchanged.'
+    assert recovery.classify(row,cfg,runtime=observed)['action'] is None
+
+
+def test_compact_transport_reassesses_only_pre_fix_historical_failures(monkeypatch):
+    from datetime import datetime,timezone
+    observed=healthy_native(monkeypatch)
+    source=dict(product_gid='gid://shopify/Product/1',file_id='id:original',revision='a1',content_hash='a'*64)
+    row=dict(product_gid=source['product_gid'],status='Blocked',priority=8,source=source,dropbox_file_id=source['file_id'],reason='Preparation failed: Prepared package exceeds the cloud transfer limit.. Existing PSD and mapping are preserved.',updated_at=datetime(2026,10,15,tzinfo=timezone.utc))
+    assert recovery.classify(row,{},runtime=observed)['action']=='retry_native'
+    row['updated_at']=datetime(2026,10,18,tzinfo=timezone.utc)
+    assert recovery.classify(row,{},runtime=observed)['action'] is None
+
+
+def test_queue_contention_does_not_consume_native_budget_and_is_still_capped():
+    from datetime import datetime,timezone,timedelta
+    now=datetime.now(timezone.utc)
+    event=dict(created_at=now-timedelta(minutes=20),detail=dict(accepted=False,transient_admission=True))
+    assert recovery.budget([event],1,now)==''
+    assert recovery.budget([event]*3,1,now).startswith('Retry limit reached for temporary')
+    assert recovery.budget([dict(created_at=now,detail=event['detail'])],1,now)=='Waiting for capped retry backoff.'
+    class Busy(Exception):sqlstate='55P03'
+    assert recovery.temporary_admission(Busy())
+    assert not recovery.temporary_admission(ValueError('Changed source identity'))

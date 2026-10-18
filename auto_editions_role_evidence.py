@@ -18,6 +18,10 @@ def resolution(source):
 def plaque(inspection,source):
     selected=resolution(source)
     if not selected:return None
+    if selected.get('source_dimensions'):
+        doc=inspection.get('document') or {}
+        if [doc.get('width_px'),doc.get('height_px')]!=selected['source_dimensions']:
+            raise ValueError('Pinned canvas geometry changed; artwork review required.')
     rows=inspection.get('layers',[])
     for role in ('number','plaque')+ (('hidden_number',) if selected.get('hidden_number') else ()):
         expected=selected[role]

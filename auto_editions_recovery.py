@@ -60,7 +60,27 @@ def fix_revision(category):
     return digest({name: hashlib.sha256((root/name).read_bytes()).hexdigest() for name in files})
 
 
-def classify(row, config):
+def native_fix_available(runtime):
+    """Current trusted Companion evidence, never merely a deployed web revision."""
+    if not runtime:return False
+    from worker_health import stamp,code_hash
+    seen=stamp(runtime.get('seen_at'));p=runtime.get('payload') or {}
+    return bool(seen and 0<=(datetime.now(timezone.utc)-seen).total_seconds()<=150
+        and os.getenv('RENDER_GIT_COMMIT') and p.get('revision')==os.getenv('RENDER_GIT_COMMIT')
+        and p.get('code_hash')==code_hash() and p.get('protocol')==1
+        and p.get('state') in ('Idle','Live') and not p.get('processor_lock')
+        and not p.get('checkpoint_pending') and not p.get('recovery_failures'))
+
+
+def native_runtime(cur):
+    # Older offline schemas have no telemetry; absence grants no eligibility.
+    cur.execute("SELECT to_regclass('public.auto_edition_worker_heartbeats') AS relation")
+    if not (cur.fetchone() or {}).get('relation'):return None
+    cur.execute("SELECT seen_at,payload FROM auto_edition_worker_heartbeats WHERE component='Companion' ORDER BY seen_at DESC LIMIT 1")
+    return cur.fetchone()
+
+
+def classify(row, config, *, runtime=None):
     """Conservative eligibility from authoritative current checkpoint evidence."""
     replacement = row.get('replacement') or {}
     # A failed replacement is the current native attempt. Its retained package's
@@ -103,6 +123,21 @@ def classify(row, config):
                     'reason':'Pinned source exceeded the old 1 GiB bound and fits the reviewed streamed 2 GiB path; disk/pixel/colour checks remain mandatory.'}
     if category == 'Upload/network' and transient:
         return {**result, 'action': 'retry', 'max_attempts': 3}
+    legacy_native=reason in (
+        'Photoshop inspection failed: RuntimeError. Retry after checking Photoshop.',
+        'Photoshop inspection failed: OSError. Retry after checking Photoshop.',
+        'Preparation failed: RuntimeError. Existing PSD and mapping are preserved.',
+        'Preparation worker interrupted three times. Retry after checking Photoshop.',
+        'PSD transfer failed: HTTPError. Retry after checking the connection.')
+    if not row.get('preparation_hash') and legacy_native and native_fix_available(runtime):
+        return {**result,'action':'retry_native',
+                'reason':'Current authenticated Companion matches the approved native bridge/parser and is healthy with no retained processor ownership. One fresh guarded attempt may replace this historical generic error; all artwork, colour and upload checks remain mandatory.'}
+    if not row.get('preparation_hash') and 'prepared package exceeds the cloud transfer limit' in lower:
+        from worker_health import stamp
+        failed=stamp(row.get('updated_at'))
+        if failed and failed<datetime(2026,10,16,1,14,tzinfo=timezone.utc) and native_fix_available(runtime):
+            return {**result,'action':'retry_native',
+                    'reason':'Failure predates the approved lossless compact transport. One current attempt is permitted; expanded package and pixel limits remain unchanged.'}
     if category == 'Upload/receipts' and row.get('preparation_hash'):
         try:
             from auto_editions_technical import repair_evidence,_colour_snapshot
@@ -202,8 +237,11 @@ def history(cur, pid, fingerprint):
 
 def budget(events, maximum, now=None):
     now = now or datetime.now(timezone.utc)
-    if len(events) >= maximum:
+    operational=[e for e in events if (e.get('detail') or {}).get('transient_admission')]
+    if len(events)-len(operational) >= maximum:
         return 'Retry limit reached for unchanged source, policy and shared fix. Inspect retained failure evidence.'
+    if len(operational)>=3:
+        return 'Retry limit reached for temporary queue/provider admission failures. No native attempt was started; inspect connectivity and queue contention.'
     if events:
         from worker_health import stamp
         due = stamp(events[-1]['created_at']).timestamp() + min(60 * 2 ** (len(events)-1), 900)
@@ -212,16 +250,26 @@ def budget(events, maximum, now=None):
     return ''
 
 
+def temporary_admission(error):
+    from requests.exceptions import Timeout as RequestTimeout,ConnectionError as RequestConnectionError
+    return (getattr(error,'sqlstate',None) in ('55P03','57014','40P01','40001')
+            or isinstance(error,(TimeoutError,ConnectionError,RequestTimeout,RequestConnectionError))
+            or getattr(error,'code',None) in (429,500,502,503,504)
+            or getattr(error,'status_code',None) in (429,500,502,503,504)
+            or getattr(getattr(error,'response',None),'status_code',None) in (429,500,502,503,504))
+
+
 def plan(connect, config):
     """Full authoritative backlog; independent of the 50-row UI pagination."""
     with connect() as conn, conn.cursor() as cur:
         cur.execute(SQL + " WHERE q.status IN ('Blocked','Needs PSD Repair') ORDER BY CASE WHEN q.priority=8 THEN 11 ELSE q.priority END DESC,q.created_at,q.product_gid")
         rows = cur.fetchall()
+        runtime=native_runtime(cur)
         scope=ordered_scope()
         rows=sorted(rows,key=lambda r:(-(11 if r.get('priority')==8 else r.get('priority',0)),-scope.get(r['product_gid'],0),str(r.get('created_at')),r['product_gid']))
         result = []
         for row in rows:
-            decision = classify(row, config)
+            decision = classify(row, config, runtime=runtime)
             if row['product_gid'] not in scope:
                 decision={**decision,'action':None,'reason':'Outside the owner-selected ordered-product recovery scope; left untouched.'}
             fingerprint = key(row, decision, config)
@@ -284,7 +332,7 @@ def scan(connect, read_metadata, *, limit=3):
                 def borrowed():
                     yield conn
                 current_config = read_config(borrowed)
-                current_decision = classify(fresh, current_config)
+                current_decision = classify(fresh, current_config, runtime=native_runtime(cur))
                 fingerprint = key(fresh, current_decision, current_config)
                 if fingerprint != item['fingerprint'] or current_decision['action'] != decision['action']:
                     continue
@@ -293,8 +341,9 @@ def scan(connect, read_metadata, *, limit=3):
                     continue
                 request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, pid + fingerprint + str(len(events))))
                 if pid not in ordered_scope():continue
-                submit(borrowed, pid, ACTOR, request_id, repair_confirmed=decision['action'] in ('repair_exports','retry_roles'))
-                Queue.audit(cur, pid, ACTOR, EVENT, dict(fingerprint=fingerprint, attempt=len(events)+1,
+                submit(borrowed, pid, ACTOR, request_id, repair_confirmed=decision['action'] in ('repair_exports','retry_roles','retry_native'))
+                Queue.audit(cur, pid, ACTOR, EVENT, dict(fingerprint=fingerprint,
+                    attempt=sum(not (e.get('detail') or {}).get('transient_admission') for e in events)+1,admission_attempt=len(events)+1,
                     action=decision['action'], category=decision['category'], source=source,
                     previous_reason=decision['reason'], request_id=request_id))
                 accepted.append(pid)
@@ -306,7 +355,9 @@ def scan(connect, read_metadata, *, limit=3):
                 events = history(cur, pid, item['fingerprint'])
                 if not budget(events, decision['max_attempts']):
                     Queue.audit(cur,pid,ACTOR,EVENT,dict(fingerprint=item['fingerprint'],
-                        attempt=len(events)+1,accepted=False,category=decision['category'],
+                        attempt=sum(not (e.get('detail') or {}).get('transient_admission') for e in events)+1,
+                        admission_attempt=len(events)+1,accepted=False,category=decision['category'],
+                        transient_admission=temporary_admission(error),
                         reason=str(error)[:500]))
             import logging
             logging.getLogger(__name__).warning('backlog_recovery_admission_deferred product=%s error_type=%s', pid, type(error).__name__)

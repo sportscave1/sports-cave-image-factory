@@ -241,10 +241,12 @@ class Health:
         with self.connect() as conn,conn.cursor() as cur:
             queue_sql="""SELECT q.product_gid,q.file_id,q.status,q.priority,q.reason,q.attempts,
                 q.preparation_hash,q.lease_until,q.updated_at,to_jsonb(q)->'replacement' AS replacement,p.product_title,
-                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_retry') AS colour_affected,
+                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND
+                    (ca.event='colour_retry' OR ca.event='backlog_recovery_attempt' AND ca.detail->>'category'='Colour/provenance' AND ca.detail->>'accepted' IS DISTINCT FROM 'false')) AS colour_affected,
                 EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='worker_health_queue_request') AS wh_requested,
-                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_recovered'
-                    AND ca.detail->>'preparation_hash'=q.preparation_hash) AS colour_recovered,
+                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND
+                    (ca.event='colour_recovered' AND ca.detail->>'preparation_hash'=q.preparation_hash
+                     OR ca.event='technical_cloud_ready' AND ca.detail->>'hash'=q.preparation_hash)) AS colour_recovered,
                 (m.dropbox_file_id=q.file_id AND p.edition_total BETWEEN 1 AND 1000 AND
                  (SELECT count(*) FROM edition_products other WHERE COALESCE(NULLIF(other.shopify_product_gid,''),other.shopify_product_id)=q.product_gid)=1) AS eligible,
                 (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='claimed' ORDER BY created_at DESC,id DESC LIMIT 1) AS claimed_at,
@@ -263,7 +265,10 @@ class Health:
                 LEFT JOIN LATERAL(SELECT created_at FROM auto_edition_onboarding_audit c
                     WHERE c.product_gid=a.product_gid AND c.event='claimed' AND c.created_at<=a.created_at
                     ORDER BY c.created_at DESC,c.id DESC LIMIT 1)c ON true
-                WHERE a.event='preparation_metrics' ORDER BY a.id DESC LIMIT 20"""
+                WHERE a.event='technical_cloud_ready' OR a.event='preparation_metrics'
+                  AND EXISTS(SELECT 1 FROM auto_edition_onboarding cq WHERE cq.product_gid=a.product_gid AND cq.status='Cloud Ready' AND cq.preparation_hash=a.detail->>'preparation_hash')
+                  AND NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit verified WHERE verified.product_gid=a.product_gid AND verified.event='technical_cloud_ready' AND verified.detail->>'hash'=a.detail->>'preparation_hash')
+                ORDER BY a.id DESC LIMIT 20"""
             beats_sql="SELECT * FROM auto_edition_worker_heartbeats ORDER BY seen_at DESC LIMIT 16" if include_beats else "SELECT NULL WHERE false"
             cur.execute("""WITH queue_rows AS ("""+queue_sql+"""), successes AS ("""+successes_sql+"""),
                 beats AS ("""+beats_sql+""") SELECT
