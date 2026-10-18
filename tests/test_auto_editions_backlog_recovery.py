@@ -163,6 +163,59 @@ def test_broken_historical_receipts_get_fresh_export_not_false_completion(flow,m
     assert not rows(sql,'auto_edition_layouts')
 
 
+def test_healthy_native_retry_is_admitted_once_and_unchanged_failure_stops(backlog,monkeypatch):
+    from worker_health import record_heartbeat
+    from tests.test_ordered_design_recovery import healthy_native
+    observed=healthy_native(monkeypatch);d,sql=backlog
+    reason='Photoshop inspection failed: OSError. Retry after checking Photoshop.'
+    pid,source=source_job(d,sql,reason=reason)
+    record_heartbeat(d.connect,'Companion','fixture',observed['payload'])
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+        sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason=%s,source=%s::jsonb,lease_token=NULL,lease_until=NULL WHERE product_gid=%s",(reason,json.dumps(source),pid))
+        record_heartbeat(d.connect,'Companion','fixture',observed['payload'])
+        assert recovery.scan(d.connect,metadata)==[]
+    events=[r for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==recovery.EVENT]
+    assert len(events)==1 and events[0]['detail']['action']=='retry_native'
+
+
+def test_health_distinguishes_admission_and_uploaded_package_from_verified_completion(flow,monkeypatch):
+    import worker_health as health
+    from auto_editions_onboarding_store import Queue
+    from auto_editions_technical import Technical
+    d,sql,record,assets,root=flow;pid=record['manifest']['source']['product_gid']
+    sql.execute(Path('supabase/migrations/20261015200847_worker_health_telemetry.sql').read_text())
+    with d.connect() as conn,conn.cursor() as cur:
+        Queue.audit(cur,pid,'fixture','preparation_metrics',dict(preparation_hash=record['hash']))
+        Queue.audit(cur,pid,'fixture',recovery.EVENT,dict(category='Colour/provenance',attempt=1))
+    before=health.Health(d.connect).snapshot()
+    assert before['last_completed'] is None and before['colour']['repaired']==0
+    assert before['colour']['affected']==1
+    assert Technical(d.connect).run_one(assets)=='Cloud Ready'
+    after=health.Health(d.connect).snapshot()
+    assert after['last_completed'] is not None and after['colour']['repaired']==1
+    assert after['colour']['affected']==1 and after['counts']['completed']==1
+
+
+def test_temporary_guard_contention_backs_off_without_spending_native_attempt(backlog,monkeypatch):
+    from worker_health import record_heartbeat
+    from tests.test_ordered_design_recovery import healthy_native
+    observed=healthy_native(monkeypatch);d,sql=backlog
+    pid,_=source_job(d,sql,reason='Photoshop inspection failed: OSError. Retry after checking Photoshop.')
+    record_heartbeat(d.connect,'Companion','fixture',observed['payload'])
+    class Busy(Exception):sqlstate='55P03'
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        with patch('worker_health_queue.submit',side_effect=Busy('queue busy')):
+            assert recovery.scan(d.connect,metadata)==[]
+        assert recovery.scan(d.connect,metadata)==[]
+        sql.execute("UPDATE auto_edition_onboarding_audit SET created_at=now()-interval '2 minutes' WHERE event=%s",(recovery.EVENT,))
+        assert recovery.scan(d.connect,metadata)==[pid]
+    attempts=[r for r in rows(sql,'auto_edition_onboarding_audit') if r['event']==recovery.EVENT]
+    assert len(attempts)==2 and attempts[0]['detail']['transient_admission'] is True
+    assert attempts[1]['detail']['attempt']==1 and attempts[1]['detail']['admission_attempt']==2
+
+
 def test_source_revision_reassessment_requires_changed_bytes():
     from tests.test_auto_editions_discovery import asset
     base=dict(product_gid='gid://shopify/Product/987',status='Needs PSD Repair',priority=8,

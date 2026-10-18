@@ -7,9 +7,12 @@ The owner narrowed recovery to products ordered during the audited 12-month wind
 ## Shared changes
 
 - Recognise and preserve the existing No. prefix consistently in Python validation, Photoshop inspection/preparation and export proof. Count both number candidates when present; never silently choose one.
-- Resolve selected artwork roles from exact source identity plus existing layer ID, name, type and bounds. Native validation rejects changed, duplicate, nested or stale targets. The two evidenced sources are The Mentality Jordan vs Bryant and Legends Never Die Messi vs Ronaldo; both retain their embedded ICC. This is role metadata, not a replacement template or source PSD change.
+- Resolve selected artwork roles from exact source identity plus existing layer ID, name, type and bounds. Native validation rejects changed, duplicate, nested or stale targets. Nine source-bound records reuse existing collector graphics and editable fields. The final read-only batch added Final Crown Messi, Called Shot Babe Ruth, Bird/Johnson, Anthony Edwards and Kobe's motivational quote; all retain valid embedded ICCs. This is role metadata, not a replacement template or source PSD change.
 - Support streamed PSD input up to 2 GiB, with three source copies of disk headroom plus 5 GiB scratch reserve. Retain source checksums, 4 MiB streaming, pixel budget, output/package limits and all colour/profile gates. Only known old 1 GiB input-cap failures become eligible; output-size failures remain blocked.
 - Restrict automatic admission to audited ordered product IDs. Preserve queue priority bands; use annual order counts within each band. Source-bound role fixes receive one attempt; unchanged font/range problems do not gain retries merely from a role record.
+- Historical generic Photoshop/worker errors and old HTTP transfer failures may receive one fresh guarded attempt only while the authenticated Companion has the current full revision/code hash, a fresh healthy heartbeat, and no retained lock/checkpoint. Missing colour provenance still blocks export. Package-size failures are eligible only if they predate the approved lossless compact transport; current expanded-package and pixel limits remain enforced.
+- Temporary admission contention/provider failures use three capped backoff attempts separately from the native-render budget. A busy queue never consumes the sole native attempt. Deterministic source/guard failures remain capped and do not loop.
+- Worker Health uses actual verified technical completion for its last-completed signal and includes automatic colour-recovery evidence in the historical colour counts. Discovery, admission and retained uploaded packages do not become completion signals.
 
 ## Source evidence
 

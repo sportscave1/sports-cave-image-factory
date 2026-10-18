@@ -174,6 +174,181 @@
         ],
         "name": "LIMITED EDITION"
       }
+    },
+    {
+      "source": {
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAA1A",
+        "revision": "0165da1c181132e000000036d367e13",
+        "product_gid": "gid://shopify/Product/8141604290867",
+        "content_hash": "2e8a13718da6e5c80b935531cc7b1d3eb069a94a4f1f35e3fbd8d36b445c6238"
+      },
+      "source_dimensions": [
+        3543,
+        2505
+      ],
+      "evidence": "Read-only Photoshop27.10 batch and labelled composite/cached layer review; exact source bytes verified. Final Crown: separate full collector plaque Generative Fill; exact approved Cinzel-Medium is now available. No title or plaque edit.",
+      "number": {
+        "layer_id": 255,
+        "kind": "text",
+        "bounds_px": [
+          1643,
+          2302,
+          1895,
+          2339
+        ],
+        "name": "No. 023 / 100"
+      },
+      "plaque": {
+        "layer_id": 254,
+        "kind": "smart_object",
+        "bounds_px": [
+          1266,
+          2164,
+          2275,
+          2358
+        ],
+        "name": "Generative Fill"
+      }
+    },
+    {
+      "source": {
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAAow",
+        "revision": "0165da1cabadace000000036d367e13",
+        "product_gid": "gid://shopify/Product/10121274556723",
+        "content_hash": "443596eca5617a8d45ce2218ec726daaa35dc44fcee00747c7860074aa2c06f0"
+      },
+      "source_dimensions": [
+        7016,
+        4961
+      ],
+      "evidence": "Read-only Photoshop27.10 batch and labelled composite/cached layer review; exact source bytes verified. Bird/Johnson: single isolated existing central collector plaque; root number is independently editable.",
+      "number": {
+        "layer_id": 10,
+        "kind": "text",
+        "bounds_px": [
+          3286,
+          4427,
+          3730,
+          4481
+        ],
+        "name": "#017/100"
+      },
+      "plaque": {
+        "layer_id": 9,
+        "kind": "smart_object",
+        "bounds_px": [
+          3055,
+          4346,
+          3961,
+          4653
+        ],
+        "name": "Generative Fill"
+      }
+    },
+    {
+      "source": {
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAAiA",
+        "revision": "0165da1bc52aa9d000000036d367e13",
+        "product_gid": "gid://shopify/Product/9209437323571",
+        "content_hash": "3609110f212ad6e4cafc2f1de268946606e5842626acf17fd268cd48c7cb81c7"
+      },
+      "source_dimensions": [
+        7016,
+        4961
+      ],
+      "evidence": "Read-only Photoshop27.10 batch and labelled composite/cached layer review; exact source bytes verified. Anthony Edwards: A is the actual bordered LIMITED EDITION plaque artwork. B is a background fill with mirrored text, not the collector plaque; leave it untouched.",
+      "number": {
+        "layer_id": 244,
+        "kind": "text",
+        "bounds_px": [
+          3229,
+          4399,
+          3799,
+          4468
+        ],
+        "name": "#017/100"
+      },
+      "plaque": {
+        "layer_id": 243,
+        "kind": "smart_object",
+        "bounds_px": [
+          2763,
+          4272,
+          4253,
+          4777
+        ],
+        "name": "Generative Fill"
+      }
+    },
+    {
+      "source": {
+        "file_id": "id:u1tYiAa2O-AAAAAAAAABCQ",
+        "revision": "0165da1c1441f50000000036d367e13",
+        "product_gid": "gid://shopify/Product/8882175967539",
+        "content_hash": "c0994e95409303ddad63d1aac7d72500a2425a1c6c50854c95d7b912e368b33b"
+      },
+      "source_dimensions": [
+        2953,
+        2088
+      ],
+      "evidence": "Read-only Photoshop27.10 batch and labelled composite/cached layer review; exact source bytes verified. Kobe quote: A is the actual round Sports Cave collector seal containing the editable number. B is background texture extending beyond the canvas and is not selected.",
+      "number": {
+        "layer_id": 401,
+        "kind": "text",
+        "bounds_px": [
+          2609,
+          1902,
+          2711,
+          1914
+        ],
+        "name": "#024/100"
+      },
+      "plaque": {
+        "layer_id": 393,
+        "kind": "smart_object",
+        "bounds_px": [
+          2517,
+          1699,
+          2834,
+          2015
+        ],
+        "name": "Generative Fill 5"
+      }
+    },
+    {
+      "source": {
+        "file_id": "id:u1tYiAa2O-AAAAAAAAAAuA",
+        "revision": "0165da1bc71f493000000036d367e13",
+        "product_gid": "gid://shopify/Product/10158897758515",
+        "content_hash": "db7d18f5fd5ac0349fa08381444eba1ebfccc03d98419bee2fe01d76d262c150"
+      },
+      "source_dimensions": [
+        7016,
+        4961
+      ],
+      "evidence": "Current source bytes independently verified against Dropbox hash. Existing native inspection has one editable No. number and the already recognised canonical collector-plaque layer. Reuse the shared No.-prefix parser fix; no source/template edits. Fresh Photoshop27.10 inspection reconfirmed the exact font and bounds on the same byte-verified source.",
+      "number": {
+        "layer_id": 45,
+        "kind": "text",
+        "bounds_px": [
+          4695,
+          4471,
+          5257,
+          4544
+        ],
+        "name": "No. 030 / 100"
+      },
+      "plaque": {
+        "layer_id": 30,
+        "kind": "smart_object",
+        "bounds_px": [
+          3807,
+          4177,
+          6096,
+          4584
+        ],
+        "name": "limited-edition-plaque"
+      }
     }
   ]
 }
