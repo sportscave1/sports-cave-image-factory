@@ -44,10 +44,10 @@
         "name": "No. 001 / 100",
         "layer_id": 308,
         "bounds_px": [
-          1532,
-          2308,
-          2011,
-          2341
+        1523,
+        2301,
+        2015,
+        2347
         ],
         "kind": "text"
       },
@@ -62,7 +62,7 @@
         ],
         "kind": "raster"
       },
-      "evidence": "Messi/Ronaldo labelled D: central plaque; E: sole visible editable edition-number text; F: separate LIMITED EDITION heading. Preserve heading and prefix."
+      "evidence": "Messi/Ronaldo labelled D: central plaque; E: sole visible editable edition-number text; F: separate LIMITED EDITION heading. Bounds confirmed by live Photoshop 27.10 inspection 8002b9ab510712c9486baf4b00ffb31435ac2f3e9932fdd5 after exact Cinzel-Medium availability repair, replacing stale cached-preview text bounds. Preserve heading and prefix."
     }
   ]
 }

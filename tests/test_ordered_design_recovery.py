@@ -27,6 +27,14 @@ def test_exact_reviewed_roles_preserve_existing_targets(index):
     assert result['plaque_layer']==entry['plaque']['name']
 
 
+def test_live_native_text_bounds_override_stale_cached_preview():
+    data=json.loads(Path('tests/fixtures/ordered_messi_native_inspection.json').read_text())
+    entry=json.loads(roles.REGISTRY.read_text())['resolutions'][1]
+    result=onboarding.detect(data,100,source=entry['source'])
+    assert result['number_bounds']==[1523,2301,2015,2347]
+    assert result['font']=='Cinzel-Medium' and result['number_layer']=='No. 001 / 100'
+
+
 @pytest.mark.parametrize('change',['source','revision','layer_id','bounds','duplicate','second_number'])
 def test_changed_or_ambiguous_target_stays_blocked(change):
     entry=json.loads(roles.REGISTRY.read_text())['resolutions'][1];source=deepcopy(entry['source']);data=resolved_inspection(entry)
