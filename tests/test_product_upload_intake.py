@@ -293,3 +293,151 @@ def test_prompt_only_account_keeps_access_and_expired_session_is_rejected(monkey
     assert client.post('/api/product-uploads/mockups',json={},headers=headers).status_code==403
     user['session_version']=2
     assert client.get('/product-uploads').status_code==403
+
+
+def test_stream_timing_transient_status_and_single_chunk_memory_contract(env, monkeypatch):
+    import product_upload_api as api
+    import files_upload_api as files
+    from files_upload_api import FilesUploadError
+    monkeypatch.setattr(api, 'connect', env[0].connect)
+    monkeypatch.setattr(api, 'Dropbox', lambda: env[2])
+    monkeypatch.setattr(files, '_request_user', lambda request, **kwargs: ADMIN)
+    app = Starlette(routes=[Route(p, e, methods=list(m)) for p, e, m in api.ROUTES])
+    headers = {'Origin': 'http://testserver'}
+    with TestClient(app) as client:
+        key = str(uuid.uuid4()); data = psd(CHUNK + 73)
+        started = client.post('/api/product-uploads/start', headers=headers, json=dict(
+            id=key, mode='DRAFT', name='a.psd', size=len(data), content_hash=digest(data)))
+        assert 'storage;dur=' in started.headers['server-timing']
+        # Authentication still runs for every chunk; instrumentation does not cache permissions.
+        monkeypatch.setattr(files, '_request_user', lambda *a, **k: (_ for _ in ()).throw(
+            FilesUploadError('temporary authentication backend outage', status_code=503)))
+        failed = client.post(f'/api/product-uploads/chunk?id={key}&offset=0', headers=headers, content=data[:CHUNK])
+        assert failed.status_code == 503  # Must remain retryable, never be rewritten as 409.
+        assert 'total;dur=' in failed.headers['server-timing']
+        assert not env[2].calls
+        monkeypatch.setattr(files, '_request_user', lambda request, **kwargs: ADMIN)
+        too_big = client.post(f'/api/product-uploads/chunk?id={key}&offset=0', headers=headers, content=b'x'*(2*CHUNK+1))
+        assert too_big.status_code == 409 and not env[2].calls
+        for offset in range(0, len(data), CHUNK):
+            response = client.post(f'/api/product-uploads/chunk?id={key}&offset={offset}', headers=headers, content=data[offset:offset+CHUNK])
+            assert response.status_code == 200, response.text
+            timing = response.headers['server-timing']
+            for stage in ('auth', 'receive', 'adapter', 'storage', 'checks_db', 'intake', 'total'):
+                assert stage+';dur=' in timing
+        assert sum(kind=='append' for kind, _ in env[2].calls) == 2
+        response = client.post('/api/product-uploads/finish', headers=headers, json=dict(id=key))
+        assert response.json()['upload']['basic_validated']
+        assert 'operation;dur=' in response.headers['server-timing']
+        assert 'session' not in response.text and 'access_token' not in response.text
+
+
+def test_large_layer_section_crosses_many_chunks_without_decoding(env):
+    # Match the reported size and a realistic large layer section, not only a padded composite.
+    store, sql, provider = env; size = round(272.7 * 1048576); key = str(uuid.uuid4())
+    header = struct.pack('>4sH6sHIIHH', b'8BPS', 1, b'\0'*6, 3, 100, 200, 8, 3)
+    prefix = header + struct.pack('>III', 0, 0, size-40)
+    def block(offset):
+        length = min(CHUNK, size-offset)
+        return (prefix + bytes(length-len(prefix))) if offset == 0 else bytes(length)
+    hashes = [hashlib.sha256(block(offset)).digest() for offset in range(0, size, CHUNK)]
+    expected = hashlib.sha256(b''.join(hashes)).hexdigest()
+    store.create(key, 'admin', 'DRAFT', 'large.psd', size, provider, expected)
+    for offset in range(0, size, CHUNK):
+        row = store.chunk(key, 'admin', offset, block(offset), provider)
+        assert row['data']['offset'] == min(size, offset+CHUNK)
+    row = store.finish(key, 'admin', provider)
+    assert row['data']['basic_validated'] and row['data']['structure']['stage'] == 5
+    assert row['data']['source']['content_hash'] == expected
+    assert len(provider.calls) == 70  # 69 chunks and exactly one finish.
+
+
+def test_transport_batches_keep_legacy_hash_blocks_and_exact_retry_integrity(env):
+    store, sql, provider = env
+    data = psd(3*CHUNK+73); key = str(uuid.uuid4()); expected = digest(data)
+    store.create(key, 'admin', 'DRAFT', 'batch.psd', len(data), provider, expected)
+    # A Phase1 4 MiB acknowledgement followed by an 8 MiB Phase2 request.
+    store.chunk(key, 'admin', 0, data[:CHUNK], provider)
+    provider.lose_append = True
+    with pytest.raises(RuntimeError):
+        store.chunk(key, 'admin', CHUNK, data[CHUNK:3*CHUNK], provider)
+    assert store.read(key, 'admin')['data']['offset'] == CHUNK
+    recovered = store.chunk(key, 'admin', CHUNK, data[CHUNK:3*CHUNK], provider)
+    assert recovered['data']['offset'] == 3*CHUNK
+    store.chunk(key, 'admin', CHUNK, data[CHUNK:3*CHUNK], provider)
+    wrong = data[CHUNK:2*CHUNK] + b'x'*CHUNK
+    with pytest.raises(ValueError, match='differ'):
+        store.chunk(key, 'admin', CHUNK, wrong, provider)
+    # Old browser retries and subsequent resumes remain valid.
+    store.chunk(key, 'admin', CHUNK, data[CHUNK:2*CHUNK], provider)
+    store.chunk(key, 'admin', 3*CHUNK, data[3*CHUNK:], provider)
+    row = store.finish(key, 'admin', provider)
+    assert len(row['data']['blocks']) == 4
+    assert row['data']['source']['content_hash'] == expected
+    assert sum(k=='append' for k,n in provider.calls) == 3
+    assert max(n for k,n in provider.calls if k=='append') == 2*CHUNK
+    assert sum(k=='finish' for k,n in provider.calls) == 1
+
+
+def test_transport_size_alignment_and_partial_overlaps_are_rejected(env):
+    store, sql, provider = env; data = psd(4*CHUNK+73); key = str(uuid.uuid4())
+    store.create(key, 'admin', 'DRAFT', 'batch.psd', len(data), provider, digest(data))
+    for payload in (data[:3*CHUNK], data[:CHUNK+1], b''):
+        with pytest.raises(ValueError, match='chunk'):
+            store.chunk(key, 'admin', 0, payload, provider)
+    assert not provider.calls
+    store.chunk(key, 'admin', 0, data[:CHUNK], provider)
+    # Never silently skip an overlap which includes unconfirmed bytes.
+    with pytest.raises(ValueError):
+        store.chunk(key, 'admin', 0, data[:2*CHUNK], provider)
+    assert store.read(key, 'admin')['data']['offset'] == CHUNK
+
+
+def test_existing_storage_adapter_accepts_batched_binary_without_byte_changes(monkeypatch):
+    from types import SimpleNamespace
+    import tracemalloc
+    import dropbox_integration as dbx
+    from product_upload_services import Dropbox
+    captured = []
+    payload = bytearray(2*CHUNK)
+    payload[CHUNK] = 37
+    expected = hashlib.sha256(payload).hexdigest()
+    def append(data, cursor):
+        assert isinstance(data, bytes)
+        assert cursor.session_id == 'synthetic' and cursor.offset == CHUNK
+        captured.append((len(data), hashlib.sha256(data).hexdigest()))
+    sdk = SimpleNamespace(files=SimpleNamespace(UploadSessionCursor=lambda **kw: SimpleNamespace(**kw)))
+    monkeypatch.setattr(dbx, '_dropbox_sdk', lambda: sdk)
+    monkeypatch.setattr(dbx, 'team_space_client', lambda token: SimpleNamespace(files_upload_session_append_v2=append))
+    provider = Dropbox.__new__(Dropbox); provider.api = dbx; provider.token = 'synthetic'
+    provider._append_client = SimpleNamespace(files_upload_session_append_v2=append)
+    tracemalloc.start()
+    try:
+        assert provider.append('synthetic', CHUNK, payload) == 3*CHUNK
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert captured == [(2*CHUNK, expected)]
+    assert hashlib.sha256(payload).hexdigest() == expected
+    # The existing SDK adapter needs one bounded immutable copy, not a PSD-sized allocation.
+    assert peak < 3*CHUNK
+    with pytest.raises(ValueError, match='too large'):
+        provider.append('synthetic', CHUNK, bytearray(2*CHUNK+1))
+
+
+def test_upload_sdk_clone_reuses_pool_and_bounds_retries_without_changing_shared_client(monkeypatch):
+    import dropbox
+    import dropbox_integration as dbx
+    from product_upload_services import Dropbox
+    shared = dropbox.Dropbox('synthetic-token').with_path_root(dropbox.common.PathRoot.root('123'))
+    monkeypatch.setattr(dbx, 'team_space_client', lambda token: shared)
+    calls = []
+    monkeypatch.setattr(dropbox.Dropbox, 'files_upload_session_append_v2', lambda self,data,cursor: calls.append(self))
+    provider=Dropbox.__new__(Dropbox);provider.api=dbx;provider.token='synthetic-token'
+    provider.append('synthetic',0,b'abc');provider.append('synthetic',3,b'def')
+    bounded=provider._append_client
+    assert calls==[bounded,bounded]
+    assert bounded._session is shared._session and bounded._headers==shared._headers
+    assert bounded._max_retries_on_error==1 and bounded._max_retries_on_rate_limit==1
+    assert bounded._timeout==60
+    assert shared._max_retries_on_rate_limit is None

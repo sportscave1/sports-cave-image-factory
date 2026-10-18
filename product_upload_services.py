@@ -71,7 +71,15 @@ class Dropbox:
         return self.api.start_upload_session(self.token)
 
     def append(self, session, offset, content):
-        return self.api.append_upload_session(self.token, session, offset, content)
+        client = getattr(self, '_append_client', None)
+        if client is None:
+            # A scoped clone retains the cached connection pool/path-root/auth.
+            # Positive limits are intentional: this SDK's clone uses `or`, so
+            # passing zero would retain its unbounded rate-limit retry default.
+            client = self.api.team_space_client(self.token).clone(
+                max_retries_on_error=1, max_retries_on_rate_limit=1, timeout=60)
+            self._append_client = client
+        return self.api.append_upload_session(self.token, session, offset, content, client=client)
 
     def finish(self, session, size, destination):
         return self.api.finish_upload_session(self.token, session, size, b'', destination, mode='add')

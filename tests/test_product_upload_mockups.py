@@ -16,10 +16,13 @@ from product_upload_mockups import bind_export,save
 
 def test_render_claim_is_source_pinned_owner_scoped_and_pause_aware(env):
     store,sql,provider=env;row=saved(env);key=str(row['id']);renders=Renders(store.connect)
-    renders.request(key,ADMIN['id']);renders.request(key,ADMIN['id'])
+    queued=renders.request(key,ADMIN['id'])
+    assert renders.request(key,ADMIN['id'])['queued_at']==queued['queued_at']
     assert renders.claim('someone-else','host-a') is None
     first=renders.claim(ADMIN['id'],'host-a')
     assert first['source']==identity(row)
+    checkpoint=store.read(key,ADMIN['id'])['data']['mockup_render']
+    assert checkpoint['queued_at']<=checkpoint['claimed_at']
     assert renders.claim(ADMIN['id'],'host-a')==first
     assert renders.claim(ADMIN['id'],'host-b') is None
     from worker_health import set_pause
@@ -34,6 +37,8 @@ def test_failed_render_retained_and_no_implicit_native_retry(env):
     r.fail(key,ADMIN['id'],job['token'],'Missing profile: colour review required')
     with pytest.raises(ValueError,match='colour review'):r.request(key,ADMIN['id'])
     assert r.claim(ADMIN['id']) is None
+    checkpoint=store.read(key,ADMIN['id'])['data']['mockup_render']
+    assert checkpoint['claimed_at']<=checkpoint['failed_at']
     assert store.read(key,ADMIN['id'])['data']['source']==row['data']['source']
 
 
@@ -73,8 +78,9 @@ def test_render_completion_verified_and_duplicate_safe(env,tmp_path):
     provider.save_render=Mock(return_value=dict(id='id:render',rev='r1',content_hash=ae.file_hash(path,dropbox=True)))
     bad={**receipt,'owned_document_closed':False}
     with pytest.raises(ValueError,match='cleanup'):r.finish(key,ADMIN['id'],job['token'],bad,path,provider)
-    r.finish(key,ADMIN['id'],job['token'],receipt,path,provider)
-    r.finish(key,ADMIN['id'],job['token'],receipt,path,provider)
+    completed=r.finish(key,ADMIN['id'],job['token'],receipt,path,provider)
+    assert completed['queued_at']<=completed['claimed_at']<=completed['completed_at']
+    assert r.finish(key,ADMIN['id'],job['token'],receipt,path,provider)['completed_at']==completed['completed_at']
     assert provider.save_render.call_count==1
     assert store.read(key,ADMIN['id'])['data']['mockup_render']['state']=='Ready'
 

@@ -1000,7 +1000,7 @@ def start_upload_session(access_token, data=b""):
     return session_id
 
 
-def append_upload_session(access_token, session_id, offset, data):
+def append_upload_session(access_token, session_id, offset, data, *, client=None):
     """Append one bounded chunk to an existing Dropbox upload session."""
     chunk = bytes(data or b"")
     if len(chunk) > DROPBOX_UPLOAD_CHUNK_SIZE:
@@ -1011,7 +1011,7 @@ def append_upload_session(access_token, session_id, offset, data):
         offset=max(0, int(offset or 0)),
     )
     try:
-        team_space_client(access_token).files_upload_session_append_v2(chunk, cursor)
+        (client or team_space_client(access_token)).files_upload_session_append_v2(chunk, cursor)
     except Exception as error:
         raise _dropbox_error(error, "Dropbox upload could not continue.") from error
     return cursor.offset + len(chunk)

@@ -7,7 +7,8 @@ import re
 import struct
 import uuid
 
-CHUNK = 4 * 1024 * 1024  # Also Dropbox's content-hash block size.
+CHUNK = 4 * 1024 * 1024  # Stable Dropbox hash blocks and legacy resume offsets.
+TRANSPORT_CHUNK = 2 * CHUNK  # Existing adapter supports 8 MiB ordered appends.
 MAX_BYTES = 1024 ** 3
 MODES = {'DRAFT': 'Upload to Draft', 'LIVE': 'Upload to Live', 'UPDATE': 'Update Existing'}
 
@@ -70,8 +71,10 @@ class Intakes:
         self.connect = connect
 
     @contextmanager
-    def locked(self, key, actor):
+    def locked(self, key, actor, *, provider_io=False):
         with self.connect() as conn, conn.cursor() as cur:
+            if provider_io:
+                cur.execute("SET LOCAL idle_in_transaction_session_timeout = '5min'", ())
             cur.execute('SELECT * FROM product_upload_intakes WHERE id=%s AND actor_id=%s FOR UPDATE', (str(uuid.UUID(key)), str(actor)))
             row = cur.fetchone()
             if not row:
@@ -119,28 +122,39 @@ class Intakes:
     def chunk(self, key, actor, offset, content, provider):
         if type(offset) is not int or offset < 0 or offset % CHUNK:
             raise ValueError('Invalid upload offset.')
-        with self.locked(key, actor) as (row, cur):
+        with self.locked(key, actor, provider_io=True) as (row, cur):
             d = row['data']
-            digest = hashlib.sha256(content).hexdigest()
+            length = len(content)
+            # HTTP batches may combine hash blocks; durable hashes/offsets stay compatible
+            # with existing 4 MiB sessions and old browser clients. Only the final batch
+            # may end partway through a hash block.
+            if not 0 < length <= TRANSPORT_CHUNK or offset + length > d['size'] or (offset + length < d['size'] and length % CHUNK):
+                raise ValueError('A complete bounded upload chunk is required.')
+            view = memoryview(content)
+            digests = [hashlib.sha256(view[at:at + CHUNK]).hexdigest() for at in range(0, length, CHUNK)]
             if offset < d['offset']:
-                if offset // CHUNK >= len(d['blocks']) or digest != d['blocks'][offset // CHUNK]:
+                first = offset // CHUNK
+                if offset + length > d['offset'] or digests != d['blocks'][first:first + len(digests)]:
                     raise ValueError('Retry bytes differ from the saved PSD. Select the same file or start a new upload.')
                 return row
             if d.get('source') or offset != d['offset']:
                 raise ValueError('Upload position changed. Refresh and resume from the saved offset.')
             if datetime.fromisoformat(d['expires']) <= datetime.now(timezone.utc):
                 raise ValueError('The interrupted transfer expired. Choose the PSD again to start a new saved upload.')
-            if len(content) != min(CHUNK, d['size'] - offset) or not content:
-                raise ValueError('A complete bounded upload chunk is required.')
             structure = inspect_chunk(d['structure'], content, offset, d['size'])
             try:
                 provider.append(d['session'], offset, content)
             except Exception as error:
                 # Provider accepted bytes but acknowledgement/DB commit was lost.
                 # Final content hash independently proves those bytes match.
-                if getattr(error, 'correct_offset', None) != offset + len(content):
+                confirmed = getattr(error, 'correct_offset', None)
+                # An older 8 MiB append may have succeeded before its DB commit
+                # or ACK was lost. Recover it using stable 4 MiB checkpoints;
+                # final storage content_hash still independently verifies bytes.
+                if (type(confirmed) is not int or not offset + length <= confirmed <= min(d['size'], offset + TRANSPORT_CHUNK)
+                        or (confirmed != d['size'] and confirmed % CHUNK)):
                     raise
-            d['blocks'].append(digest); d['offset'] += len(content); d['structure'] = structure
+            d['blocks'].extend(digests); d['offset'] += length; d['structure'] = structure
             if d['offset'] == d['size']:
                 d['state'] = 'Checking design'
             return row
@@ -193,6 +207,6 @@ def public(row):
         return None
     d = row['data']
     # No provider session, tokens, storage path or raw worker errors in the UI.
-    return dict(id=str(row['id']), mode=row['mode'], **{k:d.get(k) for k in (
+    return dict(id=str(row['id']), mode=row['mode'], transport_chunk_bytes=TRANSPORT_CHUNK, relay_resume=True, **{k:d.get(k) for k in (
         'name','size','offset','state','basic_validated','copied','lookup','choices','product_title',
         'preparation_hash','reason','preview_url','product_url','companion_connected','shopify_completion')})

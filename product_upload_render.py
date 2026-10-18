@@ -31,7 +31,7 @@ class Renders:
                 if not retry or not previous.get('retryable'):
                     raise ValueError(previous.get('reason') or 'Review the retained render failure before retrying.')
                 if previous.get('attempt',1)>=3:raise ValueError('Three native attempts retained. Review this PSD before further processing.')
-            value = dict(state='Queued', source=identity(row), version=1,attempt=previous.get('attempt',0)+1,history=previous.get('history',[])+([previous] if previous else []))
+            value = dict(state='Queued', queued_at=datetime.now(timezone.utc).isoformat(), source=identity(row), version=1,attempt=previous.get('attempt',0)+1,history=previous.get('history',[])+([previous] if previous else []))
             row['data']['mockup_render'] = value
             return value
 
@@ -90,7 +90,7 @@ class Renders:
             if not source or any(source.get(k) != row['data']['source'].get(k) for k in ('id','rev','content_hash')):
                 raise ValueError('Original PSD identity changed during rendering.')
             output = provider.save_render(str(row['id']), path)
-            value.update(state='Ready', output=output, receipt=receipt)
+            value.update(state='Ready', completed_at=datetime.now(timezone.utc).isoformat(), output=output, receipt=receipt)
             return value
 
     def fail(self, key, actor, token, reason, retryable=False):
@@ -99,7 +99,7 @@ class Renders:
             if not secrets.compare_digest(str(value.get('token', '')), str(token)):
                 raise PermissionError('The exact render lease is required.')
             if value.get('state') != 'Ready':
-                value.update(state='Failed', reason=str(reason)[:500],retryable=retryable is True)
+                value.update(state='Failed', failed_at=datetime.now(timezone.utc).isoformat(), reason=str(reason)[:500],retryable=retryable is True)
 
 
 async def host(request):

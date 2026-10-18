@@ -1,13 +1,41 @@
 """Same-origin account-authenticated Product Uploads routes, independently gated."""
 import os
+import logging
+from time import perf_counter
 from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse, JSONResponse, Response
-from product_upload_intake import Intakes, public, CHUNK
+from product_upload_intake import Intakes, public, TRANSPORT_CHUNK
 from product_upload_services import Dropbox, Handoff, enabled, reconcile
 
 HEADERS = {'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff',
            'X-Frame-Options':'SAMEORIGIN', 'Referrer-Policy':'no-referrer'}
+
+
+class MeasuredStorage:
+    """Request-local timing only; never retain tokens or artwork in metrics."""
+    def __init__(self, provider, timings):
+        self.provider, self.timings = provider, timings
+
+    def __getattr__(self, name):
+        member = getattr(self.provider, name)
+        if not callable(member):
+            return member
+        def call(*args, **kwargs):
+            started = perf_counter()
+            try:
+                return member(*args, **kwargs)
+            finally:
+                self.timings['storage'] = self.timings.get('storage', 0) + (perf_counter() - started) * 1000
+        return call
+
+
+def measured_response(response, timings, started, operation):
+    timings['total'] = (perf_counter() - started) * 1000
+    response.headers['Server-Timing'] = ', '.join(f'{key};dur={value:.2f}' for key, value in timings.items())
+    logging.getLogger(__name__).info('product_upload operation=%s status=%s timings_ms=%s',
+                                  operation, response.status_code, {k: round(v, 2) for k, v in timings.items()})
+    return response
 
 
 def connect():
@@ -33,9 +61,12 @@ async def actor(request, *, write=False, automatic=True):
 
 def failure(error):
     from files_upload_api import FilesUploadError
+    from product_upload_relay import RelayBusy
+    if isinstance(error, RelayBusy):
+        return JSONResponse(dict(error=str(error)), status_code=503, headers={**HEADERS, 'Retry-After':'1'})
     known = isinstance(error, (ValueError, PermissionError, FilesUploadError))
     return JSONResponse(dict(error=str(error) if known else 'The service is temporarily unavailable. Your saved upload is retained; retry shortly.'),
-                        status_code=403 if isinstance(error, PermissionError) or isinstance(error, FilesUploadError) and error.status_code == 403 else 409 if known else 503,
+                        status_code=403 if isinstance(error, PermissionError) else error.status_code if isinstance(error, FilesUploadError) else 409 if known else 503,
                         headers=HEADERS)
 
 
@@ -79,18 +110,24 @@ async def state(request):
 
 
 async def action(request):
+    started = perf_counter(); timings = {}; op = request.path_params['action']
     try:
         import files_upload_api as files
         op = request.path_params['action']
         manual = op in ('prompt', 'mockups')
         user = await actor(request, write=True, automatic=not manual)
+        timings['auth'] = (perf_counter() - started) * 1000
         body = await files._json_body(request)
+        operation_started = perf_counter()
         store = Intakes(connect); key = body.get('id'); uid = user['id']
         if op == 'start':
-            provider = await run_in_threadpool(Dropbox)
+            provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
             row = await run_in_threadpool(store.create, key, uid, body.get('mode'), body.get('name'), body.get('size'), provider, body.get('content_hash'))
+        elif op == 'resume':
+            from product_upload_relay import settled
+            row = await run_in_threadpool(settled, store, key, uid)
         elif op == 'finish':
-            row = await run_in_threadpool(store.finish, key, uid, await run_in_threadpool(Dropbox))
+            row = await run_in_threadpool(store.finish, key, uid, MeasuredStorage(await run_in_threadpool(Dropbox), timings))
         elif op == 'mode':
             row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
         elif op == 'copied':
@@ -111,10 +148,10 @@ async def action(request):
             import os_accounts
             if not os_accounts.can_access_page(user,'Files'):
                 raise PermissionError('Files access is required to browse mockups. You can still copy a prompt using the manual workflow.')
-            provider = await run_in_threadpool(Dropbox)
+            provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
             return JSONResponse(await run_in_threadpool(provider.mockups), headers=HEADERS)
         elif op in ('resolve', 'link'):
-            provider = await run_in_threadpool(Dropbox)
+            provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
             service = Handoff(connect, provider)
             row = await run_in_threadpool(service.resolve if op == 'resolve' else service.link, key, user,
                                           body.get('value') if op == 'resolve' else body.get('product_id'))
@@ -135,26 +172,27 @@ async def action(request):
             await run_in_threadpool(retry)
         else:
             raise ValueError('Unknown Product Uploads action.')
-        return JSONResponse(dict(upload=public(row)), headers=HEADERS)
+        timings['handoff' if op in ('link', 'resolve') else 'operation'] = (perf_counter() - operation_started) * 1000
+        return measured_response(JSONResponse(dict(upload=public(row)), headers=HEADERS), timings, started, op)
     except Exception as error:
-        return failure(error)
+        return measured_response(failure(error), timings, started, op)
 
 
 async def chunk(request):
+    started = perf_counter(); timings = {}
     try:
         user = await actor(request, write=True)
-        # Starlette's body() would allow an unbounded request allocation.
-        data = bytearray()
-        async for block in request.stream():
-            if len(data) + len(block) > CHUNK:
-                raise ValueError('Upload chunk exceeds 4 MiB.')
-            data.extend(block)
-        provider = await run_in_threadpool(Dropbox)
-        row = await run_in_threadpool(Intakes(connect).chunk, request.query_params['id'], user['id'],
-                                     int(request.query_params['offset']), data, provider)
-        return JSONResponse(dict(upload=public(row)), headers=HEADERS)
+        timings['auth'] = (perf_counter() - started) * 1000
+        adapter = perf_counter()
+        provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
+        timings['adapter'] = (perf_counter() - adapter) * 1000
+        from product_upload_relay import transfer
+        row = await transfer(request, Intakes(connect), request.query_params['id'], user['id'],
+                             int(request.query_params['offset']), provider, timings, perf_counter)
+        timings['checks_db'] = max(0, timings.get('intake', 0) - timings.get('storage', 0))
+        return measured_response(JSONResponse(dict(upload=public(row)), headers=HEADERS), timings, started, 'chunk')
     except Exception as error:
-        return failure(error)
+        return measured_response(failure(error), timings, started, 'chunk')
 
 
 async def preview(request):
