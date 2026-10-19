@@ -220,3 +220,13 @@ def test_classification_review_is_pending_and_other_errors_remain_retryable(stat
     result['errors']=['database mirror unavailable']
     with pytest.raises(RuntimeError):onboarding.process_receipt(row,db)
     assert rows(sql,'webhook_events')[0]['status']=='failed'
+
+
+def test_reused_catalog_handle_is_pending_without_overwriting_previous_identity(state):
+    sql,p,history=state
+    sql.execute("INSERT INTO shopify_products(shopify_product_id,handle) VALUES(%s,%s)",('gid://shopify/Product/15428059398451',p['handle']))
+    deliver('reused-handle')
+    assert rows(sql,'webhook_events')[0]['status']=='pending'
+    assert 'another Shopify product' in rows(sql,'webhook_events')[0]['error_message']
+    assert not rows(sql,'edition_products') and not rows(sql,'edition_runs')
+    assert rows(sql,'shopify_products')[0]['shopify_product_id']=='gid://shopify/Product/15428059398451'

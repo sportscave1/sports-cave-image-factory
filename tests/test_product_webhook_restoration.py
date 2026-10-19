@@ -96,6 +96,8 @@ class MemoryDatabase:
                     pass
                 elif compact.startswith('SELECT id FROM edition_products WHERE shopify_product_gid='):
                     self.result = next((r for r in db.rows if r['shopify_product_id'] == params[0]), None)
+                elif compact.startswith('SELECT shopify_product_id FROM shopify_products WHERE handle='):
+                    self.result = next(({'shopify_product_id':key} for key,value in db.display.items() if value[4]==params[0]), None)
                 elif compact.startswith('SELECT EXISTS'):
                     self.result = {'has_history': bool(db.history)}
                 elif compact.startswith('INSERT INTO shopify_products'):

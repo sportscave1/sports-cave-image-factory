@@ -52,6 +52,12 @@ def verify_new_product(product, config=None):
                     (pid, [pid, pid.rsplit('/', 1)[-1]]))
         if cur.fetchone():
             return product
+        cur.execute('SELECT shopify_product_id FROM shopify_products WHERE handle=%s', (product.get('handle'),))
+        cached = cur.fetchone()
+        if cached and str(cached['shopify_product_id']) not in (pid, pid.rsplit('/', 1)[-1]):
+            raise PendingRegistration(
+                f"Catalogue handle belongs to another Shopify product ({cached['shopify_product_id']}); "
+                "reconcile the previous identity/history before onboarding. No counters changed.")
     try:
         total = edition_limit(product)
     except ValueError as exc:
