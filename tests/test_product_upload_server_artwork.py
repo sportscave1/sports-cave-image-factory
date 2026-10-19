@@ -113,43 +113,33 @@ def test_missing_profile_requires_approved_recovery_and_truncated_composite_reje
 
 @pytest.mark.parametrize('switch_selection',[False,True])
 def test_product_upload_generate_button_uses_server_artwork_and_original_engine(env,tmp_path,monkeypatch,switch_selection):
-    import ast
-    from contextlib import nullcontext
-    from types import SimpleNamespace
-    import product_upload_api as api
+    import threading,time
     import image_factory
+    import product_upload_jobs as jobs
     store,sql,provider=env;row,meta,original=source_fixture(env,tmp_path,monkeypatch);key=str(row['id'])
-    monkeypatch.setattr(api,'connect',store.connect);monkeypatch.setattr(api,'Dropbox',lambda:provider)
-    monkeypatch.setattr('product_upload_render.Renders.request',Mock(side_effect=AssertionError('No native render request allowed')))
-    state={'_product_upload_active':key};held={}
-    st=SimpleNamespace(session_state=state,subheader=lambda *a,**k:None,text_input=lambda *a,**k:k.get('value',''),
-        selectbox=lambda *a,**k:'Football',button=lambda label,**k:label=='Generate Core Shopify Images',
-        status=lambda *a,**k:nullcontext(),info=lambda *a:None,error=lambda message:(_ for _ in ()).throw(AssertionError(message)))
-    app=SimpleNamespace(_mockups_result=lambda:held.get('result'),_set_mockups_result=lambda result:held.update(result=result),
-        alphabetize_options=lambda values,**k:values,SPORT_OPTIONS=['Football'],get_sport_category=lambda a,b:a,
-        MOCKUPS_GENERATION_SEMAPHORE=__import__('threading').Semaphore(1),BASE_DIR=tmp_path,
-        build_mockup_final_prompt_items=lambda *a:[],normalize_generation_result=lambda r:r,render_generation_result=lambda r:None)
     row=artwork.prepare(store.connect,provider,key,ADMIN['id'])
-    generate=Mock(return_value=dict(product_name='Same',sport_category='Football'))
-    if switch_selection:
-        def changed(**kwargs):
-            state['_product_upload_active']='newer-selection'
-            return dict(product_name='Same',sport_category='Football')
-        generate.side_effect=changed
+    manager=jobs.Jobs();monkeypatch.setattr(jobs,'JOBS',manager)
+    monkeypatch.setattr('product_upload_render.Renders.request',Mock(side_effect=AssertionError('No Companion')))
     discarded=Mock();monkeypatch.setattr('product_upload_mockups.release_transient',discarded)
-    monkeypatch.setattr(image_factory,'generate_product_images',generate)
-    tree=ast.parse((Path(__file__).resolve().parents[1]/'product_upload_mockups_ui.py').read_text(encoding='utf-8'))
-    fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='render_design')
-    scope=dict(st=st,Path=Path,poll_render=lambda *a:None)
-    exec(compile(ast.Module(body=[fn],type_ignores=[]),'isolated-render-design','exec'),scope)
-    scope['render_design'](app,row,ADMIN)
-    generate.assert_called_once()
-    with Image.open(generate.call_args.kwargs['artwork_file_path']) as image:assert image.size==(640,480)
-    if switch_selection:
-        assert not held.get('result');discarded.assert_called_once();return
-    assert held['result']['_product_upload_intake']==key
-    assert held['result']['_product_upload_source_hash']==meta['content_hash']
-    assert store.read(key,ADMIN['id'])['data']['server_artwork']['state']=='Ready'
+    def render(name,sport,path,**kwargs):
+        with Image.open(path) as image:assert image.size==(640,480)
+        assets=[]
+        for number in range(5):
+            file=tmp_path/f'asset-{number}.png';Image.new('RGB',(10,10),'red').save(file)
+            asset={field:file for field in ('preview_path','review_path','jpg_path','webp_path')}
+            assets.append(asset)
+            if switch_selection and number==0:manager.cancel(key,ADMIN['id'])
+            kwargs['asset_completed_callback'](asset,{},run_dir=tmp_path)
+        return dict(product_name=name,sport_category=sport,assets=assets,run_dir=tmp_path)
+    generator=Mock(side_effect=render);monkeypatch.setattr(image_factory,'generate_product_images',generator)
+    job=jobs.generate(store.connect,row,ADMIN['id'],'Same','Football',lambda:provider,tmp_path,threading.Semaphore(1),lambda *a:[])
+    end=time.monotonic()+5
+    while manager.snapshot(key,ADMIN['id'],'generate')['state'] in ('Queued','Running') and time.monotonic()<end:time.sleep(.01)
+    result=manager.result(key,ADMIN['id'],'generate',job['token'])
+    assert generator.call_count==1 and provider.download.call_count==1
+    if switch_selection:assert result is None and discarded.called
+    else:assert result['_product_upload_intake']==key and len(result['assets'])==5
+    manager.pool.shutdown()
 
 
 def test_rle_composite_preserves_alpha_and_memory_admission_fails_clearly(env,tmp_path,monkeypatch):
@@ -167,3 +157,32 @@ def test_prepare_without_selection_never_restores_latest_product():
     connect=Mock(side_effect=AssertionError('No latest-account lookup allowed'))
     with pytest.raises(ValueError,match='exact Dropbox'):artwork.prepare(connect,Mock(),None,ADMIN['id'])
     connect.assert_not_called()
+
+
+def test_download_never_holds_database_transaction_needed_by_progress_reads(env,tmp_path,monkeypatch):
+    import threading,shutil
+    store,sql,provider=env;row,meta,original=source_fixture(env,tmp_path,monkeypatch)
+    observed=[]
+    def download(metadata,destination):
+        finished=threading.Event()
+        def read():
+            observed.append(store.read(str(row['id']),ADMIN['id'])['data']['server_artwork']['state']);finished.set()
+        thread=threading.Thread(target=read,daemon=True);thread.start()
+        assert finished.wait(.5),'Progress state read blocked behind original download transaction'
+        shutil.copyfile(original,destination)
+    provider.download.side_effect=download
+    assert artwork.prepare(store.connect,provider,str(row['id']),ADMIN['id'])['data']['state']=='Ready'
+    assert observed==['Preparing']
+
+
+def test_live_source_lease_blocks_duplicate_download_and_is_not_overwritten(env,tmp_path,monkeypatch):
+    from datetime import datetime,timezone,timedelta
+    store,sql,provider=env;row,meta,original=source_fixture(env,tmp_path,monkeypatch)
+    processing=artwork.settings(store.connect)
+    spec=dict(state='Preparing',attempt='other-owner',cache_key=json.dumps([artwork.source(row),processing],sort_keys=True),
+              lease_until=(datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat())
+    with store.locked(str(row['id']),ADMIN['id']) as (value,cur):value['data']['server_artwork']=spec
+    with pytest.raises(artwork.PreparationBusyError,match='existing source'):
+        artwork.prepare(store.connect,provider,str(row['id']),ADMIN['id'])
+    provider.download.assert_not_called()
+    assert store.read(str(row['id']),ADMIN['id'])['data']['server_artwork']==spec

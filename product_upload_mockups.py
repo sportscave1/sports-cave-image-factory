@@ -30,7 +30,7 @@ def bind_export(connect, actor, result, kind, *, folder=''):
                     for x in factory.product_image_manifest_json(result['product_image_manifest'])]))
 
 
-def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform):
+def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False):
     """Reserve a destination once, including the existing numbered-folder rule.
 
     The provider call never occurs under a long DB transaction. Failed/unknown
@@ -44,6 +44,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
     with store.locked(key,actor) as (row,cur):
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
             raise ValueError('Selected mockups belong to a previous PSD.')
+        if result.get('_product_upload_source') and row['data']['source'] != result['_product_upload_source']:
+            raise ValueError('The selected PSD identity/revision changed. Reselect it before saving.')
         saves=row['data'].setdefault('mockup_saves',{})
         old=saves.get(fingerprint)
         if old and old['state']=='Complete': return old['receipt']
@@ -56,12 +58,20 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
             if existing and conflict=='cancel': return dict(cancelled=True,destination=proposed,successes=[],failures=[])
             if existing and existing.get('.tag')!='folder': raise ValueError('A file already uses this output name.')
             target=api.numbered_path(provider.token,proposed) if existing and conflict=='numbered' else proposed
-        saves[fingerprint]=dict(state='Saving',target=target,started_at=time.time())
+        import uuid
+        attempt=uuid.uuid4().hex
+        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt)
+    def checkpoint(**changes):
+        with store.locked(key,actor) as (row,cur):
+            record=row['data']['mockup_saves'][fingerprint]
+            if record.get('attempt')!=attempt:raise ValueError('A newer save attempt owns this destination.')
+            if result.get('_product_upload_source') and row['data']['source']!=result['_product_upload_source']:
+                raise ValueError('Selected PSD changed during saving. Completed uploads are retained.')
+            record.update(changes,started_at=time.time())
     try:
-        receipt=perform(target)
+        receipt=perform(target,dict(old or {}),checkpoint) if checkpointed else perform(target)
     except Exception:
-        with store.locked(key,actor) as (row,cur): row['data']['mockup_saves'][fingerprint]['state']='Failed'
+        checkpoint(state='Failed')
         raise
-    with store.locked(key,actor) as (row,cur):
-        row['data']['mockup_saves'][fingerprint].update(state='Failed' if receipt.get('failures') else 'Complete',receipt=receipt)
+    checkpoint(state='Failed' if receipt.get('failures') else 'Complete',receipt=receipt)
     return receipt

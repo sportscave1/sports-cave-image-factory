@@ -3,7 +3,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert'),{webcrypto}=req
 const tick=()=>new Promise(r=>setImmediate(r));
 async function fixture(){
  const elements={},listeners={},calls=[],messages=[];let deferred=null,selected=null,browseDeferred=null,failPrepare=false,prepareDeferred=null;
- const el=id=>elements[id]??={value:id==='mode'?'DRAFT':id==='picker-root'?'review':'',hidden:true,textContent:'',children:[],addEventListener(n,f){if(n==='close')this.onclose=f;else this[n]=f},replaceChildren(...c){this.children=c},append(c){this.children.push(c)},close(){this.open=false},showModal(){this.open=true},select(){},focus(){this.focused=true}};
+ const el=id=>elements[id]??={value:id==='mode'?'DRAFT':id==='picker-root'?'review':'',hidden:true,textContent:'',children:[],setAttribute(n,v){this[n]=v},removeAttribute(n){delete this[n]},addEventListener(n,f){if(n==='close')this.onclose=f;else this[n]=f},replaceChildren(...c){this.children=c},append(c){this.children.push(c)},close(){this.open=false},showModal(){this.open=true},select(){},focus(){this.focused=true}};
  const doc={hidden:false,body:{getBoundingClientRect:()=>({height:500})},getElementById:el,createElement:()=>({}),addEventListener(n,f){listeners[n]=f},execCommand:()=>true};
  const ctx={document:doc,console,crypto:webcrypto,AbortController,Date,URL,Image:class{},ResizeObserver:class{observe(){}},queueMicrotask,navigator:{clipboard:{writeText:async()=>{}}},location:{origin:'http://local'},setTimeout:(f,n)=>{const t=setTimeout(f,n);t.unref();return t},clearTimeout,fetch:async(url,options)=>{
   calls.push(url);const body=options.body?JSON.parse(options.body):{};let data;

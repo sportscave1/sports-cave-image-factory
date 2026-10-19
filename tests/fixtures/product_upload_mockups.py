@@ -25,7 +25,8 @@ app.current_os_user=lambda:ADMIN
 app.record_activity_log=lambda *a,**k:None
 app._files_access_token=lambda **kw:'synthetic'
 app._files_team_root=lambda token:'/Sportscave Team Folder'
-app._render_mockup_folder_picker=lambda *a:'/Sportscave Team Folder/04_OUTPUT/product-images'
+if STATE.get('configure_outputs'):STATE['configure_outputs'](app)
+else:app._render_mockup_folder_picker=lambda *a:'/Sportscave Team Folder/04_OUTPUT/product-images'
 app._save_mockups_to_dropbox_impl=lambda token,user,result,manifest,root,parent,name,conflict:dict(destination=result['_product_upload_save_target'],successes=[dict(relative_path=x['archive_name']) for x in manifest],failures=[])
 st.query_params['page']='product_uploads'
 st.session_state['current_page']='Product Uploads'
@@ -60,6 +61,7 @@ with st.sidebar:
         if row and row['data'].get('product_gid'):
             folder=provider.root/'prepared';folder.mkdir(exist_ok=True);import_synthetic(STATE['env'],row,folder)
 with patch.object(app,'current_os_user',return_value=ADMIN),patch.object(app.prompt_store,'get_prompt',side_effect=lambda key,default='',**kw:default),patch.object(app,'record_activity_log'),patch.object(app,'_files_access_token',return_value='synthetic'),patch.object(app,'_files_team_root',return_value='/Sportscave Team Folder'),patch.object(app,'_render_mockup_folder_picker',return_value='/Sportscave Team Folder/04_OUTPUT/product-images'),patch.object(app,'_save_mockups_to_dropbox_impl',side_effect=lambda token,user,result,manifest,root,parent,name,conflict:dict(destination=result['_product_upload_save_target'],successes=[dict(relative_path=x['archive_name']) for x in manifest],failures=[])):
+    if STATE.get('configure_outputs'):STATE['configure_outputs'](app)
     if st.session_state.get('fixture-standalone'):
         st.session_state['current_page']='Mockups';app.render_mockups_page()
     else:app.render_product_uploads_page()

@@ -14,8 +14,9 @@ import threading
 import logging
 import traceback
 import uuid
+from contextlib import contextmanager,ExitStack
 from time import perf_counter
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from product_upload_intake import Intakes
 
@@ -23,6 +24,49 @@ _slots = threading.BoundedSemaphore(1)
 _active = set()
 _active_lock = threading.Lock()
 _log = logging.getLogger(__name__)
+_cache_lock=threading.RLock()
+_cache_users={}
+
+
+@contextmanager
+def lease(path):
+    """Protect a prepared derivative while its mockups are being rendered."""
+    path=Path(path)
+    with _cache_lock:
+        if not path.is_dir():raise ValueError('Prepared artwork expired. Retry preparation.')
+        _cache_users[path]=_cache_users.get(path,0)+1
+    try:yield path
+    finally:
+        with _cache_lock:
+            _cache_users[path]-=1
+            if not _cache_users[path]:del _cache_users[path]
+
+
+def prune_cache(keep):
+    """Bound only this application's disposable derivatives, never originals."""
+    import shutil,time
+    root=Path(keep).parent
+    with _cache_lock:
+        entries=[]
+        for path in root.iterdir():
+            if path.is_symlink() or not path.is_dir() or not re.fullmatch('[0-9a-f]{64}',path.name):continue
+            if path.resolve().parent!=root.resolve():continue
+            size=sum(p.stat().st_size for p in path.iterdir() if p.is_file() and not p.is_symlink())
+            entries.append((path.stat().st_mtime,path,size))
+        total=sum(x[2] for x in entries);count=len(entries)
+        for modified,path,size in sorted(entries):
+            if path==keep or path in _cache_users:continue
+            if count<=8 and total<=256*1024*1024 and time.time()-modified<86400:continue
+            shutil.rmtree(path);total-=size;count-=1
+
+
+@contextmanager
+def prepared(row,connect,provider):
+    with ExitStack() as stack:
+        with _cache_lock:
+            current_row,path=ensure_ready(row,connect,provider)
+            stack.enter_context(lease(path))
+        yield current_row,path
 
 
 class PreparationError(ValueError):
@@ -30,6 +74,10 @@ class PreparationError(ValueError):
     def __init__(self, message, *, status_code=503):
         super().__init__(message)
         self.status_code = status_code
+
+
+class PreparationBusyError(PreparationError):
+    """Another live lease owns this source; wait without marking it failed."""
 
 
 def diagnosis(error, stage, reference):
@@ -117,6 +165,7 @@ def cached(row, processing):
         for name in ('artwork.png','preview.webp'):
             path=target/name
             if path.is_symlink() or not path.is_file() or file_hash(path)!=receipt['hashes'][name]:return None
+        os.utime(target,None)
         return target,receipt
     except (OSError,ValueError,KeyError):return None
 
@@ -169,7 +218,7 @@ def decode(psd, destination, row, connect):
     return dict(source_profile_sha256=hashlib.sha256(icc).hexdigest(),policy=policy,operation='server ICC conversion to sRGB',decoder='Pillow full-resolution PSD saved composite')
 
 
-def prepare(connect, provider, key, actor, *, provider_factory=None):
+def prepare(connect, provider, key, actor, *, provider_factory=None, progress=None):
     import image_factory as factory
     from auto_editions import file_hash
     if not key:raise ValueError('Select an exact Dropbox PSD workflow first.')
@@ -183,59 +232,91 @@ def prepare(connect, provider, key, actor, *, provider_factory=None):
     started=perf_counter();stage='load processing settings';attempt=uuid.uuid4().hex
     previous_spec=row['data'].get('server_artwork',{})
     processing=None
+    stages=[]
+    def report(label,completed=None,total=None):
+        if not stages or stages[-1]['stage']!=label:stages.append(dict(stage=label,elapsed_ms=round((perf_counter()-started)*1000,2)))
+        if progress:progress(label,completed,total)
     _log.info('product_artwork_start workflow=%s file_id=%s revision=%s attempt=%s',key,source(row)['file_id'],source(row)['revision'],attempt[:12])
 
     try:
-        processing=settings(connect)
+        report('Checking prepared artwork');processing=settings(connect)
         if provider is None:
             stage='connect to Dropbox'
             from product_upload_services import Dropbox
             provider=(provider_factory or Dropbox)()
         stage='validate source';current(provider,row)
         stage='acquire preparation lock'
+        cache_key=json.dumps([source(row),processing],sort_keys=True)
         with connect() as conn, conn.cursor() as cur:
-            cur.execute("SET LOCAL idle_in_transaction_session_timeout = '5min'")
             cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',('server-product-artwork:'+json.dumps(source(row),sort_keys=True),))
+            cur.execute("""SELECT id FROM product_upload_intakes
+                WHERE data->'server_artwork'->>'cache_key'=%s
+                AND data->'server_artwork'->>'state'='Preparing'
+                AND (data->'server_artwork'->>'lease_until')::timestamptz > now() LIMIT 1""",(cache_key,))
+            if cur.fetchone():raise PreparationBusyError('Waiting for the existing source preparation. Retry shortly; no duplicate download was started.',status_code=409)
             with store.locked(key,actor) as (value,_):
                 if source(value)!=source(row):raise ValueError('Selection changed before preparation.')
-                value['data']['server_artwork']=dict(state='Preparing',source=source(row),settings=processing,attempt=attempt)
+                value['data']['server_artwork']=dict(state='Preparing',source=source(row),settings=processing,attempt=attempt,
+                    cache_key=cache_key,lease_until=(datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat())
                 value['data'].update(state='Preparing',reason='')
-            stage='read prepared cache'
-            ready=cached(row,processing);reused=bool(ready)
-            if not ready:
-                target=folder(row,processing)
-                with tempfile.TemporaryDirectory(dir=target.parent,prefix='staging-') as temporary:
-                    staging=Path(temporary);psd=staging/'selected.psd'
-                    from auto_editions_source_limits import check_source
-                    stage='validate source'
-                    check_source(row['data']['source']['size'],staging)
-                    stage='retrieve original PSD'
-                    provider.download(row['data']['source'],psd)
-                    stage='verify download'
-                    if psd.stat().st_size!=row['data']['source']['size'] or file_hash(psd,dropbox=True)!=row['data']['source']['content_hash']:
-                        raise ValueError('Downloaded PSD bytes do not match the selected Dropbox revision.')
-                    _log.info('product_artwork_download_verified workflow=%s attempt=%s bytes=%s',key,attempt[:12],psd.stat().st_size)
-                    stage='decode original PSD'
-                    colour=decode(psd,staging/'artwork.png',row,connect)
-                    stage='create preview'
-                    factory.create_preview_file(staging/'artwork.png',staging,'preview.webp')
-                    stage='verify preparation'
-                    current(provider,row)
-                    receipt=dict(source=source(row),settings=processing,colour=colour,
-                        hashes={n:file_hash(staging/n) for n in ('artwork.png','preview.webp')})
-                    stage='write prepared artwork'
+        # No database transaction spans network, hashing, decoding or rendering.
+        pulse_stop=threading.Event()
+        def heartbeat():
+            while not pulse_stop.wait(45):
+                try:
+                    with store.locked(key,actor) as (value,_):
+                        spec=value['data'].get('server_artwork',{})
+                        if spec.get('attempt')!=attempt or spec.get('state')!='Preparing':return
+                        spec['lease_until']=(datetime.now(timezone.utc)+timedelta(minutes=5)).isoformat()
+                except Exception:
+                    _log.warning('product_artwork_lease_refresh_failed workflow=%s attempt=%s',key,attempt[:12])
+                    return
+        pulse=threading.Thread(target=heartbeat,name='product-artwork-lease',daemon=True);pulse.start()
+        stage='read prepared cache'
+        ready=cached(row,processing);reused=bool(ready)
+        if not ready:
+            target=folder(row,processing)
+            prune_cache(target)
+            with tempfile.TemporaryDirectory(dir=target.parent,prefix='staging-') as temporary:
+                staging=Path(temporary);psd=staging/'selected.psd'
+                from auto_editions_source_limits import check_source
+                stage='validate source'
+                check_source(row['data']['source']['size'],staging)
+                stage='retrieve original PSD'
+                report('Downloading PSD',0,row['data']['source']['size'])
+                if progress:
+                    provider.download(row['data']['source'],psd,progress=lambda done,total:report('Downloading PSD',done,total))
+                else:provider.download(row['data']['source'],psd)
+                stage='verify download'
+                report('Checking file')
+                if psd.stat().st_size!=row['data']['source']['size'] or file_hash(psd,dropbox=True)!=row['data']['source']['content_hash']:
+                    raise ValueError('Downloaded PSD bytes do not match the selected Dropbox revision.')
+                _log.info('product_artwork_download_verified workflow=%s attempt=%s bytes=%s',key,attempt[:12],psd.stat().st_size)
+                stage='decode original PSD'
+                report('Preparing artwork')
+                colour=decode(psd,staging/'artwork.png',row,connect)
+                stage='create preview'
+                factory.create_preview_file(staging/'artwork.png',staging,'preview.webp')
+                stage='verify preparation'
+                receipt=dict(source=source(row),settings=processing,colour=colour,
+                    hashes={n:file_hash(staging/n) for n in ('artwork.png','preview.webp')})
+                stage='write prepared artwork'
+                with _cache_lock:
                     target.mkdir(exist_ok=True)
                     for name in ('artwork.png','preview.webp'):os.replace(staging/name,target/name)
                     (target/'receipt.json').write_text(json.dumps(receipt),encoding='utf-8')
-                    ready=target,receipt
-            stage='verify preparation'
-            current(provider,row)
-            if settings(connect)!=processing:raise ValueError('Artwork processing settings changed. Retry preparation.')
-            with store.locked(key,actor) as (value,_):
-                if source(value)!=source(row) or value['data']['server_artwork'].get('attempt')!=attempt:raise ValueError('Selection changed during preparation.')
-                value['data']['server_artwork']=dict(state='Ready',source=source(row),settings=processing,reused=reused,attempt=attempt,
-                    elapsed_ms=round((perf_counter()-started)*1000,2),completed_at=datetime.now(timezone.utc).isoformat())
-                value['data'].update(state='Ready',reason='')
+                    prune_cache(target)
+                ready=target,receipt
+        stage='verify preparation'
+        current(provider,row)
+        if settings(connect)!=processing:raise ValueError('Artwork processing settings changed. Retry preparation.')
+        with store.locked(key,actor) as (value,_):
+            if source(value)!=source(row) or value['data']['server_artwork'].get('attempt')!=attempt:raise ValueError('Selection changed during preparation.')
+            value['data']['server_artwork']=dict(state='Ready',source=source(row),settings=processing,reused=reused,attempt=attempt,
+                elapsed_ms=round((perf_counter()-started)*1000,2),stages=stages,completed_at=datetime.now(timezone.utc).isoformat())
+            value['data'].update(state='Ready',reason='')
+    except PreparationBusyError:
+        raise
     except Exception as error:
         reference=attempt[:12];log_failure(error,stage,reference,row)
         message=diagnosis(error,stage,reference)
@@ -243,7 +324,7 @@ def prepare(connect, provider, key, actor, *, provider_factory=None):
         try:
             with store.locked(key,actor) as (value,_):
                 spec=value['data'].get('server_artwork',{})
-                if source(value)==source(row) and (spec.get('attempt')==attempt or spec==previous_spec):
+                if source(value)==source(row) and (spec.get('attempt')==attempt or (spec==previous_spec and spec.get('state')!='Preparing')):
                     value['data']['server_artwork']=dict(state='Failed',reason=message,source=source(row),attempt=attempt,reference=reference,stage=stage)
                     value['data'].update(state='Error',reason=message)
             from product_upload_dropbox import status
@@ -253,16 +334,19 @@ def prepare(connect, provider, key, actor, *, provider_factory=None):
             log_failure(checkpoint_error,'save failure checkpoint',reference,row)
         raise safe from error
     finally:
+        if 'pulse_stop' in locals():pulse_stop.set();pulse.join(timeout=1)
         with _active_lock:
             _active.discard(key)
             _slots.release()
     _log.info('product_artwork_ready workflow=%s attempt=%s reused=%s elapsed_ms=%.2f',key,attempt[:12],reused,(perf_counter()-started)*1000)
+    report('Ready',1,1)
     return store.read(key,actor)
 
 
-def ready(row, connect, provider):
+def ready(row, connect, provider, *, validated=False):
     spec=row['data'].get('server_artwork',{})
-    processing=settings(connect);current(provider,row)
+    processing=settings(connect)
+    if not validated:current(provider,row)
     value=cached(row,processing)
     if spec.get('state')!='Ready' or spec.get('source')!=source(row) or spec.get('settings')!=processing or not value:
         raise ValueError('Prepare this exact PSD revision on the server first.')
@@ -271,9 +355,9 @@ def ready(row, connect, provider):
 
 def ensure_ready(row, connect, provider):
     current(provider,row)
-    try:return row,ready(row,connect,provider)
+    try:return row,ready(row,connect,provider,validated=True)
     except ValueError:
         # Disposable server caches can expire or be lost on restart. Rebuild
         # from the pinned source instead of requiring a new product workflow.
         row=prepare(connect,provider,str(row['id']),row['actor_id'])
-        return row,ready(row,connect,provider)
+        return row,ready(row,connect,provider,validated=True)

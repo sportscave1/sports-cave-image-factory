@@ -96,6 +96,13 @@ def test_download_never_overwrites_existing_file(download, tmp_path):
     response.close.assert_called_once()
 
 
+def test_original_download_reports_actual_bytes_without_a_browser_upload(download,tmp_path):
+    provider,metadata,response,*_=download
+    progress=Mock()
+    provider.download(metadata,tmp_path/'selected.psd',progress=progress)
+    progress.assert_called_once_with(len(PAYLOAD),len(PAYLOAD))
+
+
 @pytest.mark.parametrize('revision', ['rev:'+REV, 'not-a-revision', '123', '', None])
 def test_malformed_revision_is_rejected_before_request(download, revision):
     provider, metadata, response, calls, *_ = download

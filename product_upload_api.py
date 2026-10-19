@@ -137,9 +137,10 @@ async def action(request):
         elif op in ('start', 'finish', 'resume'):
             raise ValueError('Choose an existing PSD from Dropbox. Manual PSD transfers have been removed.')
         elif op == 'prepare':
-            from product_upload_artwork import prepare
+            from product_upload_jobs import prepare
             from product_upload_dropbox import status
-            row = await run_in_threadpool(prepare,connect,None,key,uid,provider_factory=Dropbox)
+            await run_in_threadpool(prepare,connect,key,uid,Dropbox)
+            row = await run_in_threadpool(store.read,key,uid)
             row = await run_in_threadpool(status,row,connect)
         elif op == 'mode':
             row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
@@ -239,13 +240,13 @@ async def source_preview(request):
         if not row or row['data'].get('workflow_version') != 3: raise ValueError('Select a Dropbox PSD first.')
         provider = await run_in_threadpool(Dropbox)
         expected = row['data']['source']
-        meta = await run_in_threadpool(provider.metadata_if_present, expected['id'])
-        if not meta or any(meta.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
-            raise ValueError('The selected revision changed. Select its current PSD again.')
         if (row['data'].get('server_artwork') or {}).get('state') == 'Ready':
             from product_upload_artwork import ready
             folder = await run_in_threadpool(ready,row,connect,provider)
             return Response(await run_in_threadpool((folder/'preview.webp').read_bytes),media_type='image/webp',headers=HEADERS)
+        meta = await run_in_threadpool(provider.metadata_if_present, expected['id'])
+        if not meta or any(meta.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
+            raise ValueError('The selected revision changed. Select its current PSD again.')
         data = await run_in_threadpool(provider.api.get_psd_thumbnail_bytes, provider.token, meta['id'])
         after = await run_in_threadpool(provider.metadata_if_present, expected['id'])
         if not after or any(after.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
@@ -253,7 +254,19 @@ async def source_preview(request):
         return Response(data, media_type='image/jpeg', headers=HEADERS)
     except Exception as error: return failure(error)
 
+async def original_asset(request):
+    try:
+        user = await actor(request, automatic=False)
+        from product_upload_gallery import resolve
+        from starlette.responses import FileResponse
+        path = await run_in_threadpool(resolve, request.query_params.get('token', ''), user['id'], Intakes(connect).read)
+        return FileResponse(path, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
 ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+          ('/api/product-uploads/asset', original_asset, ('GET',)),
           ('/api/product-uploads/source-preview', source_preview, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),
           ('/api/product-uploads/preview', preview, ('GET',)), ('/api/product-uploads/{action}', action, ('POST',)))

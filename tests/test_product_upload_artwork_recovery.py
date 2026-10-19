@@ -145,16 +145,17 @@ def test_generate_is_disabled_until_artwork_ready(env, tmp_path, monkeypatch, st
     monkeypatch.setattr(api, 'connect', store.connect); monkeypatch.setattr(api, 'Dropbox', lambda: provider)
     seen = []
     def button(label, **kwargs):
-        if label == 'Generate Core Shopify Images':seen.append(kwargs['disabled']); return True  # defend even against stale click events
+        if label == 'Generate mockups':seen.append(kwargs['disabled']); return True  # disabled callbacks never submit
         return False
     st = SimpleNamespace(session_state={'_product_upload_active': key}, subheader=Mock(), text_input=lambda *a, **k:k.get('value', ''),
-        selectbox=lambda *a, **k:'Football', button=button, info=Mock(), error=Mock())
+        selectbox=lambda *a, **k:'Football', button=button, info=Mock(), error=Mock(),caption=Mock())
     app = SimpleNamespace(_mockups_result=lambda: None, alphabetize_options=lambda values, **k:values,
         SPORT_OPTIONS=['Football'], get_sport_category=lambda a,b:a)
     generate = Mock(side_effect=AssertionError('Not ready'))
     monkeypatch.setattr(image_factory, 'generate_product_images', generate)
     tree = ast.parse((Path(__file__).parents[1]/'product_upload_mockups_ui.py').read_text(encoding='utf-8'))
     fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'render_design')
+    fn.decorator_list=[]
     scope = dict(st=st, Path=Path, poll_render=Mock())
     exec(compile(ast.Module(body=[fn], type_ignores=[]), 'isolated-render', 'exec'), scope)
     scope['render_design'](app, row, ADMIN)

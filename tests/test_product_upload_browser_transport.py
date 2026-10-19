@@ -25,7 +25,10 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
     for meta,colour in [(first,(220,35,60)),(second,(20,60,220))]:
         path=real_psd(tmp_path/meta['name'],colour=colour);meta.update(content_hash=file_hash(path,dropbox=True),size=path.stat().st_size)
         provider.files[meta['id']]=meta;provider.files[meta['path_display']]=meta;sources[meta['id']]=path
-    provider.download=lambda metadata,destination:Path(destination).write_bytes(sources[metadata['id']].read_bytes())
+    def download(metadata,destination,*,progress=None):
+        Path(destination).write_bytes(sources[metadata['id']].read_bytes())
+        if progress:progress(metadata['size'],metadata['size'])
+    provider.download=download
     monkeypatch.setenv('SPORTS_CAVE_TEMP_DIR',str(tmp_path/'server'))
     from product_upload_dropbox import REVIEW
     sub=dict(id='id:sub',name='Subfolder',path_display=REVIEW+'/Subfolder',**{'.tag':'folder'})
@@ -63,7 +66,9 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
         page.screenshot(path=str(out/'picker-selection-desktop.png'),full_page=True)
         page.locator('#choose').click();page.locator('#picker-search').fill('Second');expect(page.locator('#picker-items button')).to_have_count(1)
         page.get_by_role('button',name='Second.psd',exact=True).click();expect(page.locator('#filename')).to_have_text('Second.psd')
+        page.wait_for_function("old=>productUploadMetrics.selections.filter(x=>x.selection_to_bound_ms!==undefined).at(-1)?.id!==old",arg=key)
         assert page.evaluate('productUploadMetrics.selections.filter(x=>x.selection_to_bound_ms!==undefined).at(-1).id')!=key
+        expect(page.locator('#stage')).to_have_text('Ready',timeout=10000)
         page.locator('#product').evaluate("el=>el.value='Preserved form'")
         selected_name=page.locator('#filename').inner_text();held_metadata=[]
         page.route('**/api/product-uploads/browse',lambda route:held_metadata.append(route))

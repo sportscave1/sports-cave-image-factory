@@ -105,6 +105,12 @@ def status(row, connect):
         spec=dict(state='Selected');d['server_artwork']=spec
     d['state']={'Selected':'Selected','Preparing':'Preparing','Ready':'Ready','Failed':'Error'}.get(spec.get('state'),'Selected')
     d['reason']=spec.get('reason','')
+    from product_upload_jobs import JOBS
+    job=JOBS.snapshot(str(row['id']),row['actor_id'],'prepare')
+    if job and job['state'] in ('Queued','Running'):
+        d['state']='Preparing';d['reason']=''
+    d['artwork_progress']=({k:job.get(k) for k in ('token','state','stage','completed','total','started_ms','elapsed_ms','stages')} if job else None)
+    if job and job['state']=='Failed':d['state']='Error';d['reason']=job.get('error','Preparation failed. Retry artwork preparation.')
     if d.get('product_gid'):d['state']='Shopify confirmed'
     d['preview_url']='/api/product-uploads/source-preview?id='+str(row['id'])+('&prepared='+spec['settings'] if spec.get('state')=='Ready' else '')
     return row

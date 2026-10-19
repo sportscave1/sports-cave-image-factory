@@ -19,12 +19,15 @@
     if(!response.ok)throw Object.assign(new Error(data.error||'Dropbox request failed. Retry.'),{upload:data.upload});return data;
   }
   const action=(name,extra={},signal)=>request(name,{id:row?.id,mode:$('mode').value,...extra},signal);
-  function schedule(){clearTimeout(timer);if(!manual&&row?.basic_validated&&!['Cloud Ready','Failed','Uploaded','Error'].includes(row.state)&&!busy&&!document.hidden&&!stopped)timer=setTimeout(refresh,5000);}
+  function schedule(){clearTimeout(timer);if(!manual&&row?.basic_validated&&!['Ready','Cloud Ready','Failed','Uploaded','Error'].includes(row.state)&&!busy&&!document.hidden&&!stopped)timer=setTimeout(refresh,row.state==='Preparing'?750:1000);}
   function render(){
     $('drop').hidden=manual;$('manual').textContent=manual&&enabled?'Use automatic workflow':'Use manual workflow';$('manual').disabled=!enabled||busy;
     $('mode').disabled=busy;$('choose').disabled=busy;$('new').hidden=!row||busy;
     $('summary').hidden=manual||!row;if(row){$('filename').textContent=row.name;$('stage').textContent=row.state==='Checking design'?'Processing':row.state;
-      $('progress').value=row.size?100*(row.offset||0)/row.size:0;$('progress').hidden=!!row.basic_validated;
+      const preparation=row.artwork_progress,bar=$('progress');bar.hidden=false;bar.setAttribute('aria-label','PSD preparation progress');
+      if(row.state==='Ready'){bar.value=100;$('stage').textContent='Ready';}
+      else if(preparation?.stage==='Downloading PSD'&&preparation.total){bar.value=100*preparation.completed/preparation.total;$('stage').textContent=`Downloading PSD · ${(preparation.completed/1048576).toFixed(1)} / ${(preparation.total/1048576).toFixed(1)} MiB · ${Math.floor(bar.value)}%`;}
+      else{bar.removeAttribute('value');$('stage').textContent=preparation?.stage||(row.state==='Preparing'?'Waiting to start':row.state);}
       $('detail').textContent=(row.source?`${row.source.path_display} · Revision ${row.source.rev} · `:'')+((row.lifecycle?`${row.lifecycle.state}${row.lifecycle.reason?' · '+row.lifecycle.reason:''}`:row.reason)||'Exact Dropbox PSD selected. Artwork preparation runs on the server.');
     }
 
@@ -46,7 +49,7 @@
   }
   function resize(){if(parent!==window){const height=Math.ceil(Math.max(document.body.getBoundingClientRect().height,$('picker').open?Math.min(720,($('picker').scrollHeight||480)+64):0));if(height===lastHeight)return;lastHeight=height;parent.postMessage({type:'sports-cave-product-upload-height',height},location.origin);if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height},'*');}}
   window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data?.type==='sports-cave-product-upload-measure')resize();});
-  async function refresh(){const current=epoch,requested=row?.id;try{const data=await request('state'+(row?.id?'?id='+encodeURIComponent(row.id):''));if(current!==epoch||requested!==row?.id)return;const previousManual=manual;enabled=data.enabled;row=data.upload;manual=!enabled||manual;if(previousManual!==manual)notify();if(row)$('mode').value=row.mode;render();}catch(e){if(current===epoch&&e.name!=='AbortError')fail(e);clearTimeout(timer);}}
+  async function refresh(){const current=epoch,requested=row?.id;try{const data=await request('state'+(row?.id?'?id='+encodeURIComponent(row.id):''));if(current!==epoch||requested!==row?.id)return;const previousManual=manual,previousState=row?.state;enabled=data.enabled;row=data.upload;manual=!enabled||manual;if(previousManual!==manual||previousState!==row?.state)notify();if(row)$('mode').value=row.mode;render();}catch(e){if(current===epoch&&e.name!=='AbortError')fail(e);clearTimeout(timer);}}
   let pickerRoot='review',pickerPath='',pickerPage='',pickerEpoch=0,pickerBusy=false,pickerController=new AbortController();
   function closePicker(){pickerEpoch++;pickerController.abort();pickerBusy=false;clearTimeout($('picker-search').timer);if($('picker').open)$('picker').close();$('choose').focus({preventScroll:true});resize();}
   function breadcrumbs(data){
@@ -68,7 +71,7 @@
     finally{if(sequence===pickerEpoch){pickerBusy=false;$('picker-more').disabled=false;}resize();}
   }
   async function selectPSD(item){
-    closePicker();reset();selectedAt=Date.now();const current=epoch;busy=true;render();
+    closePicker();reset();selectedAt=Date.now();const current=epoch;busy=true;row={name:item.name,source:item,size:item.size,state:'Checking selection',basic_validated:false};render();
     try{const selected=await action('select',{id:crypto.randomUUID(),file_id:item.id,revision:item.rev});
       if(current!==epoch)return;row=selected.upload;record(metrics.selections,{id:row.id,selection_to_bound_ms:Date.now()-selectedAt});busy=false;render();notify();row.state='Preparing';render();const prepared=await action('prepare');if(current!==epoch)return;row=prepared.upload;notify();
     }catch(e){if(current===epoch){if(e.upload){row=e.upload;notify();}fail(e);}}finally{if(current===epoch){busy=false;render();}}

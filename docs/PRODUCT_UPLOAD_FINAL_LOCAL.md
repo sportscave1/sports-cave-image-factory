@@ -1,5 +1,217 @@
 # Product Uploads — consolidated local upload optimisation
 
+Release authorisation — 19 October 2026: the user subsequently authorised
+publishing both the speed/progress work and lifestyle/copy/Save all changes to
+Git/Render, and updating the installed Companion. The local-only sections below
+describe implementation-stage status. Combined pre-release verification passed
+56 focused tests plus the optional affected-PSD test run separately (57 total),
+Node picker/state checks, Render topology validation and Studio verification.
+Exact release/deploy/Companion evidence is recorded under ignored
+`output/product-upload-combined-release-20261019/`; no live artwork/Shopify test
+writes are part of release verification.
+
+## Master lifestyle brief, originals and Save all — 19 October 2026 (local only)
+
+Verified existing worktree:
+`C:\Dev\SportsCaveWorktrees\sports-cave-products-product-uploads-integrated-existing-mockup-20261018-4b18037e`
+on `codex/task/products-product-uploads-integrated-existing-mockup-20261018-4b18037e`,
+task `20261018-4b18037e`, owner `codex-products-mockups-20261018`.
+HEAD remains `e4efe300aeeb9ba59e8277f637b0d162d8da01cd`. Existing unfinished
+speed/progress changes were snapshotted under ignored
+`output/product-upload-lifestyle/before/` before editing overlapping files.
+
+Files for this continuation: `product_upload_lifestyle.py`,
+`product_upload_outputs_ui.py`, `product_upload_gallery.py`,
+`components/product_upload_gallery/index.html`, `product_upload_export.py`,
+`product_upload_mockups.py`, `product_upload_mockups_ui.py`,
+`product_upload_api.py`, `components/product_uploads/index.html`, this report,
+`tests/test_product_upload_outputs.py`,
+`tests/fixtures/product_upload_outputs_provider.py`,
+`tests/fixtures/product_upload_mockups.py`,
+`scripts/product_upload_outputs_preview.py`, and
+`scripts/verify_product_upload_outputs.py`.
+
+Product Upload now has its own presentation around the existing engine. It
+reads the three saved lifestyle overrides, including legacy keys, and uses the
+existing prompt store/editor with a separate `lifestyle::product-upload-master-v1`
+key. Shared templates and standalone Mockups are unchanged. Default room/angle
+draws are deterministic for the workflow; authored selections remain intact.
+One master brief repeats exact-product/A1/glazing requirements in each of three
+labelled scenes and requests separate, sequential, approval-gated ChatGPT images.
+The OS does not control that external conversation. Existing XL 62 × 87 cm is
+a nominal display reference, not evidence of exact outer-frame measurements.
+The master distinguishes A1 paper (841 × 594 mm, reversed for portrait) from
+unknown outer-frame/mount/depth dimensions and flags conflicts rather than
+inventing allowances or deforming the reference. Material claims remain unchanged.
+
+The compact copy row precedes the same Man Cave, Office and Living Room cards.
+Every preview opens its own original on click/keyboard. Original delivery is
+on demand, authenticated and bound to workflow/source/asset; replaced assets,
+other actors and revoked selections cannot use an old link. Image copying
+reports success only after Clipboard API completion. PNG conversion retains
+dimensions. Uploaded lifestyle originals are retained separately from the
+shared size-limited export assets; they are not substituted into production
+exports. Clipboard denial offers Open original and never substitutes text/URLs.
+
+Confirmed previous mismatch: Product Upload delegated to the standalone result
+renderer, exposing group/ZIP controls and eagerly building ZIPs. Its export
+wrapper forced merge/replace for a reserved target. Product Upload now renders
+Save all only, without ZIP assembly, and uses the same ordered asset manifest,
+namespace/path helpers, folder service and upload_batch service as Mockups.
+The picker starts from the configured Files team root plus
+`04_OUTPUT/product-images`; only a direct child sport collection is accepted.
+The current Product name supplies the sanitised output folder automatically.
+Existing folders get a numbered destination; atomic creation and provider ID
+checks prevent merging into another product's folder. The existing intake save
+ledger now checkpoints folder ownership and confirmed files. Hash/size checks
+recover partial/lost acknowledgements without overwriting or re-uploading
+confirmed bytes. Transfers use the existing application job runner with real
+byte/file progress, duplicate fencing and no Companion calls. Saving does not
+run PSD preparation/generation or change Shopify collections/publication/PSDs.
+
+Settings reused, without a new encoder: generated outputs retain aspect ratio
+with the shared maximum 1600-pixel edge; WEBP quality 82/method 4; JPEG quality
+92/optimise. Product lifestyle imports retain aspect ratio, use the shared
+1600-pixel export bound and lossless WEBP/method 1. Preview encoding is separate.
+The existing manifest selects ordered `WEBP/` and `jpg/` files (16 for all eight
+ready product images). The social JPG preparation remains internal. Existing
+upload/pixel/memory limits and colour handling are unchanged; no new target KB
+limit or invented crop/size/quality setting was introduced.
+
+Focused verification: eight new regression tests plus existing export-binding
+and durable-save regressions passed (10 distinct tests). An actual encoder fixture
+compared the standalone save implementation's original paths, names, order,
+dimensions and hashes against Product Upload's confirmed uploads. Tests covered
+partial retry, lost acknowledgement, duplicate completion, numbered collisions,
+conflicting destination bytes, source/revision/actor fencing, stable custom
+scenes, original retention and absence of ZIP controls.
+
+Installed Chrome (headless) exercised the actual local Product Upload with the
+affected Jake Bauers PSD read-only, synthetic lifestyle uploads, isolated SQL,
+mocked Dropbox writes and Companion calls prohibited. It verified all eight
+originals open, keyboard opening, a 1000 × 1000 black-frame clipboard PNG with
+identical decoded pixels, retained/copied 2000 × 1200 lifestyle originals,
+honest clipboard denial, correct picker root, visible saving progress and
+interactive form. A forced file failure retried into the same folder: 17 upload
+attempts for 16 confirmed files, one folder reservation. Old image links were
+revoked on source removal and a fresh page stayed empty. No browser JS errors.
+Evidence: `output/product-upload-lifestyle/{ui-results.json,tests.log,ui.png}`;
+test tools: `scripts/product_upload_outputs_preview.py` and
+`scripts/verify_product_upload_outputs.py`. No PSD benchmarks were restarted.
+
+Limitations: no production Dropbox test exports, external ChatGPT generation,
+visual A1 accuracy, operating-system paste or live saved-prompt persistence were
+verified. Writes were mocked; shared prompt persistence uses the existing
+Developer mechanism. No commit/push/merge/deploy, live Shopify changes, source
+PSD rename/move/modification or Companion update was performed.
+
+How To: choose a PSD and Generate mockups; paste Copy black frame into ChatGPT,
+then Copy prompt. Approve each separate scene before the next and upload it to
+its matching card. Click previews to open originals. Save all → sport collection
+→ Save here creates the Product-name output folder. Retry that same destination
+after a partial failure; confirmed files are verified and skipped. The page's
+existing How to panel has the same updated instructions.
+
+## Responsive preparation and generation — 19 October 2026 (local only)
+
+Continued in the existing PRODUCTS worktree and branch, starting clean at
+`e4efe300aeeb9ba59e8277f637b0d162d8da01cd`. The working Dropbox revision-path
+download remains unchanged. No commit, push, deployment, live Shopify mutation,
+original PSD change or Companion update is authorised or performed here.
+
+Confirmed blocking paths: the preparation HTTP request waited for download,
+hashing and decoding; its database transaction/advisory lock spanned that whole
+operation and blocked progress reads in the isolated database transport. Generate
+ran the image engine on the Streamlit render thread. Prompt/export/ZIP assembly
+also ran on the UI thread. State reads, metadata checks and five-second fragment
+polling added latency. Neither the normal cold/cache sequence nor Generate
+duplicated the PSD download: the before and after browser runs each transferred
+the original once across two selections and two generations.
+
+Both operations now use bounded application thread jobs, following the existing
+PostingJobs/Files-preview executor pattern. The unchanged shared Mockups engine
+provides actual completed-asset callbacks. Workers never read or mutate Streamlit
+session state. Preparation uses a short source-specific database claim with a
+five-minute renewable lease, commits before downloading and decoding, and fences
+completion by source/attempt. UI polling reads lightweight job snapshots; normal
+progress never rebuilds the entire page. Terminal updates rerun once, including
+failures. Duplicate submissions share a running job; old tokens and selections
+cannot publish their results. Process loss remains retryable from the exact source.
+
+The selected PSD shows actual download bytes/total and percentage, followed by
+Checking file, Preparing artwork and Ready. Unmeasurable stages use indeterminate
+bars. **Generate mockups** is disabled until artwork is ready and while rendering.
+It acknowledges immediately, shows actual completed-image counts and lightweight
+completed previews, then enables the unchanged lifestyle/export/Shopify controls.
+Prompt and ZIP finalisation reuse the existing functions in the worker. Colour
+policies, full-composite decoding, resolution and generated image quality are
+unchanged. Standalone `app.py`/`image_factory.py` and rename/move code are untouched.
+
+Prepared source assets retain strict source/revision/settings/receipt hashes.
+The disposable cache is limited to eight entries, 256 MiB and 24 hours; active
+renderers pin their prepared asset. Processing settings or corrupt/missing assets
+still invalidate reuse. Progress-preview bytes and retained jobs are also bounded.
+
+Matched local Chromium runs used the actual Product Upload component, Streamlit
+renderer and image engine, the affected 285,917,118-byte PSD read-only, disposable
+PGlite and a provider stream limited to **32 MiB/s**. No credentials or external
+requests were allowed. These are local UI measurements, not Render performance.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Cold selection to Ready | 11.125 s | 11.093 s |
+| Cached selection to Ready | 0.281 s | 0.203 s |
+| Generate to first feedback, cold | 0.125 s | 0.094 s |
+| Generate to all five loaded images, cold | 5.219 s | 4.437 s |
+| Generate to all five loaded images, cached | 5.156 s | 4.438 s |
+| Metadata calls across both workflows | 39 | 34 |
+| Original PSD downloads across both workflows | 1 | 1 |
+
+This is a paired sample, not a statistically established production speedup.
+Cold time did not materially improve: the controlled stream occupied about
+9.1 seconds, checking about 0.19 seconds and artwork/preview preparation about
+1.31 seconds. Cache-hit processing took 78 ms plus UI delivery. The major change
+is responsiveness throughout work. A separate UI recovery run received a server
+interaction in 78 ms during rendering, retained form values, retried the same
+workflow after an injected provider failure, disabled repeated generation, changed
+selection mid-render without stale images, and opened a fresh page with no image.
+All five final previews were loaded and visually inspected as the Jake Bauers design.
+
+Focused evidence, stage timestamps, screenshots and source-hash checks are under
+ignored `output/product-upload-responsive/`. The earlier authenticated Render
+download of 6.42 seconds remains a separate measurement. Live UI latency, Render
+CPU contention and its network/database queue times have not been benchmarked;
+the available log query did not supply a matching flow for this continuation.
+
+How To: choose the Dropbox PSD, watch download/preparation progress, then select
+**Generate mockups**. Product details remain editable while work runs. Retry
+retains the source and form; reselect when its revision changes. Wait for all five
+mockups before continuing with the existing lifestyle images, exports and Shopify
+actions. Companion remains solely the separate post-Shopify rename/move trigger.
+
+Implementation files: `product_upload_jobs.py`, `product_upload_artwork.py`,
+`product_upload_services.py`, `product_upload_api.py`, `product_upload_dropbox.py`,
+`product_upload_intake.py`, `product_upload_mockups_ui.py`, the existing component
+JS/HTML and this report. Focused tests and loopback-only benchmark/verification
+fixtures are included; their external boundaries are explicitly isolated.
+
+Verification: 48 distinct focused Python tests passed across the 47-test
+regression and six job/callback follow-up checks (one newly added test), plus
+the Node component-state test and changed-file syntax checks. Actual Chromium
+recovery/progress checks passed against the affected read-only original with
+Companion calls prohibited. No unrelated suite was repeated.
+
+Test files: `tests/test_product_upload_jobs.py`,
+`tests/test_product_upload_server_artwork.py`,
+`tests/test_product_upload_artwork_recovery.py`,
+`tests/test_product_upload_original_download.py`,
+`tests/test_product_upload_browser_transport.py` and
+`tests/test_product_upload_state.cjs`. Harness files:
+`scripts/product_upload_responsive_preview.py`,
+`scripts/benchmark_product_upload_responsive.py`,
+`scripts/verify_product_upload_responsive.py` and
+`tests/fixtures/product_upload_responsive.py`.
+
 ## Original download HTTP 400 — 19 October 2026 (local, deployment held)
 
 Release follow-up: the owner subsequently authorised committing and pushing this

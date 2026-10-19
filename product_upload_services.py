@@ -48,7 +48,7 @@ class Dropbox:
     def render_destination(self, key):
         return self.destination(key).removesuffix('.psd') + '-mockup-render-v1.png'
 
-    def download(self, metadata, destination):
+    def download(self, metadata, destination, *, progress=None):
         # Reuse Files' authenticated, revision-pinned content download. The
         # original stays server-side; reject metadata mismatches before writing.
         from pathlib import Path
@@ -58,6 +58,7 @@ class Dropbox:
             if any(actual.get(k) != metadata.get(k) for k in ('id', 'rev', 'size', 'content_hash')):
                 raise self.api.DropboxSourceChangedError('The original does not match the selected PSD revision. Refresh the Dropbox picker and reselect the PSD.')
             written = 0
+            notified = 0
             signature = bytearray()
             with Path(destination).open('xb') as output:
                 created = True
@@ -67,6 +68,8 @@ class Dropbox:
                         raise self.api.DropboxOriginalDownloadError('Dropbox returned more bytes than the selected PSD. Retry artwork preparation.')
                     signature.extend(chunk[:max(0, 6-len(signature))])
                     output.write(chunk)
+                    if progress and (written-notified>=1024*1024 or written==metadata['size']):
+                        progress(written,metadata['size']);notified=written
             if written != metadata['size'] or signature != b'8BPS\x00\x01':
                 raise self.api.DropboxOriginalDownloadError('Dropbox returned an incomplete or invalid original PSD. Retry artwork preparation.')
         except Exception:
