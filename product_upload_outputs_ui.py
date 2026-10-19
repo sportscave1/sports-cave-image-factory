@@ -6,11 +6,25 @@ import streamlit as st
 
 
 def asset_card(app,result,asset,source):
-    from product_upload_gallery import register,render
+    from product_upload_gallery import register,render,preview_item
     uploaded=(result.get('product_upload_originals') or {}).get(asset.get('prompt_filename'),{})
     path=uploaded.get('path') or app.get_asset_full_resolution_path(asset)
     url=register(result,asset,source,path) if path else ''
-    render(preview=asset.get('preview_path'),original=url,label=asset['label'],copy_action=asset['key']!='black')
+    render(key='product-upload-image-'+result['_product_upload_intake']+'-'+asset['key'],
+           items=[preview_item(asset.get('preview_path'),url,asset['label'])])
+
+
+def core_preview_items(app,result,source):
+    from product_upload_gallery import register,preview_item
+    items=[]
+    generated={a['key']:a for a in result['assets'] if a['asset_group']=='generated'}
+    for key in ('black','oak','white','unframed','size-guide'):
+        asset=generated.get(key)
+        if not asset:continue
+        path=app.get_asset_full_resolution_path(asset)
+        url=register(result,asset,source,path) if path else ''
+        items.append(preview_item(asset.get('preview_path'),url,asset['label']))
+    return items
 
 
 @st.fragment(run_every=.25)
@@ -99,19 +113,17 @@ def render_outputs(app,result,row,user,name):
     if latest and latest.get('run_dir')==result.get('run_dir'):result=latest
     key=str(row['id'])
     if st.session_state.get('_product_upload_active')!=key:return
+    if result.get('_product_upload_intake')!=key or result.get('_product_upload_source_hash')!=row['data']['source']['content_hash']:return
     result=app.normalize_generation_result(result)
     result['_product_upload_source']=dict(row['data']['source'])
     app._set_mockups_result(result)
     source=row['data']['source']
     st.success('Mockups ready')
     st.subheader('Generated Previews')
-    with st.container(key='mockups-gallery'):
-        for asset in result['assets']:
-            if asset['asset_group']!='generated':continue
-            with st.container(key='mockups-image-'+asset['key']):
-                st.markdown('**'+asset['label']+'**');asset_card(app,result,asset,source)
+    with st.container(key='product-upload-preview-row'):
+        render(key='product-upload-previews-'+key,mode='gallery',items=core_preview_items(app,result,source))
     # Read existing Developer overrides, including legacy IDs, without migrating or
-    # writing any shared prompt. Only the new master has a Product Upload editor.
+    # writing any shared prompt. Editing belongs exclusively in Developer Studio.
     specs=[dict(prompt_key=PROMPT_ID,default_text=INSTRUCTIONS)]
     for filename in FILENAMES:
         specs.extend(dict(prompt_key='lifestyle::'+suffix,default_text='')
@@ -128,11 +140,7 @@ def render_outputs(app,result,row,user,name):
     black=next((a for a in result['assets'] if a['key']=='black'),None)
     path=app.get_asset_full_resolution_path(black) if black else None
     url=register(result,black,source,path) if path else ''
-    render(original=url,prompt=prompt,copy_row=True)
-    if app.prompt_editing_allowed():
-        if st.button('Edit master prompt',key='product-upload-edit-master-'+key):
-            st.session_state[app._mockup_prompt_edit_key(PROMPT_ID)]=True
-        app.render_mockup_prompt_editor('Product Upload master lifestyle prompt',PROMPT_ID,instructions,default_text=INSTRUCTIONS)
+    render(key='product-upload-copy-actions-'+key,original=url,prompt=prompt,mode='actions')
     pending=JOBS.snapshot(key,user['id'],'save')
     saving=bool(pending and pending['state'] in ('Queued','Running'))
     with st.container(key='mockups-lifestyle-grid'):

@@ -1,5 +1,61 @@
 # Product Uploads — consolidated local upload optimisation
 
+## Gallery and clipboard correction — 19 October 2026, local only
+
+Release follow-up: the user subsequently explicitly authorised pushing this
+gallery/copy correction to Git/Render and verifying the deployed version. The
+local-only statements in this section describe implementation-stage status.
+Release evidence is retained under ignored
+`output/product-upload-gallery-regression/`; existing speed/progress, Save all
+and standalone Mockups implementation files are unchanged by this release.
+
+Worktree: `C:\Dev\SportsCaveWorktrees\sports-cave-products-product-uploads-integrated-existing-mockup-20261018-4b18037e`.
+Branch: `codex/task/products-product-uploads-integrated-existing-mockup-20261018-4b18037e`,
+base `eb74083066591d0dd5ff652059afdb1615614ae3`. No commit, push or deployment for this correction.
+
+The completed-results renderer replaced the small generation strip with five
+315px component cards and mounted a separate inline master-prompt editor.
+It now keeps one ordered, compact preview row and exactly two clipboard buttons
+above the unchanged lifestyle upload cards. A keyed Streamlit component handshake
+replaces the unkeyed inline-script iframe controls. The prior missing-button
+symptom was not reproduced against an authenticated production browser; no CSP
+cause is asserted. Inline editing is removed from Product Upload.
+
+Previews reuse `image_factory.create_preview_file`: WEBP, maximum edge 900px,
+quality 70, method 4, preserving aspect ratio. Preview payloads are cached by path,
+size and modification stamp (80-entry bound). Original URLs carry metadata only;
+no original bytes enter component arguments. Original retrieval is restricted to
+explicit preview links and Copy black frame. The existing authenticated original
+registry, source checks, export manifest, encoder and save services are retained.
+
+Focused checks: 11 tests passed in `tests/test_product_upload_gallery.py` and
+`tests/test_product_upload_outputs.py`; Node syntax check passed for the new
+component script. `scripts/verify_product_upload_gallery.py` passed using installed
+desktop Chrome in headless mode against the loopback outputs fixture, reading
+the affected PSD without changing it. Network assertions confirm zero original
+requests on initial rendering and a full rerender, one correct original per
+explicit preview open, and no browser original retrieval during Save all.
+During generation, existing lightweight progress previews remain one row; after
+completion they are replaced by the single permanent five-preview row.
+
+Measured preview files for this fixture, all 900×900 WEBP: Black 75,288 bytes;
+Oak 88,846; White 75,140; Unframed 84,198; Size Guide 55,798. They display within
+140×110 boxes with intact aspect ratios. Black-frame clipboard PNG dimensions
+and pixels match the 1000×1000 generated original. Full master text, clipboard
+denial errors, keyboard opening, all five original links, all three uploaded
+2000×1200 lifestyle originals, mocked Save all (16 original-derived WEBP/JPG
+outputs), and stale-link revocation passed. Browser JavaScript errors: none.
+Existing focused export tests cover original encoder parity, partial retry,
+duplicate submission, collisions and revision fences.
+
+Evidence: ignored `output/product-upload-gallery-regression/` contains
+`tests.log`, `ui-results.json`, `browser.log` and screenshots. No external ChatGPT
+generation, OS paste target, authenticated production browser, Dropbox export
+writes or live Shopify operations were tested. Companion calls are prohibited in
+the fixture. Standalone Mockups, merged prompt content, speed/progress code and
+Save all services have no changes in this correction; no performance benchmarks
+were restarted. The older release notes below describe previous work only.
+
 Release authorisation — 19 October 2026: the user subsequently authorised
 publishing both the speed/progress work and lifestyle/copy/Save all changes to
 Git/Render, and updating the installed Companion. The local-only sections below

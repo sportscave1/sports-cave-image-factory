@@ -1,7 +1,7 @@
 """On-demand original pixels, scoped to an authenticated workflow and asset."""
 import base64
-import json
 import secrets
+from functools import lru_cache
 from pathlib import Path
 from threading import RLock
 from time import monotonic
@@ -84,11 +84,25 @@ def retain_upload_original(result, filename, uploaded, signature):
     return result
 
 
-def render(*, preview=None, original='', label='', prompt=None, copy_row=False, copy_action=True):
+@lru_cache(maxsize=80)
+def _preview_data(path, size, modified):
+    # Only factory-produced lightweight WEBPs enter component payloads. The
+    # stamp invalidates replacements; originals are never read for rendering.
+    return 'data:image/webp;base64,' + base64.b64encode(Path(path).read_bytes()).decode('ascii')
+
+
+def preview_item(path, original, label):
+    item=dict(original=original,label=label,preview='')
+    if path and Path(path).is_file():
+        path=Path(path)
+        stat=path.stat()
+        item['preview']=_preview_data(str(path.resolve()),stat.st_size,stat.st_mtime_ns)
+    return item
+
+
+def render(*, key, items=(), original='', prompt=None, mode='image'):
     import streamlit.components.v1 as components
-    data = dict(original=original, label=label, prompt=prompt, copyRow=copy_row, copyAction=copy_action)
-    if preview and Path(preview).is_file():
-        data['preview'] = 'data:image/webp;base64,' + base64.b64encode(Path(preview).read_bytes()).decode('ascii')
-    template = (Path(__file__).parent / 'components/product_upload_gallery/index.html').read_text(encoding='utf-8')
-    components.html(template.replace('/*CONFIG*/{}', json.dumps(data).replace('<', '\\u003c')),
-                    height=86 if copy_row else 315, scrolling=False)
+    # Keyed render handshake instead of unkeyed script-generated srcdoc cards.
+    # Arguments contain preview bytes and original URLs, never original bytes.
+    component=components.declare_component('product_upload_gallery',path=str(Path(__file__).parent/'components/product_upload_gallery'))
+    return component(mode=mode,items=list(items),original=original,prompt=prompt,key=key,default=None)
