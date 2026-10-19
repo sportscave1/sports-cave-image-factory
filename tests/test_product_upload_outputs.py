@@ -49,12 +49,20 @@ def test_save_uses_standalone_manifest_partial_retry_lost_ack_and_duplicate(env,
     def run():return transfer(provider,result,manifest,api.root,api.base+'/Baseball','Current: Product',store.connect,ADMIN['id'],lambda *a:updates.append(a))
     first=run();assert len(first['failures'])==2
     assert not store.read(row['id'],ADMIN['id'])['data'].get('mockups_exported')
-    second=run();assert not second['failures'] and len(second['successes'])==16
+    second=run();assert not second['failures'] and len(second['successes'])==8
+    assert len(manifest)==8 and all(x['archive_name'].startswith('WEBP/') for x in manifest)
+    assert all(not path.casefold().endswith(('.jpg','.jpeg','/jpg')) for path in api.files)
+    assert all(total==8 for _,_,total in updates)
+    from product_upload_source import current_source,prompt_section
+    source=current_source(store.read(row['id'],ADMIN['id']))
+    assert source['expected_webp_count']==8 and len(source['files'])==8
+    assert all(x['filename'].endswith('.webp') for x in source['files'])
+    assert '"expected_webp_count": 8' in prompt_section(source)
     assert second['destination']==first['destination']==api.base+'/Baseball/Current_ Product'
     assert len([x for x in api.calls if x[0]=='folder'])==1
-    assert len([x for x in api.calls if x[0]=='upload'])==17 # retry failure only; lost ACK checked by hash
+    assert len([x for x in api.calls if x[0]=='upload'])==9 # retry failure only; lost ACK checked by hash
     calls=list(api.calls);assert run()==second and api.calls==calls
-    assert all('/WEBP/' in x[1] or '/jpg/' in x[1] for x in api.calls if x[0]=='upload')
+    assert all('/WEBP/' in x[1] for x in api.calls if x[0]=='upload')
     assert store.read(row['id'],ADMIN['id'])['data']['mockups_exported']
     assert not store.read(row['id'],ADMIN['id'])['data'].get('product_gid')
     assert any(isinstance(u[1],float) and not u[1].is_integer() for u in updates)
@@ -215,7 +223,7 @@ def test_save_encoder_and_manifest_exactly_match_standalone(env,tmp_path,monkeyp
     result.update(_product_upload_intake=str(row['id']),_product_upload_actor_id=str(ADMIN['id']),_product_upload_source_hash=row['data']['source']['content_hash'],_product_upload_source=row['data']['source'])
     provider=SimpleNamespace(api=Outputs(),token='fixture')
     receipt=transfer(provider,result,manifest,provider.api.root,provider.api.base+'/Cricket','Fixture',store.connect,ADMIN['id'],lambda *a:None)
-    assert not receipt['failures'] and len(receipt['successes'])==16
+    assert not receipt['failures'] and len(receipt['successes'])==8
     for item in receipt['successes']:
         assert item['metadata']['content_hash']==expected[item['relative_path']][0]
     assert all(expected[e['archive_name']][1]==(1600,960) for e in manifest if e.get('category')==factory.ASSET_CATEGORY_PRODUCT)

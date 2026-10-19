@@ -61,6 +61,10 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
     import auto_editions as ae
     import mockup_storage
     api=provider.api
+    # Product Uploads only: even a retained pre-release run must never transfer
+    # its old JPG masters as new final assets. Source PSD storage is separate.
+    manifest=[entry for entry in manifest if PurePosixPath(entry['archive_name']).parts[0]=='WEBP'
+              and PurePosixPath(entry['archive_name']).suffix.casefold()=='.webp']
     if category_id and resolve_category(api,provider.token,root,category_id)['path']!=parent:
         raise ValueError('The sport folder changed before saving. Refresh the top selection and retry.')
     base=collection_root(api,root)

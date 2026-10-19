@@ -6239,6 +6239,7 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
         sport_slug=result["sport_slug"],
         prompt_filename=Path(prompt_path).name,
         image_file=uploaded_file,
+        **({"export_jpg": False} if result.get("_product_upload_intake") else {}),
     )
 
     prompt_filename = Path(prompt_path).name
@@ -6745,7 +6746,8 @@ def render_primary_zip_download(result, section_key):
 
 def _mockup_dropbox_manifest(result, selected_groups):
     selected_assets = get_selected_zip_assets(result, selected_groups)
-    return image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False)
+    return image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False,
+        **({"include_jpg": False} if result.get("_product_upload_intake") else {}))
 
 
 def _mockup_dropbox_folder_name(result):

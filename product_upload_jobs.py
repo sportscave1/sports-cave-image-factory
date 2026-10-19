@@ -138,7 +138,7 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                     from product_upload_lifestyle import individual_prompt_items
                     result=factory.generate_product_images(name,sport,folder/'artwork.png',base_dir=base_dir,
                         output_root=factory.create_temp_run_parent(),final_prompt_items=individual_prompt_items(prompts(name,sport)),
-                        asset_completed_callback=asset)
+                        asset_completed_callback=asset,export_jpg=False)
                 progress('Checking completed mockups',5,5)
                 if finalize:
                     progress('Finalising mockups')
@@ -147,7 +147,7 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                 from product_upload_intake import Intakes
                 latest=Intakes(connect).read(key,actor)
                 if not latest or source(latest)!=identity:raise ValueError('Selected PSD changed. Reselect it before generating mockups.')
-                if len(result['assets'])!=5 or any(not Path(a[field]).is_file() for a in result['assets'] for field in ('review_path','preview_path','jpg_path','webp_path')):raise ValueError('Mockup outputs are incomplete. Retry generation.')
+                if len(result['assets'])!=5 or any(not Path(a[field]).is_file() for a in result['assets'] for field in ('review_path','preview_path','webp_path')):raise ValueError('Mockup outputs are incomplete. Retry generation.')
                 result.update(_product_upload_intake=key,_product_upload_actor_id=str(actor),_product_upload_source_hash=row['data']['source']['content_hash'])
                 return result
             except BaseException:

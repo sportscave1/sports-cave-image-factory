@@ -1465,7 +1465,7 @@ def rebuild_export_folders(
 def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, webp_name, jpg_name):
     review_path = review_dir / review_name
     webp_path = webp_dir / webp_name
-    jpg_path = jpg_dir / jpg_name
+    jpg_path = jpg_dir / jpg_name if jpg_dir is not None else None
 
     export_image = resize_for_export(image)
     try:
@@ -1478,12 +1478,13 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
             method=EXPORT_WEBP_METHOD,
         )
 
-        export_image.save(
-            jpg_path,
-            format="JPEG",
-            quality=EXPORT_JPG_QUALITY,
-            optimize=True,
-        )
+        if jpg_path is not None:
+            export_image.save(
+                jpg_path,
+                format="JPEG",
+                quality=EXPORT_JPG_QUALITY,
+                optimize=True,
+            )
     finally:
         close_image(export_image)
         del export_image
@@ -1990,7 +1991,7 @@ def file_content_sha1(file_path):
     return digest.hexdigest()
 
 
-def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=True):
+def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=True, include_jpg=True):
     selected_groups = normalize_zip_groups(zip_groups)
     used_names = set()
     entries = []
@@ -2011,6 +2012,8 @@ def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=Tr
         archive_paths = [("webp_path", "WEBP"), ("jpg_path", "jpg")]
         if asset_group == ASSET_CATEGORY_SOCIAL:
             archive_paths = [("jpg_path", "jpg")]
+        if not include_jpg:
+            archive_paths = [(key, folder) for key, folder in archive_paths if key == "webp_path"]
 
         for path_key, archive_folder in archive_paths:
             file_path = asset.get(path_key)
@@ -2116,13 +2119,13 @@ def create_complete_pack_zip(
     return complete_zip_path
 
 
-def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
+def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file, *, export_jpg=True):
     with _lifestyle_processing_lock:
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         try:
             with tempfile.TemporaryDirectory(dir=run_dir, prefix="lifestyle-stage-") as staging:
-                staged = _save_lifestyle_mockup(staging, product_slug, sport_slug, prompt_filename, image_file)
+                staged = _save_lifestyle_mockup(staging, product_slug, sport_slug, prompt_filename, image_file, export_jpg=export_jpg)
                 result, committed, backups = {}, [], {}
                 try:
                     for key, value in staged.items():
@@ -2156,13 +2159,14 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
 
 
 
-def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
+def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file, *, export_jpg=True):
     run_dir = Path(run_dir)
     webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
     jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
     preview_dir = run_dir / PREVIEW_FOLDER_NAME
     webp_dir.mkdir(parents=True, exist_ok=True)
-    jpg_dir.mkdir(parents=True, exist_ok=True)
+    if export_jpg:
+        jpg_dir.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
 
     variant_slug = LIFESTYLE_IMAGE_VARIANTS[prompt_filename]
@@ -2253,12 +2257,13 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
             with suppress(FileNotFoundError, PermissionError):
                 webp_output_path.unlink()
 
-        image_export.save(
-            jpg_output_path,
-            format="JPEG",
-            quality=EXPORT_JPG_QUALITY,
-            optimize=True,
-        )
+        if export_jpg:
+            image_export.save(
+                jpg_output_path,
+                format="JPEG",
+                quality=EXPORT_JPG_QUALITY,
+                optimize=True,
+            )
 
         preview_image = image_export.copy()
         try:
@@ -2278,7 +2283,7 @@ def _save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, i
 
     return {
         "webp_path": webp_output_path if should_save_webp else None,
-        "jpg_path": jpg_output_path,
+        "jpg_path": jpg_output_path if export_jpg else None,
         "preview_path": preview_output_path,
     }
 
@@ -2296,6 +2301,7 @@ def generate_product_images(
     final_prompt_items=None,
     output_root=None,
     asset_completed_callback=None,
+    export_jpg=True,
 ):
     def report(message, progress=None):
         if callable(status_callback):
@@ -2326,14 +2332,15 @@ def generate_product_images(
     review_dir = run_dir / "review"
     preview_dir = run_dir / PREVIEW_FOLDER_NAME
     webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
-    jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
+    jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME if export_jpg else None
     zip_dir = run_dir / "zip"
     upload_dir = run_dir / "uploaded"
 
     review_dir.mkdir(parents=True, exist_ok=True)
     preview_dir.mkdir(parents=True, exist_ok=True)
     webp_dir.mkdir(parents=True, exist_ok=True)
-    jpg_dir.mkdir(parents=True, exist_ok=True)
+    if jpg_dir is not None:
+        jpg_dir.mkdir(parents=True, exist_ok=True)
     zip_dir.mkdir(parents=True, exist_ok=True)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
