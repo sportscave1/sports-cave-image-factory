@@ -37,17 +37,19 @@
       $('detail').textContent=(row.source?`${row.source.path_display} · Revision ${row.source.rev} · `:'')+((row.lifecycle?`${row.lifecycle.state}${row.lifecycle.reason?' · '+row.lifecycle.reason:''}`:row.reason)||'Exact Dropbox PSD selected. Artwork preparation runs on the server.');
     }
 
-    $('prompt').hidden=!(manual||row?.basic_validated);$('action-label').textContent=labels[$('mode').value];$('copy').disabled=busy||manual||!row?.saved_source_version;
-    $('save-first').hidden=!!row?.saved_source_version&&!manual;
-    $('return').hidden=manual||!row?.basic_validated;mapping.sync(row,section!=='upload'&&!manual);
+    const finalReady=!manual&&!!row?.saved_source_version&&section!=='upload';
+    $('prompt').hidden=!finalReady;$('action-label').textContent=labels[$('mode').value];$('copy').disabled=busy||!finalReady;
+    $('return').hidden=!finalReady;mapping.sync(row,finalReady);
     $('terminal').hidden=manual||!row?.product_title||!row?.lifecycle;$('terminal').textContent=row?.product_title?`${row.shopify_completion||'Shopify product verified'} · Linked to ${row.product_title} · ${row.state}${row.reason?' — '+row.reason:''}`:'';
     $('retry').hidden=manual||!row?.lifecycle||row.lifecycle.state!=='Error';$('retry').textContent='Retry file handoff';
     if(previewKey&&previewKey!==row?.preview_url){clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('preview').textContent='Preview pending';}
     if(row?.basic_validated&&!row.preview_url)$('preview').textContent=row.state==='Failed'?'Preview unavailable':row.product_title?'Preview waiting':'PSD saved';
-    if(row?.preview_url&&previewKey!==row.preview_url)loadPreview(row.preview_url);
+    // The final text/mapping component never displays a PSD thumbnail. Loading
+    // it here previously repeated Dropbox thumbnail/metadata and cache checks.
+    if(section!=='handoff'&&row?.preview_url&&previewKey!==row.preview_url)loadPreview(row.preview_url);
     $('remove').hidden=!row;
     $('artwork-retry').hidden=manual||!row||!['Error','Selected'].includes(row.state);$('artwork-retry').disabled=busy;
-    if(section==='upload'){$('save-first').hidden=true;$('prompt').hidden=true;$('return').hidden=true;$('terminal').hidden=true;$('retry').hidden=true;}
+    if(section==='upload'){$('prompt').hidden=true;$('return').hidden=true;$('terminal').hidden=true;$('retry').hidden=true;}
     if(section==='handoff'){$('setup').hidden=true;$('automatic').hidden=true;$('footer').hidden=true;$('remove').hidden=true;}
     if(row?.state==='Ready'&&selectedAt&&!timedReady.has(row.id)){timedReady.add(row.id);record(metrics.selections,{id:row.id,selection_to_mockup_ready_ms:Date.now()-selectedAt});}
     schedule();resize();

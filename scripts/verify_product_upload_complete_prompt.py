@@ -103,8 +103,9 @@ def main():
                 expect(page.locator('#copy')).to_have_text('Copy Complete Upload Prompt')
                 context.request.post(server.base+'/fixture/change')
                 page.reload()
-                expect(button).to_be_disabled()
-                expect(page.locator('#save-first')).to_be_visible()
+                expect(page.locator('#copy')).to_be_disabled()
+                expect(page.locator('#prompt')).to_be_hidden()
+                expect(page.locator('#return')).to_be_hidden()
                 assert not errors and not downloads
                 assert not any(any(part in u for part in ('saved-image', 'saved-package', 'saved-transfer', 'clipboard-launch')) for u in requests)
                 provider.assert_not_called()

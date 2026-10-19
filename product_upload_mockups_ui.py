@@ -52,7 +52,6 @@ def render_page(app):
     key=st.session_state.get('_product_upload_active')
     manual=st.session_state.get('_product_upload_manual',False)
     if manual:
-        component(section='handoff',manual=True,mode=st.session_state.get('_product_upload_mode','LIVE'),key='product-upload-manual-'+visit,default=None)
         return
     if not key: return
     row=Intakes(connect).read(key,user['id'])
@@ -63,12 +62,18 @@ def render_page(app):
     with st.container(key='product-upload-workspace'):
         with st.container(key='mockups-workspace'):
             render_design(app,row,user)
-    # Hand-off is below the SAME existing lifestyle/export controls. Rendering
-    # the text prompt, exports and clipboard never confirms a Shopify product.
+    # Do not mount a second workflow iframe (polling, mapping, preview effects)
+    # until this product's complete Save All result is current. A CSS hide still
+    # runs those effects and competed with PSD preparation in the last release.
     row=Intakes(connect).read(key,user['id'])
+    if not row or not row['data'].get('mockups_exported'):return
+    from product_upload_jobs import JOBS
+    if any((JOBS.snapshot(key,user['id'],operation) or {}).get('state') in ('Queued','Running')
+           for operation in ('prepare','generate','save')):return
     from product_upload_intake import public
     state=public(row)
-    linked=component(section='handoff',id=key,mode=row['mode'],source_version=state.get('saved_source_version',''),key='product-upload-handoff-'+visit+'-'+key,default=None)
+    if not state.get('saved_source_version'):return
+    linked=component(section='handoff',id=key,mode=row['mode'],source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
     if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
         st.session_state['_product_upload_linked']=linked['nonce']
         st.rerun()

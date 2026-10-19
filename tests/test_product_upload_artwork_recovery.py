@@ -137,18 +137,20 @@ def test_sdk_adapter_pins_id_revision_and_streams_complete_response(tmp_path, mo
 
 @pytest.mark.parametrize('state', ['Selected', 'Preparing', 'Failed'])
 def test_generate_is_disabled_until_artwork_ready(env, tmp_path, monkeypatch, state):
+    from contextlib import nullcontext
     import product_upload_api as api
     import image_factory
     store, sql, provider = env
     row, meta, original = source_fixture(env, tmp_path, monkeypatch); key = str(row['id'])
     with store.locked(key, ADMIN['id']) as (current, cur):current['data']['server_artwork'] = dict(state=state, reason='Verified failure')
     monkeypatch.setattr(api, 'connect', store.connect); monkeypatch.setattr(api, 'Dropbox', lambda: provider)
+    monkeypatch.setattr('product_upload_sport.render_selector', lambda *a, **kw:dict(sport='Football',id='id:sport'))
     seen = []
     def button(label, **kwargs):
         if label == 'Generate mockups':seen.append(kwargs['disabled']); return True  # disabled callbacks never submit
         return False
     st = SimpleNamespace(session_state={'_product_upload_active': key}, subheader=Mock(), text_input=lambda *a, **k:k.get('value', ''),
-        selectbox=lambda *a, **k:'Football', button=button, info=Mock(), error=Mock(),caption=Mock())
+        selectbox=lambda *a, **k:'Football', button=button, info=Mock(), error=Mock(),caption=Mock(),container=lambda **kw:nullcontext())
     app = SimpleNamespace(_mockups_result=lambda: None, alphabetize_options=lambda values, **k:values,
         SPORT_OPTIONS=['Football'], get_sport_category=lambda a,b:a)
     generate = Mock(side_effect=AssertionError('Not ready'))
