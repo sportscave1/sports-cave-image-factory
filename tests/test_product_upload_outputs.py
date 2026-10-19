@@ -24,7 +24,7 @@ def test_master_each_scene_complete_and_custom_selections_stable():
     assert scene_texts(result,loaded,lambda *a:'saved custom')==custom
     master=compose(INSTRUCTIONS,first)
     assert master.count(PER_IMAGE)==3
-    for text in ('THREE complete','Immediately generate Card 1','Wait until Card 1 is approved','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','841 × 594 mm','594 × 841 mm','acrylic rather than glass','Reflections match the room lighting','1024 × 1024'):
+    for text in ('THREE complete','Immediately generate Card 1','Immediately continue to Card 2 without waiting for approval or another message','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','841 × 594 mm','594 × 841 mm','acrylic rather than glass','Reflections match the room lighting','1024 × 1024'):
         assert text in master
     assert all(filename in factory.PRODUCT_PAGE_PROMPT_FILENAMES for filename in FILENAMES)
 
@@ -141,6 +141,43 @@ def test_explicit_collision_cancel_then_numbered_retry(env,tmp_path):
     assert not second['failures'] and second['destination']==first['destination']
     assert len([c for c in api.calls if c[0]=='folder'])==1
     assert api.files[target]['id']=='unrelated-folder'
+
+
+def test_category_id_rename_retries_same_owned_product_folder(env,tmp_path):
+    store,_,_=env;row,result,manifest=make_result(env,tmp_path)
+    api=Outputs();provider=SimpleNamespace(api=api,token='fixture')
+    parent=api.base+'/Cricket'
+    api.files[parent]['id']='id:category'
+    # Metadata-by-ID and returned paths model the real team-space SDK.
+    def metadata(token,path):
+        for current,value in api.files.items():
+            if current==path or value.get('id')==path:return dict(value,path_display=current)
+        return None
+    api.get_metadata_if_exists=metadata
+    api.fail_once=manifest[0]['archive_name']
+    first=transfer(provider,result,manifest,api.root,parent,'Product',store.connect,ADMIN['id'],lambda *a:None,category_id='id:category')
+    assert first['failures']
+    new_parent=api.base+'/Cricket Wall Art'
+    api.files={path.replace(parent,new_parent,1) if path==parent or path.startswith(parent+'/') else path:value for path,value in api.files.items()}
+    second=transfer(provider,result,manifest,api.root,new_parent,'Product',store.connect,ADMIN['id'],lambda *a:None,category_id='id:category')
+    assert not second['failures'] and second['destination']==new_parent+'/Product'
+    assert len([c for c in api.calls if c[0]=='folder'])==1
+
+
+def test_category_move_during_transfer_stops_before_more_uploads(env,tmp_path):
+    store,_,_=env;row,result,manifest=make_result(env,tmp_path)
+    api=Outputs();provider=SimpleNamespace(api=api,token='fixture');parent=api.base+'/Cricket'
+    original=api.get_metadata_if_exists
+    moved=[False]
+    def metadata(token,path):
+        if path=='id:category':return {'.tag':'folder','id':path,'name':'Cricket','path_display':parent+'/nested' if moved[0] else parent}
+        return original(token,path)
+    api.get_metadata_if_exists=metadata
+    def progress(stage,completed,total):
+        if completed==1:moved[0]=True
+    with pytest.raises(ValueError,match='no longer directly'):
+        transfer(provider,result,manifest,api.root,parent,'Product',store.connect,ADMIN['id'],progress,category_id='id:category')
+    assert len([c for c in api.calls if c[0]=='upload'])==1
 
 
 def test_save_encoder_and_manifest_exactly_match_standalone(env,tmp_path,monkeypatch,request):

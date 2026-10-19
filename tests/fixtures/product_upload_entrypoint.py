@@ -42,7 +42,7 @@ def configure(ns):
 
     # Fail explicitly if any extracted-module dependency is absent, including
     # callbacks not exercised by an empty page or disabled buttons.
-    for filename in ('product_upload_mockups_ui.py', 'product_upload_outputs_ui.py'):
+    for filename in ('product_upload_mockups_ui.py', 'product_upload_outputs_ui.py', 'product_upload_sport.py'):
         tree = ast.parse((ROOT / filename).read_text(encoding='utf-8'))
         required = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)
                     and isinstance(n.value, ast.Name) and n.value.id == 'app'}
@@ -54,6 +54,11 @@ def configure(ns):
         from PIL import Image
         from product_upload_lifestyle import FILENAMES
         factory = ns['get_image_factory']()
+        ns['_files_access_token']=lambda:'synthetic'
+        ns['_files_team_root']=lambda token:'/Team'
+        stack.enter_context(patch.object(ns['dropbox_integration'],'list_folder_page',
+            lambda *a,**kw:dict(entries=[{'.tag':'folder','id':'id:cricket','name':'Cricket Wall Art',
+                'path_display':'/Team/04_OUTPUT/product-images/Cricket Wall Art'}],has_more=False)))
         root = factory.create_temp_run_parent() / 'synthetic-run'
         root.mkdir()
         assets = []

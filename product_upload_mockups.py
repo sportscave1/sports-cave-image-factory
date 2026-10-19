@@ -30,7 +30,7 @@ def bind_export(connect, actor, result, kind, *, folder=''):
                     for x in factory.product_image_manifest_json(result['product_image_manifest'])]))
 
 
-def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False):
+def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None):
     """Reserve a destination once, including the existing numbered-folder rule.
 
     The provider call never occurs under a long DB transaction. Failed/unknown
@@ -39,7 +39,7 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
     """
     import auto_editions as ae
     entries=[dict(name=x['archive_name'],hash=ae.file_hash(x['path'])) for x in manifest]
-    fingerprint=hashlib.sha256(json.dumps([entries,parent,folder_name,conflict],sort_keys=True).encode()).hexdigest()
+    fingerprint=hashlib.sha256(json.dumps([entries,parent_identity or parent,folder_name,conflict],sort_keys=True).encode()).hexdigest()
     store=Intakes(connect);key=result['_product_upload_intake'];api=provider.api
     with store.locked(key,actor) as (row,cur):
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
@@ -48,6 +48,13 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
             raise ValueError('The selected PSD identity/revision changed. Reselect it before saving.')
         saves=row['data'].setdefault('mockup_saves',{})
         old=saves.get(fingerprint)
+        if old and parent_identity and old.get('folder_id'):
+            owned=api.get_metadata_if_exists(provider.token,old['folder_id'])
+            target=api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
+            if not owned or owned.get('id')!=old['folder_id'] or target.rsplit('/',1)[0].casefold()!=parent.casefold():
+                raise ValueError('The reserved product folder moved or is unavailable. No new folder was created; restore it before retrying.')
+            old['target']=target
+            if old.get('receipt'):old['receipt']=dict(old['receipt'],destination=target)
         if old and old['state']=='Complete': return old['receipt']
         if old and old['state']=='Saving' and time.time()-old['started_at']<600:
             raise ValueError('This exact save is already running. Wait for its receipt before retrying.')

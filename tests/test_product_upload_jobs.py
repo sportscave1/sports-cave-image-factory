@@ -94,8 +94,21 @@ def test_generate_callback_uses_latest_form_values_without_doing_image_work(monk
         MOCKUPS_GENERATION_SEMAPHORE=threading.Semaphore(1),build_mockup_final_prompt_items=Mock())
     row=dict(id='one',data=dict(name='Original.psd',workflow_version=3,server_artwork={'state':'Ready'},source={'content_hash':'a'*64}))
     submit=Mock();monkeypatch.setattr(jobs,'generate',submit);monkeypatch.setattr(jobs.JOBS,'snapshot',lambda *a:None)
+    import product_upload_sport
+    selection=dict(id='id:football',sport='Football',path='/Team/product-images/Football')
+    monkeypatch.setattr(product_upload_sport,'render_selector',lambda *a,**k:selection)
+    monkeypatch.setattr(product_upload_sport,'selected',lambda key:selection)
+    app._files_access_token=lambda:'fixture'
+    app._files_team_root=lambda token:'/Team'
+    app.dropbox_integration=Mock()
+    monkeypatch.setattr('product_upload_export.resolve_category',lambda *a:selection)
     scope=dict(st=st,Path=Path);exec(compile(ast.Module(body=[fn],type_ignores=[]),'render-design','exec'),scope)
     scope['render_design'](app,row,{'id':'actor'})
     st.session_state['product-upload-name-one']='Current product title'
     callbacks['generate']()
     assert submit.call_args.args[3]=='Current product title'
+    assert submit.call_args.args[4]=='Football'
+    submit.reset_mock()
+    selection=None
+    callbacks['generate']()
+    submit.assert_not_called()

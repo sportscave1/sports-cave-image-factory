@@ -51,6 +51,13 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
             assert len(gallery['items']) == 5
             assert all(i['preview'].startswith('data:image/webp;base64,') for i in gallery['items'])
             assert any(p.get('mode') == 'actions' and p.get('prompt') for p in payloads)
+            from product_upload_lifestyle import AUTOMATIC_START
+            copied = next(p['prompt'] for p in payloads if p.get('mode') == 'actions')
+            assert copied.startswith(AUTOMATIC_START + '\n\n')
+            assert copied.count('AUTOMATIC START —') == 1
+            assert copied.count('END AUTOMATIC START') == 1
+            assert 'Wait until Card 1 is approved' not in copied
+            assert 'stop and wait' not in copied
             assert len(test.get('file_uploader')) == 3
             assert any(b.label == 'Save all' for b in test.button)
             assert not any('Edit master prompt' in b.label for b in test.button)

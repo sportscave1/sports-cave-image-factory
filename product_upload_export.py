@@ -26,7 +26,8 @@ def sport_categories(api, token, root):
             path=api.normalize_dropbox_path(entry.get('path_display') or entry.get('path_lower') or '')
             if (entry.get('.tag')=='folder' and path.rsplit('/',1)[0].casefold()==base.casefold()
                     and api.path_is_within_root(path,base)):
-                folders[path.casefold()]=dict(path=path,name=entry.get('name') or path.rsplit('/',1)[-1])
+                name=entry.get('name') or path.rsplit('/',1)[-1]
+                folders[path.casefold()]=dict(id=entry.get('id'),path=path,name=name,sport=folder_sport(name))
         if not page.get('has_more'):break
         cursor=page.get('cursor')
         if not cursor or cursor in seen:raise ValueError('Dropbox folder listing is incomplete. Retry Save all.')
@@ -34,11 +35,34 @@ def sport_categories(api, token, root):
     return sorted(folders.values(),key=lambda folder:(folder['name'].casefold(),folder['path']))
 
 
-def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress, *, conflict='numbered'):
+def folder_sport(name):
+    import re
+    from sports_categories import normalize_sport_category
+    label=re.sub(r'\s+wall art$', '', name, flags=re.I).strip()
+    # The shared taxonomy aliases Soccer to Football; these destinations must
+    # remain distinct, including their product naming and export identity.
+    return 'Soccer' if label.casefold()=='soccer' else normalize_sport_category(label,label)
+
+
+def resolve_category(api, token, root, category_id):
+    if not category_id:raise ValueError('Select a sport category above before continuing.')
+    entry=api.get_metadata_if_exists(token,category_id)
+    base=collection_root(api,root)
+    path=api.normalize_dropbox_path((entry or {}).get('path_display') or (entry or {}).get('path_lower') or '')
+    if (not entry or entry.get('id')!=category_id or entry.get('.tag')!='folder'
+            or path.rsplit('/',1)[0].casefold()!=base.casefold() or not api.path_is_within_root(path,base)):
+        raise ValueError('The selected sport folder is missing, inaccessible, or no longer directly inside product-images. Choose an available sport above.')
+    name=entry.get('name') or path.rsplit('/',1)[-1]
+    return dict(id=category_id,path=path,name=name,sport=folder_sport(name),root=root)
+
+
+def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress, *, conflict='numbered', category_id=None):
     from product_upload_mockups import save,bind_export
     import auto_editions as ae
     import mockup_storage
     api=provider.api
+    if category_id and resolve_category(api,provider.token,root,category_id)['path']!=parent:
+        raise ValueError('The sport folder changed before saving. Refresh the top selection and retry.')
     base=collection_root(api,root)
     parent=api.normalize_dropbox_path(parent)
     if parent.rsplit('/',1)[0].casefold()!=base.casefold() or not api.path_is_within_root(parent,base):
@@ -64,6 +88,8 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
         successes={x['relative_path']:x for x in previous.get('confirmed',())}
         failures=[]
         for index,entry in enumerate(manifest,1):
+            if category_id and resolve_category(api,provider.token,root,category_id)['path']!=parent:
+                raise ValueError('The sport folder moved during saving. Refresh the top selection and retry; confirmed files are retained.')
             name=entry['archive_name']
             progress('Saving '+name,index-1,total)
             try:
@@ -95,7 +121,7 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
         return dict(destination=target,successes=list(successes.values()),failures=failures,cancelled=False)
 
     if conflict not in ('cancel','numbered'):raise ValueError('Choose a safe output-folder conflict option.')
-    receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,checkpointed=True)
+    receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,checkpointed=True,parent_identity=category_id)
     if not receipt.get('failures') and len(receipt.get('successes',()))==total:
         import image_factory
         if image_factory.product_image_readiness(result['product_image_manifest'])['complete']:

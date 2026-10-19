@@ -12,7 +12,53 @@ LABELS = ('Man Cave', 'Office', 'Living Room')
 ROOM_COMBINATIONS = ((1,0,2),(2,2,0),(0,1,1),(3,4,4),(4,3,3))
 FILENAMES = ('01-man-cave-prompt.txt', '02-office-prompt.txt', '03-living-room-prompt.txt')
 
-INSTRUCTIONS = '''# SPORTS CAVE — ULTIMATE 3-MOCKUP MASTER V6
+AUTOMATIC_START = '''AUTOMATIC START — GENERATE ALL THREE IN SEQUENCE
+When this prompt and a product image are supplied, immediately execute the complete mockup workflow.
+
+Prepare three independent scene prompts, then generate:
+1. Card 1 — Man Cave.
+2. Card 2 — Office.
+3. Card 3 — Living Room.
+
+Generate each card as a separate, standalone image using a separate image-generation call. Finish one, then immediately continue to the next until all three are complete. Never combine them into a collage, triptych or single image.
+
+Do not wait for approval between cards. Do not ask whether to continue. Do not require the user to say “next” or send another message. Do not stop after acknowledging the files, preparing prompts or generating the first image.
+
+Use the original supplied product for every card and follow the existing exact-product compositing and artwork-preservation requirements. Create three genuinely different rooms while respecting saved scene selections.
+
+If an image-loading error occurs, retry accessing the supplied file and resume automatically once resolved. If a genuine blocker prevents completion, explain the specific blocker and accurately identify which cards remain unfinished. Never claim an image was generated when it was not.
+END AUTOMATIC START'''
+
+
+def sequential_instructions(text):
+    """Migrate the old Product Upload execution rules, including saved overrides.
+
+    Only execution directives change; approved artwork/room/camera locks stay intact.
+    Run at the copy boundary as well as on the default so cached overrides are safe.
+    """
+    text = re.sub(r'AUTOMATIC START[^\n]*\n.*?END AUTOMATIC START', '', text,
+                  flags=re.DOTALL)
+    replacements = {
+        '7. Wait until Card 1 is approved, finalised or the user explicitly requests Card 2.':
+            '7. Immediately continue to Card 2 without waiting for approval or another message.',
+        '9. Wait for approval or explicit instruction to continue.':
+            '9. Immediately continue to Card 3 without waiting for approval or another message.',
+        'Do not advance to another card unless instructed.':
+            'Complete any unfinished cards automatically; preserve completed cards unless a revision is requested.',
+        '# 21. REVISION AND APPROVAL WORKFLOW': '# 21. AUTOMATIC GENERATION AND REVISION WORKFLOW',
+        'Once Card 1 has been generated, stop and wait.':
+            'Once Card 1 has been generated, immediately generate Card 2, then Card 3, each in a separate image-generation call.',
+        'If the user approves Card 1, proceed to Card 2 when requested.':
+            'Continue automatically until all three individual images are complete.',
+        'If the user requests Card 2 or Card 3 explicitly, treat that as permission to advance to the named card.':
+            'No approval or explicit request is required between cards.',
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return AUTOMATIC_START + '\n\n' + text.strip()
+
+
+INSTRUCTIONS = sequential_instructions('''# SPORTS CAVE — ULTIMATE 3-MOCKUP MASTER V6
 
 **Photorealistic Collector Lifestyle Mockups | Product Page Production System**
 
@@ -73,12 +119,12 @@ Never show all three rooms inside one image.
 4. Write THREE complete, separately labelled, fully independent image-generation prompts: Man Cave, Office, Living Room.
 5. Each prompt must include the full product lock, physical scale, glazing, scene, lighting, composition, realism, quality and output requirements.
 6. Immediately generate Card 1 as one standalone image.
-7. Wait until Card 1 is approved, finalised or the user explicitly requests Card 2.
+7. Immediately continue to Card 2 without waiting for approval or another message.
 8. Generate Card 2 independently, using the original supplied product again.
-9. Wait for approval or explicit instruction to continue.
+9. Immediately continue to Card 3 without waiting for approval or another message.
 10. Generate Card 3 independently.
 
-If the user requests a revision, regenerate only the requested card. Do not advance to another card unless instructed.
+If the user requests a revision, regenerate only the requested card. Complete any unfinished cards automatically; preserve completed cards unless a revision is requested.
 
 Sports Cave OS may supply the product image and saved scene briefs, but ChatGPT controls this conversation's generation sequence.
 
@@ -978,13 +1024,13 @@ Do not claim exact pixel fidelity or successful source-preserving compositing wi
 
 ---
 
-# 21. REVISION AND APPROVAL WORKFLOW
+# 21. AUTOMATIC GENERATION AND REVISION WORKFLOW
 
-Once Card 1 has been generated, stop and wait.
+Once Card 1 has been generated, immediately generate Card 2, then Card 3, each in a separate image-generation call.
 
-If the user approves Card 1, proceed to Card 2 when requested.
+Continue automatically until all three individual images are complete.
 
-If the user requests Card 2 or Card 3 explicitly, treat that as permission to advance to the named card.
+No approval or explicit request is required between cards.
 
 If the user requests changes:
 
@@ -1048,7 +1094,7 @@ The original artwork should always remain perfect and unchanged.
 
 Produce three distinctly different, believable premium homes showing the same original Sports Cave framed product, with the product always the unmistakable hero.
 
-**END SPORTS CAVE ULTIMATE 3-MOCKUP MASTER V6**'''
+**END SPORTS CAVE ULTIMATE 3-MOCKUP MASTER V6**''')
 
 PER_IMAGE = '''## 3. ABSOLUTE PRODUCT AND ARTWORK LOCK
 
@@ -1345,6 +1391,6 @@ def scene_texts(result, current_text, saved_base):
 
 
 def compose(instructions, texts):
-    return instructions.strip() + '\n\n' + '\n\n'.join(
+    return sequential_instructions(instructions) + '\n\n' + '\n\n'.join(
         f'{index + 1}. {label}\n{PER_IMAGE}\n\nSaved scene/composition/output requirements:\n{text}'
         for index, (label, text) in enumerate(zip(LABELS, texts)))

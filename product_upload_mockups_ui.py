@@ -23,6 +23,9 @@ def render_page(app):
         st.session_state['_product_upload_mode']=event.get('mode','DRAFT')
         st.session_state['_product_upload_visible']=event.get('visible',True)
         if previous!=event.get('id'):
+            from product_upload_sport import clear_selection
+            clear_selection(previous)
+            clear_selection(event.get('id'))
             from product_upload_gallery import revoke
             revoke(previous,user['id'])
             from product_upload_jobs import JOBS
@@ -119,13 +122,18 @@ def render_design(app,row,user):
     if result and result.get('_product_upload_intake')!=key:
         app._set_mockups_result(None);result=None
     st.subheader('Prepare product images')
-    name=st.text_input('Product name',value=Path(row['data']['name']).stem,key='product-upload-name-'+key)
-    from sports_categories import infer_sport_category
-    options=app.alphabetize_options(app.SPORT_OPTIONS,last=('Custom',))
-    inferred=infer_sport_category([Path(row['data']['name']).stem],default='')
-    option=st.selectbox('Sport category',options=options,index=options.index(inferred) if inferred in options else 0,key='product-upload-sport-'+key)
-    custom=st.text_input('Custom sport category',key='product-upload-custom-'+key) if option=='Custom' else ''
-    sport=app.get_sport_category(option,custom)
+    from product_upload_sport import render_selector,selected,rebind_result
+    active_jobs=[JOBS.snapshot(key,user['id'],operation) for operation in ('generate','save')]
+    busy=any(job and job['state'] in ('Queued','Running') for job in active_jobs)
+    name=st.text_input('Product name',value=Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
+    choice=render_selector(app,key,user,disabled=busy)
+    sport=choice['sport'] if choice else ''
+    if result and choice and not busy:
+        updated=rebind_result(app,result,name,choice)
+        if updated is not result:
+            with Intakes(connect).locked(key,user['id']) as (current,cur):
+                current['data'].update(mockups_exported=False,mockups_context=None)
+            result=updated;app._set_mockups_result(result)
     if row['data'].get('workflow_version')!=3:
         st.info('Choose a Dropbox PSD for server preparation. This saved legacy workflow is retained.');return
     spec=row['data'].get('server_artwork') or {}
@@ -138,8 +146,19 @@ def render_design(app,row,user):
         active_save=JOBS.snapshot(key,user['id'],'save')
         if active_save and active_save['state'] in ('Queued','Running'):return
         selected_name=st.session_state.get('product-upload-name-'+key,name).strip()
-        selected_option=st.session_state.get('product-upload-sport-'+key,option)
-        selected_sport=app.get_sport_category(selected_option,st.session_state.get('product-upload-custom-'+key,custom))
+        selection=selected(key)
+        if selection:
+            from product_upload_export import resolve_category
+            from product_upload_sport import state_key
+            try:
+                token=app._files_access_token()
+                selection=resolve_category(app.dropbox_integration,token,app._files_team_root(token),selection['id'])
+            except Exception:
+                st.session_state[state_key(key)+'-error']='The selected sport folder is unavailable. Refresh and select an available sport before generating.'
+                st.session_state.pop(state_key(key)+'-folders',None)
+                st.session_state.pop(state_key(key)+'-resolved',None)
+                return
+        selected_sport=selection['sport'] if selection else ''
         if not selected_name or not selected_sport:return
         if result and result['product_name']==selected_name and result['sport_category']==selected_sport:return
         if row['data'].get('product_gid'):

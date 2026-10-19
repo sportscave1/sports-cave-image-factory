@@ -2,14 +2,43 @@ import unittest
 
 import mockup_product_prompts as scenes
 from product_upload_lifestyle import (
-    FILENAMES, INSTRUCTIONS, LABELS, PER_IMAGE, PROMPT_ID, compose, scene_texts,
+    AUTOMATIC_START, FILENAMES, INSTRUCTIONS, LABELS, PER_IMAGE, PROMPT_ID, compose, scene_texts,
 )
 
 
 class ProductUploadMasterV6Tests(unittest.TestCase):
+    def test_saved_override_migration_is_idempotent_and_preserves_design_locks(self):
+        legacy = '''AUTOMATIC START — OLD
+Generate Card 1 and wait for approval.
+END AUTOMATIC START
+Custom master: retain the saved coastal room and low camera.
+7. Wait until Card 1 is approved, finalised or the user explicitly requests Card 2.
+9. Wait for approval or explicit instruction to continue.
+Do not advance to another card unless instructed.
+# 21. REVISION AND APPROVAL WORKFLOW
+Once Card 1 has been generated, stop and wait.
+If the user approves Card 1, proceed to Card 2 when requested.
+If the user requests Card 2 or Card 3 explicitly, treat that as permission to advance to the named card.
+If a room or angle has already been approved or explicitly locked, do not randomise that setting.
+Do not regenerate already approved cards.'''
+        from product_upload_lifestyle import sequential_instructions
+        migrated = sequential_instructions(AUTOMATIC_START + '\n\n' + legacy)
+        self.assertEqual(sequential_instructions(migrated), migrated)
+        prompt = compose(migrated, ['locked man cave', 'locked office', 'locked living room'])
+        self.assertTrue(prompt.startswith(AUTOMATIC_START + '\n\n'))
+        self.assertEqual(prompt.count('AUTOMATIC START —'), 1)
+        self.assertEqual(prompt.count('END AUTOMATIC START'), 1)
+        for conflict in ('stop and wait', 'when requested', 'unless instructed',
+                         'Wait until Card 1', 'Wait for approval', 'permission to advance'):
+            self.assertNotIn(conflict, prompt)
+        for preserved in ('retain the saved coastal room and low camera',
+                          'do not randomise that setting', 'Do not regenerate already approved cards',
+                          'locked man cave', 'locked office', 'locked living room'):
+            self.assertIn(preserved, prompt)
+
     def test_v6_master_and_per_card_requirements(self):
         self.assertEqual(PROMPT_ID, 'lifestyle::product-upload-master-v6')
-        self.assertTrue(INSTRUCTIONS.startswith('# SPORTS CAVE — ULTIMATE 3-MOCKUP MASTER V6'))
+        self.assertTrue(INSTRUCTIONS.startswith(AUTOMATIC_START))
         self.assertTrue(INSTRUCTIONS.endswith('**END SPORTS CAVE ULTIMATE 3-MOCKUP MASTER V6**'))
         prompt = compose(INSTRUCTIONS, ['saved lounge', 'saved office', 'saved living room'])
         self.assertTrue(prompt.startswith(INSTRUCTIONS))
@@ -22,7 +51,9 @@ class ProductUploadMasterV6Tests(unittest.TestCase):
                             '1024 × 1024', 'Never claim artwork integrity was verified'):
             self.assertIn(requirement, PER_IMAGE)
         self.assertIn('Immediately generate Card 1 as one standalone image', INSTRUCTIONS)
-        self.assertIn('Wait until Card 1 is approved', INSTRUCTIONS)
+        self.assertNotIn('Wait until Card 1 is approved', INSTRUCTIONS)
+        self.assertEqual(prompt.count(AUTOMATIC_START), 1)
+        self.assertEqual(prompt.count('END AUTOMATIC START'), 1)
         self.assertNotIn('Artwork/paper is 841 mm wide', prompt)
 
     def test_saved_custom_room_and_camera_survive(self):

@@ -23,48 +23,86 @@ def test_incomplete_listing_fails_closed(monkeypatch):
     with pytest.raises(ValueError,match='incomplete'):sport_categories(api,'token','/Team')
 
 
-def test_compact_destination_panel(tmp_path,monkeypatch):
-    from streamlit.testing.v1 import AppTest
-    from pathlib import Path
-    script=Path(__file__).parent/'fixtures/product_upload_destination.py'
-    test=AppTest.from_file(str(script))
-    test.session_state['original_path']=str(tmp_path/'original.webp')
-    (tmp_path/'original.webp').write_bytes(b'original-export-not-preview')
-    test.run()
-    test.button(key='product-upload-save-all-fixture').click().run()
-    assert not test.exception
-    category=test.selectbox(key='product-upload-save-picker-fixture-category')
-    assert category.options==['Cricket','Motorsport Wall Art']
-    assert test.button(key='product-upload-save-confirm-fixture').disabled
-    category.select('/Team/04_OUTPUT/product-images/Motorsport Wall Art').run()
-    assert test.session_state['listing_calls']==['/Team/04_OUTPUT/product-images']
-    assert not test.session_state['submissions']
-    assert any(c.value=='Motorsport Wall Art / Current_ Product' for c in test.caption)
-    test.button(key='product-upload-save-close-fixture').click().run()
-    assert not test.error, [e.value for e in test.error]
-    assert not test.session_state['product-upload-save-picker-fixture']
-    assert not test.selectbox
-    assert test.session_state['result']['assets']==['prepared-originals']
-    test.button(key='product-upload-save-all-fixture').click().run()
-    assert test.selectbox[0].value.endswith('/Motorsport Wall Art')
-    test.button(key='product-upload-save-confirm-fixture').click().run()
-    assert not test.exception
-    assert len(test.session_state['submissions'])==1
-    captured=test.session_state['submissions'][0]
-    assert captured['parent'].endswith('/Motorsport Wall Art') and captured['folder']=='Current_ Product'
-    assert captured['manifest'][0]['path']==tmp_path/'original.webp'
-    assert captured['conflict']=='cancel'
-    assert test.button(key='product-upload-save-confirm-fixture').disabled
-    assert test.button(key='product-upload-save-all-fixture').disabled
-    assert test.selectbox[0].disabled
-    assert any('Saving' in i.value for i in test.info)
-
-
-def test_missing_assets_disable_save(tmp_path):
+def fixture_app(tmp_path):
     from streamlit.testing.v1 import AppTest
     from pathlib import Path
     test=AppTest.from_file(str(Path(__file__).parent/'fixtures/product_upload_destination.py'))
-    test.session_state['original_path']=str(tmp_path/'missing.webp')
-    test.run().button(key='product-upload-save-all-fixture').click().run()
-    test.selectbox[0].select('/Team/04_OUTPUT/product-images/Motorsport Wall Art').run()
-    assert test.button(key='product-upload-save-confirm-fixture').disabled
+    original=tmp_path/'original.webp';original.write_bytes(b'original-export-not-preview')
+    test.session_state['original_path']=str(original)
+    test.run()
+    return test,original
+
+
+def test_one_top_selection_drives_sport_and_save(tmp_path):
+    test,original=fixture_app(tmp_path)
+    assert len(test.selectbox)==1
+    assert test.selectbox[0].options==['Football Wall Art','Motorsport Wall Art','Soccer Wall Art','V8 Supercars Wall Art']
+    assert test.button(key='product-upload-save-all-fixture').disabled
+    test.selectbox[0].select('id:motor').run()
+    assert not test.exception and not test.error
+    assert test.session_state['listing_calls']==['/Team/04_OUTPUT/product-images']
+    assert not test.session_state['submissions']
+    assert test.session_state['result']['sport_category']=='Motorsport'
+    test.selectbox[0].select('id:v8').run()
+    result=test.session_state['result']
+    assert result['sport_category']=='V8 Supercars'
+    assert result['assets'][0]['webp_path']==original
+    assert result['lifestyle_mockup_paths']=={'uploaded':'retained'}
+    assert any(c.value=='Saving to: V8 Supercars Wall Art / Current_ Product' for c in test.caption)
+    assert not any(b.label=='Save' for b in test.button)
+    test.button(key='product-upload-save-all-fixture').click().run()
+    assert not test.exception and not test.error
+    captured=test.session_state['submissions'][0]
+    assert captured['parent'].endswith('/V8 Supercars Wall Art') and captured['folder']=='Current_ Product'
+    assert captured['category_id']=='id:v8' and captured['result']['sport_category']=='V8 Supercars'
+    assert captured['manifest'][0]['path']==original
+    assert 'v8-supercars' in captured['manifest'][0]['archive_name']
+    assert original.read_bytes()==b'original-export-not-preview'
+    assert captured['conflict']=='cancel'
+    assert test.button(key='product-upload-save-all-fixture').disabled and test.selectbox[0].disabled
+    assert len(test.session_state['submissions'])==1
+
+
+def test_id_rename_refresh_and_missing_folder_never_fallback(tmp_path):
+    test,_=fixture_app(tmp_path)
+    test.selectbox[0].select('id:motor').run()
+    test.session_state['renamed']=True
+    test.run()
+    assert test.selectbox[0].value=='id:motor'
+    assert 'Motor Racing Wall Art' in test.selectbox[0].options
+    test.button(key='product-upload-save-all-fixture').click().run()
+    captured=test.session_state['submissions'][0]
+    assert captured['parent'].endswith('/Motor Racing Wall Art')
+    test.session_state['job']=None
+    test.session_state['missing']=True
+    test.run()
+    assert test.error
+    assert test.selectbox[0].value is None
+    assert test.button(key='product-upload-save-all-fixture').disabled
+    assert len(test.session_state['submissions'])==1
+
+
+def test_new_upload_clears_selection_without_default(tmp_path):
+    test,_=fixture_app(tmp_path)
+    test.selectbox[0].select('id:soccer').run()
+    assert test.session_state['result']['sport_category']=='Soccer'
+    test.selectbox[0].select('id:football').run()
+    assert test.session_state['result']['sport_category']=='Football'
+    test.button[ -1 ].click().run()
+    assert test.session_state['product-upload-category-fixture-resolved'] is None
+    assert test.button(key='product-upload-save-all-fixture').disabled
+
+
+def test_missing_original_disables_save(tmp_path):
+    test,original=fixture_app(tmp_path)
+    original.unlink()
+    test.selectbox[0].select('id:motor').run()
+    assert test.button(key='product-upload-save-all-fixture').disabled
+
+
+def test_resolve_rejects_moved_folder_and_uses_id(monkeypatch):
+    from product_upload_export import resolve_category
+    meta=Mock(return_value={'.tag':'folder','id':'id:motor','name':'Motor','path_display':'/Team/elsewhere/Motor'})
+    monkeypatch.setattr(api,'get_metadata_if_exists',meta)
+    with pytest.raises(ValueError,match='no longer directly'):resolve_category(api,'token','/Team','id:motor')
+    meta.assert_called_once_with('token','id:motor')
