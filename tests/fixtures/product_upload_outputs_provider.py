@@ -45,7 +45,10 @@ class Outputs:
             assert kwargs['conflict']=='cancel' and path not in self.files
             if self.fail_once in (name,'*'):
                 self.fail_once=None;failures.append(dict(relative_path=name,error='Isolated failure'));continue
-            local=Path(item['local_path']);value=dict(id='id:'+uuid.uuid4().hex,content_hash=ae.file_hash(local,dropbox=True),size=local.stat().st_size,**{'.tag':'file'})
+            parent=path.rsplit('/',1)[0]
+            if parent not in self.files:
+                self.files[parent]=dict(id='id:'+uuid.uuid4().hex,name=parent.rsplit('/',1)[-1],path_display=parent,**{'.tag':'folder'})
+            local=Path(item['local_path']);value=dict(id='id:'+uuid.uuid4().hex,name=path.rsplit('/',1)[-1],path_display=path,rev='fixture-rev',content_hash=ae.file_hash(local,dropbox=True),size=local.stat().st_size,**{'.tag':'file'})
             self.files[path]=value
             kwargs['progress_callback'](1,1,name,value['size']//2,value['size'])
             if self.delay:__import__('time').sleep(self.delay)

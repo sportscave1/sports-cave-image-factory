@@ -23,6 +23,17 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
     with Intakes(connect).locked(result['_product_upload_intake'], actor) as (row, cur):
         if row['data']['source']['content_hash'] != result['_product_upload_source_hash']:
             raise ValueError('Export belongs to a previous PSD; it cannot unlock this Shopify handoff.')
+        token = result.get('_product_upload_save_token')
+        if kind == 'Dropbox':
+            export_fingerprint = export_fingerprint or result.get('_product_upload_export_fingerprint')
+            if not export_fingerprint:
+                raise ValueError('Save All first: an exact save receipt is required.')
+            if not token or row['data'].get('mockup_save_token') != token:
+                raise ValueError('A newer image set or save operation replaced this save.')
+            if row['data'].get('mockup_save_fingerprint') != export_fingerprint:
+                raise ValueError('A newer save operation replaced this destination.')
+            if result.get('_product_upload_source') and row['data']['source'] != result['_product_upload_source']:
+                raise ValueError('Selected PSD changed during saving.')
         row['data'].update(mockups_exported=True, mockups_context=dict(
             design_name=result['product_name'], sport_category=result['sport_category'],
             folder=folder, export_kind=kind,
@@ -34,7 +45,10 @@ def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=N
         for fingerprint, saved in row['data'].get('mockup_saves', {}).items():
             if saved.get('state') == 'Complete' and saved.get('target') == folder and (not export_fingerprint or fingerprint==export_fingerprint):
                 op['output'].update(folder_id=saved.get('folder_id'), export_fingerprint=fingerprint,
-                                    files=saved.get('confirmed') or (saved.get('receipt') or {}).get('successes', []))
+                                    save_token=token, files=saved.get('confirmed') or (saved.get('receipt') or {}).get('successes', []))
+        if kind == 'Dropbox':
+            from product_upload_source import current_source
+            op['output']['webp_source'] = current_source(row)
 
 
 def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None):
@@ -55,6 +69,9 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
             raise ValueError('The selected PSD identity/revision changed. Reselect it before saving.')
         saves=row['data'].setdefault('mockup_saves',{})
         old=saves.get(fingerprint)
+        token=result.get('_product_upload_save_token')
+        if token and row['data'].get('mockup_save_token') != token:
+            raise ValueError('A newer image set or save operation replaced this save.')
         if old and parent_identity and old.get('folder_id'):
             owned=api.get_metadata_if_exists(provider.token,old['folder_id'])
             target=api.normalize_dropbox_path((owned or {}).get('path_display') or (owned or {}).get('path_lower') or '')
@@ -62,14 +79,21 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
                 raise ValueError('The reserved product folder moved or is unavailable. No new folder was created; restore it before retrying.')
             old['target']=target
             if old.get('receipt'):old['receipt']=dict(old['receipt'],destination=target)
-        if old and old['state']=='Complete': return dict(old['receipt'],export_fingerprint=fingerprint)
         if old and old['state']=='Saving' and time.time()-old['started_at']<600:
             raise ValueError('This exact save is already running. Wait for its receipt before retrying.')
+        if not token:
+            from product_upload_source import invalidate
+            token=invalidate(row)
+            result['_product_upload_save_token']=token
+        result['_product_upload_export_fingerprint']=fingerprint
+        row['data']['mockup_save_fingerprint']=fingerprint
+        row['data'].update(mockups_exported=False,mockups_context=None,copied=False)
+        if old and old['state']=='Complete': return dict(old['receipt'],export_fingerprint=fingerprint,save_token=token)
         if old: target=old['target']
         else:
             proposed=api.join_upload_path(parent,api.sanitize_path_component(folder_name,fallback='mockups'))
             existing=api.get_metadata_if_exists(provider.token,proposed)
-            if existing and conflict=='cancel': return dict(cancelled=True,destination=proposed,successes=[],failures=[])
+            if existing and conflict=='cancel': return dict(cancelled=True,destination=proposed,successes=[],failures=[],save_token=token)
             if existing and existing.get('.tag')!='folder': raise ValueError('A file already uses this output name.')
             target=api.numbered_path(provider.token,proposed) if existing and conflict=='numbered' else proposed
         import uuid
@@ -79,6 +103,10 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
         with store.locked(key,actor) as (row,cur):
             record=row['data']['mockup_saves'][fingerprint]
             if record.get('attempt')!=attempt:raise ValueError('A newer save attempt owns this destination.')
+            if row['data'].get('mockup_save_token')!=token:
+                raise ValueError('A newer image set or save operation replaced this save.')
+            if row['data'].get('mockup_save_fingerprint')!=fingerprint:
+                raise ValueError('A newer save operation replaced this destination.')
             if result.get('_product_upload_source') and row['data']['source']!=result['_product_upload_source']:
                 raise ValueError('Selected PSD changed during saving. Completed uploads are retained.')
             record.update(changes,started_at=time.time())
@@ -87,6 +115,8 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
     except Exception:
         checkpoint(state='Failed')
         raise
-    receipt=dict(receipt,export_fingerprint=fingerprint)
-    checkpoint(state='Failed' if receipt.get('failures') else 'Complete',receipt=receipt)
+    receipt=dict(receipt,export_fingerprint=fingerprint,save_token=token)
+    checkpoint(state='Failed' if receipt.get('failures') or receipt.get('cancelled') or
+               {x.get('relative_path') for x in receipt.get('successes', [])} != {x['name'] for x in entries}
+               else 'Complete',receipt=receipt)
     return receipt

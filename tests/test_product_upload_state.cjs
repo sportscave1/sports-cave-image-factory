@@ -28,7 +28,7 @@ async function fixture(){
  f=await fixture();await f.el('choose').onclick();await tick();await f.el('picker-items').children[0].onclick();
  assert.equal(f.el('filename').textContent,'Art.psd');assert(f.el('detail').textContent.includes('/Review/Art.psd'));
  f.el('remove').onclick();assert(f.el('summary').hidden);
- f.el('manual').onclick();for(const mode of ['DRAFT','LIVE','UPDATE']){f.el('mode').value=mode;await f.el('copy').onclick();assert.equal(f.el('copy').textContent,'Copied ✓');}
+ f.el('manual').onclick();for(const mode of ['DRAFT','LIVE','UPDATE']){f.el('mode').value=mode;await f.el('copy').onclick();assert(f.el('copy').disabled);assert(!f.el('save-first').hidden);}assert(!f.calls.some(x=>x.endsWith('/prompt')));
  f=await fixture();const loaded=f.delayBrowse();f.el('choose').onclick();await tick();assert(f.el('picker').open);f.el('mode').value='DRAFT';f.el('picker-close').onclick();assert(!f.el('picker').open);assert(f.el('choose').focused);loaded();await tick();assert.equal(f.el('picker-items').children.length,0);assert.equal(f.el('mode').value,'DRAFT');
  f.el('choose').onclick();await tick();assert(f.el('picker').open);let prevented=false;f.el('picker').cancel({preventDefault:()=>{prevented=true}});assert(prevented&&!f.el('picker').open&&f.el('choose').focused);
  f=await fixture();f.failPreparation(true);f.el('choose').onclick();await tick();await f.el('picker-items').children[0].onclick();assert.equal(f.el('stage').textContent,'Error');assert.equal(f.el('error').textContent,'Original PSD download interrupted.');assert(!f.el('artwork-retry').hidden);f.failPreparation(false);await f.el('artwork-retry').onclick();assert.equal(f.el('stage').textContent,'Ready');assert(f.el('artwork-retry').hidden);assert(f.el('error').hidden);

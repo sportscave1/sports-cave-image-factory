@@ -66,12 +66,12 @@ def render_page(app):
     # Hand-off is below the SAME existing lifestyle/export controls. Rendering
     # the text prompt, exports and clipboard never confirms a Shopify product.
     row=Intakes(connect).read(key,user['id'])
-    if row['data'].get('mockups_exported'):
-        output=(row['data'].get('upload_operation') or {}).get('output') or {}
-        linked=component(section='handoff',id=key,mode=row['mode'],package_version=output.get('export_fingerprint',''),key='product-upload-handoff-'+visit+'-'+key,default=None)
-        if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
-            st.session_state['_product_upload_linked']=linked['nonce']
-            st.rerun()
+    from product_upload_intake import public
+    state=public(row)
+    linked=component(section='handoff',id=key,mode=row['mode'],source_version=state.get('saved_source_version',''),key='product-upload-handoff-'+visit+'-'+key,default=None)
+    if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
+        st.session_state['_product_upload_linked']=linked['nonce']
+        st.rerun()
 
 
 @st.fragment(run_every=0.25)
@@ -152,8 +152,10 @@ def render_design(app,row,user):
         updated=rebind_result(app,result,name,choice)
         if updated is not result:
             with Intakes(connect).locked(key,user['id']) as (current,cur):
-                current['data'].update(mockups_exported=False,mockups_context=None)
+                from product_upload_source import invalidate
+                invalidate(current)
             result=updated;app._set_mockups_result(result)
+            st.rerun()
     if row['data'].get('workflow_version')!=3:
         st.info('Choose a Dropbox PSD for server preparation. This saved legacy workflow is retained.');return
     spec=row['data'].get('server_artwork') or {}

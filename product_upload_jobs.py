@@ -123,7 +123,9 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                     from product_upload_intake import Intakes
                     with Intakes(connect).locked(key,actor) as (value,cur):
                         if value['data'].get('product_gid'):raise ValueError('This PSD is already linked to Shopify. Start a separate design workflow.')
-                        value['data'].update(mockups_exported=False,mockups_context=None,copied=False,lookup='',choices=[])
+                        from product_upload_source import invalidate
+                        invalidate(value)
+                        value['data'].update(lookup='',choices=[])
                 provider=provider_factory()
                 completed=0
                 def asset(record,job,**kwargs):

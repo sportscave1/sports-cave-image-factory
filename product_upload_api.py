@@ -164,22 +164,27 @@ async def action(request):
         elif op == 'mode':
             row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
         elif op == 'copied':
-            row = await run_in_threadpool(store.copied, key, uid, body.get('mode'))
+            row = await run_in_threadpool(store.copied, key, uid, body.get('mode'), body.get('source_version', ''))
         elif op == 'prompt':
             from product_upload_prompts import build
             row = await run_in_threadpool(store.read, key, uid) if key else None
             if key and (not row or not row['data'].get('basic_validated') or row['mode'] != body.get('mode')):
                 raise ValueError('Finish the PSD upload and copy the current action.')
-            if row and row['data'].get('workflow_version') in (2,3) and not row['data'].get('mockups_exported'):
-                raise ValueError('Save or download the completed design images before copying the Shopify prompt.')
-            prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'] if row else '')
+            from product_upload_source import current_source
+            source = current_source(row, body.get('source_version', ''))
+            prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'], source=source)
             if row and row['data'].get('mockups_context'):
                 import json
-                prompt = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(row['data']['mockups_context'], ensure_ascii=False) + '\nAttach the exact saved WebP package before pasting this prompt. Copy upload prompt copies text only.\n\n' + prompt
+                output = row['data']['upload_operation']['output']
+                context = {k: output[k] for k in ('design_name', 'sport_category', 'images') if k in output}
+                prompt = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(context, ensure_ascii=False) + '\n\n' + prompt
             if row:
                 def correlated():
                     from product_upload_identity import correlation_prompt
                     with store.locked(key, uid) as (current, cur):
+                        current_source(current, source['version'])
+                        if current['mode'] != body.get('mode'):
+                            raise ValueError('The selected action changed. Copy the current prompt again.')
                         return correlation_prompt(current)
                 prompt = await run_in_threadpool(correlated) + prompt
             return JSONResponse(dict(prompt=prompt), headers=HEADERS)
@@ -414,13 +419,6 @@ async def saved_image(request):
         return failure(error)
 
 
-async def package_script(request):
-    try:
-        await actor(request, automatic=False)
-        return Response((Path(__file__).parent/'components/product_uploads/package.js').read_text(encoding='utf-8'), media_type='application/javascript', headers=HEADERS)
-    except Exception as error: return failure(error)
-
-
 ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
           ('/product-upload-native', clipboard_page, ('GET',)),
           ('/product-upload-native.js', clipboard_page, ('GET',)),
@@ -428,7 +426,6 @@ ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploa
           ('/api/product-uploads/clipboard-status', clipboard_status, ('POST',)),
           ('/api/product-uploads/clipboard-claim', clipboard_native, ('POST',)),
           ('/api/product-uploads/clipboard-complete', clipboard_native, ('POST',)),
-          ('/product-upload-package.js', package_script, ('GET',)),
           ('/api/product-uploads/saved-package', saved_package, ('GET',)),
           ('/api/product-uploads/saved-image', saved_image, ('GET',)),
           ('/product-upload-mapping.js', mapping_script, ('GET',)),

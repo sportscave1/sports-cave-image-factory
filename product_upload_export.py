@@ -118,12 +118,32 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
                 logging.getLogger(__name__).warning('product_upload_save_file_failed name=%s error_type=%s',name,type(error).__name__)
                 failures.append(dict(relative_path=name,error=str(error) if isinstance(error,ValueError) else 'Dropbox transfer failed. Retry Save all.'))
             progress('Saving '+name,index,total)
-        return dict(destination=target,successes=list(successes.values()),failures=failures,cancelled=False)
+        receipt = dict(destination=target,successes=list(successes.values()),failures=failures,cancelled=False)
+        return receipt
 
     if conflict not in ('cancel','numbered'):raise ValueError('Choose a safe output-folder conflict option.')
     receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,checkpointed=True,parent_identity=category_id)
     if not receipt.get('failures') and len(receipt.get('successes',()))==total:
         import image_factory
         if image_factory.product_image_readiness(result['product_image_manifest'])['complete']:
+            from product_upload_source import receipt_source
+            source = receipt_source(receipt, image_factory.product_image_manifest_json(result['product_image_manifest']))
+            if not receipt.get('webp_folder'):
+                # One exact metadata lookup, also for a completed save from an older release.
+                # The product folder ID is not the WEBP folder ID.
+                try:
+                    folder_meta = api.get_metadata_if_exists(provider.token, source['folder_path'])
+                except Exception:
+                    folder_meta = None  # The confirmed exact path remains usable without an ID.
+                if folder_meta and folder_meta.get('.tag') == 'folder' and folder_meta.get('id'):
+                    actual = folder_meta.get('path_display') or folder_meta.get('path_lower')
+                    if actual and actual.casefold() == source['folder_path'].casefold():
+                        receipt['webp_folder'] = dict(path=source['folder_path'], id=folder_meta['id'])
+                        from product_upload_intake import Intakes
+                        with Intakes(connect).locked(result['_product_upload_intake'], actor) as (current, cur):
+                            if (current['data'].get('mockup_save_token') != receipt['save_token'] or
+                                    current['data'].get('mockup_save_fingerprint') != receipt['export_fingerprint']):
+                                raise ValueError('A newer save operation replaced this destination.')
+                            current['data']['mockup_saves'][receipt['export_fingerprint']]['receipt'] = receipt
             bind_export(connect,actor,result,'Dropbox',folder=receipt['destination'],export_fingerprint=receipt.get('export_fingerprint'))
     return receipt

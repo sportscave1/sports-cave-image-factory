@@ -7,12 +7,12 @@
   const copyFeedbackTimers=new Map(),copyLabels=new Map(['copy'].map(id=>[id,$(id).innerHTML]));
   function restoreCopy(id){clearTimeout(copyFeedbackTimers.get(id));copyFeedbackTimers.delete(id);$(id).innerHTML=copyLabels.get(id);}
   function clearCopyFeedback(){for(const id of copyLabels.keys())restoreCopy(id);}
-  function showCopied(id){restoreCopy(id);$(id).textContent='Copied ✓';copyFeedbackTimers.set(id,setTimeout(()=>{restoreCopy(id);resize();},2000));}
+  function showCopied(id){restoreCopy(id);$(id).textContent='Copied';copyFeedbackTimers.set(id,setTimeout(()=>{restoreCopy(id);resize();},2000));}
   const metrics=window.productUploadMetrics={requests:[],selections:[],note:'Measured browser elapsed time; artwork preparation runs on the server.'};
   function record(list,value){list.push(value);if(list.length>100)list.shift();}
   const abortError=()=>Object.assign(new Error('Selection cancelled'),{name:'AbortError'});
   const notify=()=>{if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{id:row?.id||null,manual,mode:$('mode').value,visible:!document.hidden,linked:!!row?.product_title,nonce:crypto.randomUUID()},dataType:'json'},'*');};
-  function reset(){savedPackage.reset();mapping.reset();clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('preview').textContent='Preview pending';clear();render();notify();}
+  function reset(){mapping.reset();clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('preview').textContent='Preview pending';clear();render();notify();}
   const fail=e=>{if(e.name==='AbortError')return;$('error').textContent=e.message||String(e);$('error').hidden=false;};
   const clear=()=>{$('error').hidden=true;};
   async function request(path,body,signal=controller.signal){
@@ -24,7 +24,7 @@
   }
   const action=(name,extra={},signal)=>request(name,{id:row?.id,mode:$('mode').value,...extra},signal);
   const mapping=window.ProductUploadMapping({request,getRow:()=>row});
-  const savedPackage=window.ProductUploadPackage({request,resize});let savedRevision='';
+  let savedRevision='';
   function schedule(){clearTimeout(timer);if(!manual&&row?.basic_validated&&!['Ready','Cloud Ready','Failed','Uploaded','Error','Shopify confirmed'].includes(row.state)&&!busy&&!document.hidden&&!stopped)timer=setTimeout(refresh,row.state==='Preparing'?750:1000);}
   function render(){
     $('drop').hidden=manual;$('manual').textContent=manual&&enabled?'Use automatic workflow':'Use manual workflow';$('manual').disabled=!enabled||busy;
@@ -37,8 +37,9 @@
       $('detail').textContent=(row.source?`${row.source.path_display} · Revision ${row.source.rev} · `:'')+((row.lifecycle?`${row.lifecycle.state}${row.lifecycle.reason?' · '+row.lifecycle.reason:''}`:row.reason)||'Exact Dropbox PSD selected. Artwork preparation runs on the server.');
     }
 
-    $('prompt').hidden=!(manual||row?.basic_validated);$('action-label').textContent=labels[$('mode').value];$('copy').disabled=busy;
-    $('return').hidden=manual||!row?.basic_validated;mapping.sync(row,section!=='upload'&&!manual);savedPackage.sync(row,section!=='upload'&&!manual,savedRevision);
+    $('prompt').hidden=!(manual||row?.basic_validated);$('action-label').textContent=labels[$('mode').value];$('copy').disabled=busy||manual||!row?.saved_source_version;
+    $('save-first').hidden=!!row?.saved_source_version&&!manual;
+    $('return').hidden=manual||!row?.basic_validated;mapping.sync(row,section!=='upload'&&!manual);
     $('terminal').hidden=manual||!row?.product_title||!row?.lifecycle;$('terminal').textContent=row?.product_title?`${row.shopify_completion||'Shopify product verified'} · Linked to ${row.product_title} · ${row.state}${row.reason?' — '+row.reason:''}`:'';
     $('retry').hidden=manual||!row?.lifecycle||row.lifecycle.state!=='Error';$('retry').textContent='Retry file handoff';
     if(previewKey&&previewKey!==row?.preview_url){clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('preview').textContent='Preview pending';}
@@ -46,14 +47,14 @@
     if(row?.preview_url&&previewKey!==row.preview_url)loadPreview(row.preview_url);
     $('remove').hidden=!row;
     $('artwork-retry').hidden=manual||!row||!['Error','Selected'].includes(row.state);$('artwork-retry').disabled=busy;
-    if(section==='upload'){$('prompt').hidden=true;$('return').hidden=true;$('terminal').hidden=true;$('retry').hidden=true;}
+    if(section==='upload'){$('save-first').hidden=true;$('prompt').hidden=true;$('return').hidden=true;$('terminal').hidden=true;$('retry').hidden=true;}
     if(section==='handoff'){$('setup').hidden=true;$('automatic').hidden=true;$('footer').hidden=true;$('remove').hidden=true;}
     if(row?.state==='Ready'&&selectedAt&&!timedReady.has(row.id)){timedReady.add(row.id);record(metrics.selections,{id:row.id,selection_to_mockup_ready_ms:Date.now()-selectedAt});}
     schedule();resize();
   }
   function resize(){if(parent!==window){const height=Math.ceil(Math.max(document.body.getBoundingClientRect().height,$('picker').open?Math.min(720,($('picker').scrollHeight||480)+64):0));if(height===lastHeight)return;lastHeight=height;parent.postMessage({type:'sports-cave-product-upload-height',height},location.origin);if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height},'*');}}
   window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data?.type==='sports-cave-product-upload-measure')resize();});
-  async function refresh(){const current=epoch,requested=row?.id;try{const data=await request('state'+(row?.id?'?id='+encodeURIComponent(row.id):''));if(current!==epoch||requested!==row?.id)return;const previousManual=manual,previousState=row?.state;enabled=data.enabled;row=data.upload;manual=!enabled||manual;if(previousManual!==manual||previousState!==row?.state)notify();if(row)$('mode').value=row.mode;render();}catch(e){if(current===epoch&&e.name!=='AbortError')fail(e);clearTimeout(timer);}}
+  async function refresh(){const current=epoch,requested=row?.id;try{const data=await request('state'+(row?.id?'?id='+encodeURIComponent(row.id):''));if(current!==epoch||requested!==row?.id)return;const previousManual=manual,previousState=row?.state;if(row?.saved_source_version!==data.upload?.saved_source_version){clearCopyFeedback();}enabled=data.enabled;row=data.upload;manual=!enabled||manual;if(previousManual!==manual||previousState!==row?.state)notify();if(row)$('mode').value=row.mode;render();}catch(e){if(current===epoch&&e.name!=='AbortError')fail(e);clearTimeout(timer);}}
   let pickerRoot='review',pickerPath='',pickerPage='',pickerEpoch=0,pickerBusy=false,pickerController=new AbortController();
   function closePicker(){pickerEpoch++;pickerController.abort();pickerBusy=false;clearTimeout($('picker-search').timer);if($('picker').open)$('picker').close();$('choose').focus({preventScroll:true});resize();}
   function breadcrumbs(data){
@@ -86,17 +87,17 @@
   $('picker-root').onchange=()=>{pickerRoot=$('picker-root').value;$('picker-search').value='';browse();};
   $('picker-search').oninput=()=>{clearTimeout($('picker-search').timer);$('picker-search').timer=setTimeout(()=>browse(pickerPath),250);};
   $('picker-more').onclick=()=>{if(!pickerBusy)browse(pickerPath,pickerPage);};
-  async function copied(id='copy'){
+  async function copied(version,id='copy'){
     const current=epoch;
     if(copyMode!==$('mode').value||copyID!==(manual?'':row?.id))throw new Error('The selected action changed. Copy the current prompt again.');
-    if(!manual)row=(await action('copied')).upload;if(current!==epoch||stopped)return;showCopied(id);render();
+    if(!manual)row=(await action('copied',{source_version:version})).upload;if(current!==epoch||stopped)return;render();
   }
   async function copy(){
-    if(busy)return;restoreCopy('copy');const current=epoch,mode=$('mode').value,id=manual?'':row?.id;
-    busy=true;clear();render();$('copy').textContent='Copying…';
-    const valid=()=>{if(current!==epoch||stopped||mode!==$('mode').value||id!==(manual?'':row?.id))throw abortError();};
+    if(busy||manual||!row?.saved_source_version)return;restoreCopy('copy');const current=epoch,mode=$('mode').value,id=row.id,version=row.saved_source_version;
+    let clipboardWritten=false;busy=true;clear();render();$('copy').textContent='Copying…';
+    const valid=()=>{if(current!==epoch||stopped||mode!==$('mode').value||id!==row?.id||version!==row?.saved_source_version)throw abortError();};
     try{
-      const text=action('prompt',{id:manual?null:row?.id}).then(data=>{valid();return data.prompt;});
+      const text=action('prompt',{id,source_version:version}).then(data=>{valid();return data.prompt;});
       text.catch(()=>{}); // A blocked clipboard must still consume a failed retrieval.
       if(navigator.clipboard?.write&&typeof ClipboardItem==='function'){
         const payload=text.then(value=>new Blob([value],{type:'text/plain'}));payload.catch(()=>{});
@@ -106,9 +107,9 @@
         if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');
         await navigator.clipboard.writeText(value);
       }
-      valid();copyMode=mode;copyID=id;await copied();
-    }catch(e){if(current===epoch&&e.name!=='AbortError')fail(new Error('Could not copy prompt. Allow clipboard access and retry.'));}
-    finally{if(current===epoch){busy=false;if($('copy').textContent!=='Copied ✓')restoreCopy('copy');render();}}
+      valid();clipboardWritten=true;showCopied('copy');copyMode=mode;copyID=id;await copied(version);
+    }catch(e){if(current===epoch&&e.name!=='AbortError')fail(new Error((clipboardWritten?'Prompt copied, but its saved status could not be recorded. ':'Could not copy prompt. ')+(e.message||'Allow clipboard access and retry.')));}
+    finally{if(current===epoch){busy=false;if($('copy').textContent!=='Copied')restoreCopy('copy');render();}}
   }
   async function loadPreview(url){const current=epoch;if(stopped||document.hidden||previewAttempts>=12)return;previewKey=url;previewAttempts++;try{const r=await fetch(url,{credentials:'same-origin'});if(current!==epoch)return;if(r.status===202){$('preview').textContent='Preparing preview';previewTimer=setTimeout(()=>{if(row?.preview_url===url)loadPreview(url);},5000);return;}if(!r.ok)throw new Error('Preview unavailable');const blob=await r.blob();if(current!==epoch||row?.preview_url!==url)return;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob=URL.createObjectURL(blob);const img=new Image();img.alt='Prepared design preview';img.src=previewBlob;img.onload=()=>{if(current===epoch&&selectedAt)record(metrics.selections,{id:row.id,selection_to_preview_ms:Date.now()-selectedAt,representation:url.includes("&prepared=")?"prepared-artwork":"dropbox-thumbnail"});};$('preview').replaceChildren(img);}catch(e){if(current===epoch)$('preview').textContent='Preview unavailable';}}
   $('choose').onclick=()=>{$('picker').showModal();browse();};$('copy').onclick=copy;
@@ -117,9 +118,9 @@
   $('new').onclick=()=>{pickerRoot='review';pickerPath='';pickerPage='';$('picker-root').value='review';$('picker-search').value='';reset();};$('remove').onclick=()=>{reset();};
   $('retry').onclick=async()=>{try{await action('retry-file');await refresh();}catch(e){fail(e);}};
   window.addEventListener('pageshow',event=>{if(event.persisted)reset();});
-  window.addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='streamlit:render')return;if(!component)lastHeight=0;component=true;const args=event.data.args||{};section=args.section||'full';if(savedRevision&&savedRevision!==(args.package_version||'')){epoch++;controller.abort();controller=new AbortController();clearCopyFeedback();busy=false;savedPackage.reset();}savedRevision=args.package_version||'';if(section==='upload'&&args.refresh&&args.refresh!==refreshKey){refreshKey=args.refresh;if(row&&!busy)refresh();}if(section==='handoff'&&args.manual){manual=true;if(args.mode)$('mode').value=args.mode;}if(args.id&&(activeID!==args.id||args.mode&&row?.mode!==args.mode||args.package_version&&row?.saved_package_version!==args.package_version)){savedPackage.reset();mapping.reset();epoch++;clearCopyFeedback();controller.abort();controller=new AbortController();activeID=args.id;row={id:args.id};refresh();}render();});
+  window.addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='streamlit:render')return;if(!component)lastHeight=0;component=true;const args=event.data.args||{};section=args.section||'full';if(section==='handoff'&&savedRevision!==(args.source_version||'')){epoch++;controller.abort();controller=new AbortController();clearCopyFeedback();busy=false;if(row)delete row.saved_source_version;}savedRevision=args.source_version||'';if(section==='upload'&&args.refresh&&args.refresh!==refreshKey){refreshKey=args.refresh;if(row&&!busy)refresh();}if(section==='handoff'&&args.manual){manual=true;if(args.mode)$('mode').value=args.mode;}if(args.id&&(activeID!==args.id||args.mode&&row?.mode!==args.mode||section==='handoff'&&(row?.saved_source_version||'')!==(args.source_version||''))){mapping.reset();epoch++;clearCopyFeedback();controller.abort();controller=new AbortController();activeID=args.id;row={id:args.id};refresh();}render();});
   parent.postMessage({isStreamlitMessage:true,type:'streamlit:componentReady',apiVersion:1},'*');
-  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);clearTimeout(previewTimer);if(section==='upload'&&!busy)notify();if(!document.hidden&&!busy){if(row?.preview_url&&!previewBlob){previewKey='';previewAttempts=0;}refresh();}});window.addEventListener('pagehide',()=>{savedPackage.dispose();mapping.dispose();stopped=true;epoch++;clearCopyFeedback();controller.abort();clearTimeout(timer);clearTimeout(previewTimer);if(previewBlob)URL.revokeObjectURL(previewBlob);});try{const frame=window.frameElement;if(frame){const observer=new MutationObserver(()=>{if(!frame.isConnected){stopped=true;epoch++;controller.abort();clearCopyFeedback();clearTimeout(timer);clearTimeout(previewTimer);observer.disconnect();}});observer.observe(window.parent.document,{childList:true,subtree:true});}}catch{}
+  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);clearTimeout(previewTimer);if(section==='upload'&&!busy)notify();if(!document.hidden&&!busy){if(row?.preview_url&&!previewBlob){previewKey='';previewAttempts=0;}refresh();}});window.addEventListener('pagehide',()=>{mapping.dispose();stopped=true;epoch++;clearCopyFeedback();controller.abort();clearTimeout(timer);clearTimeout(previewTimer);if(previewBlob)URL.revokeObjectURL(previewBlob);});try{const frame=window.frameElement;if(frame){const observer=new MutationObserver(()=>{if(!frame.isConnected){stopped=true;epoch++;controller.abort();clearCopyFeedback();clearTimeout(timer);clearTimeout(previewTimer);observer.disconnect();}});observer.observe(window.parent.document,{childList:true,subtree:true});}}catch{}
   new ResizeObserver(resize).observe(document.body);
   refresh();
 })();

@@ -20,7 +20,8 @@ def saved_row():
     output=dict(folder=folder,folder_id='id:folder',export_fingerprint='saved',files=files,manifest=manifest)
     return dict(id=key,mode='DRAFT',data=dict(source=source,mockups_exported=True,
         upload_operation=dict(id=key,provider='dropbox',source=deepcopy(source),output=output),
-        mockup_saves={'saved':dict(state='Complete',target=folder,manifest=[dict(name=x['relative_path']) for x in files])}))
+        mockup_saves={'saved':dict(state='Complete',target=folder,manifest=[dict(name=x['relative_path']) for x in files],
+            receipt=dict(destination=folder,successes=files,failures=[],webp_folder=dict(path=folder+'/WEBP',id='id:webp-folder')))}))
 
 
 def test_exact_receipt_order_and_lightweight_urls():
@@ -110,7 +111,8 @@ def test_thumbnail_route_never_downloads_and_original_is_revision_pinned(monkeyp
 
 
 def test_inline_save_status_requires_current_complete_receipt(tmp_path):
-    from streamlit.testing.v1 import AppTest
+    import subprocess
+    import sys
     asset=tmp_path/'output.webp';asset.write_bytes(b'fixture')
     source='''
 from types import SimpleNamespace
@@ -127,17 +129,19 @@ result=dict(product_image_readiness=dict(complete=True),product_upload_save_rece
 app=SimpleNamespace(dropbox_integration=SimpleNamespace(sanitize_path_component=lambda name,**k:name),os_accounts=SimpleNamespace(can_access_page=lambda *a:True),_mockup_dropbox_manifest=lambda *a:manifest,ASSET_CATEGORY_CORE='core',ASSET_CATEGORY_PRODUCT='product',ASSET_CATEGORY_SOCIAL='social')
 save_controls(app,result,row,dict(id='fixture'),'product')
 '''.replace('PATH',repr(str(asset)))
-    # Isolated module cache patch restored after the script runs.
-    import product_upload_jobs
-    snapshot=product_upload_jobs.JOBS.snapshot
-    try:
-        page=AppTest.from_string(source).run()
-        assert not page.exception
-        assert any('✓ Saved' in x.value for x in page.markdown)
-        assert any('product (2)' in x.value for x in page.caption)
-        assert [x.label for x in page.button]==['Save all']
-        assert not page.success
-    finally:product_upload_jobs.JOBS.snapshot=snapshot
+    # app.py's legacy test imports modify Streamlit globals. Keep the real
+    # rendering check isolated from collection order and restore no fake UI state.
+    check = """from streamlit.testing.v1 import AppTest
+page=AppTest.from_string(SOURCE).run()
+assert not page.exception
+assert any('✓ Saved' in x.value for x in page.markdown)
+assert any('product (2)' in x.value for x in page.caption)
+assert [x.label for x in page.button]==['Save all']
+assert not page.success
+""".replace('SOURCE', repr(source))
+    completed = subprocess.run([sys.executable, '-c', check], capture_output=True, text=True,
+                               creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0)
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_saved_stamp_changes_for_source_category_or_file(tmp_path):
@@ -168,15 +172,21 @@ def test_copy_upload_prompt_preserves_mode_and_operation(monkeypatch,mode):
         def locked(self,*_):yield row,None
     async def actor(*a,**kw):return {'id':'fixture'}
     monkeypatch.setattr(api,'actor',actor);monkeypatch.setattr(api,'Intakes',Store)
-    build=Mock(side_effect=lambda m,n:m+' original prompt for '+n);monkeypatch.setattr(product_upload_prompts,'build',build)
+    from product_upload_source import current_source, prompt_section
+    build=Mock(side_effect=lambda m,n,source:m+' original prompt for '+n+'\n'+prompt_section(source));monkeypatch.setattr(product_upload_prompts,'build',build)
+    provider=Mock(side_effect=AssertionError('Prompt copy must not access Dropbox or download files'))
+    monkeypatch.setattr(api,'Dropbox',provider)
     app=Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])
     with TestClient(app) as client:
-        response=client.post('/api/product-uploads/prompt',json=dict(id=row['id'],mode=mode))
+        response=client.post('/api/product-uploads/prompt',json=dict(id=row['id'],mode=mode,source_version=current_source(row)['version']))
     assert response.status_code==200
     prompt=response.json()['prompt']
     assert tag(row['id']) in prompt and mode+' original prompt for Exact.psd' in prompt
-    assert '/exact/saved/WEBP' in prompt
-    build.assert_called_once_with(mode,'Exact.psd')
+    assert '/exact/saved/WEBP' not in prompt
+    build.assert_called_once_with(mode,'Exact.psd',source=current_source(row))
+    assert 'product (2)/WEBP' in prompt and 'id:webp-folder' in prompt
+    assert 'attached separately' in prompt
+    provider.assert_not_called()
 
 
 def test_dropbox_listing_preserves_stable_folder_id_and_cursor(monkeypatch):

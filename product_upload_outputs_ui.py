@@ -47,9 +47,16 @@ def save_progress(app,key,actor):
         if st.session_state.get(marker)!=job['token']:
             st.session_state[marker]=job['token'];st.rerun()
     elif job['state']=='Ready':
+        if st.session_state.get('product-upload-save-applied-'+key)==job['token']:return
         receipt=JOBS.result(key,actor,'save',job['token'])
         result=app._mockups_result()
         if not receipt or not result or result.get('_product_upload_intake')!=key:return
+        from product_upload_api import connect
+        from product_upload_intake import Intakes
+        current=Intakes(connect).read(key,actor)
+        if not current or receipt.get('save_token')!=current['data'].get('mockup_save_token'):
+            st.session_state['product-upload-save-applied-'+key]=job['token']
+            return
         if st.session_state.get('product-upload-save-applied-'+key)!=job['token']:
             st.session_state['product-upload-save-applied-'+key]=job['token']
             result['product_upload_save_receipt']=receipt
@@ -92,7 +99,9 @@ def save_controls(app,result,row,user,name):
         app._set_mockups_result(result)
         from product_upload_intake import Intakes
         with Intakes(connect).locked(key,actor) as (current,cur):
-            current['data'].update(mockups_exported=False,mockups_context=None)
+            from product_upload_source import invalidate
+            invalidate(current)
+        st.rerun()
     if not folder:st.caption('Enter a valid Product name before saving.')
     disabled=running or not folder or not permitted or not choice or not ready
     with st.container(horizontal=True,vertical_alignment='center',gap='small'):
@@ -128,7 +137,9 @@ def save_controls(app,result,row,user,name):
             stamp=package_stamp(row['data']['source'],category_id,name,manifest)
             from product_upload_intake import Intakes
             with Intakes(connect).locked(key,actor) as (current,cur):
-                current['data'].update(mockups_exported=False,mockups_context=None)
+                from product_upload_source import invalidate
+                invalidate(current)
+                scoped['_product_upload_save_token']=current['data']['mockup_save_token']
             JOBS.submit(key,actor,'save',fingerprint,
                 lambda progress:dict(transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,
                                          conflict=conflict,category_id=category_id),package_stamp=stamp))
@@ -214,7 +225,8 @@ def render_outputs(app,result,row,user,name):
                                 from product_upload_api import connect
                                 from product_upload_intake import Intakes
                                 with Intakes(connect).locked(key,user['id']) as (current,cur):
-                                    current['data'].update(mockups_exported=False,mockups_context=None)
+                                    from product_upload_source import invalidate
+                                    invalidate(current)
                             app._set_mockups_result(result)
                             if changed:st.rerun()
                 except Exception as error:st.error(app._safe_lifestyle_upload_error(error))

@@ -39,13 +39,19 @@ and edition-preparation queue services are unchanged; no second product is creat
 The deterministic archive target recovers a lost move response. Old intake rows
 retain their previous path and behaviour.
 
-A completed image export unlocks the existing Dev Mode Shopify prompt. Export and
-clipboard actions do not confirm Shopify completion. The current design/sport,
-canonical filenames and exact saved folder are additional inert prompt context.
-Numbered Dropbox saves reserve their target once; retries reuse the same target.
-Opening the saved folder from this integrated route uses a new tab, retaining the
-active workflow. Structural template/number/font acceptance still occurs through
-the established product-linked native preparation gates, not the web render.
+Save All unlocks **Copy Complete Upload Prompt** only when the current required
+WEBP set has a complete authoritative Dropbox receipt. The prompt is still built
+from the Developer Studio template and selected Draft/Live/Update operation.
+Its dynamic source section includes the exact saved WEBP directory, its folder ID
+when available, actual count, ordered roles, filenames and available file identities.
+The directory comes from confirmed save metadata, including numbered destinations.
+Save-operation tokens reject stale results after edits or overlapping saves.
+Copying retrieves text and metadata only; it never downloads image bytes, creates
+sharing links/ZIPs, invokes the native helper or performs Shopify writes. The bottom
+saved-image gallery is removed; the upper previews and lifestyle actions remain.
+Run scripts/verify_product_upload_complete_prompt.py for an isolated Chrome/Edge
+clipboard, feedback, layout and save-gate check. The check does not verify the
+external Dropbox-to-ChatGPT-to-Shopify transfer.
 
 Local isolated preview: run `scripts/product_upload_mockups_preview.py --port 8683`
 with `AUTO_EDITIONS_TEST_PGLITE` pointing to an installed PGlite dist/index.js.
@@ -83,17 +89,15 @@ running Companion, and remote writes were deliberately not exercised.
 
 ## User flow
 
-1. Choose Upload to Draft, Upload to Live or Update Existing.
-2. Upload the PSD. The backend verifies its structure, final size, Dropbox content
-   hash, stable file ID and revision before enabling Copy Prompt.
-3. Find Mockups opens the existing Files route at the verified product-images folder.
-4. Copy Prompt and give ChatGPT the website images. The prompt remains sourced from
-   the existing Dev Mode prompt IDs and commercial rules.
-5. After ChatGPT finishes, paste the resulting exact title or Shopify URL and Upload.
-6. Exact lookup includes drafts. Duplicate titles require a choice. The existing
-   Shopify registration, mapping and Companion queue services handle the product.
-7. Status updates until Cloud Ready or Failed. The preview becomes available after
-   linking and successful native preparation. Manual workflow requires no PSD.
+1. Select Upload to Draft, Upload to Live or Update Existing, then choose the PSD.
+2. Select the sport, prepare the mockups and supply the lifestyle images.
+3. Use Save All and wait for the compact Saved status.
+4. Copy Complete Upload Prompt and paste it into ChatGPT. The connected Dropbox
+   app must retrieve the exact original files listed in the saved manifest; separate
+   attachments are not required. Missing files or transfer/access limitations must
+   be reported before any Shopify change.
+5. After Shopify completion is actually verified, return and click MAP. Existing
+   product mapping and edition-preparation behavior is retained.
 
 ## Integration and recovery
 

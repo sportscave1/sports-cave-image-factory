@@ -192,12 +192,15 @@ class Intakes:
                 row['data'].update(copied=False, lookup='', choices=[])
             return row
 
-    def copied(self, key, actor, selected):
+    def copied(self, key, actor, selected, source_version=None):
         with self.locked(key, actor) as (row, cur):
             if row['mode'] != selected or not row['data'].get('basic_validated'):
                 raise ValueError('Upload or action changed. Copy the current prompt again.')
             if row['data'].get('workflow_version') in (2,3) and not row['data'].get('mockups_exported'):
                 raise ValueError('Save or download the completed image package before the Shopify handoff.')
+            if source_version is not None:
+                from product_upload_source import current_source
+                current_source(row, source_version)
             row['data']['copied'] = True
             return row
 
@@ -214,6 +217,11 @@ def public(row):
     if d.get('artwork_progress'):result['artwork_progress']=d['artwork_progress']
     if d.get('mockups_exported'):
         result['saved_package_version']=((d.get('upload_operation') or {}).get('output') or {}).get('export_fingerprint') or 'legacy-receipt'
+        from product_upload_source import current_source
+        try:
+            result['saved_source_version'] = current_source(row)['version']
+        except (ValueError, KeyError, TypeError):
+            pass  # Old/incomplete saves cannot unlock the complete prompt.
     if d.get('workflow_version') == 3:
         result['source'] = {k:d['source'].get(k) for k in ('id','rev','content_hash','path_display','name','size')}
         if d.get('lifecycle'):
