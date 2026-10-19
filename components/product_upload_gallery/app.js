@@ -8,6 +8,17 @@
   const url=value=>value?new URL(value,location.origin).href:'';
   const active=version=>{if(version!==epoch||controller.signal.aborted)throw new Error('Selection changed. Reopen the current image.');};
   const button=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.id=id;return b;};
+  const feedbackTimers=new Map();
+  const clearFeedback=b=>{clearTimeout(feedbackTimers.get(b));feedbackTimers.delete(b);};
+  const clearAllFeedback=()=>{for(const timer of feedbackTimers.values())clearTimeout(timer);feedbackTimers.clear();};
+  function copyFeedback(b){
+    const original=b.innerHTML;
+    return {
+      begin(){clearFeedback(b);b.textContent='Copying…';b.disabled=true;resize();},
+      restore(){clearFeedback(b);b.innerHTML=original;resize();},
+      success(){clearFeedback(b);b.textContent='Copied';feedbackTimers.set(b,setTimeout(()=>{feedbackTimers.delete(b);b.innerHTML=original;resize();},2000));}
+    };
+  }
   function link(original,label){const a=document.createElement('a');a.href=url(original);a.target='_blank';a.rel='noopener';a.setAttribute('aria-label','Open '+label+' full-resolution original');return a;}
   function image(item,compact){
     const wrapper=document.createElement('div');wrapper.className=compact?'preview':'single';
@@ -34,21 +45,23 @@
   function actions(args){
     const row=document.createElement('div');row.className='actions';
     const copyImage=button('Copy black frame','copyImage'),copyPrompt=button('Copy prompt','copyPrompt');
+    const imageFeedback=copyFeedback(copyImage),promptFeedback=copyFeedback(copyPrompt);
     copyImage.disabled=!args.original;row.append(copyImage,copyPrompt);root.append(row);
     const status=document.createElement('div');status.id='status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(status);
     copyPrompt.onclick=async()=>{
-      const version=epoch;copyPrompt.textContent='Copying…';copyPrompt.disabled=true;status.textContent='';resize();
-      try{if(!navigator.clipboard?.writeText)throw new Error();await navigator.clipboard.writeText(args.prompt);active(version);copyPrompt.textContent='Copied';}
-      catch{if(version===epoch){copyPrompt.textContent='Copy prompt';status.textContent='Could not copy prompt. Allow clipboard access and retry.';}}
+      if(copyPrompt.disabled)return;
+      const version=epoch;promptFeedback.begin();status.textContent='';resize();
+      try{if(!navigator.clipboard?.writeText)throw new Error();await navigator.clipboard.writeText(args.prompt);active(version);promptFeedback.success();}
+      catch{if(version===epoch){promptFeedback.restore();status.textContent='Could not copy prompt. Allow clipboard access and retry.';}}
       finally{if(version===epoch){copyPrompt.disabled=false;resize();}}
     };
     copyImage.onclick=async()=>{
       if(copyImage.disabled)return;
-      const version=epoch;copyImage.disabled=true;copyImage.textContent='Copying…';status.textContent='';resize();
+      const version=epoch;imageFeedback.begin();status.textContent='';resize();
       try{
         if(!navigator.clipboard?.write||!window.ClipboardItem)throw new Error();
-        await navigator.clipboard.write([new ClipboardItem({'image/png':png(args.original,version)})]);active(version);copyImage.textContent='Copied';
-      }catch{if(version===epoch){copyImage.textContent='Copy black frame';status.textContent='Could not copy image. Allow clipboard access or open the original.';const a=link(args.original,'Black Framed');a.textContent='Open original';status.append(a);}}
+        await navigator.clipboard.write([new ClipboardItem({'image/png':png(args.original,version)})]);active(version);imageFeedback.success();
+      }catch{if(version===epoch){imageFeedback.restore();status.textContent='Could not copy image. Allow clipboard access or open the original.';const a=link(args.original,'Black Framed');a.textContent='Open original';status.append(a);}}
       finally{if(version===epoch){copyImage.disabled=false;resize();}}
     };
   }
@@ -59,13 +72,13 @@
     if(theme.backgroundColor)document.body.style.setProperty('--background',theme.backgroundColor);
     if(theme.font)document.body.style.setProperty('--font',theme.font);
     const next=JSON.stringify(args);if(signature===next){resize();return;}
-    signature=next;epoch++;controller.abort();controller=new AbortController();root.replaceChildren();
+    signature=next;epoch++;controller.abort();clearAllFeedback();controller=new AbortController();root.replaceChildren();
     if(args.mode==='actions')actions(args);
     else{const container=document.createElement('div');container.className=args.mode==='gallery'?'gallery':'single-preview';container.setAttribute('aria-label',args.mode==='gallery'?'Generated mockup previews':'Lifestyle mockup preview');
       for(const item of args.items||[])container.append(image(item,args.mode==='gallery'));root.append(container);}
     resize();
   });
-  addEventListener('pagehide',()=>{epoch++;controller.abort();});
+  addEventListener('pagehide',()=>{epoch++;controller.abort();clearAllFeedback();});
   new ResizeObserver(resize).observe(root);
   post('streamlit:componentReady',{apiVersion:1});
 })();

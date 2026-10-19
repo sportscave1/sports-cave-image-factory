@@ -29,6 +29,18 @@ Use the original supplied product for every card and follow the existing exact-p
 If an image-loading error occurs, retry accessing the supplied file and resume automatically once resolved. If a genuine blocker prevents completion, explain the specific blocker and accurately identify which cards remain unfinished. Never claim an image was generated when it was not.
 END AUTOMATIC START'''
 
+FINISHED_MOCKUPS = '''FINISHED MOCKUPS ONLY — SUPPLIED PRODUCT REQUIRED
+
+Every image shown to the user must be a finished mockup containing the original supplied artwork AND its complete supplied black frame.
+
+Never present an empty room, blank wall, placeholder frame or background-only image as a completed mockup. If generating the room separately is necessary, treat it as an internal intermediate step. Complete the source-preserving product compositing before displaying that card.
+
+Preserve the entire supplied framed product: artwork, text, logos, signatures, edition details, colours, proportions and original black frame. Do not redraw the artwork, substitute another frame or omit the product.
+
+Before displaying each card, verify that the supplied framed product is present, fully visible and correctly integrated into the room. Then automatically continue to the next card until all three finished mockups are complete, without asking for approval between cards.
+
+END FINISHED MOCKUPS ONLY'''
+
 
 def sequential_instructions(text):
     """Migrate the old Product Upload execution rules, including saved overrides.
@@ -38,7 +50,11 @@ def sequential_instructions(text):
     """
     text = re.sub(r'AUTOMATIC START[^\n]*\n.*?END AUTOMATIC START', '', text,
                   flags=re.DOTALL)
+    text = re.sub(r'FINISHED MOCKUPS ONLY[^\n]*\n.*?END FINISHED MOCKUPS ONLY', '', text,
+                  flags=re.DOTALL)
     replacements = {
+        'If pixel-preserving compositing is unavailable, generate a blank room/frame scene and identify that it requires the original product to be inserted using Photoshop, Photopea or the Sports Cave OS compositor.':
+            'If pixel-preserving compositing is unavailable, keep any room-only scene internal. Explain the specific compositing blocker and identify the unfinished card; do not display an empty room or placeholder as a completed mockup. Resume with the original supplied framed product once compositing is available.',
         '7. Wait until Card 1 is approved, finalised or the user explicitly requests Card 2.':
             '7. Immediately continue to Card 2 without waiting for approval or another message.',
         '9. Wait for approval or explicit instruction to continue.':
@@ -55,7 +71,18 @@ def sequential_instructions(text):
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
-    return AUTOMATIC_START + '\n\n' + text.strip()
+    return AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n' + text.strip()
+
+
+def individual_prompt(text):
+    """Apply the same product/display contract to a standalone card brief."""
+    return sequential_instructions(text).removeprefix(AUTOMATIC_START + '\n\n')
+
+
+def individual_prompt_items(items):
+    """Product Upload only: retain names, metadata and authored scene content."""
+    return [dict(item, prompt=individual_prompt(item['prompt']))
+            if item.get('filename') in FILENAMES else dict(item) for item in items]
 
 
 INSTRUCTIONS = sequential_instructions('''# SPORTS CAVE — ULTIMATE 3-MOCKUP MASTER V6
@@ -198,7 +225,7 @@ When the product is supplied as a finished framed item, preserve and place the *
 
 Generate the environment without recreating protected product content. Use the original finished artwork as the exact image asset during compositing.
 
-If pixel-preserving compositing is unavailable, generate a blank room/frame scene and identify that it requires the original product to be inserted using Photoshop, Photopea or the Sports Cave OS compositor.
+If pixel-preserving compositing is unavailable, keep any room-only scene internal. Explain the specific compositing blocker and identify the unfinished card; do not display an empty room or placeholder as a completed mockup. Resume with the original supplied framed product once compositing is available.
 
 Never claim an AI-redrawn poster is an exact reproduction.
 
@@ -1096,7 +1123,7 @@ Produce three distinctly different, believable premium homes showing the same or
 
 **END SPORTS CAVE ULTIMATE 3-MOCKUP MASTER V6**''')
 
-PER_IMAGE = '''## 3. ABSOLUTE PRODUCT AND ARTWORK LOCK
+PER_IMAGE = individual_prompt('''## 3. ABSOLUTE PRODUCT AND ARTWORK LOCK
 
 **CRITICAL: THE ORIGINAL SUPPLIED PRODUCT IS AN IMMUTABLE ASSET.**
 
@@ -1164,7 +1191,7 @@ When the product is supplied as a finished framed item, preserve and place the *
 
 Generate the environment without recreating protected product content. Use the original finished artwork as the exact image asset during compositing.
 
-If pixel-preserving compositing is unavailable, generate a blank room/frame scene and identify that it requires the original product to be inserted using Photoshop, Photopea or the Sports Cave OS compositor.
+If pixel-preserving compositing is unavailable, keep any room-only scene internal. Explain the specific compositing blocker and identify the unfinished card; do not display an empty room or placeholder as a completed mockup. Resume with the original supplied framed product once compositing is available.
 
 Never claim an AI-redrawn poster is an exact reproduction.
 
@@ -1366,7 +1393,7 @@ Do not stretch landscape artwork into a square product.
 
 The room image is square; the product preserves its original orientation and proportions.
 
----'''
+---''')
 
 
 def scene_texts(result, current_text, saved_base):
@@ -1391,6 +1418,9 @@ def scene_texts(result, current_text, saved_base):
 
 
 def compose(instructions, texts):
+    # Saved scene briefs may carry old execution rules, but their room/camera
+    # settings remain intact. PER_IMAGE supplies the contract once per card.
+    texts = [individual_prompt(text).removeprefix(FINISHED_MOCKUPS + '\n\n') for text in texts]
     return sequential_instructions(instructions) + '\n\n' + '\n\n'.join(
         f'{index + 1}. {label}\n{PER_IMAGE}\n\nSaved scene/composition/output requirements:\n{text}'
         for index, (label, text) in enumerate(zip(LABELS, texts)))

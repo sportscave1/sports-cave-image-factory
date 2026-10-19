@@ -72,6 +72,7 @@ def rebind_result(app,result,name,choice):
     result=dict(result,product_name=name.strip(),product_slug=factory.slugify(name),
                 sport_category=choice['sport'],sport_slug=factory.slugify(choice['sport']),
                 _product_upload_category_id=choice['id'])
-    result['final_prompt_items']=app.build_mockup_final_prompt_items(name.strip(),choice['sport'])
+    from product_upload_lifestyle import individual_prompt_items
+    result['final_prompt_items']=individual_prompt_items(app.build_mockup_final_prompt_items(name.strip(),choice['sport']))
     result.pop('product_upload_save_receipt',None)
     return app.normalize_generation_result(result)

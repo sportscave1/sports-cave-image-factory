@@ -148,12 +148,19 @@ def render_outputs(app,result,row,user,name):
     texts=scene_texts(result,app.current_lifestyle_prompt_text,
                      lambda filename,default:app.get_image_factory().get_lifestyle_prompt_text(filename,default,local_only=True))
     prompt=compose(instructions,texts)
-    st.subheader('Product Page Lifestyle Mockups')
-    st.caption('Paste the black frame and master prompt into ChatGPT. Create each mockup separately, then upload it to the matching card.')
     black=next((a for a in result['assets'] if a['key']=='black'),None)
     path=app.get_asset_full_resolution_path(black) if black else None
     url=register(result,black,source,path) if path else ''
-    render(key='product-upload-copy-actions-'+key,original=url,prompt=prompt,mode='actions')
+    with st.container(key='product-upload-lifestyle-actions'):
+        st.html('''<style>
+        .st-key-product-upload-lifestyle-actions {gap:10px!important;}
+        .product-upload-lifestyle-intro h3 {margin:0!important;padding:0!important;line-height:1.35!important;}
+        .product-upload-lifestyle-intro p {margin:7px 0 0!important;padding:0!important;font-size:12px;line-height:1.5!important;overflow-wrap:anywhere;}
+        </style><div class="product-upload-lifestyle-intro">
+        <h3>Product Page Lifestyle Mockups</h3>
+        <p>Paste the black frame and master prompt into ChatGPT. Create each mockup separately, then upload it to the matching card.</p>
+        </div>''')
+        render(key='product-upload-copy-actions-'+key,original=url,prompt=prompt,mode='actions')
     pending=JOBS.snapshot(key,user['id'],'save')
     saving=bool(pending and pending['state'] in ('Queued','Running'))
     with st.container(key='mockups-lifestyle-grid'):

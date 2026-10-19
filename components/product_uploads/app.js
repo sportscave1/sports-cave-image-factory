@@ -4,11 +4,15 @@
   const $=id=>document.getElementById(id),labels={DRAFT:'Upload to Draft',LIVE:'Upload to Live',UPDATE:'Update Existing'};
   let row=null,manual=false,enabled=true,busy=false,timer=null,previewTimer=null,previewAttempts=0,previewKey='',previewBlob='',promptText='',copyMode='',copyID='',stopped=false,epoch=0,section='full',component=false,activeID='',refreshKey='',controller=new AbortController();
   let lastHeight=0,selectedAt=0;const timedReady=new Set();
+  const copyFeedbackTimers=new Map(),copyLabels=new Map(['copy','fallback-copy'].map(id=>[id,$(id).innerHTML]));
+  function restoreCopy(id){clearTimeout(copyFeedbackTimers.get(id));copyFeedbackTimers.delete(id);$(id).innerHTML=copyLabels.get(id);}
+  function clearCopyFeedback(){for(const id of copyLabels.keys())restoreCopy(id);}
+  function showCopied(id){restoreCopy(id);$(id).textContent='Copied';copyFeedbackTimers.set(id,setTimeout(()=>{restoreCopy(id);resize();},2000));}
   const metrics=window.productUploadMetrics={requests:[],selections:[],note:'Measured browser elapsed time; artwork preparation runs on the server.'};
   function record(list,value){list.push(value);if(list.length>100)list.shift();}
   const abortError=()=>Object.assign(new Error('Selection cancelled'),{name:'AbortError'});
   const notify=()=>{if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{id:row?.id||null,manual,mode:$('mode').value,visible:!document.hidden,linked:!!row?.product_title,nonce:crypto.randomUUID()},dataType:'json'},'*');};
-  function reset(){stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('product').value='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('choices').replaceChildren();$('preview').textContent='Preview pending';$('fallback').close();clear();render();notify();}
+  function reset(){clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('product').value='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('choices').replaceChildren();$('preview').textContent='Preview pending';$('fallback').close();clear();render();notify();}
   const fail=e=>{if(e.name==='AbortError')return;$('error').textContent=e.message||String(e);$('error').hidden=false;};
   const clear=()=>{$('error').hidden=true;};
   async function request(path,body,signal=controller.signal){
@@ -82,12 +86,13 @@
   $('picker-root').onchange=()=>{pickerRoot=$('picker-root').value;$('picker-search').value='';browse();};
   $('picker-search').oninput=()=>{clearTimeout($('picker-search').timer);$('picker-search').timer=setTimeout(()=>browse(pickerPath),250);};
   $('picker-more').onclick=()=>{if(!pickerBusy)browse(pickerPath,pickerPage);};
-  async function copied(){
+  async function copied(id='copy'){
+    const current=epoch;
     if(copyMode!==$('mode').value||copyID!==(manual?'':row?.id))throw new Error('The selected action changed. Copy the current prompt again.');
-    if(!manual)row=(await action('copied')).upload;$('copy').textContent='Copied';$('fallback').close();render();setTimeout(()=>{$('copy').textContent='Copy Prompt';},2200);
+    if(!manual)row=(await action('copied')).upload;if(current!==epoch||stopped)return;showCopied(id);$('fallback').close();render();
   }
-  async function copy(){if(busy)return;const current=epoch;busy=true;clear();render();$('copy').textContent='Preparing prompt…';try{promptText=(await action('prompt',{id:manual?null:row?.id})).prompt;if(current!==epoch)return;copyMode=$('mode').value;copyID=manual?'':row?.id;let deadline;try{await Promise.race([navigator.clipboard.writeText(promptText),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Clipboard request timed out.')),2500);})]);}catch(e){if(current!==epoch)return;$('fallback-text').value=promptText;$('fallback').showModal();$('fallback-text').select();fail(new Error('Clipboard access was blocked or did not respond. Use the copy fallback to continue.'));return;}finally{clearTimeout(deadline);}if(current!==epoch)return;await copied();}catch(e){fail(e);}finally{if(current!==epoch)return;busy=false;if($('copy').textContent!=='Copied')$('copy').textContent='Copy Prompt';render();}}
-  $('fallback-copy').onclick=async()=>{try{$('fallback-text').select();if(!document.execCommand('copy'))throw new Error('Press Ctrl+C while the prompt is selected.');await copied();clear();}catch(e){fail(e);}};
+  async function copy(){if(busy)return;restoreCopy('copy');const current=epoch;busy=true;clear();render();$('copy').textContent='Preparing prompt…';try{promptText=(await action('prompt',{id:manual?null:row?.id})).prompt;if(current!==epoch)return;copyMode=$('mode').value;copyID=manual?'':row?.id;let deadline;try{await Promise.race([navigator.clipboard.writeText(promptText),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Clipboard request timed out.')),2500);})]);}catch(e){if(current!==epoch)return;$('fallback-text').value=promptText;$('fallback').showModal();$('fallback-text').select();fail(new Error('Clipboard access was blocked or did not respond. Use the copy fallback to continue.'));return;}finally{clearTimeout(deadline);}if(current!==epoch)return;await copied();}catch(e){fail(e);}finally{if(current!==epoch)return;busy=false;if($('copy').textContent!=='Copied')restoreCopy('copy');render();}}
+  $('fallback-copy').onclick=async()=>{restoreCopy('fallback-copy');try{$('fallback-text').select();if(!document.execCommand('copy'))throw new Error('Press Ctrl+C while the prompt is selected.');await copied('fallback-copy');clear();}catch(e){fail(e);}};
   $('fallback-text').addEventListener('copy',e=>{const t=$('fallback-text');if(e.isTrusted&&t.value.slice(t.selectionStart,t.selectionEnd)===promptText)queueMicrotask(()=>copied().catch(fail));});
   async function link(pid){if(busy)return;const current=epoch;busy=true;clear();render();try{const linked=await action(pid?'link':'resolve',pid?{product_id:pid}:{value:$('product').value});if(current!==epoch)return;row=linked.upload;
     if(row.product_title){notify();parent.postMessage({type:'sports-cave-product-upload-linked'},location.origin);}
@@ -101,6 +106,6 @@
   window.addEventListener('pageshow',event=>{if(event.persisted)reset();});
   window.addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='streamlit:render')return;if(!component)lastHeight=0;component=true;const args=event.data.args||{};section=args.section||'full';if(section==='upload'&&args.refresh&&args.refresh!==refreshKey){refreshKey=args.refresh;if(row&&!busy)refresh();}if(section==='handoff'&&args.manual){manual=true;if(args.mode)$('mode').value=args.mode;}if(section==='handoff'&&args.id&&(activeID!==args.id||args.mode&&row?.mode!==args.mode)){activeID=args.id;row={id:args.id};refresh();}render();});
   parent.postMessage({isStreamlitMessage:true,type:'streamlit:componentReady',apiVersion:1},'*');
-  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);clearTimeout(previewTimer);if(section==='upload'&&!busy)notify();if(!document.hidden&&!busy){if(row?.preview_url&&!previewBlob){previewKey='';previewAttempts=0;}refresh();}});window.addEventListener('pagehide',()=>{stopped=true;controller.abort();clearTimeout(timer);clearTimeout(previewTimer);if(previewBlob)URL.revokeObjectURL(previewBlob);});new ResizeObserver(resize).observe(document.body);
+  document.addEventListener('visibilitychange',()=>{clearTimeout(timer);clearTimeout(previewTimer);if(section==='upload'&&!busy)notify();if(!document.hidden&&!busy){if(row?.preview_url&&!previewBlob){previewKey='';previewAttempts=0;}refresh();}});window.addEventListener('pagehide',()=>{stopped=true;epoch++;clearCopyFeedback();controller.abort();clearTimeout(timer);clearTimeout(previewTimer);if(previewBlob)URL.revokeObjectURL(previewBlob);});new ResizeObserver(resize).observe(document.body);
   refresh();
 })();

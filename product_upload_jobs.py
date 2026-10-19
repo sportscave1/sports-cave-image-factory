@@ -133,8 +133,9 @@ def generate(connect,row,actor,name,sport,provider_factory,base_dir,semaphore,pr
                     progress('Generating mockups',completed,5,record['preview_path'])
                 with prepared(row,connect,provider) as (ready_row,folder):
                     progress('Generating mockups',0,5)
+                    from product_upload_lifestyle import individual_prompt_items
                     result=factory.generate_product_images(name,sport,folder/'artwork.png',base_dir=base_dir,
-                        output_root=factory.create_temp_run_parent(),final_prompt_items=prompts(name,sport),
+                        output_root=factory.create_temp_run_parent(),final_prompt_items=individual_prompt_items(prompts(name,sport)),
                         asset_completed_callback=asset)
                 progress('Checking completed mockups',5,5)
                 if finalize:

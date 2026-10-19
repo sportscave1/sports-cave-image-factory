@@ -2,11 +2,37 @@ import unittest
 
 import mockup_product_prompts as scenes
 from product_upload_lifestyle import (
-    AUTOMATIC_START, FILENAMES, INSTRUCTIONS, LABELS, PER_IMAGE, PROMPT_ID, compose, scene_texts,
+    AUTOMATIC_START, FINISHED_MOCKUPS, FILENAMES, INSTRUCTIONS, LABELS, PER_IMAGE, PROMPT_ID, compose, scene_texts,
+    individual_prompt, individual_prompt_items,
 )
 
 
 class ProductUploadMasterV6Tests(unittest.TestCase):
+    def test_finished_contract_in_master_saved_overrides_and_each_card(self):
+        scene = 'Selected room: coastal study\nSelected camera angle: low three-quarter\nOnce Card 1 has been generated, stop and wait.'
+        prompt = compose('Custom saved master: protect all artwork.', [scene] * 3)
+        self.assertTrue(prompt.startswith(AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n'))
+        self.assertEqual(prompt.count(FINISHED_MOCKUPS), 4)  # master + three independent briefs
+        self.assertNotIn('stop and wait', prompt)
+        self.assertEqual(prompt.count('Selected camera angle: low three-quarter'), 3)
+        self.assertTrue(INSTRUCTIONS.startswith(AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS))
+        self.assertTrue(PER_IMAGE.startswith(FINISHED_MOCKUPS))
+        self.assertNotIn('generate a blank room/frame scene and identify', prompt)
+        brief = individual_prompt(scene)
+        self.assertEqual(individual_prompt(brief), brief)
+        items = [dict(filename=name, prompt=scene, label=label) for name, label in zip(FILENAMES, LABELS)]
+        protected = individual_prompt_items(items)
+        for original, item in zip(items, protected):
+            self.assertTrue(item['prompt'].startswith(FINISHED_MOCKUPS))
+            self.assertEqual(item['filename'], original['filename'])
+            self.assertEqual(item['label'], original['label'])
+            self.assertIn('Selected room: coastal study', item['prompt'])
+            self.assertNotIn('stop and wait', item['prompt'])
+            self.assertEqual(original['prompt'], scene)
+        self.assertEqual(individual_prompt_items(protected), protected)
+        unrelated = dict(filename='social-prompt.txt', prompt='unchanged')
+        self.assertEqual(individual_prompt_items([unrelated]), [unrelated])
+
     def test_saved_override_migration_is_idempotent_and_preserves_design_locks(self):
         legacy = '''AUTOMATIC START — OLD
 Generate Card 1 and wait for approval.

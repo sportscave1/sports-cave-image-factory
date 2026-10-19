@@ -51,9 +51,11 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
             assert len(gallery['items']) == 5
             assert all(i['preview'].startswith('data:image/webp;base64,') for i in gallery['items'])
             assert any(p.get('mode') == 'actions' and p.get('prompt') for p in payloads)
-            from product_upload_lifestyle import AUTOMATIC_START
+            from product_upload_lifestyle import AUTOMATIC_START, FINISHED_MOCKUPS
             copied = next(p['prompt'] for p in payloads if p.get('mode') == 'actions')
             assert copied.startswith(AUTOMATIC_START + '\n\n')
+            assert copied.startswith(AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n')
+            assert copied.count(FINISHED_MOCKUPS) == 4
             assert copied.count('AUTOMATIC START —') == 1
             assert copied.count('END AUTOMATIC START') == 1
             assert 'Wait until Card 1 is approved' not in copied
