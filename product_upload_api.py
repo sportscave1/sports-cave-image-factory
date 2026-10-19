@@ -203,8 +203,8 @@ async def action(request):
             source = await run_in_threadpool(current_source, row, body.get('source_version'))
             def work(progress):
                 return Mapping(connect, Dropbox()).map(key, user, source_version=source['version'],
-                    product_id=body.get('product_id'), confirmed_limit=body.get('edition_limit'))
-            JOBS.submit(key, uid, 'sync-map', [source['version'], body.get('edition_limit')], work)
+                    product_id=body.get('product_id'), confirmed_limit=body.get('edition_limit'), confirm_product=body.get('confirm_product') is True)
+            JOBS.submit(key, uid, 'sync-map', [source['version'], body.get('edition_limit'), body.get('product_id'), body.get('confirm_product')], work)
             return JSONResponse(dict(mapping=await run_in_threadpool(mapping_snapshot, key, user)), headers=HEADERS)
         elif op == 'mockups':
             import os_accounts

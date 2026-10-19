@@ -8129,7 +8129,7 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
         decisions.append(details)
         _webhook_log("edition_product_classified", "eligible" if decision["eligible"] else "skipped",
                      topic=topic, webhook_id=webhook_id, source=source, **details)
-        if decision.get("retryable") and source == "webhook":
+        if decision.get("retryable") and source in ("webhook", "product_uploads"):
             from shopify_product_onboarding import PendingRegistration
             raise PendingRegistration(f"Product registration deferred: {decision['reason']}; retry current Shopify state.")
         if decision["eligible"]:
@@ -19703,6 +19703,11 @@ def _normalize_shopify_product_create_payload(payload):
 
 
 def process_product_create_webhook(payload, webhook_id, topic="products/create", *, claim_event=True, config=None):
+    return process_shopify_product_job(payload, webhook_id, topic, claim_event=claim_event, config=config)
+
+
+def process_shopify_product_job(payload, webhook_id, topic="products/create", *, claim_event=True, config=None, source="webhook"):
+
     started = time.perf_counter()
     topic = str(topic or "products/create").strip()
     webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(
@@ -19710,9 +19715,9 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
         topic,
         safe_payload=_safe_webhook_product_payload(payload),
     )
-    if not shopify_sync.is_products_create_webhook_topic(topic):
+    if not (shopify_sync.is_products_create_webhook_topic(topic) or (topic == "editions/onboard" and source == "product_uploads" and not claim_event)):
         return {
-            "source": "webhook",
+            "source": source,
             "duplicate": False,
             "processed": False,
             "reason": "Unsupported Shopify webhook topic.",
@@ -19730,7 +19735,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
         if claim.get("duplicate"):
             _webhook_log("webhook_duplicate_skipped", "completed", webhook_id=webhook_id, topic=topic)
             return {
-                "source": "webhook",
+                "source": source,
                 "duplicate": True,
                 "processed": True,
                 "shopify_product_id": claim.get("shopify_product_id") or "",
@@ -19767,7 +19772,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                         for reason in sport_tagging.get("review", [])]
         _webhook_log(
             "webhook_product_processing_started",
-            source="webhook",
+            source=source,
             topic=topic,
             webhook_id=webhook_id,
             shopify_product_id=product.get("shopify_product_id") or "",
@@ -19780,7 +19785,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                          shopify_product_id=product.get("shopify_product_id"), handle=product.get("handle"),
                          product_status=product.get("status"), eligible=False, action="skipped", reason="not_active")
             result = {
-                "source": "webhook",
+                "source": source,
                 "duplicate": False,
                 "processed": True,
                 "reason": "Product is not active; a later products/update can initialize it.",
@@ -19815,7 +19820,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
 
         apply_summary = register_shopify_products_for_edition_ops(
             [product],
-            source="webhook",
+            source=source,
             config=config,
             topic=topic,
             webhook_id=webhook_id,
@@ -19838,7 +19843,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             "results": [],
         }
         result = {
-            "source": "webhook",
+            "source": source,
             "duplicate": False,
             "processed": True,
             "shopify_product_id": product.get("shopify_product_id") or "",
@@ -19886,7 +19891,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
         _webhook_log(
             "webhook_product_processing_finished",
             status,
-            source="webhook", topic=topic, webhook_id=webhook_id,
+            source=source, topic=topic, webhook_id=webhook_id,
             shopify_product_id=product.get("shopify_product_id") or "",
             shopify_handle=product.get("handle") or "",
             inserted=inserted_count,

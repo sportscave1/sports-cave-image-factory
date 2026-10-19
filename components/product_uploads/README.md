@@ -1,3 +1,41 @@
+## Coordinated Map update (local, based on release 9c86ea)
+
+Map prefers the saved Shopify ID and persists its shop, upload session and source
+PSD revision. External ChatGPT publication already carries the exact `sc-upload`
+operation tag; that correlation remains the automatic handoff. An absent or
+ambiguous tag requires an explicit product-ID selection. Names, handles and
+catalogue order cannot authorise a match.
+
+Missing editions use a native `editions/onboard` receipt in the existing durable
+product consumer, with a 30-second bounded wait for the persisted active run.
+There is no fake webhook or second allocator. Missing metadata remains pending;
+correct the authoritative Shopify metadata and retry. Draft publication remains
+pending under the shared onboarding eligibility rules.
+
+A cached handle is released only after a successful same-shop GraphQL read proves
+the previous ID absent, the current ID/handle exact, and product read access valid.
+The previous cache row is archived in app_settings and retained with a null alias.
+No historical identity, run, allocation, certificate, mapping or counter transfers.
+An existing historical edition handle conflict still requires explicit review.
+
+Apply `supabase/migrations/20261019221742_product_upload_coordinated_mapping.sql`
+with an authorised release before using the new move flow. It keeps incomplete
+moves out of downstream processing and permits the existing preparation queue
+only after final verification commits. A completed hold is a durable receipt;
+subsequent explicit administrator replacements keep their existing workflow.
+Identical mapped revisions reuse the existing mapping/preparation. Different
+known revisions require explicit replacement. Interrupted moves recover by the
+original Dropbox file ID, destination, content hash, size and revision metadata.
+
+Local validation uses simulated providers/orders and disposable PostgreSQL via
+PGlite, plus the real browser component/API fixture. No live PSD was moved. Brock
+15428753948979 is still absent from live Edition Ops: release 9c86ea has no safe
+operation that performs this new cache repair. Its predecessor 15428059398451
+still owns the cached handle. Reconciliation/import remains pending deployment;
+local success is not evidence of live import.
+
+The historical implementation notes below describe earlier versions.
+
 # Local Mockups integration — 18 October 2026
 
 This section supersedes the historical UI/lifecycle description below. The owner

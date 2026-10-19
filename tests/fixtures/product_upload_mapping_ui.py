@@ -21,6 +21,7 @@ def fixture():
     root=Path(__file__).resolve().parents[2]
     db=database.__wrapped__();database_value=next(db)
     with tempfile.TemporaryDirectory(prefix='sc-map-fixture-') as directory, pytest.MonkeyPatch.context() as patch:
+        patch.setenv('SHOPIFY_STORE_DOMAIN','fixture.myshopify.com')
         environment=env.__wrapped__(database_value,Path(directory),patch)
         service,key,meta,product=setup(environment)
         working_attach=service.mappings.attach
@@ -49,7 +50,7 @@ def fixture():
             <section><button onclick="fetch('/fixture/fail',{method:'POST'}).then(()=>this.textContent='Fixture sync paused')">Pause fixture mapping</button> <button onclick="fetch('/fixture/restore',{method:'POST'}).then(()=>this.textContent='Fixture sync restored')">Restore fixture mapping</button></section>
             <label>Fixture viewport <select onchange="document.querySelector('main').style.maxWidth=this.value+'px'"><option value="1050">Desktop</option><option value="640">Narrow desktop</option></select></label>
             <label>Fixture text scale <select onchange="document.querySelector('iframe').contentDocument.documentElement.style.fontSize=this.value+'px';document.documentElement.style.fontSize=this.value+'px'"><option value="14">100%</option><option value="21">150%</option><option value="28">200%</option></select></label></main>
-            <script>const f=document.querySelector('iframe');f.addEventListener('load',()=>f.contentWindow.postMessage({type:'streamlit:render',args:{section:'handoff',id:'KEY',mode:'DRAFT'}},location.origin));
+            <script>const f=document.querySelector('iframe');f.addEventListener('load',()=>f.contentWindow.postMessage({type:'streamlit:render',args:{section:'handoff',id:'KEY',mode:'LIVE'}},location.origin));
             addEventListener('message',e=>{if(e.source===f.contentWindow&&e.data.type==='sports-cave-product-upload-height')f.style.height=e.data.height+'px';});</script>'''.replace('KEY',key))
         async def evidence(request):
             return JSONResponse(dict(requests=history,operation=key,source=meta,state=service.status(key,ADMIN)))

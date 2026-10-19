@@ -2,8 +2,10 @@
 'use strict';
 window.ProductUploadMapping = ({request, getRow}) => {
   const $ = id => document.getElementById(id);
-  const steps=['Finding Shopify product','Syncing Edition Ops','Checking edition setup','Moving PSD','Saving mapping','Verifying'];
+  const steps=['Finding product','Syncing if needed','Linking PSD'];
+  const stageLabel=s=>s==='Finding Shopify product'?'Finding product':['Syncing Edition Ops','Checking edition setup'].includes(s)?'Syncing if needed':'Linking PSD';
   let key='',source='',mode='',serial=0,value=null,dialog=null,pending=false,disposed=false,visible=false;
+  let announced='';
   let requests=new AbortController(),pollTimer=null,returnFocus=null,sequence=0;
   const valid=(id,version)=>!disposed&&visible&&key===id&&serial===version&&getRow()?.id===id&&getRow()?.saved_source_version===source;
   function recoveryURL(clear=false){
@@ -16,10 +18,14 @@ window.ProductUploadMapping = ({request, getRow}) => {
   }
   function paint(){
     const state=value?.state||'Unmapped',success=state==='Mapped';
+    if(success&&announced!==key&&window.location?.origin){
+      parent.postMessage({type:'sports-cave-product-upload-linked',product_id:value?.product?.id,run_id:value?.run_id},window.location.origin);announced=key;
+    }
     $('mapping-status').textContent=success?'✓ Success — synced and PSD mapped':state;
     $('mapping-status').style.color=success?'#197341':['Mapping…','Pending sync'].includes(state)?'#876614':state==='Unmapped'?'#62676e':'#ad2929';
-    $('mapping-reason').textContent=success?'':value?.reason||'';
-    $('map').disabled=!visible||!key;
+    $('mapping-reason').textContent=success?value?.product?.title||'':value?.reason||'';
+    $('map').disabled=!visible||!key||pending||state==='Mapping…';
+    $('map').textContent=success?'Mapped ✓':state==='Mapping…'?stageLabel(value?.stage):'MAP';
     $('mapping-refresh').disabled=!visible||!key||pending;
     if(!dialog)return;
     const d=id=>dialog.querySelector('[data-field="'+id+'"]');
@@ -28,17 +34,23 @@ window.ProductUploadMapping = ({request, getRow}) => {
     d('state').textContent=success?'Success — synced and PSD mapped':state;
     d('reason').textContent=success?'':value?.reason||'';
     d('edition').textContent=value?.edition_id?`Edition Ops record ${value.edition_id} · Run ${value.run_id}`:'';
+    d('edition-link').hidden=!success;
     d('steps').replaceChildren();
     for(const step of steps){
       const item=dialog.ownerDocument.createElement('li');
-      item.textContent=(value?.completed?.includes(step)?'✓ ':value?.stage===step?'→ ':'')+step;
-      if(value?.stage===step)item.setAttribute('aria-current','step');
+      item.textContent=(value?.completed?.includes({'Finding product':'Finding Shopify product','Syncing if needed':'Checking edition setup','Linking PSD':'Verifying'}[step])?'✓ ':stageLabel(value?.stage)===step?'→ ':'')+step;
+      if(stageLabel(value?.stage)===step)item.setAttribute('aria-current','step');
       d('steps').append(item);
     }
     d('limit-row').hidden=!value?.needs_limit;
+    d('product-row').hidden=!value?.needs_product;
+    const select=d('product-choice');select.replaceChildren();
+    for(const product of value?.candidates||[]){const option=dialog.ownerDocument.createElement('option');option.value=product.id;option.textContent=product.title+' · '+product.id;select.append(option);}
+    select.hidden=!(value?.candidates||[]).length;
+    d('product-id').hidden=(value?.candidates||[]).length>0;
     d('retry').hidden=success;
     d('retry').disabled=pending||state==='Mapping…';
-    d('retry').textContent=value?.needs_limit?'Confirm & resume':'Retry';
+    d('retry').textContent=value?.needs_product?'Confirm product & map':value?.needs_limit?'Confirm & resume':'Retry';
   }
   function schedule(){
     clearTimeout(pollTimer);pollTimer=null;
@@ -89,17 +101,23 @@ window.ProductUploadMapping = ({request, getRow}) => {
       .sc-upload-edition-dialog input{width:100%;margin:7px 0}.sc-upload-edition-dialog .sc-edition-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
       .sc-upload-edition-dialog [data-field=retry]{background:#b08b40;border-color:#b08b40;color:white}
     </style><h2>Sync &amp; Map</h2><strong data-field="title"></strong>
-    <ol data-field="steps"></ol><p>PSD: <span data-field="psd"></span></p><p data-field="edition"></p>
+    <ol data-field="steps"></ol><p>PSD: <span data-field="psd"></span></p><p data-field="edition"></p><p><a data-field="edition-link" href="?page=edition_ops" target="_top" hidden>Open Edition Ops</a></p>
     <strong data-field="state" role="status" aria-live="polite"></strong><p data-field="reason"></p>
     <label data-field="limit-row" hidden>Confirmed edition limit<input data-field="limit" type="number" min="1" max="1000" step="1" placeholder="Confirmed product edition limit"></label>
-    <div class="sc-edition-actions"><button data-field="retry" type="button">Retry</button><button data-field="close" type="button" autofocus>Close</button></div>`;
+    <label data-field="product-row" hidden>Confirm Shopify product<select data-field="product-choice"></select><input data-field="product-id" placeholder="Shopify product ID from publication" aria-label="Shopify product ID"></label><div class="sc-edition-actions"><button data-field="retry" type="button">Retry</button><button data-field="close" type="button" autofocus>Close</button></div>`;
     doc.body.append(dialog);
     dialog.querySelector('[data-field="close"]').onclick=close;
     dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
     dialog.querySelector('[data-field="retry"]').onclick=()=>{
       const input=dialog.querySelector('[data-field="limit"]');
       if(value?.needs_limit&&(!input.value||!input.reportValidity()))return;
-      map(value?.needs_limit?{edition_limit:Number(input.value)}:{});
+      const extra=value?.needs_limit?{edition_limit:Number(input.value)}:{};
+      if(value?.needs_product){
+        const chosen=(value.candidates||[]).length?dialog.querySelector('[data-field="product-choice"]').value:dialog.querySelector('[data-field="product-id"]').value.trim();
+        if(!chosen)return;
+        extra.product_id=/^\d+$/.test(chosen)?'gid://shopify/Product/'+chosen:chosen;extra.confirm_product=true;
+      }
+      map(extra);
     };
     paint();dialog.showModal();
     const owner=dialog,id=key,version=serial;

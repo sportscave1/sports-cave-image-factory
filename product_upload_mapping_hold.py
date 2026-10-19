@@ -1,6 +1,6 @@
 """Scoped preparation exclusion for an explicitly requested upload mapping.
 
-No runnable checkpoint is created. Database guards also protect against older
+Preparation is admitted only after finalisation. Database guards also protect older
 discovery/Companion processes during a rolling release.
 """
 
@@ -15,10 +15,18 @@ def held(cur, pid=None, file_id=None):
     if not cur.fetchone()['name']:
         return False
     cur.execute('SELECT 1 FROM '+TABLE+' WHERE product_gid=%s OR file_id=%s', (pid, file_id))
+    matched=bool(cur.fetchone())
+    if not matched:return False
+    cur.execute("SELECT to_regprocedure('public.product_upload_mapping_complete(uuid,text,text)') AS name")
+    if not cur.fetchone()['name']:return True
+    cur.execute('SELECT 1 FROM '+TABLE+' WHERE (product_gid=%s OR file_id=%s) AND NOT public.product_upload_mapping_complete(operation_id,product_gid,file_id)',(pid,file_id))
     return bool(cur.fetchone())
 
 
 def assert_ready(cur):
+    cur.execute("SELECT to_regprocedure('public.product_upload_mapping_complete(uuid,text,text)') AS name")
+    if not cur.fetchone()['name']:
+        raise ValueError('Coordinated Map migration is required before moving a PSD.')
     cur.execute("SELECT count(*) AS n FROM pg_trigger WHERE tgname=ANY(%s) AND tgenabled='O' AND NOT tgisinternal", (list(GUARDS),))
     if cur.fetchone()['n'] != len(GUARDS):
         raise ValueError('Sync & Map requires the mapping-only preparation guards migration. No PSD was moved.')
@@ -58,6 +66,7 @@ def verify(cur, key, pid, file_id):
     cur.execute('SELECT 1 FROM '+TABLE+' WHERE operation_id=%s AND product_gid=%s AND file_id=%s', (key,pid,file_id))
     if not cur.fetchone():
         raise ValueError('Automatic preparation is not held for this exact upload.')
+    if not held(cur,pid,file_id):return
     cur.execute("SELECT 1 FROM auto_edition_onboarding WHERE (product_gid=%s OR file_id=%s)", (pid,file_id))
     if cur.fetchone():
         raise ValueError('Unexpected preparation work exists for this upload. Success cannot be confirmed.')

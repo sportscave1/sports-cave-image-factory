@@ -54,10 +54,12 @@ def verify_new_product(product, config=None):
             return product
         cur.execute('SELECT shopify_product_id FROM shopify_products WHERE handle=%s', (product.get('handle'),))
         cached = cur.fetchone()
-        if cached and str(cached['shopify_product_id']) not in (pid, pid.rsplit('/', 1)[-1]):
-            raise PendingRegistration(
-                f"Catalogue handle belongs to another Shopify product ({cached['shopify_product_id']}); "
-                "reconcile the previous identity/history before onboarding. No counters changed.")
+    if cached and str(cached['shopify_product_id']) not in (pid, pid.rsplit('/', 1)[-1]):
+        from shopify_cache_identity import reconcile
+        try:
+            reconcile(db.connect, product, config)
+        except ValueError as exc:
+            raise PendingRegistration(str(exc)) from exc
     try:
         total = edition_limit(product)
     except ValueError as exc:
@@ -103,11 +105,17 @@ def verify_new_product(product, config=None):
 
 
 def process_receipt(row, db, config=None):
+    if row.get('shop_domain'):
+        validate_shop(row['shop_domain'],config)
+    elif row['topic']=='editions/onboard':
+        raise ValueError('Native onboarding job is missing its Shopify shop.')
     payload = row['payload']
     if isinstance(payload, str):
         payload = json.loads(payload)
     try:
-        result = db.process_product_create_webhook(payload, row['webhook_id'], row['topic'], claim_event=False, config=config)
+        result = (db.process_shopify_product_job(payload, row['webhook_id'], row['topic'], claim_event=False, config=config, source='product_uploads')
+                  if row['topic'] == 'editions/onboard' else
+                  db.process_product_create_webhook(payload, row['webhook_id'], row['topic'], claim_event=False, config=config))
     except PendingRegistration as exc:
         db._update_webhook_event_status(row['webhook_id'], 'pending', error_message=str(exc))
         return {'status': 'pending', 'reason': str(exc)}
@@ -136,8 +144,8 @@ def drain(db, config=None, limit=10, renew=None):
     retry schedule (30s exponential, capped at one hour), without a retry cutoff.
     """
     with db.connect() as conn, conn.cursor() as cur:
-        cur.execute("""SELECT webhook_id,topic,payload FROM webhook_events
-            WHERE lower(replace(topic,'_','/')) IN ('products/create','products/update')
+        cur.execute("""SELECT webhook_id,topic,payload,shop_domain FROM webhook_events
+            WHERE lower(replace(topic,'_','/')) IN ('products/create','products/update','editions/onboard')
               AND status IN ('received','processing','failed','retry','pending')
               AND (processed_at IS NULL OR processed_at <= now() -
                    least(3600,30*power(2,least(COALESCE((payload->>'_onboarding_attempts')::int,0),7))) * interval '1 second')
@@ -268,3 +276,64 @@ def run(stop):
         if scan:
             next_scan = time.monotonic() + 300
         stop.wait(5)
+
+
+def validate_shop(shop, config=None):
+    import shopify_sync
+    domain=shopify_sync.normalize_store_domain(shop)
+    configured=shopify_sync.normalize_store_domain((config or shopify_sync.get_config()).get('store_domain'))
+    if not domain or domain != configured:
+        raise ValueError('The saved Shopify shop does not match this server. No product was linked.')
+    return domain
+
+
+def enqueue(connect, shop, product_id):
+    """Native application job, not a webhook delivery. Reuse outstanding work."""
+    import shopify_sync
+    shop = validate_shop(shop)
+    if not shop or not product_id.startswith('gid://shopify/Product/') or not product_id.rsplit('/',1)[-1].isdigit():
+        raise ValueError('A configured shop and exact Shopify product ID are required.')
+    event = 'edition-onboard-' + hashlib.sha256((shop+'|'+product_id).encode()).hexdigest()
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', (shop+'|'+product_id,))
+        cur.execute("""SELECT webhook_id,status FROM webhook_events WHERE shop_domain=%s
+            AND (payload->>'id'=%s OR payload->>'admin_graphql_api_id'=%s)
+            AND topic IN ('products/create','products/update','editions/onboard')
+            AND status IN ('received','processing','pending','failed','retry')
+            ORDER BY received_at LIMIT 1 FOR UPDATE""", (shop,product_id.rsplit('/',1)[-1],product_id))
+        prior=cur.fetchone()
+        if prior:
+            event=prior['webhook_id']
+            if prior['status'] in ('pending','failed','retry'):
+                cur.execute("UPDATE webhook_events SET status='received',processed_at=NULL WHERE webhook_id=%s",(event,))
+        else:
+            cur.execute("""INSERT INTO webhook_events(webhook_id,topic,status,shop_domain,source,payload,received_at)
+                VALUES(%s,'editions/onboard','received',%s,'product_uploads',%s::jsonb,now())
+                ON CONFLICT(webhook_id) DO UPDATE SET status='received',processed_at=NULL
+                WHERE webhook_events.status NOT IN ('processing','received')""",
+                (event,shop,json.dumps({'id':product_id.rsplit('/',1)[-1]})))
+        conn.commit()
+    return event
+
+
+def ensure(connect, shop, product_id, *, timeout=30, poll=None):
+    """Bounded wait for persisted identity/run, never a receipt acknowledgement."""
+    from product_upload_mapping import read_edition
+    validate_shop(shop)
+    edition=read_edition(connect,product_id)
+    if edition:
+        return edition
+    event=enqueue(connect,shop,product_id)
+    deadline=time.monotonic()+timeout
+    while True:
+        edition=read_edition(connect,product_id)
+        if edition:
+            return edition
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute('SELECT status,error_message FROM webhook_events WHERE webhook_id=%s',(event,))
+            job=cur.fetchone() or {}
+        if job.get('status') in ('pending','failed'):
+            raise PendingRegistration(job.get('error_message') or 'Edition onboarding needs review. Retry safely.')
+        if time.monotonic() >= deadline:
+            raise PendingRegistration('Edition onboarding is still queued. Retry to resume this saved operation.')
+        (poll or (lambda:time.sleep(0.5)))()

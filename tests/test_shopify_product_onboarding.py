@@ -15,6 +15,7 @@ PID = 'gid://shopify/Product/15428753948979'
 
 @pytest.fixture
 def state(database, monkeypatch):
+    monkeypatch.setenv('SHOPIFY_STORE_DOMAIN','fixture.myshopify.com')
     jobs, sql = database
     jobs.connect.commit = lambda self: None
     type(sql).rowcount = 1
@@ -227,6 +228,95 @@ def test_reused_catalog_handle_is_pending_without_overwriting_previous_identity(
     sql.execute("INSERT INTO shopify_products(shopify_product_id,handle) VALUES(%s,%s)",('gid://shopify/Product/15428059398451',p['handle']))
     deliver('reused-handle')
     assert rows(sql,'webhook_events')[0]['status']=='pending'
-    assert 'another Shopify product' in rows(sql,'webhook_events')[0]['error_message']
+    assert 'identity/access could not be verified' in rows(sql,'webhook_events')[0]['error_message']
     assert not rows(sql,'edition_products') and not rows(sql,'edition_runs')
     assert rows(sql,'shopify_products')[0]['shopify_product_id']=='gid://shopify/Product/15428059398451'
+
+
+@pytest.mark.parametrize('proof',['deleted','exists','failure','wrong-shop','no-scope','wrong-current','unknown'])
+def test_cache_alias_reconciliation_requires_authoritative_deletion(state,proof):
+    import shopify_cache_identity as identity
+    sql,p,api=state
+    old='gid://shopify/Product/15428059398451'
+    sql.execute('INSERT INTO shopify_products(shopify_product_id,handle,raw) VALUES(%s,%s,%s::jsonb)',(old,p['handle'],json.dumps({'historic':'unchanged'})))
+    original=rows(sql,'shopify_products')[0]
+    result={'shop':{'myshopifyDomain':'fixture.myshopify.com'},'currentAppInstallation':{'accessScopes':[{'handle':'read_products'}]},
+            'previous':None,'current':{'id':PID,'handle':p['handle']}}
+    if proof=='exists':result['previous']={'id':old}
+    if proof=='wrong-shop':result['shop']['myshopifyDomain']='other.myshopify.com'
+    if proof=='no-scope':result['currentAppInstallation']['accessScopes']=[]
+    if proof=='wrong-current':result['current']['id']=old
+    if proof=='unknown':del result['previous']
+    api.return_value=(result,'2026-04')
+    if proof=='failure':api.side_effect=ConnectionError('API unavailable')
+    if proof!='deleted':
+        with pytest.raises((ValueError,ConnectionError)):identity.reconcile(db.connect,p)
+        assert rows(sql,'shopify_products')==[original]
+        assert not rows(sql,'app_settings')
+    else:
+        assert identity.reconcile(db.connect,p)
+        retained=rows(sql,'shopify_products')[0]
+        assert retained==dict(original,handle=None)
+        archive=rows(sql,'app_settings')[0]['value']
+        assert archive['product_id']==old and archive['released_handle']==p['handle']
+        assert not identity.reconcile(db.connect,p)
+
+
+def test_brock_deleted_cache_owner_imports_exact_new_identity_without_history_mutation(state):
+    import shopify_cache_identity as identity
+    sql,p,api=state
+    old='gid://shopify/Product/15428059398451'
+    sql.execute('INSERT INTO shopify_products(shopify_product_id,handle) VALUES(%s,%s)',(old,p['handle']))
+    def query(q,**kw):
+        if q==identity.QUERY:
+            return {'shop':{'myshopifyDomain':'fixture.myshopify.com'},'currentAppInstallation':{'accessScopes':[{'handle':'read_products'}]},
+                    'previous':None,'current':{'id':PID,'handle':p['handle']}},'2026-04'
+        return {'orders':{'nodes':[],'pageInfo':{'hasNextPage':False}}},'2026-04'
+    api.side_effect=query
+    event=onboarding.enqueue(db.connect,'fixture.myshopify.com',PID)
+    assert onboarding.enqueue(db.connect,'fixture.myshopify.com',PID)==event
+    onboarding.drain(db)
+    assert rows(sql,'webhook_events')[0]['status']=='processed'
+    product=rows(sql,'edition_products')[0]
+    assert (product['shopify_product_gid'],product['next_edition_number'],product['sold_count'],product['remaining_count'])==(PID,1,0,100)
+    assert len(rows(sql,'edition_runs'))==1
+    assert not rows(sql,'edition_orders') and not rows(sql,'certificates')
+    deliver('older-duplicate')
+    assert len(rows(sql,'edition_runs'))==1 and rows(sql,'edition_products')[0]['next_edition_number']==1
+    assert {r['shopify_product_id']:r['handle'] for r in rows(sql,'shopify_products')}=={old:None,PID:p['handle']}
+
+
+def test_native_queue_reuses_receipts_and_rejects_wrong_shop(state):
+    sql,p,api=state
+    db.claim_product_create_webhook_receipt({'id':PID.rsplit('/',1)[-1]},'real-delivery','products/update',shop_domain='fixture.myshopify.com')
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        assert set(pool.map(lambda _:onboarding.enqueue(db.connect,'fixture.myshopify.com',PID),range(3)))=={'real-delivery'}
+    assert len(rows(sql,'webhook_events'))==1
+    with pytest.raises(ValueError,match='shop'):onboarding.ensure(db.connect,'different.myshopify.com',PID)
+    onboarding.drain(db)
+    api.reset_mock()
+    assert onboarding.ensure(db.connect,'fixture.myshopify.com',PID)['run_id']
+    api.assert_not_called()
+
+
+def test_cache_repair_preserves_predecessor_allocations_certificates_and_mapping(state):
+    import shopify_cache_identity as identity
+    sql,p,api=state
+    deliver()
+    # Simulated historical predecessor with an allocated first order.
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute('SELECT allocate_edition_line_units_atomic(%s,%s,%s,%s,%s,%s,%s,%s)',
+            ('shopify','historic-local','historic-line',PID,1,'historic-local','#LOCAL','historic-line'))
+    sql.execute('CREATE TABLE product_psd_mappings(product_gid text,file_id text,revision text)')
+    sql.execute("INSERT INTO product_psd_mappings VALUES(%s,'id:historic','r1')",(PID,))
+    sql.execute("INSERT INTO certificates(edition_order_id,certificate_file_url) VALUES('1','fixture://historic-certificate')")
+    tables=['edition_products','edition_runs','edition_orders','certificates','edition_allocation_tombstones','product_psd_mappings']
+    before={t:rows(sql,t) for t in tables}
+    new=dict(p,shopify_product_id='gid://shopify/Product/15429999999999',legacy_resource_id='15429999999999')
+    api.return_value=({'shop':{'myshopifyDomain':'fixture.myshopify.com'},'currentAppInstallation':{'accessScopes':[{'handle':'read_products'}]},
+                      'previous':None,'current':{'id':new['shopify_product_id'],'handle':new['handle']}},'2026-04')
+    assert identity.reconcile(db.connect,new)
+    assert {t:rows(sql,t) for t in tables}==before
+    # Existing handle-keyed edition history requires review, never rekey or merge.
+    plan=db._plan_edition_product_incremental_sync([dict(new,_onboarding_verified=True)],before['edition_products'])
+    assert plan[0]['action']=='error'

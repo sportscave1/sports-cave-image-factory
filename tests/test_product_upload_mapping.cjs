@@ -47,5 +47,15 @@ function harness(){
   h.setRow({...saved('second'),saved_source_version:'new-save'});await tick();assert(!h.dialog().isConnected);
   h.el('map').onclick();await tick();const last=h.dialog();h.frame.isConnected=false;h.mutation();
   assert(!last.isConnected&&!last.open);assert.equal(h.timers.size,0);h.panel.clearRecoveryURL();assert(!h.host.location.href.includes('upload='));
+  const pick=harness();pick.setRow(saved('choice'));
+  pick.respond(async path=>({mapping:path==='map'?{state:'Mapping…',stage:'Syncing Edition Ops'}:{state:'Pending sync',needs_product:true,candidates:[{id:'gid://shopify/Product/987',title:'Confirmed artwork'}]}}));
+  pick.el('map').onclick();await tick();
+  assert.equal(pick.calls.filter(x=>x.path==='map').length,0,'ambiguous identity must not submit automatically');
+  pick.dialog().querySelector('[data-field="product-choice"]').value='gid://shopify/Product/987';
+  pick.dialog().querySelector('[data-field="retry"]').onclick();await tick();
+  assert.equal(pick.calls.at(-1).body.product_id,'gid://shopify/Product/987');
+  assert.equal(pick.calls.at(-1).body.confirm_product,true);
+  assert.equal(pick.el('map').textContent,'Syncing if needed');assert(pick.el('map').disabled);
+  pick.panel.dispose();
   console.log('PASS: no mount requests; explicit start; double-click; non-cancelling close; recovery; failure never green; stale operation/save fencing; timers and unmount.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

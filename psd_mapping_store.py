@@ -13,7 +13,8 @@ class MappingConflict(ValueError):
 
 
 def _record(row):
-    return {**dict(row), 'verified': True, 'state': 'Linked', 'path': row['file_path']}
+    pending=bool(row.get('_upload_pending'))
+    return {**dict(row), 'verified': not pending, 'state': 'Mapping pending' if pending else 'Linked', 'path': row['file_path']}
 
 
 def preview(candidates, existing, product_ids):
@@ -54,7 +55,13 @@ class PostgresMappings:
     @staticmethod
     def _all(cur):
         cur.execute('SELECT * FROM public.product_psd_mappings ORDER BY shopify_product_gid')
-        return {r['shopify_product_gid']: _record(r) for r in cur.fetchall()}
+        rows=list(cur.fetchall())
+        cur.execute("SELECT to_regprocedure('public.product_upload_mapping_complete(uuid,text,text)') AS name")
+        if cur.fetchone()['name']:
+            cur.execute('SELECT product_gid FROM product_upload_mapping_holds WHERE NOT public.product_upload_mapping_complete(operation_id,product_gid,file_id)')
+            pending={r['product_gid'] for r in cur.fetchall()}
+            rows=[dict(r,_upload_pending=r['shopify_product_gid'] in pending) for r in rows]
+        return {r['shopify_product_gid']: _record(r) for r in rows}
 
     def read(self):
         """One indexed revision query per page; one batch read on revision changes."""
@@ -92,6 +99,9 @@ class PostgresMappings:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute('SELECT * FROM public.product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
             row = cur.fetchone()
+            if row:
+                from product_upload_mapping_hold import held
+                row=dict(row,_upload_pending=held(cur,pid,row['dropbox_file_id']))
             return _record(row) if row else None
 
     @staticmethod

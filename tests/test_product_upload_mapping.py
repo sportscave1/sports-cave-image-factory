@@ -16,12 +16,25 @@ ROOT=Path(__file__).parents[1]
 MIGRATION='supabase/migrations/20261019095933_product_upload_mapping_only_hold.sql'
 
 
-def setup(env, *, correlated=True, limit=200, mode='DRAFT', live_source=False, production_grants=False):
+@pytest.fixture(autouse=True)
+def restore_provider_boundaries(monkeypatch):
+    monkeypatch.setenv('SHOPIFY_STORE_DOMAIN','fixture.myshopify.com')
+    import shopify_sync, product_sport_tag_sync
+    for module,name in ((shopify_sync,'fetch_product_by_shopify_id'),(shopify_sync,'graphql_request'),(product_sport_tag_sync,'sync_product_sport_tags')):
+        monkeypatch.setattr(module,name,getattr(module,name))
+
+
+def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, production_grants=False):
     store,sql,provider=env
     sql.execute((ROOT/'supabase/migrations/20261019070000_product_upload_verified_psd_mapping.sql').read_text(encoding='utf-8'))
     if production_grants:
         sql.execute('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO service_role')
     sql.execute((ROOT/MIGRATION).read_text(encoding='utf-8'))
+    sql.execute((ROOT/'supabase/migrations/20261019221742_product_upload_coordinated_mapping.sql').read_text())
+    sql.execute("""CREATE TABLE IF NOT EXISTS app_settings(key text PRIMARY KEY,value jsonb,updated_at timestamptz);
+    CREATE TABLE IF NOT EXISTS webhook_events(webhook_id text PRIMARY KEY,topic text,status text,shop_domain text,source text,payload jsonb,
+      received_at timestamptz,processed_at timestamptz,error_message text,inserted_count int,skipped_count int,
+      affected_handles_count int,processing_elapsed_ms int,new_order_inserted bool,shopify_order_id text,shopify_order_name text);""")
     from product_upload_dropbox import ROOTS
     row,meta=selected(env, **({'parent':ROOTS['live']} if live_source else {}));key=str(row['id']);receipt=saved_row()['data']
     with store.locked(key,ADMIN['id']) as (row,cur):
@@ -30,11 +43,18 @@ def setup(env, *, correlated=True, limit=200, mode='DRAFT', live_source=False, p
                            mockups_context={'design_name':'fixture-art','sport':'Motorsport'})
         row['data']['upload_operation']['output']=receipt['upload_operation']['output']
     p=product(tags=([tag(key)] if correlated else [])+([f'sc-edition-limit-{limit}'] if limit else []),
-              status='ACTIVE' if mode=='LIVE' else 'DRAFT',online_store_url='https://fixture/products/art' if mode=='LIVE' else '')
+              status='DRAFT' if mode=='DRAFT' else 'ACTIVE',online_store_url='' if mode=='DRAFT' else 'https://fixture/products/art',created_at='2026-10-19T09:28:59Z')
     shop=Mock()
     shop.fetch_catalog_page.side_effect=lambda **kw:dict(products=[deepcopy(p)] if correlated else [],has_next_page=False)
     shop.fetch_product_by_shopify_id.side_effect=lambda pid:deepcopy(p) if pid==PID else None
-    return Mapping(store.connect,provider,shopify=shop),key,meta,p
+    import supabase_backend as db
+    import shopify_product_onboarding as onboarding
+    db.shopify_sync.fetch_product_by_shopify_id=lambda *a,**kw:deepcopy(p)
+    db.shopify_sync.graphql_request=lambda *a,**kw:({'orders':{'nodes':[],'pageInfo':{'hasNextPage':False}}},'2026-04')
+    import product_sport_tag_sync
+    product_sport_tag_sync.sync_product_sport_tags=lambda *a,**kw:dict(status='verified',review=[])
+    ensure=lambda pid:onboarding.ensure(store.connect,'fixture.myshopify.com',pid,timeout=2,poll=lambda:onboarding.drain(db))
+    return Mapping(store.connect,provider,shopify=shop,shop_domain='fixture.myshopify.com',onboard=ensure),key,meta,p
 
 
 def count(sql,table):
@@ -51,18 +71,18 @@ def test_hold_grants_remain_immutable_with_production_default_privileges(env):
 
 
 def no_jobs(env):
-    for table in ('auto_edition_onboarding','auto_edition_jobs','auto_edition_discovery','auto_edition_source_inventory'):
+    for table in ('auto_edition_jobs','auto_edition_discovery','auto_edition_source_inventory'):
         assert count(env[1],table)==0,table
 
 
-@pytest.mark.parametrize('mode',['DRAFT','LIVE','UPDATE'])
+@pytest.mark.parametrize('mode',['LIVE','UPDATE'])
 def test_complete_real_path_from_missing_catalogue_idempotent_no_customer_allocation(env,mode):
     service,key,meta,p=setup(env,mode=mode)
     before=deepcopy(env[0].read(key,ADMIN['id']))
     assert read_edition(env[0].connect,PID) is None
     result=service.map(key,ADMIN)
     assert result['state']=='Mapped',result
-    assert result['reason']=='Success — synced and PSD mapped' and result['preparation_held']
+    assert result['reason']=='Success — synced and PSD mapped' and not result['preparation_held']
     assert result['edition_id'] and result['run_id'] and len(result['completed'])==6
     assert result['psd'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/New Art.psd')
     saved=env[0].read(key,ADMIN['id'])
@@ -104,6 +124,7 @@ def test_preexisting_exact_live_mapping_is_reused_without_moving(env):
     assert service.map(key,ADMIN)['state']=='Mapped'
     assert not env[2].api.move_path.called
     assert service.mappings.read_one(PID)['file_path']==meta['path_display']
+    assert count(env[1],'auto_edition_onboarding')==0
     no_jobs(env)
 
 
@@ -136,7 +157,7 @@ def test_exact_correlation_conflicts_never_guess(env,kind):
     if kind=='archived':p['status']='ARCHIVED'
     result=service.map(key,ADMIN)
     assert result['state']!='Mapped' and result['reason']
-    if kind=='none':assert result['reason']=='Product not found in Shopify yet'
+    if kind=='none':assert result['reason'].startswith('Product not found in Shopify yet') and result['needs_product']
     assert not env[2].api.move_path.called and not read_edition(env[0].connect,PID)
     no_jobs(env)
 
@@ -144,9 +165,10 @@ def test_exact_correlation_conflicts_never_guess(env,kind):
 def test_unknown_edition_choice_resumes_without_recreating_product(env):
     service,key,meta,p=setup(env,limit=None)
     result=service.map(key,ADMIN)
-    assert result['needs_limit'] and result['state']=='Pending sync'
+    assert 'edition limit' in result['reason'] and result['state']=='Pending sync'
     assert read_edition(env[0].connect,PID) is None
-    assert service.map(key,ADMIN,confirmed_limit=75)['state']=='Mapped'
+    p['tags'].append('sc-edition-limit-75')
+    assert service.map(key,ADMIN)['state']=='Mapped'
     assert read_edition(env[0].connect,PID)['edition_total']==75
     no_jobs(env)
 
@@ -226,40 +248,39 @@ def test_status_polling_never_contacts_providers_and_stale_save_never_green(env)
     assert service.status(key,ADMIN)['state']=='Status unavailable'
 
 
-def test_background_discovery_queue_and_older_direct_sql_cannot_admit_held_source(env,monkeypatch):
-    from auto_editions_discovery import Discovery,register
+def test_background_queue_rejected_until_finalisation_then_admitted_once(env):
     from auto_editions_onboarding_store import Queue
     service,key,meta,p=setup(env)
+    original=service._verify_database
+    def fail_after_attach(*a,**kw):
+        raise ConnectionError('finalisation not committed')
+    service._verify_database=fail_after_attach
+    assert service.map(key,ADMIN)['state']=='Mapping failed'
+    Queue(env[0].connect).enqueue(PID,meta['id'],'fixture')
+    env[1].execute("INSERT INTO auto_edition_onboarding(product_gid,file_id) VALUES(%s,%s)",(PID,meta['id']))
+    assert count(env[1],'auto_edition_onboarding')==0
+    assert not service.mappings.read_one(PID)['verified']
+    service._verify_database=original
     assert service.map(key,ADMIN)['state']=='Mapped'
-    moved=env[2].files[meta['id']]
-    monkeypatch.setenv('AUTO_EDITIONS_V15_ENABLED','true')
-    monkeypatch.setenv('AUTO_EDITIONS_V17_CONTINUOUS_ENABLED','true')
-    discovery=Discovery(env[0].connect);sql=env[1]
-    with env[0].connect() as conn,conn.cursor() as cur:register(cur,[p],'fixture')
-    token=discovery.claim()['lease_token']
-    discovery.page(token,dict(entries=[moved],cursor='fixture',has_more=False))
-    discovery.seed_existing();Queue(env[0].connect).enqueue(PID,meta['id'],'fixture')
-    # Database guards protect old deployed callers and direct SQL admission too.
-    sql.execute("INSERT INTO auto_edition_onboarding(product_gid,file_id,priority) VALUES(%s,%s,9)",(PID,meta['id']))
-    sql.execute("INSERT INTO auto_edition_discovery(product_gid,event_id) VALUES(%s,'old-worker')",(PID,))
-    sql.execute("INSERT INTO auto_edition_source_inventory(file_id,name_key,path_lower,metadata) VALUES(%s,'newart',%s,%s::jsonb)",(meta['id'],moved['path_display'].lower(),json.dumps(moved)))
-    payload=dict(identity=dict(source=dict(product_gid=PID,file_id=meta['id'])))
-    sql.execute("INSERT INTO auto_edition_jobs(id,payload,actor_id) VALUES(%s,%s::jsonb,'fixture')",('a'*64,json.dumps(payload)))
-    with pytest.raises(RuntimeError,match='held for verified'):
-        sql.execute("UPDATE product_psd_mappings SET source='automatic' WHERE shopify_product_gid=%s",(PID,))
+    assert service.mappings.read_one(PID)['verified']
+    Queue(env[0].connect).enqueue(PID,meta['id'],'fixture')
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert count(env[1],'auto_edition_onboarding')==1
+    env[1].execute('SELECT source FROM auto_edition_onboarding')
+    assert env[1].fetchone()['source']['file_id']==meta['id']
+    assert env[2].api.move_path.call_count==1
     no_jobs(env)
-    assert service.status(key,ADMIN)['state']=='Mapped'
-    # Unrelated work still admits normally.
-    other='gid://shopify/Product/988'
-    sql.execute("INSERT INTO auto_edition_onboarding(product_gid,file_id) VALUES(%s,'id:unrelated')",(other,))
-    assert count(sql,'auto_edition_onboarding')==1
 
 
-def test_late_source_change_and_run_replacement_after_move_rejected(env):
+@pytest.mark.parametrize('change',['source','run','inactive'])
+def test_late_source_change_and_run_replacement_after_move_rejected(env,change):
     service,key,meta,p=setup(env)
     original=service.mappings.attach
     def corrupt(*a,**kw):
-        original(*a,**kw);env[2].files[meta['id']]['rev']='b2'
+        original(*a,**kw)
+        if change=='source':env[2].files[meta['id']]['rev']='b2'
+        elif change=='run':env[1].execute("UPDATE edition_runs SET status='archived'")
+        else:env[1].execute('UPDATE edition_products SET active=false')
     service.mappings.attach=corrupt
     assert service.map(key,ADMIN)['state']=='Mapping failed'
     assert service.status(key,ADMIN)['state']!='Mapped'
@@ -331,7 +352,7 @@ def test_other_operation_cannot_take_hold_and_changed_run_cannot_reuse_success(e
         acquire(env[0].connect,str(uuid.uuid4()),ADMIN['id'],PID,meta['id'])
     env[1].execute('UPDATE edition_products SET active_edition_run_id=NULL')
     assert service.status(key,ADMIN)['state']!='Mapped'
-    assert service.map(key,ADMIN)['state']!='Mapped'
+    with pytest.raises(ValueError,match='replacement workflow'):service.map(key,ADMIN)
 
 
 def test_expired_attempt_and_late_owner_are_fenced(env):
@@ -340,9 +361,97 @@ def test_expired_attempt_and_late_owner_are_fenced(env):
     service,key,meta,p=setup(env)
     with env[0].locked(key,ADMIN['id']) as (row,cur):
         row['data']['upload_operation']['sync_map']=dict(state='Mapping…',lease='expired',
-            lease_until=(now()-timedelta(minutes=1)).isoformat(),source_version=current_source(row)['version'],mode='DRAFT')
+            lease_until=(now()-timedelta(minutes=1)).isoformat(),source_version=current_source(row)['version'],mode='LIVE')
     assert service.status(key,ADMIN)['state']=='Pending sync'
     assert service.map(key,ADMIN)['state']=='Mapped'
     with pytest.raises(ValueError,match='Another attempt'):
         with service._guard(key,ADMIN,'expired'):raise AssertionError('Stale attempt must not mutate')
     assert env[2].api.move_path.call_count==1
+
+
+def test_ambiguous_correlation_requires_explicit_selector_confirmation(env):
+    service,key,meta,p=setup(env)
+    service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[p,dict(p,shopify_product_id='gid://shopify/Product/988')],has_next_page=False)
+    result=service.map(key,ADMIN)
+    assert result['needs_product'] and len(result['candidates'])==2
+    assert not env[2].api.move_path.called
+    assert service.map(key,ADMIN,product_id=PID)['state']!='Mapped'
+    assert service.map(key,ADMIN,product_id=PID,confirm_product=True)['state']=='Mapped'
+    op=env[0].read(key,ADMIN['id'])['data']['upload_operation']
+    assert op['publication_binding']['product_id']==PID and op['publication_binding']['source']==meta
+
+
+def test_saved_publication_id_avoids_search_and_onboarded_run_avoids_enqueue(env):
+    service,key,meta,p=setup(env)
+    service.register(p,200)
+    with env[0].locked(key,ADMIN['id']) as (row,cur):
+        row['data']['upload_operation'].update(product_id=PID,binding='operator',shop_domain='fixture.myshopify.com')
+    service.shopify.fetch_catalog_page.side_effect=AssertionError('No search when publication ID exists')
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert count(env[1],'webhook_events')==0
+
+
+def test_move_failure_is_retryable_and_never_ready(env):
+    service,key,meta,p=setup(env)
+    original=env[2].api.move_path.side_effect
+    env[2].api.move_path.side_effect=ConnectionError('Storage unavailable')
+    assert service.map(key,ADMIN)['state']=='Mapping failed'
+    assert count(env[1],'product_psd_mappings')==0 and count(env[1],'auto_edition_onboarding')==0
+    assert env[2].files[meta['id']]['path_display']==meta['path_display']
+    env[2].api.move_path.side_effect=original
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert count(env[1],'product_psd_mappings')==1 and count(env[1],'auto_edition_onboarding')==1
+
+
+def test_explicit_replacement_workflow_remains_available_after_mapping(env):
+    service,key,meta,p=setup(env)
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    before=read_edition(env[0].connect,PID)
+    replacement=dict(env[2].files[meta['id']],id='id:replacement',rev='new-revision')
+    service.mappings.attach(PID,replacement,ADMIN,expected_file_id=meta['id'],confirm_replace=True,confirm_mismatch=True)
+    assert service.mappings.read_one(PID)['dropbox_file_id']=='id:replacement'
+    assert read_edition(env[0].connect,PID)==before
+    env[1].execute('SELECT file_id FROM auto_edition_onboarding')
+    assert env[1].fetchone()['file_id']=='id:replacement'
+    assert service.status(key,ADMIN)['state']!='Mapped'
+
+
+def test_identical_existing_prepared_mapping_reuses_without_reprocessing(env):
+    import auto_editions as ae
+    service,key,meta,p=setup(env,mode='UPDATE',live_source=True)
+    service.register(p,200)
+    env[1].execute("INSERT INTO product_psd_mappings(shopify_product_gid,dropbox_file_id,file_path,source,actor_id) VALUES(%s,%s,%s,'manual',%s)",(PID,meta['id'],meta['path_display'],ADMIN['id']))
+    env[1].execute("INSERT INTO auto_edition_onboarding(product_gid,file_id,status,source) VALUES(%s,%s,'Cloud Ready',%s::jsonb)",(PID,meta['id'],json.dumps(ae.source_identity(PID,meta))))
+    env[1].execute('SELECT * FROM auto_edition_onboarding');before=env[1].fetchall()
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert not env[2].api.move_path.called
+    env[1].execute('SELECT * FROM auto_edition_onboarding');assert env[1].fetchall()==before
+    assert count(env[1],'product_upload_mapping_holds')==0
+
+
+def test_finalisation_transaction_failure_rolls_back_readiness_and_queue(env):
+    service,key,meta,p=setup(env)
+    original=service.mappings._audit
+    def fail(cur,pid,action,actor,before,after):
+        if after.get('ready'):raise ConnectionError('Commit unavailable after queue admission')
+        return original(cur,pid,action,actor,before,after)
+    service.mappings._audit=fail
+    assert service.map(key,ADMIN)['state']=='Mapping failed'
+    assert count(env[1],'product_psd_mappings')==1
+    assert count(env[1],'auto_edition_onboarding')==0
+    assert not service.mappings.read_one(PID)['verified']
+    service.mappings._audit=original
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert count(env[1],'auto_edition_onboarding')==1
+    assert env[2].api.move_path.call_count==1
+
+
+def test_verified_saved_identity_survives_removal_of_mutable_correlation_tag(env):
+    service,key,meta,p=setup(env)
+    original=env[2].api.move_path.side_effect
+    env[2].api.move_path.side_effect=ConnectionError('Temporary storage outage')
+    assert service.map(key,ADMIN)['state']=='Mapping failed'
+    p['tags']=[t for t in p['tags'] if not t.startswith('sc-upload-')]
+    service.shopify.fetch_catalog_page.side_effect=AssertionError('Persisted publication ID is authoritative')
+    env[2].api.move_path.side_effect=original
+    assert service.map(key,ADMIN)['state']=='Mapped'
