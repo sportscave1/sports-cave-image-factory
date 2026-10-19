@@ -58,6 +58,11 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
             assert copied.count(FINISHED_MOCKUPS) == 4
             assert copied.count('AUTOMATIC START —') == 1
             assert copied.count('END AUTOMATIC START') == 1
+            assert 'Generate each COMPLETE mockup in one image-generation call' in copied
+            assert 'not guaranteed pixel-identical reproduction' in copied
+            assert 'deterministic image compositing' not in copied
+            assert 'source-preserving compositing' not in copied
+            assert 'IMMUTABLE ASSET' not in copied
             assert 'Wait until Card 1 is approved' not in copied
             assert 'stop and wait' not in copied
             assert len(test.get('file_uploader')) == 3

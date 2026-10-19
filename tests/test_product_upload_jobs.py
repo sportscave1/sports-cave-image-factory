@@ -88,6 +88,7 @@ def test_generate_callback_uses_latest_form_values_without_doing_image_work(monk
         if label=='Generate mockups':callbacks['generate']=kwargs['on_click']
         return False
     st=SimpleNamespace(session_state={'_product_upload_active':'one'},subheader=Mock(),caption=Mock(),
+        container=lambda **kw:__import__('contextlib').nullcontext(),
         text_input=lambda *a,**k:k.get('value',''),selectbox=lambda *a,**k:'Football',button=button,error=Mock())
     app=SimpleNamespace(_mockups_result=lambda:None,alphabetize_options=lambda values,**k:values,
         SPORT_OPTIONS=['Football'],get_sport_category=lambda value,custom:value,BASE_DIR=Path('.'),
@@ -102,13 +103,16 @@ def test_generate_callback_uses_latest_form_values_without_doing_image_work(monk
     app._files_team_root=lambda token:'/Team'
     app.dropbox_integration=Mock()
     monkeypatch.setattr('product_upload_export.resolve_category',lambda *a:selection)
-    scope=dict(st=st,Path=Path);exec(compile(ast.Module(body=[fn],type_ignores=[]),'render-design','exec'),scope)
+    scope=dict(st=st,Path=Path,uuid=__import__('uuid'));exec(compile(ast.Module(body=[fn],type_ignores=[]),'render-design','exec'),scope)
     scope['render_design'](app,row,{'id':'actor'})
     st.session_state['product-upload-name-one']='Current product title'
     callbacks['generate']()
     assert submit.call_args.args[3]=='Current product title'
     assert submit.call_args.args[4]=='Football'
+    focus=st.session_state['product-upload-generation-focus-one']
+    assert focus
     submit.reset_mock()
     selection=None
     callbacks['generate']()
     submit.assert_not_called()
+    assert st.session_state['product-upload-generation-focus-one']==focus

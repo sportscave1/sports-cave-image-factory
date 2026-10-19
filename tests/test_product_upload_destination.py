@@ -106,3 +106,21 @@ def test_resolve_rejects_moved_folder_and_uses_id(monkeypatch):
     monkeypatch.setattr(api,'get_metadata_if_exists',meta)
     with pytest.raises(ValueError,match='no longer directly'):resolve_category(api,'token','/Team','id:motor')
     meta.assert_called_once_with('token','id:motor')
+
+
+def test_compact_save_retains_explicit_numbered_collision_retry(tmp_path):
+    test,original=fixture_app(tmp_path)
+    assert not test.checkbox
+    assert not any('Refresh sport' in b.label for b in test.button)
+    assert not any('Prepare all product images' in c.value for c in test.caption)
+    test.selectbox[0].select('id:motor').run()
+    result=test.session_state['result']
+    result['product_upload_save_receipt']={'cancelled':True}
+    test.session_state['result']=result
+    test.run()
+    assert test.warning
+    test.button(key='product-upload-save-numbered-retry-fixture').click().run()
+    assert not test.exception
+    assert test.session_state['submissions'][0]['conflict']=='numbered'
+    assert test.session_state['submissions'][0]['manifest'][0]['path']==original
+    assert test.button(key='product-upload-save-all-fixture').disabled

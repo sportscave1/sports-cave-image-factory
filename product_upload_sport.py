@@ -38,7 +38,7 @@ def render_selector(app,key,user,*,disabled=False):
                 choice=resolve_category(api,token,root,retained)
                 options[retained]=choice
             except Exception:
-                error='The selected sport folder is unavailable or moved. Refresh the choices and select an available folder.'
+                error='The selected sport folder is unavailable or moved. Choices have been reloaded; select an available folder.'
                 st.session_state.pop(state+'-folders',None)
                 refreshed=sport_categories(api,token,root)
                 options={x['id']:x for x in refreshed if x.get('id') and x['id']!=retained}
@@ -54,13 +54,11 @@ def render_selector(app,key,user,*,disabled=False):
         else:choice=None
         if not category_id and not error:st.caption('Select the sport once; Save all uses this Dropbox folder.')
     except Exception as exc:
-        error=str(exc) if isinstance(exc,ValueError) else 'Dropbox sport folders could not be read. Check Files access and refresh the choices.'
+        error=str(exc) if isinstance(exc,ValueError) else 'Dropbox sport folders could not be read. Check Files access, then reload this page to retry.'
         st.session_state.pop(state+'-folders',None)
         choice=None
     st.session_state[state+'-resolved']=choice
     if error:st.error(error)
-    if st.button('Refresh sport folders',key=state+'-refresh',disabled=disabled):
-        st.session_state.pop(state+'-folders',None);st.rerun()
     return choice
 
 

@@ -24,28 +24,79 @@ Generate each card as a separate, standalone image using a separate image-genera
 
 Do not wait for approval between cards. Do not ask whether to continue. Do not require the user to say “next” or send another message. Do not stop after acknowledging the files, preparing prompts or generating the first image.
 
-Use the original supplied product for every card and follow the existing exact-product compositing and artwork-preservation requirements. Create three genuinely different rooms while respecting saved scene selections.
+Use the ORIGINAL supplied framed product as the image reference for every call. Generate each complete mockup in one unified image-generation call, following the artwork-preservation and physical-realism requirements. Create three genuinely different rooms while respecting saved scene selections.
 
 If an image-loading error occurs, retry accessing the supplied file and resume automatically once resolved. If a genuine blocker prevents completion, explain the specific blocker and accurately identify which cards remain unfinished. Never claim an image was generated when it was not.
 END AUTOMATIC START'''
 
 FINISHED_MOCKUPS = '''FINISHED MOCKUPS ONLY — SUPPLIED PRODUCT REQUIRED
 
-Every image shown to the user must be a finished mockup containing the original supplied artwork AND its complete supplied black frame.
+Generate each COMPLETE mockup in one image-generation call using the ORIGINAL supplied full-resolution framed product as the image reference. Generate the room, displayed artwork, physical black frame, transparent glazing, reflections, lighting and shadows together as one genuine interior photograph. Never generate empty-room backgrounds or paste the product onto a completed room afterward.
 
-Never present an empty room, blank wall, placeholder frame or background-only image as a completed mockup. If generating the room separately is necessary, treat it as an internal intermediate step. Complete the source-preserving product compositing before displaying that card.
+Faithfully preserve the supplied artwork's subjects, faces, vehicles, uniforms, wording, typography, logos, signatures, edition details, colours and composition. Preserve the complete black frame's design, proportions, finish and moulding width. Do not redesign, crop, replace or invent product details. Allow the physical frame and transparent glazing to respond naturally to the room's lighting and camera angle, with coherent perspective, believable depth and natural frame bevel highlights.
 
-Preserve the entire supplied framed product: artwork, text, logos, signatures, edition details, colours, proportions and original black frame. Do not redraw the artwork, substitute another frame or omit the product.
+Require convincing transparent glazing with noticeable but controlled window or room-light reflections. Keep reflections clear of important artwork details, titles and faces. Require narrow contact shadows, soft directional shadows, realistic wall mounting and consistent lighting across room, frame and glazing. Use believable A1-like scale unless another product size is supplied. No flat pasted-on appearance, floating frame, artificial halo, excessive glare or CGI finish.
 
-Before displaying each card, verify that the supplied framed product is present, fully visible and correctly integrated into the room. Then automatically continue to the next card until all three finished mockups are complete, without asking for approval between cards.
+Output one standalone 1024 × 1024 image per card, never a collage or triptych. Honour each card's saved room and camera selections; keep the three homes architecturally distinct. Use the ORIGINAL supplied product reference for every call, including corrections, never a previous mockup as the product reference.
+
+Present only completed mockups containing the artwork and full black frame. Inspect each actual result against the reference for artwork fidelity, glazing, scale and physical integration. Correct material errors by regenerating the complete card with the original reference before presenting it. Never present an empty room, blank wall, placeholder frame or background-only image as a completed mockup.
+
+For the three-card workflow, finish Card 1 — Man Cave, automatically continue to Card 2 — Office, then Card 3 — Living Room, each in its own call without approval or another user message. A standalone card brief produces its named card; when part of the three-card workflow continue automatically to the next unfinished card.
+
+Describe fidelity honestly: reference-based image generation is not guaranteed pixel-identical reproduction. Never claim exact pixel fidelity, or claim inspection when the actual result has not been checked. If a genuine blocker remains, identify it and the unfinished cards accurately.
 
 END FINISHED MOCKUPS ONLY'''
+
+
+def unified_instructions(text):
+    """Migrate Product Upload copy/export text only; never write shared overrides.
+
+    Retain authored scene/camera and physical-size data while replacing legacy
+    production mechanics from saved masters, per-card templates and shared blocks.
+    """
+    from sports_cave_prompt_blocks import SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK
+    text = text.replace(SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK,
+                        'PRODUCT REFERENCE: Faithfully preserve all artwork details and the complete black frame design; let frame lighting and glazing respond naturally to the room.')
+    text = re.sub(r'(?ms)^##? 4\. EXACT PRODUCT COMPOSITING[^\n]*\n.*?(?=^##? \d+\.|\Z)', '', text)
+    replacements = {
+        'THE ORIGINAL SUPPLIED PRODUCT IS AN IMMUTABLE ASSET.': 'THE ORIGINAL SUPPLIED PRODUCT IS THE REQUIRED IMAGE REFERENCE.',
+        'Treat the uploaded full-resolution product as an immutable physical asset.': 'Use the original full-resolution framed product as the image reference for unified generation.',
+        'Treat the artwork and frame as one unchanged physical item.': 'Preserve the artwork content and frame design while allowing natural room-dependent lighting and glazing.',
+        '- Redraw or regenerate the original artwork.': '- Redesign or invent details of the original artwork.',
+        '- Regenerate logos, signatures or text.': '- Alter logos, signatures or text.',
+        'Only the surrounding physical environment changes.': 'The frame lighting, glazing and shadows respond naturally to the environment and camera angle.',
+        '- Original image compositing requirements.': '- Unified complete-mockup image-generation requirements.',
+        'Do not claim exact pixel fidelity or successful source-preserving compositing without checking the finished image against the uploaded original.': 'Reference-based generation is not guaranteed pixel-identical reproduction. Compare the actual result with the original and describe any fidelity limitations honestly.',
+        'The original artwork should always remain perfect and unchanged.': 'Faithfully preserve the original artwork; inspect the result and correct material errors without promising pixel-identical reproduction.',
+        'Preserve the supplied artwork and frame exactly:': 'Faithfully preserve the supplied artwork content and frame design:',
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    # Legacy physical-realism integrity line is appended by shared templates.
+    text = re.sub(r'(?m)^INTEGRITY:.*$', 'INTEGRITY: Faithfully preserve the supplied artwork details and complete frame design using the original reference; generate room, product, glazing and lighting together. No invented details, cropping or distortion.', text)
+    # Saved free-text overrides may carry old mechanics outside the V6 section.
+    # Remove only conflicting sentences, preserving neighbouring scene selections.
+    conflict = re.compile(r'(?:deterministic (?:image )?composit|pixel[- ]preserving|source[- ]preserving composit|immutable|generate (?:the |a |an )?(?:new )?(?:empty|blank) room|generate the (?:new )?room separately|(?:insert|paste|composite|place) .*?(?:into|onto) (?:the |a )?(?:completed|new|generated) room|reflective overlays separately|preserve .*?source artwork pixels|do not .*?(?:regenerate|redraw).*?artwork)', re.I)
+    lines = []
+    for line in text.split('\n'):
+        sentences = re.split(r'(?<=[.!?]) +', line)
+        kept = []
+        for part in sentences:
+            if conflict.search(part):
+                continue
+            if (re.search(r'wait for approval|stop and wait|pause after Card [12]', part, re.I)
+                    and not re.search(r'do not|never|without|no approval', part, re.I)):
+                part = 'Continue automatically to the next unfinished card without approval or another message.'
+            kept.append(part)
+        lines.append(' '.join(kept))
+    return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()
+
 
 
 def sequential_instructions(text):
     """Migrate the old Product Upload execution rules, including saved overrides.
 
-    Only execution directives change; approved artwork/room/camera locks stay intact.
+    Execution and generation mechanics change; authored room/camera settings stay intact.
     Run at the copy boundary as well as on the default so cached overrides are safe.
     """
     text = re.sub(r'AUTOMATIC START[^\n]*\n.*?END AUTOMATIC START', '', text,
@@ -53,8 +104,6 @@ def sequential_instructions(text):
     text = re.sub(r'FINISHED MOCKUPS ONLY[^\n]*\n.*?END FINISHED MOCKUPS ONLY', '', text,
                   flags=re.DOTALL)
     replacements = {
-        'If pixel-preserving compositing is unavailable, generate a blank room/frame scene and identify that it requires the original product to be inserted using Photoshop, Photopea or the Sports Cave OS compositor.':
-            'If pixel-preserving compositing is unavailable, keep any room-only scene internal. Explain the specific compositing blocker and identify the unfinished card; do not display an empty room or placeholder as a completed mockup. Resume with the original supplied framed product once compositing is available.',
         '7. Wait until Card 1 is approved, finalised or the user explicitly requests Card 2.':
             '7. Immediately continue to Card 2 without waiting for approval or another message.',
         '9. Wait for approval or explicit instruction to continue.':
@@ -71,7 +120,7 @@ def sequential_instructions(text):
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
-    return AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n' + text.strip()
+    return AUTOMATIC_START + '\n\n' + FINISHED_MOCKUPS + '\n\n' + unified_instructions(text)
 
 
 def individual_prompt(text):
@@ -159,7 +208,7 @@ Sports Cave OS may supply the product image and saved scene briefs, but ChatGPT 
 
 ## 3. ABSOLUTE PRODUCT AND ARTWORK LOCK
 
-**CRITICAL: THE ORIGINAL SUPPLIED PRODUCT IS AN IMMUTABLE ASSET.**
+**CRITICAL: THE ORIGINAL SUPPLIED PRODUCT IS THE REQUIRED IMAGE REFERENCE.**
 
 Use the original highest-resolution framed Sports Cave product supplied for this run.
 
@@ -186,11 +235,11 @@ When the product is supplied with a black frame, preserve that exact black frame
 
 Never:
 
-- Redraw or regenerate the original artwork.
+- Redesign or invent details of the original artwork.
 - Change a face or athlete's appearance.
 - Alter a jersey, car, livery, vehicle number or team colour.
 - Invent or modify an edition number.
-- Regenerate logos, signatures or text.
+- Alter logos, signatures or text.
 - Change the original artwork's colours.
 - Replace the photograph with an AI likeness.
 - Add extra decorative borders, matboards or plaques.
@@ -199,37 +248,9 @@ Never:
 - Mirror the print or reverse its lettering.
 - Use a previously generated room image as the new source artwork.
 
-**The product must remain the same product in every mockup. Only the surrounding physical environment changes.**
+**The product must remain the same product in every mockup. The frame lighting, glazing and shadows respond naturally to the environment and camera angle.**
 
 A realistic camera angle may apply perspective to the complete framed object as one rigid rectangle. Never independently deform the artwork within the frame.
-
----
-
-## 4. EXACT PRODUCT COMPOSITING — MANDATORY
-
-When creating the lifestyle environment, use this source-preserving production workflow:
-
-1. Examine the original full-resolution framed product.
-2. Isolate the complete finished product from its supplied background, without removing or modifying any portion of the frame.
-3. Generate the new room separately, with an appropriate blank wall or empty frame-placement area.
-4. Place the original framed product into the new room through deterministic image compositing.
-5. Preserve its source artwork pixels and proportions as closely as the required physical perspective and image resolution permit.
-6. Apply physically consistent position, size and perspective to the framed product as a single rigid object.
-7. Add mounting shadows, environmental light interaction and reflective overlays separately.
-8. Keep artwork details protected beneath any reflections.
-9. Inspect the finished image against the original reference.
-
-When the product is supplied as a finished framed item, preserve and place the **entire framed item**. Do not manufacture a different frame and simply approximate the print.
-
-### For athlete, team or third-party sports imagery
-
-Generate the environment without recreating protected product content. Use the original finished artwork as the exact image asset during compositing.
-
-If pixel-preserving compositing is unavailable, keep any room-only scene internal. Explain the specific compositing blocker and identify the unfinished card; do not display an empty room or placeholder as a completed mockup. Resume with the original supplied framed product once compositing is available.
-
-Never claim an AI-redrawn poster is an exact reproduction.
-
-Never claim artwork integrity was verified unless the actual output has been compared with the original.
 
 ---
 
@@ -927,7 +948,7 @@ Each prompt must independently contain:
 
 - The specific original product reference.
 - Exact artwork and frame preservation requirements.
-- Original image compositing requirements.
+- Unified complete-mockup image-generation requirements.
 - The selected sport and collector characteristics.
 - Complete room concept and architectural description.
 - Selected wall colour, finish and texture.
@@ -1047,7 +1068,7 @@ Confirm:
 
 If an output fails, correct the relevant issue before recommending it as final.
 
-Do not claim exact pixel fidelity or successful source-preserving compositing without checking the finished image against the uploaded original.
+Reference-based generation is not guaranteed pixel-identical reproduction. Compare the actual result with the original and describe any fidelity limitations honestly.
 
 ---
 
@@ -1103,7 +1124,7 @@ Their lighting should look natural.
 
 Their spaces should look premium, minimal and personally furnished.
 
-The original artwork should always remain perfect and unchanged.
+Faithfully preserve the original artwork; inspect the result and correct material errors without promising pixel-identical reproduction.
 
 **FINAL PRIORITY ORDER**
 
@@ -1125,7 +1146,7 @@ Produce three distinctly different, believable premium homes showing the same or
 
 PER_IMAGE = individual_prompt('''## 3. ABSOLUTE PRODUCT AND ARTWORK LOCK
 
-**CRITICAL: THE ORIGINAL SUPPLIED PRODUCT IS AN IMMUTABLE ASSET.**
+**CRITICAL: THE ORIGINAL SUPPLIED PRODUCT IS THE REQUIRED IMAGE REFERENCE.**
 
 Use the original highest-resolution framed Sports Cave product supplied for this run.
 
@@ -1152,11 +1173,11 @@ When the product is supplied with a black frame, preserve that exact black frame
 
 Never:
 
-- Redraw or regenerate the original artwork.
+- Redesign or invent details of the original artwork.
 - Change a face or athlete's appearance.
 - Alter a jersey, car, livery, vehicle number or team colour.
 - Invent or modify an edition number.
-- Regenerate logos, signatures or text.
+- Alter logos, signatures or text.
 - Change the original artwork's colours.
 - Replace the photograph with an AI likeness.
 - Add extra decorative borders, matboards or plaques.
@@ -1165,37 +1186,9 @@ Never:
 - Mirror the print or reverse its lettering.
 - Use a previously generated room image as the new source artwork.
 
-**The product must remain the same product in every mockup. Only the surrounding physical environment changes.**
+**The product must remain the same product in every mockup. The frame lighting, glazing and shadows respond naturally to the environment and camera angle.**
 
 A realistic camera angle may apply perspective to the complete framed object as one rigid rectangle. Never independently deform the artwork within the frame.
-
----
-
-## 4. EXACT PRODUCT COMPOSITING — MANDATORY
-
-When creating the lifestyle environment, use this source-preserving production workflow:
-
-1. Examine the original full-resolution framed product.
-2. Isolate the complete finished product from its supplied background, without removing or modifying any portion of the frame.
-3. Generate the new room separately, with an appropriate blank wall or empty frame-placement area.
-4. Place the original framed product into the new room through deterministic image compositing.
-5. Preserve its source artwork pixels and proportions as closely as the required physical perspective and image resolution permit.
-6. Apply physically consistent position, size and perspective to the framed product as a single rigid object.
-7. Add mounting shadows, environmental light interaction and reflective overlays separately.
-8. Keep artwork details protected beneath any reflections.
-9. Inspect the finished image against the original reference.
-
-When the product is supplied as a finished framed item, preserve and place the **entire framed item**. Do not manufacture a different frame and simply approximate the print.
-
-### For athlete, team or third-party sports imagery
-
-Generate the environment without recreating protected product content. Use the original finished artwork as the exact image asset during compositing.
-
-If pixel-preserving compositing is unavailable, keep any room-only scene internal. Explain the specific compositing blocker and identify the unfinished card; do not display an empty room or placeholder as a completed mockup. Resume with the original supplied framed product once compositing is available.
-
-Never claim an AI-redrawn poster is an exact reproduction.
-
-Never claim artwork integrity was verified unless the actual output has been compared with the original.
 
 ---
 

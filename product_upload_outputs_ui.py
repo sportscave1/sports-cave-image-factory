@@ -65,23 +65,34 @@ def save_controls(app,result,row,user,name):
     except ValueError:folder=''
     permitted=app.os_accounts.can_access_page(user,'Files')
     destination=st.session_state.get(state_key(key)+'-saving-destination') if running else None
-    if destination:st.caption('Saving to: '+destination)
-    elif choice:st.caption('Saving to: '+choice['name']+' / '+(folder or 'Enter Product name'))
-    numbered=st.checkbox('If the product folder exists, create a numbered folder',
-        key='product-upload-save-numbered-'+key,disabled=running)
+    with st.container(key='product-upload-save-destination'):
+        if destination:st.caption('Saving to: '+destination)
+        elif choice:st.caption('Saving to: '+choice['name']+' / '+(folder or 'Enter Product name'))
+    receipt=result.get('product_upload_save_receipt') or {}
+    numbering_key='product-upload-save-numbered-'+key
+    numbering_context=(choice['id'] if choice else None,folder)
+    if st.session_state.get(numbering_key+'-context')!=numbering_context:
+        st.session_state[numbering_key]=False
+        st.session_state[numbering_key+'-context']=numbering_context
+    numbered=st.session_state.get(numbering_key,False)
     manifest=app._mockup_dropbox_manifest(result,(app.ASSET_CATEGORY_CORE,app.ASSET_CATEGORY_PRODUCT,app.ASSET_CATEGORY_SOCIAL))
     ready=bool(result.get('product_image_readiness',{}).get('complete') and manifest
         and all(Path(entry['path']).is_file() for entry in manifest))
     if not folder:st.caption('Enter a valid Product name before saving.')
-    if not ready:st.caption('Prepare all product images before saving.')
-    if st.button('Save all',type='primary',disabled=running or not folder or not permitted or not choice or not ready,
-                 key='product-upload-save-all-'+key):
+    disabled=running or not folder or not permitted or not choice or not ready
+    save_requested=st.button('Save all',type='primary',disabled=disabled,
+                 key='product-upload-save-all-'+key)
+    if receipt.get('cancelled') and not running:
+        st.warning('That product folder already exists. Save in a numbered folder or change Product name. Nothing was overwritten.')
+        if st.button('Save in a numbered folder',disabled=disabled,key='product-upload-save-numbered-retry-'+key):
+            numbered=True;st.session_state[numbering_key]=True;save_requested=True
+    if save_requested:
         from copy import deepcopy
         try:
             token=app._files_access_token();root=app._files_team_root(token)
             resolved=resolve_category(api,token,root,choice['id'])
         except Exception:
-            st.session_state[state_key(key)+'-error']='The selected sport folder is missing, inaccessible, or moved. Refresh and select an available sport above; nothing was saved.'
+            st.session_state[state_key(key)+'-error']='The selected sport folder is missing, inaccessible, or moved. Select an available sport from the reloaded choices above; nothing was saved.'
             st.session_state.pop(state_key(key)+'-folders',None)
             st.session_state.pop(state_key(key)+'-resolved',None)
             st.rerun()
@@ -107,9 +118,7 @@ def save_controls(app,result,row,user,name):
     if job:save_progress(app,key,actor)
     receipt=result.get('product_upload_save_receipt') or {}
     if receipt and not running:
-        if receipt.get('cancelled'):
-            st.warning('That product folder already exists. Choose the numbered-folder option to save separately, or change the destination. Nothing was overwritten.')
-        elif receipt.get('failures'):
+        if receipt.get('failures'):
             st.warning('Save incomplete. Retry Save all in the same collection; confirmed files are checked and skipped.')
             for failure in receipt['failures']:st.caption(failure['relative_path']+': '+failure['error'])
         elif receipt.get('successes'):
@@ -155,7 +164,7 @@ def render_outputs(app,result,row,user,name):
         st.html('''<style>
         .st-key-product-upload-lifestyle-actions {gap:10px!important;}
         .product-upload-lifestyle-intro h3 {margin:0!important;padding:0!important;line-height:1.35!important;}
-        .product-upload-lifestyle-intro p {margin:7px 0 0!important;padding:0!important;font-size:12px;line-height:1.5!important;overflow-wrap:anywhere;}
+        .product-upload-lifestyle-intro p {margin:7px 0 0!important;padding:0!important;font-size:12px;line-height:1.4!important;overflow-wrap:anywhere;}
         </style><div class="product-upload-lifestyle-intro">
         <h3>Product Page Lifestyle Mockups</h3>
         <p>Paste the black frame and master prompt into ChatGPT. Create each mockup separately, then upload it to the matching card.</p>

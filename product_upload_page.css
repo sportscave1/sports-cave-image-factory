@@ -1,0 +1,24 @@
+/* Product Upload only. Shared Mockups styles and rendering remain unchanged. */
+.st-key-product-upload-workspace {container-type:inline-size;min-width:0;}
+.st-key-product-upload-workspace [data-testid="stVerticalBlock"] {gap:8px;min-width:0;}
+.st-key-product-upload-workspace [data-testid="stElementContainer"] {min-width:0;}
+.st-key-product-upload-workspace .st-key-product-upload-details {display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:12px;align-items:start;}
+.st-key-product-upload-workspace h3 {font-size:16px;padding:3px 0;line-height:1.4;}
+.st-key-product-upload-workspace button {min-height:34px!important;border-radius:5px!important;padding:6px 10px!important;}
+.st-key-product-upload-workspace [data-baseweb="input"],
+.st-key-product-upload-workspace [data-baseweb="select"] > div {min-height:36px;border-radius:5px;}
+.st-key-product-upload-workspace .st-key-mockups-lifestyle-grid {grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+.st-key-product-upload-workspace [class*="st-key-mockups-lifestyle-"]:not(.st-key-mockups-lifestyle-grid) {padding:9px;background:#fff;border:1px solid #e3e1dc;border-radius:5px;min-width:0;}
+.st-key-product-upload-workspace [data-testid="stFileUploader"] {padding:5px!important;min-width:0;}
+.st-key-product-upload-workspace [data-testid="stFileUploaderDropzone"] {flex-wrap:wrap;gap:5px;min-width:0;}
+.st-key-product-upload-workspace [data-testid="stCaptionContainer"] {line-height:1.4;}
+.st-key-product-upload-workspace .st-key-product-upload-save-destination {border-top:1px solid #e3e1dc;padding-top:8px;}
+.st-key-product-upload-save-destination p {overflow-wrap:anywhere;white-space:normal;line-height:1.4;font-weight:500;}
+.st-key-product-upload-generation {scroll-margin-top:90px;}
+@container (max-width:720px) {
+ .st-key-product-upload-workspace .st-key-mockups-lifestyle-grid {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@container (max-width:540px) {
+ .st-key-product-upload-workspace .st-key-product-upload-details,
+ .st-key-product-upload-workspace .st-key-mockups-lifestyle-grid {grid-template-columns:minmax(0,1fr);}
+}

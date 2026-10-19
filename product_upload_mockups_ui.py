@@ -44,9 +44,11 @@ def render_page(app):
         from product_upload_dropbox import status
         row = status(row, connect)
     if not row or not row['data'].get('basic_validated'): return
-    st.html('<style>'+ (app.BASE_DIR/'mockups_page.css').read_text(encoding='utf-8')+'</style>')
-    with st.container(key='mockups-workspace'):
-        render_design(app,row,user)
+    st.html('<style>'+ (app.BASE_DIR/'mockups_page.css').read_text(encoding='utf-8')+
+            (app.BASE_DIR/'product_upload_page.css').read_text(encoding='utf-8')+'</style>')
+    with st.container(key='product-upload-workspace'):
+        with st.container(key='mockups-workspace'):
+            render_design(app,row,user)
     # Hand-off is below the SAME existing lifestyle/export controls. Rendering
     # the text prompt, exports and clipboard never confirms a Shopify product.
     row=Intakes(connect).read(key,user['id'])
@@ -125,8 +127,11 @@ def render_design(app,row,user):
     from product_upload_sport import render_selector,selected,rebind_result
     active_jobs=[JOBS.snapshot(key,user['id'],operation) for operation in ('generate','save')]
     busy=any(job and job['state'] in ('Queued','Running') for job in active_jobs)
-    name=st.text_input('Product name',value=Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
-    choice=render_selector(app,key,user,disabled=busy)
+    with st.container(key='product-upload-details'):
+        with st.container(key='product-upload-detail-name'):
+            name=st.text_input('Product name',value=Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
+        with st.container(key='product-upload-detail-sport'):
+            choice=render_selector(app,key,user,disabled=busy)
     sport=choice['sport'] if choice else ''
     if result and choice and not busy:
         updated=rebind_result(app,result,name,choice)
@@ -154,13 +159,15 @@ def render_design(app,row,user):
                 token=app._files_access_token()
                 selection=resolve_category(app.dropbox_integration,token,app._files_team_root(token),selection['id'])
             except Exception:
-                st.session_state[state_key(key)+'-error']='The selected sport folder is unavailable. Refresh and select an available sport before generating.'
+                st.session_state[state_key(key)+'-error']='The selected sport folder is unavailable. Select an available sport from the reloaded choices before generating.'
                 st.session_state.pop(state_key(key)+'-folders',None)
                 st.session_state.pop(state_key(key)+'-resolved',None)
                 return
         selected_sport=selection['sport'] if selection else ''
         if not selected_name or not selected_sport:return
-        if result and result['product_name']==selected_name and result['sport_category']==selected_sport:return
+        if result and result['product_name']==selected_name and result['sport_category']==selected_sport:
+            st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
+            return
         if row['data'].get('product_gid'):
             st.session_state['product-upload-job-error-'+key]='This PSD is already linked to Shopify. Start a separate design workflow.';return
         if result:
@@ -172,6 +179,7 @@ def render_design(app,row,user):
                 return app.rebuild_result_artifacts(result)
             generate(connect,row,user['id'],selected_name,selected_sport,Dropbox,app.BASE_DIR,
                 app.MOCKUPS_GENERATION_SEMAPHORE,app.build_mockup_final_prompt_items,reset_exports=bool(result),finalize=finalize)
+            st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
             st.session_state.pop('product-upload-job-error-'+key,None)
         except Exception as error:st.session_state['product-upload-job-error-'+key]=str(error)
     st.button('Generate mockups',type='primary',key='product-upload-generate-'+key,on_click=queue_generation,
@@ -189,11 +197,16 @@ def render_design(app,row,user):
             st.rerun(scope='fragment')
         poll_render(key,user['id'],spec.get('state'))
     else:st.caption('Artwork ready. Generate mockups to continue.')
-    if pending and not result:poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'])
+    with st.container(key='product-upload-generation'):
+        if pending or result:
+            from product_upload_layout import focus_generation
+            focus_generation(st.session_state.get('product-upload-generation-focus-'+key))
+        if pending and not result:poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'])
+        if result:
+            result['_product_upload_actor_id']=str(user['id'])
+            from product_upload_outputs_ui import render_outputs
+            render_outputs(app,result,row,user,name)
     if result:
-        result['_product_upload_actor_id']=str(user['id'])
-        from product_upload_outputs_ui import render_outputs
-        render_outputs(app,result,row,user,name)
         latest=Intakes(connect).read(key,user['id'])
         if latest['data'].get('mockups_exported'):
             if st.button('Continue to Shopify',key='product-upload-continue-'+key):st.rerun()

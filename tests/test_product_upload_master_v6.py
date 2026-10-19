@@ -72,9 +72,9 @@ Do not regenerate already approved cards.'''
         for label, brief in zip(LABELS, ['saved lounge', 'saved office', 'saved living room']):
             self.assertIn(label, prompt)
             self.assertIn(brief, prompt)
-        for requirement in ('deterministic image compositing', 'If pixel-preserving compositing is unavailable',
+        for requirement in ('Generate each COMPLETE mockup in one image-generation call', 'not guaranteed pixel-identical reproduction',
                             'Where the selected product is confirmed as A1', 'If another size or verified outer measurement',
-                            '1024 × 1024', 'Never claim artwork integrity was verified'):
+                            '1024 × 1024', 'Inspect each actual result against the reference'):
             self.assertIn(requirement, PER_IMAGE)
         self.assertIn('Immediately generate Card 1 as one standalone image', INSTRUCTIONS)
         self.assertNotIn('Wait until Card 1 is approved', INSTRUCTIONS)
@@ -101,3 +101,57 @@ Do not regenerate already approved cards.'''
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_unified_generation_migrates_shared_blocks_and_saved_mechanics():
+    from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
+    from product_upload_lifestyle import sequential_instructions
+    legacy = '''Custom scene: heritage office. Selected camera angle: gently elevated from the right.
+## 4. EXACT PRODUCT COMPOSITING — MANDATORY
+Generate the new room separately, with an appropriate blank wall.
+Place the original framed product into the new room through deterministic image compositing.
+Preserve its source artwork pixels.
+# 5. SAVED ROOM
+Selected room: industrial converted garage lounge
+Generate Card 1 and wait for approval.
+'''
+    shared = append_sports_cave_image_realism_rules(legacy)
+    migrated = individual_prompt(shared)
+    for forbidden in ('deterministic image compositing', 'source-preserving compositing',
+                      'pixel-preserving', 'immutable', 'Generate the new room separately',
+                      'wait for approval.', 'Preserve its source artwork pixels'):
+        assert forbidden not in migrated
+    for retained in ('Selected room: industrial converted garage lounge',
+                     'Selected camera angle: gently elevated from the right',
+                     'Custom scene: heritage office', 'SPORTS_CAVE_PHYSICAL_SCALE_AND_FRAME_REALISM'):
+        assert retained in migrated
+    assert individual_prompt(migrated) == migrated
+    assert sequential_instructions(sequential_instructions(shared)) == sequential_instructions(shared)
+    master = compose(shared, [shared] * 3)
+    assert master.count(AUTOMATIC_START) == 1
+    for text in (master, migrated, INSTRUCTIONS, PER_IMAGE):
+        for required in ('COMPLETE mockup in one image-generation call',
+                         'ORIGINAL supplied full-resolution framed product as the image reference',
+                         'not guaranteed pixel-identical reproduction',
+                         'natural frame bevel highlights', 'narrow contact shadows',
+                         'noticeable but controlled window or room-light reflections',
+                         'Correct material errors', '1024 × 1024'):
+            assert required in text
+    # Conversion is scoped to Product Upload: the shared source still has its old contract.
+    assert 'immutable' in shared and 'source-preserving compositing' in shared
+
+
+def test_actual_three_card_templates_are_unified_without_losing_selection():
+    import image_factory as factory
+    items = factory.build_lifestyle_prompt_items('Reference product', 'Motorsport', local_only=True)
+    protected = individual_prompt_items(items)
+    for before, after in zip(items, protected):
+        if before['filename'] not in FILENAMES:
+            assert before == after
+            continue
+        assert scenes.SCENE.search(before['prompt']).group() == scenes.SCENE.search(after['prompt']).group()
+        assert 'immutable' not in after['prompt']
+        assert 'source-preserving compositing' not in after['prompt']
+        assert 'COMPLETE mockup in one image-generation call' in after['prompt']
+        assert 'not guaranteed pixel-identical reproduction' in after['prompt']
+    assert individual_prompt_items(protected) == protected
