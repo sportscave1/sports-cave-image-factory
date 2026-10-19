@@ -180,7 +180,7 @@ def release_controls():
         except Exception as exc:st.error(str(exc))
 
 
-@st.fragment
+@st.fragment(run_every=15)
 def table():
     ops._render_table()
     release_controls()

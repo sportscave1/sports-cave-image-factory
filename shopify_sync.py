@@ -589,6 +589,7 @@ query SportsCaveProductById($id: ID!) {
     productType
     tags
     updatedAt
+    createdAt
     onlineStoreUrl
     media(first: 10) {
       nodes {

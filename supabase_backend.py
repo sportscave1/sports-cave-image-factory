@@ -7573,7 +7573,7 @@ def _plan_edition_product_incremental_sync(products, existing_rows, *, include_i
         match_type = "shopify_product_id" if existing else ""
         product_tags = product.get('tags') or []
         if isinstance(product_tags, str): product_tags = product_tags.split(',')
-        if not existing and not upload_mapping and any(re.fullmatch(r'sc-upload-[a-f0-9]{32}', t.strip()) for t in product_tags):
+        if not existing and not upload_mapping and not product.get("_onboarding_verified") and any(re.fullmatch(r'sc-upload-[a-f0-9]{32}', t.strip()) for t in product_tags):
             # MAP owns new correlated runs and their confirmed edition limit.
             # Catalogue/webhook sync must not race it with the legacy default.
             actions.append({'action':'skip','product':product,'reason':'awaiting_upload_mapping'})
@@ -8130,8 +8130,11 @@ def register_shopify_products_for_edition_ops(products, *, source="manual_sync",
         _webhook_log("edition_product_classified", "eligible" if decision["eligible"] else "skipped",
                      topic=topic, webhook_id=webhook_id, source=source, **details)
         if decision.get("retryable") and source == "webhook":
-            raise RuntimeError(f"Product registration deferred: {decision['reason']}; retry current Shopify state.")
+            from shopify_product_onboarding import PendingRegistration
+            raise PendingRegistration(f"Product registration deferred: {decision['reason']}; retry current Shopify state.")
         if decision["eligible"]:
+            from shopify_product_onboarding import verify_new_product
+            product = verify_new_product(product, config=config)
             eligible.append(product)
     try:
         result = upsert_shopify_products_to_edition_products(
@@ -8220,6 +8223,9 @@ def upsert_shopify_products_to_edition_products(
             existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
             actions = (_plan_edition_product_incremental_sync(active_draft_products, existing_rows, include_intake_drafts=True)
                        if include_intake_drafts else _plan_edition_product_incremental_sync(active_draft_products, existing_rows))
+            for action in actions:
+                if action.get("action") == "insert" and action["product"].get("_onboarding_verified"):
+                    action["fields"]["_upload_confirmed_total"] = action["product"]["_onboarding_total"]
             if missing_only:
                 for action in actions:
                     if action.get("action") == "update":
@@ -19511,27 +19517,19 @@ def claim_product_create_webhook_receipt(payload, webhook_id, topic="products/cr
     topic = str(topic or "products/create").strip()
     safe_payload = _safe_webhook_product_payload(payload)
     webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(payload, topic, safe_payload=safe_payload)
-    if not _claim_webhook_event(
-        webhook_id,
-        topic,
-        payload,
-        shop_domain=shop_domain,
-        safe_payload=safe_payload,
-        shopify_order_id="",
-        shopify_order_name="",
-    ):
-        return {
-            "webhook_id": webhook_id,
-            "duplicate": True,
+    # The receipt IS the durable queue. Never re-open a completed delivery or
+    # replace its payload while a server worker owns it.
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO webhook_events(webhook_id,topic,status,shop_domain,source,payload,received_at)
+            VALUES(%s,%s,'received',%s,'webhook',%s::jsonb,now())
+            ON CONFLICT(webhook_id) DO NOTHING RETURNING webhook_id""",
+            (webhook_id, topic, shop_domain, json_dumps(safe_payload)))
+        inserted = cur.fetchone()
+        conn.commit()
+    return {"webhook_id": webhook_id, "duplicate": not bool(inserted),
             "shopify_product_id": safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "",
-            "shopify_handle": safe_payload.get("handle") or "",
-        }
-    return {
-        "webhook_id": webhook_id,
-        "duplicate": False,
-        "shopify_product_id": safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "",
-        "shopify_handle": safe_payload.get("handle") or "",
-    }
+            "shopify_handle": safe_payload.get("handle") or ""}
+
 
 
 def _update_webhook_event_status(
@@ -19912,6 +19910,9 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
         except Exception as diagnostic_error:
             _webhook_log("webhook_product_diagnostics_failed", "failed", webhook_id=webhook_id,
                          topic=topic, error_type=type(diagnostic_error).__name__)
+        from shopify_product_onboarding import PendingRegistration
+        if isinstance(error, PendingRegistration):
+            raise
         raise RuntimeError(message) from error
 
 

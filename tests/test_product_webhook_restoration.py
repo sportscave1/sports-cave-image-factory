@@ -94,6 +94,8 @@ class MemoryDatabase:
                     assert self.conn.held, 'Identity must be read after serialization'
                 elif compact.startswith('SELECT id, shopify_product_id, shopify_product_gid, shopify_handle, metafields_sync_status FROM edition_products'):
                     pass
+                elif compact.startswith('SELECT id FROM edition_products WHERE shopify_product_gid='):
+                    self.result = next((r for r in db.rows if r['shopify_product_id'] == params[0]), None)
                 elif compact.startswith('SELECT EXISTS'):
                     self.result = {'has_history': bool(db.history)}
                 elif compact.startswith('INSERT INTO shopify_products'):
@@ -148,6 +150,7 @@ class ProductLifecycleTests(unittest.TestCase):
         self.stack.enter_context(patch.object(backend, '_set_webhook_app_setting'))
         self.stack.enter_context(patch.object(backend, '_update_webhook_event_status'))
         self.stack.enter_context(patch.object(backend, '_webhook_log'))
+        self.stack.enter_context(patch.object(backend.shopify_sync, 'graphql_request', return_value=({'orders': {'nodes': [], 'pageInfo': {'hasNextPage': False}}}, '2026-04')))
         self.global_runs = self.stack.enter_context(patch.object(backend, '_ensure_active_edition_runs_for_products', side_effect=AssertionError('Global counter rewrite forbidden')))
         self.payload = {'id': 987, 'handle': 'new-art', 'title': 'New Art', 'status': 'active'}
         self.fetch_context = threading.local()
@@ -157,7 +160,7 @@ class ProductLifecycleTests(unittest.TestCase):
     def full_product(self, payload):
         return {**backend._normalize_shopify_product_create_payload(payload),
                 'vendor': 'Sports Cave', 'product_type': 'Framed Art',
-                'tags': ['Collector Series'], 'online_store_url': 'https://example.com/art',
+                'tags': ['Collector Series', 'sc-edition-limit-100'], 'created_at': __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(), 'online_store_url': 'https://example.com/art',
                 '_edition_registration_canonical': True}
 
     def deliver(self, **changes):
@@ -284,7 +287,7 @@ class ProductLifecycleTests(unittest.TestCase):
     def test_product_routes_verify_real_hmac_before_database_writes(self):
         self.stack.enter_context(patch.object(backend, 'is_configured', return_value=True))
         claim = self.stack.enter_context(patch.object(backend, 'claim_product_create_webhook_receipt', return_value={'webhook_id': 'test-event'}))
-        self.stack.enter_context(patch.dict('os.environ', {'SHOPIFY_WEBHOOK_SECRET': 'local-secret', 'SHOPIFY_ORDER_RECONCILIATION_ENABLED': 'false'}))
+        self.stack.enter_context(patch.dict('os.environ', {'SHOPIFY_STORE_DOMAIN': 'test.myshopify.com', 'SHOPIFY_WEBHOOK_SECRET': 'local-secret', 'SHOPIFY_ORDER_RECONCILIATION_ENABLED': 'false'}))
         body = json.dumps(self.payload).encode()
         signature = base64.b64encode(hmac.new(b'local-secret', body, hashlib.sha256).digest()).decode()
         client = TestClient(webhook_server.app)
@@ -293,34 +296,25 @@ class ProductLifecycleTests(unittest.TestCase):
             self.assertEqual(invalid.status_code, 401)
         claim.assert_not_called()
         self.assertEqual(self.db.rows, [])
-        valid = client.post('/webhooks/shopify/products-update', content=body, headers={'X-Shopify-Hmac-Sha256': signature})
+        valid = client.post('/webhooks/shopify/products-update', content=body, headers={'X-Shopify-Hmac-Sha256': signature, 'X-Shopify-Shop-Domain': 'test.myshopify.com'})
         self.assertEqual(valid.status_code, 200)
-        self.assertEqual(self.db.rows[0]['next_edition_number'], 1)
+        self.assertEqual(valid.json()['status'], 'queued')
+        self.assertEqual(self.db.rows, [])
 
 
 class DisplayAndRegistrationTests(unittest.TestCase):
-    def test_product_processing_does_not_block_health_endpoint(self):
-        entered, release = threading.Event(), threading.Event()
-        def process(*args, **kwargs):
-            entered.set()
-            if not release.wait(5):
-                raise RuntimeError('Test did not release processing')
-            return {}
+    def test_product_receipt_ack_does_not_start_processing(self):
         with ExitStack() as stack:
             stack.enter_context(patch.object(webhook_server, 'verify_shopify_webhook_hmac', return_value={'ok': True}))
             stack.enter_context(patch.object(backend, 'is_configured', return_value=True))
             stack.enter_context(patch.object(backend, 'claim_product_create_webhook_receipt', return_value={'webhook_id': 'local'}))
-            stack.enter_context(patch.object(backend, 'process_product_create_webhook', side_effect=process))
-            stack.enter_context(patch.dict('os.environ', {'SHOPIFY_ORDER_RECONCILIATION_ENABLED': 'false'}))
-            with TestClient(webhook_server.app) as client, ThreadPoolExecutor(max_workers=2) as pool:
-                future = pool.submit(client.post, '/webhooks/shopify/products-update', json={'id': 1, 'handle': 'art'})
-                try:
-                    self.assertTrue(entered.wait(2))
-                    health = pool.submit(client.get, '/healthz')
-                    self.assertEqual(health.result(timeout=1).status_code, 200)
-                finally:
-                    release.set()
-                self.assertEqual(future.result(timeout=2).status_code, 200)
+            process = stack.enter_context(patch.object(backend, 'process_product_create_webhook', side_effect=AssertionError('Request must only enqueue')))
+            stack.enter_context(patch.dict('os.environ', {'SHOPIFY_STORE_DOMAIN':'test.myshopify.com'}))
+            client = TestClient(webhook_server.app)
+            response = client.post('/webhooks/shopify/products-update', json={'id': 1}, headers={'X-Shopify-Shop-Domain':'test.myshopify.com'})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['status'], 'queued')
+            process.assert_not_called()
 
     def test_expired_session_refreshes_and_dirty_edits_are_preserved(self):
         old = _product(1)
