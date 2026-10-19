@@ -201,14 +201,15 @@ def render_design(app,row,user):
         poll_render(key,user['id'],spec.get('state'))
     elif not running and not result:st.caption('Artwork ready. Generate mockups to continue.')
     with st.container(key='product-upload-generation'):
-        if pending or result:
-            from product_upload_layout import focus_generation
-            focus_generation(st.session_state.get('product-upload-generation-focus-'+key))
         if pending and not result:poll_generation(app,key,user['id'],name,sport,row['data']['source']['content_hash'])
         if result:
             result['_product_upload_actor_id']=str(user['id'])
             from product_upload_outputs_ui import render_outputs
             render_outputs(app,result,row,user,name)
+            # Mount the scroll helper only after completed output components.
+            # Progress ticks and failed jobs must not consume the request.
+            from product_upload_layout import focus_generation
+            focus_generation(st.session_state.get('product-upload-generation-focus-'+key))
     if result:
         latest=Intakes(connect).read(key,user['id'])
         if latest['data'].get('mockups_exported'):
