@@ -29,6 +29,9 @@ def test_exact_receipt_order_and_lightweight_urls():
     assert result['folder'].endswith('product (2)/WEBP')
     assert all('thumbnail=1' in x['preview'] and 'thumbnail' not in x['original'] for x in result['items'])
     assert all('metadata' not in x for x in result['items'])
+    for item, receipt in zip(result['items'], row['data']['upload_operation']['output']['files']):
+        assert item['size'] == receipt['metadata']['size']
+        assert item['content_hash'] == receipt['metadata']['content_hash']
 
 
 def test_legacy_package_uses_only_own_unique_complete_receipt():
@@ -187,3 +190,55 @@ def test_dropbox_listing_preserves_stable_folder_id_and_cursor(monkeypatch):
     dbx.list_folder_page('fixture','id:exact-webp',cursor=first['cursor'])
     client.files_list_folder_continue.assert_called_once_with('next')
     with pytest.raises(ValueError):dbx.list_folder_page('fixture','id:../escape')
+
+
+def test_downloads_keep_exact_product_file_ids_names_and_bytes(monkeypatch):
+    from io import BytesIO
+    import hashlib
+    from PIL import Image
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    import product_upload_api as api
+    rows = [saved_row(), saved_row()]
+    metadata, payloads = {}, {}
+    for product, row in enumerate(rows):
+        output = row['data']['upload_operation']['output']
+        old_folder = output['folder']
+        output['folder'] += '/product-' + str(product)
+        row['data']['mockup_saves']['saved']['target'] = output['folder']
+        for i, entry in enumerate(output['files']):
+            meta = entry['metadata']
+            meta['id'] += '-product-' + str(product)
+            meta['path_display'] = meta['path_display'].replace(old_folder, output['folder'])
+            stream = BytesIO()
+            Image.new('RGB', (32, 24), (product * 100, i * 20, 60)).save(stream, 'WEBP')
+            data = stream.getvalue()
+            meta['size'] = len(data)
+            meta['content_hash'] = hashlib.sha256(hashlib.sha256(data).digest()).hexdigest()
+            metadata[meta['id']] = meta
+            payloads[meta['id']] = data
+    calls = []
+    def original(token, file_id, revision):
+        calls.append((file_id, revision))
+        return metadata[file_id], SimpleNamespace(iter_content=lambda **_: iter([payloads[file_id]]), close=lambda: None)
+    async def actor(*a, **k): return {'id': 'owner'}
+    monkeypatch.setattr(api, 'actor', actor)
+    monkeypatch.setattr(api, 'Dropbox', lambda: SimpleNamespace(token='fixture', metadata_if_present=metadata.get,
+        api=SimpleNamespace(get_psd_file_response=original)))
+    monkeypatch.setattr(api, 'Intakes', lambda _: SimpleNamespace(read=lambda key, _: next(r for r in rows if str(r['id']) == key)))
+    with TestClient(Starlette(routes=[Route(p, e, methods=list(m)) for p, e, m in api.ROUTES])) as client:
+        for row in rows:
+            for item in view(row)['items']:
+                expected = next(x['metadata'] for x in row['data']['upload_operation']['output']['files'] if x['metadata']['name'] == item['name'])
+                response = client.get(item['download'])
+                assert response.status_code == 200
+                assert response.headers['content-type'] == 'image/webp'
+                assert response.headers['content-disposition'].startswith('attachment;')
+                assert item['name'] in response.headers['content-disposition']
+                assert response.content == payloads[expected['id']]
+                assert response.content[:4] == b'RIFF' and response.content[8:12] == b'WEBP'
+                assert calls[-1] == (expected['id'], expected['rev'])
+        # A different product has identical filenames, but a different package identity.
+        first = view(rows[0])['items'][0]['download']
+        assert client.get(first.replace(str(rows[0]['id']), str(rows[1]['id']))).status_code == 409

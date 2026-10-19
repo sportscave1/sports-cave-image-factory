@@ -108,6 +108,8 @@ def view(row, provider=None):
         item['preview'] = '/api/product-uploads/saved-image?' + urlencode(dict(args, thumbnail='1'))
         item['original'] = '/api/product-uploads/saved-image?' + urlencode(args)
         item['download'] = '/api/product-uploads/saved-image?' + urlencode(dict(args, download='1'))
+        item['size'] = item['metadata']['size']
+        item['content_hash'] = item['metadata']['content_hash']
         del item['metadata']
     return result
 
