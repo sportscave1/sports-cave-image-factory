@@ -95,11 +95,11 @@ class UniversalTests(unittest.IsolatedAsyncioTestCase):
 
 class DropboxStreamTests(unittest.TestCase):
     def test_sdk_immutable_id_revision_stream_and_thumbnail_never_create_links(self):
-        client=Mock();stream=Mock();client.files_download.return_value=(metadata(),stream)
+        client=Mock();client.clone.return_value=client;stream=Mock();client.files_download.return_value=({**metadata(),'rev':'123456789'},stream)
         thumbnail=Mock();thumbnail.iter_content.return_value=iter([b'tiny']);client.files_get_thumbnail.return_value=(metadata(),thumbnail)
         with patch.object(dbx,'team_space_client',return_value=client):
-            self.assertIs(dbx.get_psd_file_response('fake','id:1','rev')[1],stream)
-            client.files_download.assert_called_once_with('id:1',rev='rev')
+            self.assertIs(dbx.get_psd_file_response('fake','id:1','123456789')[1],stream)
+            client.files_download.assert_called_once_with('rev:123456789')
             self.assertEqual(dbx.get_psd_thumbnail_bytes('fake','id:1'),b'tiny')
         thumbnail.close.assert_called_once()
         client.sharing_get_file_metadata.assert_not_called()

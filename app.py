@@ -3168,6 +3168,11 @@ def get_current_page():
         )
     if route != session_route:
         _begin_navigation_transition(route, source=source)
+    if route == "Product Uploads" and st.session_state.get(CURRENT_PAGE_STATE_KEY) != route:
+        from product_upload_mockups import release_transient
+        release_transient(st.session_state.get('_product_upload_mockups_result'))
+        for key in ("_product_upload_visit", "_product_upload_active", "_product_upload_event", "_product_upload_manual", "_product_upload_mockups_result"):
+            st.session_state.pop(key, None)
     _store_current_page(route, source=source)
     st.session_state[CURRENT_PAGE_QUERY_STATE_KEY] = query_value
 
@@ -3193,6 +3198,11 @@ def set_current_page(page, *, source="user", sync_query=True, force=False):
     _begin_navigation_transition(route, source=source, force=force)
     # Durably store the exact route before either the query-parameter forward
     # message or the explicit Streamlit rerun can be emitted.
+    if route == "Product Uploads" and st.session_state.get(CURRENT_PAGE_STATE_KEY) != route:
+        from product_upload_mockups import release_transient
+        release_transient(st.session_state.get('_product_upload_mockups_result'))
+        for key in ("_product_upload_visit", "_product_upload_active", "_product_upload_event", "_product_upload_manual", "_product_upload_mockups_result"):
+            st.session_state.pop(key, None)
     _store_current_page(route, source=source)
     if sync_query:
         sync_current_page_to_query_params(route)
@@ -4143,6 +4153,20 @@ def get_uploaded_file_signature(uploaded_file):
     name = getattr(uploaded_file, "name", "")
     size = getattr(uploaded_file, "size", 0)
     return hashlib.sha1(f"{name}|{size}".encode("utf-8")).hexdigest()[:16]
+
+
+def _mockups_result_key():
+    return "_product_upload_mockups_result" if st.session_state.get(CURRENT_PAGE_STATE_KEY) == "Product Uploads" else "last_generation_result"
+
+
+def _mockups_result():
+    return st.session_state.get(_mockups_result_key())
+
+
+def _set_mockups_result(value):
+    if value and value.get('_product_upload_intake') and value['_product_upload_intake'] != st.session_state.get('_product_upload_active'):
+        return
+    st.session_state[_mockups_result_key()] = value
 
 
 def _mockups_upload_processing_cache():
@@ -5184,7 +5208,7 @@ def render_download_button(label, file_path, mime, key):
         return
 
     with file_path.open("rb") as file_handle:
-        st.download_button(
+        return st.download_button(
             label=label,
             data=file_handle,
             file_name=file_path.name,
@@ -5873,7 +5897,7 @@ def apply_asset_selection_from_session(result):
 
     if selections_changed:
         result = rebuild_result_artifacts(result)
-        st.session_state.last_generation_result = result
+        _set_mockups_result(result)
 
     return result
 
@@ -6356,7 +6380,7 @@ def _isolated_lifestyle_upload_result(result):
 
 
 def _current_mockups_result_for_run(result):
-    latest = st.session_state.get("last_generation_result")
+    latest = _mockups_result()
     if (
         isinstance(latest, dict)
         and str(latest.get("run_dir") or "") == str(result.get("run_dir") or "")
@@ -6384,7 +6408,7 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
             updated_result = remove_uploaded_lifestyle_result(result, prompt_path)
             st.session_state.pop(upload_signature_key, None)
             lifecycle.pop(slot_key, None)
-            st.session_state.last_generation_result = updated_result
+            _set_mockups_result(updated_result)
             return updated_result
         lifecycle.pop(slot_key, None)
         return result
@@ -6516,7 +6540,7 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
         return _current_mockups_result_for_run(result)
 
     st.session_state[upload_signature_key] = upload_signature
-    st.session_state.last_generation_result = updated_result
+    _set_mockups_result(updated_result)
     return updated_result
 
 
@@ -6683,12 +6707,12 @@ def render_primary_zip_download(result, section_key):
                         "drive_link": upload_info.get("drive_link"),
                     },
                 )
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 st.rerun()
             except Exception as error:
                 result["zip_drive_message"] = None
                 result["zip_drive_error"] = str(error)
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 st.rerun()
 
     with action_cols[1]:
@@ -6829,7 +6853,26 @@ def _render_mockup_folder_picker(access_token, root_path, run_key):
     return current_path
 
 
-def _save_mockups_to_dropbox(
+def _save_mockups_to_dropbox(access_token,user,result,manifest,root_path,destination_parent,folder_name,destination_conflict):
+    if not result.get("_product_upload_intake"):
+        return _save_mockups_to_dropbox_impl(access_token,user,result,manifest,root_path,destination_parent,folder_name,destination_conflict)
+    from product_upload_mockups import save,bind_export
+    from product_upload_api import connect,Dropbox
+    provider=Dropbox()
+    def perform(target):
+        scoped=dict(result,_product_upload_save_target=target)
+        return _save_mockups_to_dropbox_impl(access_token,user,scoped,manifest,root_path,destination_parent,folder_name,"merge_replace")
+    saved=save(connect,user['id'],result,manifest,provider,destination_parent,folder_name,destination_conflict,perform)
+    slots={x.get('product_slot_id') for x in manifest}
+    if not saved.get('cancelled') and saved.get('successes') and not saved.get('failures') and len(slots-{None})==8:
+        bind_export(connect,user['id'],result,'Dropbox',folder=saved['destination'])
+        result['dropbox_saved_path']=saved['destination']
+        _set_mockups_result(result)
+        st.rerun()
+    return saved
+
+
+def _save_mockups_to_dropbox_impl(
     access_token,
     user,
     result,
@@ -6843,7 +6886,9 @@ def _save_mockups_to_dropbox(
     proposed = dropbox_integration.join_upload_path(destination_parent, clean_name)
     existing = dropbox_integration.get_metadata_if_exists(access_token, proposed)
     conflict_key = str(destination_conflict or "cancel")
-    if existing:
+    if result.get("_product_upload_save_target"):
+        destination=result["_product_upload_save_target"];file_conflict="replace"
+    elif existing:
         if str(existing.get(".tag") or "").casefold() != "folder":
             raise dropbox_integration.DropboxConflictError("A file already uses this output name.")
         if conflict_key == "cancel":
@@ -6991,12 +7036,12 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
             elif saved.get("successes") and not saved.get("failures"):
                 result["dropbox_saved_path"] = saved["destination"]
                 result["dropbox_save_failures"] = []
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 st.success("Saved to Dropbox")
             elif saved.get("successes"):
                 result["dropbox_saved_path"] = saved["destination"]
                 result["dropbox_save_failures"] = list(saved.get("failures") or ())
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 failed_names = ", ".join(
                     str(row.get("relative_path") or row.get("path") or "unknown file")
                     for row in saved["failures"]
@@ -7023,7 +7068,9 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
             )
         else:
             st.success("Saved to Dropbox")
-        if st.button(
+        if result.get('_product_upload_intake'):
+            st.link_button("Open folder", "/?page=files&files_path="+quote(saved_path,safe=''), icon=":material/folder_open:")
+        elif st.button(
             "Open folder",
             key=f"mockups-dropbox-open::{run_key}",
             icon=":material/folder_open:",
@@ -7118,7 +7165,7 @@ def render_final_zip_download(result):
     with action_cols[1]:
         try:
             filtered_zip_path = build_filtered_download_zip(result, selected_groups)
-            render_download_button(
+            downloaded = render_download_button(
                 "Download ZIP",
                 filtered_zip_path,
                 "application/zip",
@@ -7127,6 +7174,11 @@ def render_final_zip_download(result):
         except Exception as error:
             logging.warning("Mockups ZIP creation failed: %s", error)
             st.warning("Could not create the ZIP.")
+    if result.get('_product_upload_intake') and locals().get('downloaded') and {ASSET_CATEGORY_CORE,ASSET_CATEGORY_PRODUCT}.issubset(normalized_groups):
+        from product_upload_mockups import bind_export
+        from product_upload_api import connect
+        bind_export(connect,result['_product_upload_actor_id'],result,'ZIP')
+        st.rerun()
     _render_mockups_dropbox_save(result, selected_groups, selected_manifest, show_button=False)
 
 
@@ -7163,7 +7215,7 @@ def render_mockups_dropbox_status(result):
             logging.exception("Mockups Dropbox retry failed")
             result["dropbox_upload_status"] = "failed"
             result["dropbox_upload_failures"] = [{"error": str(error)[:300]}]
-            st.session_state.last_generation_result = result
+            _set_mockups_result(result)
             st.warning("Dropbox upload still needs attention.")
         else:
             updated["status_text"] = (
@@ -7171,7 +7223,7 @@ def render_mockups_dropbox_status(result):
                 if updated.get("dropbox_upload_status") == "saved"
                 else "Dropbox upload needs retry."
             )
-            st.session_state.last_generation_result = updated
+            _set_mockups_result(updated)
             st.rerun()
 
 
@@ -7299,7 +7351,7 @@ def render_product_image_readiness(result):
 @st.fragment
 def render_prompt_cards(result, prompt_groups):
     """Keep uploader state and every downstream image consumer in one fragment."""
-    latest_result = st.session_state.get("last_generation_result")
+    latest_result = _mockups_result()
     if (
         isinstance(latest_result, dict)
         and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
@@ -7311,7 +7363,7 @@ def render_prompt_cards(result, prompt_groups):
     for prompt_paths, heading, caption in prompt_groups:
         result = _render_prompt_card_group(result, prompt_paths, heading, caption)
 
-    latest_result = st.session_state.get("last_generation_result")
+    latest_result = _mockups_result()
     if (
         isinstance(latest_result, dict)
         and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
@@ -7373,7 +7425,7 @@ def render_optional_package_controls(result):
                             "file_path": str(updated_result.get(package_spec["path_key"]) or ""),
                         },
                     )
-                    st.session_state.last_generation_result = updated_result
+                    _set_mockups_result(updated_result)
                     st.rerun()
                 except Exception as error:
                     st.error(package_spec["error_message"])
@@ -7392,7 +7444,7 @@ def render_generation_result(result):
     result = ensure_lifestyle_prompts(result)
     if not result_is_dropbox_backed(result):
         result = ensure_primary_download_zip(result)
-    st.session_state.last_generation_result = result
+    _set_mockups_result(result)
     if result.get("dropbox_upload_status") == "failed":
         st.warning("Core images were generated, but Dropbox upload needs a retry.")
     else:
@@ -8093,7 +8145,7 @@ def render_mockups_page():
                         "storage": "temporary_until_manual_save",
                     },
                 )
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
             except ValueError as error:
                 logging.info("Mockups generation validation failed: %s", error)
                 status_container.error(str(error))
@@ -8111,13 +8163,13 @@ def render_mockups_page():
                 if run_signature and st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
                     st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
 
-        if st.session_state.last_generation_result is not None:
-            render_generation_result(st.session_state.last_generation_result)
+        if _mockups_result() is not None:
+            render_generation_result(_mockups_result())
 
 
 def current_product_upload_source_metadata():
     factory = get_image_factory()
-    result = st.session_state.get("last_generation_result")
+    result = _mockups_result()
     result = dict(result) if isinstance(result, dict) else {}
     normalized_result = normalize_generation_result(result) if result else {}
     if normalized_result:
@@ -8208,27 +8260,29 @@ def record_product_upload_prompt_generation(user, *, product_name, upload_type):
 
 
 def render_product_uploads_page():
-    """Same-origin durable intake; manual prompt-only operation stays available."""
-    st.markdown('<iframe title="Product Uploads" src="/product-uploads" '
-                'style="width:100%;height:760px;border:0" id="product-uploads-frame"></iframe>', unsafe_allow_html=True)
-    get_components_module().html('''<script>
+    from product_upload_mockups_ui import render_page
+    from types import SimpleNamespace
+    # Preserve the existing OS product/Edition Ops invalidation after a verified
+    # link. Only a same-origin message from this workflow's own frames is read.
+    get_components_module().html("""<script>
     const host=parent;
     if(host._scProductUploadsListener)host.removeEventListener('message',host._scProductUploadsListener);
     host._scProductUploadsListener=(event)=>{
       if(event.origin!==host.location.origin)return;
-      const frame=host.document.querySelector('#product-uploads-frame');
-      if(!frame||event.source!==frame.contentWindow)return;
-      if(event.data?.type==='sports-cave-product-upload-height')
-        frame.style.height=Math.max(400,Math.min(1800,Number(event.data.height)||760))+'px';
+      const frames=[...host.document.querySelectorAll('iframe[title*="product_uploads_workflow"]')];
+      if(!frames.some(frame=>event.source===frame.contentWindow))return;
       if(event.data?.type==='sports-cave-product-upload-linked'){
         host.SportsCaveEditionStatus?.refresh?.();
         host.dispatchEvent(new CustomEvent('sports-cave-products-changed'));
       }
     };
     host.addEventListener('message',host._scProductUploadsListener);
-    host.document.querySelector('#product-uploads-frame')?.contentWindow?.postMessage(
-      {type:'sports-cave-product-upload-measure'},host.location.origin);
-    </script>''',height=0)
+    </script>""",height=0)
+    # Streamlit executes each session in its own globals, but __main__ in
+    # sys.modules is process-wide and may belong to another script/session.
+    # Bind the extracted UI to this execution's helpers and authenticated state.
+    render_page(SimpleNamespace(**globals()))
+
 
 def test_google_drive_connection():
     drive_storage = get_drive_storage_module()

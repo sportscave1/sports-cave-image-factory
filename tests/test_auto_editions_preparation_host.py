@@ -54,13 +54,38 @@ def test_recovery_package_requires_exact_revision_and_settings(tmp_path):
     root=tmp_path/'host';folder=root/('a'*48);folder.mkdir(parents=True)
     ctx={'automatic':True,'source':{'file_id':'id:a','revision':'rev1'},'total':100}
     manifest={'source':ctx['source'],'edition_total':100,'source_dimensions':[2835,2004],
-              'preparation_geometry':{'scale':4}}
+              'preparation_geometry':{'scale':4},'colour_evidence':{'icc_sha256':'a'*64,'pixels_converted':False}}
     archive=folder/'prepared.zip'
     with zipfile.ZipFile(archive,'w') as z:z.writestr('manifest.json',json.dumps(manifest))
     with patch.object(local,'HOST_FILE',root/'host.dpapi'):
         assert local.find_reusable_package(ctx)==archive
         assert local.find_reusable_package({**ctx,'source':{'file_id':'id:a','revision':'rev2'}}) is None
         assert local.find_reusable_package({**ctx,'total':200}) is None
+
+
+def test_legacy_oversized_or_unprofiled_package_is_preserved_but_never_reuploaded(tmp_path):
+    import zipfile
+    import auto_editions_package as package_limits
+    root=tmp_path/'host';folder=root/('a'*48);folder.mkdir(parents=True)
+    ctx={'automatic':True,'source':{'file_id':'id:a','revision':'rev1'},'total':100}
+    manifest={'source':ctx['source'],'edition_total':100,'source_dimensions':[2835,2004],
+              'preparation_geometry':{'scale':4}}
+    archive=folder/'prepared.zip'
+    def write():
+        with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr('manifest.json',json.dumps(manifest));z.writestr('large-old-export',b'x'*2048)
+    with patch.object(local,'HOST_FILE',root/'host.dpapi'):
+        write();before=archive.read_bytes()
+        assert local.find_reusable_package(ctx) is None
+        assert archive.read_bytes()==before
+        manifest['colour_evidence']={'icc_sha256':'a'*64,'pixels_converted':False};write()
+        assert local.find_reusable_package(ctx)==archive
+        with patch.object(package_limits,'MAX_PACKAGE_BYTES',1024):
+            assert archive.stat().st_size<1024 # compressed bytes fit, expanded bytes do not
+            assert local.find_reusable_package(ctx) is None
+        with patch.object(package_limits,'MAX_PACKAGE_BYTES',100):
+            assert local.find_reusable_package(ctx) is None
+        assert archive.exists()
 
 
 def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):

@@ -26,6 +26,9 @@ def unpack(archive,root,source,number,total):
         refs=sorted({1,number,total})
         allowed={'manifest.json','original.png'}|{f'reference-{n}.png' for n in refs}
         allowed|={manifest['master']['name']}|{p['name'] for p in manifest['patches'].values()}
+        from auto_editions_role_evidence import resolution
+        reviewed=resolution(source)
+        if reviewed and reviewed.get('hidden_number'):allowed.add('uncorrected.png')
         from auto_editions_transport import descriptor,reconstruct
         deltas=descriptor(package,allowed)
         if sum(e.file_size for e in entries)+sum(d['bytes'] for d in deltas.values())>MAX_PACKAGE_BYTES:
@@ -58,6 +61,8 @@ def unpack(archive,root,source,number,total):
             with Image.open(root/name) as image:
                 if profile_info(image.info.get('icc_profile',b''))['sha256']!=expected:
                     raise ValueError('ICC export mismatch: package profile evidence differs.')
+    from auto_editions_artwork_recovery import verify_package
+    verify_package(root,manifest)
     proofs=[ae.compare_reference(manifest,root,n,root/f'reference-{n}.png') for n in refs]
     proofs.append(ae.compare_original_outside_number(manifest,root,number,root/'original.png'))
     return manifest,proofs

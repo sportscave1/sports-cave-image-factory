@@ -20,17 +20,93 @@ class Dropbox:
         self.token = self.context['access_token']
 
     def destination(self, key):
+        # Use the existing configured Product Upload Assets area for intake;
+        # the authoritative design-live archive is entered only after Shopify.
+        root = self.api.folder_path('product_upload_assets')
+        self.api.ensure_folder_path(self.token, root, root_path=self.context['root_path'])
+        return root.rstrip('/') + '/product-upload-' + key + '.psd'
+
+    def archive(self, key, source):
         import psd_directory
         root = self.api.get_file_metadata(self.token, psd_directory.ROOT)
         if root.get('.tag') != 'folder' or not root.get('id'):
-            raise ValueError('The approved original PSD folder could not be verified in Files.')
-        return root['path_display'].rstrip('/') + '/product-upload-' + key + '.psd'
+            raise ValueError('The design live online PSD destination is unavailable. Your staged PSD is retained.')
+        destination = root['path_display'].rstrip('/') + '/product-upload-' + key + '.psd'
+        old = self.metadata_if_present(destination)
+        if old:
+            if old.get('id') != source['id'] or old.get('content_hash') != source['content_hash']:
+                raise ValueError('Archive destination conflict; the existing artwork is preserved.')
+            return old
+        current = self.metadata_if_present(source['id'])
+        if not current or any(current.get(k) != source.get(k) for k in ('id','rev','content_hash')):
+            raise ValueError('Staged source changed; review the original before retrying.')
+        moved = self.api.move_path(self.token, source['id'], destination, root_path=self.context['root_path'])
+        if moved.get('id') != source['id'] or moved.get('content_hash') != source['content_hash']:
+            raise ValueError('PSD archive identity verification failed; retain the saved intake and retry.')
+        return moved
+
+    def render_destination(self, key):
+        return self.destination(key).removesuffix('.psd') + '-mockup-render-v1.png'
+
+    def download(self, metadata, destination, *, progress=None):
+        # Reuse Files' authenticated, revision-pinned content download. The
+        # original stays server-side; reject metadata mismatches before writing.
+        from pathlib import Path
+        actual, response = self.api.get_psd_file_response(self.token, metadata['id'], metadata['rev'])
+        created = False
+        try:
+            if any(actual.get(k) != metadata.get(k) for k in ('id', 'rev', 'size', 'content_hash')):
+                raise self.api.DropboxSourceChangedError('The original does not match the selected PSD revision. Refresh the Dropbox picker and reselect the PSD.')
+            written = 0
+            notified = 0
+            signature = bytearray()
+            with Path(destination).open('xb') as output:
+                created = True
+                for chunk in response.iter_content(chunk_size=64*1024):
+                    written += len(chunk)
+                    if written > metadata['size']:
+                        raise self.api.DropboxOriginalDownloadError('Dropbox returned more bytes than the selected PSD. Retry artwork preparation.')
+                    signature.extend(chunk[:max(0, 6-len(signature))])
+                    output.write(chunk)
+                    if progress and (written-notified>=1024*1024 or written==metadata['size']):
+                        progress(written,metadata['size']);notified=written
+            if written != metadata['size'] or signature != b'8BPS\x00\x01':
+                raise self.api.DropboxOriginalDownloadError('Dropbox returned an incomplete or invalid original PSD. Retry artwork preparation.')
+        except Exception:
+            if created:
+                Path(destination).unlink(missing_ok=True)
+            raise
+        finally:
+            response.close()
+
+    def save_render(self, key, path):
+        target = self.render_destination(key)
+        old = self.metadata_if_present(target)
+        from auto_editions import file_hash
+        expected = file_hash(path, dropbox=True)
+        if old:
+            if old.get('content_hash') != expected:
+                raise ValueError('A different render already exists for this upload; retain it for review.')
+            return old
+        self.api.upload_local_file(self.token, target, path, conflict='cancel')
+        result = self.metadata_if_present(target)
+        if not result or result.get('content_hash') != expected:
+            raise ValueError('Rendered artwork upload verification failed; retry the same render.')
+        return result
 
     def start(self):
         return self.api.start_upload_session(self.token)
 
     def append(self, session, offset, content):
-        return self.api.append_upload_session(self.token, session, offset, content)
+        client = getattr(self, '_append_client', None)
+        if client is None:
+            # A scoped clone retains the cached connection pool/path-root/auth.
+            # Positive limits are intentional: this SDK's clone uses `or`, so
+            # passing zero would retain its unbounded rate-limit retry default.
+            client = self.api.team_space_client(self.token).clone(
+                max_retries_on_error=1, max_retries_on_rate_limit=1, timeout=60)
+            self._append_client = client
+        return self.api.append_upload_session(self.token, session, offset, content, client=client)
 
     def finish(self, session, size, destination):
         return self.api.finish_upload_session(self.token, session, size, b'', destination, mode='add')
@@ -166,6 +242,10 @@ class Handoff:
         import auto_editions as ae
         import shopify_sync
         shopify = self.shopify or shopify_sync
+        selected = self.store.read(key, actor['id'])
+        if selected and selected['data'].get('workflow_version') == 3:
+            from product_upload_lifecycle import confirm
+            return confirm(self, key, actor, pid, shopify)
         with self.store.locked(key, actor['id']) as (row, cur):
             d = row['data']
             if d.get('product_gid') == pid:
@@ -176,12 +256,35 @@ class Handoff:
                 raise ValueError('This upload is already bound to a different product.')
             meta = self.provider.metadata_if_present(d['source']['id'])
             source = ae.source_identity(pid, meta or {})
-            if source != ae.source_identity(pid, d['source']):
-                raise ValueError('The saved PSD changed. Start a new upload; previous preparation cannot be reused.')
+            previous_source = ae.source_identity(pid, d['source'])
+            if source != previous_source:
+                # A prior archive move may have committed while its response/DB
+                # transaction was lost. Recover only this deterministic target.
+                import psd_directory
+                expected_path=psd_directory.ROOT+'/product-upload-'+str(row['id'])+'.psd'
+                if not (d.get('workflow_version')==2 and meta.get('path_display','').casefold()==expected_path.casefold() and source['file_id']==previous_source['file_id'] and source['content_hash']==previous_source['content_hash']):
+                    raise ValueError('The saved PSD changed. Start a new upload; previous preparation cannot be reused.')
             product = shopify.fetch_product_by_shopify_id(pid)
             previous = next(p for p in d['choices'] if p['id'] == pid)
             if normal_title(product['title']) != normal_title(previous['title']):
                 raise ValueError('Shopify title changed during lookup. Retry the exact name or URL.')
+            status = product.get('status', '').upper()
+            if d.get('workflow_version') == 2 and row['mode'] == 'LIVE' and (status != 'ACTIVE' or not product.get('online_store_url')):
+                raise ValueError('Shopify has not confirmed live publication. Finish publishing in ChatGPT, then retry this same upload.')
+            if d.get('workflow_version') == 2 and row['mode'] == 'DRAFT' and status != 'DRAFT':
+                raise ValueError('This action expects a confirmed Shopify draft. Select the intended action before linking.')
+            existing = self.mappings.read().get(pid)
+            if existing and existing['dropbox_file_id'] != source['file_id']:
+                raise ValueError('A different PSD is already mapped. Use Edition Ops Reset / Replace to explicitly replace it; the existing design is preserved.')
+            if d.get('workflow_version') == 2:
+                if not d.get('mockups_exported'):
+                    raise ValueError('Save or download this design completed mockup package before the Shopify handoff.')
+                # Moving preserves Dropbox file ID and pixels. A lost response
+                # is recovered at the deterministic target without a second file.
+                meta = self.provider.archive(str(row['id']), d['source'])
+                d.update(source=meta, archived_source=meta, shopify_status=status,
+                         shopify_completion='Published live' if status == 'ACTIVE' and product.get('online_store_url') else 'Draft confirmed')
+                source = ae.source_identity(pid, meta)
             self.register(product)
             existing = self.mappings.read().get(pid)
             if existing and existing['dropbox_file_id'] != source['file_id']:

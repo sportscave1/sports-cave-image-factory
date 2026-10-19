@@ -51,6 +51,14 @@ class DropboxApiError(RuntimeError):
     pass
 
 
+class DropboxOriginalDownloadError(ValueError):
+    """Safe application validation failure for original PSD downloads."""
+
+
+class DropboxSourceChangedError(DropboxOriginalDownloadError):
+    """The returned original is not the selected stable file and revision."""
+
+
 class DropboxFolderAccessError(DropboxApiError):
     """The configured shared folder is outside the app's visible Dropbox root."""
 
@@ -403,7 +411,12 @@ def list_folder(access_token, path="", *, max_entries=2000):
 
 def list_folder_page(access_token, path="", *, cursor="", limit=500, include_deleted=False):
     """Return one non-recursive Dropbox folder page without scanning the whole folder."""
-    clean_path = normalize_dropbox_path(path)
+    clean_path = str(path or '').strip()
+    if clean_path.startswith('id:'):
+        if not re.fullmatch(r'id:[A-Za-z0-9_-]+', clean_path):
+            raise ValueError('Invalid Dropbox folder ID.')
+    else:
+        clean_path = normalize_dropbox_path(path)
     page_limit = max(1, min(int(limit or 500), 2000))
     client = team_space_client(access_token)
     try:
@@ -510,9 +523,17 @@ def get_file_response(access_token, path):
 
 
 def get_file_metadata(access_token, path):
+    # Dropbox IDs are stable identifiers, not absolute paths. In particular,
+    # normalise_path('id:...') would silently request the unrelated '/id:...'.
+    target = str(path or '').strip()
+    if target.startswith('id:'):
+        if not re.fullmatch(r'id:[A-Za-z0-9_-]+', target):
+            raise ValueError('Invalid Dropbox file or folder ID.')
+    else:
+        target = normalize_dropbox_path(path)
     try:
         metadata = team_space_client(access_token).files_get_metadata(
-            normalize_dropbox_path(path),
+            target,
             include_media_info=False,
             include_deleted=False,
         )
@@ -992,7 +1013,7 @@ def start_upload_session(access_token, data=b""):
     return session_id
 
 
-def append_upload_session(access_token, session_id, offset, data):
+def append_upload_session(access_token, session_id, offset, data, *, client=None):
     """Append one bounded chunk to an existing Dropbox upload session."""
     chunk = bytes(data or b"")
     if len(chunk) > DROPBOX_UPLOAD_CHUNK_SIZE:
@@ -1003,7 +1024,7 @@ def append_upload_session(access_token, session_id, offset, data):
         offset=max(0, int(offset or 0)),
     )
     try:
-        team_space_client(access_token).files_upload_session_append_v2(chunk, cursor)
+        (client or team_space_client(access_token)).files_upload_session_append_v2(chunk, cursor)
     except Exception as error:
         raise _dropbox_error(error, "Dropbox upload could not continue.") from error
     return cursor.offset + len(chunk)
@@ -1182,11 +1203,19 @@ def copy_path(access_token, source_path, destination_path, *, root_path):
 
 def move_path(access_token, source_path, destination_path, *, root_path):
     clean_root = normalize_dropbox_path(root_path)
-    source = normalize_dropbox_path(source_path)
+    source = str(source_path or '').strip()
+    if source.startswith('id:'):
+        metadata = get_file_metadata(access_token, source)
+        if metadata.get('id') != source or metadata.get('.tag') != 'file' or not metadata.get('path_display'):
+            raise ValueError('The exact source file could not be verified for this move.')
+        source_location = normalize_dropbox_path(metadata['path_display'])
+    else:
+        source = normalize_dropbox_path(source)
+        source_location = source
     destination = normalize_dropbox_path(destination_path)
     if (
-        source.casefold() == clean_root.casefold()
-        or not path_is_within_root(source, clean_root)
+        source_location.casefold() == clean_root.casefold()
+        or not path_is_within_root(source_location, clean_root)
         or not path_is_within_root(destination, clean_root)
     ):
         raise ValueError("This move is outside the shared Files folder.")
@@ -1284,13 +1313,26 @@ def psd_open_metadata(access_token, file_id, *, include_preview=True):
 
 
 def get_psd_file_response(access_token, file_id, revision):
-    """Pin the already verified master by immutable ID and revision; SDK streams."""
-    if not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')) or not revision:
+    """Download the pinned revision and verify its stable ID before streaming."""
+    if (not re.fullmatch(r'id:[A-Za-z0-9_-]+',str(file_id or '')) or
+            not re.fullmatch(r'[0-9a-f]{9,}',str(revision or ''))):
         raise ValueError('Invalid PSD identity.')
+    response = None
     try:
-        metadata, response = team_space_client(access_token).files_download(file_id,rev=revision)
-        return _metadata_to_dict(metadata), response
+        # Dropbox now rejects the deprecated separate rev argument with HTTP400.
+        # Clone retains the Files account, connection pool and team path-root.
+        client = team_space_client(access_token).clone(
+            timeout=60, max_retries_on_error=2, max_retries_on_rate_limit=2)
+        metadata, response = client.files_download('rev:' + revision)
+        metadata = _metadata_to_dict(metadata)
+        if metadata.get('id') != file_id or metadata.get('rev') != revision:
+            raise DropboxSourceChangedError('The original does not match the selected PSD revision. Refresh the Dropbox picker and reselect the PSD.')
+        return metadata, response
     except Exception as error:
+        if response is not None:
+            response.close()
+        if isinstance(error, DropboxSourceChangedError):
+            raise
         raise _dropbox_error(error,'Dropbox original is unavailable.') from error
 
 

@@ -830,14 +830,16 @@ Preserve every other price and product field.
 
 
     def test_compact_page_mounts_same_origin_intake_without_legacy_fields(self):
-        from unittest.mock import Mock
-        fake=Mock()
-        with patch.object(app,'st',fake),patch.object(app,'get_components_module') as components:
-            app.render_product_uploads_page()
-        markup=fake.markdown.call_args.args[0]
-        self.assertIn('src="/product-uploads"',markup)
-        fake.text_input.assert_not_called()
-        self.assertIn('event.source!==frame.contentWindow',components.return_value.html.call_args.args[0])
+        import ast
+        tree=ast.parse((ROOT/'app.py').read_text(encoding='utf-8'))
+        function=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='render_product_uploads_page')
+        text=ast.get_source_segment((ROOT/'app.py').read_text(encoding='utf-8'),function)
+        self.assertIn('product_upload_mockups_ui',text)
+        ui=(ROOT/'product_upload_mockups_ui.py').read_text(encoding='utf-8')
+        self.assertIn("section='upload'",ui)
+        self.assertIn("section='handoff'",ui)
+        self.assertIn('render_generation_result(result)',ui)
+        self.assertNotIn('Customer-facing Product Title',ui)
 
     def test_compact_markup_and_saved_prompts_have_the_new_input_contract(self):
         from product_upload_prompts import build
@@ -845,7 +847,7 @@ Preserve every other price and product field.
         self.assertIn('id="return" hidden',markup)
         self.assertEqual(markup.count('type="text"'),1)
         self.assertNotIn('maxlength=',markup)
-        for text in ('Find Mockups','Use manual workflow','Shopify product name','How to'):
+        for text in ('Generate Core Shopify Images','Use manual workflow','Shopify product name','How to'):
             self.assertIn(text,markup)
         for selected in ('DRAFT','LIVE','UPDATE'):
             text=build(selected,load=lambda key,default,**kw:default)

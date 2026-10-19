@@ -7,7 +7,7 @@ import re
 import auto_editions as ae
 from auto_editions_colour_source import ColourReview
 
-NUMBER = re.compile(r'^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)$', re.I)
+NUMBER = re.compile(r'^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)$', re.I)
 PLAQUES = {'SC_EDITION_PLAQUE', 'limited-edition-plaque'}
 MATTING = {'SC_EDITION_MATTING', 'Matting', 'matting'}
 
@@ -16,7 +16,7 @@ class NeedsRepair(ValueError):
     pass
 
 
-def detect(inspection, total, *, colour_policy=None):
+def detect(inspection, total, *, colour_policy=None, source=None):
     """Accept a single complete top-level editable edition, with its own plaque."""
     doc = inspection.get('document', {})
     state=doc.get('profile_state')
@@ -24,14 +24,15 @@ def detect(inspection, total, *, colour_policy=None):
         raise ColourReview('Inspector failure: Photoshop colour metadata could not be read.')
     if (state=='untagged' or 'profile' in doc and not doc['profile']) and not colour_policy:
         raise ColourReview('Colour policy awaiting approval: original PSD colour profile is unavailable; owner colour review is required.')
-    return detect_roles(inspection,total)
+    return detect_roles(inspection,total,source=source)
 
 
-def detect_roles(inspection,total):
+def detect_roles(inspection,total,*,source=None):
     """Structural review evidence only; never authorises colour or preparation."""
     doc=inspection.get('document',{})
     canvas = ae.dimensions([doc.get('width_px'), doc.get('height_px')])
-    rows = inspection.get('layers', [])
+    from auto_editions_role_evidence import reviewed_rows
+    rows = reviewed_rows(inspection,source)
     candidates = []
     for row in rows:
         match = NUMBER.fullmatch(row.get('text') or '') if row.get('kind') == 'text' else None
@@ -50,8 +51,10 @@ def detect_roles(inspection,total):
     fonts = number.get('fonts', [])
     if not fonts or any(f.get('installed') is not True for f in fonts):
         raise NeedsRepair('The exact edition-number font is unavailable.')
+    from auto_editions_role_evidence import plaque as pinned_plaque
+    pinned=pinned_plaque(inspection,source)
     plaques = [r for r in rows if len(r.get('path', [])) == 1
-               and r['path'][0]['name'] in PLAQUES and r.get('visible')]
+               and r['path'][0]['name'] in ({pinned} if pinned else PLAQUES) and r.get('visible')]
     if len(plaques) != 1:
         raise NeedsRepair('A unique recognised collector plaque is required; manual role review needed.')
     plaque = plaques[0]

@@ -92,14 +92,20 @@ class PostgresMappings:
         cur.execute('INSERT INTO public.product_psd_mapping_audit(shopify_product_gid,action,actor_id,before_state,after_state) VALUES(%s,%s,%s,%s::jsonb,%s::jsonb)',
                     (pid, action, actor, json.dumps(before, default=str) if before else None, json.dumps(after, default=str)))
 
-    def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False):
+    def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False, upload_operation=None):
         import psd_directory as psd
         import os_accounts
         if not os_accounts.can_attach_missing_psd(actor):
             raise PermissionError("You don't have permission to attach PSD files. Contact your administrator.")
         if not os_accounts.is_admin(actor) and (expected_file_id or confirm_replace):
             raise PermissionError('Only an administrator can replace an existing PSD mapping.')
-        if not psd.product_id({'shopify_product_gid': pid}) or not psd.approved_file(metadata):
+        upload_verified = False
+        if upload_operation:
+            from product_upload_mapping import approved_upload_source
+            upload_verified = approved_upload_source(self.connect, pid, metadata, actor=actor['id'], key=upload_operation)
+            if not upload_verified:
+                raise ValueError('The persisted upload does not confirm this exact product and PSD revision.')
+        if not psd.product_id({'shopify_product_gid': pid}) or not (psd.approved_file(metadata) or upload_verified):
             raise ValueError('An approved main-folder PSD and valid product are required.')
         fid = metadata['id']
         with self.connect() as conn, conn.cursor() as cur:
@@ -109,6 +115,8 @@ class PostgresMappings:
                 raise ValueError('Filename differs from the product title; explicit confirmation required.')
             existing = self._all(cur)
             before = existing.get(pid)
+            if upload_verified and before and before['dropbox_file_id'] == fid:
+                return before
             # Check after the existing table lock: no VA overwrite, including stale/racing picks.
             if before is not None and not os_accounts.is_admin(actor):
                 raise PermissionError('Only an administrator can replace an existing PSD mapping.')
@@ -141,6 +149,11 @@ class PostgresMappings:
                     WHERE auto_edition_onboarding.file_id<>excluded.file_id""".format(clear_reset=clear_reset),(pid,fid))
                 cur.execute("""INSERT INTO public.auto_edition_onboarding_audit(product_gid,actor_id,event)
                     VALUES(%s,%s,'mapping_confirmed')""",(pid,actor_id))
+                if upload_verified:
+                    import auto_editions as ae
+                    import json
+                    cur.execute("UPDATE auto_edition_onboarding SET source=%s::jsonb WHERE product_gid=%s AND file_id=%s AND source IS NULL",
+                                (json.dumps(ae.source_identity(pid, metadata)), pid, fid))
         self._revision = None
         return after
 

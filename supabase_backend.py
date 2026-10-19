@@ -7547,7 +7547,7 @@ def _safe_existing_product_updates(existing, product, by_handle):
     return updates
 
 
-def _plan_edition_product_incremental_sync(products, existing_rows, *, include_intake_drafts=False):
+def _plan_edition_product_incremental_sync(products, existing_rows, *, include_intake_drafts=False, upload_mapping=False):
     indexes = _index_existing_edition_products(existing_rows)
     by_id = indexes["by_id"]
     by_handle = indexes["by_handle"]
@@ -7571,6 +7571,13 @@ def _plan_edition_product_incremental_sync(products, existing_rows, *, include_i
             if existing:
                 break
         match_type = "shopify_product_id" if existing else ""
+        product_tags = product.get('tags') or []
+        if isinstance(product_tags, str): product_tags = product_tags.split(',')
+        if not existing and not upload_mapping and any(re.fullmatch(r'sc-upload-[a-f0-9]{32}', t.strip()) for t in product_tags):
+            # MAP owns new correlated runs and their confirmed edition limit.
+            # Catalogue/webhook sync must not race it with the legacy default.
+            actions.append({'action':'skip','product':product,'reason':'awaiting_upload_mapping'})
+            continue
         if not existing and handle:
             handle_key = handle.casefold()
             if handle_key in indexes["ambiguous_legacy_handles"]:
@@ -7846,7 +7853,8 @@ def _candidate_edition_products_for_shopify_products(cur, products):
 
 def _assert_new_edition_product_safe(cur, fields):
     # Fail closed for orphaned history. Never reconstruct or renumber it here.
-    warning = shopify_sync.edition_registration_history_warning(fields.get("raw") or {})
+    warning = (shopify_sync.edition_registration_history_warning(fields.get("raw") or {}, confirmed_total=fields["_upload_confirmed_total"])
+               if "_upload_confirmed_total" in fields else shopify_sync.edition_registration_history_warning(fields.get("raw") or {}))
     if warning:
         raise RuntimeError(warning)
     candidates = sorted(_shopify_product_identity_candidates(fields))
@@ -7872,10 +7880,13 @@ def _assert_new_edition_product_safe(cur, fields):
 
 
 def _insert_edition_product_from_shopify(cur, fields):
+    total = fields.get("_upload_confirmed_total", 100)
+    if type(total) is not int or not 1 <= total <= 1000:
+        raise ValueError("Confirmed edition limit must be between 1 and 1000.")
     _assert_new_edition_product_safe(cur, fields)
     raw_json = json_dumps(fields.get("raw") or {})
     cur.execute(
-        """
+        f"""
         INSERT INTO edition_products(
             shopify_product_id, shopify_product_gid, shopify_handle, product_title,
             edition_total, next_edition_number, last_assigned_edition, sold_count, remaining_count,
@@ -7884,7 +7895,7 @@ def _insert_edition_product_from_shopify(cur, fields):
             synced_at, updated_at
         )
         VALUES (
-            %s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s,
+            %s, %s, %s, %s, {total}, 1, 0, 0, {total}, 'limited_release', %s,
             TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb,
             'Pending automatic mirror', '', now(), now()
         )

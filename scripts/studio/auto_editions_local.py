@@ -255,6 +255,10 @@ def host_loop():
                     timings['claim_seconds']=round(time.monotonic()-claim_started,6)
                     if HOST_LAST_COMPLETED_AT is not None:timings['completed_to_claim_request_seconds']=round(claim_started-HOST_LAST_COMPLETED_AT,6)
                     state='Preparing'
+                elif data.get('product_mockup_renders') is True:
+                    import sys
+                    from product_upload_render_local import run_one
+                    if run_one(config,sys.modules[__name__]):state='Rendering product mockups'
             failures=0
             HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
@@ -341,10 +345,13 @@ def package_finished(row,ctx):
                 manifest.get('preparation_geometry',{}).get('scale',1)!=preparation_scale(manifest.get('source_dimensions',manifest['dimensions']))
                 or (ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id'])):continue
             ae.validate_manifest(manifest)
+            from auto_editions_artwork_recovery import verify_package
+            verify_package(folder,manifest)
             refs=sorted({1,ctx['number'],ctx['total']})
             for n in refs:ae.compare_reference(manifest,folder,n,folder/f'reference-{n}.png')
             ae.compare_original_outside_number(manifest,folder,ctx['number'],folder/'original.png')
             names=['manifest.json','master.png','original.png']+[p['name'] for p in manifest['patches'].values()]+[f'reference-{n}.png' for n in refs]
+            if (manifest.get('artwork_recovery') or {}).get('hidden_number'):names.append('uncorrected.png')
             archive=row['folder']/'prepared.zip'
             if archive.exists():return None
             from auto_editions_transport import build_package
@@ -357,13 +364,19 @@ def package_finished(row,ctx):
 def find_reusable_package(ctx):
     """Only reuse exact source/edition identities. The server revalidates pixels."""
     if not ctx.get('automatic'):return None
+    from auto_editions_package import MAX_PACKAGE_BYTES
     root=HOST_FILE.parent.resolve()
     for package in sorted(root.glob('*/prepared.zip'),key=lambda p:p.stat().st_mtime,reverse=True):
         if package.is_symlink() or package.parent.is_symlink():continue
         try:
+            if package.stat().st_size>MAX_PACKAGE_BYTES:continue
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
+                if sum(info.file_size for info in archive.infolist())>MAX_PACKAGE_BYTES:continue
                 manifest=json.loads(archive.read('manifest.json'))
+            colour=manifest.get('colour_evidence') or {}
+            import re
+            if not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256',''))) or colour.get('pixels_converted') is not False:continue
             if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:continue
             from auto_editions_onboarding import preparation_scale
             expected=preparation_scale(manifest.get('source_dimensions',manifest.get('dimensions',[])))
@@ -508,7 +521,8 @@ def inspect(key):
         item=manifest['items'][0]
         if any(item.get(k)!=meta[v] for k,v in [('dropbox_id','id'),('revision','rev'),('content_hash','content_hash')]):
             raise ValueError('The linked source changed.')
-        if not 0<meta['size']<=1024*1024*1024:raise ValueError('Source exceeds the preparation transfer limit.')
+        from auto_editions_source_limits import check_source
+        check_source(meta['size'],folder)
         req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),
                     headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
         from auto_editions_local_cache import reuse_source,cached_inspection,inspection_receipt
@@ -580,7 +594,7 @@ def inspect(key):
             policy=None
             if row['inspection']['document'].get('profile_state')=='untagged':
                 _,policy=resolve(row['context']['source'])
-            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy)
+            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy,source=row['context']['source'])
             prepare_worker(key,dict(number=roles['number_layer'],plaque=roles['plaque_layer']),
                            preparation_scale(roles['source_dimensions']))
         except Exception as error:
@@ -668,6 +682,7 @@ def prepare_worker(key,roles,scale=1):
         names=['manifest.json','master.png','original.png']
         names += [p['name'] for p in manifest['patches'].values()]
         names += [f'reference-{n}.png' for n in sorted({1,ctx['number'],ctx['total']})]
+        if (manifest.get('artwork_recovery') or {}).get('hidden_number'):names.append('uncorrected.png')
         archive=row['folder']/'prepared.zip'
         from auto_editions_transport import build_package,digest
         from auto_editions_performance import stage as measured

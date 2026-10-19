@@ -79,6 +79,8 @@ class Queue:
 
     def claim(self, actor):
         token = str(uuid.uuid4())
+        from auto_editions_recovery import ordered_scope
+        sales=json.dumps(ordered_scope())
         from auto_editions_v17 import enabled as continuous
         eligibility="priority>0 AND priority<>1"
         ordering='priority'
@@ -131,7 +133,8 @@ class Queue:
                 OR (COALESCE(to_jsonb(q)->'replacement'->>'stage','') IN ('','Complete','Failed') AND attempts<3 AND
                   ((status='Awaiting preparation' AND ({eligibility})) OR (status='Preparing' AND lease_until<now()))))
                 ORDER BY GREATEST({ordering},CASE WHEN to_jsonb(q)->'replacement'->>'stage' IN ('Queued','Preparing') THEN 2 ELSE 0 END) DESC,
-                CASE WHEN priority=8 THEN updated_at END DESC NULLS LAST,created_at FOR UPDATE SKIP LOCKED LIMIT 1""")
+                COALESCE((%s::jsonb->>product_gid)::int,0) DESC,
+                CASE WHEN priority=8 THEN updated_at END DESC NULLS LAST,created_at FOR UPDATE SKIP LOCKED LIMIT 1""",(sales,))
             row=cur.fetchone()
             if not row:return None
             pending=row.get('replacement') or {}

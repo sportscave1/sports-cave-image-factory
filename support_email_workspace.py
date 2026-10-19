@@ -75,6 +75,7 @@ class Workspace:
             state.setdefault(key, default)
         # Content lives separately from short-lived mailbox/header snapshots and selection.
         self.bodies = DisplayLRU(state, "opened_content", limit=BODY_LIMIT, byte_limit=BODY_BYTES)
+        self.bodies.pinned = {self._content_key(m) for m in state.get('conversation', [])}
         from support_email_render import RENDER_POLICY
         reader_scope = hashlib.sha256(repr((self.config.scope, str(user['id']), RENDER_POLICY)).encode()).hexdigest()
         if state.get('reader_scope') != reader_scope:
@@ -354,7 +355,7 @@ class Workspace:
     def show_images(self, event):
         message = self._header(event.get('message_key'))
         identity = self._reader_identity(message)
-        if (self.state['view'] != 'mail' or reference_key(message) not in self.state['expanded']
+        if (self.state['view'] != 'mail' or message not in self.state.get('conversation', [])
                 or event.get('reader_identity') != identity):
             raise MailboxError('Message changed. Open it again before showing images.')
         content = self._content(message)
@@ -367,6 +368,7 @@ class Workspace:
         self.state.setdefault('image_grants', set()).add(identity)
 
     def _body(self, message, *, defer=False):
+        self.bodies.pinned = {self._content_key(m) for m in self.state.get('conversation', [])}
         key = self._content_key(message)
         existing = self._content(message)
         if existing is not None:
@@ -417,6 +419,7 @@ class Workspace:
         self.state.pop('read_mark_pending', None)
         self.state['body_loading'] = False
         self.state.pop("body_pending", None)
+        self.state['body_errors'] = {}
         self.state.update(selected=thread["thread_key"], expanded=set(), view="mail", context={})
         resolved = self.resolved_threads.get((self.state["mailbox_version"], thread["thread_key"]))
         messages = resolved if resolved is not None else thread["messages"]
@@ -782,11 +785,23 @@ class Workspace:
                 self.load(previews=False,defer_body=True)
             elif action == "load_visible_body":
                 key = self.state.get("body_pending")
-                if key and key == self.state.get("active_message") and key == event.get("message_key"):
+                if key and key == event.get("message_key") and self.state["view"] == "mail":
                     self.state.pop('body_pending',None)
                     message = self._header(key)
-                    if self._body(message) is not None and self.state.pop('body_mark_read',None) == key:
-                        self._visible_ready(message)  # Paint before the explicit Open's flag write.
+                    try:
+                        if self._body(message) is not None and self.state.pop('body_mark_read',None) == key:
+                            self._visible_ready(message)  # Paint before the explicit Open's flag write.
+                    except MailboxError as error:
+                        self.state.setdefault('body_errors', {})[key] = str(error)
+            elif action == 'load_conversation_body':
+                key = event.get('message_key')
+                message = next((m for m in self.state.get('conversation', []) if reference_key(m) == key), None)
+                if (message and event.get('thread_key') == self.state.get('selected')
+                        and self.state['view'] == 'mail' and not self.state.get('body_pending')):
+                    try:
+                        self._body(message, defer=True)
+                    except MailboxError as error:
+                        self.state.setdefault('body_errors', {})[key] = str(error)
             elif action == 'mark_visible_read':
                 key = self.state.pop('read_mark_pending', None)
                 if (key and key == event.get('message_key') == self.state.get('active_message')
@@ -1510,12 +1525,12 @@ class Workspace:
         if not s.get("error"):
             for m in s.get("conversation", []):
                 key = reference_key(m)
-                content = self._content(m) if key in s["expanded"] else None
+                content = self._content(m)
                 body = content["body"] if content else None
                 row = {"key": key, "reply_to": m.get("reply_to", []), "sender": m["sender"], "subject": m["subject"], "to": m["to"], "cc": m["cc"],
                     "time": formatted_date(m["date"] or m["received_at"], user), "folder": m["folder"],
                     "own": m["sender"]["email"].casefold() == self.config.address.casefold(), "unread": m["unread"],
-                    "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}
+                    "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "body_error": s.get('body_errors', {}).get(key, ''), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}
                 if body:
                     row.update(html=content["html"], reader_document=content.get("reader_document", ""), quote=content["quote"], warnings=body.get("warnings", []),
                         attachments=[{k: a[k] for k in ("section", "filename", "content_type", "encoded_size")} for a in body["attachments"]])
@@ -1596,7 +1611,7 @@ class Workspace:
             "initial_load_pending": bool(s.get("initial_load_pending")),
             "discovery_pending": bool(s.get('discovery_pending')),
             "read_pending": bool(s.get('read_pending')), "body_loading": bool(s.get('body_loading')),
-            "body_completion": s.get('body_completion') if can_read and s['view']=='mail' and s.get('body_pending')==s.get('active_message') else None,
+            "body_completion": s.get('body_completion') if can_read and s['view']=='mail' and s.get('body_pending') else None,
             "read_mark_pending": s.get('read_mark_pending'),
             "live_pending": bool(s.get('live_pending')),
             "sync_health": (self.imap.reads.health_snapshot() if hasattr(self.imap,'reads') else {}),

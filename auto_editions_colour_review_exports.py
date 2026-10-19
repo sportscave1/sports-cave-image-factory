@@ -27,7 +27,7 @@ def stage_export_review(source,folder,output,identity,total):
         raise ValueError('Retained source modification evidence requires review.')
     if report.get('edition_total')!=total or report.get('source_dimensions')!=[binary['width'],binary['height']]:
         raise ValueError('Retained preparation differs from the current source or edition limit.')
-    roles=detect_roles(report.get('source_inspection') or {},total)
+    roles=detect_roles(report.get('source_inspection') or {},total,source=source)
     if roles['number_layer']!=report.get('number_layer_name') or roles['plaque_layer']!=report.get('plaque_layer_name'):
         raise ValueError('Retained export layer roles are inconsistent.')
     refs=sorted({1,total})

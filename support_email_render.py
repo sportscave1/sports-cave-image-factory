@@ -6,7 +6,7 @@ from urllib.parse import unquote
 from support_email_compose import _SafeHTML, safe_url
 
 IMAGE_TYPES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
-RENDER_POLICY = 2
+RENDER_POLICY = 3
 
 class ImageReferences(HTMLParser):
     def __init__(self):
@@ -65,6 +65,7 @@ class ReaderHTML(_SafeHTML):
                 self.out.append('<span role="img" aria-label="Image unavailable">'+escape(clean['alt'])+'</span>')
                 return
         for name in ('width','height','cellpadding','cellspacing','border','colspan','rowspan'):
+            if name == 'height' and tag != 'img': continue
             value = values.get(name) or ''
             if re.fullmatch(r'\d{1,4}%?',value): clean[name]=value
         for name, allowed in [('align',{'left','right','center','justify'}),('valign',{'top','middle','bottom'}),('dir',{'ltr','rtl'})]:
@@ -74,6 +75,10 @@ class ReaderHTML(_SafeHTML):
         for declaration in (values.get('style') or '').split(';'):
             name, _, value=declaration.partition(':')
             name,value=name.strip().lower(),value.strip()
+            # Sender typography must not reduce the line box below its glyphs,
+            # or pull successive text blocks over one another.
+            if name == 'line-height' or (name == 'height' and tag != 'img'): continue
+            if name.startswith('margin') and '-' in value: continue
             # No URLs, escapes, functions, comments, positioning or executable CSS.
             if name in self.styles and re.fullmatch(r"[#A-Za-z0-9 .,%'\-]+",value):
                 styles.append(f'{name}:{value}')
@@ -103,4 +108,4 @@ def reader_document(markup, *, allow_remote=False):
     images = 'https: data:' if allow_remote else 'data:'
     return '''<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src '''+images+'''; script-src 'none'; style-src 'unsafe-inline'; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
-<style>html,body{margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}body{font:14px/1.6 Arial,sans-serif;color:#222}img{max-width:100%!important;height:auto!important}img[data-sc-remote-src]{display:none!important}table{max-width:100%!important}pre{white-space:pre-wrap}*{box-sizing:border-box}a{overflow-wrap:anywhere}</style></head><body>'''+markup+'</body></html>'
+<style>html,body{margin:0;padding:0;max-width:100%;overflow-wrap:anywhere}body{font:14px/1.6 Arial,sans-serif;color:#222}.sc-email-content{display:flow-root}img{max-width:100%!important;height:auto!important}img[data-sc-remote-src]{display:none!important}table{max-width:100%!important;table-layout:fixed}td,th{overflow-wrap:anywhere}pre{white-space:pre-wrap}*{box-sizing:border-box;max-width:100%!important;line-height:1.6!important}a{overflow-wrap:anywhere}</style></head><body><div class="sc-email-content">'''+markup+'</div></body></html>'

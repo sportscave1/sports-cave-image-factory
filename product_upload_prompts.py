@@ -65,5 +65,5 @@ Do not infer Shopify identity from a PSD filename. Capture the actual resulting 
             'Do not include credentials or internal access tokens in copied text or output.\n\n' + text +
             '\n\nRETURN TO PRODUCT UPLOADS\nAfter all selected-mode checks finish, end with the exact persisted Shopify product title '
             'on its own line, followed by its product admin URL and stable product ID when available. '
-            'Report incomplete steps honestly. The operator pastes that title or URL into Product Uploads to link the already-created product to its saved PSD. '
-            'That final Upload action must not create another Shopify product. Copying this prompt does not prove Shopify completion or native design validation.')
+            'Report incomplete steps honestly. The operator returns to Product Uploads and clicks MAP to link the already-created product to its saved PSD. '
+            'MAP must not create another Shopify product. Copying this prompt does not prove Shopify completion or native design validation.')

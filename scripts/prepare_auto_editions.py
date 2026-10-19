@@ -64,6 +64,9 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
                    report=str(output/'preparation.json'),number_layer_name=number_layer,
                    plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale,
                    export_strategy=export_strategy,native_benchmark=native_benchmark is True)
+    from auto_editions_role_evidence import resolution
+    reviewed=resolution(identity)
+    if reviewed and reviewed.get('hidden_number'):request['approved_hidden_number']=reviewed['hidden_number']
     script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
     script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
     script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
@@ -90,8 +93,12 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     from auto_editions_colour import restore_export_profiles
     names=['original.png','master.png']+[f'number-{n}.png' for n in range(1,total+1)]
     names += [f'reference-{n}.png' for n in sorted({1,reference_number,total})]
+    if reviewed and reviewed.get('hidden_number'):names.append('uncorrected.png')
     with measured(timings,'icc_preservation'):
         restored=restore_export_profiles(output,report,names,source_icc=icc)
+    from auto_editions_artwork_recovery import verify_exports
+    correction=verify_exports(output,report,identity,names)
+    if correction:report['artwork_recovery']=correction
     report['colour_evidence']=dict(source_state=colour['state'],icc_sha256=__import__('hashlib').sha256(icc).hexdigest(),
         policy=policy,assignment=assignment,restored_exports=restored,source_sha256=before,pixels_converted=False)
     # Measurements must never change the reusable artwork identity.
