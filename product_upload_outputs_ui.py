@@ -1,8 +1,13 @@
 """Product Upload presentation; standalone Mockups keeps its existing renderer."""
 from pathlib import Path
-from urllib.parse import quote
 import hashlib
 import streamlit as st
+
+
+def package_stamp(source, category, name, manifest):
+    return hashlib.sha256(repr((source, category, name,
+        [(x['archive_name'], str(x['path']), Path(x['path']).stat().st_size,
+          Path(x['path']).stat().st_mtime_ns) for x in manifest])).encode()).hexdigest()
 
 
 def asset_card(app,result,asset,source):
@@ -35,9 +40,9 @@ def save_progress(app,key,actor):
     if not job:return
     if job['state'] in ('Queued','Running'):
         if job['total']:st.progress(min(1.,job['completed']/job['total']),text=job['stage'])
-        else:st.info('Saving to Dropbox · '+job['stage'])
+        else:st.caption('Saving… · '+job['stage'])
     elif job['state']=='Failed':
-        st.error(job['error'])
+        st.caption('Save failed · '+job['error'])
         marker='product-upload-save-seen-'+key
         if st.session_state.get(marker)!=job['token']:
             st.session_state[marker]=job['token'];st.rerun()
@@ -65,9 +70,6 @@ def save_controls(app,result,row,user,name):
     except ValueError:folder=''
     permitted=app.os_accounts.can_access_page(user,'Files')
     destination=st.session_state.get(state_key(key)+'-saving-destination') if running else None
-    with st.container(key='product-upload-save-destination'):
-        if destination:st.caption('Saving to: '+destination)
-        elif choice:st.caption('Saving to: '+choice['name']+' / '+(folder or 'Enter Product name'))
     receipt=result.get('product_upload_save_receipt') or {}
     numbering_key='product-upload-save-numbered-'+key
     numbering_context=(choice['id'] if choice else None,folder)
@@ -78,10 +80,27 @@ def save_controls(app,result,row,user,name):
     manifest=app._mockup_dropbox_manifest(result,(app.ASSET_CATEGORY_CORE,app.ASSET_CATEGORY_PRODUCT,app.ASSET_CATEGORY_SOCIAL))
     ready=bool(result.get('product_image_readiness',{}).get('complete') and manifest
         and all(Path(entry['path']).is_file() for entry in manifest))
+    stamp=package_stamp(row['data']['source'],choice['id'] if choice else '',name,manifest) if ready else ''
+    saved=bool(stamp and receipt.get('package_stamp')==stamp and not receipt.get('failures')
+               and not receipt.get('cancelled') and len(receipt.get('successes',()))==len(manifest))
+    with st.container(key='product-upload-save-destination'):
+        if saved:st.caption('Saving to: '+' / '.join(receipt['destination'].rstrip('/').split('/')[-2:]))
+        elif destination:st.caption('Saving to: '+destination)
+        elif choice:st.caption('Saving to: '+choice['name']+' / '+(folder or 'Enter Product name'))
+    if receipt and not saved and not running and receipt.get('successes') and not receipt.get('failures'):
+        result.pop('product_upload_save_receipt',None)
+        app._set_mockups_result(result)
+        from product_upload_intake import Intakes
+        with Intakes(connect).locked(key,actor) as (current,cur):
+            current['data'].update(mockups_exported=False,mockups_context=None)
     if not folder:st.caption('Enter a valid Product name before saving.')
     disabled=running or not folder or not permitted or not choice or not ready
-    save_requested=st.button('Save all',type='primary',disabled=disabled,
-                 key='product-upload-save-all-'+key)
+    with st.container(horizontal=True,vertical_alignment='center',gap='small'):
+        save_requested=st.button('Save all',type='primary',disabled=disabled,
+                     key='product-upload-save-all-'+key)
+        if running:st.caption('Saving…')
+        elif saved:st.markdown(':green[✓ Saved]')
+        elif job and job['state']=='Failed':st.caption('Save failed · retry Save all')
     if receipt.get('cancelled') and not running:
         st.warning('That product folder already exists. Save in a numbered folder or change Product name. Nothing was overwritten.')
         if st.button('Save in a numbered folder',disabled=disabled,key='product-upload-save-numbered-retry-'+key):
@@ -106,24 +125,25 @@ def save_controls(app,result,row,user,name):
             conflict='numbered' if numbered else 'cancel'
             fingerprint=hashlib.sha256(repr((scoped['_product_upload_source'],category_id,parent,folder,conflict,
                 [(x['archive_name'],str(x['path']),Path(x['path']).stat().st_mtime_ns) for x in manifest])).encode()).hexdigest()
+            stamp=package_stamp(row['data']['source'],category_id,name,manifest)
+            from product_upload_intake import Intakes
+            with Intakes(connect).locked(key,actor) as (current,cur):
+                current['data'].update(mockups_exported=False,mockups_context=None)
             JOBS.submit(key,actor,'save',fingerprint,
-                lambda progress:transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,
-                                         conflict=conflict,category_id=category_id))
+                lambda progress:dict(transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,
+                                         conflict=conflict,category_id=category_id),package_stamp=stamp))
             st.session_state[state_key(key)+'-saving-destination']=resolved['name']+' / '+folder
             scoped.pop('product_upload_save_receipt',None)
             app._set_mockups_result(scoped)
-            st.info('Saving to Dropbox...');st.rerun()
+            st.rerun()
         except Exception as error:
             st.error(str(error) if isinstance(error,ValueError) else 'Save could not start. Your sport selection and images are retained; retry Save all.')
     if job:save_progress(app,key,actor)
     receipt=result.get('product_upload_save_receipt') or {}
     if receipt and not running:
         if receipt.get('failures'):
-            st.warning('Save incomplete. Retry Save all in the same collection; confirmed files are checked and skipped.')
+            st.caption('Save incomplete. Retry Save all; confirmed files are checked and skipped.')
             for failure in receipt['failures']:st.caption(failure['relative_path']+': '+failure['error'])
-        elif receipt.get('successes'):
-            st.success('Saved to Dropbox')
-            st.link_button('Open folder','/?page=files&files_path='+quote(receipt['destination'],safe=''))
 
 
 @st.fragment

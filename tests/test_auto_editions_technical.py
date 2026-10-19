@@ -63,6 +63,22 @@ def test_automatic_completion_real_files_no_visual_gate_and_no_side_effects(flow
     assert not any(r['event']=='visual_quality_approved' for r in rows(sql,'auto_edition_onboarding_audit'))
 
 
+def test_upload_review_original_completes_with_exact_persisted_upload_proof(flow):
+    import uuid
+    from product_upload_dropbox import REVIEW
+    d,sql,record,assets,root=flow
+    sql.execute(Path('supabase/migrations/20261017010350_product_upload_intakes.sql').read_text(encoding='utf-8'))
+    original=assets.integration.psd_open_metadata.side_effect
+    meta=original(None,'id:original')
+    meta=dict(meta,path_display=REVIEW+'/'+meta['name'])
+    data=dict(product_gid=PID,source=meta,mockups_exported=True,
+              upload_operation=dict(product_id=PID,binding='correlation',source=meta))
+    sql.execute('INSERT INTO product_upload_intakes(id,actor_id,mode,data) VALUES(%s,%s,%s,%s::jsonb)',
+                (str(uuid.uuid4()),ADMIN['id'],'DRAFT',json.dumps(data)))
+    assets.integration.psd_open_metadata.side_effect=lambda token,fid,**kw:deepcopy(meta) if fid=='id:original' else original(token,fid,**kw)
+    assert technical.Technical(d.connect).run_one(assets)=='Cloud Ready'
+
+
 def test_fresh_import_uses_local_verified_assets_without_full_download(flow):
     d,sql,record,assets,root=flow
     assets.fetch.side_effect=AssertionError('No duplicate asset download on import')

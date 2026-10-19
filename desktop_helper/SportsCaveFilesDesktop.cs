@@ -27,7 +27,7 @@ using System.Windows.Media.Imaging;
 
 internal static class Program
 {
-    internal const int HelperVersion = 11;
+    internal const int HelperVersion = 12;
     internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
     private const string MutexName = @"Local\SportsCaveOSDesktop-v9";
     private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v9";
@@ -729,6 +729,7 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
+                    { "productUploadWebp", true },
                     { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openWith", "verifiedOpen", "appDefaults", "openPhotoshop", "openPsdApp", "openViewer", "folders", "cancel" } },
                 });
                 return;
@@ -771,6 +772,7 @@ internal sealed class DesktopWindow : Window
                 return;
             }
             if (action != "drag" && action != "copyFile"
+                && action != "copyWebpPackage" && action != "selectWebpPackage"
                 && action != "copyImage" && action != "openFile" && action != "openWith" && action != "openPhotoshop" && action != "openPsdApp")
             {
                 throw new DesktopException("action_denied", "The desktop action is not allowed.");
@@ -785,7 +787,9 @@ internal sealed class DesktopWindow : Window
             try
             {
                 string photoshop = action == "openPhotoshop" ? NativePhotoshop.FindRequiredApplication() : "";
-                string[] paths = (action == "openPhotoshop" || action == "openPsdApp")
+                string[] paths = (action == "copyWebpPackage" || action == "selectWebpPackage")
+                    ? await cache.MaterializeWebpPackageAsync(grant, cancellation.Token)
+                    : (action == "openPhotoshop" || action == "openPsdApp")
                     ? await cache.MaterializePhotoshopAsync(grant, cancellation.Token)
                     : await cache.MaterializeAsync(
                     grant,
@@ -817,14 +821,21 @@ internal sealed class DesktopWindow : Window
                         { "effect", effect == DragDropEffects.Copy ? "copy" : "cancelled" },
                     });
                 }
-                else if (action == "copyFile")
+                else if (action == "copyFile" || action == "copyWebpPackage")
                 {
+                    cancellation.Token.ThrowIfCancellationRequested();
                     var data = NativePayload.Create(paths);
                     SetClipboardData(data);
                     Reply(action, requestId, true, new Dictionary<string, object>
                     {
                         { "count", paths.Length },
                     });
+                }
+                else if (action == "selectWebpPackage")
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    Process.Start(new ProcessStartInfo("explorer.exe", "\"" + Path.GetDirectoryName(paths[0]) + "\"") { UseShellExecute = true });
+                    Reply(action, requestId, true, new Dictionary<string, object> { { "count", paths.Length } });
                 }
                 // Premium files: chooser uses the existing validated transfer/cache path.
                 else if (action == "openWith")
@@ -1204,6 +1215,48 @@ internal sealed class NativeCache
             try { File.Delete(Path.Combine(lease, ".active")); } catch { }
             throw;
         }
+    }
+
+    internal async Task<string[]> MaterializeWebpPackageAsync(TransferGrant grant, CancellationToken cancellation)
+    {
+        var manifest = await GetJson(grant.BaseUrl + "/api/files-native-transfer/manifest?ticket=" + Uri.EscapeDataString(grant.Ticket), grant.Secret, cancellation);
+        var items = manifest.ContainsKey("items") ? manifest["items"] as IList : null;
+        var entries = manifest.ContainsKey("roots") ? manifest["roots"] as IList : null;
+        if (!manifest.ContainsKey("purpose") || Convert.ToString(manifest["purpose"]) != "product_upload_webp"
+            || items == null || entries == null || items.Count != 8 || entries.Count != 8)
+            throw new DesktopException("package_invalid", "The complete saved WebP package is required. Retry Save all.");
+        string lease = Path.Combine(root, "leases", grant.Ticket);
+        Directory.CreateDirectory(lease);
+        File.WriteAllText(Path.Combine(lease, ".active"), DateTime.UtcNow.ToString("o"));
+        var paths = new List<string>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try {
+            for (int i = 0; i < items.Count; i++) {
+                cancellation.ThrowIfCancellationRequested();
+                var item = items[i] as Dictionary<string,object>;
+                string name = item == null ? "" : SafeSegment(Convert.ToString(item["name"]));
+                if (!name.EndsWith(".webp", StringComparison.OrdinalIgnoreCase) || !names.Add(name))
+                    throw new DesktopException("package_invalid", "The saved WebP filenames are invalid.");
+                var single = new Dictionary<string,object> { { "items", new object[] {items[i]} }, { "roots", new object[] {entries[i]} } };
+                try {
+                string[] source;
+                source = await MaterializeNativeOpenAsync(grant, single, cancellation, null);
+                string output = Path.Combine(lease, "WEBP"); Directory.CreateDirectory(output);
+                string target = Path.Combine(output, name); EnsureInside(lease, target);
+                if (File.Exists(target)) File.Delete(target);
+                File.Copy(source[0], target);
+                await NativePhotoshop.VerifyMasterAsync(target, root, Convert.ToInt64(item["size"]), Convert.ToString(item["content_hash"]), cancellation);
+                paths.Add(target);
+                } catch (OperationCanceledException) { throw; }
+                  catch (DesktopException error) { throw new DesktopException(error.Code, name + ": " + error.Message); }
+                  catch (Exception) { throw new DesktopException("package_file_failed", name + ": could not hydrate or verify this file. Check the connection and retry."); }
+            }
+            // Revalidate the server operation after hydration, before touching the clipboard.
+            await GetJson(grant.BaseUrl + "/api/files-native-transfer/manifest?ticket=" + Uri.EscapeDataString(grant.Ticket), grant.Secret, cancellation);
+            File.WriteAllText(Path.Combine(lease, ".lease"), DateTime.UtcNow.AddDays(3).ToString("o"));
+            Directory.SetLastWriteTimeUtc(lease, DateTime.UtcNow);
+            return paths.ToArray();
+        } finally { File.Delete(Path.Combine(lease, ".active")); }
     }
 
     internal async Task<string[]> MaterializeNativeOpenAsync(TransferGrant grant,

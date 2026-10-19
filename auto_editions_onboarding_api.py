@@ -255,7 +255,10 @@ def product_context(pid, token):
     from auto_editions_v17 import enabled as continuous
     if continuous():
         import psd_directory as psd
-        if not psd.approved_file(meta):raise ValueError('Mapped source is not an approved original PSD.')
+        if not psd.approved_file(meta):
+            from product_upload_mapping import approved_upload_source
+            if reset_id or not approved_upload_source(store.connect,pid,meta):
+                raise ValueError('Mapped source is not an approved original PSD.')
     if reset_id:
         import psd_directory as psd
         if pending.get('expected_source'):
@@ -376,7 +379,9 @@ async def claim(request):
         auth=await run_in_threadpool(files._dropbox_context)
         meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,auth['access_token'],row['file_id'],include_preview=False)
         if ae.source_identity(row['product_gid'],meta)!=ctx['source']:raise ValueError('Source changed; retry.')
-        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta)
+        from product_upload_mapping import approved_upload_source
+        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta,
+            product_upload=not __import__('psd_directory').approved_file(meta) and approved_upload_source(store.connect,row['product_gid'],meta))
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
@@ -442,7 +447,9 @@ async def reconnect(request):
         auth=await run_in_threadpool(files._dropbox_context)
         meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,auth['access_token'],ctx['source']['file_id'],include_preview=False)
         if ae.source_identity(body['product_gid'],meta)!=ctx['source']:raise ValueError('Source changed; retained package cannot be reused.')
-        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta)
+        from product_upload_mapping import approved_upload_source
+        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta,
+            product_upload=not __import__('psd_directory').approved_file(meta) and approved_upload_source(store.connect,body['product_gid'],meta))
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
             host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())

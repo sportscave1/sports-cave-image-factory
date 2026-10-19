@@ -15,7 +15,7 @@ async function fixture(){
   else data={upload:selected};
   return {ok:true,status:200,json:async()=>data};
  }};
- ctx.window=ctx;ctx.parent={postMessage:m=>messages.push(m)};ctx.addEventListener=(n,f)=>listeners[n]=f;
+ ctx.ProductUploadMapping=()=>({reset(){},sync(){},dispose(){}});ctx.ProductUploadPackage=()=>({reset(){},sync(){},dispose(){}});ctx.window=ctx;ctx.parent={postMessage:m=>messages.push(m)};ctx.addEventListener=(n,f)=>listeners[n]=f;
  vm.runInNewContext(fs.readFileSync('components/product_uploads/app.js','utf8'),ctx);await tick();
  return {el,calls,messages,listeners,metrics:ctx.productUploadMetrics,delayPreparation:()=>{let resolve;const promise=new Promise(r=>resolve=r);prepareDeferred={promise,resolve};return resolve;},failPreparation:value=>{failPrepare=value},delayBrowse:()=>{let resolve;const promise=new Promise(r=>resolve=r);browseDeferred={promise,resolve};return resolve;},delay:()=>{let resolve;const promise=new Promise(r=>resolve=r);deferred={promise,resolve};return resolve;}};
 }
@@ -29,7 +29,7 @@ async function fixture(){
  assert.equal(f.el('filename').textContent,'Art.psd');assert(f.el('detail').textContent.includes('/Review/Art.psd'));
  f.el('remove').onclick();assert(f.el('summary').hidden);
  f.el('manual').onclick();for(const mode of ['DRAFT','LIVE','UPDATE']){f.el('mode').value=mode;await f.el('copy').onclick();assert.equal(f.el('copy').textContent,'Copied');}
- f=await fixture();const loaded=f.delayBrowse();f.el('choose').onclick();await tick();assert(f.el('picker').open);f.el('product').value='Retain product form';f.el('picker-close').onclick();assert(!f.el('picker').open);assert(f.el('choose').focused);loaded();await tick();assert.equal(f.el('picker-items').children.length,0);assert.equal(f.el('product').value,'Retain product form');
+ f=await fixture();const loaded=f.delayBrowse();f.el('choose').onclick();await tick();assert(f.el('picker').open);f.el('mode').value='DRAFT';f.el('picker-close').onclick();assert(!f.el('picker').open);assert(f.el('choose').focused);loaded();await tick();assert.equal(f.el('picker-items').children.length,0);assert.equal(f.el('mode').value,'DRAFT');
  f.el('choose').onclick();await tick();assert(f.el('picker').open);let prevented=false;f.el('picker').cancel({preventDefault:()=>{prevented=true}});assert(prevented&&!f.el('picker').open&&f.el('choose').focused);
  f=await fixture();f.failPreparation(true);f.el('choose').onclick();await tick();await f.el('picker-items').children[0].onclick();assert.equal(f.el('stage').textContent,'Error');assert.equal(f.el('error').textContent,'Original PSD download interrupted.');assert(!f.el('artwork-retry').hidden);f.failPreparation(false);await f.el('artwork-retry').onclick();assert.equal(f.el('stage').textContent,'Ready');assert(f.el('artwork-retry').hidden);assert(f.el('error').hidden);
  f=await fixture();const late=f.delayPreparation();f.el('choose').onclick();await tick();const old=f.el('picker-items').children[0].onclick();await tick();f.el('choose').onclick();await tick();await f.el('picker-items').children[0].onclick();const newest=f.metrics.selections.filter(x=>x.selection_to_mockup_ready_ms!==undefined).at(-1).id;late();await old;assert.equal(f.metrics.selections.filter(x=>x.selection_to_mockup_ready_ms!==undefined).at(-1).id,newest);

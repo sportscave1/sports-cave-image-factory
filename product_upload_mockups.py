@@ -17,7 +17,7 @@ def release_transient(result):
     shutil.rmtree(root)
 
 
-def bind_export(connect, actor, result, kind, *, folder=''):
+def bind_export(connect, actor, result, kind, *, folder='', export_fingerprint=None):
     import image_factory as factory
     factory.require_complete_product_image_manifest(result['product_image_manifest'])
     with Intakes(connect).locked(result['_product_upload_intake'], actor) as (row, cur):
@@ -28,6 +28,13 @@ def bind_export(connect, actor, result, kind, *, folder=''):
             folder=folder, export_kind=kind,
             images=[dict(role=x['slot_id'], filename=x.get('output_filename',''))
                     for x in factory.product_image_manifest_json(result['product_image_manifest'])]))
+        from product_upload_identity import operation
+        op = operation(row)
+        op['output'] = dict(row['data']['mockups_context'], manifest=factory.product_image_manifest_json(result['product_image_manifest']))
+        for fingerprint, saved in row['data'].get('mockup_saves', {}).items():
+            if saved.get('state') == 'Complete' and saved.get('target') == folder and (not export_fingerprint or fingerprint==export_fingerprint):
+                op['output'].update(folder_id=saved.get('folder_id'), export_fingerprint=fingerprint,
+                                    files=saved.get('confirmed') or (saved.get('receipt') or {}).get('successes', []))
 
 
 def save(connect, actor, result, manifest, provider, parent, folder_name, conflict, perform, *, checkpointed=False, parent_identity=None):
@@ -55,7 +62,7 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
                 raise ValueError('The reserved product folder moved or is unavailable. No new folder was created; restore it before retrying.')
             old['target']=target
             if old.get('receipt'):old['receipt']=dict(old['receipt'],destination=target)
-        if old and old['state']=='Complete': return old['receipt']
+        if old and old['state']=='Complete': return dict(old['receipt'],export_fingerprint=fingerprint)
         if old and old['state']=='Saving' and time.time()-old['started_at']<600:
             raise ValueError('This exact save is already running. Wait for its receipt before retrying.')
         if old: target=old['target']
@@ -67,7 +74,7 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
             target=api.numbered_path(provider.token,proposed) if existing and conflict=='numbered' else proposed
         import uuid
         attempt=uuid.uuid4().hex
-        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt)
+        saves[fingerprint]=dict(old or {},state='Saving',target=target,started_at=time.time(),attempt=attempt,manifest=entries)
     def checkpoint(**changes):
         with store.locked(key,actor) as (row,cur):
             record=row['data']['mockup_saves'][fingerprint]
@@ -80,5 +87,6 @@ def save(connect, actor, result, manifest, provider, parent, folder_name, confli
     except Exception:
         checkpoint(state='Failed')
         raise
+    receipt=dict(receipt,export_fingerprint=fingerprint)
     checkpoint(state='Failed' if receipt.get('failures') else 'Complete',receipt=receipt)
     return receipt

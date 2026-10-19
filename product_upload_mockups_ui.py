@@ -18,7 +18,19 @@ def render_page(app):
     if '_product_upload_visit' not in st.session_state: st.session_state['_product_upload_visit']=uuid.uuid4().hex
     visit=st.session_state['_product_upload_visit']
     component=app.get_components_module().declare_component('product_uploads_workflow',path=str(app.BASE_DIR/'components/product_uploads'))
-    event=component(section='upload',refresh=st.session_state.get('_product_upload_linked',''),key='product-upload-input-'+visit,default=None)
+    resume=None
+    requested=st.query_params.get('upload')
+    if requested and st.session_state.get('_product_upload_resume_seen')!=requested:
+        st.session_state['_product_upload_resume_seen']=requested
+        try:
+            resume=Intakes(connect).read(str(uuid.UUID(requested)),user['id'])
+            if not resume:raise ValueError('Saved upload unavailable to this account.')
+        except ValueError as error:
+            st.error(str(error))
+        # One-shot explicit recovery link. Future new uploads start empty.
+        st.query_params.pop('upload',None)
+    event=component(section='upload',**(dict(id=str(resume['id']),mode=resume['mode']) if resume else {}),
+                    refresh=st.session_state.get('_product_upload_linked',''),key='product-upload-input-'+visit,default=None)
     if event and event.get('nonce')!=st.session_state.get('_product_upload_event'):
         previous=st.session_state.get('_product_upload_active')
         st.session_state['_product_upload_event']=event['nonce']
@@ -55,8 +67,8 @@ def render_page(app):
     # the text prompt, exports and clipboard never confirms a Shopify product.
     row=Intakes(connect).read(key,user['id'])
     if row['data'].get('mockups_exported'):
-        st.caption('Open the saved design folder. Attach the images to ChatGPT, then paste the Shopify prompt below. Copy Prompt copies text only.')
-        linked=component(section='handoff',id=key,mode=row['mode'],key='product-upload-handoff-'+visit+'-'+key,default=None)
+        output=(row['data'].get('upload_operation') or {}).get('output') or {}
+        linked=component(section='handoff',id=key,mode=row['mode'],package_version=output.get('export_fingerprint',''),key='product-upload-handoff-'+visit+'-'+key,default=None)
         if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
             st.session_state['_product_upload_linked']=linked['nonce']
             st.rerun()
@@ -210,7 +222,3 @@ def render_design(app,row,user):
             # Progress ticks and failed jobs must not consume the request.
             from product_upload_layout import focus_generation
             focus_generation(st.session_state.get('product-upload-generation-focus-'+key))
-    if result:
-        latest=Intakes(connect).read(key,user['id'])
-        if latest['data'].get('mockups_exported'):
-            if st.button('Continue to Shopify',key='product-upload-continue-'+key):st.rerun()

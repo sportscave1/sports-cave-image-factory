@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize('mode', ['legacy', 'allowed', 'outputs', 'missing', 'expired', 'denied'])
+@pytest.mark.parametrize('mode', ['legacy', 'allowed', 'outputs', 'missing', 'expired', 'denied', 'recover'])
 def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, monkeypatch, caplog):
     import dotenv
     from streamlit.testing.v1 import AppTest
@@ -44,6 +44,10 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
         assert any(t.value == 'Access not approved' for t in test.title)
     else:
         assert test.get('component_instance'), 'Product Upload component must render'
+        if mode == 'recover':
+            import json
+            payload=json.loads(test.get('component_instance')[0].proto.json_args)
+            assert payload['id']=='12345678-1234-4234-9234-123456789012' and payload['mode']=='DRAFT'
         if mode == 'outputs':
             import json
             payloads = [json.loads(c.proto.json_args) for c in test.get('component_instance')]

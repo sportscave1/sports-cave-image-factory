@@ -80,6 +80,8 @@ def select(connect, provider, key, actor, selected_mode, file_id, revision):
             data = dict(workflow_version=3, source=meta, name=meta['name'], size=meta['size'], offset=meta['size'],
                         content_hash=meta['content_hash'], basic_validated=True, copied=False,
                         selected_at=datetime.now(timezone.utc).isoformat(), state='Selected', server_artwork=dict(state='Selected'))
+            from product_upload_identity import operation
+            operation(dict(id=key,data=data))['correlation_expected'] = True
             cur.execute('INSERT INTO product_upload_intakes(id,actor_id,mode,data) VALUES(%s,%s,%s,%s::jsonb)',
                         (key, str(actor), selected_mode, json.dumps(data)))
     return store.read(key, actor)

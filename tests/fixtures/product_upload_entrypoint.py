@@ -48,6 +48,14 @@ def configure(ns):
                     and isinstance(n.value, ast.Name) and n.value.id == 'app'}
         assert not required.difference(ns), required.difference(ns)
 
+    if mode == 'recover':
+        import product_upload_intake
+        st.query_params['upload']='12345678-1234-4234-9234-123456789012'
+        def saved_upload(self,key,actor):
+            assert key=='12345678-1234-4234-9234-123456789012' and actor=='offline-user'
+            return dict(id=key,mode='DRAFT',data={})
+        stack.enter_context(patch.object(product_upload_intake.Intakes,'read',saved_upload))
+
     if mode == 'outputs':
         import product_upload_intake
         import product_upload_dropbox

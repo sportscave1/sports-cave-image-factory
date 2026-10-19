@@ -32,7 +32,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 11", self.install)
+        self.assertIn("HelperVersion = 12", self.install)
         self.assertIn("SportsCaveFiles.ico", self.install)
         self.assertIn("$shortcut.IconLocation = $iconPath", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
@@ -292,6 +292,28 @@ class DesktopWindowsBuildTests(unittest.TestCase):
         finally:
             process.terminate()
             process.wait(timeout=5)
+
+    def test_native_package_payload_contains_eight_separate_original_filenames(self):
+        """Real Windows FileDrop object; does not write the user's clipboard."""
+        self._compile()
+        from PIL import Image
+        paths=[]
+        for name in ('black-frame','man-cave','office','living-room','size-guide','oak-frame','white-frame','unframed'):
+            path=self.base/(name+'.webp')
+            Image.new('RGB',(16,16),'gold').save(path,format='WEBP')
+            paths.append(str(path))
+        spec=self.base/'package.json';spec.write_text(json.dumps(paths),encoding='utf-8')
+        script="""
+Add-Type -AssemblyName PresentationFramework
+$assembly=[System.Reflection.Assembly]::LoadFrom('EXE')
+$method=$assembly.GetType('NativePayload').GetMethod('Create',[System.Reflection.BindingFlags]'NonPublic,Static')
+$paths=[string[]](Get-Content -LiteralPath 'SPEC' -Raw|ConvertFrom-Json)
+$data=$method.Invoke($null,[object[]]@(,$paths))
+ConvertTo-Json -InputObject @($data.GetData([System.Windows.DataFormats]::FileDrop)) -Compress
+""".replace('EXE',str(self.executable).replace("'","''")).replace('SPEC',str(spec).replace("'","''"))
+        result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-STA','-Command',script],capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout),paths)
 
 
 @unittest.skipUnless(

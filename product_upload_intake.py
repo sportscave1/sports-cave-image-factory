@@ -212,6 +212,8 @@ def public(row):
         'preparation_hash','reason','preview_url','product_url','companion_connected','shopify_completion',
         'selected_at')})
     if d.get('artwork_progress'):result['artwork_progress']=d['artwork_progress']
+    if d.get('mockups_exported'):
+        result['saved_package_version']=((d.get('upload_operation') or {}).get('output') or {}).get('export_fingerprint')
     if d.get('workflow_version') == 3:
         result['source'] = {k:d['source'].get(k) for k in ('id','rev','content_hash','path_display','name','size')}
         if d.get('lifecycle'):

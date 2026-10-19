@@ -565,7 +565,9 @@ class NativeTransferManager:
                     status_code=404,
                     code="transfer_expired",
                 )
-            return record
+        if record.purpose == 'product_upload_webp':
+            record.validate()
+        return record
 
     def item(self, ticket, secret, item_token):
         record = self.get(ticket, secret)
@@ -2244,7 +2246,7 @@ def _native_transfer_secret(request):
 async def native_transfer_manifest(request: Request):
     """Return only the validated manifest attached to one transfer grant."""
     try:
-        record = NATIVE_TRANSFER_MANAGER.get(
+        record = await run_in_threadpool(NATIVE_TRANSFER_MANAGER.get,
             request.query_params.get("ticket"),
             _native_transfer_secret(request),
         )
@@ -2297,7 +2299,7 @@ async def native_transfer_content(request: Request):
     """Stream one ticketed Dropbox file without exposing Dropbox credentials."""
     upstream = None
     try:
-        record, item = NATIVE_TRANSFER_MANAGER.item(
+        record, item = await run_in_threadpool(NATIVE_TRANSFER_MANAGER.item,
             request.query_params.get("ticket"),
             _native_transfer_secret(request),
             request.query_params.get("item"),
@@ -2308,7 +2310,7 @@ async def native_transfer_content(request: Request):
                 status_code=400,
                 code="transfer_item_invalid",
             )
-        if record.purpose == "native_open":
+        if record.purpose in ("native_open", "product_upload_webp"):
             metadata, upstream = await run_in_threadpool(dropbox_integration.get_psd_file_response,
                 record.access_token, item["dropbox_id"], item["revision"])
         else:
@@ -2319,7 +2321,7 @@ async def native_transfer_content(request: Request):
             )
         current_id = str(metadata.get("id") or "")
         current_revision = str(metadata.get("rev") or metadata.get("content_hash") or "")
-        if record.purpose == "native_open" and (current_id != item["dropbox_id"] or current_revision != item["revision"]
+        if record.purpose in ("native_open", "product_upload_webp") and (current_id != item["dropbox_id"] or current_revision != item["revision"]
                 or str(metadata.get("content_hash") or "") != item["content_hash"]):
             upstream.close()
             upstream = None

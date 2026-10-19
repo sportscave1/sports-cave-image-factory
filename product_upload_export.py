@@ -125,5 +125,5 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
     if not receipt.get('failures') and len(receipt.get('successes',()))==total:
         import image_factory
         if image_factory.product_image_readiness(result['product_image_manifest'])['complete']:
-            bind_export(connect,actor,result,'Dropbox',folder=receipt['destination'])
+            bind_export(connect,actor,result,'Dropbox',folder=receipt['destination'],export_fingerprint=receipt.get('export_fingerprint'))
     return receipt

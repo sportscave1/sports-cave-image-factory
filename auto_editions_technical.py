@@ -308,7 +308,10 @@ class Technical:
             # Fetch current source immediately before the short fenced commit.
             meta=assets.integration.psd_open_metadata(assets.token,m['source']['file_id'],include_preview=False)
             import psd_directory
-            if not psd_directory.approved_file(meta) or ae.source_identity(pid,meta)!=m['source']:raise ValueError('Source changed. Prepare the current mapped PSD before retrying.')
+            from product_upload_mapping import approved_upload_source
+            if (not (psd_directory.approved_file(meta) or approved_upload_source(self.connect,pid,meta))
+                    or ae.source_identity(pid,meta)!=m['source']):
+                raise ValueError('Source changed. Prepare the current mapped PSD before retrying.')
             value=certificate(record)
             return self.commit(job,record,original,value)
         except Exception as error:

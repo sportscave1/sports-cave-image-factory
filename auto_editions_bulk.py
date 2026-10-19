@@ -458,7 +458,8 @@ def approve_one(connect,item,actor,*,job=None):
         # Source can change while PNG checks run; fence again immediately before the atomic write.
         meta=assets.integration.psd_open_metadata(assets.token,m['source']['file_id'],include_preview=False)
         import psd_directory
-        if not psd_directory.approved_file(meta) or ae.source_identity(pid,meta)!=m['source']:return finish('Skipped')
+        from product_upload_mapping import approved_upload_source
+        if not (psd_directory.approved_file(meta) or approved_upload_source(connect,pid,meta)) or ae.source_identity(pid,meta)!=m['source']:return finish('Skipped')
         cur.execute('LOCK TABLE auto_edition_layouts IN SHARE ROW EXCLUSIVE MODE')
         cur.execute('SELECT * FROM auto_edition_layouts WHERE product_gid=%s',(pid,));layouts=cur.fetchall()
         if any(l['preparation_hash']!=digest for l in layouts):return finish('Needs Attention')

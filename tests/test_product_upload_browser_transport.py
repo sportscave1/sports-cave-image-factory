@@ -69,7 +69,7 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
         page.wait_for_function("old=>productUploadMetrics.selections.filter(x=>x.selection_to_bound_ms!==undefined).at(-1)?.id!==old",arg=key)
         assert page.evaluate('productUploadMetrics.selections.filter(x=>x.selection_to_bound_ms!==undefined).at(-1).id')!=key
         expect(page.locator('#stage')).to_have_text('Ready',timeout=10000)
-        page.locator('#product').evaluate("el=>el.value='Preserved form'")
+        selected_mode=page.locator('#mode').input_value()
         selected_name=page.locator('#filename').inner_text();held_metadata=[]
         page.route('**/api/product-uploads/browse',lambda route:held_metadata.append(route))
         page.locator('#choose').click();expect(page.locator('#picker-status')).to_have_text('Loading Dropbox metadata…')
@@ -77,7 +77,7 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
         assert page.get_by_role('button',name='Up',exact=True).count()==0
         page.get_by_role('button',name='Close Dropbox picker',exact=True).click();expect(page.locator('#picker')).not_to_be_visible()
         expect(page.locator('#choose')).to_be_focused();expect(page.locator('#filename')).to_have_text(selected_name)
-        assert page.locator('#product').input_value()=='Preserved form'
+        assert page.locator('#mode').input_value()==selected_mode
         page.unroute('**/api/product-uploads/browse')
         page.locator('#choose').click();page.keyboard.press('Escape');expect(page.locator('#picker')).not_to_be_visible();expect(page.locator('#choose')).to_be_focused()
         page.reload();expect(page.locator('#summary')).to_be_hidden();assert page.locator('#preview img').count()==0
