@@ -22,6 +22,13 @@ def native_cleanup_uncertain(output):
     except (OSError,ValueError,AttributeError):return True
 
 
+def native_dispatch(run, script, output):
+    # A preflight cleanup receipt cannot prove a subsequent RPC closed its doc.
+    status=Path(output)/'native-status.json'
+    if status.exists():status.replace(Path(output)/'preflight-native-status.json')
+    return run(script)
+
+
 def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1,
             export_strategy='duplicate_merged',native_benchmark=False):
     if type(scale) is not int or scale not in (1,2,3,4):
@@ -35,6 +42,8 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     source, output = Path(source).resolve(), Path(output).resolve()
     if output.exists():
         raise ValueError('Use a new package directory; existing work is never overwritten.')
+    ae.source_identity(identity.get('product_gid'),dict(id=identity.get('file_id'),
+        rev=identity.get('revision'),content_hash=identity.get('content_hash')))
     timings={}
     with measured(timings,'source_checksums'):
         hashes=file_hashes(source)
@@ -67,17 +76,26 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     from auto_editions_role_evidence import resolution
     reviewed=resolution(identity)
     if reviewed and reviewed.get('hidden_number'):request['approved_hidden_number']=reviewed['hidden_number']
-    script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
-    script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
-    script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
+    inspector = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
+    preparation = (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
+    def script_for(value):
+        return inspector+'\nvar SC_AUTO_EDITIONS_REQUEST = '+json.dumps(value)+';\n'+preparation
     # Durable intent distinguishes pre-COM failures from uncertain RPC cleanup.
     # It is local diagnostic evidence, never part of the preparation identity.
     with (output/'photoshop-dispatch.json').open('x',encoding='utf-8') as dispatched:
         json.dump(dict(export_strategy=export_strategy,started=True),dispatched)
         dispatched.flush();__import__('os').fsync(dispatched.fileno())
     try:
+        from auto_editions_preflight import validate,verify_resize
+        preflight={**request,'preflight_only':True,'report':str(output/'preflight.json')}
+        with measured(timings,'native_preflight',path=output):
+            if native_dispatch(run,script_for(preflight),output) != 'AUTO_EDITIONS_PREFLIGHT':
+                raise ValueError('Photoshop did not confirm template preflight.')
+            inspection=json.loads((output/'preflight.json').read_text(encoding='utf-8-sig'))
+            background=validate(output,inspection,identity,total,number_layer,plaque_layer,scale)
+            if background:request['opaque_resize_layer']=background
         with measured(timings,'photoshop_prepare',path=output):
-            result = run(script)
+            result = native_dispatch(run,script_for(request),output)
     finally:
         # A failed export must retain the same original/staged integrity fence.
         if ae.file_hash(source) != before or ae.file_hash(staged) != staged_hash:
@@ -85,6 +103,7 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
         raise ValueError('Photoshop did not confirm preparation.')
     report=json.loads((output/'preparation.json').read_text(encoding='utf-8-sig'))
+    if background:report['resize_evidence']=verify_resize(output)
     if report.get('source_dimensions')!=[colour['width'],colour['height']]:
         raise ColourReview('Inspector failure: Photoshop source geometry differs from the pinned PSD.')
     witness=inspect_psd(output/'profile-witness.psd')

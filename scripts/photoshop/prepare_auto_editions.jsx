@@ -119,6 +119,38 @@ var SCAutoEditionsPreparation = (function () {
                     throw Error("approved_hidden_number_changed");
             }
             var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
+            if (r.preflight_only === true) {
+                savePNG(doc,"preflight-original.png");
+                var bottom = null, visibility = [];
+                for (var v=0;v<doc.layers.length;v++) {
+                    visibility.push(doc.layers[v].visible);
+                    if(doc.layers[v].visible)bottom=doc.layers[v];
+                }
+                var candidate = null;
+                if(scale!==1 && bottom && bottom!==layer && bottom!==plaque && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
+                    candidate={layer_id:bottom.id,name:bottom.name};
+                    try {
+                        for(var hide=0;hide<doc.layers.length;hide++)if(doc.layers[hide]!==bottom)doc.layers[hide].visible=false;
+                        savePNG(doc,"preflight-artwork.png");
+                    } finally {
+                        for(var restore=0;restore<doc.layers.length;restore++)doc.layers[restore].visible=visibility[restore];
+                    }
+                }
+                write({inspection:inspection,resize_background:candidate});
+                completed=true;
+                return "AUTO_EDITIONS_PREFLIGHT";
+            }
+            if(r.opaque_resize_layer) {
+                var bg=[], approved=r.opaque_resize_layer;
+                named(doc,approved.name,bg);
+                if(bg.length!==1 || bg[0].id!==approved.layer_id || bg[0]===layer || bg[0]===plaque || !bg[0].visible)
+                    throw Error("resize_background_identity_changed");
+                // Only Python-verified opaque native pixels, on the disposable
+                // staged document. No fill colour and no source PSD writes.
+                if(bg[0].kind===LayerKind.SMARTOBJECT)bg[0].rasterize(RasterizeType.ENTIRELAYER);
+                bg[0].isBackgroundLayer=true;
+                savePNG(doc,"resize-original.png");
+            }
             timings.layer_inspection_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
             if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 95000000)

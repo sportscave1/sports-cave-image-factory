@@ -427,8 +427,14 @@ def upload_prepared(key,archive):
                 if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
                 finish_upload(row,result,started)
                 return
-            except requests.RequestException:
+            except requests.RequestException as error:
+                response=getattr(error,'response',None)
+                status=response.status_code if response is not None else None
+                if status is not None and status not in (408,429) and status<500:raise
                 if attempt==2 or not row['context'].get('automatic'):raise
+                # Bounded, cancellation-aware backoff. A reconnect can recover
+                # an already accepted upload before any bytes are sent again.
+                if HOST_STOP.wait(min(2**attempt,4)):raise Cancelled()
                 completed=reconnect(row)
                 if isinstance(completed,dict) and completed.get('preparation_hash'):
                     finish_upload(row,completed,started)
@@ -436,8 +442,11 @@ def upload_prepared(key,archive):
     except Cancelled:raise
     except Exception as error:
         response=getattr(error,'response',None)
-        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code>=500)
-        row.update(status='Recovering' if transient else 'Blocked',error='Prepared package retained; upload/checkpoint failed: '+type(error).__name__)
+        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code in (408,429) or response.status_code>=500)
+        detail=failure_detail(row,'Uploading',error)
+        code=' HTTP '+str(response.status_code) if response is not None else ''
+        if transient:row['diagnostic']=safe_diagnostic('upload/checkpoint failed','Uploading')
+        row.update(status='Recovering' if transient else 'Blocked',error='Prepared package retained; upload/checkpoint failed: '+detail+code)
         if transient:
             row['recovery_failures']=row.get('recovery_failures',0)+1
             if row['recovery_failures']>=3:
@@ -625,13 +634,29 @@ def failure_detail(row,stage,error):
     """Retain Photoshop's cause locally; never put paths/capabilities in status."""
     import re
     message=str(error)[:4000]
-    row['diagnostic']=safe_diagnostic(message,'Preparing')
+    response=getattr(error,'response',None)
+    if stage=='Uploading' and response is not None:
+        try:
+            payload=response.json()
+            if isinstance(payload,dict) and isinstance(payload.get('error'),str):
+                message+=': '+payload['error'][:1000]
+        except (ValueError,TypeError):pass
+    safe_stage={'Preparation':'Preparing','Photoshop inspection':'Photoshop','PSD transfer':'Claimed'}.get(stage,stage)
+    row['diagnostic']=safe_diagnostic(message,safe_stage)
     for value in [*row.get('grant',{}).values(),row.get('context',{}).get('lease_token')]:
         if isinstance(value,str) and len(value)>8:message=message.replace(value,'[redacted]')
     message=re.sub(r'https?://[^\s]+','[redacted URL]',message)
     try:
-        atomic_json(row['folder']/'failure-detail.json',dict(stage=stage,error_type=type(error).__name__,
-            message=message,product_gid=row.get('context',{}).get('product_gid'),recorded_at=time.time()))
+        import traceback
+        trace=''.join(traceback.format_exception(type(error),error,error.__traceback__))[-12000:]
+        for value in [*row.get('grant',{}).values(),row.get('context',{}).get('lease_token')]:
+            if isinstance(value,str) and len(value)>8:trace=trace.replace(value,'[redacted]')
+        trace=re.sub(r'https?://[^\s]+','[redacted URL]',trace)
+        detail=dict(stage=stage,error_type=type(error).__name__,message=message,traceback=trace,
+            product_gid=row.get('context',{}).get('product_gid'),recorded_at=time.time())
+        atomic_json(row['folder']/'failure-detail.json',detail)
+        with (row['folder']/'failure-history.jsonl').open('a',encoding='utf-8') as history:
+            history.write(json.dumps(detail)+'\n')
     except OSError:pass
     if isinstance(error,RuntimeError):
         if 'source_profile_requires_review' in message or 'colour_conversion_requires_approval' in message:
@@ -641,7 +666,7 @@ def failure_detail(row,stage,error):
         if 'export_profile_changed' in message:return 'ICC export mismatch: Photoshop changed the document profile.'
         if 'scratch' in message.lower():return 'Photoshop scratch disk failure; inspect free scratch storage.'
         return 'Photoshop preparation failed; inspect the retained local failure-detail.json.'
-    return str(error)[:350] if isinstance(error,ValueError) else type(error).__name__
+    return message[:350] if isinstance(error,ValueError) or stage=='Uploading' and message else type(error).__name__
 
 
 def safe_diagnostic(message,stage):
