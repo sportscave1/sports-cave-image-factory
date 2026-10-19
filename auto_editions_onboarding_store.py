@@ -20,6 +20,9 @@ class Queue:
 
     def enqueue_cursor(self, cur, pid, file_id, actor, *, newly_linked=True, expected_source=None):
         """Reuse checkpoint decisions inside a mapping/registration transaction."""
+        from product_upload_mapping_hold import held
+        if held(cur, pid, file_id):
+            return  # Mapping-only hold is not a deferred or future runnable job.
         cur.execute('SELECT dropbox_file_id FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
         mapping = cur.fetchone()
         if not mapping or mapping['dropbox_file_id'] != file_id:

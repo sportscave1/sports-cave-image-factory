@@ -1,7 +1,7 @@
 """Resumable upload -> existing Shopify product -> Edition Ops registration.
 
-GET status is read-only. MAP never creates/publishes a product, moves a PSD,
-allocates an edition, or releases an order. Provider calls are outside intake locks.
+Sync & Map reuses catalogue registration and authoritative PSD mapping.
+Only an explicit click starts work. No Shopify writes or preparation admission.
 """
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
@@ -52,20 +52,24 @@ def edition_limit(product, confirmed=None):
 def read_edition(connect, pid):
     with connect() as conn, conn.cursor() as cur:
         cur.execute('''SELECT p.*,r.id AS run_id,r.edition_total AS run_total,
-            r.next_edition_number AS run_next,r.status AS run_status
+            r.next_edition_number AS run_next,r.status AS run_status,r.shopify_product_id AS run_shopify_id
             FROM edition_products p LEFT JOIN edition_runs r ON r.id=p.active_edition_run_id
             AND r.edition_product_id=p.id
             WHERE p.shopify_product_gid=%s OR p.shopify_product_id=%s''', (pid, pid))
         rows = cur.fetchall()
     if len(rows) > 1:
         raise ValueError('Conflicting Edition Ops product identities; review the existing records.')
+    if rows and any(rows[0].get(field) and str(rows[0][field]) not in (pid, pid.rsplit('/',1)[-1])
+                    for field in ('shopify_product_gid','shopify_product_id','run_shopify_id')):
+        raise ValueError('Conflicting Shopify identity on the Edition Ops record or edition run.')
     return dict(rows[0]) if rows else None
 
 
 def register_edition(connect, product, total):
     """Canonical locked plan/allocator, restricted to exact stable identity.
 
-    Existing records/runs/counters are never rewritten. The canonical initializer
+    Existing counters/runs are never rewritten. Display fields use the canonical
+    safe refresh plan. The canonical initializer
     checks orphaned orders/runs/tombstones and creates a run without allocating.
     """
     import supabase_backend as db
@@ -83,7 +87,6 @@ def register_edition(connect, product, total):
             if action['action'] in ('skip', 'update'):
                 if action.get('match_type') != 'shopify_product_id':
                     raise ValueError('Legacy edition history needs explicit stable-ID reconciliation in Edition Ops.')
-                action['action'] = 'skip'
             if action['action'] == 'insert':
                 if total is None:
                     raise ValueError('Confirm the edition limit before creating a new edition run.')
@@ -111,7 +114,7 @@ def approved_upload_source(connect, pid, metadata, *, actor=None, key=None):
         if key and str(row['id']) != str(key) or actor and row['actor_id'] != str(actor):
             continue
         op = row['data'].get('upload_operation') or {}
-        source = op.get('source') or {}
+        source = (op.get('sync_map') or {}).get('moved') or op.get('source') or {}
         if (op.get('product_id') == pid and op.get('binding') in ('correlation', 'existing_mapping', 'operator')
                 and all(source.get(k) == metadata.get(k) for k in ('id', 'rev', 'content_hash', 'path_display'))):
             return True
@@ -119,25 +122,13 @@ def approved_upload_source(connect, pid, metadata, *, actor=None, key=None):
 
 
 class Mapping:
-    def __init__(self, connect, provider, *, shopify=None, mappings=None, queue=None, register=None, mirror=None):
+    def __init__(self, connect, provider, *, shopify=None, mappings=None, register=None):
         import shopify_sync
         from psd_mapping_store import PostgresMappings
-        from auto_editions_onboarding_store import Queue
         self.connect, self.store, self.provider = connect, Intakes(connect), provider
         self.shopify = shopify or shopify_sync
         self.mappings = mappings or PostgresMappings(connect)
-        self.queue = queue or Queue(connect)
         self.register = register or (lambda p, n: register_edition(connect, p, n))
-        self.mirror = mirror or self._mirror
-
-    def _mirror(self, product):
-        import supabase_backend as db
-        edition = read_edition(self.connect, product['shopify_product_id'])
-        if edition.get('metafields_sync_status') == 'Pending automatic mirror':
-            db._mirror_pending_registered_product(product['shopify_product_id'])
-        else:
-            db.sync_product_edition_metafields(edition['shopify_handle'], ensure_schema_first=False)
-
     def source(self, row):
         op = operation(row)
         meta = self.provider.metadata_if_present(op['source']['id'])
@@ -150,7 +141,7 @@ class Mapping:
         for _ in range(10):
             page = self.shopify.fetch_catalog_page(search=query, after=cursor, page_size=100)
             for item in page['products']:
-                if item.get('status') in ('DRAFT', 'ACTIVE') and (not exact_tag or exact_tag in tags(item)):
+                if (exact_tag in tags(item) if exact_tag else item.get('status') in ('DRAFT', 'ACTIVE')):
                     result[item['shopify_product_id']] = item
             if not page['has_next_page']:
                 return list(result.values())
@@ -160,206 +151,246 @@ class Mapping:
             cursor = next_cursor
         raise ValueError('Catalogue lookup was incomplete. Narrow the product search and retry; nothing was linked.')
 
-    def candidates(self, key, actor, search=''):
-        row = self.store.read(key, actor['id'])
-        if not row:
-            raise ValueError('This saved upload is unavailable.')
-        # Discovery suggestions are NEVER evidence for automatic binding.
-        value = str(search or (row['data'].get('mockups_context') or {}).get('design_name') or '').strip()[:180]
-        escaped = value.replace('\\', '\\\\').replace('"', '\\"')
-        query = '(status:active OR status:draft)'
-        if value.startswith('gid://shopify/Product/'):
-            products = [self.shopify.fetch_product_by_shopify_id(value)]
-        else:
-            query += (' AND (handle:"' + escaped + '*" OR title:"' + escaped.replace('-', ' ') + '*")') if value else ''
-            products = self.catalogue(query)[:50]
-        choices = [summary(p) for p in products if p.get('status') in ('DRAFT', 'ACTIVE')]
-        with self.store.locked(key, actor['id']) as (current, cur):
-            operation(current)
-            current['data']['mapping_candidates'] = choices
-        return choices
+    def _guard(self, key, actor, lease):
+        """Fence side effects under the durable intake lock, including expired leases.
 
-    def _checkpoint(self, key, actor, lease, **values):
-        with self.store.locked(key, actor['id']) as (row, cur):
-            op = operation(row)
-            if op.get('lease') != lease:
-                raise ValueError('Another mapping attempt owns this operation. Refresh status.')
-            op.update(values)
+        A takeover waits for an in-flight mutation. A late reader must prove its
+        lease again before it can mutate anything. No process-local lock is authority.
+        """
+        from contextlib import contextmanager
+        from product_upload_source import current_source
+        @contextmanager
+        def locked():
+            with self.store.locked(key, actor['id'], provider_io=True) as (row, cur):
+                op = operation(row)
+                task = op['sync_map']
+                if task.get('lease') != lease:
+                    raise ValueError('Another attempt owns Sync & Map. Refresh its progress.')
+                current_source(row, task['source_version'])
+                if row['mode'] != task['mode']:
+                    raise ValueError('The upload mode changed. Retry with the current saved operation.')
+                task['lease_until'] = (now()+timedelta(minutes=5)).isoformat()
+                yield row, op, task, cur
+        return locked()
 
-    def register_worker(self, pid, meta, actor):
-        """Queue and pin the captured revision in one transaction, without reset."""
-        import auto_editions as ae
-        import json
-        source = ae.source_identity(pid, meta)
-        with self.connect() as conn, conn.cursor() as cur:
-            cur.execute('LOCK TABLE auto_edition_onboarding IN SHARE ROW EXCLUSIVE MODE')
-            self.queue.enqueue_cursor(cur, pid, meta['id'], str(actor['id']), expected_source=source)
-            cur.execute('SELECT file_id,source FROM auto_edition_onboarding WHERE product_gid=%s FOR UPDATE', (pid,))
-            worker = cur.fetchone()
-            if not worker or worker['file_id'] != meta['id'] or worker['source'] and worker['source'] != source:
-                raise ValueError('Worker preparation belongs to another PSD revision. Review its existing checkpoint; it was not reset.')
-            if worker['source'] is None:
-                cur.execute('UPDATE auto_edition_onboarding SET source=%s::jsonb WHERE product_gid=%s', (json.dumps(source), pid))
-                self.queue.audit(cur, pid, str(actor['id']), 'upload_source_pinned', source)
+    def _step(self, key, actor, lease, stage, **values):
+        with self._guard(key, actor, lease) as (row, op, task, cur):
+            task.update(stage=stage, **values)
 
-    def map(self, key, actor, *, product_id=None, confirmed_limit=None):
+    def _identity(self, key, row):
+        op = operation(row)
+        pid = op.get('product_id') or row['data'].get('product_gid')
+        marker = tag(key)
+        matches = self.catalogue('tag:"'+marker+'"', exact_tag=marker)
+        if len(matches) > 1:
+            raise ValueError('Multiple Shopify products have this upload correlation tag. Resolve the conflict; no product was chosen.')
+        if not matches:
+            raise ValueError('Product not found in Shopify yet')
+        found = matches[0]['shopify_product_id']
+        if pid and pid != found:
+            raise ValueError('The saved Shopify product ID conflicts with this upload correlation tag.')
+        product = self.shopify.fetch_product_by_shopify_id(pid or found)
+        if not product or product.get('shopify_product_id') != found or marker not in tags(product):
+            raise ValueError('Shopify identity or correlation changed during verification. Retry after resolving the conflict.')
+        status = product.get('status')
+        if status not in ('DRAFT', 'ACTIVE'):
+            raise ValueError('The Shopify product is archived or unavailable.')
+        if row['mode'] == 'DRAFT' and status != 'DRAFT':
+            raise ValueError('This upload expects a Shopify draft. Its publication state was not changed.')
+        if row['mode'] == 'LIVE' and (status != 'ACTIVE' or not product.get('online_store_url')):
+            raise ValueError('The requested Shopify live publication is not confirmed yet.')
+        return product
+
+    def _mapping_conflicts(self, pid, source):
+        # Existing authority, including the one-product-per-file constraint.
+        existing = self.mappings.read()
+        if pid in existing and existing[pid]['dropbox_file_id'] != source['id']:
+            raise ValueError('This product already maps to another PSD. Nothing was replaced.')
+        if any(m['dropbox_file_id'] == source['id'] and p != pid for p,m in existing.items()):
+            raise ValueError('This PSD already maps to a different Shopify product. Nothing was replaced.')
+        return existing.get(pid)
+
+    @staticmethod
+    def _edition(edition, task):
+        if (not edition or not edition.get('id') or not edition.get('run_id') or
+                not edition.get('active') or not edition.get('is_active') or edition['run_status'] != 'active' or
+                edition['run_total'] != edition['edition_total'] or edition['run_next'] != edition['next_edition_number']):
+            raise ValueError('Edition setup needs review: a consistent active run is required. No existing history was reset or reopened.')
+        if any(task.get(k) and task[k] != edition[field] for k,field in [('edition_id','id'),('run_id','run_id')]):
+            raise ValueError('The Edition Ops record or run changed during mapping. Resolve the conflict before retrying.')
+        return edition
+
+    def _move(self, key, actor, lease, product):
+        from product_upload_dropbox import verify_roots, within
+        from product_upload_lifecycle import filename
+        from product_upload_mapping_hold import verify
+        roots = verify_roots(self.provider)
+        with self._guard(key, actor, lease) as (row, op, task, cur):
+            source = op['source']
+            verify(cur, key, product['shopify_product_id'], source['id'])
+            live_path = roots['live']['path']
+            # Preserve a pre-existing master name; Review masters use the existing
+            # title sanitisation convention. The intent never changes on retry.
+            target = (source['path_display'] if source['path_display'].rsplit('/',1)[0].casefold() == live_path.casefold()
+                      else live_path+'/'+filename(product['title']))
+            task.setdefault('move_intent', dict(source=deepcopy(source), to=target, folder=roots['live']))
+            if task['move_intent']['folder'] != roots['live']:
+                raise ValueError('The configured live-designs destination changed. Review the saved move intent.')
+        # Intent committed BEFORE provider mutation: lost responses reconcile by ID.
+        with self._guard(key, actor, lease) as (row, op, task, cur):
+            source = op['source']; intent = task['move_intent']; target = intent['to']
+            current = self.provider.metadata_if_present(source['id'])
+            expected = task.get('moved') or source
+            recovered = bool(current and not task.get('moved') and source['path_display'] != target and current.get('path_display') == target
+                             and current.get('id') == source['id'] and current.get('content_hash') == source['content_hash']
+                             and current.get('size') == source.get('size'))
+            if not current or (not recovered and any(current.get(k) != expected.get(k) for k in ('id','rev','content_hash','path_display','size'))):
+                raise ValueError('The original PSD source revision changed. No replacement was moved.')
+            if current['path_display'] != target and not within(current['path_display'], roots['review']['path']):
+                raise ValueError('The original PSD is outside the configured Review source.')
+            occupied = self.provider.metadata_if_present(target)
+            if occupied and occupied.get('id') != source['id']:
+                raise ValueError('Destination conflict: another design occupies the live path. Nothing was overwritten.')
+            if current['path_display'] != target:
+                # Recheck preparation exclusion immediately before the move.
+                verify(cur, key, product['shopify_product_id'], source['id'])
+                self.provider.api.move_path(self.provider.token, source['id'], target, root_path=self.provider.context['root_path'])
+            fresh = self.provider.metadata_if_present(source['id'])
+            if (not fresh or fresh.get('path_display') != target or not fresh.get('rev') or
+                    any(fresh.get(k) != source.get(k) for k in ('id','content_hash','size'))):
+                raise ValueError('Dropbox did not verify the original PSD at its intended destination. Retry to reconcile the saved move.')
+            task['moved'] = deepcopy(fresh)
+            return fresh
+
+    def map(self, key, actor, *, product_id=None, confirmed_limit=None, source_version=None):
         import os_accounts
+        from time import monotonic
+        from product_upload_source import current_source
+        from product_upload_mapping_hold import acquire, verify
         if not os_accounts.can_attach_missing_psd(actor):
             raise PermissionError('Your account needs permission to attach a product PSD.')
-        lease = str(uuid.uuid4())
+        lease = str(uuid.uuid4()); started = monotonic()
         with self.store.locked(key, actor['id']) as (row, cur):
-            if not row['data'].get('mockups_exported'):
-                raise ValueError('Save this upload’s prepared images before mapping.')
-            op = operation(row)
-            if op.get('lease_until') and datetime.fromisoformat(op['lease_until']) > now():
-                return dict(state='Mapping…', reason='The existing mapping attempt is still running.')
-            op.update(lease=lease, lease_until=(now()+timedelta(minutes=5)).isoformat(), state='Mapping…', error='')
+            source = current_source(row, source_version)
+            op = operation(row); task = op.setdefault('sync_map', {})
+            if row['data'].get('lifecycle'):
+                raise ValueError('This older upload has an existing Companion handoff. Review that retained workflow before Sync & Map; it was not changed.')
+            if row['data'].get('workflow_version') != 3:
+                raise ValueError('Sync & Map requires the current Dropbox PSD selection workflow.')
+            if task.get('lease_until') and datetime.fromisoformat(task['lease_until']) > now():
+                return self._status_row(row)
+            task.update(lease=lease, lease_until=(now()+timedelta(minutes=5)).isoformat(), state='Mapping…', error='',
+                        stage='Finding Shopify product', source_version=source['version'], mode=row['mode'], needs_limit=False)
+            task.setdefault('completed', [])
             captured = deepcopy(row)
-        stage = 'Resolving product'
+        stage = 'Finding Shopify product'; phase = monotonic()
+        def step(next_stage):
+            nonlocal stage, phase
+            with self._guard(key, actor, lease) as (row, op, task, cur):
+                task.setdefault('timings_ms', {})[stage] = round((monotonic()-phase)*1000, 2)
+                if stage not in task['completed']: task['completed'].append(stage)
+                task['stage'] = next_stage
+            stage, phase = next_stage, monotonic()
         try:
-            meta = self.source(captured)
-            op = captured['data']['upload_operation']
-            bound_pid = captured['data'].get('product_gid') or op.get('product_id')
-            pid = bound_pid
-            binding = op.get('binding')
-            if product_id and pid and product_id != pid:
-                raise ValueError('This operation is already bound to another product; its saved identity cannot be replaced.')
-            if not pid and product_id:
-                if product_id not in {p['id'] for p in captured['data'].get('mapping_candidates', [])}:
-                    raise ValueError('Choose a product from this upload’s current selector.')
-                pid, binding = product_id, 'operator'
-            if not pid:
-                marker = tag(key)
-                matches = self.catalogue('tag:"' + marker + '" AND (status:active OR status:draft)', exact_tag=marker)
-                if len(matches) == 1:
-                    pid, binding = matches[0]['shopify_product_id'], 'correlation'
-                elif not matches and not op.get('correlation_expected'):
-                    # Legacy recovery only. A newly correlated upload may reuse
-                    # an old PSD but create a different product; the PSD alone
-                    # must never redirect that operation to the older product.
-                    existing = [p for p,m in self.mappings.read().items() if m['dropbox_file_id'] == meta['id']]
-                    if len(existing) == 1:
-                        pid, binding = existing[0], 'existing_mapping'
-                    elif len(existing) > 1:
-                        raise ValueError('Multiple products are linked to this PSD. Resolve the conflict in Edition Ops.')
-                if not pid:
-                    self._checkpoint(key, actor, lease, state='Pending sync',
-                        error='More than one product has this operation tag. Select the intended product explicitly.' if matches else
-                              'Waiting for the correlated Shopify product. Retry shortly, or select an existing product for a legacy upload.')
-                    return self.status(key, actor)
-            product = self.shopify.fetch_product_by_shopify_id(pid)
-            if product.get('shopify_product_id') != pid or product.get('status') not in ('DRAFT', 'ACTIVE'):
-                raise ValueError('The confirmed Shopify product is unavailable or archived.')
-            if not bound_pid and binding == 'correlation' and tag(key) not in tags(product):
-                raise ValueError('Shopify correlation changed during lookup. Refresh and retry.')
-            with self.store.locked(key, actor['id']) as (row, cur):
-                saved = operation(row)
-                if saved.get('lease') != lease:
-                    raise ValueError('Mapping ownership changed; refresh status.')
-                cur.execute('SELECT pg_advisory_xact_lock(hashtext(%s))', ('product-file-link:'+meta['id'],))
-                cur.execute("SELECT id FROM product_upload_intakes WHERE data->'source'->>'id'=%s AND data->>'product_gid' IS NOT NULL AND data->>'product_gid'<>%s LIMIT 1", (meta['id'], pid))
-                if cur.fetchone():
-                    raise ValueError('The exact PSD is already linked to a different Shopify product.')
-                row['data'].update(product_gid=pid, product_title=product['title'], product_url=product.get('admin_url', ''))
-                saved.update(product_id=pid, product_handle=product.get('handle'), binding=binding or 'existing_mapping',
-                             product=summary(product))
-                saved.setdefault('output', deepcopy(row['data'].get('mockups_context')))
-                saved.setdefault('mapped_output', deepcopy(saved['output']))
-            existing_mapping = self.mappings.read().get(pid)
-            if existing_mapping and existing_mapping['dropbox_file_id'] != meta['id']:
-                raise ValueError('This product already maps to another PSD. Use Edition Ops replacement; nothing was overwritten.')
-            stage = 'Edition Ops'
+            product = self._identity(key, captured); pid = product['shopify_product_id']
+            if product_id and product_id != pid:
+                raise ValueError('A supplied product ID conflicts with the exact upload correlation.')
+            original = operation(captured)['source']
+            self._mapping_conflicts(pid, original)
+            # Reject a changed initial source before registration or any movement.
+            if not captured['data']['upload_operation']['sync_map'].get('move_intent'):
+                self.source(captured)
+            with self._guard(key, actor, lease) as (row, op, task, cur):
+                op.update(product_id=pid, binding='correlation', product=summary(product))
+                row['data'].update(product_gid=pid, product_title=product['title'], product_url=product.get('admin_url',''))
+            acquire(self.connect, key, actor['id'], pid, original['id'])
+            step('Syncing Edition Ops')
             edition = read_edition(self.connect, pid)
-            limit = edition_limit(product, confirmed_limit if confirmed_limit is not None else op.get('confirmed_limit')) if not edition else edition['edition_total']
+            limit = edition['edition_total'] if edition else edition_limit(product, confirmed_limit if confirmed_limit is not None else captured['data']['upload_operation']['sync_map'].get('confirmed_limit'))
             if limit is None:
-                self._checkpoint(key, actor, lease, state='Pending sync', needs_limit=True,
-                                 error='Confirm the edition limit shown on the product before initialising its run.')
+                self._step(key, actor, lease, 'Checking edition setup', state='Pending sync', needs_limit=True,
+                           error='Confirm the edition limit for this new product, then resume Sync & Map.')
                 return self.status(key, actor)
-            self._checkpoint(key, actor, lease, confirmed_limit=limit)
-            self.register(product, limit)
-            edition = read_edition(self.connect, pid)
-            if not edition or not edition.get('run_id'):
-                raise ValueError('The existing edition record has no valid run. Review Edition Ops; no history was reset.')
-            self._checkpoint(key, actor, lease, edition_id=edition['id'], run_id=edition['run_id'], needs_limit=False)
-            stage = 'PSD mapping'
-            if not existing_mapping:
-                self.mappings.attach(pid, meta, actor, confirm_mismatch=True, upload_operation=key)
-            self._checkpoint(key, actor, lease, mapping_saved=True)
-            stage = 'Shopify sync'
-            current = self.status(key, actor)
-            if not current.get('sync_verified'):
-                self.mirror(product)
-            stage = 'Worker registration'
-            self.register_worker(pid, meta, actor)
-            self._checkpoint(key, actor, lease, worker_registered=True, state='Pending sync', error='')
+            with self._guard(key, actor, lease) as (row, op, task, cur):
+                self.register(product, limit)
+                task['confirmed_limit'] = limit
+            step('Checking edition setup')
+            # Fresh read after canonical registration's transaction has committed.
+            edition = self._edition(read_edition(self.connect, pid), captured['data']['upload_operation']['sync_map'])
+            self._step(key, actor, lease, stage, edition_id=edition['id'], run_id=edition['run_id'])
+            step('Moving PSD')
+            self._mapping_conflicts(pid, original)
+            moved = self._move(key, actor, lease, product)
+            step('Saving mapping')
+            with self._guard(key, actor, lease) as (row, op, task, cur):
+                self._edition(read_edition(self.connect, pid), task)
+                verify(cur, key, pid, moved['id'])
+                self.mappings.attach(pid, moved, actor, confirm_mismatch=True, upload_operation=key)
+            step('Verifying')
+            # Fresh exact reads, not cached list entries or submission acknowledgements.
+            self._identity(key, self.store.read(key, actor['id']))
+            fresh = self.provider.metadata_if_present(moved['id'])
+            if not fresh or any(fresh.get(k) != moved.get(k) for k in ('id','rev','content_hash','path_display','size')):
+                raise ValueError('The PSD changed after moving. Mapping success cannot be confirmed.')
+            with self._guard(key, actor, lease) as (row, op, task, cur):
+                self._verify_database(cur, key, op, task)
+                task.update(state='Mapped', error='', verified_at=now().isoformat(), preparation_held=True,
+                            elapsed_ms=round((monotonic()-started)*1000,2))
+                if stage not in task['completed']: task['completed'].append(stage)
+                task.setdefault('timings_ms', {})[stage] = round((monotonic()-phase)*1000,2)
         except Exception as error:
             import logging
-            logging.getLogger(__name__).exception('Upload mapping failed: operation=%s stage=%s', key, stage)
-            message = str(error) if isinstance(error, (ValueError, PermissionError)) else 'Service unavailable. Retry the failed step; the saved product and PSD identities are retained.'
-            self._checkpoint(key, actor, lease, state='Pending sync' if stage in ('Shopify sync', 'Worker registration') else 'Mapping failed', error=stage+': '+message)
-        finally:
-            self._checkpoint(key, actor, lease, lease_until=None)
-        result = self.status(key, actor)
-        if result['state'] == 'Mapped':
+            logging.getLogger(__name__).exception('Upload Sync & Map failed: operation=%s stage=%s', key, stage)
+            message = str(error) if isinstance(error,(ValueError,PermissionError)) else 'Service unavailable. Retry this step; completed steps and the original PSD identity are retained.'
             with self.store.locked(key, actor['id']) as (row, cur):
-                saved = operation(row)
-                if saved.get('lease') == lease:
-                    saved.update(state='Mapped', error='', worker_registered=True, sync_verified=True,
-                                 verified_at=now().isoformat())
+                task = operation(row).get('sync_map', {})
+                if task.get('lease') == lease:
+                    task.update(state='Pending sync' if message=='Product not found in Shopify yet' else 'Mapping failed',
+                                error=message, stage=stage, elapsed_ms=round((monotonic()-started)*1000,2))
+        finally:
+            with self.store.locked(key, actor['id']) as (row, cur):
+                task = operation(row).get('sync_map', {})
+                if task.get('lease') == lease: task['lease_until'] = None
+        return self.status(key, actor)
+
+    def _verify_database(self, cur, key, op, task):
+        from product_upload_mapping_hold import verify
+        pid = op['product_id']; meta = task['moved']
+        verify(cur, key, pid, meta['id'])
+        edition = self._edition(read_edition(self.connect, pid), task)
+        mapping = self.mappings.read_one(pid)
+        if not mapping or mapping['dropbox_file_id'] != meta['id'] or mapping['file_path'] != meta['path_display']:
+            raise ValueError('The authoritative PSD mapping does not match the verified destination.')
+        return edition
+
+    def _status_row(self, row):
+        op = row['data'].get('upload_operation') or {}; task = op.get('sync_map') or {}
+        result = dict(state=task.get('state','Unmapped'), reason=task.get('error',''), stage=task.get('stage',''),
+                      completed=task.get('completed',[]), needs_limit=task.get('needs_limit',False), product=op.get('product'),
+                      psd=(task.get('moved') or op.get('source') or {}).get('path_display',''),
+                      edition_id=task.get('edition_id'), run_id=task.get('run_id'), edition_limit=task.get('confirmed_limit'),
+                      preparation_held=task.get('preparation_held',False), elapsed_ms=task.get('elapsed_ms'),
+                      timings_ms=task.get('timings_ms',{}))
+        if result['state']=='Mapping…' and (not task.get('lease_until') or datetime.fromisoformat(task['lease_until'])<=now()):
+            result.update(state='Pending sync',reason='Sync & Map was interrupted. Retry to resume its saved steps.')
         return result
 
     def status(self, key, actor):
-        """Read authoritative state only; never enqueue, sync, or map on refresh."""
+        """Small DB reads only: polling must never contact Shopify or Dropbox."""
         try:
+            from product_upload_source import current_source
             row = self.store.read(key, actor['id'])
-            if not row:
-                raise ValueError('Saved upload unavailable to this account.')
-            op = row['data'].get('upload_operation') or {}
-            pid = row['data'].get('product_gid') or op.get('product_id')
-            result = dict(state=op.get('state', 'Unmapped'), reason=op.get('error', ''),
-                          psd=(op.get('source') or row['data'].get('source') or {}).get('name', ''),
-                          needs_limit=op.get('needs_limit', False), product=op.get('product'), worker='Not registered')
-            if result['state'] == 'Mapping…' and (not op.get('lease_until') or datetime.fromisoformat(op['lease_until']) <= now()):
-                result.update(state='Pending sync', reason='The mapping attempt was interrupted. Retry MAP to resume its saved steps.')
-            if not pid:
-                return result
-            product = self.shopify.fetch_product_by_shopify_id(pid)
-            if product.get('shopify_product_id') != pid or product.get('status') not in ('DRAFT', 'ACTIVE'):
-                raise ValueError('The saved Shopify product is unavailable or archived.')
-            result['product'] = summary(product)
-            meta = self.source(row)
-            edition = read_edition(self.connect, pid)
-            mapping = self.mappings.read().get(pid)
-            with self.connect() as conn, conn.cursor() as cur:
-                cur.execute('SELECT product_gid,file_id,status,source FROM auto_edition_onboarding WHERE product_gid=%s', (pid,))
-                worker = cur.fetchone()
-            result.update(edition_limit=edition.get('edition_total') if edition else None,
-                          next_edition=f"{edition['next_edition_number']:03d}" if edition else None,
-                          worker=worker['status'] if worker and worker['file_id'] == meta['id'] else 'Not registered')
-            values = {m['key']: str(m['value']).lower() for m in product.get('metafields', []) if m.get('namespace') == 'sports_cave'}
-            configured = bool(edition and edition.get('run_id') and edition.get('active') and edition.get('is_active')
-                              and edition['run_status'] == 'active' and edition['run_total'] == edition['edition_total']
-                              and edition['run_next'] == edition['next_edition_number'])
-            expected = ({'edition_total': str(edition['edition_total']), 'edition_next_number': str(edition['next_edition_number']),
-                         'edition_sold_count': str(edition['sold_count']), 'edition_remaining': str(edition['remaining_count']),
-                         'edition_enabled': 'true', 'edition_status': str(edition['edition_status']).lower(),
-                         'edition_label': str(edition['edition_name']).lower()} if edition else {})
-            synced = bool(configured and edition.get('metafields_sync_status') == 'Synced'
-                          and all(values.get(k) == v for k,v in expected.items()))
-            result['sync_verified'] = synced
-            import auto_editions as ae
-            worker_ok = bool(worker and worker['file_id'] == meta['id'] and
-                             worker['source'] == ae.source_identity(pid, meta))
-            linked = bool(mapping and mapping['dropbox_file_id'] == meta['id'])
-            if linked and configured and synced and worker_ok:
-                result.update(state='Mapped', reason='Product, exact PSD, edition run, Shopify sync and worker registration verified.')
-            elif result['state'] != 'Mapping failed':
-                result['state'] = 'Pending sync'
-                if not result['reason']:
-                    result['reason'] = ('Edition run configuration needs review.' if not configured else
-                                        'PSD linkage is incomplete.' if not linked else
-                                        'Shopify edition sync is not yet verified.' if not synced else 'Worker registration is incomplete; retry MAP.')
+            if not row: raise ValueError('Saved upload unavailable to this account.')
+            op = row['data'].get('upload_operation') or {}; task = op.get('sync_map') or {}
+            if task:
+                current_source(row, task.get('source_version'))
+                if task.get('mode') != row['mode']: raise ValueError('Upload mode changed. Retry Sync & Map.')
+            result = self._status_row(row)
+            if result['state']=='Mapped':
+                with self.connect() as conn, conn.cursor() as cur:
+                    self._verify_database(cur,key,op,task)
+                result['reason'] = 'Success — synced and PSD mapped'
             return result
         except Exception as error:
-            return dict(state='Status unavailable', reason=str(error) if isinstance(error, ValueError) else
-                        'Could not verify saved mapping status. Check service access and refresh status; no mapping was changed.')
+            return dict(state='Status unavailable', reason=str(error) if isinstance(error,ValueError) else
+                        'Could not verify saved mapping status. Retry Sync & Map; no mapping was changed.')

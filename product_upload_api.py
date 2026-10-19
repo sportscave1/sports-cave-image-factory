@@ -193,15 +193,19 @@ async def action(request):
                 raise ValueError('The current Dropbox source opening is missing. Copy the current prompt again.')
             prompt = opening + context_prompt + prompt[len(opening):]
             return JSONResponse(dict(prompt=prompt), headers=HEADERS)
-        elif op in ('map', 'mapping-candidates'):
+        elif op == 'map':
             from product_upload_mapping import Mapping
-            provider = await run_in_threadpool(Dropbox)
-            service = Mapping(connect, provider)
-            if op == 'mapping-candidates':
-                choices = await run_in_threadpool(service.candidates, key, user, body.get('search', ''))
-                return JSONResponse(dict(choices=choices), headers=HEADERS)
-            result = await run_in_threadpool(service.map, key, user, product_id=body.get('product_id'), confirmed_limit=body.get('edition_limit'))
-            return JSONResponse(dict(mapping=result), headers=HEADERS)
+            from product_upload_jobs import JOBS
+            from product_upload_source import current_source
+            if not isinstance(body.get('source_version'), str) or not body['source_version']:
+                raise ValueError('Save All first, then use Sync & Map for the current saved images.')
+            row = await run_in_threadpool(store.read, key, uid)
+            source = await run_in_threadpool(current_source, row, body.get('source_version'))
+            def work(progress):
+                return Mapping(connect, Dropbox()).map(key, user, source_version=source['version'],
+                    product_id=body.get('product_id'), confirmed_limit=body.get('edition_limit'))
+            JOBS.submit(key, uid, 'sync-map', [source['version'], body.get('edition_limit')], work)
+            return JSONResponse(dict(mapping=await run_in_threadpool(mapping_snapshot, key, user)), headers=HEADERS)
         elif op == 'mockups':
             import os_accounts
             if not os_accounts.can_access_page(user,'Files'):
@@ -251,12 +255,22 @@ async def chunk(request):
 async def mapping_status(request):
     try:
         user = await actor(request)
-        from product_upload_mapping import Mapping
-        provider = await run_in_threadpool(Dropbox)
-        result = await run_in_threadpool(Mapping(connect, provider).status, request.query_params.get('id'), user)
+        result = await run_in_threadpool(mapping_snapshot, request.query_params.get('id'), user)
         return JSONResponse(dict(mapping=result), headers=HEADERS)
     except Exception as error:
         return failure(error)
+
+
+def mapping_snapshot(key, user):
+    from product_upload_mapping import Mapping
+    from product_upload_jobs import JOBS
+    result = Mapping(connect, None).status(key, user)
+    job = JOBS.snapshot(key, user['id'], 'sync-map')
+    if job and job['state'] in ('Queued','Running'):
+        result.update(state='Mapping…', running=True)
+    elif job and job['state']=='Failed':
+        result.update(state='Mapping failed', reason=job.get('error','Sync & Map failed. Retry.'))
+    return result
 
 
 async def preview(request):

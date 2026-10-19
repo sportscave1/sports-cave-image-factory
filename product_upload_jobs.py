@@ -81,7 +81,7 @@ class Jobs:
     def cancel(self,key,actor):
         with self.lock:
             for identity,job in self.jobs.items():
-                if identity[:2]==(str(actor),str(key)) and job['state'] in ('Queued','Running'):
+                if identity[:2]==(str(actor),str(key)) and identity[2]!='sync-map' and job['state'] in ('Queued','Running'):
                     job['state']='Cancelled'
                     job['future'].cancel()
 

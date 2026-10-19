@@ -38,6 +38,9 @@ def register(cur, products, event_id):
         pid = psd.product_id(product)
         if not pid:
             raise ValueError('Exact Shopify product identity required.')
+        from product_upload_mapping_hold import held
+        if held(cur, pid):
+            continue
         cur.execute("""INSERT INTO auto_edition_discovery(product_gid,event_id)
             VALUES(%s,%s) ON CONFLICT(product_gid) DO UPDATE SET
             event_id=excluded.event_id,next_check_at=now(),updated_at=now()
@@ -80,6 +83,9 @@ class Discovery:
                     cur.execute('DELETE FROM auto_edition_source_inventory WHERE path_lower=%s', (path,))
                     changed = True
                 elif psd.approved_file(entry):
+                    from product_upload_mapping_hold import held
+                    if held(cur, file_id=entry['id']):
+                        continue
                     cur.execute("""INSERT INTO auto_edition_source_inventory(file_id,name_key,path_lower,metadata)
                         VALUES(%s,%s,%s,%s::jsonb) ON CONFLICT(file_id) DO UPDATE SET
                         name_key=excluded.name_key,path_lower=excluded.path_lower,metadata=excluded.metadata""",
@@ -112,14 +118,20 @@ class Discovery:
         retains priority zero until commerce signals or Prepare Now promote it.
         """
         with self.connect() as conn,conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.product_upload_mapping_holds') AS name")
+            exclusion = ("AND NOT EXISTS(SELECT 1 FROM public.product_upload_mapping_holds h WHERE h.product_gid=m.shopify_product_gid OR h.file_id=m.dropbox_file_id)"
+                         if cur.fetchone()['name'] else '')
             cur.execute('SELECT seed_finished FROM auto_edition_discovery_cursor WHERE id=1 FOR UPDATE')
             from auto_editions_v17 import enabled as continuous
             if cur.fetchone()['seed_finished'] and not continuous():return 0
             cur.execute("""SELECT m.shopify_product_gid,m.dropbox_file_id FROM product_psd_mappings m
                 WHERE NOT EXISTS(SELECT 1 FROM auto_edition_onboarding q WHERE q.product_gid=m.shopify_product_gid)
-                ORDER BY m.shopify_product_gid LIMIT %s""",(max(1,min(int(limit),20)),))
+                {exclusion} ORDER BY m.shopify_product_gid LIMIT %s""".format(exclusion=exclusion),(max(1,min(int(limit),20)),))
             rows=cur.fetchall()
             for row in rows:
+                from product_upload_mapping_hold import held
+                if held(cur, row['shopify_product_gid'], row['dropbox_file_id']):
+                    continue
                 self.queue.enqueue_cursor(cur,row['shopify_product_gid'],row['dropbox_file_id'],ACTOR,newly_linked=False)
             if not rows:cur.execute('UPDATE auto_edition_discovery_cursor SET seed_finished=true WHERE id=1')
             return len(rows)
@@ -164,6 +176,9 @@ class Discovery:
             cur.execute('SELECT * FROM auto_edition_discovery WHERE product_gid=%s FOR UPDATE', (pid,))
             current = cur.fetchone()
             if not current or current['event_id'] != request['event_id']:
+                return None
+            from product_upload_mapping_hold import held
+            if held(cur, pid):
                 return None
             cur.execute('SELECT * FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
             existing = cur.fetchone()

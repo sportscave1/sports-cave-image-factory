@@ -12,7 +12,7 @@
   function record(list,value){list.push(value);if(list.length>100)list.shift();}
   const abortError=()=>Object.assign(new Error('Selection cancelled'),{name:'AbortError'});
   const notify=()=>{if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{id:row?.id||null,manual,mode:$('mode').value,visible:!document.hidden,linked:!!row?.product_title,nonce:crypto.randomUUID()},dataType:'json'},'*');};
-  function reset(){mapping.reset();clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('preview').textContent='Preview pending';clear();render();notify();}
+  function reset(){mapping.clearRecoveryURL?.();mapping.reset();clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('preview').textContent='Preview pending';clear();render();notify();}
   const fail=e=>{if(e.name==='AbortError')return;$('error').textContent=e.message||String(e);$('error').hidden=false;};
   const clear=()=>{$('error').hidden=true;};
   async function request(path,body,signal=controller.signal){

@@ -27,8 +27,9 @@ def render_page(app):
             if not resume:raise ValueError('Saved upload unavailable to this account.')
         except ValueError as error:
             st.error(str(error))
-        # One-shot explicit recovery link. Future new uploads start empty.
-        st.query_params.pop('upload',None)
+        # A Sync & Map URL retains only the operation ID across browser refresh.
+        # Other existing recovery links remain one-shot; new uploads clear both.
+        if st.query_params.get('sync_map')!='1':st.query_params.pop('upload',None)
     event=component(section='upload',**(dict(id=str(resume['id']),mode=resume['mode']) if resume else {}),
                     refresh=st.session_state.get('_product_upload_linked',''),key='product-upload-input-'+visit,default=None)
     if event and event.get('nonce')!=st.session_state.get('_product_upload_event'):
@@ -39,6 +40,9 @@ def render_page(app):
         st.session_state['_product_upload_mode']=event.get('mode','LIVE')
         st.session_state['_product_upload_visible']=event.get('visible',True)
         if previous!=event.get('id'):
+            if st.query_params.get('upload')!=event.get('id'):
+                st.query_params.pop('upload',None)
+                st.query_params.pop('sync_map',None)
             from product_upload_sport import clear_selection
             clear_selection(previous)
             clear_selection(event.get('id'))
@@ -149,7 +153,8 @@ def render_design(app,row,user):
     busy=any(job and job['state'] in ('Queued','Running') for job in active_jobs)
     with st.container(key='product-upload-details'):
         with st.container(key='product-upload-detail-name'):
-            name=st.text_input('Product name',value=Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
+            saved_name=(row['data'].get('mockups_context') or {}).get('design_name')
+            name=st.text_input('Product name',value=saved_name or Path(row['data']['name']).stem,key='product-upload-name-'+key,disabled=busy)
         with st.container(key='product-upload-detail-sport'):
             choice=render_selector(app,key,user,disabled=busy)
     sport=choice['sport'] if choice else ''

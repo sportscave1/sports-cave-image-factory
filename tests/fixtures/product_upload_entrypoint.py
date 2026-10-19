@@ -48,9 +48,10 @@ def configure(ns):
                     and isinstance(n.value, ast.Name) and n.value.id == 'app'}
         assert not required.difference(ns), required.difference(ns)
 
-    if mode == 'recover':
+    if mode in ('recover','recover-map'):
         import product_upload_intake
         st.query_params['upload']='12345678-1234-4234-9234-123456789012'
+        if mode=='recover-map':st.query_params['sync_map']='1'
         def saved_upload(self,key,actor):
             assert key=='12345678-1234-4234-9234-123456789012' and actor=='offline-user'
             return dict(id=key,mode='DRAFT',data={})

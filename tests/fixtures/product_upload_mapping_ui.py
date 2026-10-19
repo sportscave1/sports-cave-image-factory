@@ -5,11 +5,11 @@ Run python -m tests.fixtures.product_upload_mapping_ui. No production config.
 import os
 from pathlib import Path
 import tempfile
+from contextlib import contextmanager
 
 
-def main():
-    keep={k:v for k,v in os.environ.items() if k.upper() in ('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','USERPROFILE','AUTO_EDITIONS_TEST_PGLITE')}
-    os.environ.clear();os.environ.update(keep)
+@contextmanager
+def fixture():
     import pytest
     from starlette.applications import Starlette
     from starlette.responses import HTMLResponse, JSONResponse
@@ -23,7 +23,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='sc-map-fixture-') as directory, pytest.MonkeyPatch.context() as patch:
         environment=env.__wrapped__(database_value,Path(directory),patch)
         service,key,meta,product=setup(environment)
-        working_mirror=service.mirror
+        working_attach=service.mappings.attach
+        with environment[0].locked(key,ADMIN['id']) as (row,cur):
+            row['data']['server_artwork']={'state':'Ready','settings':'synthetic'}
         patch.setattr(api,'connect',environment[0].connect)
         patch.setattr(api,'Dropbox',lambda:environment[2])
         patch.setattr(files,'_request_user',lambda *a,**kw:ADMIN)
@@ -44,7 +46,7 @@ def main():
             <section>PSD: Same.psd — captured fixture revision a1<br>Prepared images retained<br>Saving to: V8 Supercars Wall Art / fixture-artwork</section>
             <div id="space">Prepared mockup section (fixture)</div><iframe id="handoff" title="Product Upload handoff" src="/component"></iframe>
             <section><button id="below" onclick="this.textContent='Below control works'">Control below results</button> <button onclick="document.querySelector('iframe').remove()">Unmount component</button></section>
-            <section><button onclick="fetch('/fixture/fail',{method:'POST'}).then(()=>this.textContent='Fixture sync paused')">Pause fixture Shopify sync</button> <button onclick="fetch('/fixture/restore',{method:'POST'}).then(()=>this.textContent='Fixture sync restored')">Restore fixture Shopify sync</button></section>
+            <section><button onclick="fetch('/fixture/fail',{method:'POST'}).then(()=>this.textContent='Fixture sync paused')">Pause fixture mapping</button> <button onclick="fetch('/fixture/restore',{method:'POST'}).then(()=>this.textContent='Fixture sync restored')">Restore fixture mapping</button></section>
             <label>Fixture viewport <select onchange="document.querySelector('main').style.maxWidth=this.value+'px'"><option value="1050">Desktop</option><option value="640">Narrow desktop</option></select></label>
             <label>Fixture text scale <select onchange="document.querySelector('iframe').contentDocument.documentElement.style.fontSize=this.value+'px';document.documentElement.style.fontSize=this.value+'px'"><option value="14">100%</option><option value="21">150%</option><option value="28">200%</option></select></label></main>
             <script>const f=document.querySelector('iframe');f.addEventListener('load',()=>f.contentWindow.postMessage({type:'streamlit:render',args:{section:'handoff',id:'KEY',mode:'DRAFT'}},location.origin));
@@ -53,21 +55,26 @@ def main():
             return JSONResponse(dict(requests=history,operation=key,source=meta,state=service.status(key,ADMIN)))
         async def control(request):
             if request.path_params['state']=='fail':
-                product['metafields']=[]
-                environment[1].execute("UPDATE edition_products SET metafields_sync_status='Pending automatic mirror'")
-                def unavailable(_):raise ConnectionError('Synthetic Shopify outage')
-                service.mirror=unavailable
-            else:service.mirror=working_mirror
+                def unavailable(*a,**kw):raise ConnectionError('Synthetic mapping outage')
+                service.mappings.attach=unavailable
+            else:service.mappings.attach=working_attach
             return JSONResponse(dict(ok=True))
         app=Starlette(routes=[Route('/',shell),Route('/component',component),Route('/fixture/evidence',evidence),
                              Route('/fixture/{state}',control,methods=['POST']),
                              *[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES]])
         try:
             with local_client(Requests(app)) as client:
-                print(client.base,flush=True)
-                input('Local fixture running; press Enter to stop.\n')
+                yield dict(url=client.base,service=service,env=environment,key=key,requests=history)
         finally:
             db.close()
+
+
+def main():
+    keep={k:v for k,v in os.environ.items() if k.upper() in ('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','USERPROFILE','AUTO_EDITIONS_TEST_PGLITE')}
+    os.environ.clear();os.environ.update(keep)
+    with fixture() as value:
+        print(value['url'],flush=True)
+        input('Local fixture running; press Enter to stop.\n')
 
 
 if __name__=='__main__':main()

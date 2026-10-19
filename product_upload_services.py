@@ -381,6 +381,6 @@ def reconcile(row, connect):
 def catalog_revision(connect):
     """Small durable registration marker used by the existing Edition Ops cache."""
     with connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT count(*) AS n,max(created_at) AS latest FROM product_upload_intakes WHERE data->>'product_gid' IS NOT NULL")
+        cur.execute("SELECT count(*) AS n,max(created_at) AS latest,max(data->'upload_operation'->'sync_map'->>'verified_at') AS mapped FROM product_upload_intakes WHERE data->>'product_gid' IS NOT NULL")
         row = cur.fetchone()
-        return (row['n'], str(row['latest']))
+        return (row['n'], str(row['latest']), row['mapped'])

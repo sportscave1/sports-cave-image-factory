@@ -87,6 +87,13 @@ class PostgresMappings:
         with self.connect() as conn, conn.cursor() as cur:
             return self.product(cur, pid)
 
+    def read_one(self, pid):
+        """Fresh exact record for final handoff verification; no list cache."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute('SELECT * FROM public.product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
+            row = cur.fetchone()
+            return _record(row) if row else None
+
     @staticmethod
     def _audit(cur, pid, action, actor, before, after):
         cur.execute('INSERT INTO public.product_psd_mapping_audit(shopify_product_gid,action,actor_id,before_state,after_state) VALUES(%s,%s,%s,%s::jsonb,%s::jsonb)',
@@ -115,7 +122,20 @@ class PostgresMappings:
                 raise ValueError('Filename differs from the product title; explicit confirmation required.')
             existing = self._all(cur)
             before = existing.get(pid)
+            from product_upload_mapping_hold import held, verify
+            mapping_only = held(cur, pid, fid)
+            if mapping_only:
+                if not upload_verified:
+                    raise MappingConflict('This PSD is held for its Product Uploads Sync & Map operation.')
+                verify(cur, upload_operation, pid, fid)
             if upload_verified and before and before['dropbox_file_id'] == fid:
+                path = metadata.get('path_display') or metadata.get('path_lower')
+                if before['file_path'] != path:
+                    cur.execute('UPDATE product_psd_mappings SET file_path=%s,actor_id=%s,updated_at=now() WHERE shopify_product_gid=%s RETURNING *', (path,str(actor['id']),pid))
+                    after = _record(cur.fetchone())
+                    self._audit(cur,pid,'attach',str(actor['id']),before,after)
+                    self._revision = None
+                    return after
                 return before
             # Check after the existing table lock: no VA overwrite, including stale/racing picks.
             if before is not None and not os_accounts.is_admin(actor):
@@ -138,7 +158,7 @@ class PostgresMappings:
             # Add and its preparation checkpoint commit together. Older schemas
             # keep the existing mapping behavior during a rolling deployment.
             cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")
-            if cur.fetchone()['name']:
+            if cur.fetchone()['name'] and not mapping_only:
                 cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
                 reset=(cur.fetchone() or {}).get('replacement') or {}
                 clear_reset='replacement=NULL,' if reset.get('manual_required') else ''
