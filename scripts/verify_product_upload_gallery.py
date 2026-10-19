@@ -62,9 +62,10 @@ def main():
   original_pixels=tab.locator('img').evaluate('''i=>{const c=document.createElement('canvas');c.width=i.naturalWidth;c.height=i.naturalHeight;const x=c.getContext('2d');x.drawImage(i,0,0);return c.toDataURL('image/png').split(',')[1]}''')
   tab.close()
   actions.locator('#copyPrompt').click();expect(actions.locator('#copyPrompt')).to_have_text('Copied')
-  master=page.evaluate('navigator.clipboard.readText()')
-  assert master.count('A1 PHYSICAL SCALE:')==3 and master.count('PREMIUM GLAZING:')==3
-  assert all(x in master for x in ('different properties/interiors','immediately start generating image 1','never a collage','ORIGINAL attached product'))
+  master=page.evaluate('navigator.clipboard.readText()').replace('\r\n','\n')
+  from product_upload_lifestyle import INSTRUCTIONS,PER_IMAGE
+  assert master.startswith(INSTRUCTIONS) and master.count(PER_IMAGE)==3
+  assert all(x in master for x in ('three genuinely different homes or properties','Immediately generate Card 1','No collage, triptych or contact sheet','original uploaded full-resolution framed product'))
   actions.locator('#copyImage').click();expect(actions.locator('#copyImage')).to_have_text('Copied',timeout=15000)
   copied=page.evaluate('''async()=>{const r=await navigator.clipboard.read();const b=await r[0].getType('image/png');return Array.from(new Uint8Array(await b.arrayBuffer()))}''')
   with Image.open(io.BytesIO(bytes(copied))) as image,Image.open(io.BytesIO(base64.b64decode(original_pixels))) as original:

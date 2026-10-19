@@ -24,7 +24,7 @@ def test_master_each_scene_complete_and_custom_selections_stable():
     assert scene_texts(result,loaded,lambda *a:'saved custom')==custom
     master=compose(INSTRUCTIONS,first)
     assert master.count(PER_IMAGE)==3
-    for text in ('THREE complete','immediately start generating image 1','approved/finalised','ORIGINAL attached','never a collage','different properties','841 mm','594 mm','acrylic/Perspex','OWN reflection pattern','1024 × 1024'):
+    for text in ('THREE complete','Immediately generate Card 1','Wait until Card 1 is approved','original uploaded full-resolution framed product','No collage, triptych or contact sheet','three genuinely different homes or properties','841 × 594 mm','594 × 841 mm','acrylic rather than glass','Reflections match the room lighting','1024 × 1024'):
         assert text in master
     assert all(filename in factory.PRODUCT_PAGE_PROMPT_FILENAMES for filename in FILENAMES)
 

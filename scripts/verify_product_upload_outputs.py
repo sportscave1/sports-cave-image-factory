@@ -41,9 +41,10 @@ def main():
         expect(row.get_by_role('button',name='Copy black frame',exact=True)).to_be_enabled()
         row.get_by_role('button',name='Copy prompt',exact=True).click()
         expect(row.locator('#copyPrompt')).to_have_text('Copied')
-        master=page.evaluate('navigator.clipboard.readText()')
-        assert master.count('A1 PHYSICAL SCALE:')==3 and master.count('PREMIUM GLAZING:')==3
-        assert all(x in master for x in ('different properties/interiors','immediately start generating image 1','never a collage','ORIGINAL attached product'))
+        master=page.evaluate('navigator.clipboard.readText()').replace('\r\n','\n')
+        from product_upload_lifestyle import INSTRUCTIONS,PER_IMAGE
+        assert master.startswith(INSTRUCTIONS) and master.count(PER_IMAGE)==3
+        assert all(x in master for x in ('three genuinely different homes or properties','Immediately generate Card 1','No collage, triptych or contact sheet','original uploaded full-resolution framed product'))
         (OUT/'master-prompt.txt').write_text(master,encoding='utf-8')
         original_url=row.evaluate('original')
         original=page.request.get(original_url)
