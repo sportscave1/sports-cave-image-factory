@@ -124,4 +124,3 @@ def main():
    boundary='Loopback fixture; affected PSD read-only, synthetic lifestyle uploads, mocked Dropbox writes; companion prohibited. No external ChatGPT generation, OS paste or production UI claim.')
   (OUT/'ui-results.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2));browser.close()
 if __name__=='__main__':main()
-
