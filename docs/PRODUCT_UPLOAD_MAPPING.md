@@ -1,7 +1,10 @@
 # Product Upload → Edition Ops mapping
 
-Implemented locally on the existing PRODUCTS task branch. No production migration,
-Shopify write, Dropbox write, commit, push or deployment was performed for this work.
+Released from the existing PRODUCTS task branch with explicit user authorisation
+on 19 October 2026. The verified-source migration was applied to the documented
+authoritative Supabase project and its trigger/privileges read back successfully.
+Code was pushed to the task branch and main for the existing sports-cave-os service.
+No Shopify product or original Dropbox PSD was modified during release verification.
 
 ## Existing services retained
 

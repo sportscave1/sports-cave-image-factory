@@ -1,8 +1,9 @@
 # Product Upload saved WebP package
 
-Implemented locally on the existing PRODUCTS task, 19 October 2026. No commit,
-push, deployment, installed-helper replacement or production writes. Existing
-uncommitted Edition Ops mapping work is preserved.
+Released with the Edition Ops mapping update from the existing PRODUCTS task,
+19 October 2026, with explicit user authorisation. Code is pushed to the task branch
+and main; Render uses the existing sports-cave-os service. Windows helper version
+12 is installed with the existing Dropbox root and trusted origins preserved.
 
 ## Behaviour
 
@@ -54,9 +55,14 @@ browser cannot supply the native multi-file clipboard through this integration.
 The old URI helper is deliberately not used: it has no authenticated completion
 receipt for this operation.
 
-Both the web changes and updated desktop helper must be released to enable the
-native path. The helper was compiled in isolated tests, not installed over the
-user's current host.
+The helper now includes a Product Uploads navigation button. Its restricted
+--product-uploads[=upload-UUID] entry point opens only the configured trusted
+origin and retains normal server authentication/ownership checks. Regular browser
+windows do not expose this native bridge and retain the honest attachment fallback.
+
+Older uploads recover their package from their own unique completed save receipt
+and saved role/filename context. Ambiguous, incomplete or changed receipts fail
+closed; no folder search or new export is performed.
 
 ## Verification
 
@@ -79,10 +85,18 @@ user's current host.
   one black-frame original. Desktop and 640px layout at 150% CSS scale were
   inspected without overlapping controls. This is a fixture, not production.
 
+Release checks: 22 package/real-entrypoint tests pass together, 19 desktop-helper
+tests pass, and package/mapping/selection JavaScript checks pass. An expanded
+mixed run had 76 passes and three Streamlit form-context failures; the seven real
+entrypoint cases pass in a fresh process and alongside the package tests. The mixed
+test-process interference has not been resolved and is not a live-runtime result.
+
 Not verified: one native clipboard paste attaching all eight images in the actual
-ChatGPT composer. The controllable browser has no Windows desktop bridge; the
-updated host is not installed. Real Dropbox save/copy and live Edition Ops were
-not exercised. Do not describe the native ChatGPT acceptance check as passed.
+ChatGPT composer. The installed native host opened Product Uploads signed in, but
+Windows Computer Use stopped before the paste because it could not confidently
+determine the desktop browser URL for its policy check. Real Dropbox save/copy and
+live Edition Ops mapping were not exercised. Do not describe ChatGPT acceptance as
+passed. No ChatGPT message was sent.
 
 Local screenshot: output/product-upload-package/desktop.png (synthetic fixture).
 Run fixture: python -m tests.fixtures.product_upload_package_ui.

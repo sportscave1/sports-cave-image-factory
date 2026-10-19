@@ -55,6 +55,22 @@ internal static class Program
         try
         {
             string protocol = args.Length == 1 ? args[0] : "";
+            if (protocol == "--product-uploads" || protocol.StartsWith("--product-uploads=", StringComparison.Ordinal))
+            {
+                var uploadConfig = DesktopConfig.Load();
+                string uploadUrl = new Uri(uploadConfig.AppUrl).GetLeftPart(UriPartial.Authority) + "/?page=product_uploads";
+                if (protocol.Contains("="))
+                {
+                    Guid uploadId;
+                    if (!Guid.TryParse(protocol.Substring(protocol.IndexOf('=') + 1), out uploadId)) return 1;
+                    uploadUrl += "&upload=" + uploadId.ToString();
+                }
+                // The normal server authentication and upload ownership checks
+                // still apply; the argument cannot select an arbitrary origin.
+                var uploadApp = new System.Windows.Application();
+                uploadApp.Run(new DesktopWindow(uploadConfig, uploadUrl, false));
+                return 0;
+            }
             bool show = args.Length == 1 && args[0] == "--app";
             bool openFiles = false;
             if (Uri.IsWellFormedUriString(protocol, UriKind.Absolute))
@@ -338,7 +354,25 @@ internal sealed class DesktopWindow : Window
         MinHeight = 620;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         browser = new WebView2();
-        Content = browser;
+        var shell = new System.Windows.Controls.DockPanel();
+        var toolbar = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            Margin = new Thickness(8, 4, 8, 4)
+        };
+        var filesButton = new System.Windows.Controls.Button
+        { Content = "Files", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0) };
+        filesButton.Click += delegate { NavigateToFiles(); };
+        var uploadsButton = new System.Windows.Controls.Button
+        { Content = "Product Uploads", Padding = new Thickness(12, 4, 12, 4) };
+        uploadsButton.Click += delegate
+        { NavigateTrusted(new Uri(config.AppUrl).GetLeftPart(UriPartial.Authority) + "/?page=product_uploads"); };
+        toolbar.Children.Add(filesButton);
+        toolbar.Children.Add(uploadsButton);
+        System.Windows.Controls.DockPanel.SetDock(toolbar, System.Windows.Controls.Dock.Top);
+        shell.Children.Add(toolbar);
+        shell.Children.Add(browser);
+        Content = shell;
         Loaded += OnLoaded;
         Closing += delegate(object sender, System.ComponentModel.CancelEventArgs args)
         {
