@@ -213,7 +213,7 @@ def public(row):
         'selected_at')})
     if d.get('artwork_progress'):result['artwork_progress']=d['artwork_progress']
     if d.get('mockups_exported'):
-        result['saved_package_version']=((d.get('upload_operation') or {}).get('output') or {}).get('export_fingerprint')
+        result['saved_package_version']=((d.get('upload_operation') or {}).get('output') or {}).get('export_fingerprint') or 'legacy-receipt'
     if d.get('workflow_version') == 3:
         result['source'] = {k:d['source'].get(k) for k in ('id','rev','content_hash','path_display','name','size')}
         if d.get('lifecycle'):

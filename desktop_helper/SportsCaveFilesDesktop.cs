@@ -22,8 +22,8 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("11.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("11.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("12.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("12.0.0.0")]
 
 internal static class Program
 {

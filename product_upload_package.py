@@ -7,6 +7,33 @@ from urllib.parse import urlencode
 ORDER = ('black-frame', 'man-cave', 'office', 'living-room', 'size-guide', 'oak-frame', 'white-frame', 'unframed')
 
 
+def legacy_output(row):
+    """Recover only this upload's unique completed receipt; never browse folders."""
+    context = row['data'].get('mockups_context') or {}
+    images = context.get('images') or []
+    if len(images) != len(ORDER) or {x.get('role') for x in images} != set(ORDER):
+        raise ValueError('This older upload has no complete saved image manifest. Retry Save all.')
+    matches = [(key, value) for key, value in row['data'].get('mockup_saves', {}).items()
+               if value.get('state') == 'Complete' and value.get('target') == context.get('folder')]
+    if len(matches) != 1:
+        raise ValueError('This older upload has no unique saved receipt. Retry Save all.')
+    fingerprint, saved = matches[0]
+    receipt = saved.get('receipt') or {}
+    files = receipt.get('successes') or []
+    if receipt.get('failures') or receipt.get('cancelled') or receipt.get('destination') != context.get('folder'):
+        raise ValueError('This older upload did not finish saving. Retry Save all.')
+    names = [x.get('relative_path') for x in files]
+    if not names or len(set(names)) != len(names):
+        raise ValueError('The saved receipt contains missing or duplicate files. Retry Save all.')
+    # Older releases persisted the authoritative complete receipt without an
+    # additional hash manifest. Keep the original record intact on read-back.
+    manifest = saved.get('manifest') or [dict(name=name) for name in names]
+    output = dict(context, export_fingerprint=fingerprint, files=files,
+                  manifest=[dict(slot_id=x['role'], output_filename=x['filename'],
+                                 display_label=x['role'].replace('-', ' ').title()) for x in images])
+    return output, dict(saved, manifest=manifest)
+
+
 def package(row, expected=None):
     from product_upload_identity import operation
     if not row or not row['data'].get('mockups_exported'):
@@ -14,6 +41,9 @@ def package(row, expected=None):
     output = operation(row).get('output') or {}
     fingerprint = output.get('export_fingerprint')
     saved = row['data'].get('mockup_saves', {}).get(fingerprint) or {}
+    if not fingerprint:
+        output, saved = legacy_output(row)
+        fingerprint = output['export_fingerprint']
     if not fingerprint or saved.get('state') != 'Complete' or saved.get('target') != output.get('folder'):
         raise ValueError('The saved package is unavailable. Retry Save all.')
     manifest = {x['slot_id']: x for x in output.get('manifest', [])}

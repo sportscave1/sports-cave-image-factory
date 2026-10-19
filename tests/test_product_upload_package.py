@@ -31,6 +31,25 @@ def test_exact_receipt_order_and_lightweight_urls():
     assert all('metadata' not in x for x in result['items'])
 
 
+def test_legacy_package_uses_only_own_unique_complete_receipt():
+    row = saved_row()
+    output = row['data'].pop('upload_operation')['output']
+    row['data']['mockups_context'] = dict(folder=output['folder'],
+        images=[dict(role=x['slot_id'], filename=x['output_filename']) for x in output['manifest']])
+    saved = row['data']['mockup_saves']['saved']
+    saved.pop('manifest')
+    saved['receipt'] = dict(destination=output['folder'], successes=output['files'], failures=[])
+    before = deepcopy(saved)
+    result = package(row)
+    assert len(result['items']) == 8 and saved == before
+    assert package(row, result['version']) == result
+    row['data']['mockup_saves']['ambiguous'] = deepcopy(saved)
+    with pytest.raises(ValueError, match='unique'): package(row)
+    del row['data']['mockup_saves']['ambiguous']
+    saved['receipt']['successes'].pop()
+    with pytest.raises(ValueError, match='missing'): package(row)
+
+
 @pytest.mark.parametrize('change',['source','incomplete','missing','wrong-folder','extra','revision'])
 def test_changed_or_incomplete_package_is_rejected(change):
     row=saved_row();old=package(row)['version'];out=row['data']['upload_operation']['output']
