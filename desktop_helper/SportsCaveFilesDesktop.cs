@@ -22,12 +22,12 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("12.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("12.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("13.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("13.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 12;
+    internal const int HelperVersion = 13;
     internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
     private const string MutexName = @"Local\SportsCaveOSDesktop-v9";
     private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v9";
@@ -76,13 +76,13 @@ internal static class Program
             if (Uri.IsWellFormedUriString(protocol, UriKind.Absolute))
             {
                 Uri request = new Uri(protocol);
-                if (request.Scheme == "sports-cave-files" && request.Host == "launch")
+                if (request.Scheme == "sports-cave-files" && (request.Host == "launch" || request.Host == "webp"))
                 {
                     var launchConfig = DesktopConfig.Load();
                     string launchUrl = BrowserFileLaunch.Resolve(request, launchConfig);
                     var launchApp = new System.Windows.Application();
                     var launchWindow = new DesktopWindow(launchConfig, launchUrl, false);
-                    launchWindow.Title = "Sports Cave — Open file";
+                    launchWindow.Title = request.Host == "webp" ? "Sports Cave — Copy WebP files" : "Sports Cave — Open file";
                     launchWindow.Width = 580; launchWindow.Height = 360;
                     launchWindow.MinWidth = 420; launchWindow.MinHeight = 300;
                     launchApp.Run(launchWindow);
@@ -1810,7 +1810,7 @@ internal static class BrowserFileLaunch
 {
     internal static string Resolve(Uri uri, DesktopConfig config)
     {
-        if (uri.Scheme != "sports-cave-files" || uri.Host != "launch" || uri.AbsolutePath != ""
+        if (uri.Scheme != "sports-cave-files" || (uri.Host != "launch" && uri.Host != "webp") || uri.AbsolutePath != ""
             && uri.AbsolutePath != "/" || !String.IsNullOrEmpty(uri.UserInfo) || uri.Port != -1)
             throw new DesktopException("invalid_launch", "The desktop launch is invalid.");
         string query = uri.Query.TrimStart('?');
@@ -1826,6 +1826,6 @@ internal static class BrowserFileLaunch
         string code = uri.Fragment.TrimStart('#');
         if (!System.Text.RegularExpressions.Regex.IsMatch(code,"^[A-Za-z0-9_-]{43}$"))
             throw new DesktopException("invalid_launch", "The desktop launch is invalid or expired.");
-        return source.GetLeftPart(UriPartial.Authority)+"/files-native-launch#"+code;
+        return source.GetLeftPart(UriPartial.Authority)+(uri.Host == "webp" ? "/product-upload-native#" : "/files-native-launch#")+code;
     }
 }

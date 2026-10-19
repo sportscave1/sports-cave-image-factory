@@ -319,6 +319,71 @@ async def saved_package(request):
     except Exception as error: return failure(error)
 
 
+async def clipboard_launch(request):
+    try:
+        from product_upload_clipboard import REQUESTS
+        from product_upload_package import package
+        from urllib.parse import quote
+        import os_accounts
+        user = await actor(request, write=True)
+        if not os_accounts.can_access_page(user, 'Files'):
+            raise PermissionError('Files access is required to copy saved files.')
+        body = await request.json()
+        key, version = body.get('id'), body.get('version')
+        if not key or not version: raise ValueError('Select the current saved package first.')
+        validate = lambda: package(Intakes(connect).read(key, user['id']), version)
+        code = await run_in_threadpool(REQUESTS.create, user, key, version, validate)
+        origin = str(request.base_url).rstrip('/')
+        return JSONResponse(dict(code=code, url='sports-cave-files://webp?origin='+quote(origin, safe='')+'#'+code), headers=HEADERS)
+    except Exception as error: return failure(error)
+
+
+async def clipboard_status(request):
+    try:
+        from product_upload_clipboard import REQUESTS
+        user = await actor(request, write=True)
+        body = await request.json()
+        result = await run_in_threadpool(REQUESTS.status, body.get('code'), user, body.get('cancel') is True)
+        return JSONResponse(result, headers=HEADERS)
+    except Exception as error: return failure(error)
+
+
+async def clipboard_native(request):
+    """One-use capability was issued by an authenticated, authorised browser."""
+    try:
+        from product_upload_clipboard import REQUESTS
+        from product_upload_package import native_grant
+        import files_upload_api as files
+        if not request.headers.get('origin') or not files._same_origin(request):
+            raise PermissionError('Request origin rejected.')
+        body = await request.json()
+        code = body.get('code')
+        if request.url.path.endswith('/clipboard-complete'):
+            await run_in_threadpool(REQUESTS.finish, code, body.get('secret'), body.get('count'), body.get('error', ''))
+            return JSONResponse(dict(ok=True), headers=HEADERS)
+        record = await run_in_threadpool(REQUESTS.claim, code)
+        try:
+            row = await run_in_threadpool(Intakes(connect).read, record['key'], record['user']['id'])
+            provider = await run_in_threadpool(Dropbox)
+            context = await run_in_threadpool(files._dropbox_context)
+            grant = await run_in_threadpool(native_grant, row, record['version'], provider, record['user'], context)
+            grant.validate = lambda: REQUESTS.active(code)
+            return JSONResponse(dict(secret=record['secret'], transfer=dict(base_url=str(request.base_url).rstrip('/'),
+                ticket=grant.ticket, secret=grant.secret)), headers=HEADERS)
+        except Exception as error:
+            await run_in_threadpool(REQUESTS.finish, code, record['secret'], 0,
+                str(error) if isinstance(error, ValueError) else 'Could not prepare saved files. Retry Copy all WEBP files.')
+            raise
+    except Exception as error: return failure(error)
+
+
+async def clipboard_page(request):
+    name = 'native_clipboard.js' if request.url.path.endswith('.js') else 'native_clipboard.html'
+    return Response((Path(__file__).parent/'components/product_uploads'/name).read_text(encoding='utf-8'),
+        media_type='application/javascript' if name.endswith('.js') else 'text/html',
+        headers={**HEADERS, 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"})
+
+
 async def saved_image(request):
     upstream = None
     try:
@@ -355,6 +420,12 @@ async def package_script(request):
 
 
 ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+          ('/product-upload-native', clipboard_page, ('GET',)),
+          ('/product-upload-native.js', clipboard_page, ('GET',)),
+          ('/api/product-uploads/clipboard-launch', clipboard_launch, ('POST',)),
+          ('/api/product-uploads/clipboard-status', clipboard_status, ('POST',)),
+          ('/api/product-uploads/clipboard-claim', clipboard_native, ('POST',)),
+          ('/api/product-uploads/clipboard-complete', clipboard_native, ('POST',)),
           ('/product-upload-package.js', package_script, ('GET',)),
           ('/api/product-uploads/saved-package', saved_package, ('GET',)),
           ('/api/product-uploads/saved-image', saved_image, ('GET',)),

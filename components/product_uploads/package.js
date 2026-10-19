@@ -1,7 +1,7 @@
 /* Exact saved package; the browser never masquerades links/PNG as WebP files. */
 window.ProductUploadPackage = function({request, resize}) {
   const $=id=>document.getElementById(id), button=$('copy-files'), label=button.innerHTML;
-  let key='',version='',generation=0,pack=null,timer=null,pending=null,bridge=null,disposed=false,nativeAvailable=false;
+  let key='',version='',generation=0,pack=null,timer=null,pending=null,bridge=null,disposed=false,nativeAvailable=false,launchCode=null,pollTimer=null,pollReject=null;
   const restore=()=>{clearTimeout(timer);timer=null;button.innerHTML=label;};
   function native(action, transfer) {
     return new Promise((resolve,reject)=>{
@@ -15,7 +15,35 @@ window.ProductUploadPackage = function({request, resize}) {
       bridge.addEventListener('message',receive);bridge.postMessage({action,request_id,...(transfer?{transfer}:{})});
     });
   }
-  function reset(){generation++;if(pending)pending();restore();pack=null;key='';version='';button.disabled=false;$('saved-package').hidden=true;$('copy-files').hidden=true;$('package-instruction').hidden=true;$('file-fallback').hidden=true;$('package-error').textContent='';$('saved-files').replaceChildren();resize();}
+  function stopLaunch(){clearTimeout(pollTimer);pollTimer=null;if(pollReject){pollReject(Error('Copy cancelled. Click Copy all WEBP files to retry.'));pollReject=null;}if(launchCode){request('clipboard-status',{code:launchCode,cancel:true}).catch(()=>{});launchCode=null;}$('open-copy-helper').hidden=true;$('cancel-copy').hidden=true;}
+  function reset(){generation++;if(pending)pending();stopLaunch();restore();pack=null;key='';version='';button.disabled=false;$('saved-package').hidden=true;$('copy-files').hidden=true;$('package-instruction').hidden=true;$('file-fallback').hidden=true;$('package-error').textContent='';$('saved-files').replaceChildren();resize();}
+  async function browserCopy(snapshot,current){
+    const launched=await request('clipboard-launch',{id:snapshot.id,version:snapshot.version});
+    if(current!==generation){request('clipboard-status',{code:launched.code,cancel:true}).catch(()=>{});throw Error('Upload changed.');}
+    launchCode=launched.code;
+    const link=$('open-copy-helper');link.href=launched.url;link.hidden=false;
+    $('cancel-copy').hidden=false;
+    $('package-error').textContent='Allow Sports Cave Windows helper to open. If it does not open, use Open clipboard helper below (version 13 or later).';resize();
+    // Keep the upload page in place. A visible link also supports browsers that
+    // require a second explicit gesture to open an external application.
+    try{link.click();}catch{}
+    return new Promise((resolve,reject)=>{
+      pollReject=reject;let attempts=0;
+      const finish=(error,value)=>{if(current!==generation)return reject(Error('Upload changed.'));clearTimeout(pollTimer);pollTimer=null;pollReject=null;link.hidden=true;error?reject(error):resolve(value);};
+      const poll=async()=>{
+        try{
+          if(current!==generation)return finish(Error('Upload changed.'));
+          const result=await request('clipboard-status',{code:launched.code});
+          if(current!==generation)return finish(Error('Upload changed.'));
+          if(result.state==='Complete'){launchCode=null;$('package-error').textContent='';return finish(null,result);}
+          if(result.state==='Failed'||result.state==='Cancelled')return finish(Error(result.error||'Copy cancelled. Retry Copy all WEBP files.'));
+          if(result.state==='Preparing'){$('package-error').textContent='Windows is preparing all eight files…';resize();}
+          if(++attempts>=210)return finish(Error('No clipboard completion received. Check Windows helper version 13, then retry Copy all WEBP files.'));
+          pollTimer=setTimeout(poll,1000);
+        }catch(e){finish(e);}
+      };poll();
+    });
+  }
   async function sync(row,visible,revision){
     const next=visible&&row?.id&&row.saved_package_version?row.id+':'+row.saved_package_version:'';
     if(!next){if(key)reset();return;}if(key===next)return;reset();key=next;const current=generation;
@@ -39,18 +67,24 @@ window.ProductUploadPackage = function({request, resize}) {
     const current=generation, snapshot=pack;restore();button.disabled=true;button.textContent='Preparing files…';$('package-error').textContent='';resize();
     try{
       try{bridge=window.top.chrome?.webview;}catch{bridge=null;}
-      const hello=await native('hello');if(!hello.productUploadWebp)throw Error('This desktop helper needs the saved WebP package update. Use Select saved files until it is installed.');
-      nativeAvailable=true;
+      let reply;
+      if(!bridge&&action==='copyWebpPackage')reply=await browserCopy(snapshot,current);
+      else{
+        const hello=await native('hello');if(!hello.productUploadWebp)throw Error('This desktop helper needs the saved WebP package update. Use Select saved files until it is installed.');
+        nativeAvailable=true;
+        if(current!==generation)return;
+        const grant=await request('saved-transfer',{id:snapshot.id,version:snapshot.version});if(current!==generation)return;
+        reply=await native(action,grant.transfer);
+      }
       if(current!==generation)return;
-      const grant=await request('saved-transfer',{id:snapshot.id,version:snapshot.version});if(current!==generation)return;
-      const reply=await native(action,grant.transfer);if(current!==generation)return;
       if(reply.count!==snapshot.items.length)throw Error('Windows did not confirm every saved WebP. Retry; no complete copy is confirmed.');
       if(action==='copyWebpPackage'){button.textContent='Copied';timer=setTimeout(()=>{restore();resize();},2000);}
       else restore();
     }catch(e){if(current===generation){restore();$('package-error').textContent=e.message;$('file-fallback').hidden=false;}}
-    finally{if(current===generation){button.disabled=false;resize();}}
+    finally{if(current===generation){stopLaunch();button.disabled=false;resize();}}
   }
   button.onclick=()=>prepare('copyWebpPackage');
+  $('cancel-copy').onclick=()=>stopLaunch();
   $('select-files').onclick=async()=>{
     if(!pack)return;
     if(nativeAvailable)return prepare('selectWebpPackage');

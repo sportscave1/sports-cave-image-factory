@@ -32,7 +32,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 12", self.install)
+        self.assertIn("HelperVersion = 13", self.install)
         self.assertIn("SportsCaveFiles.ico", self.install)
         self.assertIn("$shortcut.IconLocation = $iconPath", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
@@ -314,6 +314,32 @@ ConvertTo-Json -InputObject @($data.GetData([System.Windows.DataFormats]::FileDr
         result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-STA','-Command',script],capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads(result.stdout),paths)
+
+    def test_webp_protocol_resolves_only_trusted_origin_and_one_use_code(self):
+        self._compile()
+        code = 'a' * 43
+        good = 'sports-cave-files://webp?origin=http%3A%2F%2F127.0.0.1%3A8501#' + code
+        cases = [good, good.replace('127.0.0.1', 'attacker.example'), good.replace(code, 'short'),
+                 good.replace('webp?', 'webp/arbitrary?'), good.replace('webp?', 'unknown?')]
+        spec = self.base/'launches.json'; spec.write_text(json.dumps(cases), encoding='utf-8')
+        script = """
+Add-Type -AssemblyName PresentationFramework
+$assembly=[System.Reflection.Assembly]::LoadFrom('EXE')
+$flags=[System.Reflection.BindingFlags]'NonPublic,Static'
+$config=$assembly.GetType('DesktopConfig').GetMethod('Load',$flags).Invoke($null,@())
+$origins=New-Object 'System.Collections.Generic.HashSet[string]'
+[void]$origins.Add('http://127.0.0.1:8501')
+$assembly.GetType('DesktopConfig').GetField('AllowedOrigins',[System.Reflection.BindingFlags]'NonPublic,Instance').SetValue($config,$origins)
+$resolve=$assembly.GetType('BrowserFileLaunch').GetMethod('Resolve',$flags)
+$cases=Get-Content -LiteralPath 'SPEC' -Raw|ConvertFrom-Json
+$values=@($cases|ForEach-Object {
+ try {$resolve.Invoke($null,[object[]]@([Uri]$_,$config))} catch {'rejected'}
+})
+ConvertTo-Json -InputObject $values -Compress
+""".replace('EXE',str(self.executable).replace("'","''")).replace('SPEC',str(spec).replace("'","''"))
+        result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',script],capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(json.loads(result.stdout), ['http://127.0.0.1:8501/product-upload-native#'+code]+['rejected']*4)
 
 
 @unittest.skipUnless(

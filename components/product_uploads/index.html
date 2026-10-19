@@ -27,6 +27,8 @@ select{margin-bottom:10px}button,a.button{min-height:34px;padding:6px 10px;borde
 <div class="prompt-row" id="prompt" hidden><button id="copy-files" hidden>Copy all WEBP files</button><button id="copy">Copy upload prompt</button><strong id="action-label">Upload to Draft</strong></div>
 <p class="muted" id="package-instruction" hidden>Copy files and paste into ChatGPT, then copy and paste the upload prompt.</p>
 <p class="muted" id="package-error" role="status" aria-live="polite"></p>
+<a id="open-copy-helper" hidden>Open clipboard helper</a>
+<button id="cancel-copy" class="secondary" hidden>Cancel copy</button>
 <div id="file-fallback" hidden><button class="secondary" id="select-files">Select saved files</button><p class="muted" id="attachment-help"></p><div id="attachment-files" hidden></div></div>
 <section class="return" id="return" hidden><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="gold" id="map">MAP</button><span id="mapping-status" role="status" aria-live="polite">Checking…</span><button class="secondary" id="mapping-refresh">Refresh status</button></div><p class="muted" id="mapping-reason"></p></section>
 <div class="terminal" id="terminal" aria-live="polite" hidden></div><button id="retry" hidden>Retry preparation</button>

@@ -1,5 +1,36 @@
 # Product Upload saved WebP package
 
+## Browser clipboard repair (local, pending release)
+
+The reported browser failure was the direct WebView2-only bridge lookup: ordinary
+Edge/Chrome/PWA pages have no `window.top.chrome.webview`. Installing helper v12
+alone could not connect that page to the helper. No clipboard write was attempted.
+
+The local repair adds a Product Upload-specific `sports-cave-files://webp` launch,
+handled by helper v13. An authenticated same-origin request with Files permission
+issues a four-minute, one-use capability for exactly the current upload/package.
+No arbitrary paths or Dropbox credentials are passed through the URL. The helper
+accepts configured trusted origins only and removes the capability fragment from
+its displayed URL before claiming. Claiming cannot be repeated or raced twice.
+
+The helper reuses the verified eight-file hydration and native FileDrop clipboard
+service. Only its successful eight-file response can complete the operation.
+The original page polls owner-authenticated completion, shows Copied for two
+seconds, then restores its label. Every later click creates a fresh operation;
+the hydrated cache can be reused but cannot prevent another clipboard write.
+Failed/partial writes never report Copied. Cancel, source/package changes and
+unmount revoke pending requests. A visible Open clipboard helper link supports
+browsers requiring an explicit external-application gesture, with Cancel copy
+available while waiting. The existing exact-file fallback remains secondary.
+
+Verification: 27 clipboard/package/real-entrypoint tests pass. Native helper build
+and payload checks pass, including compiled trusted-origin protocol validation.
+Two Node checks exercise first copy and repeated copies, independent feedback,
+partial counts, native errors, cancellation, stale packages and listener cleanup.
+Actual browser protocol approval and an eight-file paste in ChatGPT remain
+unverified. Web changes and helper v13 must be released together; the installed
+v12 helper and deployed service are unchanged by this local repair.
+
 Released with the Edition Ops mapping update from the existing PRODUCTS task,
 19 October 2026, with explicit user authorisation. Code is pushed to the task branch
 and main; Render uses the existing sports-cave-os service. Windows helper version
