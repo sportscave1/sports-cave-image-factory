@@ -54,49 +54,73 @@ def save_progress(app,key,actor):
 
 def save_controls(app,result,row,user,name):
     from product_upload_jobs import JOBS
-    from product_upload_export import collection_root,product_folder,transfer
+    from product_upload_export import product_folder,sport_categories,transfer
     from product_upload_api import connect,Dropbox
     key=str(row['id']);actor=user['id'];api=app.dropbox_integration
     job=JOBS.snapshot(key,actor,'save')
     running=bool(job and job['state'] in ('Queued','Running'))
     state='product-upload-save-picker-'+key
+    listing=state+'-categories'
+    selection=state+'-category'
+    def close_destination():
+        st.session_state[state]=False
     try:folder=product_folder(api,name)
     except ValueError:folder=''
-    if st.button('Save all',type='primary',disabled=running or not folder,key='product-upload-save-all-'+key):
+    permitted=app.os_accounts.can_access_page(user,'Files')
+    if st.button('Save all',type='primary',disabled=running or not folder or not permitted,key='product-upload-save-all-'+key):
         st.session_state[state]=True
-        # Opening always starts at the configured collection root, never the last PSD folder.
-        try:st.session_state['mockups-dropbox-picker-path::product-upload-'+key]=collection_root(api,app._files_team_root(app._files_access_token()))
-        except Exception:st.error('Dropbox is unavailable. Check Files access and retry.');return
+        # Refresh only the collection root, never a selected category's contents.
+        st.session_state.pop(listing,None)
     if not folder:st.caption('Enter a valid Product name before saving.')
-    if st.session_state.get(state):
-        if not app.os_accounts.can_access_page(user,'Files'):
-            st.error('Files access is required to save to Dropbox.');return
-        try:
-            token=app._files_access_token();root=app._files_team_root(token)
-            base=collection_root(api,root)
-            st.markdown('**Choose the destination sport collection**')
-            parent=app._render_mockup_folder_picker(token,root,'product-upload-'+key)
-            allowed=parent.rsplit('/',1)[0].casefold()==base.casefold() and api.path_is_within_root(parent,base)
-            st.caption('Product folder: '+folder)
-            manifest=app._mockup_dropbox_manifest(result,(app.ASSET_CATEGORY_CORE,app.ASSET_CATEGORY_PRODUCT,app.ASSET_CATEGORY_SOCIAL))
-            if st.button('Save here',disabled=running or not allowed or not folder,key='product-upload-save-confirm-'+key):
-                from copy import deepcopy
-                scoped=deepcopy(result)
-                scoped['_product_upload_source']=dict(row['data']['source'])
-                fingerprint=hashlib.sha256(repr((scoped['_product_upload_source'],parent,folder,
-                    [(x['archive_name'],str(x['path']),Path(x['path']).stat().st_mtime_ns) for x in manifest])).encode()).hexdigest()
-                JOBS.submit(key,actor,'save',fingerprint,
-                    lambda progress:transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress))
-                st.rerun()
-            if not allowed:st.caption('Select a sport collection inside product-images.')
-            if st.button('Close destination picker',key='product-upload-save-close-'+key):
-                st.session_state[state]=False;st.rerun(scope='fragment')
-        except Exception:
-            st.error('Dropbox destination could not be opened. Check Files access and retry.')
+    if st.session_state.get(state) and permitted:
+        with st.container(key='product-upload-destination-'+key):
+            try:
+                token=app._files_access_token();root=app._files_team_root(token)
+                cached=st.session_state.get(listing)
+                if not cached or cached['root']!=root or cached['actor']!=actor:
+                    cached=dict(root=root,actor=actor,folders=sport_categories(api,token,root))
+                    st.session_state[listing]=cached
+                options={item['path']:item['name'] for item in cached['folders']}
+                if st.session_state.get(selection) not in options:st.session_state.pop(selection,None)
+                retained=st.session_state.get(selection+'-retained')
+                if selection not in st.session_state and retained in options:st.session_state[selection]=retained
+                parent=st.selectbox('Sport category',list(options),index=None,
+                    placeholder='Select a sport category',format_func=options.get,key=selection,disabled=running)
+                st.session_state[selection+'-retained']=parent
+                st.caption((options[parent]+' / ' if parent else 'Select category / ')+(folder or 'Enter Product name'))
+                numbered=st.checkbox('If the product folder exists, create a numbered folder',
+                    key=state+'-numbered',disabled=running)
+                manifest=app._mockup_dropbox_manifest(result,(app.ASSET_CATEGORY_CORE,app.ASSET_CATEGORY_PRODUCT,app.ASSET_CATEGORY_SOCIAL))
+                ready=bool(result.get('product_image_readiness',{}).get('complete') and manifest
+                    and all(Path(entry['path']).is_file() for entry in manifest))
+                if not ready:st.caption('Prepare all product images before saving.')
+                if not options:st.caption('No sport category folders are available in product-images.')
+                save_column,cancel_column=st.columns(2)
+                if save_column.button('Save',type='primary',disabled=running or not parent or not folder or not ready,
+                                      key='product-upload-save-confirm-'+key):
+                    from copy import deepcopy
+                    scoped=deepcopy(result)
+                    scoped['_product_upload_source']=dict(row['data']['source'])
+                    manifest=deepcopy(manifest)
+                    conflict='numbered' if numbered else 'cancel'
+                    fingerprint=hashlib.sha256(repr((scoped['_product_upload_source'],parent,folder,conflict,
+                        [(x['archive_name'],str(x['path']),Path(x['path']).stat().st_mtime_ns) for x in manifest])).encode()).hexdigest()
+                    JOBS.submit(key,actor,'save',fingerprint,
+                        lambda progress:transfer(Dropbox(),scoped,manifest,root,parent,folder,connect,actor,progress,conflict=conflict))
+                    result.pop('product_upload_save_receipt',None)
+                    app._set_mockups_result(result)
+                    st.info('Saving to Dropbox...')
+                    st.rerun()
+                cancel_column.button('Cancel',disabled=running,key='product-upload-save-close-'+key,on_click=close_destination)
+            except Exception:
+                st.error('Dropbox destination could not be opened. Retry Save all; your selection and images are retained.')
+                st.button('Cancel',key='product-upload-save-error-close-'+key,on_click=close_destination)
     if job:save_progress(app,key,actor)
     receipt=result.get('product_upload_save_receipt') or {}
-    if receipt:
-        if receipt.get('failures'):
+    if receipt and not running:
+        if receipt.get('cancelled'):
+            st.warning('That product folder already exists. Choose the numbered-folder option to save separately, or change the destination. Nothing was overwritten.')
+        elif receipt.get('failures'):
             st.warning('Save incomplete. Retry Save all in the same collection; confirmed files are checked and skipped.')
             for failure in receipt['failures']:st.caption(failure['relative_path']+': '+failure['error'])
         elif receipt.get('successes'):
@@ -133,7 +157,7 @@ def render_outputs(app,result,row,user,name):
     warnings={r['warning'] for r in records.values() if r.get('warning')}
     if warnings:st.caption('Saved prompt storage is unavailable; defaults are shown. Reconnect before relying on saved customisations.')
     texts=scene_texts(result,app.current_lifestyle_prompt_text,
-                     lambda filename,default:app.image_factory.get_lifestyle_prompt_text(filename,default,local_only=True))
+                     lambda filename,default:app.get_image_factory().get_lifestyle_prompt_text(filename,default,local_only=True))
     prompt=compose(instructions,texts)
     st.subheader('Product Page Lifestyle Mockups')
     st.caption('Paste the black frame and master prompt into ChatGPT. Create each mockup separately, then upload it to the matching card.')

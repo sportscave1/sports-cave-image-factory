@@ -8261,7 +8261,7 @@ def record_product_upload_prompt_generation(user, *, product_name, upload_type):
 
 def render_product_uploads_page():
     from product_upload_mockups_ui import render_page
-    import sys
+    from types import SimpleNamespace
     # Preserve the existing OS product/Edition Ops invalidation after a verified
     # link. Only a same-origin message from this workflow's own frames is read.
     get_components_module().html("""<script>
@@ -8278,7 +8278,10 @@ def render_product_uploads_page():
     };
     host.addEventListener('message',host._scProductUploadsListener);
     </script>""",height=0)
-    render_page(sys.modules[__name__])
+    # Streamlit executes each session in its own globals, but __main__ in
+    # sys.modules is process-wide and may belong to another script/session.
+    # Bind the extracted UI to this execution's helpers and authenticated state.
+    render_page(SimpleNamespace(**globals()))
 
 
 def test_google_drive_connection():

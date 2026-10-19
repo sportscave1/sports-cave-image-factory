@@ -127,6 +127,22 @@ def test_retain_uploaded_original_without_export_resize(tmp_path):
     assert original.stat().st_mtime_ns==stamp
 
 
+def test_explicit_collision_cancel_then_numbered_retry(env,tmp_path):
+    store,_,_=env;row,result,manifest=make_result(env,tmp_path)
+    api=Outputs();provider=SimpleNamespace(api=api,token='fixture')
+    parent=api.base+'/Cricket';target=parent+'/Product'
+    api.files[target]={'.tag':'folder','id':'unrelated-folder'}
+    cancelled=transfer(provider,result,manifest,api.root,parent,'Product',store.connect,ADMIN['id'],lambda *a:None,conflict='cancel')
+    assert cancelled['cancelled'] and api.calls==[]
+    api.fail_once=manifest[0]['archive_name']
+    first=transfer(provider,result,manifest,api.root,parent,'Product',store.connect,ADMIN['id'],lambda *a:None,conflict='numbered')
+    assert first['destination']==target+' (2)' and first['failures']
+    second=transfer(provider,result,manifest,api.root,parent,'Product',store.connect,ADMIN['id'],lambda *a:None,conflict='numbered')
+    assert not second['failures'] and second['destination']==first['destination']
+    assert len([c for c in api.calls if c[0]=='folder'])==1
+    assert api.files[target]['id']=='unrelated-folder'
+
+
 def test_save_encoder_and_manifest_exactly_match_standalone(env,tmp_path,monkeypatch,request):
     import app,image_factory as factory,io
     import tempfile

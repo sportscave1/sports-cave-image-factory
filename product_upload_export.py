@@ -16,7 +16,25 @@ def collection_root(api, root):
     return api.normalize_dropbox_path(root.rstrip('/')+'/04_OUTPUT/product-images')
 
 
-def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress):
+def sport_categories(api, token, root):
+    """All immediate output folders, using the authenticated team-space API."""
+    base=collection_root(api,root)
+    folders={};cursor='';seen=set()
+    while True:
+        page=api.list_folder_page(token,base,cursor=cursor)
+        for entry in page.get('entries',()):
+            path=api.normalize_dropbox_path(entry.get('path_display') or entry.get('path_lower') or '')
+            if (entry.get('.tag')=='folder' and path.rsplit('/',1)[0].casefold()==base.casefold()
+                    and api.path_is_within_root(path,base)):
+                folders[path.casefold()]=dict(path=path,name=entry.get('name') or path.rsplit('/',1)[-1])
+        if not page.get('has_more'):break
+        cursor=page.get('cursor')
+        if not cursor or cursor in seen:raise ValueError('Dropbox folder listing is incomplete. Retry Save all.')
+        seen.add(cursor)
+    return sorted(folders.values(),key=lambda folder:(folder['name'].casefold(),folder['path']))
+
+
+def transfer(provider, result, manifest, root, parent, folder, connect, actor, progress, *, conflict='numbered'):
     from product_upload_mockups import save,bind_export
     import auto_editions as ae
     import mockup_storage
@@ -76,7 +94,8 @@ def transfer(provider, result, manifest, root, parent, folder, connect, actor, p
             progress('Saving '+name,index,total)
         return dict(destination=target,successes=list(successes.values()),failures=failures,cancelled=False)
 
-    receipt=save(connect,actor,result,manifest,provider,parent,clean,'numbered',perform,checkpointed=True)
+    if conflict not in ('cancel','numbered'):raise ValueError('Choose a safe output-folder conflict option.')
+    receipt=save(connect,actor,result,manifest,provider,parent,clean,conflict,perform,checkpointed=True)
     if not receipt.get('failures') and len(receipt.get('successes',()))==total:
         import image_factory
         if image_factory.product_image_readiness(result['product_image_manifest'])['complete']:
