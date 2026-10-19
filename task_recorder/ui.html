@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sports Cave OS · Task Recorder</title><link rel="stylesheet" href="/ui.css"><script src="/ui.js" defer></script></head>
+<body>
+<header><div><small>SPORTS CAVE OS / DEVELOPER</small><h1>Task Recorder <span>V1 · Local</span></h1></div><span id="connection" role="status">Connecting…</span></header>
+<div id="pair" hidden><p>Run <b>Start Task Recorder.cmd</b>. Use the console it opens, or copy its connection key here to pair this embedded page.</p><input id="key" type="password" autocomplete="off" aria-label="Local connection key"><button id="connect">Connect</button></div>
+<nav aria-label="Task controls">
+<button id="new">New Task</button><button id="open">Open Browser</button><button id="record">● Record</button><button id="recordStop">Stop Recording</button><button id="save">Save</button><button id="play" class="accent">▶ Play</button><button id="pause">Pause</button><button id="resume">Resume</button><button id="stop">■ Stop</button>
+</nav>
+<div class="address"><label for="url">Browser URL</label><input id="url" type="url"><button id="demo">Use demo</button><button id="copyKey" title="Copy connection key for the local OS embedded page">Pair OS page</button></div>
+<div id="progress" role="status">Ready</div><div id="error" role="alert" hidden></div>
+<main>
+<aside><h2>Saved tasks <button id="refresh" aria-label="Refresh saved tasks">↻</button></h2><div id="tasks"></div><p class="hint">Tasks and browser sessions stay on this PC. Sign in manually while recording is stopped.</p></aside>
+<section class="editor">
+<div class="taskName"><label for="name">Task name</label><input id="name" value="Untitled task"></div>
+<div class="sectionTitle"><h2>Steps <span id="stepCount"></span></h2><button id="addStep">+ Step</button></div>
+<div class="stepsWrap"><table><thead><tr><th># / Action</th><th>Target locator</th><th>Value / input</th><th></th></tr></thead><tbody id="steps"></tbody></table></div>
+<div class="sectionTitle"><h2>Inputs</h2><button id="addInput">+ Input</button></div>
+<div id="inputs"></div><p class="hint">Use {{product_name}} in a step value to bind an input. Uploads require an absolute local file path. Values entered under Inputs are kept in memory only.</p>
+</section>
+<aside class="preview"><h2>Browser layout <button id="preview">Refresh</button></h2><canvas id="canvas" width="400" height="250"></canvas><p id="previewNote" class="hint">On demand only. Page text, images and field values are removed for privacy.</p><details><summary>Supported in V1</summary><p>Navigation, URL checkpoint, click, fill, single select, checkbox/radio, one-file upload and wait for element. Main tab/frame only.</p><p>Flagged actions must be corrected before playback. Stop closes this dedicated browser; saved sessions remain.</p><p>For upload completion, add a Wait step targeting the site's uploaded/ready indicator.</p></details></aside>
+</main>
+<footer>Local demonstration is not verified Meta ad automation. No production service or worker is involved.</footer>
+</body></html>
+

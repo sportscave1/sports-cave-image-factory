@@ -1,0 +1,445 @@
+"""One browser, one run, fixed action dispatch. No app/worker imports."""
+import asyncio
+import contextlib
+import copy
+import os
+import re
+import time
+from pathlib import Path
+
+from playwright.async_api import async_playwright
+from .schema import Invalid, safe_url, validate_task, resolve_task
+from .store import Store
+
+AUTH_PATH = re.compile(r"login|log-in|signin|sign-in|oauth|authorize|authentication|/auth(?:/|$)", re.I)
+
+class TargetProblem(Exception):
+    pass
+
+class Runner:
+    def __init__(self, root, *, headless=False):
+        self.store = Store(root)
+        self.headless = headless
+        self.pw = self.context = self.page = self.job = None
+        self.mode = "idle"
+        self.message = "Ready. Open the dedicated browser, sign in with recording stopped, then Record."
+        self.index = 0
+        self.current_action = ""
+        self.recording = False
+        self.privacy_pause = False
+        self.pause_requested = False
+        self.can_resume = False
+        self.gate = asyncio.Event()
+        self.gate.set()
+        self.lock = asyncio.Lock()
+        self.draft = self.blank()
+        self.last_click = 0
+        self.run_id = None
+        self.total = 0
+        if self.store.journal.exists():
+            import json
+            previous = json.loads(self.store.journal.read_text(encoding="utf-8"))
+            if previous.get("status") == "interrupted":
+                self.message = previous["message"]
+
+    @staticmethod
+    def blank():
+        return {"version": 1, "name": "Untitled task", "inputs": [], "steps": []}
+
+    def state(self):
+        return {"mode": self.mode, "message": self.message, "step": self.index + 1 if self.total else 0,
+                "total": self.total, "action": self.current_action, "can_resume": self.can_resume,
+                "browser_open": bool(self.context and self.page and not self.page.is_closed()),
+                "recording": self.recording, "privacy_pause": self.privacy_pause,
+                "draft": self.draft, "tasks": self.store.list()}
+
+    def busy(self):
+        return bool(self.job and not self.job.done())
+
+    async def open_browser(self, url=None):
+        if self.busy() or self.recording: raise Invalid("Stop the current run or recording before opening a URL.")
+        if url: safe_url(url)
+        if not self.context:
+            if not self.pw: self.pw = await async_playwright().start()
+            options = {}
+            # Installed Chrome/Edge is the stable headed Windows runtime; always
+            # use our profile, never the user's ordinary browser profile.
+            if not self.headless and os.name == "nt":
+                if Path("C:/Program Files/Google/Chrome/Application/chrome.exe").is_file():
+                    options["channel"] = "chrome"
+                elif Path("C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe").is_file():
+                    options["channel"] = "msedge"
+            self.context = await self.pw.chromium.launch_persistent_context(
+                str(self.store.root / "browser-profile"), headless=self.headless,
+                viewport={"width": 1280, "height": 800}, accept_downloads=False, **options)
+            await self.context.expose_binding("__scRecord", self.record_event)
+            await self.context.add_init_script(path=str(Path(__file__).with_name("record.js")))
+            self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
+            self.page.on("domcontentloaded", lambda: asyncio.create_task(self.loaded()))
+            self.page.on("framenavigated", lambda frame: asyncio.create_task(self.navigated(frame)))
+            self.page.on("dialog", lambda dialog: asyncio.create_task(self.dialog(dialog)))
+            self.page.on("download", lambda download: asyncio.create_task(self.download(download)))
+            self.context.on("page", lambda page: asyncio.create_task(self.extra_page(page)))
+            self.page.on("close", self.closed)
+            await self.page.evaluate(Path(__file__).with_name("record.js").read_text(encoding="utf-8"))
+        if url:
+            try: await self.page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            except Exception: raise Invalid("Browser could not open that URL. Check the visible browser and address.")
+        await self.page.bring_to_front()
+        return self.state()
+
+    def closed(self):
+        self.recording = False
+        if not self.busy():
+            self.mode = "idle"
+            self.message = "Recorded tab closed. Use Stop to close its profile, then Open Browser."
+
+    async def extra_page(self, page):
+        if page == self.page: return
+        if self.recording:
+            self.unsupported("New tabs/popups are unsupported; recording remains on the original tab.")
+        if self.busy():
+            self.pause_requested = True
+            self.can_resume = False
+            self.gate.clear()
+            self.mode = "paused"
+            self.message = "A new tab opened. Inspect the browser and Stop; V1 cannot safely continue this run."
+
+    async def dialog(self, dialog):
+        await dialog.dismiss()
+        if self.recording: self.unsupported("Browser dialog was dismissed; dialogs are unsupported.")
+        if self.busy():
+            self.pause_requested = True
+            self.can_resume = False
+            self.gate.clear()
+            self.mode = "paused"
+            self.message = "Browser dialog dismissed. Outcome may be uncertain; inspect and Stop."
+
+    async def download(self, download):
+        await download.cancel()
+        if self.recording: self.unsupported("Downloads are unsupported and were cancelled.")
+
+    async def loaded(self):
+        if self.recording:
+            for frame in self.page.frames:
+                with contextlib.suppress(Exception):
+                    await frame.evaluate("window.__scRecorder?.set(true)")
+        if self.recording and self.page and await self.is_sensitive():
+            await self.privacy()
+
+    async def is_sensitive(self):
+        if not self.page or self.page.is_closed(): return True
+        try:
+            for frame in self.page.frames:
+                if AUTH_PATH.search(frame.url): return True
+                if await frame.evaluate("!!window.__scRecorder?.sensitive()"): return True
+            return False
+        except Exception:
+            return True
+
+    async def navigated(self, frame):
+        if not self.recording: return
+        if frame != self.page.main_frame:
+            self.unsupported("Frame navigation is unsupported; V1 records only the main frame.")
+            with contextlib.suppress(Exception):
+                await frame.evaluate("window.__scRecorder?.set(true)")
+            return
+        if AUTH_PATH.search(frame.url):
+            await self.privacy()
+            return
+        try:
+            safe_url(frame.url)
+            # Never issue a second navigation for a click/submission's result.
+            # Keep an explicit checkpoint instead of silently dropping it.
+            action = "wait_url" if time.monotonic() - self.last_click < 10 else "navigate"
+            self.last_click = 0
+            self.append({"action": action, "value": frame.url})
+        except Invalid:
+            self.unsupported("Navigation uses a private or query/fragment URL; supply a safe URL input.")
+
+    def unsupported(self, reason):
+        self.append({"action": "unsupported", "reason": reason})
+        self.message = "Unsupported action captured. Resolve flagged steps before Play."
+
+    def append(self, step):
+        if len(self.draft["steps"]) >= 500:
+            self.recording = False
+            self.mode = "idle"
+            self.message = "500-step limit reached. Save this task."
+            return
+        old = self.draft["steps"]
+        if old and old[-1] == step: return
+        if old and step["action"] == "fill" and old[-1]["action"] == "fill" and old[-1]["locator"] == step["locator"]:
+            old[-1] = step
+        else: old.append(step)
+
+    async def privacy(self):
+        self.recording = False
+        self.privacy_pause = True
+        self.mode = "recording_paused"
+        self.message = "Recording paused for sign-in or sensitive content. Sign in manually, leave the sign-in page, then Resume."
+        with contextlib.suppress(Exception):
+            await self.page.evaluate("window.__scRecorder?.set(false)")
+
+    async def record_event(self, source, data):
+        if not self.recording or source["page"] != self.page: return
+        if isinstance(data, dict) and data.get("kind") == "privacy":
+            await self.privacy()
+            return
+        if source["frame"] != self.page.main_frame:
+            self.unsupported("Iframe actions are unsupported; use a top-level page.")
+            return
+        if not isinstance(data, dict): return
+        if data.get("kind") == "privacy":
+            await self.privacy()
+        elif data.get("kind") == "unsupported":
+            # Page scripts are untrusted; do not retain arbitrary messages.
+            self.unsupported("Unsupported browser action. Use simple labeled controls, a submit button and one tab.")
+        elif data.get("kind") == "step":
+            step = copy.deepcopy(data.get("step"))
+            if not isinstance(step, dict): return
+            if step.get("action") == "upload":
+                n = 1
+                names = {i["name"] for i in self.draft["inputs"]}
+                name = "image_path"
+                while name in names:
+                    n += 1
+                    name = "image_path_" + str(n)
+                self.draft["inputs"].append({"name": name, "required": True})
+                step["value"] = {"input": name}
+                self.message = "Upload recorded. Set its absolute local path in Inputs before Play."
+            try:
+                validate_task({**self.draft, "steps": [step]})
+            except Invalid:
+                await self.privacy()
+                return
+            if step["action"] == "click": self.last_click = time.monotonic()
+            self.append(step)
+
+    async def set_recording(self, active):
+        if active:
+            if self.busy(): raise Invalid("Stop playback before recording.")
+            if not self.page or self.page.is_closed(): raise Invalid("Open Browser first.")
+            if await self.is_sensitive():
+                await self.privacy()
+                return
+            if not self.draft["steps"]:
+                self.append({"action": "navigate", "value": safe_url(self.page.url)})
+            self.recording = True
+            self.privacy_pause = False
+            self.mode = "recording"
+            self.message = "Recording this browser tab only. Stop Recording before sign-in."
+            for frame in self.page.frames:
+                with contextlib.suppress(Exception):
+                    await frame.evaluate("window.__scRecorder?.set(true)")
+        else:
+            if self.page and not self.page.is_closed():
+                with contextlib.suppress(Exception):
+                    await self.page.evaluate("window.__scRecorder?.flush()")
+                    await self.page.evaluate("window.__scRecorder?.set(false)")
+            self.recording = False
+            self.privacy_pause = False
+            self.mode = "idle"
+            self.message = "Recording stopped. Edit inputs/steps, name the task, then Save."
+
+    def locator(self, loc):
+        p, value = self.page, loc["value"]
+        if loc["by"] == "role": return p.get_by_role(loc["role"], name=value, exact=True)
+        if loc["by"] == "label": return p.get_by_label(value, exact=True)
+        if loc["by"] == "test_id": return p.get_by_test_id(value)
+        if loc["by"] == "placeholder": return p.get_by_placeholder(value, exact=True)
+        if loc["by"] == "text": return p.get_by_text(value, exact=True)
+        # Escape an ID as an attribute value, never accept user-supplied CSS.
+        import json
+        return p.locator("[id=" + json.dumps(value) + "]")
+
+    async def wait_gate(self):
+        if self.pause_requested:
+            await self.gate.wait()
+
+    async def target(self, step):
+        loc = self.locator(step["locator"])
+        remaining = step.get("timeout_ms", 8000) / 1000
+        while remaining > 0:
+            await self.wait_gate()
+            started = time.monotonic()
+            count = await loc.count()
+            if count > 1: raise TargetProblem("Target is ambiguous (" + str(count) + " matches). Make the page unique, then Resume; or Stop and edit the locator.")
+            if count == 1:
+                if step["action"] == "upload" or await loc.is_visible():
+                    return loc
+            await asyncio.sleep(.1)
+            remaining -= time.monotonic() - started
+        raise TargetProblem("Target missing or hidden. Check the visible page, then Resume to retry only this step; or Stop and edit.")
+
+    async def perform(self, step):
+        action = step["action"]
+        if action == "wait_url":
+            await self.wait_gate()
+            try:
+                await self.page.wait_for_url(step["value"], wait_until="domcontentloaded", timeout=step.get("timeout_ms",8000))
+            except Exception:
+                raise TargetProblem("Expected navigation has not completed. Check the browser, then Resume; or Stop and edit the URL checkpoint.")
+            return
+        if action == "navigate":
+            await self.wait_gate()
+            await self.page.goto(step["value"], wait_until="domcontentloaded", timeout=step.get("timeout_ms", 8000))
+            return
+        loc = await self.target(step)
+        await self.wait_gate()
+        if await self.is_sensitive():
+            raise TargetProblem("Sign-in detected. Sign in manually with recording off, then Resume.")
+        if action == "wait": return
+        if action == "click":
+            # Trial can time out without dispatching a click; this is safe to retry.
+            try: await loc.click(trial=True, timeout=step.get("timeout_ms", 8000))
+            except Exception: raise TargetProblem("Target is not actionable (covered, moving or disabled). Resolve it, then Resume.")
+        await self.wait_gate()
+        self.can_resume = False
+        timeout = step.get("timeout_ms", 8000)
+        if action == "click": await loc.click(timeout=timeout, no_wait_after=True)
+        elif action == "fill": await loc.fill(step["value"], timeout=timeout)
+        elif action == "select": await loc.select_option(value=step["value"], timeout=timeout)
+        elif action == "check": await loc.set_checked(step["value"], timeout=timeout)
+        elif action == "upload":
+            await loc.set_input_files(step["value"], timeout=timeout)
+            # Confirms browser selection; remote processing needs an explicit wait step.
+            await loc.evaluate("(el) => { if (!el.files || el.files.length !== 1) throw Error('Upload not selected'); }")
+
+    async def run(self, task):
+        try:
+            for i, step in enumerate(task["steps"]):
+                self.index, self.current_action = i, step["action"]
+                await self.wait_gate()
+                while True:
+                    try:
+                        self.store.result(self.run_id, "executing", i, "Step started; no automatic replay after interruption.")
+                        await self.perform(step)
+                        break
+                    except TargetProblem as exc:
+                        self.mode = "paused"
+                        self.can_resume = True
+                        self.pause_requested = True
+                        self.gate.clear()
+                        self.message = str(exc)
+                        self.store.result(self.run_id, "paused", i, self.message)
+                        await self.gate.wait()
+                self.store.result(self.run_id, "running", i + 1, "Step completed.")
+                self.message = "Completed step " + str(i + 1) + " of " + str(self.total)
+                # Yield so Stop/Pause is handled between fast actions.
+                await asyncio.sleep(.05)
+            self.mode = "completed"
+            self.message = "Task completed. Verify the result in the browser."
+            self.store.result(self.run_id, "completed", self.total, self.message)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.mode = "paused"
+            self.can_resume = False
+            self.message = "Action failed or browser closed; outcome may be uncertain. Inspect the browser, then Stop. Completed actions will not be replayed automatically."
+            self.store.result(self.run_id, "interrupted", self.index, self.message)
+            # Keep the job owned until Stop; Play must not overwrite uncertain work.
+            await asyncio.Event().wait()
+
+    async def play(self, task_id, values):
+        if self.busy() or self.recording or self.mode == "recording_paused":
+            raise Invalid("Stop the current run/recording first.")
+        task = resolve_task(self.store.get(task_id), values)
+        if not self.page or self.page.is_closed(): await self.open_browser()
+        self.run_id = task_id
+        self.total = len(task["steps"])
+        self.index = 0
+        self.mode = "running"
+        self.message = "Playing saved task."
+        self.can_resume = True
+        self.pause_requested = False
+        self.gate.set()
+        self.job = asyncio.create_task(self.run(task))
+
+    async def pause(self):
+        if self.recording:
+            await self.set_recording(False)
+            self.mode = "recording_paused"
+            self.message = "Recording paused. Sign in manually if needed, then Resume."
+        elif self.busy() and self.mode == "running":
+            self.pause_requested = True
+            self.can_resume = True
+            self.gate.clear()
+            self.mode = "paused"
+            self.message = "Pause requested. An already dispatched action may finish; next action waits."
+
+    async def resume(self):
+        if self.mode == "recording_paused":
+            await self.set_recording(True)
+        elif self.busy() and self.mode == "paused" and self.can_resume:
+            self.pause_requested = False
+            self.mode = "running"
+            self.message = "Resuming at current step."
+            self.gate.set()
+        else: raise Invalid("This action cannot be safely resumed. Inspect the browser, then Stop.")
+
+    async def stop(self):
+        self.recording = False
+        self.privacy_pause = False
+        self.pause_requested = False
+        if self.job and not self.job.done():
+            self.job.cancel()
+            with contextlib.suppress(asyncio.CancelledError): await self.job
+            self.store.result(self.run_id, "stopped", self.index, "Stopped. Pending browser actions cancelled; check any submitted result.")
+        # Closing this dedicated context cancels Playwright commands still in flight.
+        if self.context:
+            with contextlib.suppress(Exception): await self.context.close()
+        self.context = self.page = None
+        self.job = None
+        self.mode = "stopped"
+        self.can_resume = False
+        self.message = "Stopped; dedicated browser closed to cancel pending actions. Session profile is retained."
+
+    async def preview(self):
+        if not self.page or self.page.is_closed(): raise Invalid("Open Browser first.")
+        if self.privacy_pause or await self.is_sensitive():
+            return {"blocked": True, "boxes": []}
+        # Layout only: no page strings, values, URLs, pixels, images or session data.
+        return await self.page.evaluate("""() => ({
+          blocked:false, width:innerWidth, height:innerHeight,
+          boxes:[...document.querySelectorAll('input,button,select,textarea,a,img,canvas,video,iframe,h1,h2,p,form')]
+            .map(e=>{const r=e.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height,
+              kind:['INPUT','TEXTAREA','SELECT'].includes(e.tagName)?'field':e.tagName==='BUTTON'?'button':'block'};})
+            .filter(r=>r.w>0&&r.h>0&&r.y<innerHeight&&r.y+r.h>0).slice(0,250)
+        })""")
+
+    async def command(self, name, data):
+        if name == "state": return self.state()
+        if name == "preview": return await self.preview()
+        async with self.lock:
+            if name == "open": await self.open_browser(data.get("url"))
+            elif name == "record":
+                if self.busy() or self.recording: raise Invalid("Stop the active operation first.")
+                if "task" in data: self.draft = validate_task(data["task"])
+                await self.set_recording(True)
+            elif name == "record-stop":
+                if self.busy(): raise Invalid("Use Stop or Pause for playback.")
+                await self.set_recording(False)
+            elif name == "pause": await self.pause()
+            elif name == "resume": await self.resume()
+            elif name == "stop": await self.stop()
+            elif name == "play": await self.play(data.get("id"), data.get("values", {}))
+            elif name in {"new", "load", "save"}:
+                if self.busy() or self.recording or self.mode == "recording_paused": raise Invalid("Stop playback/recording before editing tasks.")
+                if name == "new": self.draft = self.blank()
+                elif name == "load": self.draft = self.store.get(data.get("id"))
+                else: self.draft = self.store.save(data.get("task"))
+                self.total = 0
+                self.index = 0
+                self.current_action = ""
+                self.mode = "idle"
+                self.message = "Task saved locally." if name == "save" else "Task ready."
+            else: raise Invalid("Unknown recorder command.")
+            return self.state()
+
+    async def close(self):
+        await self.stop()
+        if self.pw:
+            await self.pw.stop()
+            self.pw = None
+

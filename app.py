@@ -7467,6 +7467,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
     "Worker Health": ":material/monitor_heart:",
+    "Task Recorder": ":material/videocam:",
     "Accounts & Access": ":material/settings:"
 }
 
@@ -7510,7 +7511,7 @@ def _sidebar_route_button(
 
 def _active_sidebar_group(route):
     import crm_navigation
-    if route in {"Developer", "Worker Health", "Product Quiz"}:
+    if route in {"Developer", "Worker Health", "Task Recorder", "Product Quiz"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
@@ -7714,7 +7715,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if ('Worker Health' in allowed_routes or 'Developer' in allowed_routes) and disclosure(
+    if ('Worker Health' in allowed_routes or 'Task Recorder' in allowed_routes or 'Developer' in allowed_routes) and disclosure(
         'developer','Developer',':material/developer_mode:','Worker Health',
         can_open_overview='Worker Health' in allowed_routes,
     ):
@@ -7722,6 +7723,8 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
         if 'Worker Health' in allowed_routes:
             child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Task Recorder' in allowed_routes:
+            child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
         if 'Product Quiz' in history_routes:
             child_button(children, "Product Quiz", "Product Quiz")
         if 'Developer Studio' in allowed_routes:
@@ -14345,7 +14348,7 @@ def render_selected_page(current_page):
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
         "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
-        "Developer Studio", "Developer", "Worker Health", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Developer Studio", "Developer", "Worker Health", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -14372,6 +14375,9 @@ def render_selected_page(current_page):
 
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
+    elif current_page == "Task Recorder":
+        from task_recorder_page import render_page
+        render_page(current_os_user())
     elif current_page == "Developer Studio":
         from developer_studio_page import render_page
         render_page(current_os_user())
