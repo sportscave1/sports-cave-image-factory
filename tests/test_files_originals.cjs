@@ -18,7 +18,7 @@ const {execFileSync}=require('node:child_process'), {chromium}=require('playwrig
    const u=new URL(route.request().url());assert.equal(u.hostname,'files.synthetic.test');
    if(u.pathname==='/files-window'||u.pathname==='/files-image-viewer'||u.pathname==='/files-original-actions.js'){
     const name=u.pathname==='/files-original-actions.js'?'components/files_original_actions.js':'components/'+(u.pathname==='/files-window'?'files_window':'files_image_viewer')+'/index.html';
-    return route.fulfill({contentType:name.endsWith('.js')?'text/javascript':'text/html',body:baseline?execFileSync('git',['show','HEAD:'+name],{encoding:'utf8'}):fs.readFileSync(name,'utf8')});
+    return route.fulfill({contentType:name.endsWith('.js')?'text/javascript':'text/html',body:baseline?execFileSync('git',['show','59b609728b182c6c997f02ed0a8786fff0483095:'+name],{encoding:'utf8'}):fs.readFileSync(name,'utf8')});
    }
    if(u.pathname==='/api/files-list') return route.fulfill({json:{root_path:'/Synthetic',current_path:'/Synthetic',items,has_more:false}});
    if(u.pathname==='/api/files-preview') return route.fulfill({contentType:'image/webp',body:bytes});

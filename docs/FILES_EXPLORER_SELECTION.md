@@ -103,3 +103,11 @@ under `test-results/files-selection` and `test-results/files-compact` (ignored).
 Changes are intentionally uncommitted. Studio cannot report clean committed
 review readiness. Local selection/fallback implementation is complete; the native
 clipboard requirement and reported card-only failure remain unresolved as above.
+
+## Release authorization
+
+The user subsequently authorized pushing to Git and Render. The seven task files
+were committed and integrated with the latest origin/main without conflicts.
+The local-only statements above describe the initial implementation phase;
+clipboard limitations remain unchanged. Re-run focused checks against the
+integrated revision before pushing to the existing main/Render deployment path.
