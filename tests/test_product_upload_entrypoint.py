@@ -17,9 +17,16 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
     def blocked(*args, **kwargs):
         raise AssertionError('Network is forbidden in entrypoint regression')
 
+    socket_connect = socket.socket.connect
+    def local_only(sock, address):
+        # Windows implements asyncio's self-pipe with a loopback socket pair.
+        if isinstance(address, tuple) and address[0] in ('127.0.0.1', '::1'):
+            return socket_connect(sock, address)
+        return blocked()
+
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(dotenv, 'load_dotenv', lambda *a, **k: False)
-    monkeypatch.setattr(socket.socket, 'connect', blocked)
+    monkeypatch.setattr(socket.socket, 'connect', local_only)
     monkeypatch.setattr(socket, 'create_connection', blocked)
     # No inherited provider settings, credentials or source-tree .env fallback.
     with patch.dict(os.environ, {'PATH': os.environ.get('PATH', ''),
@@ -51,6 +58,7 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
         if mode == 'outputs':
             import json
             payloads = [json.loads(c.proto.json_args) for c in test.get('component_instance')]
+            assert not any(p.get('section') == 'handoff' for p in payloads), 'Unsaved outputs must not mount the final component'
             gallery = next(p for p in payloads if p.get('mode') == 'gallery')
             assert len(gallery['items']) == 5
             assert all(i['preview'].startswith('data:image/webp;base64,') for i in gallery['items'])

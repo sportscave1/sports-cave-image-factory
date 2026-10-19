@@ -25,7 +25,7 @@ async function fixture(modern=false){
  return {el,events,timers,calls,writes,frame,observers,
   tick(ms){clock+=ms;for(const [id,t] of [...timers])if(t.at<=clock){timers.delete(id);t.fn();}},
   deny(v){denied=v},delay(){let resolve;delay=new Promise(r=>resolve=r);return ()=>{resolve();delay=null}},
-  async source(version,id='first'){row={...row,id,saved_source_version:version};events.message({source:parent,data:{type:'streamlit:render',args:{section:'handoff',id,mode:row.mode,source_version:version||''}}});await settle();},
+  async source(version,id='first'){row={...row,id,saved_source_version:version,preview_url:'/preview-must-not-load-in-handoff'};events.message({source:parent,data:{type:'streamlit:render',args:{section:'handoff',id,mode:row.mode,source_version:version||''}}});await settle();},
   async mode(mode){el('mode').value=mode;await el('mode').onchange();}
  };
 }
@@ -39,7 +39,7 @@ async function fixture(modern=false){
   }
   await f.el('copy').onclick();f.tick(1000);await f.el('copy').onclick();f.tick(1000);assert.equal(f.el('copy').textContent,'Copied');f.tick(1000);assert.equal(f.el('copy').textContent,'Copy Complete Upload Prompt');
   f.deny(true);await f.el('copy').onclick();assert.match(f.el('error').textContent,/Clipboard denied/);assert.equal(f.el('copy').textContent,'Copy Complete Upload Prompt');assert.equal(f.timers.size,0);
-  f.deny(false);await f.source(undefined);assert(f.el('copy').disabled);assert(!f.el('save-first').hidden);let count=f.calls.length;await f.el('copy').onclick();assert.equal(f.calls.length,count);
+  f.deny(false);await f.source(undefined);assert(f.el('copy').disabled);assert(f.el('prompt').hidden);assert(f.el('return').hidden);let count=f.calls.length;await f.el('copy').onclick();assert.equal(f.calls.length,count);
   await f.source('source-2');const resolve=f.delay(),before=f.writes.length,old=f.el('copy').onclick();await settle();await f.source('source-3','new-product');resolve();await old;assert.equal(f.writes.length,before);
   await f.el('copy').onclick();assert.equal(f.writes.at(-1),'Complete UPDATE source-3');
   f.events.pagehide();assert.equal(f.timers.size,0);

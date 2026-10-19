@@ -39,8 +39,10 @@ and edition-preparation queue services are unchanged; no second product is creat
 The deterministic archive target recovers a lost move response. Old intake rows
 retain their previous path and behaviour.
 
-Save All unlocks **Copy Complete Upload Prompt** only when the current required
-WEBP set has a complete authoritative Dropbox receipt. The prompt is still built
+The final component is not mounted until Save All confirms the current required
+WEBP set and exact Dropbox destination. It is absent during selection, preparation,
+generation, saving, partial failures and after edits invalidate that receipt.
+It never loads a hidden PSD preview. **Copy Complete Upload Prompt** is built on click
 from the Developer Studio template and selected Draft/Live/Update operation.
 Its dynamic source section includes the exact saved WEBP directory, its folder ID
 when available, actual count, ordered roles, filenames and available file identities.
