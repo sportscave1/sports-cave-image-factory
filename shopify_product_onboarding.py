@@ -8,11 +8,12 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 
 LOG = logging.getLogger(__name__)
 CHECKPOINT = 'edition-product-onboarding-checkpoint'
 REVISION = 'edition-product-onboarding-revision'
-LOCK = 731902614
+LEASE = "edition-product-onboarding-lease"
 
 PRODUCT_PAGE = '''query EditionUpdatedProducts($first:Int!, $after:String, $query:String!) {
   products(first:$first, after:$after, query:$query, sortKey:UPDATED_AT) {
@@ -105,7 +106,13 @@ def process_receipt(row, db, config=None):
         db._update_webhook_event_status(row['webhook_id'], 'pending', error_message=str(exc))
         return {'status': 'pending', 'reason': str(exc)}
     if result.get('errors'):
-        raise RuntimeError('; '.join(result['errors']))
+        message = '; '.join(result['errors'])
+        # Classification warnings need metadata/review, not a stalled scan.
+        if all(error.startswith('Sport classification review required:') for error in result['errors']):
+            db._update_webhook_event_status(row['webhook_id'], 'pending', error_message=message)
+            return dict(result, status='pending')
+        db._update_webhook_event_status(row['webhook_id'], 'failed', error_message=message)
+        raise RuntimeError(message)
     decisions = result.get('eligibility_results') or []
     # Drafts, absent classification and late metadata remain durable pending work.
     pending = result.get('action') == 'skipped' or any(not d.get('eligible') for d in decisions)
@@ -116,8 +123,8 @@ def process_receipt(row, db, config=None):
     return result
 
 
-def drain(db, config=None, limit=10):
-    """Caller holds the session advisory lock; crashes release it automatically.
+def drain(db, config=None, limit=10, renew=None):
+    """Caller holds a durable expiring lease, compatible with transaction pools.
 
     Existing failed/processing receipts survive restart. Use the edition mirror
     retry schedule (30s exponential, capped at one hour), without a retry cutoff.
@@ -131,6 +138,8 @@ def drain(db, config=None, limit=10):
             ORDER BY COALESCE(processed_at,received_at),webhook_id LIMIT %s""", (limit,))
         rows = list(cur.fetchall())
     for row in rows:
+        if renew:
+            renew()
         try:
             process_receipt(row, db, config)
         except Exception as exc:
@@ -145,7 +154,7 @@ def drain(db, config=None, limit=10):
     return len(rows)
 
 
-def reconcile(db, config=None, max_pages=4):
+def reconcile(db, config=None, max_pages=4, renew=None):
     """Bounded update-window scan; save page continuation only after processing.
 
     Pending metadata is durably retained in receipts. API/persistence failures
@@ -164,6 +173,8 @@ def reconcile(db, config=None, max_pages=4):
         if not isinstance(connection, dict) or 'nodes' not in connection or 'pageInfo' not in connection:
             raise RuntimeError('Incomplete product reconciliation page.')
         for product in connection['nodes']:
+            if renew:
+                renew()
             pid = product['id'].rsplit('/', 1)[-1]
             event = 'edition-recovery-' + hashlib.sha256((product['id'] + product['updatedAt']).encode()).hexdigest()
             payload = {'id': pid}
@@ -194,21 +205,35 @@ def tick(scan=False, db=None, config=None):
         import supabase_backend as db
     if not db.is_configured():
         return
-    # Session lock works across receipt writes on other pool connections. Do not
-    # wrap network processing in a table/row lock or a long open transaction.
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute('SELECT pg_try_advisory_lock(%s) AS acquired', (LOCK,))
-        acquired = cur.fetchone()['acquired']
-        conn.commit()
-        if not acquired:
-            return
-        try:
-            drain(db, config)
-            if scan:
-                reconcile(db, config)
-        finally:
-            cur.execute('SELECT pg_advisory_unlock(%s)', (LOCK,))
+    # Session advisory locks are unsafe through transaction-mode poolers. Claim
+    # and renew an expiring lease in short committed transactions instead.
+    owner = str(uuid.uuid4())
+    def lease(release=False):
+        with db.connect() as conn, conn.cursor() as cur:
+            cur.execute("""UPDATE app_settings SET value=jsonb_build_object(
+                'owner',%s::text,'expires_at',now()+%s * interval '1 second'),updated_at=now()
+                WHERE key=%s AND value->>'owner'=%s RETURNING key""",
+                (owner, 0 if release else 600, LEASE, owner))
+            owned = cur.fetchone()
             conn.commit()
+            if not owned and not release:
+                raise RuntimeError('Product onboarding lease was lost; retry later.')
+    with db.connect() as conn, conn.cursor() as cur:
+        cur.execute("""INSERT INTO app_settings(key,value,updated_at)
+            VALUES(%s,jsonb_build_object('owner',%s::text,'expires_at',now()+interval '10 minutes'),now())
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=now()
+            WHERE (app_settings.value->>'expires_at')::timestamptz <= now()
+            RETURNING key""", (LEASE, owner))
+        acquired = cur.fetchone()
+        conn.commit()
+    if not acquired:
+        return
+    try:
+        drain(db, config, renew=lease)
+        if scan:
+            reconcile(db, config, renew=lease)
+    finally:
+        lease(release=True)
 
 
 def inspect_subscriptions():

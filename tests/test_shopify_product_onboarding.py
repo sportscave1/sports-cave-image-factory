@@ -191,3 +191,32 @@ def test_unknown_or_expired_history_fails_closed(state):
     deliver('uncertain-history')
     assert not rows(sql,'edition_products')
     assert all(r['status']=='pending' for r in rows(sql,'webhook_events'))
+
+
+def test_durable_lease_excludes_other_consumers_and_recovers_after_expiry(state, monkeypatch):
+    sql,p,history=state
+    calls=[]
+    def drain(*args, **kwargs):
+        calls.append(1)
+        kwargs['renew']()
+        onboarding.tick(db=db)  # competing instance must not enter drain
+    monkeypatch.setattr(onboarding,'drain',drain)
+    onboarding.tick(db=db)
+    assert calls == [1]
+    onboarding.tick(db=db)
+    assert calls == [1,1]  # normal release permits the next cycle
+    db.set_app_setting(onboarding.LEASE, {'owner':'crashed','expires_at':'2000-01-01T00:00:00Z'}, ensure_schema_first=False)
+    onboarding.tick(db=db)
+    assert calls == [1,1,1]
+
+
+def test_classification_review_is_pending_and_other_errors_remain_retryable(state, monkeypatch):
+    sql,p,history=state
+    db.claim_product_create_webhook_receipt({'id':PID.rsplit('/',1)[-1]},'review','products/update')
+    result={'errors':['Sport classification review required: missing sport']}
+    monkeypatch.setattr(db,'process_product_create_webhook',lambda *a,**k:result)
+    row={'payload':{'id':PID},'webhook_id':'review','topic':'products/update'}
+    assert onboarding.process_receipt(row,db)['status']=='pending'
+    result['errors']=['database mirror unavailable']
+    with pytest.raises(RuntimeError):onboarding.process_receipt(row,db)
+    assert rows(sql,'webhook_events')[0]['status']=='failed'
