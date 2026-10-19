@@ -117,6 +117,12 @@ def main():
                     import difflib
                     assert text == expected, '\n'.join(difflib.unified_diff(expected.splitlines(), text.splitlines()))
                     assert text.startswith(opening + 'UPLOAD OPERATION CORRELATION — REQUIRED\n')
+                    if mode == 'LIVE':
+                        assert 'PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING' in text
+                        assert 'Do not enable Add to Cart' in text
+                        assert 'Only if EVERY required check passes report PRODUCT PUBLISHED LIVE' not in text
+                    else:
+                        assert 'PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING' not in text
                     assert source['folder_path'] in text and source['folder_id'] in text
                     assert all(item['file_id'] in text and item['filename'] in text for item in source['files'])
                     if channel == 'msedge': assert 'product (2)' not in text

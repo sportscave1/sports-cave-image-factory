@@ -68,7 +68,8 @@ def test_complete_prompt_keeps_saved_template_and_mode_rules(mode):
     assert text.startswith(execution_opening(current_source(row)))
     assert text.count('DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST') == 1
     assert 'DEVELOPER CUSTOM COMMERCIAL COPY' in text
-    assert product_upload_price_ladder_prompt_text() in text
+    from product_upload_modes import common_build
+    assert product_upload_price_ladder_prompt_text() in common_build(text)
     assert 'DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST' in text
     assert 'product (2)/WEBP' in text and '"expected_webp_count": 8' in text
     assert 'do not need to be attached separately' in text

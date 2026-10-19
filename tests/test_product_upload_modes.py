@@ -17,7 +17,7 @@ class ModeTests(unittest.TestCase):
             self.assertIn(RULES,text)
             self.assertIn(app.PRODUCT_UPLOAD_META_PROMPT,text)
             self.assertIn(app.PRODUCT_UPLOAD_ALT_TEXT_PROMPT,text)
-            self.assertIn(app.product_upload_price_ladder_prompt_text(),text)
+            self.assertIn(app.product_upload_price_ladder_prompt_text(),modes.common_build(text))
             self.assertIn(app.PRODUCT_UPLOAD_MEDIA_RELIABILITY_SHARED,text)
             for required in ('16-variant','SKU','gallery','compare-at','Size guide','Prints in Posters, Prints, & Visual Artwork'):
                 self.assertIn(required,text)
