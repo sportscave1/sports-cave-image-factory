@@ -411,7 +411,12 @@ def list_folder(access_token, path="", *, max_entries=2000):
 
 def list_folder_page(access_token, path="", *, cursor="", limit=500, include_deleted=False):
     """Return one non-recursive Dropbox folder page without scanning the whole folder."""
-    clean_path = normalize_dropbox_path(path)
+    clean_path = str(path or '').strip()
+    if clean_path.startswith('id:'):
+        if not re.fullmatch(r'id:[A-Za-z0-9_-]+', clean_path):
+            raise ValueError('Invalid Dropbox folder ID.')
+    else:
+        clean_path = normalize_dropbox_path(path)
     page_limit = max(1, min(int(limit or 500), 2000))
     client = team_space_client(access_token)
     try:

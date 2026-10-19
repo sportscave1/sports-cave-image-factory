@@ -174,3 +174,16 @@ def test_copy_upload_prompt_preserves_mode_and_operation(monkeypatch,mode):
     assert tag(row['id']) in prompt and mode+' original prompt for Exact.psd' in prompt
     assert '/exact/saved/WEBP' in prompt
     build.assert_called_once_with(mode,'Exact.psd')
+
+
+def test_dropbox_listing_preserves_stable_folder_id_and_cursor(monkeypatch):
+    import dropbox_integration as dbx
+    client=Mock()
+    client.files_list_folder.return_value=SimpleNamespace(entries=[],cursor='next',has_more=True)
+    client.files_list_folder_continue.return_value=SimpleNamespace(entries=[],cursor='',has_more=False)
+    monkeypatch.setattr(dbx,'team_space_client',lambda token:client)
+    first=dbx.list_folder_page('fixture','id:exact-webp')
+    assert client.files_list_folder.call_args.args==('id:exact-webp',)
+    dbx.list_folder_page('fixture','id:exact-webp',cursor=first['cursor'])
+    client.files_list_folder_continue.assert_called_once_with('next')
+    with pytest.raises(ValueError):dbx.list_folder_page('fixture','id:../escape')
