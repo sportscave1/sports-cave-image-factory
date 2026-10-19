@@ -119,8 +119,8 @@
         <button class="tool" id="rotateRightButton" type="button" title="Rotate right" aria-label="Rotate right"><span class="icon">&#8635;</span></button>
         <div class="file-name" id="fileName"></div>
         <div class="toolbar-spacer"></div>
-        <button class="tool text-tool" id="copyImageButton" type="button" title="Copy image pixels"><span class="icon">&#x2398;</span><span class="tool-label">Copy image</span></button>
-        <button class="tool text-tool" id="downloadButton" type="button" title="Download Original" aria-label="Download Original"><span class="icon">&#8681;</span><span class="tool-label">Download</span></button>
+        <button class="tool text-tool" id="copyImageButton" type="button" title="Copy original file"><span class="icon">&#x2398;</span><span class="tool-label">Copy</span></button>
+        <button class="tool text-tool" id="downloadButton" type="button" title="Download Original" aria-label="Download Original"><span class="icon">&#8681;</span><span class="tool-label">Download Original</span></button>
         <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
       </div>
       <section class="stage" id="stage">
@@ -552,9 +552,10 @@
 
       async function copyImagePixels() {
         const path = state.path;
+        notify("Copying…");
         try {
-          await FilesOriginal.copy(`/api/files-download?relative_path=${encodeURIComponent(path)}`);
-          notify("Original image copied at native dimensions (PNG clipboard).");
+          await FilesOriginal.copy(FilesOriginal.snapshot([{path, name:state.name, url:`/api/files-download?relative_path=${encodeURIComponent(path)}`} ]));
+          notify("Copied 1 file");
         } catch (error) {
           notify(`${error.message || "Image copy failed."} Use Download Original.`);
         }
@@ -759,8 +760,8 @@
       if (state.path) loadImage(state.path, { folder: state.folder, name: state.name, revision: state.revision, replaceHistory: false });
       loadFolderImages();
       if (embedded) notifyOpenerReady();
-      elements.actualButton.title = "View preview pixels at 1:1; Copy/Download uses the original";
-      elements.copyImageButton.title = "Copy original image at native dimensions";
+      elements.actualButton.title = "View preview pixels at 1:1";
+      elements.copyImageButton.title = "Copy original file (browser support required)";
     </script>
   </body>
 </html>
