@@ -22,3 +22,11 @@
  .st-key-product-upload-workspace .st-key-product-upload-details,
  .st-key-product-upload-workspace .st-key-mockups-lifestyle-grid {grid-template-columns:minmax(0,1fr);}
 }
+
+/* Streamlit fades stale elements to .33 during fragment/app reruns. Progress
+   already communicates work, and disabled widgets retain duplicate-submit guards.
+   Scope by the mounted page marker; never alter dialogs or other page loading. */
+[data-testid="stMain"]:has(.product-upload-page-marker) [data-stale="true"] {
+ opacity:1!important;
+ transition:none!important;
+}

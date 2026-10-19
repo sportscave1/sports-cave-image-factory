@@ -11,6 +11,10 @@ def render_page(app):
     from product_upload_api import connect
     from product_upload_intake import Intakes
     user=app.current_os_user()
+    # Install before component/database reads so reruns retain readable content.
+    st.html('<style>'+(app.BASE_DIR/'mockups_page.css').read_text(encoding='utf-8')+
+            (app.BASE_DIR/'product_upload_page.css').read_text(encoding='utf-8')+
+            '</style><span class="product-upload-page-marker" aria-hidden="true"></span>')
     if '_product_upload_visit' not in st.session_state: st.session_state['_product_upload_visit']=uuid.uuid4().hex
     visit=st.session_state['_product_upload_visit']
     component=app.get_components_module().declare_component('product_uploads_workflow',path=str(app.BASE_DIR/'components/product_uploads'))
@@ -44,8 +48,6 @@ def render_page(app):
         from product_upload_dropbox import status
         row = status(row, connect)
     if not row or not row['data'].get('basic_validated'): return
-    st.html('<style>'+ (app.BASE_DIR/'mockups_page.css').read_text(encoding='utf-8')+
-            (app.BASE_DIR/'product_upload_page.css').read_text(encoding='utf-8')+'</style>')
     with st.container(key='product-upload-workspace'):
         with st.container(key='mockups-workspace'):
             render_design(app,row,user)
@@ -76,7 +78,8 @@ def progress_preview(path):
     return base64.b64encode(Path(path).read_bytes()).decode('ascii')
 
 
-@st.fragment(run_every=0.25)
+# Leave time for progress paint/terminal result hydration between fragment ticks.
+@st.fragment(run_every=1.0)
 def poll_generation(app,key,actor,name,sport,source_hash):
     from product_upload_jobs import JOBS
     if st.session_state.get('_product_upload_active')!=key:return
@@ -196,7 +199,7 @@ def render_design(app,row,user):
             except Exception as error:st.error(str(error));return
             st.rerun(scope='fragment')
         poll_render(key,user['id'],spec.get('state'))
-    else:st.caption('Artwork ready. Generate mockups to continue.')
+    elif not running and not result:st.caption('Artwork ready. Generate mockups to continue.')
     with st.container(key='product-upload-generation'):
         if pending or result:
             from product_upload_layout import focus_generation
