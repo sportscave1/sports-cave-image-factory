@@ -4,15 +4,15 @@
   const $=id=>document.getElementById(id),labels={DRAFT:'Upload to Draft',LIVE:'Upload to Live',UPDATE:'Update Existing'};
   let row=null,manual=false,enabled=true,busy=false,timer=null,previewTimer=null,previewAttempts=0,previewKey='',previewBlob='',promptText='',copyMode='',copyID='',stopped=false,epoch=0,section='full',component=false,activeID='',refreshKey='',controller=new AbortController();
   let lastHeight=0,selectedAt=0;const timedReady=new Set();
-  const copyFeedbackTimers=new Map(),copyLabels=new Map(['copy','fallback-copy'].map(id=>[id,$(id).innerHTML]));
+  const copyFeedbackTimers=new Map(),copyLabels=new Map(['copy'].map(id=>[id,$(id).innerHTML]));
   function restoreCopy(id){clearTimeout(copyFeedbackTimers.get(id));copyFeedbackTimers.delete(id);$(id).innerHTML=copyLabels.get(id);}
   function clearCopyFeedback(){for(const id of copyLabels.keys())restoreCopy(id);}
-  function showCopied(id){restoreCopy(id);$(id).textContent='Copied';copyFeedbackTimers.set(id,setTimeout(()=>{restoreCopy(id);resize();},2000));}
+  function showCopied(id){restoreCopy(id);$(id).textContent='Copied ✓';copyFeedbackTimers.set(id,setTimeout(()=>{restoreCopy(id);resize();},2000));}
   const metrics=window.productUploadMetrics={requests:[],selections:[],note:'Measured browser elapsed time; artwork preparation runs on the server.'};
   function record(list,value){list.push(value);if(list.length>100)list.shift();}
   const abortError=()=>Object.assign(new Error('Selection cancelled'),{name:'AbortError'});
   const notify=()=>{if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{id:row?.id||null,manual,mode:$('mode').value,visible:!document.hidden,linked:!!row?.product_title,nonce:crypto.randomUUID()},dataType:'json'},'*');};
-  function reset(){savedPackage.reset();mapping.reset();clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('preview').textContent='Preview pending';$('fallback').close();clear();render();notify();}
+  function reset(){savedPackage.reset();mapping.reset();clearCopyFeedback();stopped=false;selectedAt=0;epoch++;controller.abort();controller=new AbortController();row=null;busy=false;promptText='';copyID='';copyMode='';clearTimeout(timer);clearTimeout(previewTimer);previewKey='';previewAttempts=0;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob='';$('filename').textContent='';$('stage').textContent='';$('detail').textContent='';$('preview').textContent='Preview pending';clear();render();notify();}
   const fail=e=>{if(e.name==='AbortError')return;$('error').textContent=e.message||String(e);$('error').hidden=false;};
   const clear=()=>{$('error').hidden=true;};
   async function request(path,body,signal=controller.signal){
@@ -89,15 +89,31 @@
   async function copied(id='copy'){
     const current=epoch;
     if(copyMode!==$('mode').value||copyID!==(manual?'':row?.id))throw new Error('The selected action changed. Copy the current prompt again.');
-    if(!manual)row=(await action('copied')).upload;if(current!==epoch||stopped)return;showCopied(id);$('fallback').close();render();
+    if(!manual)row=(await action('copied')).upload;if(current!==epoch||stopped)return;showCopied(id);render();
   }
-  async function copy(){if(busy)return;restoreCopy('copy');const current=epoch;busy=true;clear();render();$('copy').textContent='Preparing prompt…';try{promptText=(await action('prompt',{id:manual?null:row?.id})).prompt;if(current!==epoch)return;copyMode=$('mode').value;copyID=manual?'':row?.id;let deadline;try{await Promise.race([navigator.clipboard.writeText(promptText),new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Clipboard request timed out.')),2500);})]);}catch(e){if(current!==epoch)return;$('fallback-text').value=promptText;$('fallback').showModal();$('fallback-text').select();fail(new Error('Clipboard access was blocked or did not respond. Use the copy fallback to continue.'));return;}finally{clearTimeout(deadline);}if(current!==epoch)return;await copied();}catch(e){fail(e);}finally{if(current!==epoch)return;busy=false;if($('copy').textContent!=='Copied')restoreCopy('copy');render();}}
-  $('fallback-copy').onclick=async()=>{restoreCopy('fallback-copy');try{$('fallback-text').select();if(!document.execCommand('copy'))throw new Error('Press Ctrl+C while the prompt is selected.');await copied('fallback-copy');clear();}catch(e){fail(e);}};
-  $('fallback-text').addEventListener('copy',e=>{const t=$('fallback-text');if(e.isTrusted&&t.value.slice(t.selectionStart,t.selectionEnd)===promptText)queueMicrotask(()=>copied().catch(fail));});
+  async function copy(){
+    if(busy)return;restoreCopy('copy');const current=epoch,mode=$('mode').value,id=manual?'':row?.id;
+    busy=true;clear();render();$('copy').textContent='Copying…';
+    const valid=()=>{if(current!==epoch||stopped||mode!==$('mode').value||id!==(manual?'':row?.id))throw abortError();};
+    try{
+      const text=action('prompt',{id:manual?null:row?.id}).then(data=>{valid();return data.prompt;});
+      text.catch(()=>{}); // A blocked clipboard must still consume a failed retrieval.
+      if(navigator.clipboard?.write&&typeof ClipboardItem==='function'){
+        const payload=text.then(value=>new Blob([value],{type:'text/plain'}));payload.catch(()=>{});
+        await navigator.clipboard.write([new ClipboardItem({'text/plain':payload})]);
+      }else{
+        const value=await text;valid();
+        if(!navigator.clipboard?.writeText)throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(value);
+      }
+      valid();copyMode=mode;copyID=id;await copied();
+    }catch(e){if(current===epoch&&e.name!=='AbortError')fail(new Error('Could not copy prompt. Allow clipboard access and retry.'));}
+    finally{if(current===epoch){busy=false;if($('copy').textContent!=='Copied ✓')restoreCopy('copy');render();}}
+  }
   async function loadPreview(url){const current=epoch;if(stopped||document.hidden||previewAttempts>=12)return;previewKey=url;previewAttempts++;try{const r=await fetch(url,{credentials:'same-origin'});if(current!==epoch)return;if(r.status===202){$('preview').textContent='Preparing preview';previewTimer=setTimeout(()=>{if(row?.preview_url===url)loadPreview(url);},5000);return;}if(!r.ok)throw new Error('Preview unavailable');const blob=await r.blob();if(current!==epoch||row?.preview_url!==url)return;if(previewBlob)URL.revokeObjectURL(previewBlob);previewBlob=URL.createObjectURL(blob);const img=new Image();img.alt='Prepared design preview';img.src=previewBlob;img.onload=()=>{if(current===epoch&&selectedAt)record(metrics.selections,{id:row.id,selection_to_preview_ms:Date.now()-selectedAt,representation:url.includes("&prepared=")?"prepared-artwork":"dropbox-thumbnail"});};$('preview').replaceChildren(img);}catch(e){if(current===epoch)$('preview').textContent='Preview unavailable';}}
-  $('choose').onclick=()=>{$('picker').showModal();browse();};$('copy').onclick=copy;$('close').onclick=()=>$('fallback').close();
-  $('mode').onchange=async()=>{clear();try{if(row&&!manual)row=(await action('mode')).upload;promptText='';render();notify();}catch(e){fail(e);if(row)$('mode').value=row.mode;}};
-  $('manual').onclick=()=>{manual=!manual;if(!manual&&row)$('mode').value=row.mode;clear();render();notify();};
+  $('choose').onclick=()=>{$('picker').showModal();browse();};$('copy').onclick=copy;
+  $('mode').onchange=async()=>{clearCopyFeedback();clear();try{if(row&&!manual)row=(await action('mode')).upload;promptText='';render();notify();}catch(e){fail(e);if(row)$('mode').value=row.mode;}};
+  $('manual').onclick=()=>{clearCopyFeedback();manual=!manual;if(!manual&&row)$('mode').value=row.mode;clear();render();notify();};
   $('new').onclick=()=>{pickerRoot='review';pickerPath='';pickerPage='';$('picker-root').value='review';$('picker-search').value='';reset();};$('remove').onclick=()=>{reset();};
   $('retry').onclick=async()=>{try{await action('retry-file');await refresh();}catch(e){fail(e);}};
   window.addEventListener('pageshow',event=>{if(event.persisted)reset();});
