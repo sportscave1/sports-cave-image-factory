@@ -95,6 +95,20 @@ def test_busy_queue_has_actionable_retry_response():
     assert response.status_code==503 and 'retry the same request' in json.loads(response.body)['error']
 
 
+def test_search_offers_failed_replacement_correction_without_bypassing_submit_guards():
+    row=dict(product_count=1,dropbox_file_id='id:original',file_path='/Original.psd',edition_total=100,
+        status='Blocked',reviewing=False,approved=True,preparation_hash='a'*64,retained=True,
+        replacement=dict(stage='Failed',attempts=0,expected_source={'file_id':'id:original'}))
+    assert 'confirm' in queue.eligibility(row)
+    assert not queue.eligibility(row,True)
+    row['replacement']['attempts']=3
+    assert 'separate review' in queue.eligibility(row,True)
+    row['replacement'].update(attempts=0,manual_required=True)
+    assert 'manual' in queue.eligibility(row,True)
+    row['replacement']=None
+    assert 'protected' in queue.eligibility(row,True)
+
+
 def test_search_mapping_add_and_manual_reset_deferred_restrictions(operations,monkeypatch):
     d,sql=operations;pid,fid=mapping(sql,1000)
     result=queue.search(d.connect,'1000')['rows'][0];assert result['eligible'] and result['status']=='Not queued'

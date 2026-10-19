@@ -40,21 +40,6 @@ def load_app_prompt_labels():
     raise AssertionError("PROMPT_LABELS not found in app.py")
 
 
-def run_mockups_page():
-    app_test = AppTest.from_file(str(ROOT / "app.py"))
-    app_test.session_state["sports_cave_authenticated"] = True
-    app_test.session_state["selected_page"] = "Mockups"
-    app_test.session_state["startup_shell_loaded"] = True
-    return app_test.run(timeout=20)
-
-
-def run_mockups_page_from_query_param():
-    app_test = AppTest.from_file(str(ROOT / "app.py"))
-    app_test.session_state["sports_cave_authenticated"] = True
-    app_test.query_params["page"] = "mockups"
-    return app_test.run(timeout=20)
-
-
 def tiny_png_bytes(color=(212, 165, 76)):
     buffer = io.BytesIO()
     Image.new("RGB", (10, 10), color).save(buffer, format="PNG")
@@ -391,255 +376,6 @@ class MockupPromptPreviewTests(unittest.TestCase):
 
         self.assertEqual(len(prompt_items), len(image_factory.LIFESTYLE_PROMPT_SPECS))
 
-    def test_mockups_page_does_not_render_prompt_ui_before_generation(self):
-        prompt_labels = load_app_prompt_labels()
-        app_test = run_mockups_page()
-        expected_labels = [
-            prompt_labels[filename]
-            for filename, _, _ in image_factory.LIFESTYLE_PROMPT_SPECS
-        ]
-        rendered_markdown = [markdown.value for markdown in app_test.markdown]
-        rendered_text = "\n".join(
-            rendered_markdown
-            + [caption.value for caption in app_test.caption]
-            + [button.label for button in app_test.button]
-        )
-
-        self.assertEqual(len(app_test.exception), 0)
-        self.assertEqual(len(app_test.expander), 0)
-        self.assertEqual(len(app_test.text_area), 0)
-        self.assertIn("Generate Core Shopify Images", [button.label for button in app_test.button])
-        self.assertNotIn("Image Generation Prompts", rendered_text)
-        self.assertNotIn("Copy Prompt", rendered_text)
-        for label in expected_labels:
-            self.assertNotIn(f"**{label}**", rendered_markdown)
-
-    def test_first_artwork_upload_preserves_mockups_route_and_uses_stable_widget_key(self):
-        app_test = run_mockups_page()
-
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        app_test.file_uploader[0].set_value(
-            [("first-upload.png", tiny_png_bytes(), "image/png")]
-        )
-        app_test.run(timeout=20)
-
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        self.assertEqual(len(app_test.exception), 0)
-        self.assertIn("Uploaded Artwork", [subheader.value for subheader in app_test.subheader])
-        self.assertIn("mockups_upload_processing_cache", app_test.session_state)
-
-    def test_upload_validation_error_stays_on_mockups_page(self):
-        app_test = run_mockups_page()
-
-        app_test.file_uploader[0].set_value(
-            [("bad-upload.png", b"not an image", "image/png")]
-        )
-        app_test.run(timeout=20)
-
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertTrue(
-            any("not a valid image" in error.value for error in app_test.error)
-        )
-
-    def test_mockups_upload_reruns_do_not_reset_selected_page_to_dashboard(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
-        init_source = source[source.index("def init_session_state") : source.index("\n\ndef log_app_memory")]
-        mockups_page = source[
-            source.index("def render_mockups_page") : source.index("\n\ndef render_product_uploads_page")
-        ]
-
-        self.assertNotIn('st.session_state.selected_page = "Dashboard"\n        st.session_state.startup_shell_loaded = True', init_source)
-        self.assertIn('key="mockups_artwork_upload"', mockups_page)
-        self.assertIn("process_uploaded_artwork_once(uploaded_file)", mockups_page)
-        self.assertNotIn("on_change", mockups_page)
-
-    def test_mockups_route_restores_from_page_query_param_after_state_loss(self):
-        app_test = run_mockups_page_from_query_param()
-
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        self.assertIn("mockups", app_test.query_params["page"])
-        self.assertIn("Mockups", [title.value for title in app_test.title])
-        self.assertEqual(len(app_test.exception), 0)
-
-    def test_mockups_route_remains_selected_after_generate_button_rerun(self):
-        app_test = run_mockups_page()
-        app_test.text_input[0].set_value("Route Stable Product")
-        app_test.selectbox[0].select("Motorsport")
-        app_test.run(timeout=20)
-
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-
-    def test_mockups_canonical_route_survives_legacy_state_reset_and_rerun(self):
-        app_test = run_mockups_page()
-        app_test.session_state["selected_page"] = "Dashboard"
-
-        app_test.run(timeout=20)
-
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertIn("mockups", app_test.query_params["page"])
-        self.assertIn("Mockups", [title.value for title in app_test.title])
-        self.assertEqual(len(app_test.exception), 0)
-
-    def test_mockup_callbacks_do_not_contain_home_navigation(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
-        mockup_workflow = source[
-            source.index("def save_uploaded_lifestyle_result") : source.index("\n\ndef render_recent_runs_sidebar")
-        ]
-
-        self.assertNotIn('set_current_page("Dashboard"', mockup_workflow)
-        self.assertNotIn('session_state["current_page"] = "Dashboard"', mockup_workflow)
-        self.assertNotIn('session_state.selected_page = "Dashboard"', mockup_workflow)
-
-    def test_same_upload_is_processed_once_across_product_and_sport_reruns(self):
-        app_test = run_mockups_page()
-        upload_bytes = tiny_png_bytes()
-
-        app_test.file_uploader[0].set_value(
-            [("cached-upload.png", upload_bytes, "image/png")]
-        )
-        app_test.run(timeout=20)
-        first_cache = dict(app_test.session_state["mockups_upload_processing_cache"])
-
-        app_test.text_input[0].set_value("Cached Product Name")
-        app_test.run(timeout=20)
-        second_cache = dict(app_test.session_state["mockups_upload_processing_cache"])
-
-        app_test.selectbox[0].select("Motorsport")
-        app_test.run(timeout=20)
-        third_cache = dict(app_test.session_state["mockups_upload_processing_cache"])
-
-        self.assertEqual(first_cache, second_cache)
-        self.assertEqual(second_cache, third_cache)
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-
-    def test_mockups_page_does_not_render_old_expander_or_empty_state(self):
-        app_test = run_mockups_page()
-        rendered_text = "\n".join(
-            [markdown.value for markdown in app_test.markdown]
-            + [caption.value for caption in app_test.caption]
-        )
-
-        self.assertNotIn("Preview All Image Prompts", rendered_text)
-        self.assertNotIn(
-            "Upload artwork and complete the product name and sport category to preview all prompts.",
-            rendered_text,
-        )
-
-    def test_mockups_initial_render_performs_no_generation_or_external_prompt_reads(self):
-        with patch.dict(
-            os.environ,
-            {prompt_store.ENABLE_LIFESTYLE_SUPABASE_READS_ENV: "true"},
-        ), patch.object(
-            prompt_store,
-            "_load_prompt_from_supabase",
-            side_effect=AssertionError("prompt preview must not read Supabase"),
-        ), patch.object(
-            image_factory,
-            "generate_product_images",
-            side_effect=AssertionError("prompt preview must not generate images"),
-        ):
-            app_test = run_mockups_page()
-
-        self.assertEqual(len(app_test.exception), 0)
-        self.assertEqual(len(app_test.text_area), 0)
-
-    def test_generation_still_requires_valid_artwork_before_generator_runs(self):
-        app_test = run_mockups_page()
-        generate_button_index = [
-            index
-            for index, button in enumerate(app_test.button)
-            if button.label == "Generate Core Shopify Images"
-        ][0]
-
-        with patch.object(
-            image_factory,
-            "generate_product_images",
-            side_effect=AssertionError("generator must not run without artwork"),
-        ):
-            app_test.button[generate_button_index].click().run(timeout=20)
-
-        self.assertTrue(
-            any(error.value == "Please upload an artwork image first." for error in app_test.error)
-        )
-        self.assertEqual(len(app_test.exception), 0)
-        self.assertFalse(
-            any("generator must not run without artwork" in str(exception.value) for exception in app_test.exception)
-        )
-
-    def test_mockups_page_has_no_pre_generation_prompt_preview_path(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
-        mockups_page = source[
-            source.index("def render_mockups_page") : source.index("\n\ndef render_product_uploads_page")
-        ]
-
-        self.assertNotIn("def render_mockup_prompt_preview", source)
-        self.assertNotIn("render_mockup_prompt_preview", source)
-        self.assertNotIn("Image Generation Prompts", mockups_page)
-        self.assertNotIn("prompt_preview_rendered", mockups_page)
-        self.assertLess(
-            mockups_page.index("final_prompt_items = build_mockup_final_prompt_items("),
-            mockups_page.index('generate_clicked = st.button("Generate Core Shopify Images"'),
-        )
-        self.assertIn("final_prompt_items=final_prompt_items", mockups_page)
-        self.assertIn("render_generation_result(st.session_state.last_generation_result)", mockups_page)
-
-    def test_generated_previews_render_above_post_generation_prompt_cards(self):
-        source = (ROOT / "app.py").read_text(encoding="utf-8")
-        generation_result = source[
-            source.index("def render_generation_result") : source.index("\n\ndef render_recent_runs_sidebar")
-        ]
-        prompt_fragment = source[
-            source.index("def _render_prompt_card_group") : source.index("\n\ndef render_optional_package_controls")
-        ]
-        mockups_page = source[
-            source.index("def render_mockups_page") : source.index("\n\ndef render_product_uploads_page")
-        ]
-
-        self.assertIn("render_generated_previews(result)", generation_result)
-        self.assertLess(
-            generation_result.index("render_generated_previews(result)"),
-            generation_result.index("render_prompt_cards("),
-        )
-        self.assertIn("render_final_zip_download(result)", prompt_fragment)
-        self.assertIn("render_generation_result(st.session_state.last_generation_result)", mockups_page)
-        self.assertNotIn("render_lifestyle_cards=False", mockups_page)
-        self.assertNotIn("render_zip=False", mockups_page)
-
-    def test_stale_prompt_paths_are_refreshed_to_current_prompt_collection(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            run_dir = Path(tmpdir)
-            app_test = AppTest.from_file(str(ROOT / "app.py"))
-            app_test.session_state["sports_cave_authenticated"] = True
-            app_test.session_state["selected_page"] = "Mockups"
-            app_test.session_state["startup_shell_loaded"] = True
-            app_test.session_state["last_generation_result"] = build_stale_legacy_prompt_generation_result(run_dir)
-            app_test.run(timeout=30)
-
-            self.assertEqual(len(app_test.exception), 0)
-            result = app_test.session_state["last_generation_result"]
-            prompt_names = [Path(prompt_path).name for prompt_path in result["prompt_paths"]]
-            rendered_text = "\n".join(
-                [markdown.value for markdown in app_test.markdown]
-                + [caption.value for caption in app_test.caption]
-            )
-
-            self.assertEqual(prompt_names, EXPECTED_MOCKUP_PROMPT_FILENAMES)
-            self.assertEqual(
-                [item["filename"] for item in result["final_prompt_items"]],
-                EXPECTED_MOCKUP_PROMPT_FILENAMES,
-            )
-            self.assertNotIn("14-retired-social-prompt.txt", prompt_names)
-            self.assertNotIn("Retired Social Prompt", rendered_text)
-            self.assertNotIn("14 - Premium Man Cave With Pool Table (Social)", rendered_text)
-            self.assertNotIn("15 - Premium Tool Shed / Workshop (Social)", rendered_text)
-            self.assertNotIn("16 - Man Cave With Pool Table (Social)", rendered_text)
-            self.assertNotIn("Social Lifestyle Mockups", rendered_text)
-            self.assertNotIn("17 - Architectural Loft / Statement Wall (Social)", rendered_text)
 
     def test_image_factory_import_is_reloaded_when_prompt_specs_change(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -658,68 +394,6 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertIn("importlib.import_module", import_branch_source)
         self.assertIn("importlib.reload(image_factory)", reload_branch_source)
 
-    def test_prompt_card_upload_auto_registers_for_zip_without_add_to_zip_click(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            run_dir = Path(tmpdir)
-            app_test = AppTest.from_file(str(ROOT / "app.py"))
-            app_test.session_state["sports_cave_authenticated"] = True
-            app_test.session_state["selected_page"] = "Mockups"
-            app_test.session_state["startup_shell_loaded"] = True
-            app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)
-            app_test.run(timeout=20)
-
-            self.assertEqual(len(app_test.exception), 0)
-            self.assertEqual(len(app_test.file_uploader), 4)
-            self.assertNotIn("Add To ZIP", [button.label for button in app_test.button])
-
-            app_test.file_uploader[-1].set_value(
-                [("living-room.png", tiny_png_bytes((20, 40, 80)), "image/png")]
-            )
-            app_test.run(timeout=30)
-
-            result = app_test.session_state["last_generation_result"]
-            prompt_name = "03-living-room-prompt.txt"
-            self.assertIn(prompt_name, result["lifestyle_mockup_paths"])
-            product_assets = [
-                asset
-                for asset in result["assets"]
-                if asset.get("prompt_filename") == prompt_name
-                and asset.get("zip_group") == image_factory.ASSET_CATEGORY_PRODUCT
-            ]
-            self.assertEqual(len(product_assets), 1)
-            self.assertTrue(Path(product_assets[0]["webp_path"]).exists())
-            self.assertTrue(Path(product_assets[0]["jpg_path"]).exists())
-
-            core_checkbox = next(
-                checkbox
-                for checkbox in app_test.checkbox
-                if checkbox.label == "Core Images"
-            )
-            core_checkbox.uncheck()
-            app_test.run(timeout=30)
-
-            captions = [caption.value for caption in app_test.caption]
-            selected_count_captions = [
-                caption
-                for caption in captions
-                if "files selected for ZIP" in caption
-            ]
-            self.assertIn("2 files selected for ZIP", selected_count_captions)
-
-            zip_paths = sorted((run_dir / "zip").glob("apptest-product-selected-*.zip"), key=lambda path: path.stat().st_mtime)
-            self.assertTrue(zip_paths)
-            with zipfile.ZipFile(zip_paths[-1]) as archive:
-                names = set(archive.namelist())
-
-            self.assertEqual(
-                names,
-                {
-                    "jpg/apptest-product-black-framed-afl-living-room-lifestyle.jpg",
-                    "WEBP/apptest-product-black-framed-afl-living-room-lifestyle.webp",
-                },
-            )
-            self.assertNotIn("WEBP/apptest-product-black-framed-afl-wall-art.webp", names)
-            self.assertEqual(len(names), 2)
 
     def test_prompt_card_uploads_do_not_force_full_page_reruns(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -740,39 +414,6 @@ class MockupPromptPreviewTests(unittest.TestCase):
             prompt_cards.index('if saved_lifestyle_paths:'),
         )
 
-    def test_first_prompt_upload_keeps_remaining_upload_slots_available(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            run_dir = Path(tmpdir)
-            app_test = AppTest.from_file(str(ROOT / "app.py"))
-            app_test.session_state["sports_cave_authenticated"] = True
-            app_test.session_state["selected_page"] = "Mockups"
-            app_test.session_state["startup_shell_loaded"] = True
-            app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)
-            app_test.run(timeout=20)
-
-            uploader_count = len(app_test.file_uploader)
-            self.assertEqual(uploader_count, 4)
-            app_test.file_uploader[1].set_value(
-                [("first-lifestyle.png", tiny_png_bytes((20, 40, 80)), "image/png")]
-            )
-            app_test.run(timeout=30)
-
-            self.assertEqual(len(app_test.file_uploader), uploader_count)
-            self.assertEqual(len(app_test.exception), 0)
-            self.assertIn(
-                EXPECTED_MOCKUP_PROMPT_FILENAMES[0],
-                app_test.session_state["last_generation_result"]["lifestyle_mockup_paths"],
-            )
-
-            app_test.file_uploader[2].set_value(
-                [("second-lifestyle.png", tiny_png_bytes((80, 40, 20)), "image/png")]
-            )
-            app_test.run(timeout=30)
-
-            saved_paths = app_test.session_state["last_generation_result"]["lifestyle_mockup_paths"]
-            self.assertEqual(len(app_test.file_uploader), uploader_count)
-            self.assertIn(EXPECTED_MOCKUP_PROMPT_FILENAMES[0], saved_paths)
-            self.assertIn(EXPECTED_MOCKUP_PROMPT_FILENAMES[1], saved_paths)
 
     def test_post_generation_prompt_cards_render_copy_prompt_upload_and_zip_controls(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -798,3 +439,63 @@ class MockupPromptPreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Shared coverage formerly reached through the retired standalone page.
+# Exercise the preserved services directly with a Product Uploads result binding.
+class SharedMockupRegressionTests(unittest.TestCase):
+    def test_stale_prompt_paths_are_refreshed_to_current_prompt_collection(self):
+        import app
+        with tempfile.TemporaryDirectory() as folder, patch.object(app, 'image_factory', image_factory):
+            result = build_stale_legacy_prompt_generation_result(folder)
+            result = app.ensure_lifestyle_prompts(result)
+            self.assertEqual([Path(p).name for p in result['prompt_paths']], EXPECTED_MOCKUP_PROMPT_FILENAMES)
+            self.assertEqual([p['filename'] for p in result['final_prompt_items']], EXPECTED_MOCKUP_PROMPT_FILENAMES)
+            self.assertNotIn('Retired Social Prompt', str(result['final_prompt_items']))
+
+    def test_prompt_upload_registers_real_assets_and_retains_other_slots(self):
+        import app
+        from tests.test_mockup_second_image_upload import FakeSessionState, CountingUpload
+        with tempfile.TemporaryDirectory() as folder:
+            result = build_restored_generation_result(folder)
+            result['_product_upload_intake'] = 'isolated-intake'
+            for key in ('black_framed_webp_path', 'black_framed_jpg_path'):
+                Image.new('RGB', (40, 30), 'navy').save(result[key])
+            state = FakeSessionState(current_page='Product Uploads', _product_upload_active='isolated-intake',
+                                     _product_upload_mockups_result=result)
+            with patch.object(app, 'image_factory', image_factory), patch.object(app.st, 'session_state', state), patch.object(app, 'record_activity_log'):
+                for i, prompt in enumerate(result['prompt_paths']):
+                    upload = CountingUpload(tiny_png_bytes((20+i, 40, 80)), file_id='upload-'+str(i))
+                    result = app.auto_register_lifestyle_upload(result, Path(prompt), upload)
+                    self.assertEqual(len(result['lifestyle_mockup_paths']), i+1)
+                    self.assertEqual(len(result['prompt_paths']), 3)
+                    paths = result['lifestyle_mockup_paths'][Path(prompt).name]
+                    self.assertTrue(Path(paths['webp_path']).is_file())
+                    self.assertFalse(paths.get('jpg_path'))
+                    again = app.auto_register_lifestyle_upload(result, Path(prompt), upload)
+                    self.assertEqual(again['lifestyle_mockup_paths'], result['lifestyle_mockup_paths'])
+                assets = [a for a in result['assets'] if a.get('prompt_filename') in EXPECTED_MOCKUP_PROMPT_FILENAMES]
+                self.assertEqual(len(assets), 3)
+                manifest = app._mockup_dropbox_manifest(result, [image_factory.ASSET_CATEGORY_PRODUCT])
+                self.assertEqual(len(manifest), 3)
+                self.assertTrue(all(x['archive_name'].lower().endswith('.webp') for x in manifest))
+
+    def test_shared_previews_still_precede_prompt_and_download_controls(self):
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        tree = ast.parse(source)
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'render_generation_result')
+        body = ast.get_source_segment(source, node)
+        self.assertLess(body.index('render_generated_previews(result)'), body.index('render_prompt_cards('))
+        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'render_prompt_cards')
+        self.assertIn('render_final_zip_download(result)', ast.get_source_segment(source, node))
+
+    def test_mockup_callbacks_do_not_contain_home_navigation(self):
+        source = (ROOT / 'app.py').read_text(encoding='utf-8')
+        names = {'save_uploaded_lifestyle_result', 'auto_register_lifestyle_upload',
+                 '_consume_mockup_prompt_edit_request', 'remove_uploaded_lifestyle_result'}
+        bodies = [ast.get_source_segment(source, n) for n in ast.parse(source).body
+                  if isinstance(n, ast.FunctionDef) and n.name in names]
+        self.assertEqual(len(bodies), len(names))
+        for body in bodies:
+            self.assertNotIn('set_current_page("Dashboard"', body)
+            self.assertNotIn('session_state["current_page"] = "Dashboard"', body)
+            self.assertNotIn('session_state.selected_page = "Dashboard"', body)

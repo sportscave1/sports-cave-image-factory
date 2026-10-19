@@ -51,12 +51,11 @@ PAGE_REGISTRY = (
     {"key": "task_recorder", "route": "Task Recorder", "label": "Task Recorder", "worker_assignable": False, "top_level": True},
     {"key": "worker_health", "route": "Worker Health", "label": "Worker Health", "worker_assignable": False, "top_level": True},
     {"key": "developer_studio", "route": "Developer Studio", "label": "Dev Mode", "worker_assignable": False, "top_level": True},
-    {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": True},
+    {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": False, "parent_key": "developer", "navigation_child": True},
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
     {"key": "orders", "route": "Orders", "label": "Orders", "worker_assignable": True},
     {"key": "prodigi", "route": "Prodigi", "label": "Fulfilment", "worker_assignable": True},
     {"key": "edition_ops", "route": "Edition Ops", "label": "Edition Ops", "worker_assignable": True},
-    {"key": "mockups", "route": "Mockups", "label": "Mockups", "worker_assignable": True},
     {
         "key": social_media.SOCIAL_MEDIA_PAGE_KEY,
         "route": social_media.SOCIAL_MEDIA_ROUTE,
@@ -212,6 +211,8 @@ PAGE_REGISTRY = (
 )
 
 PAGE_ALIASES = {
+    "Mockups": "Product Uploads",
+    "mockups": "Product Uploads",
     "Settings": "Accounts & Access",
     "Marketing Factory": "Ads",
     "Dropbox": "Files",

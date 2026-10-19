@@ -1,3 +1,2 @@
 # Installed only by the Windows recorder launcher; no production requirement changes.
 playwright==1.63.0
-

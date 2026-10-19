@@ -23,6 +23,7 @@ class Cursor:
         if 'FROM edition_products' in self.last:return [{'product_title':'Art','shopify_handle':'art'}]
         return list(self.rows.values())
     def fetchone(self):
+        if 'to_regprocedure' in self.last:return {'name':None}
         if 'to_regclass' in self.last:return {'name':getattr(self,'onboarding_schema',None)}
         return self.write
 

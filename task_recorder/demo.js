@@ -18,4 +18,3 @@ document.getElementById('productForm').onsubmit=ev=>{
   submissions:Number(document.getElementById('result').dataset.submissions||0)+1};
   const e=document.getElementById('result');e.dataset.submissions=String(result.submissions);e.textContent=JSON.stringify(result);
 };
-

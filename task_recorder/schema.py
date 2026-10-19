@@ -132,4 +132,3 @@ def resolve_task(task, values):
                     raise Invalid("Credential/session files cannot be uploaded.")
             step["value"] = value
     return obj
-

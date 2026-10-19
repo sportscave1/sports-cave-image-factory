@@ -109,31 +109,7 @@ class ArtworkMemoryTests(unittest.TestCase):
                     image.load()
                     self.assertEqual(image.size, (1536, 1024))
 
-    def test_failed_preview_keeps_upload_open_and_does_not_cache_partial_file(self):
-        state = FakeSessionState()
-        preview_dir = self.root / "preview"
-        upload = Upload(image_bytes())
-        with patch.object(app.st, "session_state", state), patch.object(app, "UPLOAD_PREVIEW_DIR", preview_dir):
-            with patch.object(Image.Image, "save", side_effect=MemoryError("preview allocation")):
-                with self.assertRaises(factory.MemoryLimitExceededError):
-                    app.process_uploaded_artwork_once(upload)
-            self.assertFalse(upload.closed)
-            self.assertEqual(upload.tell(), 0)
-            self.assertEqual(list(preview_dir.iterdir()), [])
-            self.assertFalse(state["mockups_upload_processing_cache"])
-            details = app.process_uploaded_artwork_once(upload)
-            self.assertTrue(Path(details["preview_path"]).exists())
 
-    def test_artwork_rerun_uses_disk_metadata_cache_without_redecode(self):
-        state = FakeSessionState()
-        with patch.object(app.st, "session_state", state), patch.object(app, "UPLOAD_PREVIEW_DIR", self.root / "preview"):
-            upload = Upload(image_bytes())
-            first = app.process_uploaded_artwork_once(upload)
-            with patch.object(Image, "open", side_effect=AssertionError("decoded on rerun")):
-                self.assertEqual(app.process_uploaded_artwork_once(upload), first)
-            app.process_uploaded_artwork_once(Upload(image_bytes(dimensions=(40, 30))))
-            assert_lightweight(state)
-            self.assertEqual(upload.tell(), 0)
 
     def test_lifestyle_all_slots_partial_export_failure_preserves_previous(self):
         original_save = Image.Image.save

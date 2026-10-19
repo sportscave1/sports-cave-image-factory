@@ -73,6 +73,13 @@ def eligibility(row,repair_confirmed=False):
     if pending.get('stage') in ('Discovering','Queued','Preparing'):return 'An explicit reset/reprocess is already in progress.'
     if row['status']=='Preparing':return 'An owned worker lease or recovery operation is still present. Wait for its recovery; do not force a retry.'
     if row['reviewing']:return 'An approval operation is pending or processing. Wait for its authoritative result.'
+    if pending.get('stage')=='Failed':
+        if row['status'] not in ('Blocked','Needs PSD Repair','Cloud Ready') or pending.get('attempts',0)>=3:
+            return 'The failed replacement requires separate review before another native attempt.'
+        if not repair_confirmed:return 'Review the failed replacement and confirm the required correction before retrying.'
+        # Availability only. submit always calls Reset.retry_failed, which locks
+        # and revalidates the original mapping, source, checkpoint and budget.
+        return ''
     if row['approved'] or row.get('preparation_hash') or row['retained']:return 'Prepared or approved artwork is protected. Use existing Review / Repair or the explicit reset/reprocess workflow.'
     if row.get('file_id') and row['file_id']!=row['dropbox_file_id']:return 'The mapped PSD differs from the queue source. Resolve the mapping explicitly first.'
     import auto_editions_v17
@@ -116,6 +123,17 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
             cur.execute("SELECT status,reason,to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,));row=cur.fetchone()
             repairing=row and (row.get('replacement') or {}).get('stage') in ('Discovering','Queued','Preparing')
             return dict(accepted=True,duplicate=True,product_gid=pid,status='Uploading' if repairing else 'Pending' if row and row['status']=='Awaiting preparation' else row['status'] if row else 'Stage unavailable')
+        @contextmanager
+        def borrowed():yield conn
+        from auto_editions_reset import Reset
+        # All retry entry points use the same replacement guard, including a
+        # failed first preparation with no retained package.
+        cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
+        pending=((cur.fetchone() or {}).get('replacement') or {})
+        if pending.get('stage') in ('Failed','Discovering','Queued','Preparing'):
+            if Reset(borrowed).retry_failed(pid,actor):
+                Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,native_replacement=True))
+                return dict(accepted=True,duplicate=pending.get('stage')!='Failed',product_gid=pid,status='Uploading',request_id=request_id)
         cur.execute(PRODUCT_SQL+" WHERE COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=%s",(pid,));found=cur.fetchall()
         if len(found)>1:raise ValueError('Product identity is ambiguous. Resolve the duplicate records before queueing.')
         row=found[0] if len(found)==1 else None
@@ -123,10 +141,14 @@ def submit(connect,pid,actor,request_id,repair_confirmed=False):
             @contextmanager
             def borrowed():yield conn
             from auto_editions_technical import Technical
-            if repair_confirmed:
-                Technical(borrowed).repair_exports(pid,actor,request_id)
-            else:Technical(borrowed).retry(pid,actor)
-            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,technical=True,repair_exports=repair_confirmed))
+            lease=health.stamp(row.get('lease_until'))
+            if lease and lease>health.datetime.now(health.timezone.utc):raise ValueError('An active lease protects this retained checkpoint.')
+            replacement=Reset(borrowed).retry_failed(pid,actor)
+            if not replacement:
+                if repair_confirmed:Technical(borrowed).repair_exports(pid,actor,request_id)
+                else:Technical(borrowed).retry(pid,actor)
+            Queue.audit(cur,pid,actor,'worker_health_queue_request',dict(request_id=request_id,
+                technical=not replacement,native_replacement=replacement,repair_exports=repair_confirmed and not replacement))
             return dict(accepted=True,duplicate=False,product_gid=pid,status='Uploading',request_id=request_id)
         reason=eligibility(row,repair_confirmed)
         if reason:raise ValueError(reason)

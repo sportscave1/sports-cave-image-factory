@@ -589,6 +589,7 @@ query SportsCaveProductById($id: ID!) {
     productType
     tags
     updatedAt
+    createdAt
     onlineStoreUrl
     media(first: 10) {
       nodes {
@@ -1075,7 +1076,7 @@ def edition_registration_eligibility(product):
     return {"eligible": True, "reason": "published_sports_cave_framed_art"}
 
 
-def edition_registration_history_warning(product):
+def edition_registration_history_warning(product, *, confirmed_total=100):
     """Mirror evidence may veto NEW initialization, never set ledger counters."""
     values = {m.get("key"): str(m.get("value") or "").strip().casefold()
               for m in product.get("metafields") or [] if m.get("namespace") == "sports_cave"}
@@ -1100,7 +1101,7 @@ def edition_registration_history_warning(product):
     for key in ("edition_total", "edition_remaining", "remaining_count"):
         if key in values:
             try:
-                if int(values[key]) != 100:
+                if int(values[key]) != confirmed_total:
                     return "nondefault_edition_mirror_requires_review"
             except ValueError:
                 return "invalid_edition_mirror_requires_review"

@@ -1001,8 +1001,9 @@ class AccountAccessTests(unittest.TestCase):
             "page_permissions": ["dashboard", "mockups"],
         }
 
-        self.assertEqual(os_accounts.allowed_navigation_routes(worker), ("Dashboard", "Mockups"))
-        self.assertTrue(os_accounts.can_access_page(worker, "Mockups"))
+        self.assertEqual(os_accounts.allowed_navigation_routes(worker), ("Dashboard",))
+        self.assertFalse(os_accounts.can_access_page(worker, "Mockups"))
+        self.assertFalse(os_accounts.can_access_page(worker, "Product Uploads"))
         self.assertFalse(os_accounts.can_access_page(worker, "Files"))
         self.assertFalse(os_accounts.can_access_page(worker, "Orders"))
         self.assertTrue(os_accounts.can_access_page(worker, "Accounts & Access"))
@@ -1258,14 +1259,14 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn('st.session_state["selected_page"] = allowed_routes[0]', auth_source)
         self.assertNotIn("st.session_state.selected_page = allowed_routes[0]", auth_source)
 
-    def test_staff_stays_on_allowed_mockups_page_after_auth_refresh(self):
+    def test_staff_redirects_mockups_to_allowed_product_uploads_after_auth_refresh(self):
         worker = {
             "id": "worker-mockups",
             "username": "reina",
             "display_name": "Reina",
             "role": "worker",
             "is_active": True,
-            "page_permissions": ["dashboard", "mockups"],
+            "page_permissions": ["dashboard", "product_uploads"],
         }
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
@@ -1274,15 +1275,15 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["current_page"] = "Mockups"
         app_test.session_state["selected_page"] = "Mockups"
 
-        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker):
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker), patch("product_upload_mockups_ui.render_page", side_effect=lambda module: module.st.title("Product Uploads")):
             app_test.run(timeout=20)
 
         self.assertFalse(app_test.exception)
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertIn("Mockups", [title.value for title in app_test.title])
+        self.assertEqual(app_test.session_state["current_page"], "Product Uploads")
+        self.assertEqual(app_test.session_state["selected_page"], "Product Uploads")
+        self.assertIn("Product Uploads", [title.value for title in app_test.title])
 
-    def test_admin_stays_on_mockups_page_after_auth_refresh(self):
+    def test_admin_redirects_mockups_to_product_uploads_after_auth_refresh(self):
         admin = {
             "id": "admin-mockups",
             "username": "nathan",
@@ -1298,13 +1299,13 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["current_page"] = "Mockups"
         app_test.session_state["selected_page"] = "Mockups"
 
-        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=admin):
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=admin), patch("product_upload_mockups_ui.render_page", side_effect=lambda module: module.st.title("Product Uploads")):
             app_test.run(timeout=20)
 
         self.assertFalse(app_test.exception)
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
-        self.assertIn("Mockups", [title.value for title in app_test.title])
+        self.assertEqual(app_test.session_state["current_page"], "Product Uploads")
+        self.assertEqual(app_test.session_state["selected_page"], "Product Uploads")
+        self.assertIn("Product Uploads", [title.value for title in app_test.title])
 
     def test_home_admin_sections_do_not_change_current_page(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -1342,8 +1343,8 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["selected_page"] = "Dashboard"
         app_test.run(timeout=20)
 
-        self.assertEqual(app_test.session_state["current_page"], "Mockups")
-        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertEqual(app_test.session_state["current_page"], "Product Uploads")
+        self.assertEqual(app_test.session_state["selected_page"], "Product Uploads")
 
     def test_blocked_worker_cannot_render_files_page(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))

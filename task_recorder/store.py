@@ -64,4 +64,3 @@ class Store:
         run = {"task_id": task_id, "status": status, "step": index, "message": message, "at": now()}
         atomic(self.journal, run)
         atomic(self.tasks / (task_id + ".result"), run)
-

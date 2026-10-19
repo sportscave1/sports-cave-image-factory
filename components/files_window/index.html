@@ -288,6 +288,9 @@
       .file-item:hover { background: #f0f6fa; border-color: #dbe8f1; }
       .file-item.selected { background: var(--accent-selected); border-color: #9cc7e4; }
       .file-item.focused { box-shadow: inset 0 0 0 1px var(--accent); }
+      .file-item.selected::after { content:"✓"; position:absolute; top:2px; right:3px; width:15px; height:15px; line-height:15px; border-radius:3px; background:#246ca3; color:white; text-align:center; font-size:11px; pointer-events:none; }
+      .selection-rectangle { position:absolute; pointer-events:none; z-index:5; border:1px solid #287dc0; background:#3d96d533; }
+      .results.selecting { user-select:none; }
       .file-item.cut-pending { opacity: 0.45; }
       .file-icon {
         align-items: center;
@@ -740,7 +743,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         <span class="command-separator" aria-hidden="true"></span>
         <button class="command" id="newButton" type="button"><span class="command-icon">+</span><span class="command-label">New</span></button>
         <button class="command" id="uploadButton" type="button"><span class="command-icon">&#8593;</span><span class="command-label">Upload</span></button>
-        <button class="command" id="downloadButton" type="button" disabled><span class="command-icon">&#8681;</span><span class="command-label">Download</span></button>
+        <button class="command" id="copyButton" type="button" disabled><span class="command-icon">&#x2398;</span><span class="command-label">Copy</span></button>
+        <button class="command" id="downloadButton" type="button" disabled><span class="command-icon">&#8681;</span><span class="command-label">Download Original</span></button>
         <span class="command-separator" aria-hidden="true"></span>
         <button class="command" id="renameButton" type="button" disabled><span class="command-icon">&#9998;</span><span class="command-label">Rename</span></button>
         <button class="command" id="deleteButton" type="button" disabled><span class="command-icon">&#9003;</span><span class="command-label">Delete</span></button>
@@ -795,7 +799,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
 
       const elements = Object.fromEntries([
         "backButton", "forwardButton", "upButton", "refreshButton", "breadcrumbs", "searchInput", "searchClear",
-        "openButton", "newButton", "uploadButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
+        "openButton", "newButton", "uploadButton", "copyButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
         "results", "resultsShell", "detailsHeader", "dateModifiedHeader", "modifiedSortArrow", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
         "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "loadingIndicator",
         "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
@@ -1056,7 +1060,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       const TEMPORARY_TOAST_MS = 3000;
       function showToast(message, { kind = "", duration = TEMPORARY_TOAST_MS, actionLabel = "", action = null } = {}) {
         const identity = `${kind}:${String(message || "")}:${String(actionLabel || "")}`;
-        if (state.toastIdentity === identity && elements.toast.classList.contains("visible")) return;
+        if (state.toastIdentity === identity && elements.toast.classList.contains("visible")) {
+          // Repeated copy failures may have a new selection snapshot.
+          elements.toastAction.onclick = action || null;
+          return;
+        }
         window.clearTimeout(state.toastTimer);
         state.toastIdentity = identity;
         elements.toast.className = `toast visible${kind ? ` ${kind}` : ""}`;
@@ -1071,7 +1079,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             elements.toastAction.onclick = null;
             state.toastIdentity = "";
             state.toastTimer = 0;
-          }, TEMPORARY_TOAST_MS);
+          }, duration);
         }
       }
 
@@ -1215,6 +1223,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         row.addEventListener("mousedown", hideFileTooltip);
         row.addEventListener("click", event => {
           if (event.detail > 1) return;
+          row.focus({preventScroll:true});
           if (event.ctrlKey || event.metaKey) selectByIndex(Number(row.dataset.index), { toggle: true });
           else if (event.shiftKey) selectByIndex(Number(row.dataset.index), { range: true });
           else {
@@ -1255,6 +1264,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function renderItems() {
+        finishSelectionDrag(true);
         hideFileTooltip();
         const activePath = document.activeElement?.closest?.(".file-item")?.dataset.path;
         const retained = new Map(Array.from(elements.items.children).filter(row => row._view === state.view).map(row => [row.dataset.path, row]));
@@ -1284,7 +1294,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             const columns = style.display === "grid" ? style.gridTemplateColumns.split(" ").length : 1;
             const gapX = parseFloat(style.columnGap) || 0;
             const gapY = parseFloat(style.rowGap) || 0;
-            const height = Math.ceil(probe.getBoundingClientRect().height);
+            const height = probe.offsetHeight;
             const width = (elements.items.clientWidth - (columns - 1) * gapX) / columns;
             probe.remove();
             state.virtual = { items, columns, gapX, gapY, height, width, start: -1, end: -1 };
@@ -1379,7 +1389,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         elements.selectionCount.textContent = state.selection.size
           ? `${state.selection.size} selected`
           : (clipboardCount
-            ? `${clipboardCount} item${clipboardCount === 1 ? "" : "s"} ${state.clipboard.mode === "cut" ? "ready to move" : "copied"}`
+            ? `${clipboardCount} item${clipboardCount === 1 ? "" : "s"} ${state.clipboard.mode === "cut" ? "ready to move" : "ready to paste in Files"}`
             : "");
       }
 
@@ -1404,6 +1414,8 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         const allFiles = chosen.length > 0 && chosen.every(item => item.tag !== "folder");
         elements.openButton.disabled = chosen.length !== 1;
         elements.downloadButton.disabled = !allFiles;
+        elements.copyButton.disabled = !allFiles || Boolean(state.originalCopyBusy);
+        if (!state.originalCopyBusy && !state.copyResetTimer) setCopyLabel(chosen.length > 1 ? `Copy ${chosen.length} files` : "Copy");
         elements.renameButton.disabled = chosen.length !== 1 || chosen[0].protected;
         elements.deleteButton.disabled = !state.canDelete || !chosen.length || chosen.some(item => item.protected);
         renderStatus();
@@ -1858,14 +1870,35 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           : `/api/files-download?path=${encodeURIComponent(item.path)}`;
       }
 
-      async function copyOriginalImage(item) {
+      function setCopyLabel(label) {
+        elements.copyButton.querySelector(".command-label").textContent = label;
+        elements.copyButton.setAttribute("aria-label", label);
+        elements.copyButton.title = label;
+      }
+
+      async function copyOriginalFiles(items = selectedItems()) {
+        if (state.originalCopyBusy) return;
+        const files = items.filter(item => item.tag !== "folder");
+        if (!files.length || files.length !== items.length) return;
+        const snapshot = FilesOriginal.snapshot(files.map(item => ({...item, url:originalDownloadUrl(item)})));
+        clearTimeout(state.copyResetTimer); state.copyResetTimer = 0;
+        state.originalCopyBusy = true;
+        setCopyLabel("Copying…"); updateSelectionUi();
         try {
-          await FilesOriginal.copy(originalDownloadUrl(item));
-          showToast("Original image copied at native dimensions (PNG clipboard).", {kind:"success"});
+          await FilesOriginal.copy(snapshot);
+          setCopyLabel(`Copied ${snapshot.length} files`);
         } catch (error) {
-          showToast(`${error.message || "Image copy failed."} Use Download Original.`, {
-            kind:"error", duration:0, actionLabel:"Download Original", action:() => startDownload([item]),
+          setCopyLabel("Copy unavailable");
+          showToast(error.message || "File copy failed. Use Download Original.", {
+            kind:"error", duration:0, actionLabel:"Download Original",
+            action:() => startDownload(snapshot),
           });
+        } finally {
+          state.originalCopyBusy = false;
+          state.copyResetTimer = setTimeout(() => {
+            state.copyResetTimer = 0; updateSelectionUi();
+          }, 2000);
+          updateSelectionUi();
         }
       }
 
@@ -1893,7 +1926,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.downloadStamp = {identity, time:Date.now()};
         showToast(files.length === 1 ? `Downloading ${files[0].name}...` : `Starting ${files.length} downloads. Your browser may ask to allow multiple downloads.`, { duration: 5000 });
         files.forEach((item, index) => {
-          const downloadUrl = originalDownloadUrl(item);
+          const downloadUrl = item.url || originalDownloadUrl(item);
           window.setTimeout(() => {
             const frame = document.createElement("iframe");
             frame.hidden = true;
@@ -2091,10 +2124,6 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         state.clipboard = { mode, items: chosen, createdAt: Date.now() };
         persistClipboard();
         updateSelectionUi();
-        if (mode === "copy" && items.length === 1 && items[0].kind === "image") {
-          void copyOriginalImage(items[0]);
-          return;
-        }
         const count = chosen.length;
         showToast(mode === "cut"
           ? `${count} item${count === 1 ? "" : "s"} ready to move inside Sports Cave Files`
@@ -2235,10 +2264,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
             { label: "Open", disabled: !single, action: () => openPreferredItem(item) },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
-            { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
+            { label: "Copy in Files", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
             { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
             menuDivider(),
-            { label: "Download", disabled: !allFiles, action: () => startDownload(chosen) },
+            { label: "Download Original", disabled: !allFiles, action: () => startDownload(chosen) },
             { label: "Rename", disabled: !single, action: () => showRenameDialog(item) },
             { label: "Delete", disabled: !canDelete, action: showDeleteDialog },
             menuDivider(),
@@ -2251,13 +2280,13 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           ];
           definitions.push(
             { label: "Preview", disabled: !single, action: () => previewItem(item) },
-            { label: "Copy Image", disabled: !single || item.kind !== "image", action: () => copyOriginalImage(item) },
+            { label: chosen.length > 1 ? `Copy ${chosen.length} files` : "Copy", disabled: !allFiles, action: () => copyOriginalFiles(chosen) },
             menuDivider(),
             { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
-            { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
+            { label: "Copy in Files", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
             { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
             menuDivider(),
-            { label: "Download", action: () => startDownload(chosen.length ? chosen : [item]) },
+            { label: "Download Original", action: () => startDownload(chosen.length ? chosen : [item]) },
             { label: "Rename", disabled: !single, action: () => showRenameDialog(item) },
             { label: "Delete", disabled: !canDelete, action: showDeleteDialog },
             menuDivider(),
@@ -2888,6 +2917,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       elements.refreshButton.onclick = () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
       elements.openButton.onclick = () => openPreferredItem(selectedItems()[0]);
       elements.newButton.onclick = showNewFolderDialog;
+      elements.copyButton.onclick = () => copyOriginalFiles();
       elements.downloadButton.onclick = () => startDownload();
       elements.renameButton.onclick = () => showRenameDialog();
       elements.deleteButton.onclick = showDeleteDialog;
@@ -2930,8 +2960,116 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         persistState();
       };
 
+      let selectionDrag = null;
+      let suppressSelectionClick = false;
+      function selectionPoint(clientX, clientY) {
+        const bounds = elements.results.getBoundingClientRect();
+        const sx = bounds.width / elements.results.offsetWidth || 1;
+        const sy = bounds.height / elements.results.offsetHeight || 1;
+        return {
+          x:(clientX - bounds.left) / sx + elements.results.scrollLeft,
+          y:(clientY - bounds.top) / sy + elements.results.scrollTop,
+          sx, sy, bounds,
+        };
+      }
+      function updateSelectionRectangle() {
+        const drag = selectionDrag;
+        if (!drag?.moved) return;
+        const point = selectionPoint(drag.clientX, drag.clientY);
+        const x = Math.max(0, Math.min(elements.results.clientWidth, point.x));
+        const y = Math.max(0, Math.min(elements.results.scrollHeight, point.y));
+        const box = {left:Math.min(drag.start.x,x), top:Math.min(drag.start.y,y),
+          right:Math.max(drag.start.x,x), bottom:Math.max(drag.start.y,y)};
+        Object.assign(drag.rectangle.style, {left:box.left+"px", top:box.top+"px",
+          width:(box.right-box.left)+"px", height:(box.bottom-box.top)+"px"});
+        const intersects = rect => rect.right >= box.left && rect.left <= box.right && rect.bottom >= box.top && rect.top <= box.bottom;
+        const next = new Set(drag.base);
+        const v = state.virtual;
+        if (v) {
+          // Include virtual cards outside the viewport; materializing them would
+          // inflate thumbnail work and miss cards scrolled past during a drag.
+          const origin = elements.items.getBoundingClientRect();
+          const offset = selectionPoint(origin.left, origin.top);
+          v.items.forEach((item,index) => {
+            const left=offset.x+(index%v.columns)*(v.width+v.gapX);
+            const top=offset.y+Math.floor(index/v.columns)*(v.height+v.gapY);
+            if (intersects({left,top,right:left+v.width,bottom:top+v.height})) next.add(item.path);
+          });
+        } else {
+          elements.items.querySelectorAll(".file-item").forEach(row => {
+            const rect = row.getBoundingClientRect();
+            const start = selectionPoint(rect.left,rect.top), end = selectionPoint(rect.right,rect.bottom);
+            if (intersects({left:start.x,top:start.y,right:end.x,bottom:end.y})) next.add(row.dataset.path);
+          });
+        }
+        state.selection = next; updateSelectionUi();
+      }
+      function selectionScrollFrame() {
+        const drag = selectionDrag;
+        if (!drag) return;
+        if (drag.moved) {
+          const {bounds,sy} = selectionPoint(drag.clientX,drag.clientY);
+          const edge=32;
+          const speed = drag.clientY < bounds.top+edge ? -Math.min(24,(bounds.top+edge-drag.clientY)/sy/3)
+            : drag.clientY > bounds.bottom-edge ? Math.min(24,(drag.clientY-bounds.bottom+edge)/sy/3) : 0;
+          if (speed) elements.results.scrollTop += speed;
+          updateSelectionRectangle();
+        }
+        drag.frame = requestAnimationFrame(selectionScrollFrame);
+      }
+      function finishSelectionDrag(cancel = false) {
+        const drag = selectionDrag;
+        if (!drag) return;
+        selectionDrag = null; cancelAnimationFrame(drag.frame);
+        if (elements.results.hasPointerCapture(drag.pointerId)) elements.results.releasePointerCapture(drag.pointerId);
+        drag.rectangle.remove(); elements.results.classList.remove("selecting");
+        if (cancel) { state.selection = new Set(drag.before); updateSelectionUi(); }
+        if (drag.moved) {
+          suppressSelectionClick = true;
+          setTimeout(() => { suppressSelectionClick = false; }, 0);
+        }
+      }
+      elements.results.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || event.pointerType === "touch" || selectionDrag ||
+            event.target.closest(".file-item, button, input, textarea, select, a, [contenteditable], [role=menu], .details-header")) return;
+        const point = selectionPoint(event.clientX,event.clientY);
+        // The native scrollbar occupies the part beyond clientWidth/clientHeight.
+        if (point.x-elements.results.scrollLeft >= elements.results.clientWidth ||
+            point.y-elements.results.scrollTop >= elements.results.clientHeight) return;
+        const rectangle = document.createElement("div");
+        rectangle.className = "selection-rectangle"; rectangle.hidden = true;
+        elements.results.appendChild(rectangle);
+        selectionDrag = {pointerId:event.pointerId,start:point,clientX:event.clientX,clientY:event.clientY,
+          initialX:event.clientX,initialY:event.clientY,before:new Set(state.selection),base:event.ctrlKey||event.metaKey ? new Set(state.selection) : new Set(),rectangle,moved:false};
+        elements.results.focus({preventScroll:true});
+        elements.results.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        selectionDrag.frame = requestAnimationFrame(selectionScrollFrame);
+      });
+      elements.results.addEventListener("pointermove", event => {
+        const drag = selectionDrag;
+        if (!drag || event.pointerId !== drag.pointerId) return;
+        drag.clientX = event.clientX; drag.clientY = event.clientY;
+        if (!drag.moved && Math.hypot(event.clientX-drag.initialX,event.clientY-drag.initialY) > 4) {
+          drag.moved = true; drag.rectangle.hidden = false; elements.results.classList.add("selecting");
+        }
+        updateSelectionRectangle();
+      });
+      elements.results.addEventListener("pointerup", event => {
+        if (selectionDrag?.pointerId !== event.pointerId) return;
+        if (!selectionDrag.moved && !event.ctrlKey && !event.metaKey) clearSelection();
+        finishSelectionDrag();
+      });
+      elements.results.addEventListener("pointercancel", () => finishSelectionDrag(true));
+      elements.results.addEventListener("lostpointercapture", () => finishSelectionDrag(true));
+      window.addEventListener("blur", () => finishSelectionDrag(true));
+
       elements.results.addEventListener("click", event => {
-        if (!event.target.closest(".file-item")) clearSelection();
+        if (suppressSelectionClick) { suppressSelectionClick = false; return; }
+        const point = selectionPoint(event.clientX,event.clientY);
+        if (point.x-elements.results.scrollLeft >= elements.results.clientWidth ||
+            point.y-elements.results.scrollTop >= elements.results.clientHeight) return;
+        if (!event.target.closest(".file-item, button, input, select, textarea, [role=menu]")) clearSelection();
       });
       elements.results.addEventListener("scroll", () => {
         hideFileTooltip();
@@ -2987,10 +3125,11 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
       }, true);
       document.addEventListener("keydown", event => {
-        const typing = event.target.matches && event.target.matches("input, textarea, select, [contenteditable='true']");
+        const typing = event.target.closest?.("input, textarea, select, [contenteditable]:not([contenteditable='false'])");
         if (event.key === "Escape") {
           event.preventDefault();
-          if (!elements.previewPanel.hidden) closePreview();
+          if (selectionDrag) { finishSelectionDrag(); clearSelection(); }
+          else if (!elements.previewPanel.hidden) closePreview();
           else if (elements.modalBackdrop.classList.contains("open")) closeModal();
           else if (document.querySelector(".menu.open")) closeMenus();
           else if (linkedProduct !== null && window.parent !== window) parent.postMessage({type:'sports-cave-psd-cancel'},location.origin);
@@ -2998,11 +3137,12 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           return;
         }
         if (typing || !elements.previewPanel.hidden || elements.modalBackdrop.classList.contains("open")) return;
+        if ((event.ctrlKey || event.metaKey) && ["a", "c"].includes(event.key.toLowerCase()) && !elements.results.contains(document.activeElement)) return;
         const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey;
         const key = event.key.toLocaleLowerCase();
         if (shortcut && key === "c" && state.selection.size) {
           event.preventDefault();
-          setFilesClipboard("copy");
+          copyOriginalFiles();
         } else if (shortcut && key === "x" && state.selection.size) {
           event.preventDefault();
           setFilesClipboard("cut");

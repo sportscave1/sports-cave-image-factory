@@ -12,7 +12,7 @@ var SCNumberExportProof=(function(){
     }
     function replacement(text,number){
         if(/[\r\n]/.test(text))throw Error("separated_number_requires_review");
-        var m=/^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
+        var m=/^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
         if(!m||number!==Math.floor(number)||number<1||number>parseInt(m[4],10))throw Error("invalid_synthetic_number");
         var digits=String(number);while(digits.length<m[2].length)digits="0"+digits;
         if(digits.length!==m[2].length)throw Error("digit_width_change_requires_review");

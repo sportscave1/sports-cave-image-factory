@@ -214,6 +214,12 @@ Path: `C:\Dev\SportsCaveWorktrees\sports-cave-integrations-local-task-recorder-v
 Approved Studio base: `59b609728b182c6c997f02ed0a8786fff0483095`.
 Source and test evidence are retained in this dedicated task branch. Release
 integration preserves the newer production navigation and Product Uploads changes.
+The user authorized Git/Render publication on 20 October 2026. Integration with
+current production main passed 19 offline Streamlit navigation/access regressions,
+the seven recorder contracts, and fresh headed record/replay acceptance. The
+actual sidebar opens Task Recorder and preserves Worker Health, Image Protection
+and Dev Mode. The hosted page points to the Windows console; secure hosted
+pairing is still outside V1.
 
 Changed existing files: `app.py`, `navigation_runtime.py`, `os_accounts.py`.
 Added: `task_recorder_page.py`, `Start Task Recorder.cmd`,
@@ -222,9 +228,9 @@ Added: `task_recorder_page.py`, `Start Task Recorder.cmd`,
 `task_recorder/server.py`, `task_recorder/record.js`, `task_recorder/ui.html`,
 `task_recorder/ui.css`, `task_recorder/ui.js`, `task_recorder/demo.html`,
 `task_recorder/demo.js`, `task_recorder/requirements.txt`,
-`tests/test_task_recorder.py`, `tests/task_recorder_acceptance.py`, and this guide.
+`tests/test_task_recorder.py`, `tests/test_task_recorder_navigation.py`,
+`tests/task_recorder_acceptance.py`, and this guide.
 
 Implementation references: [Playwright actions](https://playwright.dev/python/docs/input),
 [locators](https://playwright.dev/python/docs/locators),
 [persistent browser contexts](https://playwright.dev/python/docs/api/class-browsertype#browser-type-launch-persistent-context).
-

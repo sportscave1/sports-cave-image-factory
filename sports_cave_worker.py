@@ -93,6 +93,10 @@ class Supervisor:
             discovery_thread = threading.Thread(target=discovery_run,args=(self.stop,),
                                                 name='auto-editions-discovery',daemon=True)
             discovery_thread.start()
+        from shopify_product_onboarding import run as product_run
+        product_thread = threading.Thread(target=product_run, args=(self.stop,),
+                                          name='edition-product-onboarding', daemon=True)
+        product_thread.start()
         try:
             while not self.stop.is_set():
                 self.check_children()
@@ -100,6 +104,7 @@ class Supervisor:
                 self.stop.wait(0.5)
         finally:
             self.shutdown()
+            product_thread.join(timeout=SHUTDOWN_SECONDS)
             if discovery_thread:
                 discovery_thread.join(timeout=SHUTDOWN_SECONDS)
             if quiz_thread:

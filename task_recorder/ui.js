@@ -142,4 +142,3 @@ async function poll(replace=false) {
 }
 async function tick(){if(!document.hidden)await poll();setTimeout(tick,2000);}
 renderEditor();poll(true);setTimeout(tick,2000);
-

@@ -255,6 +255,10 @@ def host_loop():
                     timings['claim_seconds']=round(time.monotonic()-claim_started,6)
                     if HOST_LAST_COMPLETED_AT is not None:timings['completed_to_claim_request_seconds']=round(claim_started-HOST_LAST_COMPLETED_AT,6)
                     state='Preparing'
+                elif data.get('product_mockup_renders') is True:
+                    import sys
+                    from product_upload_render_local import run_one
+                    if run_one(config,sys.modules[__name__]):state='Rendering product mockups'
             failures=0
             HOST_FAILURES=0;HOST_RETRY_AT=0;HOST_LAST_DIAGNOSTIC=None
             atomic_json(HOST_FILE.parent/'host-status.json',dict(last_poll=time.time(),status=state,
@@ -341,10 +345,13 @@ def package_finished(row,ctx):
                 manifest.get('preparation_geometry',{}).get('scale',1)!=preparation_scale(manifest.get('source_dimensions',manifest['dimensions']))
                 or (ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id'])):continue
             ae.validate_manifest(manifest)
+            from auto_editions_artwork_recovery import verify_package
+            verify_package(folder,manifest)
             refs=sorted({1,ctx['number'],ctx['total']})
             for n in refs:ae.compare_reference(manifest,folder,n,folder/f'reference-{n}.png')
             ae.compare_original_outside_number(manifest,folder,ctx['number'],folder/'original.png')
             names=['manifest.json','master.png','original.png']+[p['name'] for p in manifest['patches'].values()]+[f'reference-{n}.png' for n in refs]
+            if (manifest.get('artwork_recovery') or {}).get('hidden_number'):names.append('uncorrected.png')
             archive=row['folder']/'prepared.zip'
             if archive.exists():return None
             from auto_editions_transport import build_package
@@ -357,13 +364,19 @@ def package_finished(row,ctx):
 def find_reusable_package(ctx):
     """Only reuse exact source/edition identities. The server revalidates pixels."""
     if not ctx.get('automatic'):return None
+    from auto_editions_package import MAX_PACKAGE_BYTES
     root=HOST_FILE.parent.resolve()
     for package in sorted(root.glob('*/prepared.zip'),key=lambda p:p.stat().st_mtime,reverse=True):
         if package.is_symlink() or package.parent.is_symlink():continue
         try:
+            if package.stat().st_size>MAX_PACKAGE_BYTES:continue
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
+                if sum(info.file_size for info in archive.infolist())>MAX_PACKAGE_BYTES:continue
                 manifest=json.loads(archive.read('manifest.json'))
+            colour=manifest.get('colour_evidence') or {}
+            import re
+            if not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256',''))) or colour.get('pixels_converted') is not False:continue
             if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:continue
             from auto_editions_onboarding import preparation_scale
             expected=preparation_scale(manifest.get('source_dimensions',manifest.get('dimensions',[])))
@@ -414,8 +427,14 @@ def upload_prepared(key,archive):
                 if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
                 finish_upload(row,result,started)
                 return
-            except requests.RequestException:
+            except requests.RequestException as error:
+                response=getattr(error,'response',None)
+                status=response.status_code if response is not None else None
+                if status is not None and status not in (408,429) and status<500:raise
                 if attempt==2 or not row['context'].get('automatic'):raise
+                # Bounded, cancellation-aware backoff. A reconnect can recover
+                # an already accepted upload before any bytes are sent again.
+                if HOST_STOP.wait(min(2**attempt,4)):raise Cancelled()
                 completed=reconnect(row)
                 if isinstance(completed,dict) and completed.get('preparation_hash'):
                     finish_upload(row,completed,started)
@@ -423,8 +442,11 @@ def upload_prepared(key,archive):
     except Cancelled:raise
     except Exception as error:
         response=getattr(error,'response',None)
-        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code>=500)
-        row.update(status='Recovering' if transient else 'Blocked',error='Prepared package retained; upload/checkpoint failed: '+type(error).__name__)
+        transient=isinstance(error,requests.RequestException) and (response is None or response.status_code in (408,429) or response.status_code>=500)
+        detail=failure_detail(row,'Uploading',error)
+        code=' HTTP '+str(response.status_code) if response is not None else ''
+        if transient:row['diagnostic']=safe_diagnostic('upload/checkpoint failed','Uploading')
+        row.update(status='Recovering' if transient else 'Blocked',error='Prepared package retained; upload/checkpoint failed: '+detail+code)
         if transient:
             row['recovery_failures']=row.get('recovery_failures',0)+1
             if row['recovery_failures']>=3:
@@ -508,7 +530,8 @@ def inspect(key):
         item=manifest['items'][0]
         if any(item.get(k)!=meta[v] for k,v in [('dropbox_id','id'),('revision','rev'),('content_hash','content_hash')]):
             raise ValueError('The linked source changed.')
-        if not 0<meta['size']<=1024*1024*1024:raise ValueError('Source exceeds the preparation transfer limit.')
+        from auto_editions_source_limits import check_source
+        check_source(meta['size'],folder)
         req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),
                     headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
         from auto_editions_local_cache import reuse_source,cached_inspection,inspection_receipt
@@ -580,7 +603,7 @@ def inspect(key):
             policy=None
             if row['inspection']['document'].get('profile_state')=='untagged':
                 _,policy=resolve(row['context']['source'])
-            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy)
+            roles=detect(row['inspection'],row['context']['total'],colour_policy=policy,source=row['context']['source'])
             prepare_worker(key,dict(number=roles['number_layer'],plaque=roles['plaque_layer']),
                            preparation_scale(roles['source_dimensions']))
         except Exception as error:
@@ -611,13 +634,29 @@ def failure_detail(row,stage,error):
     """Retain Photoshop's cause locally; never put paths/capabilities in status."""
     import re
     message=str(error)[:4000]
-    row['diagnostic']=safe_diagnostic(message,'Preparing')
+    response=getattr(error,'response',None)
+    if stage=='Uploading' and response is not None:
+        try:
+            payload=response.json()
+            if isinstance(payload,dict) and isinstance(payload.get('error'),str):
+                message+=': '+payload['error'][:1000]
+        except (ValueError,TypeError):pass
+    safe_stage={'Preparation':'Preparing','Photoshop inspection':'Photoshop','PSD transfer':'Claimed'}.get(stage,stage)
+    row['diagnostic']=safe_diagnostic(message,safe_stage)
     for value in [*row.get('grant',{}).values(),row.get('context',{}).get('lease_token')]:
         if isinstance(value,str) and len(value)>8:message=message.replace(value,'[redacted]')
     message=re.sub(r'https?://[^\s]+','[redacted URL]',message)
     try:
-        atomic_json(row['folder']/'failure-detail.json',dict(stage=stage,error_type=type(error).__name__,
-            message=message,product_gid=row.get('context',{}).get('product_gid'),recorded_at=time.time()))
+        import traceback
+        trace=''.join(traceback.format_exception(type(error),error,error.__traceback__))[-12000:]
+        for value in [*row.get('grant',{}).values(),row.get('context',{}).get('lease_token')]:
+            if isinstance(value,str) and len(value)>8:trace=trace.replace(value,'[redacted]')
+        trace=re.sub(r'https?://[^\s]+','[redacted URL]',trace)
+        detail=dict(stage=stage,error_type=type(error).__name__,message=message,traceback=trace,
+            product_gid=row.get('context',{}).get('product_gid'),recorded_at=time.time())
+        atomic_json(row['folder']/'failure-detail.json',detail)
+        with (row['folder']/'failure-history.jsonl').open('a',encoding='utf-8') as history:
+            history.write(json.dumps(detail)+'\n')
     except OSError:pass
     if isinstance(error,RuntimeError):
         if 'source_profile_requires_review' in message or 'colour_conversion_requires_approval' in message:
@@ -627,7 +666,7 @@ def failure_detail(row,stage,error):
         if 'export_profile_changed' in message:return 'ICC export mismatch: Photoshop changed the document profile.'
         if 'scratch' in message.lower():return 'Photoshop scratch disk failure; inspect free scratch storage.'
         return 'Photoshop preparation failed; inspect the retained local failure-detail.json.'
-    return str(error)[:350] if isinstance(error,ValueError) else type(error).__name__
+    return message[:350] if isinstance(error,ValueError) or stage=='Uploading' and message else type(error).__name__
 
 
 def safe_diagnostic(message,stage):
@@ -668,6 +707,7 @@ def prepare_worker(key,roles,scale=1):
         names=['manifest.json','master.png','original.png']
         names += [p['name'] for p in manifest['patches'].values()]
         names += [f'reference-{n}.png' for n in sorted({1,ctx['number'],ctx['total']})]
+        if (manifest.get('artwork_recovery') or {}).get('hidden_number'):names.append('uncorrected.png')
         archive=row['folder']/'prepared.zip'
         from auto_editions_transport import build_package,digest
         from auto_editions_performance import stage as measured

@@ -72,7 +72,7 @@ class SEONavigationTests(unittest.TestCase):
         self.assertNotIn("def _sidebar_section_label", source)
         self.assertNotIn("sc-sidebar-section-label", source)
         self.assertLess(
-            source.index('_sidebar_route_button("Mockups"'),
+            source.index('for route in ("Product Uploads", "Design Studio"):'),
             source.index('if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:'),
         )
         self.assertLess(
