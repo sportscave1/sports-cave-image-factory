@@ -64,6 +64,9 @@ def test_complete_prompt_keeps_saved_template_and_mode_rules(mode):
     row = saved_row()
     load = Mock(side_effect=lambda key, default, **kw: default + '\nDEVELOPER CUSTOM COMMERCIAL COPY')
     text = build(mode, 'Selected.psd', source=current_source(row), load=load)
+    from product_upload_source import execution_opening
+    assert text.startswith(execution_opening(current_source(row)))
+    assert text.count('DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST') == 1
     assert 'DEVELOPER CUSTOM COMMERCIAL COPY' in text
     assert product_upload_price_ladder_prompt_text() in text
     assert 'DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST' in text

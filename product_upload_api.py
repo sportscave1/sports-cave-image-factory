@@ -170,14 +170,15 @@ async def action(request):
             row = await run_in_threadpool(store.read, key, uid) if key else None
             if key and (not row or not row['data'].get('basic_validated') or row['mode'] != body.get('mode')):
                 raise ValueError('Finish the PSD upload and copy the current action.')
-            from product_upload_source import current_source
+            from product_upload_source import current_source, execution_opening
             source = current_source(row, body.get('source_version', ''))
             prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'], source=source)
+            context_prompt = ''
             if row and row['data'].get('mockups_context'):
                 import json
                 output = row['data']['upload_operation']['output']
                 context = {k: output[k] for k in ('design_name', 'sport_category', 'images') if k in output}
-                prompt = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(context, ensure_ascii=False) + '\n\n' + prompt
+                context_prompt = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(context, ensure_ascii=False) + '\n\n'
             if row:
                 def correlated():
                     from product_upload_identity import correlation_prompt
@@ -186,7 +187,11 @@ async def action(request):
                         if current['mode'] != body.get('mode'):
                             raise ValueError('The selected action changed. Copy the current prompt again.')
                         return correlation_prompt(current)
-                prompt = await run_in_threadpool(correlated) + prompt
+                context_prompt = await run_in_threadpool(correlated) + context_prompt
+            opening = execution_opening(source)
+            if not prompt.startswith(opening):
+                raise ValueError('The current Dropbox source opening is missing. Copy the current prompt again.')
+            prompt = opening + context_prompt + prompt[len(opening):]
             return JSONResponse(dict(prompt=prompt), headers=HEADERS)
         elif op in ('map', 'mapping-candidates'):
             from product_upload_mapping import Mapping

@@ -172,8 +172,8 @@ def test_copy_upload_prompt_preserves_mode_and_operation(monkeypatch,mode):
         def locked(self,*_):yield row,None
     async def actor(*a,**kw):return {'id':'fixture'}
     monkeypatch.setattr(api,'actor',actor);monkeypatch.setattr(api,'Intakes',Store)
-    from product_upload_source import current_source, prompt_section
-    build=Mock(side_effect=lambda m,n,source:m+' original prompt for '+n+'\n'+prompt_section(source));monkeypatch.setattr(product_upload_prompts,'build',build)
+    from product_upload_source import current_source, execution_opening
+    build=Mock(side_effect=lambda m,n,source:execution_opening(source)+m+' original prompt for '+n);monkeypatch.setattr(product_upload_prompts,'build',build)
     provider=Mock(side_effect=AssertionError('Prompt copy must not access Dropbox or download files'))
     monkeypatch.setattr(api,'Dropbox',provider)
     app=Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])

@@ -93,6 +93,27 @@ def current_source(row, expected=None):
     return source
 
 
+START_INSTRUCTIONS = """START HERE — RETRIEVE DROPBOX IMAGES FIRST
+
+This is an execution request. Begin by using the connected Dropbox app/tools to retrieve the original WEBP files from the exact saved folder identified immediately below. Do not merely acknowledge this prompt or ask me to attach images that are already accessible in Dropbox.
+
+1. Access the exact Dropbox folder using its folder ID where supported, or its full path otherwise.
+2. Retrieve the original WEBP files listed in the saved manifest. Verify their identities, expected count and image roles. A folder listing or thumbnail alone does not constitute retrieving an original file.
+3. Once the source files are available, use the connected Shopify app/tools and execute the remaining product-upload instructions in their existing order, preserving the selected Draft/Live/Update mode and all duplicate-prevention checks.
+4. Continue through the authorised workflow without stopping just to announce that the files were found.
+5. If a required connection is unavailable, request that connection specifically. If original-file retrieval or transfer is unsupported, report the exact blocker before any Shopify write. Never invent access or claim completion.
+
+The images are supplied through Dropbox; separate image attachments are not required when the connected tools can retrieve the originals.
+
+END START INSTRUCTIONS
+
+"""
+
+
+def execution_opening(source):
+    return START_INSTRUCTIONS + prompt_section(source)
+
+
 def prompt_section(source):
     data = {k: v for k, v in source.items() if k != 'version'}
     return """DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST

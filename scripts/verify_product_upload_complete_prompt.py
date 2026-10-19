@@ -21,7 +21,8 @@ from starlette.routing import Route
 from tests.benchmark_product_upload_transfer import local_client
 from tests.test_product_upload_package import saved_row
 from product_upload_intake import public
-from product_upload_source import current_source, invalidate
+from product_upload_source import current_source, invalidate, execution_opening
+from product_upload_identity import correlation_prompt
 import product_upload_api as api
 import product_upload_prompts as prompts
 
@@ -71,6 +72,21 @@ def main():
                 row['data']['upload_operation'] = fresh['data']['upload_operation']
                 row['data']['upload_operation']['id'] = row['id']
                 row['data']['mockup_saves'] = fresh['data']['mockup_saves']
+                # A different current save per browser proves no prior product is reused.
+                if channel == 'msedge':
+                    old = fresh['data']['upload_operation']['output']['folder']
+                    new = '/Team/04_OUTPUT/product-images/Baseball/Current synthetic save'
+                    output = row['data']['upload_operation']['output']
+                    receipt = row['data']['mockup_saves']['saved']['receipt']
+                    output['folder'] = new
+                    row['data']['mockup_saves']['saved']['target'] = new
+                    receipt['destination'] = new
+                    receipt['webp_folder'] = dict(path=new+'/WEBP', id='id:current-folder')
+                    for entry in output['files']:
+                        entry['metadata']['path_display'] = entry['metadata']['path_display'].replace(old, new)
+                        entry['metadata']['id'] += '-current'
+                row['data']['mockups_context'] = {'images': []}
+                row['data']['upload_operation']['output']['design_name'] = 'Current synthetic design'
                 browser = playwright.chromium.launch(channel=channel, headless=True)
                 context = browser.new_context(permissions=['clipboard-read', 'clipboard-write'], viewport={'width': 1280, 'height': 900})
                 page = context.new_page()
@@ -87,8 +103,24 @@ def main():
                     page.wait_for_function('(mode)=>document.querySelector("#action-label").textContent===({DRAFT:"Upload to Draft",LIVE:"Upload to Live",UPDATE:"Update Existing"})[mode]', arg=mode)
                     button.click()
                     expect(page.locator('#copy')).to_have_text('Copied')
-                    text = page.evaluate('navigator.clipboard.readText()')
-                    assert 'product (2)/WEBP' in text and 'id:webp-folder' in text and 'SYNTHETIC DEVELOPER EDIT' in text
+                    # Windows clipboard normalises line endings to CRLF.
+                    text = page.evaluate('navigator.clipboard.readText()').replace('\r\n', '\n')
+                    source = current_source(row)
+                    opening = execution_opening(source)
+                    expected = build(mode, row['data']['name'], source=source,
+                                     load=lambda key, default, **kw: default+'\nSYNTHETIC DEVELOPER EDIT')
+                    output = row['data']['upload_operation']['output']
+                    context_text = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(
+                        {k: output[k] for k in ('design_name', 'sport_category', 'images') if k in output},
+                        ensure_ascii=False) + '\n\n'
+                    expected = opening + correlation_prompt(row) + context_text + expected[len(opening):]
+                    import difflib
+                    assert text == expected, '\n'.join(difflib.unified_diff(expected.splitlines(), text.splitlines()))
+                    assert text.startswith(opening + 'UPLOAD OPERATION CORRELATION — REQUIRED\n')
+                    assert source['folder_path'] in text and source['folder_id'] in text
+                    assert all(item['file_id'] in text and item['filename'] in text for item in source['files'])
+                    if channel == 'msedge': assert 'product (2)' not in text
+                    (out/f'{channel}-{mode}-clipboard.txt').write_text(text, encoding='utf-8')
                     assert 'do not need to be attached separately' in text
                     assert text.count('DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST') == 1
                     assert not page.locator('dialog[open]').count()
@@ -110,6 +142,7 @@ def main():
                 provider.assert_not_called()
                 results.append(dict(browser=channel, modes=['DRAFT', 'LIVE', 'UPDATE'],
                                     direct_clipboard=True, feedback_reset=True, save_gate=True,
+                                    dropbox_first=True, single_current_manifest=True, full_prompt_preserved=True,
                                     image_or_helper_requests=0, errors=errors, downloads=downloads))
                 browser.close()
             (out/'browser-checks.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
