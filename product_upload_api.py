@@ -315,7 +315,8 @@ async def saved_package(request):
         from product_upload_package import view
         user = await actor(request)
         row = await run_in_threadpool(Intakes(connect).read, request.query_params.get('id'), user['id'])
-        return JSONResponse(await run_in_threadpool(view, row), headers=HEADERS)
+        provider = await run_in_threadpool(Dropbox)
+        return JSONResponse(await run_in_threadpool(view, row, provider), headers=HEADERS)
     except Exception as error: return failure(error)
 
 
@@ -343,7 +344,7 @@ async def clipboard_status(request):
         from product_upload_clipboard import REQUESTS
         user = await actor(request, write=True)
         body = await request.json()
-        result = await run_in_threadpool(REQUESTS.status, body.get('code'), user, body.get('cancel') is True)
+        result = await run_in_threadpool(REQUESTS.status, body.get('code'), user, body.get('cancel') is True, body.get('copy') is True)
         return JSONResponse(result, headers=HEADERS)
     except Exception as error: return failure(error)
 
@@ -359,8 +360,9 @@ async def clipboard_native(request):
         body = await request.json()
         code = body.get('code')
         if request.url.path.endswith('/clipboard-complete'):
-            await run_in_threadpool(REQUESTS.finish, code, body.get('secret'), body.get('count'), body.get('error', ''))
-            return JSONResponse(dict(ok=True), headers=HEADERS)
+            result = await run_in_threadpool(REQUESTS.native, code, body.get('secret'), body.get('event'),
+                body.get('count', 0), body.get('sequence', 0), body.get('error', ''), body.get('copy_ms'))
+            return JSONResponse(result, headers=HEADERS)
         record = await run_in_threadpool(REQUESTS.claim, code)
         try:
             row = await run_in_threadpool(Intakes(connect).read, record['key'], record['user']['id'])
@@ -371,7 +373,7 @@ async def clipboard_native(request):
             return JSONResponse(dict(secret=record['secret'], transfer=dict(base_url=str(request.base_url).rstrip('/'),
                 ticket=grant.ticket, secret=grant.secret)), headers=HEADERS)
         except Exception as error:
-            await run_in_threadpool(REQUESTS.finish, code, record['secret'], 0,
+            await run_in_threadpool(REQUESTS.native, code, record['secret'], 'failed', error=
                 str(error) if isinstance(error, ValueError) else 'Could not prepare saved files. Retry Copy all WEBP files.')
             raise
     except Exception as error: return failure(error)

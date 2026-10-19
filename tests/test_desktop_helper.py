@@ -32,7 +32,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 13", self.install)
+        self.assertIn("HelperVersion = 14", self.install)
         self.assertIn("SportsCaveFiles.ico", self.install)
         self.assertIn("$shortcut.IconLocation = $iconPath", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)

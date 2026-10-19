@@ -141,3 +141,29 @@ files_upload_api.py; desktop_helper/{SportsCaveFilesDesktop.cs,Install.ps1};
 tests/test_product_upload_package.py; tests/test_product_upload_package.cjs;
 tests/test_product_upload_state.cjs; tests/test_desktop_helper.py;
 tests/fixtures/product_upload_package_ui.py; this document.
+
+## 2026-10-19 native preparation release (helper v14)
+
+The installed helper recorded HttpRequestException before copying any files.
+An isolated CodeDOM-built .NET probe reproduced the transport failure: its default
+SSL3/TLS1.0 failed the service HTTPS handshake; explicitly selecting TLS1.2 returned
+HTTP 200. The helper now selects TLS1.2 without weakening certificate validation.
+
+The saved receipt's exact WEBP directory is listed by folder ID across all pages
+and checked against the displayed eight-file receipt. A scoped native session
+prepares these files without touching the clipboard. Explicit Copy All commands
+reuse the prepared files, verify their bytes and current operation, write FileDrop
+on the interactive STA dispatcher, then read back the exact eight paths. Completion
+is acknowledged only afterward. A new preparation revokes old sessions; errors,
+expiry, disconnection and cancellation remain visible and retryable.
+
+The native helper must be v14 for this release. The protocol may require the
+browser's normal external-application approval; the connection link remains visible
+until the helper connects. No unauthenticated local server was added.
+
+Release checks: 47 focused Python tests (including real Windows compilation and
+real application entrypoint), both updated JavaScript lifecycle suites and Render
+topology validation passed. Actual ChatGPT eight-attachment paste and ready-state
+latency remain unverified. Windows automation stopped on browser URL policy during
+the preceding turn; no end-to-end success is claimed. No live product writes were
+performed. Fixture tests use synthetic assets and an isolated compiled helper.

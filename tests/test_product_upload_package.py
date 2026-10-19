@@ -66,7 +66,9 @@ def test_native_grant_accepts_no_client_file_paths_and_pins_all_ids(monkeypatch)
     import files_upload_api as files
     row=saved_row();result=package(row)
     metadata={x['metadata']['id']:x['metadata'] for x in result['items']}
-    provider=SimpleNamespace(metadata_if_present=lambda key:metadata.get(key))
+    listing=Mock(side_effect=lambda *a,**k:dict(entries=[dict(x, **{'.tag':'file'}) for x in metadata.values()],has_more=False))
+    provider=SimpleNamespace(token='fixture',api=SimpleNamespace(list_folder_page=listing),metadata_if_present=lambda key:
+        dict(id='id:webp', **{'.tag':'folder'}) if key==result['folder'] else metadata.get(key))
     record=SimpleNamespace(items=[{} for _ in ORDER])
     create=Mock(return_value=record);monkeypatch.setattr(files.NATIVE_TRANSFER_MANAGER,'create',create)
     granted=native_grant(row,result['version'],provider,{'id':'owner'},dict(root_path='/Team',access_token='fixture'))
@@ -76,7 +78,7 @@ def test_native_grant_accepts_no_client_file_paths_and_pins_all_ids(monkeypatch)
     assert granted.purpose=='product_upload_webp'
     assert all(x['content_hash']==str(i)*64 for i,x in enumerate(granted.items))
     metadata.pop('id:file2')
-    with pytest.raises(ValueError,match='office.webp'):native_grant(row,result['version'],provider,{},dict(root_path='/Team',access_token='fixture'))
+    with pytest.raises(ValueError,match='displayed package'):native_grant(row,result['version'],provider,{},dict(root_path='/Team',access_token='fixture'))
     assert create.call_count==1
 
 

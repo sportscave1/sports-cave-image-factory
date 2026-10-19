@@ -73,8 +73,36 @@ def package(row, expected=None):
     return dict(version=version, folder=output['folder'] + '/WEBP', items=items)
 
 
-def view(row):
+def verify_folder(provider, result):
+    """List only the receipt's exact WEBP directory, including every page."""
+    folder = provider.metadata_if_present(result['folder'])
+    if not folder or folder.get('.tag', folder.get('tag')) != 'folder' or not folder.get('id'):
+        raise ValueError('The saved WEBP folder is missing or inaccessible. Retry Save all.')
+    cursor = ''
+    seen = set()
+    actual = []
+    while True:
+        page = provider.api.list_folder_page(provider.token, folder['id'], cursor=cursor)
+        actual.extend(x for x in page.get('entries', [])
+                      if x.get('.tag', x.get('tag')) == 'file' and x.get('name', '').lower().endswith('.webp'))
+        if not page.get('has_more'): break
+        cursor = page.get('cursor')
+        if not cursor or cursor in seen: raise ValueError('Saved WEBP listing was incomplete. Retry preparation.')
+        seen.add(cursor)
+    expected = {x['metadata']['id']: x for x in result['items']}
+    if len(actual) != len(expected) or {x.get('id') for x in actual} != set(expected):
+        raise ValueError('Saved WEBP folder no longer contains exactly the displayed package. Retry Save all.')
+    for meta in actual:
+        item = expected[meta['id']]
+        if any(meta.get(k) != item['metadata'].get(k) for k in ('name', 'rev', 'content_hash', 'size')):
+            raise ValueError(item['name'] + ' changed in Dropbox. Retry Save all.')
+    result['folder_id'] = folder['id']
+    return result
+
+
+def view(row, provider=None):
     result = package(row)
+    if provider is not None: verify_folder(provider, result)
     for item in result['items']:
         args = dict(id=str(row['id']), version=result['version'], role=item['role'])
         item['preview'] = '/api/product-uploads/saved-image?' + urlencode(dict(args, thumbnail='1'))
@@ -99,6 +127,7 @@ def native_grant(row, version, provider, user, context):
     if not version:
         raise ValueError('Refresh the saved package before preparing files.')
     result = package(row, version)
+    verify_folder(provider, result)
     root = context['root_path'].rstrip('/')
     selections = []
     for item in result['items']:
