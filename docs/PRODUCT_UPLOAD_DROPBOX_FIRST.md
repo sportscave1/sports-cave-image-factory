@@ -39,3 +39,9 @@ Shopify or Edition Ops writes were performed for these checks.
 The user authorised Git publication and Render deployment for this release.
 Deploy only through the existing canonical sports-cave-os service; render.yaml
 is unchanged and no Blueprint sync or infrastructure creation is required.
+
+Release integration also preserves the newer main change 051b2f55 (deferred
+handoff and PSD preview performance). Combined clipboard verification passed
+again. A broad in-process test run exposed Streamlit form-state contamination
+in three entrypoint cases; the entire seven-case entrypoint suite passes in a
+fresh subprocess. Run the entrypoint suite separately from the other contracts.
