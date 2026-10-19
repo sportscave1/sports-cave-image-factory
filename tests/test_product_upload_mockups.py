@@ -210,6 +210,39 @@ def test_render_http_accepts_existing_host_claim_health_envelope(env,monkeypatch
     assert health.call_args.args[1]=={'state':'Idle'}
 
 
+def test_legacy_staged_render_scope_failure_does_not_poison_companion_poll(env,monkeypatch):
+    from starlette.testclient import TestClient
+    from starlette.applications import Starlette
+    from starlette.routing import Route
+    import product_upload_api as api,files_upload_api as files,auto_editions_onboarding_api as onboarding
+    store,_,provider=env;row=saved(env);key=str(row['id'])
+    with store.locked(key,ADMIN['id']) as (current,cur):
+        current['data']['source']['path_display']='/Sportscave Team Folder/product_upload_assets/'+current['data']['source']['name']
+    original=deepcopy(store.read(key,ADMIN['id'])['data']['source'])
+    Renders(store.connect).request(key,ADMIN['id'])
+    assert not __import__('product_upload_dropbox').approved(original)
+    monkeypatch.setattr(api,'connect',store.connect)
+    monkeypatch.setattr(api,'Dropbox',lambda:provider)
+    async def actor(request):return ADMIN
+    monkeypatch.setattr(onboarding,'preparation_actor',actor)
+    monkeypatch.setattr(onboarding,'host_health',Mock())
+    monkeypatch.setattr(files,'_dropbox_context',lambda:dict(access_token='synthetic',root_path='/Sportscave Team Folder'))
+    monkeypatch.setattr(files.dropbox_integration,'psd_open_metadata',lambda *a,**k:deepcopy(original))
+    transfer=Mock();monkeypatch.setattr(files.NATIVE_TRANSFER_MANAGER,'create_psd',transfer)
+    client=TestClient(Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES]))
+    response=client.post('/api/product-uploads/render/claim',json={'health':{'state':'Idle'}},headers={'X-Sports-Cave-Preparation-Host':'synthetic'})
+    assert response.status_code==200,response.text
+    assert response.json()==dict(job=None,legacy_render_blocked=True)
+    transfer.assert_not_called()
+    current=store.read(key,ADMIN['id'])
+    assert current['data']['source']==original
+    assert current['data']['mockup_render']['state']=='Failed'
+    assert current['data']['mockup_render']['retryable'] is False
+    assert 'staged file is retained' in current['data']['mockup_render']['reason']
+    second=client.post('/api/product-uploads/render/claim',json={},headers={'X-Sports-Cave-Preparation-Host':'synthetic'})
+    assert second.status_code==200 and second.json()['job'] is None
+
+
 def test_native_rpc_failure_retains_owned_lock_and_marks_intake_failed(tmp_path,monkeypatch):
     from types import SimpleNamespace
     from scripts.studio.product_upload_render_local import run_one

@@ -10,6 +10,16 @@ Exact release/deploy/Companion evidence is recorded under ignored
 `output/product-upload-combined-release-20261019/`; no live artwork/Shopify test
 writes are part of release verification.
 
+Companion release verification found one retained workflow-v2 manual-upload render
+request repeatedly receiving scope-denied HTTP 403. Its staged source is under
+`product_upload_assets`, outside the current approved design folders. The native
+claim endpoint now checkpoints only that unsupported request as failed with an
+actionable Dropbox-selection reason, retaining its staged file and source metadata.
+It returns no native grant and lets subsequent host polls continue. This does not
+relax the approved-folder rules, touch originals, or change workflow-v3 server
+preparation. Focused tests cover source retention, absence of a native grant,
+non-retryable scope failure, a healthy subsequent poll and valid host claims.
+
 ## Master lifestyle brief, originals and Save all — 19 October 2026 (local only)
 
 Verified existing worktree:

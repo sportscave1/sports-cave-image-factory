@@ -143,6 +143,14 @@ async def host(request):
                 if any(meta.get(k) != job['metadata'].get(k) for k in ('id','rev','content_hash')):
                     await run_in_threadpool(renders.fail,job['id'],user['id'],job['token'],'The requested PSD revision changed. Select the current original PSD again.')
                     raise ValueError('The requested PSD revision changed.')
+                from product_upload_dropbox import approved
+                if not approved(meta):
+                    # A retained manual-upload request predates the Dropbox-only
+                    # workflow. Keep its source/checkpoint, enforce the current
+                    # scope, and stop this one request poisoning every host poll.
+                    await run_in_threadpool(renders.fail,job['id'],user['id'],job['token'],
+                        'This retained manual-upload PSD is outside the approved design folders. Its staged file is retained. Choose PSD from Dropbox to start server preparation.',False)
+                    return JSONResponse(dict(job=None,legacy_render_blocked=True),headers=HEADERS)
                 grant = files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'], root_path=auth['root_path'], user=user, metadata=meta, product_upload=True)
                 job['grant'] = dict(base_url=str(request.base_url).rstrip('/'), ticket=grant.ticket, secret=grant.secret)
             return JSONResponse(dict(job=job), headers=HEADERS)
