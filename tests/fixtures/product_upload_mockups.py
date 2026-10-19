@@ -37,12 +37,9 @@ st.session_state['current_page']='Product Uploads'
 st.session_state['selected_page']='Product Uploads'
 with st.sidebar:
     st.caption('Isolated fixture: no production writes; native render is simulated.')
-    if st.button('Standalone Mockups'):
-        st.session_state['fixture-standalone']=True
     if st.button('New Product Uploads visit'):
         st.session_state.pop('_product_upload_visit',None)
         for k in ('_product_upload_active','_product_upload_event','_product_upload_manual','_product_upload_mockups_result'):st.session_state.pop(k,None)
-        st.session_state['fixture-standalone']=False
     if st.button('Complete isolated render'):
         from product_upload_render import Renders,identity
         from tests.test_auto_editions_colour import icc
@@ -62,6 +59,4 @@ with st.sidebar:
             folder=provider.root/'prepared';folder.mkdir(exist_ok=True);import_synthetic(STATE['env'],row,folder)
 with patch.object(app,'current_os_user',return_value=ADMIN),patch.object(app.prompt_store,'get_prompt',side_effect=lambda key,default='',**kw:default),patch.object(app,'record_activity_log'),patch.object(app,'_files_access_token',return_value='synthetic'),patch.object(app,'_files_team_root',return_value='/Sportscave Team Folder'),patch.object(app,'_render_mockup_folder_picker',return_value='/Sportscave Team Folder/04_OUTPUT/product-images'),patch.object(app,'_save_mockups_to_dropbox_impl',side_effect=lambda token,user,result,manifest,root,parent,name,conflict:dict(destination=result['_product_upload_save_target'],successes=[dict(relative_path=x['archive_name']) for x in manifest],failures=[])):
     if STATE.get('configure_outputs'):STATE['configure_outputs'](app)
-    if st.session_state.get('fixture-standalone'):
-        st.session_state['current_page']='Mockups';app.render_mockups_page()
-    else:app.render_product_uploads_page()
+    app.render_product_uploads_page()

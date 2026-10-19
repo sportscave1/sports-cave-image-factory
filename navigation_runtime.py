@@ -7,7 +7,7 @@ def active_disclosure_group(
     ads_routes=(),
     analytics_routes=(),
 ):
-    if route in ('Worker Health','Developer Studio'):return 'developer'
+    if route in ('Worker Health','Developer Studio','Image Protection'):return 'developer'
     if route in social_routes:
         return "social"
     if route in seo_routes:

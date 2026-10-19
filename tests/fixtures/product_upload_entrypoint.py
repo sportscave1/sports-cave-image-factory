@@ -20,6 +20,8 @@ def configure(ns):
     user = dict(id='offline-user', username='offline', role='staff',
                 is_active=True, account_status='active', session_version=1,
                 page_permissions=['product_uploads', 'files'])
+    if mode == 'retired-denied':
+        user['page_permissions'] = ['mockups']
     if mode == 'denied':
         user['page_permissions'] = []
     if mode != 'missing':
@@ -30,7 +32,10 @@ def configure(ns):
     # Retain actual authentication, login form, access checks, router and page.
     ns['_account_system_status'] = lambda: {'available': True, 'admin': user}
     ns['current_auth_cookie'] = lambda: ''
-    ns['get_current_page'] = lambda: 'Product Uploads'
+    if mode.startswith('retired-'):
+        st.query_params['page'] = 'Mockups' if mode == 'retired-label' else 'mockups'
+    else:
+        ns['get_current_page'] = lambda: 'Product Uploads'
     for name in ('inject_styles', 'render_sidebar', 'apply_global_search_context',
                  'set_activity_actor', 'clear_activity_actor', '_finish_navigation_transition'):
         ns[name] = Mock()

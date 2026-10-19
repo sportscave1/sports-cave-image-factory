@@ -9,7 +9,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize('mode', ['legacy', 'allowed', 'outputs', 'missing', 'expired', 'denied', 'recover', 'recover-map'])
+@pytest.mark.parametrize('mode', ['legacy', 'allowed', 'outputs', 'missing', 'expired', 'denied', 'recover', 'recover-map', 'retired-label', 'retired-key', 'retired-denied'])
 def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, monkeypatch, caplog):
     import dotenv
     from streamlit.testing.v1 import AppTest
@@ -47,7 +47,7 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
     if mode in ('missing', 'expired'):
         assert any(b.label == 'Sign in' for b in test.button)
         assert not test.get('component_instance')
-    elif mode == 'denied':
+    elif mode in ('denied', 'retired-denied'):
         assert any(t.value == 'Access not approved' for t in test.title)
     else:
         assert test.get('component_instance'), 'Product Upload component must render'
@@ -81,3 +81,7 @@ def test_full_main_routes_product_upload_with_session_namespace(mode, tmp_path, 
             assert len(test.get('file_uploader')) == 3
             assert any(b.label == 'Save all' for b in test.button)
             assert not any('Edit master prompt' in b.label for b in test.button)
+
+    if mode.startswith('retired-'):
+        assert test.session_state['current_page'] == 'Product Uploads'
+        assert test.query_params['page'] == ['product_uploads']
