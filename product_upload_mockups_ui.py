@@ -36,7 +36,7 @@ def render_page(app):
         st.session_state['_product_upload_event']=event['nonce']
         st.session_state['_product_upload_active']=event.get('id')
         st.session_state['_product_upload_manual']=bool(event.get('manual'))
-        st.session_state['_product_upload_mode']=event.get('mode','DRAFT')
+        st.session_state['_product_upload_mode']=event.get('mode','LIVE')
         st.session_state['_product_upload_visible']=event.get('visible',True)
         if previous!=event.get('id'):
             from product_upload_sport import clear_selection
@@ -52,7 +52,7 @@ def render_page(app):
     key=st.session_state.get('_product_upload_active')
     manual=st.session_state.get('_product_upload_manual',False)
     if manual:
-        component(section='handoff',manual=True,mode=st.session_state.get('_product_upload_mode','DRAFT'),key='product-upload-manual-'+visit,default=None)
+        component(section='handoff',manual=True,mode=st.session_state.get('_product_upload_mode','LIVE'),key='product-upload-manual-'+visit,default=None)
         return
     if not key: return
     row=Intakes(connect).read(key,user['id'])
