@@ -92,8 +92,26 @@ class RefreshSaveRestoreTests(unittest.TestCase):
             save_locally(result, workflow, fail=saved.FILENAME)
         self.assertFalse(workflow['refresh_workspace_saved'])
         self.assertNotIn(handoff.SAVED_PACKAGE_KEY, workflow)
+        with patch.object(ads.st, 'session_state', {ads._creative_refresh_visual_review_key(result, workflow): True}), \
+             patch.object(ads.st, 'button', return_value=False) as button, \
+             patch.object(ads.st, 'caption'), patch.object(handoff, 'queue_saved_package') as queue:
+            ads._render_saved_ad_post_now(result, workflow)
+            self.assertTrue(button.call_args.kwargs['disabled'])
+            queue.assert_not_called()
         save_locally(result, workflow)
         self.assertTrue(workflow['refresh_workspace_saved'])
+
+    def test_partial_asset_save_never_allows_posting(self):
+        result, workflow = self.ready_ie()
+        save_locally(result, workflow, fail='.png')
+        self.assertFalse(workflow['refresh_workspace_saved'])
+        self.assertNotIn(handoff.SAVED_PACKAGE_KEY, workflow)
+        with patch.object(ads.st, 'session_state', {ads._creative_refresh_visual_review_key(result, workflow): True}), \
+             patch.object(ads.st, 'button', return_value=False) as button, \
+             patch.object(ads.st, 'caption'), patch.object(handoff, 'queue_saved_package') as queue:
+            ads._render_saved_ad_post_now(result, workflow)
+            self.assertTrue(button.call_args.kwargs['disabled'])
+            queue.assert_not_called()
 
     def test_four_five_and_six_cards_reach_posting_with_all_five_copy_variations(self):
         from tests.fixtures.refresh_ui import ready_carousel
@@ -171,14 +189,14 @@ with patch.object(ads, '_ads_image_workflow', return_value=workflow), patch.obje
     ads.render_supported_result(result)
 ''').run(timeout=20)
         self.assertFalse(app.exception)
-        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         next(b for b in app.button if b.label == 'Mock save').click().run(timeout=20)
         self.assertFalse(app.exception)
         visible = '\n'.join(str(e.value) for kind in ('caption','subheader','markdown') for e in app.get(kind))
         for obsolete in ('Build it in Meta', 'Final Ad Review', 'Execution notes', 'Refresh checks',
                          'Refresh analysis & standalone briefs', 'Attach WINNER_IE', 'st.iframe'):
             self.assertNotIn(obsolete, visible)
-        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=20)
         next(b for b in app.button if b.label == 'POST NOW').click().run(timeout=20)
         self.assertFalse(app.exception)
@@ -200,6 +218,56 @@ ads.render_product_name_input(rows=[])
         self.assertFalse(app.exception)
         self.assertEqual(len(app.selectbox), 1)
         self.assertEqual(app.selectbox[0].value, ads._edition_ops_product_selector_identity(ROW))
+
+    def test_review_survives_reopen_but_content_changes_require_review(self):
+        from tests.test_ads_refresh_repair import app_for, button
+        app = app_for('Instant Experience')
+        review = lambda: next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image'))
+        review().check().run(timeout=30)
+        button(app, 'Save now').click().run(timeout=30)
+        button(app, 'Save Instant Experience Package here').click().run(timeout=30)
+        self.assertFalse(app.exception)
+        self.assertFalse(button(app, 'POST NOW').disabled)
+        workflow = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
+        data = next(v for k, v in app.session_state['fixture_saved_files'].items() if k.endswith(saved.FILENAME))
+        with patch.object(ads.dropbox_integration, 'upload_batch', side_effect=AssertionError('Reopen must not upload')):
+            state = {}
+            result = saved.restore(data, state)
+            restored = state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
+            with patch.object(ads.st, 'session_state', state):
+                self.assertEqual(ads._creative_refresh_visual_review_issues(result, restored), [])
+                self.assertEqual(restored[handoff.SAVED_PACKAGE_KEY]['package_id'], workflow[handoff.SAVED_PACKAGE_KEY]['package_id'])
+                restored['slots'][next(iter(restored['slots']))]['source_hash'] = 'changed-image'
+                self.assertTrue(ads._creative_refresh_visual_review_issues(result, restored))
+
+    def test_legacy_saved_refresh_can_verify_without_resave_or_new_assets(self):
+        from tests.test_ads_refresh_repair import app_for, button
+        app = app_for('Instant Experience')
+        button(app, 'Save now').click().run(timeout=30)
+        button(app, 'Save Instant Experience Package here').click().run(timeout=30)
+        workflow = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
+        original_package = deepcopy(workflow[handoff.SAVED_PACKAGE_KEY])
+        data = workflow['refresh_workspace_export']
+        self.assertNotIn('refresh_visual_review_key', saved.loads(data)[1])
+        state = {}
+        saved.restore(data, state)
+        for key, value in state.items():
+            app.session_state[key] = value
+        app.run(timeout=30)
+        self.assertTrue(button(app, 'POST NOW').disabled)
+        self.assertTrue(any('tick the confirmation' in c.value for c in app.caption))
+        with patch.object(ads.dropbox_integration, 'upload_batch', side_effect=AssertionError('Review must not upload')):
+            next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
+            self.assertFalse(button(app, 'POST NOW').disabled)
+            app.run(timeout=30)
+            self.assertFalse(button(app, 'POST NOW').disabled)
+            reopened = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
+            self.assertEqual(handoff.content_hash(original_package), handoff.content_hash(reopened[handoff.SAVED_PACKAGE_KEY]))
+            self.assertIn('refresh_visual_review_key', saved.loads(reopened['refresh_workspace_export'])[1])
+            button(app, 'POST NOW').click().run(timeout=30)
+            self.assertFalse(app.exception)
+            self.assertEqual(app.session_state['current_page'], ads.POSTING_ROUTE)
+            self.assertEqual(handoff.content_hash(original_package), handoff.content_hash(app.session_state[handoff.PENDING_KEY]['package']))
 
 
 if __name__ == '__main__':
