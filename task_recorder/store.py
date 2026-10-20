@@ -3,9 +3,11 @@ import json
 import os
 import uuid
 import hashlib
+import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 from .schema import Invalid, validate_task
+from .attention import issues
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -24,6 +26,7 @@ class Store:
         self.tasks = self.root / "tasks"
         self.tasks.mkdir(parents=True, exist_ok=True)
         self.journal = self.root / "run.json"
+        self._summaries = {}
         if self.journal.exists():
             run = json.loads(self.journal.read_text(encoding="utf-8"))
             if run.get("status") in {"running", "paused", "executing"}:
@@ -38,7 +41,10 @@ class Store:
     def save(self, raw):
         task = validate_task(raw)
         task.setdefault("id", str(uuid.uuid4()))
+        if (self.tasks / (task["id"] + ".deleted")).exists():
+            raise Invalid("This recording was deleted. Create a new recording.")
         atomic(self.tasks / (task["id"] + ".json"), task)
+        self.metadata(task["id"], updated_at=now())
         return task
 
     @staticmethod
@@ -51,23 +57,64 @@ class Store:
     def get(self, task_id):
         try:
             task_id = str(uuid.UUID(task_id))
+            if (self.tasks / (task_id + ".deleted")).exists(): raise ValueError()
             return validate_task(json.loads((self.tasks / (task_id + ".json")).read_text(encoding="utf-8")))
         except (ValueError, OSError, TypeError):
             raise Invalid("Saved task not found or invalid.")
 
+    def metadata(self, task_id, **updates):
+        task_id = str(uuid.UUID(task_id))
+        path = self.tasks / (task_id + ".meta")
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if updates:
+            data.update(updates)
+            atomic(path, data)
+        return data
+
+    def delete(self, task_id):
+        task = self.get(task_id)  # Validated UUID and existing saved task only.
+        tombstone = self.tasks / (task["id"] + ".deleted")
+        atomic(tombstone, {"deleted_at": now()})
+        # The tombstone commits deletion before cleanup; interrupted cleanup cannot
+        # resurrect a recording. Nothing outside this task's own files is removed.
+        for suffix in (".json", ".meta", ".result"):
+            with contextlib.suppress(OSError):
+                (self.tasks / (task["id"] + suffix)).unlink(missing_ok=True)
+        checkpoint = self.root / "recording.json"
+        if checkpoint.exists():
+            record = json.loads(checkpoint.read_text(encoding="utf-8"))
+            if record.get("task", {}).get("id") == task["id"]:
+                with contextlib.suppress(OSError):checkpoint.unlink()
+        if self.journal.exists():
+            run = json.loads(self.journal.read_text(encoding="utf-8"))
+            if run.get("task_id") == task["id"]:
+                with contextlib.suppress(OSError):self.journal.unlink()
+        self._summaries.pop(task["id"], None)
+
     def list(self):
         result = []
         for p in self.tasks.glob("*.json"):
+            if p.with_suffix(".deleted").exists():
+                continue
             try:
-                task = validate_task(json.loads(p.read_text(encoding="utf-8")))
-                history_path = self.tasks / (task["id"] + ".result")
-                history = json.loads(history_path.read_text(encoding="utf-8")) if history_path.exists() else {}
-                result.append({"id": task["id"], "name": task["name"], "last_run": history.get("at"),
-                               "result": history.get("status", "Never run"), "revision": self.revision(task),
-                               "inputs": task["inputs"]})
+                paths = (p, p.with_suffix(".meta"), p.with_suffix(".result"))
+                stamp = tuple((v.stat().st_mtime_ns, v.stat().st_size) if v.exists() else None for v in paths)
+                cached = self._summaries.get(p.stem)
+                if cached and cached[0] == stamp:
+                    result.append(cached[1]); continue
+                task = self.get(p.stem)
+                meta = self.metadata(task["id"])
+                history = json.loads(paths[2].read_text(encoding="utf-8")) if paths[2].exists() else {}
+                problems=issues(task)
+                row = {"attention":problems[:3],"issue_count":len(problems),"id": task["id"], "name": task["name"], "last_run": history.get("at"),
+                       "result": history.get("status", "Never run"), "revision": self.revision(task),
+                       "inputs": task["inputs"], "steps": len(task["steps"]),
+                       "duration_ms": meta.get("duration_ms"), "updated_at": meta.get("updated_at")}
+                self._summaries[p.stem] = (stamp, row)
+                result.append(row)
             except (ValueError, OSError):
                 continue
-        return sorted(result, key=lambda x: x["name"].lower())
+        return sorted(result, key=lambda x: (x["name"].lower(), x["id"]))
 
     def result(self, task_id, status, index, message):
         run = {"task_id": task_id, "status": status, "step": index, "message": message, "at": now()}

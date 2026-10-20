@@ -94,6 +94,21 @@ class RelayTests(unittest.TestCase):
             with self.assertRaises(Invalid):safe_url(value)
         with self.assertRaises(Invalid):origin("http://sports-cave-image-factory.onrender.com")
 
+    def test_table_deletion_requires_current_helper_and_rejects_active_id(self):
+        task_id=str(uuid.uuid4())
+        with self.assertRaisesRegex(Invalid,"Update the PC helper"):
+            self.relay.enqueue(self.owner,self.device,str(uuid.uuid4()),"delete",{"id":task_id})
+        start=str(uuid.uuid4())
+        self.relay.enqueue(self.owner,self.device,start,"play",{"id":task_id,"revision":"a"*64})
+        self.poll(state_version=2,state={"mode":"running","protocol":2,"operation_id":start,"active_task_id":task_id,"tasks":[]})
+        with self.assertRaisesRegex(Invalid,"Stop this task first"):
+            self.relay.enqueue(self.owner,self.device,str(uuid.uuid4()),"delete",{"id":task_id})
+        other=str(uuid.uuid4());command=str(uuid.uuid4())
+        first=self.relay.enqueue(self.owner,self.device,command,"delete",{"id":other})
+        self.assertEqual(first,self.relay.enqueue(self.owner,self.device,command,"delete",{"id":other}))
+        with self.assertRaises(PermissionError):
+            self.relay.enqueue(str(uuid.uuid4()),self.device,str(uuid.uuid4()),"delete",{"id":other})
+
     def test_private_schema_rls(self):
         with connect() as conn:
             rows=conn.execute("SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='task_recorder_private' AND c.relkind='r'").fetchall()

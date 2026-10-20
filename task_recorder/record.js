@@ -19,7 +19,7 @@
   if(document.body)badge();else document.addEventListener('DOMContentLoaded',badge,{once:true});
   const send = data => window.__scRecord(data).catch(() => {});
   const privacy = () => { if (active && sensitive()) { active = false; pending = null; send({kind:'privacy'}); return true; } return !active; };
-  const unsupported = reason => send({kind:'unsupported', reason});
+  const unsupported = code => send({kind:'unsupported', code});
   const clean = t => typeof t === 'string' && t.trim().length <= 180 && !privateName.test(t) && !token.test(t);
   function locator(e) {
     const label = e.getAttribute('aria-label') || (e.labels && e.labels[0]?.textContent.trim());
@@ -44,18 +44,18 @@
       active = false; pending = null; send({kind:'privacy'}); return;
     }
     const loc = locator(e);
-    if (!loc) { unsupported('No stable label, role, test ID or element ID; edit this step.'); return; }
+    if (!loc) { unsupported('field_target'); return; }
     if (e.type === 'file') {
-      if (e.files?.length !== 1) unsupported('V1 supports one file per upload control.');
+      if (e.files?.length !== 1) unsupported('multiple_files');
       else return send({kind:'step', step:{action:'upload', locator:loc}});
     } else if (e.tagName === 'SELECT') {
-      if (e.multiple) unsupported('Multi-select controls are not supported in V1.');
+      if (e.multiple) unsupported('multiple_selection');
       else return send({kind:'step', step:{action:'select', locator:loc, value:e.value}});
     } else if (['checkbox','radio'].includes(e.type)) {
       return send({kind:'step', step:{action:'check', locator:loc, value:e.checked}});
     } else if (e.matches('input,textarea')) {
       return send({kind:'step', step:{action:'fill', locator:loc, value:e.value}});
-    } else if (e.isContentEditable) unsupported('Rich text/contenteditable editing needs a dedicated adapter.');
+    } else if (e.isContentEditable) unsupported('rich_text');
   }
   function flush() { if (pending) { const e = pending; pending = null; return capture(e); } }
   window.__scRecorder = {
@@ -64,6 +64,7 @@
     sensitive,
     locator
   };
+  send({kind:'ready'});
   document.addEventListener('input', ev => { if (!privacy()) pending = ev.target; }, true);
   document.addEventListener('change', ev => { if(pending && pending !== ev.target) flush(); pending = null; capture(ev.target); }, true);
   document.addEventListener('click', ev => {
@@ -71,23 +72,23 @@
     flush();
     const raw = ev.composedPath()[0];
     if (!(raw instanceof Element)) return;
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey) { unsupported('Modified clicks/new tabs are unsupported.'); return; }
-    if (raw.closest('canvas,[contenteditable=true]') || (raw.closest('svg') && !raw.closest('button,a,[role=button]'))) { unsupported('Canvas, drawing and rich editing actions are unsupported.'); return; }
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey) { unsupported('modified_click'); return; }
+    if (raw.closest('canvas,[contenteditable=true]') || (raw.closest('svg') && !raw.closest('button,a,[role=button]'))) { unsupported('rich_edit'); return; }
     if (raw.matches('input,textarea,select,option') || raw.closest('label')?.querySelector('input')) return;
     const e = raw.closest('button,a,[role=button],[role=tab],[role=menuitem]') || raw;
-    if (e.matches('a[target=_blank]')) { unsupported('New-tab navigation is unsupported; use the recorded tab.'); return; }
+    if (e.matches('a[target=_blank]')) { unsupported('new_tab'); return; }
     const loc = locator(e);
-    if (!loc) { unsupported('Click target has no stable locator; edit this step.'); return; }
+    if (!loc) { unsupported('click_target'); return; }
     send({kind:'step', step:{action:'click',locator:loc}});
   }, true);
   document.addEventListener('keydown', ev => {
     if (privacy()) return;
-    if (ev.key === 'Enter' && ev.target.matches('input,textarea')) { flush(); unsupported('Enter-key submission is unsupported; record a submit-button click.'); }
+    if (ev.key === 'Enter' && ev.target.matches('input,textarea')) { flush(); unsupported('enter_submit'); }
     else if ((ev.ctrlKey || ev.metaKey) && !['a','c','v','x'].includes(ev.key.toLowerCase()))
-      unsupported('Keyboard shortcuts are unsupported.');
+      unsupported('shortcut');
   }, true);
   for (const event of ['dblclick','contextmenu','dragstart','drop']) {
-    document.addEventListener(event, () => { if (!privacy()) unsupported('Double/right click and drag/drop actions are unsupported.'); }, true);
+    document.addEventListener(event, () => { if (!privacy()) unsupported('pointer_gesture'); }, true);
   }
   new MutationObserver(() => privacy()).observe(document, {childList:true, subtree:true, attributes:true, attributeFilter:['type','autocomplete']});
 })();

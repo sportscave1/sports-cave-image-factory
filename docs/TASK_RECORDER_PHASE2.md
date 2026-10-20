@@ -1,5 +1,7 @@
 # Task Recorder Phase 2
 
+The current interface is described in [Task Recorder embedded page upgrade](TASK_RECORDER_PAGE_UPGRADE.md). The popup instructions below describe the original Phase 2 release.
+
 ## Normal use
 
 In Sports Cave OS, open **Developer → Task Recorder**. Press **Record**, perform

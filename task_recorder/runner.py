@@ -38,6 +38,9 @@ class Runner:
         self.run_id = None
         self.total = 0
         self.simple_recording = False
+        self.recording_started = None
+        self.recorded_ms = 0
+        self.in_action = False
         self.file_selector = None
         self.selected_upload = None
         from .windows import Vault
@@ -72,6 +75,8 @@ class Runner:
                 "total": self.total, "action": self.current_action, "can_resume": self.can_resume,
                 "browser_open": bool(self.context and self.page and not self.page.is_closed()),
                 "recording": self.recording, "privacy_pause": self.privacy_pause,
+                "active_task_id": self.draft.get("id") if self.recording or self.mode == "recording_paused" else self.run_id,
+                "active_task_name": self.draft.get("name") if self.recording or self.mode == "recording_paused" else getattr(self, "run_name", ""),
                 "draft": self.draft, "tasks": self.store.list()}
 
     def busy(self):
@@ -132,6 +137,7 @@ class Runner:
 
     def closed(self):
         was_recording=self.recording or self.mode=="recording_paused"
+        if was_recording:self.finish_recording_segment()
         self.recording = False
         if not self.busy():
             if was_recording:
@@ -191,7 +197,8 @@ class Runner:
     async def navigated(self, frame):
         if not self.recording: return
         if frame != self.page.main_frame:
-            self.unsupported("Frame navigation is unsupported; V1 records only the main frame.")
+            # Embedded documents navigate while the site renders; that is not a
+            # user action. Actual frame input still reaches record_event below.
             with contextlib.suppress(Exception):
                 await frame.evaluate("window.__scRecorder?.set(true)")
             return
@@ -225,7 +232,15 @@ class Runner:
         else: old.append(step)
         self.store.checkpoint(self.draft)
 
+    def finish_recording_segment(self):
+        if self.recording_started is not None:
+            self.recorded_ms += max(0, round((time.monotonic() - self.recording_started) * 1000))
+            self.recording_started = None
+        if self.draft.get("id"):
+            self.store.metadata(self.draft["id"], duration_ms=self.recorded_ms)
+
     async def privacy(self):
+        self.finish_recording_segment()
         self.recording = False
         self.privacy_pause = True
         self.mode = "recording_paused"
@@ -238,15 +253,27 @@ class Runner:
         if isinstance(data, dict) and data.get("kind") == "privacy":
             await self.privacy()
             return
+        if isinstance(data, dict) and data.get("kind")=="ready":
+            # Init scripts notify us after their recorder is installed, including
+            # dynamically created srcdoc/cross-origin frames. Check privacy before
+            # enabling capture; never infer user interaction from a frame load.
+            if AUTH_PATH.search(source["frame"].url):await self.privacy()
+            else:
+                # set(true) performs the frame-local sensitive-field check before
+                # accepting input; its observer pauses on later sign-in fields.
+                with contextlib.suppress(Exception):await source["frame"].evaluate("window.__scRecorder?.set(true)")
+            return
         if source["frame"] != self.page.main_frame:
-            self.unsupported("Iframe actions are unsupported; use a top-level page.")
+            self.unsupported("An action inside an embedded page is unsupported. Record the action in the main browser page instead.")
             return
         if not isinstance(data, dict): return
         if data.get("kind") == "privacy":
             await self.privacy()
         elif data.get("kind") == "unsupported":
             # Page scripts are untrusted; do not retain arbitrary messages.
-            self.unsupported("Unsupported browser action. Use simple labeled controls, a submit button and one tab.")
+            from .attention import CAPTURE_REASONS
+            code=data.get("code") if isinstance(data.get("code"),str) else None
+            self.unsupported(CAPTURE_REASONS.get(code,"Unsupported browser action. Record a simple labelled control in the main tab."))
         elif data.get("kind") == "step":
             step = copy.deepcopy(data.get("step"))
             if not isinstance(step, dict): return
@@ -282,6 +309,7 @@ class Runner:
                 return
             if not self.draft["steps"]:
                 self.append({"action": "navigate", "value": safe_url(self.page.url)})
+            if self.recording_started is None:self.recording_started = time.monotonic()
             self.recording = True
             self.privacy_pause = False
             self.mode = "recording"
@@ -294,6 +322,7 @@ class Runner:
                 with contextlib.suppress(Exception):
                     await self.page.evaluate("window.__scRecorder?.flush()")
                     await self.page.evaluate("window.__scRecorder?.set(false)")
+            self.finish_recording_segment()
             self.recording = False
             self.privacy_pause = False
             self.mode = "idle"
@@ -313,6 +342,8 @@ class Runner:
 
     async def wait_gate(self):
         if self.pause_requested:
+            self.mode = "paused"
+            self.message = "Paused. Resume to continue at the next unfinished action."
             await self.gate.wait()
 
     async def target(self, step):
@@ -372,7 +403,11 @@ class Runner:
                 while True:
                     try:
                         self.store.result(self.run_id, "executing", i, "Step started; no automatic replay after interruption.")
-                        await self.perform(step)
+                        self.in_action = True
+                        try:
+                            await self.perform(step)
+                        finally:
+                            self.in_action = False
                         break
                     except TargetProblem as exc:
                         self.mode = "paused"
@@ -384,6 +419,7 @@ class Runner:
                         await self.gate.wait()
                 self.store.result(self.run_id, "running", i + 1, "Step completed.")
                 self.message = "Completed step " + str(i + 1) + " of " + str(self.total)
+                await self.wait_gate()
                 # Yield so Stop/Pause is handled between fast actions.
                 await asyncio.sleep(.05)
             self.mode = "completed"
@@ -410,6 +446,7 @@ class Runner:
         if not self.page or self.page.is_closed(): await self.open_browser()
         await self.page.bring_to_front()
         self.run_id = task_id
+        self.run_name = saved["name"]
         self.store.run_context = {"operation_id": operation_id, "task_revision": actual_revision}
         self.total = len(task["steps"])
         self.index = 0
@@ -429,8 +466,8 @@ class Runner:
             self.pause_requested = True
             self.can_resume = True
             self.gate.clear()
-            self.mode = "paused"
-            self.message = "Pause requested. An already dispatched action may finish; next action waits."
+            self.mode = "pausing" if self.in_action else "paused"
+            self.message = "Pausing… The current action is finishing." if self.in_action else "Paused. Resume to continue."
 
     async def resume(self):
         if self.mode == "recording_paused":

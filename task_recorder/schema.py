@@ -117,8 +117,11 @@ def validate_task(raw):
 def resolve_task(task, values, files=None):
     obj = validate_task(task)
     if not obj["steps"]: raise Invalid("Add or record steps first.")
-    if any(s["action"] == "unsupported" for s in obj["steps"]):
-        raise Invalid("Resolve every unsupported step before playback.")
+    from .attention import issues
+    problem=issues(obj)
+    if problem:
+        first=problem[0]
+        raise Invalid("Needs attention · Step " + str(first["step"]) + ": " + first["explanation"] + " Use Review step to save a corrected copy or record a replacement.")
     if not isinstance(values, dict) or set(values) - {i["name"] for i in obj["inputs"]}:
         raise Invalid("Unknown input values.")
     for item in obj["inputs"]:
