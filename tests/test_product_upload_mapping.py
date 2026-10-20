@@ -45,8 +45,8 @@ def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, pr
     p=product(tags=([tag(key)] if correlated else [])+([f'sc-edition-limit-{limit}'] if limit else []),
               status='DRAFT' if mode=='DRAFT' else 'ACTIVE',online_store_url='' if mode=='DRAFT' else 'https://fixture/products/art',created_at='2026-10-19T09:28:59Z')
     shop=Mock()
-    shop.fetch_catalog_page.side_effect=lambda **kw:dict(products=[deepcopy(p)] if correlated else [],has_next_page=False)
-    shop.fetch_product_by_shopify_id.side_effect=lambda pid:deepcopy(p) if pid==PID else None
+    shop.fetch_catalog_page.side_effect=AssertionError('MAP must not search Shopify')
+    shop.fetch_product_by_shopify_id.side_effect=AssertionError('MAP must not fetch Shopify')
     import supabase_backend as db
     import shopify_product_onboarding as onboarding
     db.shopify_sync.fetch_product_by_shopify_id=lambda *a,**kw:deepcopy(p)
@@ -100,7 +100,7 @@ def test_webhook_synced_product_direct_finalisation_idempotent_no_customer_alloc
     assert edition['next_edition_number']==1 and edition['sold_count']==0
     assert count(env[1],'edition_orders')==0
     no_jobs(env)
-    assert {c[0] for c in service.shopify.method_calls} <= {'fetch_catalog_page','fetch_product_by_shopify_id'}
+    assert not service.shopify.method_calls
     assert not env[2].calls # no upload/download/image bytes
 
 
@@ -146,27 +146,24 @@ def test_conflicting_edition_shopify_identifiers_stop_before_move(env,target):
     assert not env[2].api.move_path.called
 
 
-@pytest.mark.parametrize('kind',['none','multiple','saved-id','changed-tag','archived'])
+@pytest.mark.parametrize('kind',['none','multiple','saved-id','changed-tag'])
 def test_exact_correlation_conflicts_never_guess(env,kind):
-    service,key,meta,p=setup(env)
-    if kind=='none':service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[],has_next_page=False)
-    if kind=='multiple':service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[p,dict(p,shopify_product_id='gid://shopify/Product/988')],has_next_page=False)
+    service,key,meta,p=setup(env, correlated=kind not in ('none','changed-tag'))
+    if kind=='multiple':service.register(dict(p,shopify_product_id='gid://shopify/Product/988',legacy_resource_id='988',handle='other',title='Other Art'),200)
     if kind=='saved-id':
         with env[0].locked(key,ADMIN['id']) as (row,cur):
             row['data']['upload_operation']['product_id']='gid://shopify/Product/988'
-    if kind=='changed-tag':service.shopify.fetch_product_by_shopify_id.side_effect=lambda pid:dict(p,tags=[])
-    if kind=='archived':p['status']='ARCHIVED'
     result=service.map(key,ADMIN)
     assert result['state']!='Mapped' and result['reason']
-    if kind=='none':assert result['reason'].startswith('Product not found in Shopify yet') and result['needs_product']
-    assert not env[2].api.move_path.called
+    if kind=='none':assert result['reason'].startswith('Waiting for product in Edition Ops') and result['needs_product']
+    assert not env[2].api.move_path.called and not service.shopify.method_calls
     no_jobs(env)
 
 
 def test_unknown_edition_choice_resumes_without_recreating_product(env):
     service,key,meta,p=setup(env,limit=None)
     result=service.map(key,ADMIN)
-    assert 'waiting for its Edition Ops record' in result['reason'] and result['state']=='Waiting for product'
+    assert 'Waiting for product in Edition Ops' in result['reason'] and result['state']=='Waiting for product in Edition Ops'
     service.onboard.assert_not_called()
     assert count(env[1],'webhook_events')==0
     assert read_edition(env[0].connect,PID) is None
@@ -227,10 +224,11 @@ def test_double_click_during_lookup_uses_one_durable_attempt(env):
     import threading
     service,key,meta,p=setup(env)
     entered,release=threading.Event(),threading.Event()
-    def lookup(**kw):
+    original=service._local_candidates
+    def lookup(marker):
         entered.set();assert release.wait(8)
-        return dict(products=[p],has_next_page=False)
-    service.shopify.fetch_catalog_page.side_effect=lookup
+        return original(marker)
+    service._local_candidates=lookup
     with ThreadPoolExecutor() as pool:
         first=pool.submit(service.map,key,ADMIN);assert entered.wait(8)
         try:assert service.map(key,ADMIN)['state']=='Mapping…'
@@ -314,10 +312,10 @@ def test_api_starts_background_once_and_status_is_metadata_only(env,monkeypatch)
     monkeypatch.setattr(module,'Mapping',lambda *a,**kw:service)
     monkeypatch.setattr(files,'_request_user',lambda *a,**kw:ADMIN)
     entered,release=threading.Event(),threading.Event()
-    original=service.shopify.fetch_catalog_page.side_effect
-    def lookup(**kw):
-        entered.set();assert release.wait(10);return original(**kw)
-    service.shopify.fetch_catalog_page.side_effect=lookup
+    original=service._local_candidates
+    def lookup(marker):
+        entered.set();assert release.wait(10);return original(marker)
+    service._local_candidates=lookup
     version=current_source(env[0].read(key,ADMIN['id']))['version']
     with TestClient(Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])) as client:
         url='/api/product-uploads/';headers={'Origin':'http://testserver'}
@@ -375,7 +373,7 @@ def test_expired_attempt_and_late_owner_are_fenced(env):
 
 def test_ambiguous_correlation_requires_explicit_selector_confirmation(env):
     service,key,meta,p=setup(env)
-    service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[p,dict(p,shopify_product_id='gid://shopify/Product/988')],has_next_page=False)
+    service.register(dict(p,shopify_product_id='gid://shopify/Product/988',legacy_resource_id='988',handle='other',title='Other Art'),200)
     result=service.map(key,ADMIN)
     assert result['needs_product'] and len(result['candidates'])==2
     assert not env[2].api.move_path.called
@@ -477,14 +475,58 @@ def test_edition_ops_display_name_used_for_move_not_edition_label(env):
 
 
 def test_not_found_lookup_retry_does_not_move_or_sync(env):
-    service,key,meta,p=setup(env)
-    service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[],has_next_page=False)
+    service,key,meta,p=setup(env,arrived=False)
     result=service.map(key,ADMIN)
-    assert result['state']=='Waiting for product' and result['needs_product']
+    assert result['state']=='Waiting for product in Edition Ops' and result['needs_product']
     assert not env[2].api.move_path.called
-    service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[p],has_next_page=False)
+    service.register(p,200)
     result=service.map(key,ADMIN)
     assert result['state']=='Mapped',result
     assert 'Syncing Edition Ops' not in result['completed']
     assert 'Checking edition setup' not in result['completed']
     service.onboard.assert_not_called()
+
+
+@pytest.mark.parametrize('status',['DRAFT','ARCHIVED','ACTIVE'])
+def test_saved_local_id_needs_no_fresh_tag_or_publication_filter(env,status):
+    service,key,meta,p=setup(env,correlated=False)
+    env[1].execute("UPDATE edition_products SET raw=jsonb_build_object('status',%s::text)",(status,))
+    env[1].execute("DELETE FROM shopify_products")
+    with env[0].locked(key,ADMIN['id']) as (row,cur):
+        row['data']['upload_operation']['product_id']=PID
+    before=read_edition(env[0].connect,PID)
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert read_edition(env[0].connect,PID)==before
+    assert not service.shopify.method_calls
+    service.onboard.assert_not_called()
+    assert count(env[1],'edition_runs')==1 and count(env[1],'webhook_events')==0
+
+
+def test_new_operation_reuses_authoritative_psd_link_without_new_tag(env):
+    import uuid
+    from product_upload_dropbox import select
+    service,key,meta,p=setup(env)
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    prior=env[0].read(key,ADMIN['id'])
+    moved=env[2].metadata_if_present(meta['id'])
+    new_key=str(uuid.uuid4())
+    select(env[0].connect,env[2],new_key,ADMIN['id'],'UPDATE',moved['id'],moved['rev'])
+    with env[0].locked(new_key,ADMIN['id']) as (row,cur):
+        row['data'].update(mockups_exported=True,mockup_saves=deepcopy(prior['data']['mockup_saves']))
+        row['data']['upload_operation']['output']=deepcopy(prior['data']['upload_operation']['output'])
+    before=read_edition(env[0].connect,PID)
+    result=service.map(new_key,ADMIN)
+    assert result['state']=='Mapped',result
+    assert env[2].api.move_path.call_count==1
+    assert read_edition(env[0].connect,PID)==before
+    assert count(env[1],'product_psd_mappings')==1
+    assert not service.shopify.method_calls
+
+
+def test_local_cached_string_tag_and_same_title_not_identity(env):
+    service,key,meta,p=setup(env,correlated=False)
+    assert service.map(key,ADMIN)['state']=='Waiting for product in Edition Ops'
+    env[1].execute("UPDATE shopify_products SET raw_json=jsonb_build_object('tags',%s::text)",('other, '+tag(key)+', final',))
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert not service.shopify.method_calls

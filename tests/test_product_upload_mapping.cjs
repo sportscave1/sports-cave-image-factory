@@ -26,7 +26,7 @@ function harness(){
   const saved=id=>({id,name:'Captured.psd',saved_source_version:'saved-'+id,mode:'DRAFT'});
   const h=harness();h.setRow(saved('first'));await tick();
   assert.equal(h.el('mapping-status').textContent,'Unmapped');assert.equal(h.calls.length,0,'mount must do no work');
-  h.respond(async path=>({mapping:{state:path==='map'?'Mapping…':'Unmapped',stage:'Finding Shopify product'}}));
+  h.respond(async path=>({mapping:{state:path==='map'?'Mapping…':'Unmapped',stage:'Finding product in Edition Ops'}}));
   h.el('map').onclick();h.el('map').onclick();await tick();await tick();
   assert.equal(h.calls.filter(x=>x.path==='map').length,1);assert(h.host.location.href.includes('upload=first'));
   assert.equal(h.calls.at(-1).body.source_version,'saved-first');assert.equal(h.timers.size,1);
@@ -42,13 +42,13 @@ function harness(){
   let resolve;h.respond(()=>new Promise(r=>resolve=r));h.el('map').onclick();await tick();
   const previous=h.dialog();h.setRow(saved('second'));resolve({mapping:{state:'Mapped'}});await tick();
   assert.equal(h.el('mapping-status').textContent,'Unmapped');assert(!previous.isConnected);
-  h.respond(async()=>({mapping:{state:'Waiting for product',reason:'Product not found in Shopify yet'}}));
+  h.respond(async()=>({mapping:{state:'Waiting for product in Edition Ops',reason:'Waiting for product in Edition Ops'}}));
   h.el('map').onclick();await tick();assert.equal(h.timers.size,0,'not-found needs explicit Retry');
   h.setRow({...saved('second'),saved_source_version:'new-save'});await tick();assert(!h.dialog().isConnected);
   h.el('map').onclick();await tick();const last=h.dialog();h.frame.isConnected=false;h.mutation();
   assert(!last.isConnected&&!last.open);assert.equal(h.timers.size,0);h.panel.clearRecoveryURL();assert(!h.host.location.href.includes('upload='));
   const pick=harness();pick.setRow(saved('choice'));
-  pick.respond(async path=>({mapping:path==='map'?{state:'Mapping…',stage:'Moving PSD'}:{state:'Waiting for product',needs_product:true,candidates:[{id:'gid://shopify/Product/987',title:'Confirmed artwork'}]}}));
+  pick.respond(async path=>({mapping:path==='map'?{state:'Mapping…',stage:'Moving PSD'}:{state:'Waiting for product in Edition Ops',needs_product:true,candidates:[{id:'gid://shopify/Product/987',title:'Confirmed artwork'}]}}));
   pick.el('map').onclick();await tick();
   assert.equal(pick.calls.filter(x=>x.path==='map').length,0,'ambiguous identity must not submit automatically');
   pick.dialog().querySelector('[data-field="product-choice"]').value='gid://shopify/Product/987';
@@ -59,7 +59,7 @@ function harness(){
   assert.equal(pick.dialog().querySelector('[data-field="steps"]').children.length,2);
   pick.panel.dispose();
   const waiting=harness();waiting.setRow(saved('waiting'));
-  waiting.respond(async()=>({mapping:{state:'Waiting for product',needs_product:true,candidates:[]}}));
+  waiting.respond(async()=>({mapping:{state:'Waiting for product in Edition Ops',needs_product:true,candidates:[]}}));
   waiting.el('map').onclick();await tick();
   waiting.dialog().querySelector('[data-field="retry"]').onclick();await tick();
   assert.equal(waiting.calls.at(-1).path,'map');

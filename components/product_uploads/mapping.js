@@ -3,7 +3,7 @@
 window.ProductUploadMapping = ({request, getRow}) => {
   const $ = id => document.getElementById(id);
   const steps=['Finding product','Linking PSD'];
-  const stageLabel=s=>s==='Finding Shopify product'?'Finding product':'Linking PSD';
+  const stageLabel=s=>['Finding product in Edition Ops','Finding Shopify product'].includes(s)?'Finding product':'Linking PSD';
   let key='',source='',mode='',serial=0,value=null,dialog=null,pending=false,disposed=false,visible=false;
   let announced='';
   let requests=new AbortController(),pollTimer=null,returnFocus=null,sequence=0;
@@ -22,7 +22,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
       parent.postMessage({type:'sports-cave-product-upload-linked',product_id:value?.product?.id,run_id:value?.run_id},window.location.origin);announced=key;
     }
     $('mapping-status').textContent=success?'✓ Success — PSD mapped':state;
-    $('mapping-status').style.color=success?'#197341':['Mapping…','Waiting for product','Mapping incomplete'].includes(state)?'#876614':state==='Unmapped'?'#62676e':'#ad2929';
+    $('mapping-status').style.color=success?'#197341':['Mapping…','Waiting for product in Edition Ops','Mapping incomplete'].includes(state)?'#876614':state==='Unmapped'?'#62676e':'#ad2929';
     $('mapping-reason').textContent=success?value?.product?.title||'':value?.reason||'';
     $('map').disabled=!visible||!key||pending||state==='Mapping…';
     $('map').textContent=success?'Mapped ✓':state==='Mapping…'?stageLabel(value?.stage):'MAP';
@@ -38,7 +38,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
     d('steps').replaceChildren();
     for(const step of steps){
       const item=dialog.ownerDocument.createElement('li');
-      item.textContent=(value?.completed?.includes({'Finding product':'Finding Shopify product','Linking PSD':'Verifying'}[step])?'✓ ':stageLabel(value?.stage)===step?'→ ':'')+step;
+      item.textContent=(value?.completed?.includes({'Finding product':'Finding product in Edition Ops','Linking PSD':'Verifying'}[step])?'✓ ':stageLabel(value?.stage)===step?'→ ':'')+step;
       if(stageLabel(value?.stage)===step)item.setAttribute('aria-current','step');
       d('steps').append(item);
     }
@@ -71,7 +71,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
     if(!key||!visible||pending)return;
     clearTimeout(pollTimer);pollTimer=null;
     const id=key,version=serial;++sequence;pending=true;
-    value={...value,state:'Mapping…',reason:'',stage:'Finding Shopify product'};paint();
+    value={...value,state:'Mapping…',reason:'',stage:'Finding product in Edition Ops'};paint();
     try{
       const result=await request('map',{id,source_version:source,...extra},requests.signal);
       if(valid(id,version))value=result.mapping;
@@ -104,7 +104,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
     <ol data-field="steps"></ol><p>PSD: <span data-field="psd"></span></p><p data-field="edition"></p><p><a data-field="edition-link" href="?page=edition_ops" target="_top" hidden>Open Edition Ops</a></p>
     <strong data-field="state" role="status" aria-live="polite"></strong><p data-field="reason"></p>
     <label data-field="limit-row" hidden>Confirmed edition limit<input data-field="limit" type="number" min="1" max="1000" step="1" placeholder="Confirmed product edition limit"></label>
-    <label data-field="product-row" hidden>Confirm Shopify product<select data-field="product-choice"></select><input data-field="product-id" placeholder="Shopify product ID from publication" aria-label="Shopify product ID"></label><div class="sc-edition-actions"><button data-field="retry" type="button">Retry</button><button data-field="close" type="button" autofocus>Close</button></div>`;
+    <label data-field="product-row" hidden>Confirm Edition Ops product<select data-field="product-choice"></select><input data-field="product-id" placeholder="Stored Shopify product ID for the Edition Ops record" aria-label="Shopify product ID"></label><div class="sc-edition-actions"><button data-field="retry" type="button">Retry</button><button data-field="close" type="button" autofocus>Close</button></div>`;
     doc.body.append(dialog);
     dialog.querySelector('[data-field="close"]').onclick=close;
     dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
