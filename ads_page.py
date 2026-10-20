@@ -4000,9 +4000,9 @@ SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2 = "SPORTS_CAVE_IE_SET_DIFFERENTIATIO
 
 
 SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2 = """SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2
-MANDATORY FINAL CORRECTION AND 10/10 QUALITY GATE
+MANDATORY FINAL INSPECTION — NO ADDITIONAL IMAGE GENERATIONS
 
-Inspect and correct the composed image before returning it. Reject and regenerate or correct the result when:
+Inspect the composed image before returning it and briefly report unresolved defects. Inspection must not trigger another image-generation call. Check for failures when:
 - the artwork or frame changed, looks regenerated or loses any outside frame edge
 - the frame is warped, incorrectly proportioned, missing black timber depth or not rigid
 - the product misses its assigned route-specific canvas width or complete-frame visibility
@@ -4039,11 +4039,11 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - the setting becomes a commercial sports bar, themed memorabilia wall, showroom or office lobby
 - the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
 
-If native generation returns another square size, resize the approved square composition deterministically to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image; regenerate or correct its square composition first.
+If native generation returns another square size and deterministic resizing is available, resize the existing square asset to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image or generate another image to repair it; report unresolved dimensions accurately.
 
-When footer geometry or copy fit is the only failure, correct only the footer and wording fit. Preserve the product, room, camera angle, lighting, typography character and every other successful element. Shorten overlong wording; never shrink, condense or stretch the existing typography to force it into the footer.
+Resolve footer copy fit before generation. After generation, report footer defects without generating a correction or replacement. Never shrink, condense or stretch the existing typography to force it into the footer.
 
-Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Revise every hard failure and anything below the intended production-ready 10/10 standard. Do not print the score, checklist result or reasoning. The workflow must correct failures, not merely claim the checks passed."""
+Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Do not print the score or internal reasoning. Briefly report unresolved defects; never claim the checks passed without inspection. Retry only a call that failed without producing an image; never repeat a successful image call."""
 
 
 
@@ -8537,6 +8537,7 @@ def build_instant_experience_execution_image_brief(index, visual):
 
 IMAGE GENERATION PROMPT
 Image {index}; Route key: {visual['route_key']}; camera role: {visual['camera_role']}.
+Output label: Ad {index} — {'Collector Hallway' if index == 1 else visual['room_type']}
 {SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
 {ie_visuals.camera_wall_rules(visual, compact=True)}
 {SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0]}
@@ -8605,22 +8606,24 @@ def build_standard_instant_experience_prompt(
 SPORTS CAVE INSTANT EXPERIENCE — THREE IMAGES AND COMPLETED CSV
 Product: {product_name}
 Sport: {category}; selected market: {country}.
-Original framed product reference: the original supplied product image, for EVERY image and correction.
+Original framed product reference: the original supplied product image, for EVERY image call.
 Use the supplied title/metadata for identity and verified facts. Do not guess an unknown athlete, team, achievement or year from the market or a style image; never invent availability, certificates, shipping or provenance claims.
 
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy before any image call. Use the resolved scenes below as three different properties. Resolve one Description and one Meta Headline per route once; every CTA field is Claim Your Edition. Retain the final records for display and CSV. Confirm three unique footer headlines and three unique sublines; the fixed CTA intentionally repeats. Complete any headline fit selection from this pack-only data before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Ad 1 is always the collector hallway, RIGHT angle, with dominant artwork and subtle residential passage depth. Keep compatible saved scenes for Ads 2 and 3, STRAIGHT ON and LEFT respectively. Check architecture, depth arrangement, wall finishes and lighting together as three visibly different properties, not angle/accessory changes. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; every CTA field is Claim Your Edition. Retain the final records for display and CSV. Confirm three unique footer headlines and three unique sublines; the fixed CTA intentionally repeats. Complete any headline fit selection from this pack-only data before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 5. Create and attach the completed downloadable ad_copy.csv from the final copy records.
-6. Provide the existing shared Instant Experience setup below and display each finished ad's copy under its existing group label.
-Continue through the sequence without asking for "next" or approval between images. Three independent 1024 x 1024 outputs; no collage or triptych. Do not stop after writing prompts or the first image. These instructions authorise generation in the receiving conversation; they do not add an OS image backend or publish ads.
+6. Display the three matching copy groups and provide the existing shared Instant Experience setup below. Then stop.
+Make exactly three successful image-generation calls in order: Ad 1, Ad 2, Ad 3. One image per call, one call per ad. Continue automatically without asking for "next" or approval between images. Three independent 1024 x 1024 outputs; no collage or triptych. No variants, additional options, replacement images, correction generations or contact sheets. Do not stop after writing prompts or the first image. These instructions authorise generation in the receiving conversation; they do not add an OS image backend or publish ads.
 For each image call, use the ORIGINAL product reference and combine only the shared applicable ad template, that image's resolved scene/realism, and its exact selected headline, subline and CLAIM YOUR EDITION. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 {SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]}
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. If two outputs still look alike, use the existing correction allowance on the weaker image’s architecture and depth arrangement, preserving its assigned camera, selected copy, explicit saved selections and working realism with the ORIGINAL product reference. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Use at most one correction call per image, targeted to the failing output, with the ORIGINAL product reference and its complete scene/copy contract. Label corrections explicitly “Replacement for Image 1”, “Replacement for Image 2” or “Replacement for Image 3”. A replacement is never a fourth ad: return exactly three selected final covers and exclude earlier attempts from the final ad set; report unresolved defects accurately. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Label each output immediately using its exact Output label below: “Ad 1 — Collector Hallway”, “Ad 2 — [Resolved Room Name]”, “Ad 3 — [Resolved Room Name]”. Keep each image associated with its matching copy and CSV route throughout. Retain three distinct assets/output identifiers where supported; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image. Present all three via the environment’s supported display/download mechanism; promise persistence or download links only when actually available. If display fails after an image was created, recover or redisplay that existing asset; do not generate another image.
+If a call fails without producing an image, retry only that missing output. Never repeat a successful call or restart the set. If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If a genuine tool failure prevents completion, identify the unfinished image/file, preserve completed outputs and final copy for resumption, and state any inspection limitation. Do not replace requested images with a text-only plan or claim a nonexistent download. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
 

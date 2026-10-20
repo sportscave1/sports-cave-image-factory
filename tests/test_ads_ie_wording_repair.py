@@ -35,7 +35,7 @@ class WordingRepairTests(unittest.TestCase):
                           "Reserved sibling headlines:", "Sibling headlines reserved", "refinement:", "first text-only response"):
             self.assertNotIn(forbidden, text)
         for required in ("Shop Now", ads.META_AD_URL_PARAMETERS, "product.name", "https://example.com/products/volkanovski",
-                         "one coherent image call", "never generate an empty room", "Replacement for Image 1",
+                         "one coherent image call", "never generate an empty room", "No variants, additional options, replacement images",
                          "actual 1024 x 1024 output dimensions", "estimates are not measured glyph fitting"):
             self.assertIn(required, text)
         self.assertEqual(list(writing.ROUTES), ["premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left"])

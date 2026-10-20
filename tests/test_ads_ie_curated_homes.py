@@ -101,7 +101,7 @@ class CuratedHomeTests(unittest.TestCase):
         for text in ("Its surrounding wall, lighting and room are not scene references and must not be copied",
                      "Never use a previously generated mockup as the artwork source", "above every outer frame corner",
                      "No competing framed art, trophies, helmets", "individually AND together", "Prompt/schema checks do not establish visual distinction",
-                     "at most one correction call per image", "no deterministic Ads footer renderer"):
+                     "Inspection must not trigger another image generation", "no deterministic Ads footer renderer"):
             self.assertIn(text, prompt)
         self.assertNotIn("Add promotional typography as a deterministic post-production layer", prompt)
 

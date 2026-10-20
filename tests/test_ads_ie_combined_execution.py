@@ -24,19 +24,19 @@ class CombinedExecutionTests(unittest.TestCase):
         prompt = self.record()["master_prompt"]
         steps = ("1. Resolve all three scenes and final copy", "2. Generate Image 1 (RIGHT angle)",
                  "3. Immediately generate Image 2 (STRAIGHT ON)", "4. Immediately generate Image 3 (LEFT angle)",
-                 "5. Create and attach the completed downloadable ad_copy.csv", "6. Provide the existing shared Instant Experience setup")
+                 "5. Create and attach the completed downloadable ad_copy.csv", "6. Display the three matching copy groups")
         positions = [prompt.index(step) for step in steps]
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(prompt.count("\nIMAGE GENERATION PROMPT\n"), 3)
         self.assertEqual(prompt.count("\nAD COPY\n"), 3)
         for expected in ("ORIGINAL product reference", "without asking for \"next\"", "no collage or triptych",
-                         "at most one correction call per image", "preserve completed outputs", "Never claim pixel fidelity"):
+                         "exactly three successful image-generation calls", "preserve completed outputs", "Never claim pixel fidelity"):
             self.assertIn(expected, prompt)
         for obsolete in ("Do not generate images", "do not generate images", "first text-only response",
                          "FINAL RESPONSE TERMINATION", "no automatic image generation", "Do not generate the image automatically",
                          "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "COPY ONE ROUTE AT A TIME"):
             self.assertNotIn(obsolete, prompt)
-        self.assertLess(len(prompt), 45000)  # Includes pack-only fit coordination and required identity copy.
+        self.assertLess(len(prompt), 48000)  # Includes pack-only fit coordination and explicit three-asset delivery.
 
     def test_execution_priority_is_shared_with_project_template_and_text_only_gate(self):
         template = (Path(ads.__file__).parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()

@@ -59,14 +59,41 @@ class FinalRefinementTests(unittest.TestCase):
                     product_name=result["product_name"], category="MMA", country="Australia")
                 self.assertEqual(standalone.count(phrase), 1)
 
-    def test_visual_review_replacement_and_reference_contract(self):
+    def test_visual_review_without_replacement_and_reference_contract(self):
         prompt = self.record()["master_prompt"]
         for phrase in ("Do these look like three different properties, or the same wall-and-opening composition restyled?",
-                       "Replacement for Image 1", "Replacement for Image 2", "Replacement for Image 3",
-                       "at most one correction call per image", "exactly three selected final covers",
+                       "Inspection must not trigger another image generation", "exactly three final covers",
                        "never reduce a previous generation again", "Do not compound percentage reductions"):
             self.assertIn(phrase, prompt)
         self.assertIn("no deterministic Ads footer renderer", prompt)
+
+    def test_exactly_three_successes_retry_and_stable_asset_delivery(self):
+        result = self.record()
+        prompt = result["master_prompt"]
+        for phrase in ("Make exactly three successful image-generation calls in order: Ad 1, Ad 2, Ad 3",
+                       "One image per call, one call per ad", "Ad 1 is always the collector hallway, RIGHT angle",
+                       "retry only that missing output", "Never repeat a successful call or restart the set",
+                       "recover or redisplay that existing asset; do not generate another image",
+                       "Retain three distinct assets/output identifiers", "Then stop."):
+            self.assertIn(phrase, prompt)
+        for forbidden in ("at most one correction call", "existing correction allowance", "Replacement for Image",
+                          "Reject and regenerate", "regenerate or correct", "Revise every hard failure"):
+            self.assertNotIn(forbidden, prompt)
+            self.assertNotIn(forbidden, ads.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2)
+        briefs = re.findall(r"\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", prompt, re.S)
+        routes = ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left")
+        for i, (brief, row, route) in enumerate(zip(briefs, result["instant_experience_fingerprints"], routes), 1):
+            name = "Collector Hallway" if i == 1 else row["room_type"]
+            self.assertIn(f"Output label: Ad {i} — {name}\n", brief)
+            self.assertIn(f"Route key: {route}", brief)
+        self.assertEqual(len(briefs), 3)
+
+    def test_saved_scenes_two_and_three_remain_unchanged(self):
+        result = self.record()
+        saved = result["product_metadata"]["instant_experience_scene_selections"]
+        rebuilt = self.record("another-token", result["product_metadata"])
+        self.assertEqual(rebuilt["product_metadata"]["instant_experience_scene_selections"][1:], saved[1:])
+        self.assertIn("collector hallway", rebuilt["instant_experience_fingerprints"][0]["room_type"])
 
     def test_saved_draft_does_not_reroll_scenes_or_typography(self):
         saved = json.loads(json.dumps(self.record()))
