@@ -2,13 +2,14 @@
 const $=id=>document.getElementById(id),base='/api/task-recorder/';
 let devices=[],device=null,state={},selected=sessionStorage.getItem('recorder-selected')||'',after='',lastSeq=-1,stopped=false,transportOK=true;
 let pollRunning=false,pollAbort=null;
+let stepEditor=null,editorLoading=false;
 const requests=new Set();
 let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='',attentionKey='';
 const activeModes=new Set(['recording','recording_paused','running','pausing','paused','starting']);
 const uuid=()=>crypto.randomUUID();
 const tasks=()=> (state.tasks||[]).filter(t=>!deleted.has(t.id)).map(t=>renames.has(t.id)?{...t,name:renames.get(t.id)}:t);
 const active=()=>activeModes.has(state.mode)||!!device?.active_run||!!device?.needs_review;
-const starting=()=>[...pending.values()].some(c=>['record','play'].includes(c.kind));
+const starting=()=>[...pending.values()].some(c=>['record','play','record-replacement'].includes(c.kind));
 const online=()=>!!device?.connected&&transportOK;
 const modern=()=>state.protocol>=2;
 function error(text){$('error').textContent=text||'';$('error').hidden=!text;}
@@ -20,7 +21,7 @@ async function api(path,data,signal){
  const timer=setTimeout(abort,50000);
  try{
   const response=await fetch(base+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
-  const result=await response.json();if(!response.ok)throw Error(result.error||'Connection unavailable. Refresh the connection and try again.');return result;
+  const result=await response.json();if(!response.ok){if(result.step_errors)stepEditor?.showErrors(result.step_errors);const failure=Error(result.error||'Connection unavailable. Refresh the connection and try again.');failure.rejected=response.status>=400&&response.status<500;throw failure;}return result;
  }catch(e){if(controller.signal.aborted&&!signal?.aborted)throw Error('The connection timed out. Check the browser and use Stop before trying again.');throw e;}
  finally{clearTimeout(timer);requests.delete(controller);signal?.removeEventListener('abort',abort);}
 
@@ -51,7 +52,10 @@ async function confirmCommand(command,result){
   result=await api('receipt?device='+encodeURIComponent(command.device_id)+'&id='+command.id+'&wait=1');
   if(['queued','dispatched'].includes(result.status)&&Date.now()-started<250)await new Promise(r=>setTimeout(r,Math.min(2000,350*(n+1))));
  }
- if(result.status!=='applied')throw Error(result.receipt?.message||'This control is not confirmed. Check the browser and use Stop before trying again.');
+ if(result.status!=='applied'){
+  if(command.kind==='edit-copy'&&result.receipt?.step_errors)stepEditor?.showErrors(result.receipt.step_errors);
+  throw Error(result.receipt?.message||'This control is not confirmed. Check the browser and use Stop before trying again.');
+ }
  const receipt=result.receipt||{};
  if(command.kind==='delete'){
   deleted.add(command.payload.id);if(selected===command.payload.id){selected='';details=null;values={};}
@@ -60,6 +64,7 @@ async function confirmCommand(command,result){
  if(command.kind==='rename'){renames.set(command.payload.id,receipt.name||command.payload.name);editing='';notice('Recording renamed.');}
  if(command.kind==='record'){selected='';details=null;values={};}
  if(command.kind==='repair-copy'){selected=receipt.new_task_id;details=null;values={};notice('Corrected copy saved. Original preserved. Review it, then press Play.');}
+ if(command.kind==='edit-copy'){selected=receipt.new_task_id;details=null;values={};notice('Edited copy saved. Original preserved. Press Play when ready.');}
  if(receipt.tasks)state={...state,tasks:receipt.tasks};
  // The receipt is durable; read the helper's acknowledged snapshot rather than
  // guessing a mode from button clicks. A stale in-flight poll cannot undo it.
@@ -72,16 +77,20 @@ async function send(kind,payload={}){
  if(!online()){error('PC is offline. Start Task Recorder from the Windows Start menu, then refresh the connection.');return null;}
  if(!modern()&&!['stop','stop-save','view'].includes(kind)){error('Update the PC helper using Settings, then try again.');return null;}
  if([...pending.values()].some(c=>c.kind===kind&&c.payload.id===taskId))return null;
- if(['record','play'].includes(kind)&&(starting()||active()))return null;
+ if(['record','play','record-replacement'].includes(kind)&&(starting()||active()))return null;
+ if(stepEditor&&['record','play','reusable','rename','delete','repair-copy'].includes(kind)){error('Save or cancel the edit first.');return null;}
  const command={device_id:device.id,id:uuid(),kind,payload};
+ let dispatched=false;
  pending.set(command.id,command);remember();error('');notice('');render();
  try{
-  const receipt=await confirmCommand(command,await api('command',command));
+  const result=await api('command',command);dispatched=true;
+  const receipt=await confirmCommand(command,result);
   pending.delete(command.id);remember();if(taskId)rowErrors.delete(taskId);return receipt;
  }catch(e){
   // Retain uncertain command identity for navigation/reconnect reconciliation;
   // never submit a fresh duplicate start automatically.
-  if(!stopped){try{const r=await api('receipt?device='+command.device_id+'&id='+command.id);if(!['queued','dispatched'].includes(r.status))pending.delete(command.id);}catch{}}
+  if(e.rejected&&!dispatched)pending.delete(command.id);
+  else if(!stopped){try{const r=await api('receipt?device='+command.device_id+'&id='+command.id);if(!['queued','dispatched'].includes(r.status))pending.delete(command.id);}catch{}}
   error(e.message);if(taskId)rowErrors.set(taskId,e.message);return null;
  }finally{remember();after='';render();}
 }
@@ -115,15 +124,15 @@ function status(){
 function renderControls(){
  const mode=state.mode||'idle',busy=active()||starting(),enabled=online(),capable=modern();
  const task=tasks().find(t=>t.id===selected);
- $('record').disabled=!enabled||!capable||busy;
+ $('record').disabled=!enabled||!capable||busy||!!stepEditor||editorLoading;
  $('name').disabled=$('website').disabled=busy;
  $('view').disabled=!enabled;
- $('play').hidden=busy;$('play').disabled=!enabled||!capable||!task;
+ $('play').hidden=busy;$('play').disabled=!enabled||!capable||!task||!!stepEditor||editorLoading;
  $('pause').hidden=!['running','recording'].includes(mode);
  $('resume').hidden=!(mode==='recording_paused'||mode==='paused'&&state.can_resume);
  $('stop').hidden=!busy&&mode!=='interrupted';
  for(const k of ['pause','resume','stop'])$(k).disabled=!enabled||[...pending.values()].some(c=>c.kind===k);
- const request=[...pending.values()].find(c=>['record','play'].includes(c.kind));
+ const request=[...pending.values()].find(c=>['record','play','record-replacement'].includes(c.kind));
  const requestName=request?.kind==='record'?(request.payload.name||'New recording'):tasks().find(t=>t.id===request?.payload.id)?.name;
  $('activeName').textContent=starting()&&(mode==='starting'||!activeModes.has(mode))?(requestName||'Starting task'):busy?(state.active_task_name||requestName||'Current task'):(task?.name||'Select a recording');
  $('message').textContent=status();
@@ -136,6 +145,21 @@ function select(id){$('inputs').replaceChildren();selected=id;sessionStorage.set
 async function inspect(id){
  const request=++detailRequest;const result=await send('inspect',{id});
  if(result&&selected===id&&request===detailRequest){details=result;values={...result.values};renderInputs();}
+}
+async function editRecording(id){
+ if(active()||starting()||stepEditor||editorLoading)return;
+ if(state.protocol<4){error('Editing needs the updated PC helper (version 4). Existing recordings and playback are unchanged.');return;}
+ editorLoading=true;renderControls();
+ try{
+  const module=await import('/task-recorder/assets/editor.js');
+  const result=await send('inspect',{id});if(!result||active()||starting())return;
+  stepEditor=module.createEditor($('stepEditor'),{
+   task:result.task,revision:result.revision,values:result.values,send,
+   canEdit:()=>online()&&!active()&&!starting()&&![...pending.values()].some(c=>['edit-copy','edit-file'].includes(c.kind)),isRecording:()=>state.recording||state.mode==='recording_paused',
+   changed:fit,close:()=>{stepEditor=null;$('stepEditor').hidden=true;$('stepEditor').replaceChildren();document.body.classList.remove('editing-steps');render();}
+  });
+  document.body.classList.add('editing-steps');render();$('stepEditor').scrollIntoView({block:'start'});
+ }catch(e){error(e.message);}finally{editorLoading=false;renderControls();}
 }
 async function play(id){
  const t=tasks().find(t=>t.id===id);if(!t)return;
@@ -182,6 +206,7 @@ function renderTable(){
    actions.append(button('Stop','Stop '+t.name,stop,!online()));
   }
   actions.append(button('Rename','Rename '+t.name,()=>{editing=t.id;editName=t.name;confirmDelete='';renderTable();},isActive||!online()||!modern()));
+  actions.append(button('Edit','Edit '+t.name,()=>editRecording(t.id),active()||starting()||!online()));
   const trash=button('','Delete '+t.name,()=>{confirmDelete=t.id;editing='';renderTable();},!online()||!modern());trash.className='icon';
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','14');svg.setAttribute('height','14');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.8');svg.setAttribute('aria-hidden','true');
   const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');svg.append(path);trash.append(svg);actions.append(trash);cells[5].append(actions);
@@ -198,7 +223,7 @@ function render(){
  $('seen').textContent=device?'Last seen '+date(device.last_seen*1000):'';
  $('selectedSettings').hidden=!selected;$('selectedName').textContent=tasks().find(t=>t.id===selected)?.name||'';
  $('reusable').disabled=!online()||!modern()||active()||starting();
- renderControls();renderTable();renderAttention();fit();
+ renderControls();renderTable();renderAttention();stepEditor?.refresh();fit();
 }
 function review(id){select(id);renderAttention();$('attention').scrollIntoView({block:'nearest'});}
 function renderAttention(){

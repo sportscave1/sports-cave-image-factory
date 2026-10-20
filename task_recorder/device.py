@@ -18,6 +18,7 @@ import httpx
 from .schema import Invalid, keys, text, validate_task, safe_url
 from .store import atomic
 from .windows import startup, choose_file
+from .editing import EDIT_COMMANDS, validate_edit_payload, source as edit_source, edited_copy
 
 PRODUCTION = "https://sports-cave-image-factory.onrender.com"
 
@@ -31,6 +32,9 @@ def origin(value, preview=False):
     return value.rstrip("/")
 
 def payload(kind,data):
+    if kind in EDIT_COMMANDS:
+        validate_edit_payload(kind,data)
+        return data
     fields={"record":{"url","name"},"play":{"id","revision","values"},"load":{"id"},"rename":{"id","name"},"delete":{"id"},"inspect":{"id"},"reusable":{"id"},
             "repair-copy":{"id","revision","step","replacement"},"edit":{"task"},"startup":{"enabled"}}
     keys(data,fields.get(kind,set()))
@@ -104,7 +108,7 @@ class DeviceAgent:
                 s["tasks"].append({"id":draft["id"],"name":draft["name"],"inputs":[],"steps":len(draft["steps"]),
                                    "duration_ms":None,"updated_at":None,"result":"Recording","revision":None})
         settings=self.settings()
-        s.update(protocol=3,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
+        s.update(protocol=4,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
                  starting_url=settings.get("url",""),startup=settings.get("startup",False),
                  connection="connected" if self.connected else "reconnecting")
         if self.preparing and s["mode"] in {"idle","stopped","completed"}: s["mode"]="starting"
@@ -291,6 +295,7 @@ class DeviceAgent:
             status="uncertain";result={"message":"Cancelled while applying a control. Check the previous result."}
         except (Invalid,ValueError) as error:
             status="rejected";result={"message":str(error)}
+            if getattr(error,"step_errors",None):result["step_errors"]=error.step_errors
         except Exception:
             status="uncertain";result={"message":"This control could not be confirmed. Press Stop and check the browser."}
         self.db.execute("UPDATE commands SET status=?,receipt=? WHERE id=?",(status,json.dumps(result),key));self.db.commit()
@@ -299,6 +304,39 @@ class DeviceAgent:
 
     async def perform(self,kind,data,key):
         r=self.runner
+        replacement=False
+        if kind in EDIT_COMMANDS:
+            payload(kind,data)
+            if r.busy() or r.recording or r.mode in {"recording_paused","interrupted"} or self.preparing:
+                raise Invalid("Stop the current task before editing.")
+            original=edit_source(r.store,data)
+            if kind=="edit-file":
+                chosen=await asyncio.to_thread(r.file_selector or choose_file)
+                if not chosen:raise Invalid("No file selected. Choose a replacement file on your PC.")
+                return {"value":{"file":self.vault.add_file(chosen)}}
+            if kind=="edit-copy":
+                task_id=str(uuid.uuid5(uuid.NAMESPACE_URL,"sports-cave-recorder-edit:"+key))
+                task,defaults=edited_copy(r.store,self.vault,data,task_id)
+                saved=self.vault.read().get("defaults",{})
+                saved[task_id]=defaults;self.vault.put("defaults",saved)
+                meta=r.store.metadata(original["id"])
+                duration=meta.get("duration_ms") if meta.get("duration_ms") is not None else meta.get("source_duration_ms")
+                r.store.metadata(task_id,source_id=original["id"],source_revision=data["revision"],
+                                 source_duration_ms=duration,duration_ms=None,edited=True)
+                task=r.store.save(task)
+                await r.command('load',{'id':task_id})
+                r.run_id=None;r.can_resume=False;r.message="Edited copy saved. Not yet run."
+                return {"new_task_id":task_id,"tasks":r.store.list()}
+            # Replacement uses the ordinary recorder and durable Stop/autosave.
+            # Its separate recording is reviewed before insertion into an edit.
+            replacement=True
+            position=data['step']
+            if position>=len(original['steps']):raise Invalid("Choose an existing action to replace.")
+            data={"name":("Replacement — "+original["name"])[:100]}
+            if not r.page or r.page.is_closed():
+                url=next((s.get("value") for s in reversed(original["steps"][:position+1]) if s["action"] in {"navigate","wait_url"} and isinstance(s.get("value"),str)),None)
+                if url:data["url"]=url
+            kind="record"
         if kind in {"record","play"}:
             if r.busy() or r.recording or r.mode=="recording_paused":raise Invalid("Already in progress. Press Stop first.")
             self.operation_id=key
@@ -306,8 +344,10 @@ class DeviceAgent:
         if kind=="record":
             self.preparing=True
             try:
-                url=data.get("url") or self.settings().get("url")
-                if url:self.save_setting("url",safe_url(url))
+                url=data.get("url") or (None if replacement else self.settings().get("url"))
+                if url:
+                    safe_url(url)
+                    if not replacement:self.save_setting("url",url)
                 if not r.context or not r.page or r.page.is_closed():await r.open_browser(url or self.local_origin+"/demo")
                 elif url:await r.open_browser(url)
                 else:await r.page.bring_to_front()
@@ -384,7 +424,7 @@ class DeviceAgent:
         elif kind=="inspect":
             task=r.store.get(data["id"]) if data.get("id") else r.draft
             defaults=self.vault.read().get("defaults",{}).get(task.get("id"),{})
-            return {"task":task,"values":{i["name"]:defaults.get(i["name"],"") for i in task["inputs"] if not any(s["action"]=="upload" and s.get("value")=={"input":i["name"]} for s in task["steps"])}}
+            return {"task":task,"revision":r.store.revision(task),"values":{i["name"]:defaults.get(i["name"],"") for i in task["inputs"] if not any(s["action"]=="upload" and s.get("value")=={"input":i["name"]} for s in task["steps"])}}
         elif kind=="startup":
             startup(data["enabled"]);self.save_setting("startup",data["enabled"])
         elif kind=="choose-files":
@@ -395,7 +435,7 @@ class DeviceAgent:
                     if not chosen:raise Invalid("No file selected.")
                     step["value"]={"file":self.vault.add_file(chosen)}
             r.draft=r.store.save(r.draft)
-        return {}
+        return {"replacement_id":r.draft["id"]} if replacement else {}
 
     async def close(self):
         self.stopping=True;self.wake.set()

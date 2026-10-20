@@ -71,7 +71,9 @@ async def body(request):
 
 def failure(error):
     status=403 if isinstance(error,PermissionError) else 409 if isinstance(error,ValueError) else 503
-    return JSONResponse({"error":str(error) if status!=503 else "Recorder connection is unavailable. Try again shortly."},status_code=status,headers=HEADERS)
+    detail={"error":str(error) if status!=503 else "Recorder connection is unavailable. Try again shortly."}
+    if status==409 and getattr(error,"step_errors",None):detail["step_errors"]=error.step_errors
+    return JSONResponse(detail,status_code=status,headers=HEADERS)
 
 def bounded(endpoint):
     async def wrapped(request):
@@ -90,7 +92,7 @@ async def panel(request):
 async def asset(request):
     await actor(request)
     name=request.path_params["name"]
-    if name not in {"panel.js","panel.css"}: raise Invalid("Unknown asset.")
+    if name not in {"panel.js","panel.css","editor.js"}: raise Invalid("Unknown asset.")
     return Response((ROOT/"task_recorder"/name).read_bytes(),media_type="text/javascript" if name.endswith(".js") else "text/css",headers=HEADERS)
 
 @bounded

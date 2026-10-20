@@ -7,8 +7,9 @@ import uuid
 from .schema import Invalid, text
 
 KINDS = {"record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
-         "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files", "delete", "repair-copy"}
-STARTS = {"record", "play"}
+         "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files", "delete", "repair-copy",
+         "edit-copy", "edit-file", "record-replacement"}
+STARTS = {"record", "play", "record-replacement"}
 TERMINAL = {"idle", "completed", "stopped", "interrupted"}
 PREFIX = "task_recorder_private."
 
@@ -121,6 +122,11 @@ class Relay:
                 return self.public_command(old)
             if self.clock()-device["last_seen"]>35:
                 raise Invalid("This PC is offline. Start Task Recorder on that PC, then try again.")
+            if kind in {"edit-copy","edit-file","record-replacement"}:
+                if device["state"].get("protocol",1)<4:
+                    raise Invalid("Update the PC helper before editing recordings (helper 4 required).")
+                if device["active_run"] or device["needs_review"]:
+                    raise Invalid("Stop the current task before editing.")
             if kind in {"delete","rename"} and payload.get("id")==device["state"].get("active_task_id") and device["active_run"]:
                 raise Invalid("Stop this task first.")
             if kind=="repair-copy" and device["state"].get("protocol",1)<3:
