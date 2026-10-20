@@ -10,6 +10,7 @@ from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
 class CollectorSceneTests(unittest.TestCase):
     def visuals(self, token="scene-example", **kwargs):
+        kwargs.setdefault("country", "Australia")
         return ads.resolve_standard_instant_experience_visuals(
             product_name="Collector Print", category="Cricket", variation_token=token, **kwargs)
 
@@ -38,7 +39,7 @@ class CollectorSceneTests(unittest.TestCase):
                 for i, v in enumerate(rows):
                     seen[i][key].add(v[key])
             self.assertIn("visible passage depth", rows[0]["scene_brief"])
-            self.assertIn("exactly one understated peripheral cue", rows[1]["scene_brief"])
+            self.assertIn("exactly one understated architectural glimpse", rows[1]["scene_brief"])
             self.assertIn("Neither a hallway nor a nearly empty wall", rows[2]["scene_brief"])
         self.assertTrue(all(len(values) >= 5 for slot in seen for values in slot.values()))
 
@@ -47,12 +48,12 @@ class CollectorSceneTests(unittest.TestCase):
         recent = [ads.standard_instant_experience_fingerprint(i, v) for i, v in enumerate(first, 1)]
         fresh = self.visuals("next-pack", recent_fingerprints=recent)
         self.assertTrue(all(a["room_type"] != b["room_type"] for a, b in zip(first, fresh)))
-        kwargs = dict(product_name="Collector Print", category="Cricket", variation_token="next-pack", recent_fingerprints=recent)
+        kwargs = dict(product_name="Collector Print", category="Cricket", variation_token="next-pack", recent_fingerprints=recent, country="Australia")
         fps = ads.build_standard_instant_experience_fingerprints(**kwargs)
         self.assertEqual([f["room_type"] for f in fps], [v["room_type"] for v in fresh])
         for builder in (ads.build_standard_instant_experience_visual_prompts,
                         ads.build_standard_instant_experience_group_output_contract):
-            prompt = builder(**kwargs, country="Australia")
+            prompt = builder(**kwargs)
             for v in fresh:
                 self.assertIn(v["scene_brief"], prompt)
 
@@ -80,7 +81,8 @@ class CollectorSceneTests(unittest.TestCase):
             for marker in (ads.SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0],
                            ads.SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2,
                            ads.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]):
-                self.assertEqual(prompt.count(marker), 3)
+                expected = 1 if marker == ads.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0] else 3
+                self.assertEqual(prompt.count(marker), expected)
 
     def test_one_compact_realism_block_survives_metadata_and_shared_enrichment(self):
         metadata = {"frame_specs": {"verified": True, "source": "fixture", "outer_width_cm": 62,

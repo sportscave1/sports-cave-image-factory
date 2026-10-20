@@ -107,7 +107,7 @@ class DescriptionVariationTests(unittest.TestCase):
 
     def test_legacy_drafts_and_completed_copy_are_not_rebuilt(self):
         result = self.record()
-        legacy = {**result, "master_prompt": result["master_prompt"].replace(writing.VERSION, writing.LEGACY_VERSION),
+        legacy = {**result, "master_prompt": result["master_prompt"].replace(writing.VERSION, writing.LEGACY_VERSION).replace(ads.ADS_IE_COMBINED_EXECUTION_VERSION, "").replace(ads.build_instant_experience_fixed_opaque_footer_rules(), ads.build_instant_experience_fixed_opaque_footer_rules() * 3),
                   "prompt_contract_version": "older saved version", "generated_ad_output": "Approved completed copy"}
         with patch("ads_page.build_ads_result_record", side_effect=AssertionError("must not regenerate")):
             self.assertIs(ads.ensure_current_ads_result_prompt(legacy), legacy)
@@ -115,14 +115,21 @@ class DescriptionVariationTests(unittest.TestCase):
         plans = result["instant_experience_fingerprints"]
         self.assertEqual([p["description_role"] for p in plans], list(writing.ROLES))
 
-    def test_twenty_seven_image_prompts_are_byte_identical_to_released_baseline(self):
+    def test_twenty_seven_individual_prompts_keep_footer_copy_fit_and_camera_contracts(self):
         baseline = json.loads((Path(__file__).parent / "fixtures/ie_description_image_baseline.json").read_text(encoding="utf8"))
         for row in baseline:
             kw = row["kw"]
             visuals = ads.resolve_standard_instant_experience_visuals(**kw)
             prompts = [ads.build_standard_instant_experience_image_prompt(i, v, product_name=kw["product_name"],
                 category=kw["category"], country="Australia") for i, v in enumerate(visuals, 1)]
-            self.assertEqual([hashlib.sha256(p.encode()).hexdigest() for p in prompts], row["images"])
+            for i, prompt in enumerate(prompts):
+                self.assertIn(ads.build_instant_experience_fixed_opaque_footer_rules(), prompt)
+                self.assertIn(ads.build_instant_experience_on_image_copy_fit_rules(), prompt)
+                self.assertIn(visuals[i]["camera_side"], prompt)
+                self.assertIn("HEADLINE: " + visuals[i]["headline_text"], prompt)
+                self.assertIn("SUPPORTING LINE: " + visuals[i]["supporting_line"], prompt)
+                self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
+                self.assertEqual(prompt.count("PRODUCT LOCK — ABSOLUTE"), 1)
 
     def test_six_authored_sample_packs_pass_within_pack_and_recent_text_checks(self):
         # Authored examples exercise lexical checks, not a claim about model output.

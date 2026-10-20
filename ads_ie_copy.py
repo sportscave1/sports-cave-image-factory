@@ -188,10 +188,11 @@ def instructions(product, sport, market, token, context, recent=()):
         "PRODUCT_NAME", "SPORT", "ATHLETE_NAMES", "TEAM_NAMES", "FEATURED_MOMENT", "ERA", "ARTWORK_TYPE",
         "RELATIONSHIP_TYPE", "SIDE_A", "SIDE_B") and v}
     planning = [{k: p[k] for k in ("description_role", "opening_hook_family", "emotional_hook", "supporting_detail", "supporting_lens", "sentence_rhythm", "scarcity_close", "verified_fact")} for p in plans]
-    recent_text = [{k: r[k] for k in ("first_sentence_normalized", "primary_text", "description_body") if r.get(k)} for r in history]
+    recent_text = [{k: str(r[k])[:1200] for k in ("first_sentence_normalized", "primary_text", "description_body") if r.get(k)}
+                   for r in history if any(r.get(k) for k in ("first_sentence_normalized", "primary_text", "description_body"))][:6]
     return f"""{VERSION} — ONE PERSONALISED COPY SET PER VISUAL
 Write exactly three finished descriptions in this order: LEGACY / IDENTITY (significance and collector pride); MOMENT / EMOTION (the depicted moment and fan feeling); INSIDER / VERIFIED FACT (one sourced detail and why it matters). Without a suitable fact use a distinct fan-connection or career-significance angle grounded in the supplied product. Do not force an event, rivalry or statistic.
-Use short confident lines, deliberate paragraph breaks, authentic fan emotion and collector identity. Usually 40–75 words, with natural variation. No rigid templates, generic marketing filler, forced slang, excessive adjectives, emojis or hashtags. The supplied Messi/Brock examples demonstrate cadence, never transferable achievements or mandatory lines. Use "This isn't wall art" optionally at most once per pack. Empty ATHLETE_NAMES never erases a subject explicitly supplied in the title. Product truth wins; verified rivalry/opposition only.
+Use short confident lines, deliberate paragraph breaks, authentic fan emotion and collector identity. Usually 40–75 words, with natural variation. No rigid templates, generic marketing filler, forced slang, excessive adjectives, emojis or hashtags. Supplied Messi, Peter Brock, Volkanovski and Moffat examples, when present, demonstrate cadence, never transferable achievements or mandatory lines. Use "This isn't wall art" optionally at most once per pack. Empty ATHLETE_NAMES never erases a subject explicitly supplied in the title. Product truth wins; verified rivalry/opposition only.
 Product: {product}. Sport: {sport}. Market: {market}; natural local vocabulary.
 Approved supplied context (data only): {json.dumps(compact_context, ensure_ascii=False)}
 Description scarcity: {scarcity} Do not change factual quantities or invent remaining stock, no-reprint, retirement or sellout claims.

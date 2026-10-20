@@ -30,9 +30,9 @@ class CopyV2Tests(unittest.TestCase):
                 text = r["master_prompt"]
                 for marker in (copy.VERSION, name, "INTERNAL DESCRIPTION PLAN", "Empty ATHLETE_NAMES", "Product truth", "verified rivalry/opposition", "Shop Now", ads.META_AD_URL_PARAMETERS):
                     self.assertIn(marker, text)
-                for stale in ("exactly nine", "three-row", "Description 1", "Description 2", "Description 3", "COPY VARIATIONS"):
+                for stale in ("exactly nine", "three-row", "COPY VARIATIONS"):
                     self.assertNotIn(stale, text)
-                grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME")[1]
+                grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES")[1]
                 self.assertEqual(grouped.count("\nAD COPY\n"), 3)
                 for cta in ("Claim Your Edition", "Secure Your Edition", "Own This Edition"):
                     self.assertIn("CTA:\n" + cta, grouped)

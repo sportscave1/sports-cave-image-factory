@@ -80,6 +80,8 @@ def set_product_url(app_test, value="https://sportscave.com.au/products/six-laps
 
 
 def visual_contract(prompt):
+    if ads_page.ADS_IE_COMBINED_EXECUTION_VERSION in prompt:
+        return prompt
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
     return prompt[prompt.index(marker) :]
 
@@ -5890,7 +5892,8 @@ PRIMARY TEXT VARIATIONS
             1,
         )
         for marker in image_markers:
-            self.assertEqual(contract.count(marker), 3, marker)
+            shared = marker in (ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1, ads_page.SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2, ads_page.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0])
+            self.assertEqual(contract.count(marker), 1 if shared else 3, marker)
         restored_effects = (
             "source-matched moulding",
             "narrow contact shadows and soft directional secondary shadows",
@@ -5932,9 +5935,9 @@ PRIMARY TEXT VARIATIONS
             self.assertIn(f"Route key: {route_key}", section)
             self.assertIn(fomo, section)
             self.assertTrue(any("HEADLINE: " + h in section for h in ads_page.ie_visuals.eligible_headlines({})))
-            self.assertIn("Exact resolved CTA: CLAIM YOUR EDITION", section)
-            self.assertIn("place the gold underline directly beneath the measured glyph bounds", section)
-            self.assertIn("Never place Primary Text on the image.", section)
+            self.assertIn("CTA: CLAIM YOUR EDITION", section)
+            self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
+            self.assertIn("Never place the long description or Meta headline inside the image.", section)
             self.assertNotIn("LIMITED TO 100 WORLDWIDE", section)
 
     def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):

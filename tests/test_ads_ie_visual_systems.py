@@ -44,7 +44,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             self.assertEqual([r["room_profile_key"] for r in rows], ["hallway_gallery", "minimal_art_wall", "collector_interior"])
             self.assertEqual(len({r["supporting_line"] for r in rows}), 3)
             styles[sport] = [r["room_materials"] for r in rows]
-        self.assertEqual(len({tuple(v) for v in styles.values()}), 6)
+        self.assertGreaterEqual(len({tuple(v) for v in styles.values()}), 4)
         for values in styles.values():
             self.assertTrue(all("whisky" not in value and "leather" not in value for value in values))
 

@@ -196,27 +196,38 @@ SCENES = (
         ("heritage collector hallway", "tall Edwardian passage with distant archway", "dusty blue mineral plaster", "narrow ebonised console at outer left", "overcast side daylight with gentle warm picture lighting"),
         ("modern courtyard hallway", "low wide passage receding toward a courtyard", "warm grey fine microcement", "slim travertine console at outer left", "filtered courtyard daylight with warm picture-light accents"),
         ("coastal collector corridor", "airy deep passage with distant stair return", "soft ivory limewash", "narrow bleached-oak console at outer left", "bright diffused morning daylight with gentle picture lighting"),
-        ("mid-century entrance gallery", "compact offset passage with clerestory depth", "muted ochre brushed plaster", "slim tubular steel console at outer left", "late afternoon clerestory daylight with warm picture-light fill"),
+        ("mid-century entrance gallery", "compact offset passage with clerestory depth", "warm mineral-grey brushed plaster", "slim tubular steel console at outer left", "late afternoon clerestory daylight with warm picture-light fill"),
     ),
     (
-        ("minimal apartment art wall", "tightly cropped high-ceiling apartment wall", "mineral-blue matte paint", "one small pale console edge at the far left", "cool soft east-window morning light"),
-        ("minimal courtyard-house art wall", "close composition on a low modern residential wall", "soft terracotta limewash", "one partial linen chair at the far right", "diffused courtyard noon light"),
+        ("minimal apartment art wall", "tightly cropped high-ceiling apartment wall", "mineral-blue matte paint", "one small doorway glimpse into a softly focused sitting room at the far left", "cool soft east-window morning light"),
+        ("minimal courtyard-house art wall", "close composition on a low modern residential wall", "pale warm-stone limewash", "one shallow corridor return at the far right", "diffused courtyard noon light"),
         ("minimal townhouse art wall", "tightly framed tall townhouse wall", "deep teal fine plaster", "one doorway sliver at the far left", "soft lateral daylight from the right"),
-        ("minimal coastal art wall", "close composition on a compact coastal cottage wall", "pale sea-glass green brushed plaster", "one restrained lamp crop at the far right", "luminous coastal overcast daylight"),
+        ("minimal coastal art wall", "close composition on a compact coastal cottage wall", "pale sea-glass green brushed plaster", "one window recess with a partial furniture silhouette at the far right", "luminous coastal overcast daylight"),
         ("minimal loft art wall", "tightly composed broad loft wall", "cool charcoal mineral paint", "one distant room glimpse at the far right", "broad diffuse skylight"),
-        ("minimal garden-home art wall", "close composition on a modest garden-home wall", "muted rose textured paint", "one small stone console edge at the far right", "soft garden-reflected afternoon light"),
+        ("minimal garden-home art wall", "close composition on a modest garden-home wall", "smoked taupe mineral paint", "one narrow doorway into a softly focused room at the far right", "soft garden-reflected afternoon light"),
     ),
     (
-        ("refined bay-window sitting room", "angled bay-window seating recess", "deep olive lime plaster", "one oatmeal wool armchair with a small stone side table", "cool bay-window daylight with soft neutral lamp fill"),
-        ("architectural split-level living corner", "sunken living corner with distant floor-level change", "pale silver-grey mineral plaster", "low cobalt fabric settee and a single brushed steel side table", "high side-window afternoon light"),
-        ("heritage library lounge", "compact library seating alcove with one recessed shelf at the outer edge", "muted aubergine matte plaster", "one grey woven reading chair and a small painted side table", "soft rear-window daylight with a shaded reading light"),
-        ("quiet modern private retreat", "low-ceiling intimate seating corner with deep window reveal", "warm off-white textured plaster", "one moss-green upholstered chair and a pale ceramic side table", "gentle early-evening window light with neutral indirect fill"),
-        ("courtyard collector sitting room", "open residential seating corner looking toward an offset courtyard", "muted petrol-blue limewash", "one cream boucle settee and a low limestone table edge", "balanced courtyard morning daylight"),
-        ("contemporary collector living recess", "double-height living recess with an off-centre window", "pale sand fine plaster", "one ink-blue woven chair and a small aluminium table", "soft high-window overcast light"),
+        ("refined bay-window sitting room", "angled bay-window seating recess", "deep olive lime plaster", "one oatmeal wool seating edge at the outer perimeter", "cool bay-window daylight with soft neutral lamp fill"),
+        ("architectural split-level living corner", "sunken living corner with distant floor-level change", "pale silver-grey mineral plaster", "one low cobalt fabric settee edge at the far side", "high side-window afternoon light"),
+        ("heritage library lounge", "off-centre library alcove with a deep side-window reveal", "desaturated navy mineral paint", "one painted reading-bench edge deep in the alcove", "soft rear-window daylight with a shaded reading light"),
+        ("quiet modern private retreat", "low-ceiling intimate seating corner with deep window reveal", "warm off-white textured plaster", "one moss-green banquette edge at the far side of the recess", "gentle early-evening window light with neutral indirect fill"),
+        ("courtyard collector sitting room", "open residential seating corner looking toward an offset courtyard", "muted petrol-blue limewash", "one cream woven settee edge near the courtyard opening", "balanced courtyard morning daylight"),
+        ("contemporary collector living recess", "double-height living recess with an off-centre window", "pale sand fine plaster", "one ink-blue upholstered seating edge at the outer perimeter", "soft high-window overcast light"),
     ),
 )
 ROOM_OPTIONS = tuple(tuple(scene[0] for scene in slot) for slot in SCENES)
-SCENE_VERSION = "IE COLLECTOR SCENES V1"
+SCENE_VERSION = "IE COLLECTOR SCENES V2 ARTWORK FIRST"
+COMBAT_PALETTES = (
+    ("warm stone fine plaster", "mineral grey subtle limewash"),
+    ("charcoal mineral paint", "graphite fine plaster"),
+    ("smoked taupe limewash", "muted olive mineral paint", "desaturated navy fine plaster"),
+)
+
+
+def is_combat(context):
+    sport = f"{context.get('product_sport', '')} {context.get('selected_sport', '')}".casefold()
+    return any(word in sport for word in ("combat", "boxing", "mma", "ufc", "martial", "wrestling", "kickboxing", "muay thai"))
+
 
 
 def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
@@ -225,18 +236,25 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
     Callers pass the snapshot of recent fingerprints captured at fresh-pack creation,
     never the mutable live history when reopening. No new persistence is needed.
     """
-    seed = visuals[0]["resolved_seed"]
+    seed = f"{visuals[0]['resolved_seed']}|{context.get('market', '')}"
     for index, visual in enumerate(visuals):
         saved = selections[index] if index < len(selections) else {}
         saved = saved if isinstance(saved, dict) else {}
-        candidates = sorted(SCENES[index], key=lambda s: stable_rank(seed, s[0]))
-        recent = {f.get("room_type") for f in list(recent_fingerprints)[-18:] if isinstance(f, dict)}
-        history = [f.get("room_type") for f in list(recent_fingerprints)[-18:] if isinstance(f, dict)]
+        heritage = context.get("product_era") == "historic" or context.get("artwork_mood") == "heritage"
+        def scene_rank(scene):
+            suitable = heritage and any(word in scene[0] for word in ("heritage", "terrace", "library"))
+            return int.from_bytes(stable_rank(seed, scene[0]), "big") // (2 if suitable else 1)
+        candidates = sorted(SCENES[index], key=scene_rank)
+        recent = {f.get("room_type") for f in list(recent_fingerprints)[:18] if isinstance(f, dict)}
+        history = [f.get("room_type") for f in list(recent_fingerprints)[:18] if isinstance(f, dict)]
         # Exhausted libraries fall back to the least recently seen scene.
-        fallback = min(candidates, key=lambda s: max(
-            (i for i, room in enumerate(history) if room == s[0]), default=-1))
+        fallback = max(candidates, key=lambda s: min(
+            (i for i, room in enumerate(history) if room == s[0]), default=len(history)))
         scene = next((s for s in candidates if s[0] not in recent), fallback)
         room, architecture, wall, cue, light = scene
+        if is_combat(context):
+            # Slot palettes span lighter/darker neutral homes and stay distinct.
+            wall = min(COMBAT_PALETTES[index], key=lambda value: stable_rank(seed, f"{index}:{value}"))
         visual.update(
             room_profile_key=("hallway_gallery", "minimal_art_wall", "collector_interior")[index],
             room_profile=f"Room {index + 1}: {room}", room_type=room,
@@ -245,7 +263,7 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             secondary_cue="no additional styling", architectural_cue=architecture,
             lighting=light, time_of_day=light,
             atmosphere="restrained collector home; authentic residential materials",
-            shot_distance=("close passage context", "tight frontal artwork hero with generous uncluttered wall", "close collector seating context")[index],
+            shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one edge glimpse of home", "close product view with restrained alcove depth")[index],
         )
         # Explicit saved/editable scene fields retain precedence over automatic choices.
         for key in ("room_type", "wall_colour", "wall_material", "wall_finish", "room_materials",
@@ -254,6 +272,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
                 visual[key] = saved[key]
         if saved.get("wall_finish") and not saved.get("wall_material"):
             visual["wall_material"] = saved["wall_finish"]
+        if saved.get("wall_colour") and not saved.get("wall_finish") and not saved.get("wall_material"):
+            visual["wall_finish"] = visual["wall_material"] = saved["wall_colour"]
         wall_description = "; ".join(dict.fromkeys((visual["wall_colour"], visual["wall_finish"])))
         visual["room_materials"] = saved.get("room_materials") or f"{wall_description}; {visual['primary_cue']}"
         visual["room_profile"] = f"Room {index + 1}: {visual['room_type']}"
@@ -262,23 +282,34 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
         visual["scene_brief"] = (
             f"{visual['room_profile']}; {visual['architectural_cue']}; {wall_description}; "
             f"{visual['primary_cue']}; {visual['lighting']}. " + (
-                "Premium collector hallway with visible passage depth, restrained console styling and prominent artwork.",
-                "Minimal artwork-first wall composition: complete frame straight on, overwhelmingly the main subject; generous uncluttered wall and exactly one understated peripheral cue. No full-room view, furniture arrangement, desk, bar, shelving or decorative cluster.",
-                "Distinctive collector interior: dominant artwork with only enough seating and architecture to establish a real home. Neither a hallway nor a nearly empty wall; one coherent restrained residential setting.",
+                "Premium collector hallway: close artwork-first view, subtle visible passage depth, restrained console at the perimeter, warm picture light balanced with natural daylight.",
+                "Minimal artwork-first wall composition: complete frame straight on and prominent on mobile, a modest calm wall margin and exactly one understated architectural glimpse at an outer edge. The glimpse stays secondary. No full-room arrangement, large foreground desk, chair, cabinet or decorative cluster.",
+                "Distinctive collector interior: dominant artwork, off-centre alcove/window/adjoining-room depth and one peripheral furniture anchor. Neither a hallway nor a nearly empty wall; simplify the setting if it competes with the product. No bland empty-wall-and-armchair formula, flat light or showroom staging.",
             )[index]
         )
 
 
-def camera_wall_rules(visual):
+def camera_wall_rules(visual, *, compact=False):
+    if compact:
+        return f"""LOCKED CAMERA / ROOM / WALL RESOLUTION
+{SCENE_VERSION}
+CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']} (internal only).
+Selected camera: {visual['camera_side']}; refinement: {visual['resolved_camera_variation']}.
+SCENE: {visual['scene_brief']}
+Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Camera distance determines prominence; never enlarge the physical product.
+VARIANT PRECEDENCE — MANDATORY: use this one scene and camera; saved selections take precedence. Never mirror artwork.
+Reserved sibling headlines: {[s['headline_text'] for s in visual.get('sibling_summaries', [])]}.
+Only on a measured mobile fit failure, use an unused eligible alternative {visual.get('eligible_headline_alternatives', [])}, then this route's reserved truthful fallback {visual.get('headline_fit_fallback')}. Never repeat a sibling headline or use its reserved fallback.
+{SCARCITY_RULE}"""
     return f'''LOCKED CAMERA / ROOM / WALL RESOLUTION
 {SCENE_VERSION}
 CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']} (internal only; never display).
 Selected camera: {visual['camera_side']}.
 Selected viewpoint refinement: {visual['resolved_camera_variation']}. Resolve exactly ONE camera; retain RIGHT / FRONT / LEFT and Never mirror artwork.
 SCENE: {visual['scene_brief']}
-Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and generous wall breathing room above the footer.
+Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and a modest calm margin above the footer. Keep furniture/architecture near the perimeter or deeper behind the artwork. Avoid wide room views, excessive empty wall, dominating furniture and distracting background brightness. Retain enough subtle context to read as a real home.
 VARIANT PRECEDENCE — MANDATORY
-Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast.
+Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Automatic wall palettes exclude red, pink, rose, salmon, peach and strongly orange; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
 Sibling headlines reserved for other routes: {[s['headline_text'] for s in visual.get('sibling_summaries', [])]}. Never repeat them.
 This image's ONLY banner supporting line: {visual['supporting_line']}
 The only exception to exact resolved headline wording is a measured visual-fit failure. Headline fit alternatives, only if the assigned headline fails actual rendered mobile fit: {visual.get('eligible_headline_alternatives', [])}.

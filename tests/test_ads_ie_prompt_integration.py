@@ -34,14 +34,14 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
     def assert_three_formats(self, text, limit=100, *, clipboard=False):
         for old in ("PRIVATE GALLERY", "SMART HYBRID", "GROUP 3 — THE CAVE", "FOR THE ROOM THAT REMEMBERS.", "full-height right graphic column"):
             self.assertNotIn(old, text)
-        grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME", 1)[1]
+        grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES", 1)[1]
         groups = re.findall(r"^GROUP ([123]) — ([^\n]+)\n\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", grouped, re.M | re.S)
         self.assertEqual([label for _, label, _ in groups], [
             "PREMIUM SCARCITY — RIGHT ANGLE", "PREMIUM SCARCITY — STRAIGHT ON", "PREMIUM SCARCITY — LEFT ANGLE"])
         footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        self.assertEqual(text.count(footer), 3)
+        self.assertEqual(text.count(footer), 1)
         for i, (_, _, prompt) in enumerate(groups):
-            self.assertIn(footer, prompt)
+            self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
             if limit == 100:
                 self.assertTrue(any("HEADLINE: " + h in prompt for h in ads_page.ie_visuals.HEADLINES))
             else:
