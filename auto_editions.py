@@ -100,7 +100,7 @@ def inspect_layout(inspection):
         raise ValueError('The edition number must be editable text.')
     if not number.get('fonts') or any(f.get('installed') is not True for f in number['fonts']):
         raise ValueError('The original fonts are unavailable; substitution is forbidden.')
-    match = re.fullmatch(r'(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)',
+    match = re.fullmatch(r'(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)',
                          str(number.get('text', '')), re.I)
     if not match or not (1 <= int(match[2]) <= int(match[4]) <= 1000):
         raise ValueError('Edition number/total is ambiguous or unsupported.')
@@ -178,6 +178,9 @@ def compose(manifest, root, number, *, timings=None):
     x0, y0, x1, y1 = manifest['number_region']
     started=time.monotonic()
     with Image.open(asset_path(root, manifest['master'])) as source:
+        if source.mode=='RGBA' and source.getchannel('A').getextrema()[0]<255:
+            low,high=source.getchannel('A').getextrema()
+            raise ValueError(f'Saved artwork exports RGBA with non-opaque alpha ({low}-{high}). An approved opaque composition is required; no background was guessed or painted.')
         if source.format != 'PNG' or source.mode != 'RGB' or list(source.size) != canvas:
             raise ValueError('Master must be a lossless RGB PNG at the prepared size.')
         result = source.copy()
@@ -185,18 +188,78 @@ def compose(manifest, root, number, *, timings=None):
     if timings is not None:timings['master_decode_copy_ms']=round((time.monotonic()-started)*1000,3)
     started=time.monotonic()
     try:
-        with Image.open(asset_path(root, manifest['patches'][str(number)])) as patch:
-            if patch.format != 'PNG' or patch.mode != 'RGB' or patch.size != (x1-x0, y1-y0):
-                raise ValueError('Patch mode or geometry changed.')
-            if patch.info.get('icc_profile', b'') != profile:
-                raise ValueError('Master and number colour profiles differ.')
-            result.paste(patch, (x0, y0))
+        _paste_number(manifest, root, number, result, profile)
     except Exception:
         result.close()
         raise
     result.info['icc_profile'] = profile
     if timings is not None:timings['number_patch_ms']=round((time.monotonic()-started)*1000,3)
     return result
+
+
+def _paste_number(manifest, root, number, result, profile):
+    from PIL import Image
+    x0, y0, x1, y1 = manifest['number_region']
+    with Image.open(asset_path(root, manifest['patches'][str(number)])) as patch:
+        if patch.format != 'PNG' or patch.mode != 'RGB' or patch.size != (x1-x0, y1-y0):
+            raise ValueError('Patch mode or geometry changed.')
+        if patch.info.get('icc_profile', b'') != profile:
+            raise ValueError('Master and number colour profiles differ.')
+        result.paste(patch, (x0, y0))
+
+
+@serial_render
+def verify_preparation_pixels(manifest, root, number):
+    """All independent proofs, with one master decode scoped to this call.
+
+    No persistent cache or filename-based reuse: compose validates the exact
+    manifest/master, and each opaque patch is checked against its pinned hash.
+    Each patch fully replaces the same number rectangle. The original proof
+    excludes that rectangle, so the last sample needs no extra composition.
+    """
+    from PIL import Image, ImageChops
+    validate_manifest(manifest)
+    if type(number) is not int or not 1 <= number <= manifest['edition_total']:
+        raise ValueError('Edition is outside the prepared range.')
+    root = Path(root)
+    refs = sorted({1, number, manifest['edition_total']})
+    proofs = []
+    identity = fingerprint(manifest)
+    with compose(manifest, root, refs[0]) as actual:
+        profile = actual.info.get('icc_profile', b'')
+        for index, n in enumerate(refs):
+            if index:
+                _paste_number(manifest, root, n, actual, profile)
+            reference = root/f'reference-{n}.png'
+            with Image.open(reference) as expected:
+                if expected.mode != 'RGB' or expected.size != actual.size:
+                    raise ValueError('Photoshop reference has different geometry or colour mode.')
+                if expected.info.get('icc_profile', b'') != profile:
+                    raise ValueError('Photoshop reference has a different colour profile.')
+                difference = ImageChops.difference(actual, expected)
+                try:
+                    if difference.getbbox() is not None:
+                        raise ValueError('Cloud composition differs from the Photoshop reference.')
+                finally:
+                    difference.close()
+                    expected.close()
+            proofs.append(dict(number=n, reference_sha256=file_hash(reference),
+                               preparation_hash=identity, pixel_exact=True))
+        original_path = root/'original.png'
+        with Image.open(original_path) as original:
+            if (original.mode != actual.mode or original.size != actual.size
+                    or original.info.get('icc_profile', b'') != profile):
+                raise ValueError('Original artwork geometry or colour profile differs.')
+            difference = ImageChops.difference(actual, original)
+            try:
+                difference.paste((0, 0, 0), tuple(manifest['number_region']))
+                if difference.getbbox() is not None:
+                    raise ValueError('Preparation changed artwork outside the approved number region.')
+            finally:
+                difference.close()
+                original.close()
+    return proofs, dict(original_sha256=file_hash(original_path), outside_number_exact=True,
+                        preparation_hash=identity)
 
 
 @serial_render

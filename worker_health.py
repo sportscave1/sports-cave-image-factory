@@ -43,10 +43,13 @@ def set_pause(connect,paused,actor):
 
 
 def validate_heartbeat(value):
-    allowed={'state','stage','revision','code_hash','protocol','product_gid','last_progress_at','retry_at','recovery_failures','checkpoint_pending','processor_lock','diagnostic'}
+    allowed={'state','stage','revision','code_hash','protocol','product_gid','last_progress_at','retry_at','recovery_failures','checkpoint_pending','processor_lock','diagnostic','transfer_control'}
     if not isinstance(value,dict) or set(value)-allowed:raise ValueError('Bounded worker evidence required.')
     out={}
     for key,val in value.items():
+        if key=='transfer_control':
+            from companion_transfer_control import evidence
+            out[key]=evidence(val);continue
         if key=='diagnostic':out[key]=diagnostics.accepted(val);continue
         if key=='state' and val not in STATES:raise ValueError('Invalid worker state.')
         if key=='stage' and val not in diagnostics.STAGES:raise ValueError('Invalid worker stage.')
@@ -126,6 +129,10 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     jobs=[]
     for row in {r['product_gid']:r for r in rows}.values():
         state=states.get(row['product_gid'],{});label=state.get('status','Unavailable')
+        replacement=row.get('replacement') or {}
+        if replacement.get('stage')=='Failed':
+            label='Failed'
+            state={**state,'uploaded':False,'reason':replacement.get('reason') or 'Replacement preparation failed; previous assets retained.'}
         auto_approved=state.get('approval_status')=='Auto Approved'
         eligible=bool(row.get('eligible'))
         if eligible:counts['eligible']+=1
@@ -134,7 +141,15 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
         validation_pending=label=='Preparing' and row['status']!='Preparing' and (row.get('replacement') or {}).get('stage')!='Preparing'
         category=('Active' if label in ('Preparing','Uploading','Recovering') else 'Queued' if label in ('Queued','Deferred','Connect') else
                   'Needs Review' if label in ('Review','Needs Review') else 'Completed' if label in ('Cloud Ready','Production Ready') else 'Failed')
-        if __import__('auto_editions_technical').enabled() and label=='Uploading' and (row['status']=='Awaiting preparation' or state.get('substage')=='Queued technical verification'):category='Queued'
+        replacement_stage=replacement.get('stage')
+        preparation_owned=row['status']=='Preparing' or replacement_stage=='Preparing'
+        lease_expired=bool(preparation_owned and (not row.get('lease_until') or stamp(row['lease_until'])<=now))
+        if __import__('auto_editions_technical').enabled() and label=='Uploading':
+            if (row['status']=='Awaiting preparation' or state.get('substage')=='Queued technical verification'
+                    or replacement_stage in ('Discovering','Queued')):category='Queued'
+            if lease_expired:
+                category='Failed';label='Failed'
+                state={**state,'reason':'Companion lease expired. Durable worker recovery is pending.'}
         if validation_pending:category='Queued';label='Queued'
         if category=='Queued' and not eligible:category='Failed';label='Needs Repair'
         if category=='Active':counts['active']+=1
@@ -160,7 +175,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
             checkpoint=__import__('auto_editions_status').CHECKPOINTS.get(row.get('latest_checkpoint'),state.get('checkpoint') or 'No checkpoint'),reason=explanation['description'] if category=='Failed' else state.get('reason',''),
             diagnostic=explanation if category=='Failed' or explanation['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','PROFILE_APPROVED','COLOUR_INCOMPATIBLE') else None,
             colour_recovered=bool(row.get('colour_recovered')),colour_affected=bool(row.get('colour_affected')),attempts=row['attempts'],completed=completed,
-            validation_pending=validation_pending,actions=state.get('actions',[]),lease_expired=bool(row.get('lease_until') and stamp(row['lease_until'])<=now and row['status']=='Preparing')))
+            validation_pending=validation_pending,actions=state.get('actions',[]),lease_expired=lease_expired))
         jobs[-1].update(retry_eligible=bool(eligible and row['status'] in ('Blocked','Needs PSD Repair') and not row.get('preparation_hash') and not (row.get('replacement') or {}).get('manual_required')),
             repair_required=row['status']=='Needs PSD Repair' or explanation['manual_repair'])
         if __import__('auto_editions_technical').enabled() and row.get('preparation_hash') and label=='Failed' and 'retry' in state.get('actions',[]):jobs[-1]['retry_eligible']=True
@@ -182,7 +197,12 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if counts['remaining'] and health_lookup['Companion']['status']=='Offline':overall='Offline'
     starts=[stamp(r.get('claimed_at')) for r in rows if r.get('claimed_at')]
     last_output=stamp(last['created_at']) if last else min(starts) if starts else None
-    stalled=bool(counts['remaining'] and last_output and seconds(last_output,now)>2700)
+    recovery=latest.get('Companion',{}).get('payload',{})
+    transfer=recovery.get('transfer_control') or {}
+    intentional_transfer_wait=bool(current and current['stage'] in ('Claimed','Uploading') and (
+        transfer.get('pause_state') in ('Transfers paused','Pause after current transfer','Paused at chunk boundary','Pausing at chunk boundary')
+        or transfer.get('protection')=='Calibration needed'))
+    stalled=bool(not pause['paused'] and not intentional_transfer_wait and counts['remaining'] and last_output and seconds(last_output,now)>2700)
     if any(h['status'] in ('Degraded','Offline','Unavailable','Failed','Recovering') for h in subsystem) or counts['unavailable'] or stalled or telemetry_error:
         if overall!='Offline':overall='Degraded'
     if counts['eligible'] and not counts['remaining'] and not counts['completed'] and counts['failed']+counts['repair']:
@@ -191,7 +211,6 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if overall in ('Offline','Degraded','Failed') and counts['remaining']:eta=None;eta_label='Unavailable'
     if not pause['paused'] and any(j['validation_pending'] for j in jobs):eta=None;eta_label='Unavailable'
     expired=sum(j['lease_expired'] for j in jobs)
-    recovery=latest.get('Companion',{}).get('payload',{})
     upload_fail=next((j for j in jobs if (j.get('diagnostic') or {}).get('code')=='UPLOAD_INTERRUPTED'),None)
     subsystem.extend([
         dict(component='Dropbox',label='Dropbox/cloud upload',status='Degraded' if upload_fail else 'Last verified' if last else 'Unavailable',
@@ -207,7 +226,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if stalled:warnings.append('Worker has runnable jobs but no verified successful output in 45 minutes.')
     if current and (current['elapsed_seconds'] or 0)>900:warnings.append('Current job has no measured completion after 15 minutes; inspect its durable stage.')
     last_progress=recovery.get('last_progress_at')
-    if current and recovery.get('product_gid')==current['id'] and last_progress and now.timestamp()-last_progress>900:
+    if current and not intentional_transfer_wait and recovery.get('product_gid')==current['id'] and last_progress and now.timestamp()-last_progress>900:
         warnings.append('Companion reports no stage change for 15 minutes; current-job progress is not measurable.')
         if overall not in ('Paused','Pausing','Offline'):overall='Degraded';eta=None;eta_label='Unavailable'
     if telemetry_error:warnings.append('Independent heartbeat telemetry unavailable; apply the reviewed migration/setting before relying on subsystem health.')
@@ -215,7 +234,11 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     colour_codes={'PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','ICC_MISMATCH','COLOUR_INCOMPATIBLE','PROFILE_APPROVED'}
     affected=[j for j in jobs if j['colour_affected'] or (j.get('diagnostic') or {}).get('code') in colour_codes]
     repaired=sum(j['colour_recovered'] and j['completed'] for j in affected)
+    recent_failure=max((j for j in jobs if j['category']=='Failed' and seconds(j['last_activity_iso'],now)<900),
+                       key=lambda j:j['last_activity_iso'],default=None)
+    attention=({k:recent_failure[k] for k in ('design','diagnostic')} if recent_failure else None)
     return dict(colour=dict(affected=len(affected),repaired=repaired,remaining=len(affected)-repaired),
+        transfer_control=dict(instance=latest.get('Companion',{}).get('instance_id'),age_seconds=health_lookup['Companion'].get('age_seconds'),effective=recovery.get('transfer_control'),attention=attention),
         overall=overall,current=current,counts=counts,progress=dict(completed=counts['completed'],total=counts['eligible'],
         ratio=counts['completed']/counts['eligible'] if counts['eligible'] else None,current_job_ratio=None),
         eta_seconds=eta,eta_label=eta_label,eta_samples=len(durations),last_completed=dict(design=last.get('product_title') or last['product_gid'],at=sydney(last['created_at'])) if last else None,
@@ -229,10 +252,12 @@ class Health:
         with self.connect() as conn,conn.cursor() as cur:
             queue_sql="""SELECT q.product_gid,q.file_id,q.status,q.priority,q.reason,q.attempts,
                 q.preparation_hash,q.lease_until,q.updated_at,to_jsonb(q)->'replacement' AS replacement,p.product_title,
-                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_retry') AS colour_affected,
+                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND
+                    (ca.event='colour_retry' OR ca.event='backlog_recovery_attempt' AND ca.detail->>'category'='Colour/provenance' AND ca.detail->>'accepted' IS DISTINCT FROM 'false')) AS colour_affected,
                 EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='worker_health_queue_request') AS wh_requested,
-                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND ca.event='colour_recovered'
-                    AND ca.detail->>'preparation_hash'=q.preparation_hash) AS colour_recovered,
+                EXISTS(SELECT 1 FROM auto_edition_onboarding_audit ca WHERE ca.product_gid=q.product_gid AND
+                    (ca.event='colour_recovered' AND ca.detail->>'preparation_hash'=q.preparation_hash
+                     OR ca.event='technical_cloud_ready' AND ca.detail->>'hash'=q.preparation_hash)) AS colour_recovered,
                 (m.dropbox_file_id=q.file_id AND p.edition_total BETWEEN 1 AND 1000 AND
                  (SELECT count(*) FROM edition_products other WHERE COALESCE(NULLIF(other.shopify_product_gid,''),other.shopify_product_id)=q.product_gid)=1) AS eligible,
                 (SELECT created_at FROM auto_edition_onboarding_audit a WHERE a.product_gid=q.product_gid AND a.event='claimed' ORDER BY created_at DESC,id DESC LIMIT 1) AS claimed_at,
@@ -251,7 +276,10 @@ class Health:
                 LEFT JOIN LATERAL(SELECT created_at FROM auto_edition_onboarding_audit c
                     WHERE c.product_gid=a.product_gid AND c.event='claimed' AND c.created_at<=a.created_at
                     ORDER BY c.created_at DESC,c.id DESC LIMIT 1)c ON true
-                WHERE a.event='preparation_metrics' ORDER BY a.id DESC LIMIT 20"""
+                WHERE a.event='technical_cloud_ready' OR a.event='preparation_metrics'
+                  AND EXISTS(SELECT 1 FROM auto_edition_onboarding cq WHERE cq.product_gid=a.product_gid AND cq.status='Cloud Ready' AND cq.preparation_hash=a.detail->>'preparation_hash')
+                  AND NOT EXISTS(SELECT 1 FROM auto_edition_onboarding_audit verified WHERE verified.product_gid=a.product_gid AND verified.event='technical_cloud_ready' AND verified.detail->>'hash'=a.detail->>'preparation_hash')
+                ORDER BY a.id DESC LIMIT 20"""
             beats_sql="SELECT * FROM auto_edition_worker_heartbeats ORDER BY seen_at DESC LIMIT 16" if include_beats else "SELECT NULL WHERE false"
             cur.execute("""WITH queue_rows AS ("""+queue_sql+"""), successes AS ("""+successes_sql+"""),
                 beats AS ("""+beats_sql+""") SELECT
@@ -262,7 +290,10 @@ class Health:
                     'requested_at',created_at,'audit_id',id) FROM auto_edition_onboarding_audit
                     WHERE product_gid=%s AND event IN ('worker_paused','worker_resumed')
                     ORDER BY created_at DESC,id DESC LIMIT 1),
-                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause""",(after,CONTROL))
+                    '{"paused":false,"requested_at":null,"audit_id":null}'::jsonb) AS pause,
+                (SELECT jsonb_build_object('created_at',created_at,'detail',detail)
+                    FROM auto_edition_onboarding_audit WHERE product_gid=%s AND event='backlog_recovery_scan'
+                    ORDER BY id DESC LIMIT 1) AS recovery_scan""",(after,CONTROL,CONTROL))
             return dict(cur.fetchone())
 
     def snapshot(self):
@@ -274,7 +305,7 @@ class Health:
             # A missing optional heartbeat table must not hide authoritative jobs.
             # Retry in a NEW transaction after the failed optional read.
             raw=self._read_snapshot(False);telemetry_error=True;reads+=1
-        rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause']
+        rows=raw['rows'];beats=raw['beats'];successes=raw['successes'];pause=raw['pause'];scan=raw.get('recovery_scan')
         while len(raw['rows'])==500:
             raw=self._read_snapshot(False,raw['rows'][-1]['product_gid']);reads+=1;rows.extend(raw['rows'])
         state_rows=[];state_reads=0
@@ -284,6 +315,45 @@ class Health:
             state_rows.extend(part['rows']);state_reads+=part['query_count']
         states=dict(rows=state_rows,query_count=state_reads)
         result=project(rows,{r['product_gid']:r for r in states['rows']},beats,successes,pause,telemetry_error=telemetry_error)
+        instance=result['transfer_control']['instance']
+        if instance and result['transfer_control']['effective']:
+            from companion_transfer_control import requested
+            result['transfer_control']['requested']=requested(self.connect,instance)
+        from auto_editions_recovery import enabled as recovery_enabled
+        # Read-only durable scanner telemetry. Missing/stale scans never imply
+        # completion, and blocked backlog is never labelled healthy Monitoring.
+        automatic=next(h for h in result['health'] if h['component']=='Recovery')
+        current_failed={j['id'] for j in result['jobs'] if j['category'] in ('Failed','Needs Review')}
+        blocked=(scan or {}).get('detail',{}).get('needs_review',{})
+        recovering=sum(j['category']=='Active' for j in result['jobs'])
+        runnable=sum(j['category']=='Queued' for j in result['jobs'])
+        fresh=bool(scan and seconds(scan['created_at'],datetime.now(timezone.utc))<=180)
+        if fresh and recovery_enabled():
+            for job in result['jobs']:
+                if job['id'] in blocked and job['category']=='Failed':
+                    bucket='repair' if job['status']=='Needs Repair' else 'unavailable' if job['status']=='Unavailable' else 'failed'
+                    result['counts'][bucket]-=1
+                    result['counts']['review']+=1
+                    job.update(category='Needs Review',status='Needs Review',reason=blocked[job['id']])
+            result['jobs'].sort(key=lambda j:({'Active':0,'Failed':1,'Needs Review':2,'Queued':3,'Completed':4}[j['category']],-j['priority'],j['design']))
+        result['recovery']=dict(enabled=recovery_enabled(),fresh=fresh,
+            needs_review=len(current_failed.intersection(blocked)) if fresh else None,
+            recovering=recovering,runnable=runnable,verified=result['counts']['completed'],
+            categories=scan['detail'].get('categories',{}) if fresh else {},
+            eligible=scan['detail'].get('eligible') if fresh else None)
+        if not recovery_enabled():
+            automatic.update(status='Disabled',reason='Backlog recovery awaits the reviewed release and AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED=true.')
+        elif not fresh:
+            automatic.update(status='Unavailable',reason='No fresh full-backlog scan. Check the existing Render discovery worker.')
+        elif pause['paused']:
+            automatic.update(status='Paused',reason='Administrator paused new claims; retained checkpoints remain protected.')
+        elif current_failed and not recovering and not runnable:
+            why='Eligible failures await guarded admission/backoff.' if scan['detail'].get('eligible') or scan['detail'].get('backoff') else 'No eligible failures remain. Needs review designs require the recorded source, provenance or diagnostic resolution.'
+            automatic.update(status='Waiting',reason=why)
+        elif recovering or runnable:
+            automatic.update(status='Recovering',reason='Queued or owned work is progressing; completion requires verified exports and cloud receipts.')
+        else:
+            automatic.update(status='Monitoring',reason='No failed backlog requires recovery.')
         result['cost']=dict(queries=reads+states['query_count'],dropbox_calls=0,duration_ms=round((time.perf_counter()-start)*1000,2))
         return result
 

@@ -771,6 +771,17 @@ def _hydrate_from_snapshot_once():
                         st.session_state.get(ORIGINAL_ROWS_KEY) or []):
                     _invalidate_edition_ops_cache()
                     st.session_state['product_upload_catalog_revision'] = revision
+    backend = _configured_supabase_backend()
+    if backend:
+        from shopify_product_onboarding import REVISION
+        revision = backend.get_app_setting(REVISION, None, ensure_schema_first=False)
+        delta = st.session_state.get(EDITOR_KEY) or {}
+        if revision and st.session_state.get(REVISION) != revision and not (
+                isinstance(delta, dict) and delta.get("edited_rows")) and not _changed_rows(
+                st.session_state.get(EDITOR_ROWS_KEY) or st.session_state.get(ROWS_KEY) or [],
+                st.session_state.get(ORIGINAL_ROWS_KEY) or []):
+            _invalidate_edition_ops_cache()
+            st.session_state[REVISION] = revision
     if st.session_state.get(SNAPSHOT_LOADED_KEY):
         loaded_at = st.session_state.setdefault("edition_ops_snapshot_checked_at", time.monotonic())
         if time.monotonic() - loaded_at < EDITION_OPS_CACHE_TTL_SECONDS:

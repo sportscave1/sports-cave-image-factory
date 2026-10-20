@@ -1,3 +1,4 @@
+from contextlib import closing
 import time
 import unittest
 from pathlib import Path
@@ -245,10 +246,10 @@ class EditionOpsStabilityTests(unittest.TestCase):
                 ]
             )
         )
-        with patch.object(supabase_backend, "connect", side_effect=[stale, fresh]):
+        with patch.object(supabase_backend, "read_connection", side_effect=[closing(stale), closing(fresh)]):
             rows = supabase_backend.list_edition_products_read_only(limit=50)
         self.assertEqual(rows[0]["shopify_handle"], "product-7")
-        self.assertEqual(stale.close_calls, 1)
+        self.assertEqual(stale.close_calls, 2)  # failed lease discarded, then context released
         self.assertEqual(fresh.close_calls, 1)
         self.assertGreaterEqual(stale.rollback_calls, 1)
         self.assertGreaterEqual(fresh.rollback_calls, 1)
@@ -314,7 +315,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
             }
         )
         with patch.object(edition_ops, "st", fake_st), patch.object(
-            edition_ops, "_configured_supabase_backend", return_value=object()
+            edition_ops, "_configured_supabase_backend", return_value=SimpleNamespace(get_app_setting=lambda *args, **kwargs: None)
         ), patch.object(
             edition_ops,
             "_render_product_sync_diagnostics",
@@ -383,7 +384,7 @@ class EditionOpsStabilityTests(unittest.TestCase):
     def test_edition_ops_query_is_one_bounded_bulk_read_without_write_sql(self):
         cursor = _Cursor(rows=[])
         connection = _Connection(cursor)
-        with patch.object(supabase_backend, "connect", return_value=connection):
+        with patch.object(supabase_backend, "read_connection", side_effect=lambda: closing(connection)):
             rows = supabase_backend.list_edition_products_read_only(limit=5000)
         self.assertEqual(rows, [])
         self.assertEqual(len(cursor.statements), 1)
@@ -408,7 +409,8 @@ class EditionOpsStabilityTests(unittest.TestCase):
         self.assertIn('@app.post("/webhooks/shopify/products-create")', webhook_source)
         self.assertIn('@app.post("/webhooks/shopify/products-update")', webhook_source)
         self.assertIn("verify_shopify_webhook_hmac", webhook_source)
-        self.assertIn("process_product_create_webhook", webhook_source)
+        self.assertIn("claim_product_create_webhook_receipt", webhook_source)
+        self.assertIn("process_product_create_webhook", (ROOT / "shopify_product_onboarding.py").read_text(encoding="utf-8"))
         self.assertNotIn("process_product_create_webhook", edition_source[edition_source.index("def render_page():") :])
 
 

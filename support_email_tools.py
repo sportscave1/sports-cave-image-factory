@@ -81,7 +81,10 @@ def handle(workspace, action, event):
     if action == 'collapse_message':
         message = workspace._header(event.get('message_key'))
         from support_email_workspace import reference_key
-        s['expanded'].discard(reference_key(message))
+        key = reference_key(message)
+        s['expanded'].discard(key)
+        s.get('body_errors', {}).pop(key, None)
+        if s.get('body_pending') == key:workspace._cancel_body_load()
         s['image_grants'] = set()
         return True
     if action == 'expand_conversation':
@@ -91,6 +94,8 @@ def handle(workspace, action, event):
         return True
     if action == 'collapse_conversation':
         s['expanded'] = set();s['image_grants'] = set()
+        s['body_errors'] = {}
+        workspace._cancel_body_load()
         return True
     if action == 'restore':
         message = workspace._header(event.get('message_key'))

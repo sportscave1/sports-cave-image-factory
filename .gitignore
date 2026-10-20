@@ -52,3 +52,6 @@ htmlcov/
 .env.*
 !.env.example
 !.env.sample
+
+# Isolated SEO Phase 1 runtime and dependency target
+.local/

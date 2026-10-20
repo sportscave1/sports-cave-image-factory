@@ -14,23 +14,31 @@ class ImageProtectionSidebarTests(unittest.TestCase):
         self.assertFalse(list(app.exception))
         return app
 
-    def test_admin_visible_first_level_order_and_shield(self):
+    def test_admin_visible_only_under_developer_with_shield(self):
         app = self.render()
-        labels = [button.label for button in app.sidebar.button
-                  if not str(button.key).startswith(('sidebar-history::', 'sidebar-child::'))]
-        start = labels.index('Reviews')
-        self.assertEqual(labels[start:start + 5],
-                         ['Reviews', 'Email', 'Image Protection', 'Reporting', 'Accounts & Access'])
-        button = app.sidebar.button(key='sidebar-nav::Image Protection')
+        self.assertNotIn('Mockups', [b.label for b in app.sidebar.button])
+        self.assertNotIn('Image Protection', [b.label for b in app.sidebar.button])
+        app.sidebar.button(key='sidebar-disclosure::developer').click().run()
+        button = app.sidebar.button(key='sidebar-child::Image Protection')
         self.assertEqual(button.proto.icon, ':material/shield:')
-        self.assertEqual(labels.count('Image Protection'), 1)
+        self.assertEqual([b.label for b in app.sidebar.button].count('Image Protection'), 1)
+        self.assertNotIn('sidebar-nav::Image Protection', [b.key for b in app.sidebar.button])
+
+    def test_direct_url_expands_developer(self):
+        app = AppTest.from_file(str(FIXTURE))
+        app.query_params['page'] = 'Image Protection'
+        app.run()
+        self.assertFalse(list(app.exception))
+        self.assertEqual(app.sidebar.button(key='sidebar-child::Image Protection').proto.type, 'primary')
+        self.assertTrue(any('aria-expanded="true"' in m.value and 'Developer navigation' in m.value for m in app.markdown))
 
     def test_click_refresh_highlight_and_home(self):
         app = self.render()
-        app.sidebar.button(key='sidebar-nav::Image Protection').click().run()
+        app.sidebar.button(key='sidebar-disclosure::developer').click().run()
+        app.sidebar.button(key='sidebar-child::Image Protection').click().run()
         self.assertFalse(list(app.exception))
         self.assertEqual(app.title[0].value, 'Image Protection')
-        self.assertEqual(app.sidebar.button(key='sidebar-nav::Image Protection').proto.type, 'primary')
+        self.assertEqual(app.sidebar.button(key='sidebar-child::Image Protection').proto.type, 'primary')
         app.run()
         self.assertEqual(app.title[0].value, 'Image Protection')
         app.sidebar.button(key='sidebar-nav::Dashboard').click().run()

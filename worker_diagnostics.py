@@ -2,6 +2,7 @@
 import re
 
 RULES=(
+ ('MEMORY_PRESSURE','Photoshop',('not enough memory','insufficient memory','available ram','out of memory'),'Preparation computer has insufficient available memory.','Close applications you are finished with, then retry the retained job. Do not remove active locks or lower output quality.'),
  ('FONT_MISSING','Photoshop',('missing font','font is not installed','font unavailable','font is unavailable','fonts are unavailable','font is missing'),'A required PSD font is unavailable.','Install or repair the required font on the preparation computer, then confirm the correction and retry.'),
  ('EDITION_GEOMETRY','Photoshop',('psd edition total differs','not contained in its plaque','number does not lie inside'),'PSD edition text or plaque geometry does not match the required design.','Repair the mapped PSD to match the authoritative limit and plaque. Do not change issued edition numbers.'),
  ('PSD_MISSING','Dropbox',('path/not_found','file not found','mapped psd is missing'),'The mapped source PSD could not be found.','Restore or verify the existing mapped source. Do not silently select another PSD.'),
@@ -23,8 +24,9 @@ RULES=(
  ('DISK_SPACE','Companion',('storage is low','no space left on device'),'Preparation computer has insufficient working storage.','Free working space without deleting unverified packages or originals.'),
  ('ICC_MISMATCH','Photoshop',('icc export mismatch','export_profile_changed','different colour profile','profile does not match','conflicting photoshop export'), 'Photoshop export failed — ICC profile mismatch.','Review the source/export profile evidence; do not assign a guessed profile.'),
  ('PROFILE_MISSING','Photoshop',('colour profile is unavailable','source_profile_requires_review','colour settings require owner review'), 'Original PSD has no verified colour profile.','Ask the owner to review the source colour settings.'),
- ('NUMBER_LAYER','Photoshop',('exactly one visible, editable edition-number','nested, locked or not independently editable'), 'PSD missing a uniquely editable edition-number layer.','Review the number layer in the original PSD.'),
- ('PLAQUE_AMBIGUOUS','Photoshop',('unique recognised collector plaque','ambiguous_roles'), 'PSD plaque identity is ambiguous.','Review the plaque role; retain the original geometry.'),
+ ('NUMBER_LAYER','Photoshop',('exactly one visible, editable edition-number','nested, locked or not independently editable','pinned number evidence changed','pinned number identity changed'), 'PSD missing a uniquely editable edition-number layer.','Review the number layer in the original PSD.'),
+ ('PLAQUE_AMBIGUOUS','Photoshop',('unique recognised collector plaque','ambiguous_roles','pinned plaque evidence changed','pinned plaque identity changed'), 'PSD plaque identity is ambiguous.','Review the plaque role; retain the original geometry.'),
+ ('ARTWORK_ALPHA','Photoshop',('non-opaque alpha','approved opaque composition'), 'The saved artwork contains transparency.','Provide the approved opaque composition or confirm its existing background treatment; no background is guessed.'),
  ('NUMBER_FORMAT','Photoshop',('formatting cannot hold','number_width_requires_review'), 'Existing number formatting cannot hold the edition range.','Review the number format without changing issued editions.'),
  ('UPLOAD_INTERRUPTED','Dropbox',('upload/checkpoint failed','upload recovery exhausted','upload interrupted'), 'Dropbox upload interrupted — package retained for recovery.','Check connectivity and recovery receipts; do not rerender verified packages.'),
  ('TRANSFER_LIMIT','Dropbox',('transfer limit','package exceeds'), 'Artwork exceeds the verified transfer limit.','Review package size and the supported transfer policy.'),
@@ -68,7 +70,7 @@ def operator_details(reason,stage='Unknown',code=None):
     if code:
         try:value=accepted(dict(code=code,stage=stage))
         except ValueError:pass
-    repair=value['code'] in {'FONT_MISSING','EDITION_GEOMETRY','NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','PROFILE_MISSING','COLOUR_POLICY_PENDING','COLOUR_INCOMPATIBLE','ICC_MISMATCH','SOURCE_CHANGED','PSD_MISSING','VALIDATION_FAILED'}
+    repair=value['code'] in {'FONT_MISSING','EDITION_GEOMETRY','NUMBER_LAYER','PLAQUE_AMBIGUOUS','NUMBER_FORMAT','PROFILE_MISSING','COLOUR_POLICY_PENDING','COLOUR_INCOMPATIBLE','ICC_MISMATCH','SOURCE_CHANGED','PSD_MISSING','VALIDATION_FAILED','ARTWORK_ALPHA'}
     transient=value['code'] in {'DOWNLOAD_INTERRUPTED','UPLOAD_INTERRUPTED','CONNECTION_INTERRUPTED'}
     return {**value,'stage':stage if stage in STAGES and stage!='Unknown' else 'Stage unavailable',
         'manual_repair':repair,'retry_may_help':transient,

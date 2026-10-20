@@ -33,9 +33,9 @@ def test_small_resource_budget_and_missing_cleanup_are_not_assumed_safe(tmp_path
     (tmp_path/'native-status.json').write_text('{broken');assert not cleanup_proven(tmp_path)
     (tmp_path/'native-status.json').write_text('{"owned_document_closed":false}');assert not cleanup_proven(tmp_path)
 
-@pytest.mark.parametrize('strategy,admitted',[('unknown',False),('history_merged_crop',False)])
-def test_candidate_cannot_be_selected_by_normal_preparation(tmp_path,strategy,admitted):
-    with pytest.raises(ValueError,match='restricted'):
+@pytest.mark.parametrize('strategy',['unknown'])
+def test_unrecognised_strategy_cannot_be_selected_by_normal_preparation(tmp_path,strategy):
+    with pytest.raises(ValueError,match='Unsupported'):
         prepare(tmp_path/'not-read.psd',tmp_path/'not-created',{},number_layer='n',plaque_layer='p',total=100,reference_number=1,export_strategy=strategy)
     assert not (tmp_path/'not-created').exists()
 

@@ -142,7 +142,7 @@ class RefreshDraftTests(unittest.TestCase):
         button(app,'Save now').click().run(timeout=30)
         button(app,'Save setup notes here').click().run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertNotEqual(app.session_state.filtered_state.get('current_page'),ads.POSTING_ROUTE)
+        self.assertTrue('current_page' not in app.session_state or app.session_state['current_page'] != ads.POSTING_ROUTE)
         button(app,'POST NOW').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state['current_page'],ads.POSTING_ROUTE)

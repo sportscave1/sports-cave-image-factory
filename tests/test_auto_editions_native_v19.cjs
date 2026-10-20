@@ -6,7 +6,7 @@ function execute(strategy,options={}){
  const unit=v=>({as:()=>Number(v)});let context;
  function File(path){this.fsName=path;this.length=(files.get(path)||'').length;this.exists=files.has(path);this.open=()=>true;this.read=()=>files.get(path);this.write=value=>{files.set(path,value);return true;};this.close=()=>{};}
  function bounds(v){return v.map(unit);}
- function layer(doc,name,kind,b,text){let value=text;const item={font:'SyntheticFont'};Object.defineProperty(item,'contents',{get:()=>value,set:v=>{value=v;stats.text++;}});return {name,kind,visible:true,allLocked:false,parent:doc,typename:'ArtLayer',bounds:bounds(b),textItem:item};}
+ function layer(doc,name,kind,b,text){let value=text;const item={font:'SyntheticFont'};const record={id:doc.id*100+(name==='number'?1:2),name,kind,visible:true,allLocked:false,parent:doc,typename:'ArtLayer',bounds:bounds(b),textItem:item};Object.defineProperty(item,'contents',{get:()=>value,set:v=>{value=v;stats.text++;if(options.autoRename)record.name=v;}});return record;}
  function doc(name='staged',merged=null){
   const d={id:next++,mode:'RGB',bitsPerChannel:'EIGHT',width:unit(200),height:unit(120),resolution:300,colorProfileType:1,colorProfileName:'Synthetic ICC',_merged:merged,_region:null};
   d.layers=[layer(d,'number','TEXT',[130,95,170,105],'001 / 100'),layer(d,'plaque','PIXEL',[100,80,195,119],'')];
@@ -15,7 +15,7 @@ function execute(strategy,options={}){
   d.crop=box=>{d._region=box.map(v=>v.as('px'));d.width=unit(d._region[2]-d._region[0]);d.height=unit(d._region[3]-d._region[1]);};
   d.mergeVisibleLayers=()=>{stats.merge++;d._merged=rendering();d.layers=[];};
   Object.defineProperty(d,'activeHistoryState',{get:()=>({text:d.layers[0].textItem.contents}),set:value=>{
-   stats.restore++;if(options.restoreFailure)throw Error('synthetic_restore_failure');d._merged=null;d._region=null;d.width=unit(200);d.height=unit(120);d.layers=[layer(d,'number','TEXT',[130,95,170,105],value.text),layer(d,'plaque','PIXEL',[100,80,195,119],'')];
+   stats.restore++;if(options.restoreFailure)throw Error('synthetic_restore_failure');d._merged=null;d._region=null;d.width=unit(200);d.height=unit(120);d.layers=[layer(d,'number','TEXT',[130,95,170,105],value.text),layer(d,'plaque','PIXEL',[100,80,195,119],'')];if(options.autoRename)d.layers[0].name=value.text;if(options.restoreIdentityChanged)d.layers[0].id+=10;
   }});
   d.saveAs=(file,saveOptions,copy,extension)=>{
    if(file.fsName.endsWith('/profile-witness.psd')){files.set(file.fsName,witness);return;}
@@ -46,7 +46,9 @@ for(const strategy of ['duplicate_merged','history_merged_crop']){
  const state=JSON.parse(failure.files.get('C:/output/native-status.json'));assert(!state.completed&&state.owned_document_closed);
 }
 assert(execute('history_merged_crop',{restoreFailure:true}).error);
+const renamed=execute('history_merged_crop',{autoRename:true});assert.equal(renamed.error,null);assert.equal(renamed.saved.size,105);
+assert(execute('history_merged_crop',{restoreIdentityChanged:true}).error);
 const close=execute('duplicate_merged',{closeFailure:true});assert(close.error);assert.equal(JSON.parse(close.files.get('C:/output/native-status.json')).owned_document_closed,false);
-const blocked=execute('history_merged_crop',{admitted:false});assert(blocked.error);assert.equal(blocked.stats.open,0);assert.equal(blocked.saved.size,0);
+const normal=execute('history_merged_crop',{admitted:false});assert.equal(normal.error,null);assert.equal(normal.saved.size,105);
 assert(execute('unsafe').error);
 console.log('V19 DOM model: one source open, 100 exports, default fidelity, candidate operation counts, owned cleanup, failure and admission checks passed. No native speed claim.');

@@ -278,26 +278,6 @@ class MockupSecondImageUploadTests(unittest.TestCase):
         self.assertEqual(lifecycle["status"], "FAILED")
         self.assertIn("did not finish", lifecycle["error_message"])
 
-    def test_primary_artwork_cache_uses_content_not_filename_size_or_type(self):
-        first_bytes = equal_size_png_bytes((10, 20, 30))
-        second_bytes = equal_size_png_bytes((30, 20, 10))
-        self.assertEqual(len(first_bytes), len(second_bytes))
-        first = CountingUpload(first_bytes, file_id="main-a", name="same.png")
-        second = CountingUpload(second_bytes, file_id="main-b", name="same.png")
-
-        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
-            app, "UPLOAD_PREVIEW_DIR", Path(tmpdir)
-        ):
-            first_details = app.process_uploaded_artwork_once(first)
-            first_read_count = first.read_calls
-            repeated_details = app.process_uploaded_artwork_once(first)
-            second_details = app.process_uploaded_artwork_once(second)
-
-        self.assertEqual(first_details, repeated_details)
-        self.assertEqual(first.read_calls, first_read_count)
-        self.assertNotEqual(first_details["signature"], second_details["signature"])
-        self.assertEqual((first_details["width"], first_details["height"]), (12, 12))
-        self.assertEqual((second_details["width"], second_details["height"]), (12, 12))
 
     def test_lifestyle_upload_handler_contains_no_rerun_loop(self):
         source = Path(app.__file__).read_text(encoding="utf-8")

@@ -123,88 +123,41 @@ async def package(request):
     setup=None
     import time
     started=time.monotonic();timings={}
+    correlation=request.headers.get('x-sc-transfer-id','')
+    if not re.fullmatch('[a-f0-9]{32}',correlation):correlation=__import__('uuid').uuid4().hex
+    timings['correlation_id']=correlation
+    request_id=request.headers.get('x-sc-request-id','')
+    timings['request_id']=request_id if re.fullmatch('[a-f0-9]{32}',request_id) else __import__('uuid').uuid4().hex
     try:
         setup=await run_in_threadpool(grant_context,request)
+        timings['authentication_context_seconds']=round(time.monotonic()-started,6)
         acquired=IMPORT_LOCK.acquire(blocking=False)
         if not acquired:raise ValueError('Another preparation is being verified. Retry shortly.')
         if setup.get('imported'):raise ValueError('This preparation grant was already used.')
         with tempfile.TemporaryDirectory(prefix='sc-edition-import-') as folder:
             root=Path(folder);archive=root/'package.zip'
-            size=0
+            size=0;receive_started=time.monotonic();first_body=None
             with archive.open('xb') as output:
                 async for block in request.stream():
+                    if block and first_body is None:first_body=time.monotonic()
                     size+=len(block)
                     if size>MAX_PACKAGE_BYTES:raise ValueError('Preparation transfer exceeds its limit.')
                     output.write(block)
-            assets_root=root/'assets';assets_root.mkdir()
-            timings['receive_seconds']=round(time.monotonic()-started,3);phase=time.monotonic()
+            body_complete=time.monotonic()
+            timings.update(handler_to_first_body_seconds=round((first_body or body_complete)-started,6),
+                body_receive_seconds=round(body_complete-receive_started,6),
+                first_body_to_complete_seconds=round(body_complete-(first_body or body_complete),6),
+                server_received_bytes=size)
+            timings['receive_seconds']=round(time.monotonic()-started,3)
             timings['package_bytes']=size
-            timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
-            ctx=setup['context']
-            manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
-            if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:
-                raise ValueError('Reset requires an updated companion and a fresh Photoshop preparation.')
-            timings['validation_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
-            assets=runtime.storage()
-            receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
-            timings['dropbox_upload_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
-            timings.update({k:v for k,v in getattr(assets,'timings',{}).items() if k.startswith('prepared_')})
-            timings['dropbox_publish_mib_s']=round(timings.get('prepared_upload_bytes',0)/1024**2/max(timings['dropbox_upload_seconds'],.000001),4)
-            await run_in_threadpool(grant_context,request)
-            registry,_=runtime.stores()
-            digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])
-            timings['database_save_seconds']=round(time.monotonic()-phase,3)
-            timings['total_before_checkpoint_seconds']=round(time.monotonic()-started,3)
-            phase=time.monotonic()
-            if ctx.get('automatic'):
-                from auto_editions_onboarding_api import queue,host_account
-                imported_state=await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])
-                await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
-                    imported_state,'Existing exact preparation approval retained.' if imported_state=='Cloud Ready' else
-                    'Technical verification pending.' if __import__('auto_editions_technical').enabled() else
-                    'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
-            setup['imported']=digest
-            from product_upload_services import enabled as intake_enabled
-            if ctx.get('automatic') and intake_enabled():
-                from product_upload_readiness import complete
-                intake_ready=await run_in_threadpool(complete,registry.connect,ctx['product_gid'])
-            # Optional derived cache only, after durable import/checkpoint. The
-            # existing bounded preview pool retains private local file links.
-            try:
-                from auto_editions_review_thumbnails import ReviewBuildStore,schedule_prepared
-                schedule_prepared(dict(hash=digest,manifest=manifest,proofs=proofs,receipts=receipts),
-                                  assets_root,ReviewBuildStore(registry.connect))
-            except Exception:
-                __import__('logging').getLogger(__name__).warning('review_thumbnail_pending preparation=%s',digest)
-            timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
-            # Disabled by default. Reuse the exact imported files and fresh cloud
-            # receipts; never regenerate or upload during visual reconciliation.
-            from auto_editions_visual import enabled as visual_enabled
-            if ctx.get('automatic') and __import__('auto_editions_technical').enabled():
-                from auto_editions_technical import Technical
-                # The checkpoint is already durable. A crash here is recovered
-                # by the existing preparation worker, using the same job key.
-                await run_in_threadpool(Technical(registry.connect).run_one,assets,pid=ctx['product_gid'],local_root=assets_root)
-            elif ctx.get('automatic') and visual_enabled():
-                visual_started=time.monotonic()
-                try:
-                    from auto_editions_visual_store import Visual
-                    from auto_editions_onboarding_api import queue
-                    await run_in_threadpool(Visual(queue().connect).run_one,assets,pid=ctx['product_gid'],local_root=assets_root)
-                except Exception:
-                    # The already-durable import must remain recoverable. The
-                    # existing discovery worker retries missing visual evidence.
-                    __import__('logging').getLogger(__name__).warning('automatic_visual_pending preparation=%s',digest)
-                timings['automatic_visual_seconds']=round(time.monotonic()-visual_started,3)
-            timings['total_seconds']=round(time.monotonic()-started,3)
-        response_status='Cloud Ready' if intake_ready else 'Uploading' if __import__('auto_editions_technical').enabled() else 'Awaiting visual approval'
-        if ctx.get('automatic') and (__import__('auto_editions_technical').enabled() or visual_enabled()):
-            # Report the durable exact-hash decision, never infer success from a
-            # completed comparison call or fabricate a human approval.
-            try:
-                if await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])=='Cloud Ready':response_status='Cloud Ready'
-            except Exception:pass
-        return JSONResponse(dict(preparation_hash=digest,status=response_status,print_ready=False,timings=timings),headers=api.HEADERS)
+            result=await import_archive(archive,setup,lambda:grant_context(request),started,timings)
+            cleanup_started=time.monotonic()
+        timings['temporary_cleanup_seconds']=round(time.monotonic()-cleanup_started,6)
+        timings['handler_total_seconds']=round(time.monotonic()-started,6)
+        return JSONResponse(result,headers={**api.HEADERS,'X-SC-Transfer-ID':correlation,'X-SC-Received-Bytes':str(size),
+            'X-SC-Handler-Seconds':str(timings['handler_total_seconds']),
+            'X-SC-Body-Receive-Seconds':str(timings['first_body_to_complete_seconds']),
+            'X-SC-Body-Wait-Seconds':str(round((first_body or body_complete)-receive_started,6))})
     except Exception as error:
         if acquired and isinstance(error,ValueError) and setup and setup['context'].get('reset_id'):
             try:
@@ -216,6 +169,89 @@ async def package(request):
         return api.failure(error)
     finally:
         if acquired:IMPORT_LOCK.release()
+
+
+async def import_archive(archive,setup,revalidate,started,timings,expected=None):
+    import time
+    intake_ready=False
+    assets_root=archive.parent/'assets';assets_root.mkdir()
+    size=archive.stat().st_size
+    if not timings.get('resumable_protocol'):timings['receive_seconds']=round(time.monotonic()-started,3)
+    phase=time.monotonic()
+    timings['package_bytes']=size
+    if not timings.get('resumable_protocol'):timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
+    ctx=setup['context']
+    manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
+    if expected is not None and ae.fingerprint(manifest)!=expected:raise ValueError('Bound preparation fingerprint differs; publication refused.')
+    if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:
+        raise ValueError('Reset requires an updated companion and a fresh Photoshop preparation.')
+    timings['validation_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
+    assets=runtime.storage()
+    receipts=await run_in_threadpool(assets.publish_preparation,manifest,assets_root)
+    timings['dropbox_upload_seconds']=round(time.monotonic()-phase,3);phase=time.monotonic()
+    timings.update({k:v for k,v in getattr(assets,'timings',{}).items() if k.startswith('prepared_')})
+    timings['dropbox_publish_mib_s']=round(timings.get('prepared_upload_bytes',0)/1024**2/max(timings['dropbox_upload_seconds'],.000001),4)
+    await run_in_threadpool(revalidate)
+    timings['source_revalidation_seconds']=round(time.monotonic()-phase,6);phase=time.monotonic()
+    registry,_=runtime.stores()
+    digest=await run_in_threadpool(registry.save,manifest,proofs,receipts,setup['actor_id'])
+    timings['database_save_seconds']=round(time.monotonic()-phase,3)
+    timings['total_before_checkpoint_seconds']=round(time.monotonic()-started,3)
+    phase=time.monotonic()
+    if ctx.get('automatic'):
+        from auto_editions_onboarding_api import queue,host_account
+        imported_state=await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])
+        await run_in_threadpool(queue().checkpoint,ctx['product_gid'],ctx['lease_token'],setup['actor_id'],
+            imported_state,'Existing exact preparation approval retained.' if imported_state=='Cloud Ready' else
+            'Technical verification pending.' if __import__('auto_editions_technical').enabled() else
+            'Prepared and pixel-verified; visual quality review required before Cloud Ready.',digest=digest,metrics=timings)
+    setup['imported']=digest
+    from product_upload_services import enabled as intake_enabled
+    if ctx.get('automatic') and intake_enabled():
+        from product_upload_readiness import complete
+        intake_ready=await run_in_threadpool(complete,registry.connect,ctx['product_gid'])
+    # Optional derived cache only, after durable import/checkpoint. The
+    # existing bounded preview pool retains private local file links.
+    try:
+        from auto_editions_review_thumbnails import ReviewBuildStore,schedule_prepared
+        schedule_prepared(dict(hash=digest,manifest=manifest,proofs=proofs,receipts=receipts),
+                          assets_root,ReviewBuildStore(registry.connect))
+    except Exception:
+        __import__('logging').getLogger(__name__).warning('review_thumbnail_pending preparation=%s',digest)
+    timings['database_checkpoint_seconds']=round(time.monotonic()-phase,3)
+    # Disabled by default. Reuse the exact imported files and fresh cloud
+    # receipts; never regenerate or upload during visual reconciliation.
+    from auto_editions_visual import enabled as visual_enabled
+    if ctx.get('automatic') and __import__('auto_editions_technical').enabled():
+        from auto_editions_technical import Technical
+        # The checkpoint is already durable. A crash here is recovered
+        # by the existing preparation worker, using the same job key.
+        verification_started=time.monotonic()
+        await run_in_threadpool(Technical(registry.connect).run_one,assets,pid=ctx['product_gid'],local_root=assets_root)
+        timings['technical_verification_seconds']=round(time.monotonic()-verification_started,6)
+    elif ctx.get('automatic') and visual_enabled():
+        visual_started=time.monotonic()
+        try:
+            from auto_editions_visual_store import Visual
+            from auto_editions_onboarding_api import queue
+            await run_in_threadpool(Visual(queue().connect).run_one,assets,pid=ctx['product_gid'],local_root=assets_root)
+        except Exception:
+            # The already-durable import must remain recoverable. The
+            # existing discovery worker retries missing visual evidence.
+            __import__('logging').getLogger(__name__).warning('automatic_visual_pending preparation=%s',digest)
+        timings['automatic_visual_seconds']=round(time.monotonic()-visual_started,3)
+    timings['total_seconds']=round(time.monotonic()-started,3)
+    final_status_started=time.monotonic()
+    response_status='Cloud Ready' if intake_ready else 'Uploading' if __import__('auto_editions_technical').enabled() else 'Awaiting visual approval'
+    if ctx.get('automatic') and (__import__('auto_editions_technical').enabled() or visual_enabled()):
+        # Report the durable exact-hash decision, never infer success from a
+        # completed comparison call or fabricate a human approval.
+        try:
+            if await run_in_threadpool(queue().imported_state,ctx['product_gid'],digest,ctx['source'])=='Cloud Ready':response_status='Cloud Ready'
+        except Exception:pass
+    timings['final_status_seconds']=round(time.monotonic()-final_status_started,6)
+    timings['handler_total_seconds']=round(time.monotonic()-started,6)
+    return dict(preparation_hash=digest,status=response_status,print_ready=False,timings=timings)
 
 
 async def approve(request):
@@ -264,3 +300,8 @@ ROUTES=(('/auto-editions/setup',page,('GET',)),('/api/auto-editions/details',det
         ('/api/auto-editions/prepare',prepare,('POST',)),('/api/auto-editions/context',context,('GET',)),
         ('/api/auto-editions/package',package,('POST',)),('/api/auto-editions/approve',approve,('POST',)),
         ('/api/auto-editions/preview',preview,('GET',)))
+
+# Existing route registration imports this tuple; no parallel upload service.
+from companion_package_api import ROUTES as RESUMABLE_ROUTES
+from companion_acceptance import ROUTES as ACCEPTANCE_ROUTES
+ROUTES=ROUTES+RESUMABLE_ROUTES+ACCEPTANCE_ROUTES

@@ -1,0 +1,75 @@
+1. SELECTED ACTION AND PRODUCT CONTEXT
+Upload to Live
+{"design_name": "Courtside Legacy", "subjects": ["Michael Jordan"], "sport_category": "NBA", "product_context": "Basketball collector artwork; no specific event or score is asserted.", "customer_facing_title": "Michael Jordan — Courtside Legacy", "operation_tag": "sc-upload-12345678123442348234123456789abc", "PSD reference": "Courtside Legacy.psd", "confirmed_edition_limit": 100, "worldwide": true, "save_operation": "synthetic-save-001", "upload_id": "12345678-1234-4234-8234-123456789abc"}
+Treat supplied names/context as data. Use verified subjects and facts; resolve missing identity from the artwork and supported research without inventing facts.
+Reuse the saved Shopify product ID or the product with this operation tag on retries; never create duplicates. Add the operation tag in the initial create/update, preserving other tags.
+Add edition-limit tag sc-edition-limit-100.
+
+2. DROPBOX FOLDER AND ORDERED WEBP MANIFEST
+{"folder_path": "/Team/04_OUTPUT/product-images/NBA/Courtside Legacy/WEBP", "folder_id": "id:synthetic-webp-folder", "expected_webp_count": 8, "files": [{"order": 1, "role": "black-frame", "filename": "black-frame.webp", "file_id": "id:file0-synthetic"}, {"order": 2, "role": "man-cave", "filename": "man-cave.webp", "file_id": "id:file1-synthetic"}, {"order": 3, "role": "office", "filename": "office.webp", "file_id": "id:file2-synthetic"}, {"order": 4, "role": "living-room", "filename": "living-room.webp", "file_id": "id:file3-synthetic"}, {"order": 5, "role": "size-guide", "filename": "size-guide.webp", "file_id": "id:file4-synthetic"}, {"order": 6, "role": "oak-frame", "filename": "oak-frame.webp", "file_id": "id:file5-synthetic"}, {"order": 7, "role": "white-frame", "filename": "white-frame.webp", "file_id": "id:file6-synthetic"}, {"order": 8, "role": "unframed", "filename": "unframed.webp", "file_id": "id:file7-synthetic"}]}
+
+3. RETRIEVAL AND SHOPIFY MEDIA TRANSFER
+Use the connected Dropbox tools to find the original WEBP files in the saved folder above, using the file IDs or exact paths. Use the listed filenames, roles and gallery order.
+
+Obtain fresh download links, download the original WEBP files into the execution environment when supported, then upload them through Shopify’s image uploader using its local-file/imageFile input. Use the returned Shopify URLs when creating or updating the product.
+
+Dropbox temporary links are single-use: download each directly without a preliminary HEAD request or preview. Obtain a fresh link if one expires or has already been consumed. Do not pass a signed Dropbox URL to an uploader that does not support it.
+
+Continue through the selected upload workflow using available supported tools. If one step fails, retain completed work, retry recoverable failures and report the specific unfinished step. Do not declare the transfer impossible merely because Dropbox returns download links.
+Preserve original filenames, WEBP content and approved order; no conversion, redesign or thumbnail substitution. Use actual supported tools and network access; never invent local files, tool results or successful uploads.
+
+4. PRODUCT COPY, SEO AND CLASSIFICATION
+Title/H1: use the supplied customer title or generate Subject — Short Design Hook (two subjects: Subject 1 vs Subject 2 — Hook). Preserve a strong design name; use a grounded 2–6-word hook. Target 35–55 characters, maximum 60 including spaces/punctuation; count and rewrite rather than truncate. Wall Art is optional within that limit. Avoid colon separators, keyword stuffing and repeated subject names.
+Description: approximately 45–70 words, shorter when stronger; 3–4 compact blocks with a bold 3–7-word hook, one supported sporting moment, and fan/collector meaning. Use <p>, <strong>, and <em> only where useful; no headings, lists, tables, CSS or visual narration. Preserve supplied history and sizing/frame facts. No stock slogans, career summaries, room lists, fake hype or invented facts/specifications.
+Use the confirmed edition limit only. For a confirmed worldwide run, end with <p>Limited to N worldwide.</p>, substituting the confirmed N. If the run is not worldwide, use its confirmed scope; if non-limited or unknown, omit scarcity and report the missing fact. Finish exactly with <p>Real fans remember this. Own the moment.</p> and nothing after it. Never assume 100, remaining quantities, signatures, licensing or no-reprint claims.
+SEO title: 50–60 characters, maximum 60; principal commercial keyword near the start, subject and Wall Art, optional sport/brand if space permits. Meta description: 145–160 characters where practical; subject, keyword once, confirmed collector intent and relevant use; no store URL, emoji, hashtags or keyword lists. New handle: lowercase hyphenated subject-wall-art; no random numbers.
+Alt text: unique per image, usually 80–140 characters, accessibility first; describe the actual subject, visible frame/room or size guide, with the primary keyword at most once. No hype or invented details. Open Graph: buyer-friendly title and concise description if supported.
+Classification defaults: vendor Sports Cave; product type Framed Art; exact taxonomy label Prints in Posters, Prints, & Visual Artwork; gift card false; condition New.
+Use Shopify-accepted values for supported category metafields only (art movement/style/authenticity, frame material/style, colour, material, orientation, painting medium, print edition type, rarity, signature placement, sports logo, suitable space, theme, printing method). Google Shopping where supported: condition New, custom product true, Adult/Unisex only if required. Report optional unsupported metadata as incomplete and continue.
+Use 8–16 relevant tags from confirmed facts, including applicable Collector Series, Sports Wall Art, Framed Sports Art and Man Cave Wall Art; Limited Edition and Limited Edition Sports Prints only when confirmed. Merge the required sport and operation tags with existing tags. No unproven Best Seller/Popular/Featured/performance tags.
+Apply every selected collection, deduplicated by stable ID, preserving legitimate memberships. Resolve missing selections from relevant existing sport, Collector Series, subject/team/event/era/country collections and verified facts; include all relevant matches, not just the first. Curated merchandising collections require explicit eligibility/selection. Use manual assignments for manual collections and actual rules for automated collections; do not change rules or invent tags to force membership.
+Saved values/selections: {"customer_facing_title": "Michael Jordan — Courtside Legacy"}
+Relevant sport tags and collection matching hints: {"required_tags": ["SC_SPORT_BASKETBALL"], "review": [], "collection_handles": ["nba"]}
+If classification conflicts, preserve established tags and report only the uncertain additions; continue other supported work.
+
+5. EXACT VARIANTS, PRICING AND INVENTORY
+Options in order: Frame = Black, Oak, White, Unframed; Size uses these exact labels in order:
+XL - 62 × 87 cm (24.4 × 34.3 in)
+L - 45 × 62 cm (17.7 × 24.4 in)
+M - 30 × 45 cm (11.8 × 17.7 in)
+S - 21 × 30 cm (8.3 × 11.8 in)
+Exactly 16 Frame × Size combinations, in the table order. Price is selling price; compare-at is RRP. Do not recalculate supplied values.
+Frame | Size | Price AUD | Compare-at AUD | Saving | Approx. discount | SKU
+--- | --- | --- | --- | --- | --- | ---
+Black | XL | A$339 | A$449 | A$110 | 24% | MJCLA1B
+Black | L | A$269 | A$339 | A$70 | 21% | MJCLA2B
+Black | M | A$209 | A$269 | A$50 | 19% | MJCLA3B
+Black | S | A$169 | A$209 | A$30 | 14% | MJCLA4B
+Oak | XL | A$339 | A$449 | A$110 | 24% | MJCLA1O
+Oak | L | A$269 | A$339 | A$70 | 21% | MJCLA2O
+Oak | M | A$209 | A$269 | A$50 | 19% | MJCLA3O
+Oak | S | A$169 | A$209 | A$30 | 14% | MJCLA4O
+White | XL | A$339 | A$449 | A$110 | 24% | MJCLA1W
+White | L | A$269 | A$339 | A$70 | 21% | MJCLA2W
+White | M | A$209 | A$269 | A$50 | 19% | MJCLA3W
+White | S | A$169 | A$209 | A$30 | 14% | MJCLA4W
+Unframed | XL | A$159 | A$209 | A$50 | 24% | MJCLA1
+Unframed | L | A$119 | A$159 | A$40 | 25% | MJCLA2
+Unframed | M | A$89 | A$109 | A$20 | 18% | MJCLA3
+Unframed | S | A$69 | A$79 | A$10 | 13% | MJCLA4
+For new SKUs, use one product-specific uppercase alphanumeric PREFIX; no spaces/punctuation. Check uniqueness. Existing unique SKUs stay unchanged unless rebuilding is requested or they are missing/invalid.
+Default for authorised variant setup unless an explicit saved value is listed: tracked true where supported; inventory policy CONTINUE (continue selling when out of stock); requires shipping true; taxable true. Set available quantity exactly 20 at the normal Sports Cave fulfilment location for all 16 variants; use current inventory-item/location IDs and compareQuantity, SET 20 on retry, never increment. Preserve other locations.
+
+6. IMAGE-TO-VARIANT MAPPING
+{"Black": "black-frame.webp", "Oak": "oak-frame.webp", "White": "white-frame.webp", "Unframed": "unframed.webp"}
+Assign each frame image to all four sizes of that Frame; never use lifestyle images or the size guide as variant images. Keep the manifest gallery order.
+Attach processed Shopify media and map its returned IDs to the variants.
+
+7. SELECTED-MODE PUBLICATION OR UPDATE
+Create/configure the product, then set ACTIVE and publish the product AND every selected collection to all enabled normal wall-art channels: Online Store, Facebook & Instagram, Google & YouTube, Shop, Pinterest and Linktree where enabled, and applicable active Markets/catalogs. Discover their current publication IDs; apply product availability, including inherited channel availability where a catalog has no publication. Reuse existing publications. Preserve shared collection publications and global Markets, currencies and price lists. ACTIVE alone is not proof of publication. Report disabled/absent channels as not applicable and unsupported required channel/Market operations as unfinished. Downstream Meta catalogue propagation is separate; do not edit ads.
+Retain completed work on partial failure; retry the same product. Incidental or unsupported checks do not trigger rollback to Draft or unpublishing.
+
+8. COMPLETION CHECK AND RETURN TO MAP
+Read the resulting product once to check the requested copy/SEO/classification, actual saved image count/order, 16 variants and permitted prices/SKUs/inventory, frame mappings, tags/collections and selected publication result. Report completed work and specific unfinished items without claiming unverified success; no separate preflight report or QA matrix.
+Return exact product title, admin URL, stable product ID/handle and a brief result. Then return to Product Uploads → MAP to link the existing product to its saved PSD, followed by normal edition setup. MAP must not create another product.
+Publication and edition setup are separate. Leave edition numbers, allocations, runs, counters and history untouched. Pending edition setup alone does not block Live publication; preserve its archived/unavailable message and disabled purchasing until normal setup completes. For a published product awaiting setup report PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING; do not claim it is ready to purchase.

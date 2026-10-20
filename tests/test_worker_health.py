@@ -16,6 +16,58 @@ from tests.test_auto_editions_api import request,ADMIN,VA
 NOW=datetime(2026,10,16,tzinfo=timezone.utc)
 
 
+def test_transfer_settings_scoped_requested_acknowledged_and_separate_from_queue_pause(telemetry):
+    from companion_transfer import Controller
+    from companion_transfer_control import set_requested,requested
+    d,sql=telemetry;instance='a'*24;other='b'*24;c=Controller()
+    health.record_heartbeat(d.connect,'Companion',instance,dict(state='Idle',transfer_control=c.snapshot()))
+    health.record_heartbeat(d.connect,'Companion',other,dict(state='Idle'))
+    protected=lambda:(rows(sql,'edition_products'),rows(sql,'product_psd_mappings'),rows(sql,'edition_allocations'))
+    before=protected()
+    command=set_requested(d.connect,instance,dict(mode='Manual',manual_mbps=4,paused=True),'admin')
+    assert requested(d.connect,instance)==command and requested(d.connect,other) is None
+    assert c.snapshot()['revision']!=command['revision']
+    c.configure(command['settings'],command['revision'])
+    health.record_heartbeat(d.connect,'Companion',instance,dict(state='Idle',transfer_control=c.snapshot()))
+    saved=next(r for r in rows(sql,'auto_edition_worker_heartbeats') if r['instance_id']==instance)
+    assert saved['payload']['transfer_control']['revision']==command['revision']
+    with d.connect() as conn,conn.cursor() as cur:assert health.control(cur)['paused'] is False
+    assert protected()==before
+    with pytest.raises(ValueError,match='unavailable'):set_requested(d.connect,other,dict(mode='Maximum speed'),'admin')
+
+
+def test_transfer_command_uses_existing_lease_heartbeat_and_persists_ack(telemetry,tmp_path,monkeypatch):
+    from unittest.mock import AsyncMock
+    import hashlib,sys
+    import auto_editions_onboarding_api as onboarding
+    from companion_transfer import Controller
+    from companion_transfer_control import set_requested
+    sys.path.insert(0,str(Path(__file__).parents[1]/'scripts/studio'))
+    import auto_editions_local as local
+    d,sql=telemetry;pid,fid=mapping(sql,1000);d.queue.enqueue(pid,fid,ADMIN['id']);job=d.queue.claim(ADMIN['id'])
+    token='a'*43;instance=hashlib.sha256(token.encode()).hexdigest()[:24];controller=Controller(tmp_path/'transfer-settings.json')
+    health.record_heartbeat(d.connect,'Companion',instance,dict(state='Live',transfer_control=controller.snapshot()))
+    command=set_requested(d.connect,instance,dict(mode='Manual',manual_mbps=1,paused=True),ADMIN['id'])
+    req=request('POST',dict(product_gid=pid,lease_token=str(job['lease_token']),stage='Uploading',health=dict(state='Live',transfer_control=controller.snapshot())),origin=None)
+    req.scope['headers']=[(b'x-sports-cave-preparation-host',token.encode())]
+    with patch.object(onboarding,'preparation_actor',new=AsyncMock(return_value=ADMIN)),patch.object(onboarding,'queue',return_value=d.queue):
+        response=asyncio.run(onboarding.heartbeat(req))
+    assert response.status_code==200,response.body
+    monkeypatch.setattr(local,'transfer_controller',lambda:controller)
+    local.apply_transfer_settings(json.loads(response.body))
+    assert controller.snapshot()['revision']==command['revision'] and controller.snapshot()['effective_mbps']==1
+    assert Controller(controller.path).value['paused'] is True
+    assert rows(sql,'auto_edition_onboarding')[0]['lease_until']>datetime.now(timezone.utc)
+
+
+@pytest.mark.parametrize('user,origin',[(VA,'https://os.test'),(ADMIN,''),(ADMIN,'https://evil.test')])
+def test_transfer_controls_reject_unauthorised_requests_before_sql(user,origin):
+    with patch('files_upload_api._request_user',return_value=user),patch.object(api,'store') as sql:
+        value=asyncio.run(api.pause(request('POST',dict(instance='a'*24,transfer_settings={'mode':'Maximum speed'}),origin=origin)))
+    assert value.status_code==403
+    sql.assert_not_called()
+
+
 @pytest.fixture
 def telemetry(continuous,monkeypatch):
     d,sql=continuous
@@ -99,6 +151,46 @@ def test_progress_uses_verified_units_and_eta_uses_successful_durations():
     assert value['eta_seconds']==90 and value['counts']['review']==1
     assert 'AEDT' in value['updated_at'] and '11:00:00' in value['updated_at']
     args[3].clear();value=health.project(*args,now=NOW);assert value['eta_seconds'] is None and value['eta_label']=='Calculating'
+
+
+@pytest.mark.parametrize('stage',['Discovering','Queued'])
+def test_paused_replacement_waiting_is_not_an_active_photoshop_operation(monkeypatch,stage):
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    args=sample('Uploading');row=args[0][0]
+    row.update(status='Blocked',replacement=dict(stage=stage),lease_until=NOW-timedelta(days=3),claimed_at=NOW-timedelta(days=3))
+    args[1][row['product_gid']]['substage']=stage
+    args[3][0]['created_at']=NOW-timedelta(days=3);args[4]['paused']=True
+    before=deepcopy(args)
+    value=health.project(*args,now=NOW,expected_revision='abcdef12')
+    assert value['overall']=='Paused' and value['current'] is None
+    assert value['counts']['active']==0 and value['counts']['queued']==1
+    assert value['jobs'][0]['elapsed_seconds'] is None and not value['warnings']
+    assert args==before # Reporting must never reset/retry an existing operation.
+
+
+@pytest.mark.parametrize('live',[False,True])
+def test_replacement_requires_a_current_preparation_lease_to_count_as_running(monkeypatch,live):
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    args=sample('Uploading');row=args[0][0]
+    row.update(status='Blocked',replacement=dict(stage='Preparing'),lease_until=NOW+timedelta(seconds=60 if live else -1))
+    args[1][row['product_gid']]['substage']='Preparing';args[4]['paused']=True
+    value=health.project(*args,now=NOW,expected_revision='abcdef12')
+    assert value['overall']==('Pausing' if live else 'Paused')
+    assert value['counts']['active']==int(live)
+    assert value['jobs'][0]['lease_expired'] is (not live)
+    assert value['health'][-1]['status']==('Monitoring' if live else 'Degraded')
+
+
+@pytest.mark.parametrize('projected',['Failed','Uploading','Cloud Ready'])
+def test_failed_replacement_retains_failure_and_does_not_count_as_running(monkeypatch,projected):
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    args=sample(projected);args[0][0].update(status='Blocked',replacement=dict(stage='Failed',reason='The exact edition-number font is unavailable.'),lease_until=NOW-timedelta(days=1))
+    args[1][args[0][0]['product_gid']].update(substage='Queued technical verification',uploaded=True)
+    value=health.project(*args,now=NOW,expected_revision='abcdef12')
+    assert value['counts']['failed']==1 and value['counts']['active']==0
+    assert value['counts']['queued']==0 and value['counts']['completed']==0
+    assert value['jobs'][0]['status']=='Failed' and not value['jobs'][0]['lease_expired']
+    assert value['jobs'][0]['diagnostic']['code']=='FONT_MISSING'
 
 
 def test_independent_stale_heartbeats_versions_and_no_output_are_visible():

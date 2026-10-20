@@ -453,6 +453,8 @@ class ShopifySyncClientTests(unittest.TestCase):
         process_webhook.assert_not_called()
 
     def test_products_create_fastapi_route_uses_same_hmac_helper(self):
+        env = patch.dict(os.environ, {'SHOPIFY_STORE_DOMAIN':'test.myshopify.com'})
+        env.start(); self.addCleanup(env.stop)
         from fastapi.testclient import TestClient
         import webhook_server
 
@@ -485,7 +487,7 @@ class ShopifySyncClientTests(unittest.TestCase):
             response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/products-create",
                 content=raw_body,
-                headers={
+                headers={"X-Shopify-Shop-Domain":"test.myshopify.com",
                     "X-Shopify-Hmac-Sha256": "patched-hmac",
                     "X-Shopify-Topic": "products/create",
                     "X-Shopify-Webhook-Id": "product-webhook-100",
@@ -493,14 +495,15 @@ class ShopifySyncClientTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "processed")
+        self.assertEqual(response.json()["status"], "queued")
         verify_hmac.assert_called_once()
         self.assertEqual(verify_hmac.call_args.args[0], raw_body)
-        process_product.assert_called_once()
-        self.assertFalse(process_product.call_args.kwargs["claim_event"])
+        process_product.assert_not_called()
         process_order.assert_not_called()
 
-    def test_products_update_fastapi_route_processes_before_success_response(self):
+    def test_products_update_fastapi_route_enqueues_before_success_response(self):
+        env = patch.dict(os.environ, {'SHOPIFY_STORE_DOMAIN':'test.myshopify.com'})
+        env.start(); self.addCleanup(env.stop)
         from fastapi.testclient import TestClient
         import webhook_server
 
@@ -530,7 +533,7 @@ class ShopifySyncClientTests(unittest.TestCase):
             response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/products-update",
                 content=raw_body,
-                headers={
+                headers={"X-Shopify-Shop-Domain":"test.myshopify.com",
                     "X-Shopify-Hmac-Sha256": "patched-hmac",
                     "X-Shopify-Topic": "products/update",
                     "X-Shopify-Webhook-Id": "product-webhook-100",
@@ -538,12 +541,12 @@ class ShopifySyncClientTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "processed")
-        process_product.assert_called_once()
-        self.assertEqual(process_product.call_args.args[2], "products/update")
-        self.assertFalse(process_product.call_args.kwargs["claim_event"])
+        self.assertEqual(response.json()["status"], "queued")
+        process_product.assert_not_called()
 
     def test_products_fastapi_route_returns_500_when_supabase_upsert_fails(self):
+        env = patch.dict(os.environ, {'SHOPIFY_STORE_DOMAIN':'test.myshopify.com'})
+        env.start(); self.addCleanup(env.stop)
         from fastapi.testclient import TestClient
         import webhook_server
 
@@ -567,13 +570,13 @@ class ShopifySyncClientTests(unittest.TestCase):
             },
         ), patch.object(
             supabase_backend,
-            "process_product_create_webhook",
+            "claim_product_create_webhook_receipt",
             side_effect=RuntimeError("database down"),
         ) as process_product:
             response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/products-create",
                 content=raw_body,
-                headers={
+                headers={"X-Shopify-Shop-Domain":"test.myshopify.com",
                     "X-Shopify-Hmac-Sha256": "patched-hmac",
                     "X-Shopify-Topic": "products/create",
                     "X-Shopify-Webhook-Id": "product-webhook-100",
@@ -584,6 +587,8 @@ class ShopifySyncClientTests(unittest.TestCase):
         process_product.assert_called_once()
 
     def test_products_create_fastapi_route_duplicate_receipt_skips_processing(self):
+        env = patch.dict(os.environ, {'SHOPIFY_STORE_DOMAIN':'test.myshopify.com'})
+        env.start(); self.addCleanup(env.stop)
         from fastapi.testclient import TestClient
         import webhook_server
 
@@ -612,7 +617,7 @@ class ShopifySyncClientTests(unittest.TestCase):
             response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/products-create",
                 content=raw_body,
-                headers={
+                headers={"X-Shopify-Shop-Domain":"test.myshopify.com",
                     "X-Shopify-Hmac-Sha256": signature,
                     "X-Shopify-Topic": "products/create",
                     "X-Shopify-Webhook-Id": "product-webhook-100",
@@ -3129,6 +3134,9 @@ class ShopifySyncClientTests(unittest.TestCase):
 
 class SupabaseProductSyncLogicTests(unittest.TestCase):
     def setUp(self):
+        # New-product history/limit verification has dedicated integration tests.
+        verification = patch('shopify_product_onboarding.verify_new_product', side_effect=lambda p, **kw: p)
+        verification.start(); self.addCleanup(verification.stop)
         tagging = patch('product_sport_tag_sync.sync_product_sport_tags',
                         return_value={'status': 'verified', 'review': []})
         tagging.start()

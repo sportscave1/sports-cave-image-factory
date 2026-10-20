@@ -13,7 +13,8 @@ class MappingConflict(ValueError):
 
 
 def _record(row):
-    return {**dict(row), 'verified': True, 'state': 'Linked', 'path': row['file_path']}
+    pending=bool(row.get('_upload_pending'))
+    return {**dict(row), 'verified': not pending, 'state': 'Mapping pending' if pending else 'Linked', 'path': row['file_path']}
 
 
 def preview(candidates, existing, product_ids):
@@ -54,7 +55,13 @@ class PostgresMappings:
     @staticmethod
     def _all(cur):
         cur.execute('SELECT * FROM public.product_psd_mappings ORDER BY shopify_product_gid')
-        return {r['shopify_product_gid']: _record(r) for r in cur.fetchall()}
+        rows=list(cur.fetchall())
+        cur.execute("SELECT to_regprocedure('public.product_upload_mapping_complete(uuid,text,text)') AS name")
+        if cur.fetchone()['name']:
+            cur.execute('SELECT product_gid FROM product_upload_mapping_holds WHERE NOT public.product_upload_mapping_complete(operation_id,product_gid,file_id)')
+            pending={r['product_gid'] for r in cur.fetchall()}
+            rows=[dict(r,_upload_pending=r['shopify_product_gid'] in pending) for r in rows]
+        return {r['shopify_product_gid']: _record(r) for r in rows}
 
     def read(self):
         """One indexed revision query per page; one batch read on revision changes."""
@@ -87,34 +94,69 @@ class PostgresMappings:
         with self.connect() as conn, conn.cursor() as cur:
             return self.product(cur, pid)
 
+    def read_one(self, pid):
+        """Fresh exact record for final handoff verification; no list cache."""
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute('SELECT * FROM public.product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
+            row = cur.fetchone()
+            if row:
+                from product_upload_mapping_hold import held
+                row=dict(row,_upload_pending=held(cur,pid,row['dropbox_file_id']))
+            return _record(row) if row else None
+
     @staticmethod
     def _audit(cur, pid, action, actor, before, after):
         cur.execute('INSERT INTO public.product_psd_mapping_audit(shopify_product_gid,action,actor_id,before_state,after_state) VALUES(%s,%s,%s,%s::jsonb,%s::jsonb)',
                     (pid, action, actor, json.dumps(before, default=str) if before else None, json.dumps(after, default=str)))
 
-    def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False):
+    def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False, upload_operation=None, manual_takeover_operation=None):
         import psd_directory as psd
         import os_accounts
         if not os_accounts.can_attach_missing_psd(actor):
             raise PermissionError("You don't have permission to attach PSD files. Contact your administrator.")
         if not os_accounts.is_admin(actor) and (expected_file_id or confirm_replace):
             raise PermissionError('Only an administrator can replace an existing PSD mapping.')
-        if not psd.product_id({'shopify_product_gid': pid}) or not psd.approved_file(metadata):
+        upload_verified = False
+        if upload_operation:
+            from product_upload_mapping import approved_upload_source
+            upload_verified = approved_upload_source(self.connect, pid, metadata, actor=actor['id'], key=upload_operation)
+            if not upload_verified:
+                raise ValueError('The persisted upload does not confirm this exact product and PSD revision.')
+        if not psd.product_id({'shopify_product_gid': pid}) or not (psd.approved_file(metadata) or upload_verified):
             raise ValueError('An approved main-folder PSD and valid product are required.')
         fid = metadata['id']
         with self.connect() as conn, conn.cursor() as cur:
+            takeover = False
+            if not upload_operation:
+                from product_upload_manual_takeover import prepare
+                takeover = prepare(cur, pid, metadata, actor, manual_takeover_operation)
             cur.execute('LOCK TABLE public.product_psd_mappings IN SHARE ROW EXCLUSIVE MODE')
             product = self.product(cur, pid)
             if psd.filename_key(metadata['name'][:-4]) not in psd.title_filename_keys(product['product_title']) and confirm_mismatch is not True:
                 raise ValueError('Filename differs from the product title; explicit confirmation required.')
             existing = self._all(cur)
             before = existing.get(pid)
+            from product_upload_mapping_hold import held, verify
+            mapping_only = held(cur, pid, fid)
+            if mapping_only:
+                if not upload_verified:
+                    raise MappingConflict('This PSD is held for its Product Uploads Sync & Map operation.')
+                verify(cur, upload_operation, pid, fid)
+            if upload_verified and before and before['dropbox_file_id'] == fid:
+                path = metadata.get('path_display') or metadata.get('path_lower')
+                if before['file_path'] != path:
+                    cur.execute('UPDATE product_psd_mappings SET file_path=%s,actor_id=%s,updated_at=now() WHERE shopify_product_gid=%s RETURNING *', (path,str(actor['id']),pid))
+                    after = _record(cur.fetchone())
+                    self._audit(cur,pid,'attach',str(actor['id']),before,after)
+                    self._revision = None
+                    return after
+                return before
             # Check after the existing table lock: no VA overwrite, including stale/racing picks.
             if before is not None and not os_accounts.is_admin(actor):
                 raise PermissionError('Only an administrator can replace an existing PSD mapping.')
             if (before or {}).get('dropbox_file_id', '') != expected_file_id:
                 raise MappingConflict('Mapping changed while selecting. Reopen the picker.')
-            if before and before['dropbox_file_id'] == fid and before.get('source') == 'manual':
+            if before and before['dropbox_file_id'] == fid and before.get('source') == 'manual' and not takeover:
                 return before
             if before and confirm_replace is not True:
                 raise MappingConflict('Replacing an existing mapping requires administrator confirmation.')
@@ -126,11 +168,17 @@ class PostgresMappings:
             cur.execute("INSERT INTO public.product_psd_mappings(shopify_product_gid,dropbox_file_id,file_path,namespace_path,source,actor_id) VALUES(%s,%s,%s,%s,'manual',%s) ON CONFLICT(shopify_product_gid) DO UPDATE SET dropbox_file_id=EXCLUDED.dropbox_file_id,file_path=EXCLUDED.file_path,namespace_path=EXCLUDED.namespace_path,source='manual',actor_id=EXCLUDED.actor_id,updated_at=now() RETURNING *",
                         (pid, fid, metadata.get('path_display') or metadata.get('path_lower'), metadata.get('namespace_path') or '', actor_id))
             after = _record(cur.fetchone())
-            self._audit(cur, pid, 'replace' if before else 'attach', actor_id, before, after)
+            if takeover:
+                cur.execute('SELECT dropbox_file_id,file_path FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
+                saved = cur.fetchone()
+                if not saved or saved['dropbox_file_id'] != fid or saved['file_path'] != metadata['path_display']:
+                    raise MappingConflict('Manual mapping could not be verified; takeover was rolled back.')
+            audited = dict(after, manual_takeover_operation=str(manual_takeover_operation)) if takeover else after
+            self._audit(cur, pid, 'replace' if before else 'attach', actor_id, before, audited)
             # Add and its preparation checkpoint commit together. Older schemas
             # keep the existing mapping behavior during a rolling deployment.
             cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")
-            if cur.fetchone()['name']:
+            if cur.fetchone()['name'] and not mapping_only:
                 cur.execute("SELECT to_jsonb(q)->'replacement' AS replacement FROM auto_edition_onboarding q WHERE product_gid=%s",(pid,))
                 reset=(cur.fetchone() or {}).get('replacement') or {}
                 clear_reset='replacement=NULL,' if reset.get('manual_required') else ''
@@ -141,6 +189,11 @@ class PostgresMappings:
                     WHERE auto_edition_onboarding.file_id<>excluded.file_id""".format(clear_reset=clear_reset),(pid,fid))
                 cur.execute("""INSERT INTO public.auto_edition_onboarding_audit(product_gid,actor_id,event)
                     VALUES(%s,%s,'mapping_confirmed')""",(pid,actor_id))
+                if upload_verified:
+                    import auto_editions as ae
+                    import json
+                    cur.execute("UPDATE auto_edition_onboarding SET source=%s::jsonb WHERE product_gid=%s AND file_id=%s AND source IS NULL",
+                                (json.dumps(ae.source_identity(pid, metadata)), pid, fid))
         self._revision = None
         return after
 

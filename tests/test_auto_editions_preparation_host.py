@@ -13,6 +13,9 @@ def isolated_host_file(monkeypatch,tmp_path):
     # Never inspect or use this computer's registered host capability in tests.
     monkeypatch.setattr(local,'HOST_FILE',tmp_path/'isolated-host.dpapi')
     monkeypatch.setattr(local,'cancellation_check',lambda *a,**kw:False)
+    from companion_transfer import Controller
+    controller=Controller();controller.configure({'mode':'Maximum speed'})
+    monkeypatch.setattr(local,'transfer_controller',lambda:controller)
 
 
 def test_completed_bulk_jobs_do_not_exhaust_interactive_slots(tmp_path):
@@ -54,13 +57,38 @@ def test_recovery_package_requires_exact_revision_and_settings(tmp_path):
     root=tmp_path/'host';folder=root/('a'*48);folder.mkdir(parents=True)
     ctx={'automatic':True,'source':{'file_id':'id:a','revision':'rev1'},'total':100}
     manifest={'source':ctx['source'],'edition_total':100,'source_dimensions':[2835,2004],
-              'preparation_geometry':{'scale':4}}
+              'preparation_geometry':{'scale':4},'colour_evidence':{'icc_sha256':'a'*64,'pixels_converted':False}}
     archive=folder/'prepared.zip'
     with zipfile.ZipFile(archive,'w') as z:z.writestr('manifest.json',json.dumps(manifest))
     with patch.object(local,'HOST_FILE',root/'host.dpapi'):
         assert local.find_reusable_package(ctx)==archive
         assert local.find_reusable_package({**ctx,'source':{'file_id':'id:a','revision':'rev2'}}) is None
         assert local.find_reusable_package({**ctx,'total':200}) is None
+
+
+def test_legacy_oversized_or_unprofiled_package_is_preserved_but_never_reuploaded(tmp_path):
+    import zipfile
+    import auto_editions_package as package_limits
+    root=tmp_path/'host';folder=root/('a'*48);folder.mkdir(parents=True)
+    ctx={'automatic':True,'source':{'file_id':'id:a','revision':'rev1'},'total':100}
+    manifest={'source':ctx['source'],'edition_total':100,'source_dimensions':[2835,2004],
+              'preparation_geometry':{'scale':4}}
+    archive=folder/'prepared.zip'
+    def write():
+        with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr('manifest.json',json.dumps(manifest));z.writestr('large-old-export',b'x'*2048)
+    with patch.object(local,'HOST_FILE',root/'host.dpapi'):
+        write();before=archive.read_bytes()
+        assert local.find_reusable_package(ctx) is None
+        assert archive.read_bytes()==before
+        manifest['colour_evidence']={'icc_sha256':'a'*64,'pixels_converted':False};write()
+        assert local.find_reusable_package(ctx)==archive
+        with patch.object(package_limits,'MAX_PACKAGE_BYTES',1024):
+            assert archive.stat().st_size<1024 # compressed bytes fit, expanded bytes do not
+            assert local.find_reusable_package(ctx) is None
+        with patch.object(package_limits,'MAX_PACKAGE_BYTES',100):
+            assert local.find_reusable_package(ctx) is None
+        assert archive.exists()
 
 
 def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):
@@ -70,8 +98,8 @@ def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
     failed=Mock();failed.raise_for_status.side_effect=requests.HTTPError('expired transfer')
-    success=Mock();success.json.return_value={'preparation_hash':'c'*64}
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=[failed,success]) as post,\
+    success=Mock();success.json.return_value={'preparation_hash':'c'*64,'status':'Cloud Ready'}
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=[failed,success]) as post,\
          patch.object(local,'reconnect') as reconnect,patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
         assert row['status']=='Prepared' and post.call_count==2
@@ -83,7 +111,7 @@ def test_failed_upload_keeps_recoverable_package(tmp_path):
     archive=tmp_path/'prepared.zip';archive.write_bytes(b'retained')
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.ConnectionError()),\
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.ConnectionError()),\
          patch.object(local,'reconnect'),patch.object(local,'report_failure'),patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
         assert row['status']=='Recovering' and archive.read_bytes()==b'retained'
@@ -128,8 +156,8 @@ def test_lost_success_response_uses_receipt_without_second_upload(tmp_path):
     archive=tmp_path/'prepared.zip';archive.write_bytes(b'recovery')
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.Timeout()) as post,\
-         patch.object(local,'reconnect',return_value={'preparation_hash':'c'*64,'timings':{'validation_seconds':5}}),\
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.Timeout()) as post,\
+         patch.object(local,'reconnect',return_value={'preparation_hash':'c'*64,'status':'Cloud Ready','timings':{'validation_seconds':5}}),\
          patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
     assert row['status']=='Prepared' and post.call_count==1

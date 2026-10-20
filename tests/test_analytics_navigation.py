@@ -52,11 +52,11 @@ class AnalyticsNavigationTests(unittest.TestCase):
             seo_navigation.SEO_OVERVIEW_ROUTE,
         )
 
-    def test_sidebar_places_analytics_immediately_above_seo(self):
+    def test_sidebar_consolidates_analytics_into_seo(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
-        self.assertLess(source.index('"sidebar-analytics-children"'), source.index('"sidebar-seo-children"'))
-        self.assertIn("force_open_routes=analytics_nav.ANALYTICS_ROUTES", source)
-        self.assertIn("force_open_routes=seo_nav.SEO_ROUTES", source)
+        self.assertNotIn('"sidebar-analytics-children"', source)
+        self.assertIn('seo_nav.SEO_MENU_ROUTES', source)
+        self.assertIn('force_open_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES)', source)
 
     def test_legacy_combined_analytics_keys_redirect_to_analytics(self):
         for key in analytics_navigation.LEGACY_ANALYTICS_PAGE_KEYS:

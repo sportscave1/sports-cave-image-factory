@@ -68,12 +68,32 @@ async def heartbeat(request):
         if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
         user=await preparation_actor(request)
         body=await files._json_body(request)
-        await run_in_threadpool(host_health,request,body.pop('health',None))
+        transfer_settings=await run_in_threadpool(host_health,request,body.pop('health',None))
+        transfer_ticket=body.pop('transfer_ticket',None)
         if body:
             if set(body)!={'product_gid','lease_token','stage'}:raise ValueError('Exact preparation lease required.')
             await run_in_threadpool(queue().heartbeat,body['product_gid'],body['lease_token'],str(user['id']),body['stage'])
-        return JSONResponse(dict(ok=True),headers=api.HEADERS)
+        if transfer_ticket:
+            await run_in_threadpool(renew_transfer,request,body,transfer_ticket)
+        return JSONResponse(dict(ok=True,transfer_settings=transfer_settings),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
+
+
+def renew_transfer(request, body, ticket):
+    # Renew only an unexpired grant bound to this authenticated host and exact
+    # already-renewed product lease. Ticket/secret never enter telemetry.
+    import files_upload_api as files
+    digest=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest()
+    manager=files.NATIVE_TRANSFER_MANAGER
+    with manager._lock:
+        record=manager._records.get(str(ticket))
+        if not record or record.expires_at<=time.monotonic():return False
+        setup=getattr(record,'v6_setup',{})
+        ctx=setup.get('context',{})
+        if setup.get('host_token_hash')!=digest or any(ctx.get(k)!=body.get(k) for k in ('product_gid','lease_token')):
+            raise PermissionError('Transfer grant belongs to another host or lease.')
+        record.expires_at=time.monotonic()+45*60
+    return True
 
 
 async def colour_configuration(request):
@@ -93,7 +113,11 @@ def host_health(request,value):
     token=request.headers.get('x-sports-cave-preparation-host')
     if not token:raise PermissionError('Scoped preparation host required for telemetry.')
     from worker_health import record_heartbeat
-    record_heartbeat(queue().connect,'Companion',hashlib.sha256(token.encode()).hexdigest()[:24],value)
+    instance=hashlib.sha256(token.encode()).hexdigest()[:24]
+    record_heartbeat(queue().connect,'Companion',instance,value)
+    if value.get('transfer_control',{}).get('capability') in (1,2,3):
+        from companion_transfer_control import requested
+        return requested(queue().connect,instance)
 async def cancellation(request):
     try:
         import files_upload_api as files
@@ -255,10 +279,19 @@ def product_context(pid, token):
     from auto_editions_v17 import enabled as continuous
     if continuous():
         import psd_directory as psd
-        if not psd.approved_file(meta):raise ValueError('Mapped source is not an approved original PSD.')
+        if not psd.approved_file(meta):
+            from product_upload_mapping import approved_upload_source
+            if reset_id or not approved_upload_source(store.connect,pid,meta):
+                raise ValueError('Mapped source is not an approved original PSD.')
     if reset_id:
         import psd_directory as psd
-        if not psd.approved_file(meta) or psd.filename_key(meta['name'][:-4]) not in psd.title_filename_keys(row['product_title']):
+        if pending.get('expected_source'):
+            from auto_editions_reset import repair_candidate
+            with store.connect() as conn,conn.cursor() as cur:
+                chosen,_,why=repair_candidate(cur,pid,pending)
+            if not chosen or not psd.approved_file(meta) or ae.source_identity(pid,meta)!=pending['expected_source']:
+                raise ValueError(why or 'Pinned repair source changed before preparation.')
+        elif not psd.approved_file(meta) or psd.filename_key(meta['name'][:-4]) not in psd.title_filename_keys(row['product_title']):
             raise ValueError('Reset original PSD no longer matches the product.')
     source=ae.source_identity(pid,meta)
     if row['source'] and row['source']!=source:raise ValueError('Source revision changed. Retry preparation.')
@@ -340,12 +373,12 @@ async def claim(request):
         import files_upload_api as files
         user=await preparation_actor(request)
         body=await files._json_body(request)
-        await run_in_threadpool(host_health,request,body.pop('health',None))
+        transfer_settings=await run_in_threadpool(host_health,request,body.pop('health',None))
         if body!={}:raise ValueError('Preparation reads authoritative product identities.')
         from auto_editions_priority import refresh
         store=queue()
         import os
-        if os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true':
+        if os.getenv('AUTO_EDITIONS_COLOUR_RECOVERY_ENABLED','').lower()=='true' and not __import__('auto_editions_recovery').enabled():
             from auto_editions_colour_recovery import recover
             # A bad/missing optional policy must never prevent other eligible jobs.
             def colour_recover():
@@ -361,19 +394,23 @@ async def claim(request):
         if not enabled():
             await run_in_threadpool(refresh,store,str(user['id']),limit=100 if __import__('auto_editions_v17').enabled() else None)
         row=await run_in_threadpool(store.claim,str(user['id']))
-        if not row:return JSONResponse(dict(grant=None),headers=api.HEADERS)
+        if not row:
+            from product_upload_services import enabled as uploads_enabled
+            return JSONResponse(dict(grant=None,product_mockup_renders=uploads_enabled(),transfer_settings=transfer_settings),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,row['product_gid'],str(row['lease_token']))
         await run_in_threadpool(store.checkpoint,row['product_gid'],str(row['lease_token']),str(user['id']),
                                 'Preparing',source=ctx['source'],total=ctx['total'])
         auth=await run_in_threadpool(files._dropbox_context)
         meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,auth['access_token'],row['file_id'],include_preview=False)
         if ae.source_identity(row['product_gid'],meta)!=ctx['source']:raise ValueError('Source changed; retry.')
-        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta)
+        from product_upload_mapping import approved_upload_source
+        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta,
+            product_upload=not __import__('psd_directory').approved_file(meta) and approved_upload_source(store.connect,row['product_gid'],meta))
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
         if host:record.v6_setup['host_token_hash']=hashlib.sha256(host.encode()).hexdigest()
-        return JSONResponse(dict(package_transport=1,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,transfer_settings=transfer_settings,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
             ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:
         if row:
@@ -391,9 +428,9 @@ async def retry(request):
         user=await api.actor(request,setup=True,write=True)
         body=await files._json_body(request)
         if set(body)!={'product_gid'}:raise ValueError('Select one failed product.')
-        from auto_editions_technical import enabled as technical_enabled,Technical
-        retained=technical_enabled() and await run_in_threadpool(Technical(queue().connect).retry,body['product_gid'],str(user['id']))
-        if not retained:await run_in_threadpool(queue().retry,body['product_gid'],str(user['id']))
+        from worker_health_queue import submit
+        import uuid
+        await run_in_threadpool(submit,queue().connect,body['product_gid'],str(user['id']),str(uuid.uuid4()))
         return JSONResponse(dict(ok=True),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
@@ -434,11 +471,13 @@ async def reconnect(request):
         auth=await run_in_threadpool(files._dropbox_context)
         meta=await run_in_threadpool(files.dropbox_integration.psd_open_metadata,auth['access_token'],ctx['source']['file_id'],include_preview=False)
         if ae.source_identity(body['product_gid'],meta)!=ctx['source']:raise ValueError('Source changed; retained package cannot be reused.')
-        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta)
+        from product_upload_mapping import approved_upload_source
+        record=files.NATIVE_TRANSFER_MANAGER.create_psd(access_token=auth['access_token'],root_path=auth['root_path'],user=user,metadata=meta,
+            product_upload=not __import__('psd_directory').approved_file(meta) and approved_upload_source(store.connect,body['product_gid'],meta))
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
             host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())
-        return JSONResponse(dict(package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

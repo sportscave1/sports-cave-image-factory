@@ -503,12 +503,14 @@ class NativeTransferManager:
             self._records[ticket] = record
         return record
 
-    def create_psd(self, *, access_token, root_path, user, metadata):
+    def create_psd(self, *, access_token, root_path, user, metadata, product_upload=False):
         """Create an existing native grant from fresh server-validated ID metadata."""
         import psd_directory
         path = str(metadata.get('path_display') or metadata.get('path_lower') or '')
         root = dropbox_integration.normalize_dropbox_path(root_path)
-        if not psd_directory.approved_file(metadata) or not dropbox_integration.path_is_within_root(path, root):
+        from product_upload_dropbox import approved as upload_approved
+        allowed = upload_approved(metadata) if product_upload else psd_directory.approved_file(metadata)
+        if not allowed or not dropbox_integration.path_is_within_root(path, root):
             raise FilesUploadError('The linked master is outside the approved Dropbox folder.', status_code=403, code='psd_scope_denied')
         relative = _validated_relative_path(path[len(root):].lstrip('/'), root)
         if relative != path or not re.fullmatch(r'[a-fA-F0-9]{64}',str(metadata.get('content_hash') or '')):
@@ -563,7 +565,9 @@ class NativeTransferManager:
                     status_code=404,
                     code="transfer_expired",
                 )
-            return record
+        if record.purpose == 'product_upload_webp':
+            record.validate()
+        return record
 
     def item(self, ticket, secret, item_token):
         record = self.get(ticket, secret)
@@ -712,7 +716,7 @@ def _directory_entries(access_token, path, *, force=False, root_path="", user_id
     return list(entries)
 
 
-def _directory_page(access_token, path, *, root_path, user_id, force=False, page_token="", limit=None):
+def _directory_page(access_token, path, *, root_path, user_id, force=False, page_token="", limit=None, bounded=False):
     clean_path = dropbox_integration.normalize_dropbox_path(path)
     cache_key = _directory_cache_key(clean_path, root_path=root_path, user_id=user_id)
     page_limit = max(1, min(int(limit or FILES_DIRECTORY_PAGE_SIZE), 2000))
@@ -734,7 +738,7 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
                     code="folder_page_expired",
                 )
             cursor = str(page.get("cursor") or "")
-    elif not force:
+    elif not force and not bounded:
         with _DIRECTORY_CACHE_LOCK:
             cached = _directory_cache_payload(cache_key, now)
             if cached is not None:
@@ -781,7 +785,7 @@ def _directory_page(access_token, path, *, root_path, user_id, force=False, page
             result = _DIRECTORY_PAGE_RESULTS.get(request_key)
             if result and result[0] > time.monotonic():
                 return dict(result[1])
-            cached = _directory_cache_payload(cache_key)
+            cached = None if bounded else _directory_cache_payload(cache_key)
             if cached is not None:
                 return {
                     "entries": cached,
@@ -2242,7 +2246,7 @@ def _native_transfer_secret(request):
 async def native_transfer_manifest(request: Request):
     """Return only the validated manifest attached to one transfer grant."""
     try:
-        record = NATIVE_TRANSFER_MANAGER.get(
+        record = await run_in_threadpool(NATIVE_TRANSFER_MANAGER.get,
             request.query_params.get("ticket"),
             _native_transfer_secret(request),
         )
@@ -2264,6 +2268,8 @@ async def native_transfer_manifest(request: Request):
             }
             for item in record.items
         ]
+        if record.purpose=='photoshop_master':
+            for public,item in zip(public_items,record.items):public['source_path']=item['dropbox_path']
         public_roots = [
             {
                 key: item[key]
@@ -2295,7 +2301,7 @@ async def native_transfer_content(request: Request):
     """Stream one ticketed Dropbox file without exposing Dropbox credentials."""
     upstream = None
     try:
-        record, item = NATIVE_TRANSFER_MANAGER.item(
+        record, item = await run_in_threadpool(NATIVE_TRANSFER_MANAGER.item,
             request.query_params.get("ticket"),
             _native_transfer_secret(request),
             request.query_params.get("item"),
@@ -2306,7 +2312,7 @@ async def native_transfer_content(request: Request):
                 status_code=400,
                 code="transfer_item_invalid",
             )
-        if record.purpose == "native_open":
+        if record.purpose in ("native_open", "product_upload_webp"):
             metadata, upstream = await run_in_threadpool(dropbox_integration.get_psd_file_response,
                 record.access_token, item["dropbox_id"], item["revision"])
         else:
@@ -2317,7 +2323,7 @@ async def native_transfer_content(request: Request):
             )
         current_id = str(metadata.get("id") or "")
         current_revision = str(metadata.get("rev") or metadata.get("content_hash") or "")
-        if record.purpose == "native_open" and (current_id != item["dropbox_id"] or current_revision != item["revision"]
+        if record.purpose in ("native_open", "product_upload_webp") and (current_id != item["dropbox_id"] or current_revision != item["revision"]
                 or str(metadata.get("content_hash") or "") != item["content_hash"]):
             upstream.close()
             upstream = None
@@ -2679,7 +2685,9 @@ async def attach_product_psd(request: Request):
         record = await run_in_threadpool(STORE.attach,pid,metadata,user,
                                         expected_file_id=payload.get('expected_file_id') or '',
                                         confirm_replace=payload.get('confirm_replace') is True,
-                                        confirm_mismatch=payload.get('confirm_mismatch') is True)
+                                        confirm_mismatch=payload.get('confirm_mismatch') is True,
+                                        **({'manual_takeover_operation':payload['manual_takeover_operation']}
+                                           if payload.get('manual_takeover_operation') else {}))
         # PostgreSQL returns datetime values. The mapping transaction has already
         # committed here; a JSON serialization failure must not report it as an
         # unsuccessful attachment and encourage a duplicate retry.
@@ -2688,7 +2696,9 @@ async def attach_product_psd(request: Request):
     except PermissionError as error:
         return _response_error(FilesUploadError(str(error),status_code=403))
     except ValueError as error:
-        return _response_error(FilesUploadError(str(error),status_code=409))
+        return _response_error(FilesUploadError(str(error),status_code=409,
+            details=({'manual_takeover_operation':error.manual_takeover_operation}
+                     if getattr(error,'manual_takeover_operation',None) else {})))
     except Exception as error:
         return _response_error(error)
 

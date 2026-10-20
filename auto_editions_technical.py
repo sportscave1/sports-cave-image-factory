@@ -43,6 +43,27 @@ def resolve_colour(source):
 def certificate(record):
     from auto_editions_bulk import evidence
     m=evidence(record)
+    from auto_editions_artwork_recovery import require_export_evidence
+    require_export_evidence(m)
+    policy=_verified_source_roles(m)
+    return dict(method=METHOD,actor_id=ACTOR,preparation_hash=record['hash'],
+                source=record['manifest']['source'],test_only=True,
+                evidence_hash=ae.fingerprint(dict(proofs=record['proofs'],receipts=record['receipts'])),
+                technical_verified=True,colour=record['manifest'].get('colour_evidence'),colour_policy=policy)
+
+
+def repair_evidence(record):
+    """Admission for a fresh native export, never a completion certificate.
+
+    Broken historical receipts are preserved and cannot certify any upload.
+    The replacement pipeline must create and verify an entirely new package.
+    """
+    from auto_editions_bulk import evidence
+    m=evidence(record,require_receipts=False)
+    return dict(repair_only=True,source=m['source'],colour_policy=_verified_source_roles(m))
+
+
+def _verified_source_roles(m):
     inspection=m.get('source_inspection') or {};doc=inspection.get('document') or {}
     if doc.get('mode') not in ('RGB','DocumentMode.RGB'):
         raise ValueError('Source colour mode is not verified RGB. CMYK conversion requires the existing explicit colour policy; no profile was reassigned.')
@@ -52,13 +73,10 @@ def certificate(record):
         if doc.get('mode') not in ('RGB','DocumentMode.RGB') or doc.get('bits_per_channel') not in (8,'BitsPerChannelType.EIGHT'):
             raise ValueError('Approved untagged policy requires verified legacy RGB8 source evidence. CMYK conversion is not authorised.')
     from auto_editions_onboarding import detect
-    roles=detect(inspection,m['edition_total'],colour_policy=policy)
+    roles=detect(inspection,m['edition_total'],colour_policy=policy,source=m['source'])
     if roles['number_layer']!=m.get('number_layer_name') or roles['plaque_layer']!=m.get('plaque_layer_name'):
         raise ValueError('Stored editable-number/plaque roles differ from the verified inspection.')
-    return dict(method=METHOD,actor_id=ACTOR,preparation_hash=record['hash'],
-                source=record['manifest']['source'],test_only=True,
-                evidence_hash=ae.fingerprint(dict(proofs=record['proofs'],receipts=record['receipts'])),
-                technical_verified=True,colour=record['manifest'].get('colour_evidence'),colour_policy=policy)
+    return policy
 
 
 def current(value,manifest):
@@ -124,6 +142,10 @@ def project(row,valid,uploaded,*,writable=False,now=None):
         if explain(why)['code'] in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','COLOUR_INCOMPATIBLE','ICC_MISMATCH'):actions+=['colour-review']
     if reset.get('stage') in ('Discovering','Queued','Preparing'):
         state='Uploading';stage=reset['stage'];why='Existing explicit reset/reprocess is running.';actions=[]
+    elif reset.get('stage')=='Failed':
+        state='Failed';stage=reset.get('failure_status') or 'Failed'
+        why=reason(reset.get('reason')) or 'Native replacement failed; the retained preparation is protected.'
+        actions=['retry']
     if cancel.get('stage') in ('Cancelling','Confirmed'):
         state='Uploading';stage='Cancelling';why='Waiting for owned Companion safe-stop acknowledgement.';actions=[]
     return dict(product_gid=row['product_gid'],status=state,icon='✓' if state=='Cloud Ready' else '',reason=why,
@@ -187,11 +209,11 @@ class Technical:
         if not row or row['status']!='Blocked' or row['technical_state']!='Failed' or row['priority']<=0:
             raise ValueError('Only an unsuccessful retained technical preparation can be repaired.')
         from worker_diagnostics import explain
-        if explain(row['technical_reason'])['code'] not in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','ICC_MISMATCH') and row['technical_reason']!='Embedded ICC profile required.':
+        if explain(row['technical_reason'])['code'] not in ('PROFILE_MISSING','COLOUR_POLICY_PENDING','ICC_MISMATCH') and row['technical_reason'] not in ('Embedded ICC profile required.','Complete immutable upload receipts required.','Invalid Dropbox file id.'):
             raise ValueError('This failure requires separate repair evidence.')
         record=Preparations(self.connect).read(row['preparation_hash'])
         if not record or record['manifest']['source']!=row['source']:raise ValueError('Repair preparation identity changed.')
-        with colour_snapshot(self.connect):certificate(record)  # Exact existing policy, roles and preservation proofs.
+        with colour_snapshot(self.connect):repair_evidence(record)  # Exact source, policy, roles and pixel proofs; no completion authority.
         from auto_editions_reset import Reset
         return Reset(self.connect).request(pid,request_id,actor,expected_source=row['source'],expected_checkpoint=(row['preparation_hash'],row['updated_at']))
 
@@ -256,7 +278,14 @@ class Technical:
                 # be repaired by metadata lookup. Other checks still fail below.
                 receipts=[]
                 for asset in [m['master'],*m['patches'].values()]:
-                    meta=assets.integration.psd_open_metadata(assets.token,DropboxAssets.path(digest,asset['name']),include_preview=False)
+                    # The source metadata helper accepts immutable IDs only.
+                    # Missing receipts require a bounded canonical package path
+                    # lookup, followed by the normal byte/profile validation.
+                    destination=DropboxAssets.path(digest,asset['name'])
+                    client=assets.integration.team_space_client(assets.token)
+                    meta=assets.integration._metadata_to_dict(client.files_get_metadata(destination))
+                    if (meta.get('path_display') or meta.get('path_lower') or '').lower()!=destination.lower():
+                        raise ValueError('Recovered upload receipt path differs from the retained package.')
                     receipts.append(dict(name=asset['name'],file_id=meta['id'],revision=meta['rev'],bytes=meta['size']))
                 record={**record,'receipts':dict(preparation_hash=digest,assets=receipts)}
                 evidence(record)
@@ -279,7 +308,10 @@ class Technical:
             # Fetch current source immediately before the short fenced commit.
             meta=assets.integration.psd_open_metadata(assets.token,m['source']['file_id'],include_preview=False)
             import psd_directory
-            if not psd_directory.approved_file(meta) or ae.source_identity(pid,meta)!=m['source']:raise ValueError('Source changed. Prepare the current mapped PSD before retrying.')
+            from product_upload_mapping import approved_upload_source
+            if (not (psd_directory.approved_file(meta) or approved_upload_source(self.connect,pid,meta))
+                    or ae.source_identity(pid,meta)!=m['source']):
+                raise ValueError('Source changed. Prepare the current mapped PSD before retrying.')
             value=certificate(record)
             return self.commit(job,record,original,value)
         except Exception as error:

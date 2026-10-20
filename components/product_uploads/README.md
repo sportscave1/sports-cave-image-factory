@@ -1,3 +1,119 @@
+## Coordinated Map update (local, based on release 9c86ea)
+
+Map prefers the saved Shopify ID and persists its shop, upload session and source
+PSD revision. External ChatGPT publication already carries the exact `sc-upload`
+operation tag; that correlation remains the automatic handoff. An absent or
+ambiguous tag requires an explicit product-ID selection. Names, handles and
+catalogue order cannot authorise a match.
+
+Missing editions use a native `editions/onboard` receipt in the existing durable
+product consumer, with a 30-second bounded wait for the persisted active run.
+There is no fake webhook or second allocator. Missing metadata remains pending;
+correct the authoritative Shopify metadata and retry. Draft publication remains
+pending under the shared onboarding eligibility rules.
+
+A cached handle is released only after a successful same-shop GraphQL read proves
+the previous ID absent, the current ID/handle exact, and product read access valid.
+The previous cache row is archived in app_settings and retained with a null alias.
+No historical identity, run, allocation, certificate, mapping or counter transfers.
+An existing historical edition handle conflict still requires explicit review.
+
+Apply `supabase/migrations/20261019221742_product_upload_coordinated_mapping.sql`
+with an authorised release before using the new move flow. It keeps incomplete
+moves out of downstream processing and permits the existing preparation queue
+only after final verification commits. A completed hold is a durable receipt;
+subsequent explicit administrator replacements keep their existing workflow.
+Identical mapped revisions reuse the existing mapping/preparation. Different
+known revisions require explicit replacement. Interrupted moves recover by the
+original Dropbox file ID, destination, content hash, size and revision metadata.
+
+Local validation uses simulated providers/orders and disposable PostgreSQL via
+PGlite, plus the real browser component/API fixture. No live PSD was moved. Brock
+15428753948979 is still absent from live Edition Ops: release 9c86ea has no safe
+operation that performs this new cache repair. Its predecessor 15428059398451
+still owns the cached handle. Reconciliation/import remains pending deployment;
+local success is not evidence of live import.
+
+The historical implementation notes below describe earlier versions.
+
+# Local Mockups integration — 18 October 2026
+
+This section supersedes the historical UI/lifecycle description below. The owner
+authorised commit, deployment and the coordinated immutable Companion update on
+18 October after isolated native acceptance passed. Release identities and live
+verification are recorded separately; local acceptance is not a production write.
+
+Product Uploads mounts two small account-authenticated component sections around
+**the existing Streamlit Mockups renderer**. `image_factory.generate_product_images`,
+the five templates, three lifestyle cards, room/angle selections, image handling,
+canonical eight-image manifest, ZIP builder and Dropbox picker/save rules are reused.
+The standalone Mockups route and its accepted JPG/PNG/WebP formats remain intact.
+Results are page-scoped; a new visit is empty, while reactive rerenders keep the
+active PSD. Removal releases only its temporary web-image run and object URLs.
+Saved Dropbox PSDs and submitted jobs are retained. Late results are rejected.
+
+The pre-Shopify native web render is an intake checkpoint consumed by the existing
+exclusive preparation host when eligible product work is idle. It uses the same
+host authentication, transfer manager, colour policy resolver and processor lease.
+Native Photoshop renders a working copy, checks its embedded profile, converts
+only the web render to sRGB and exports a bounded PNG. Untagged sources require an
+existing applicable approval; unknown colour is actionable, never guessed. A
+failed/uncertain Photoshop close retains the safety lock. Reconnection uploads a
+verified cached render instead of rendering it again. Explicit safe retries are
+bounded. This helper must be released together with the web change. Long native
+renders send existing authenticated heartbeat telemetry without claiming or
+renewing another product job. Archival uses a verified stable file ID; the Files
+move service checks its actual shared-root location before moving it.
+
+Original PSD intake now stages in the configured `product_upload_assets` area
+(the existing `06 Product Upload Assets` folder). Only after a verified Shopify
+identity and selected Draft/Live status does it move, retaining stable file ID and
+content, into `psd_directory.ROOT`:
+`/Sportscave Team Folder/02_TASKS/03_DESIGNS-LIVE-ONLINE-UPLOADED`.
+Both verified drafts and live products use this existing downstream preparation
+location, consistent with the previous draft-supporting mapping service. Live
+requires ACTIVE plus the existing online-store publication evidence. The mapping
+and edition-preparation queue services are unchanged; no second product is created.
+The deterministic archive target recovers a lost move response. Old intake rows
+retain their previous path and behaviour.
+
+The final component is not mounted until Save All confirms the current required
+WEBP set and exact Dropbox destination. It is absent during selection, preparation,
+generation, saving, partial failures and after edits invalidate that receipt.
+It never loads a hidden PSD preview. **Copy Complete Upload Prompt** is built on click
+from the Developer Studio template and selected Draft/Live/Update operation.
+Its dynamic source section includes the exact saved WEBP directory, its folder ID
+when available, actual count, ordered roles, filenames and available file identities.
+The directory comes from confirmed save metadata, including numbered destinations.
+Save-operation tokens reject stale results after edits or overlapping saves.
+Copying retrieves text and metadata only; it never downloads image bytes, creates
+sharing links/ZIPs, invokes the native helper or performs Shopify writes. The bottom
+saved-image gallery is removed; the upper previews and lifestyle actions remain.
+Run scripts/verify_product_upload_complete_prompt.py for an isolated Chrome/Edge
+clipboard, feedback, layout and save-gate check. The check does not verify the
+external Dropbox-to-ChatGPT-to-Shopify transfer.
+
+Local isolated preview: run `scripts/product_upload_mockups_preview.py --port 8683`
+with `AUTO_EDITIONS_TEST_PGLITE` pointing to an installed PGlite dist/index.js.
+This allowlisted, loopback-only harness blocks external requests and simulates
+Photoshop, Dropbox and Shopify boundaries. It does not launch the production
+server, installed Companion or native Photoshop. Actual Mockups generation and
+ZIP packaging still run. Evidence: `output/product-upload-mockups-checks/`.
+
+Explicit native acceptance: with production claims paused and Companion normally
+stopped, run `scripts/accept_product_uploads_native.py --output output/v19/<short-name>`
+with the same PGlite setting. It refuses active Companion ownership before COM.
+The successful 18 October run (`output/v19/pu5/acceptance.json`) used a new synthetic
+layered PSD and actual Photoshop render, colour conversion, transparency handling,
+100-number preparation and independent pixel proofs. The real local package
+importer and current technical certificate reached Cloud Ready with 101 verified
+disk-provider receipts; duplicate import was rejected. All 294 existing journals
+and the before/after document inventory were unchanged. No production artwork,
+Shopify product, mapping or cloud file was used or written. Earlier failed harness
+attempts (Windows path budget and an overinclusive test archive) remain preserved.
+
+---
+
 # Product Uploads implementation and local evidence
 
 The owner authorised publication on 17 October 2026. This report preserves the
@@ -13,17 +129,15 @@ running Companion, and remote writes were deliberately not exercised.
 
 ## User flow
 
-1. Choose Upload to Draft, Upload to Live or Update Existing.
-2. Upload the PSD. The backend verifies its structure, final size, Dropbox content
-   hash, stable file ID and revision before enabling Copy Prompt.
-3. Find Mockups opens the existing Files route at the verified product-images folder.
-4. Copy Prompt and give ChatGPT the website images. The prompt remains sourced from
-   the existing Dev Mode prompt IDs and commercial rules.
-5. After ChatGPT finishes, paste the resulting exact title or Shopify URL and Upload.
-6. Exact lookup includes drafts. Duplicate titles require a choice. The existing
-   Shopify registration, mapping and Companion queue services handle the product.
-7. Status updates until Cloud Ready or Failed. The preview becomes available after
-   linking and successful native preparation. Manual workflow requires no PSD.
+1. Select Upload to Draft, Upload to Live or Update Existing, then choose the PSD.
+2. Select the sport, prepare the mockups and supply the lifestyle images.
+3. Use Save All and wait for the compact Saved status.
+4. Copy Complete Upload Prompt and paste it into ChatGPT. The connected Dropbox
+   app must retrieve the exact original files listed in the saved manifest; separate
+   attachments are not required. Missing files or transfer/access limitations must
+   be reported before any Shopify change.
+5. After Shopify completion is actually verified, return and click MAP. Existing
+   product mapping and edition-preparation behavior is retained.
 
 ## Integration and recovery
 

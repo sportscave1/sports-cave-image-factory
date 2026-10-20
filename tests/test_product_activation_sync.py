@@ -20,7 +20,7 @@ def collector(**changes):
         "shopify_product_id": "gid://shopify/Product/987", "legacy_resource_id": "987",
         "handle": "new-art", "title": "New Art", "status": "ACTIVE",
         "vendor": "Sports Cave", "product_type": "Framed Art", "tags": ["Collector Series"],
-        "online_store_url": "https://example.com/products/new-art", "metafields": [],
+        "online_store_url": "https://example.com/products/new-art", "metafields": [{"namespace":"sports_cave","key":"edition_total","value":"100"}], "created_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
         "_edition_registration_canonical": True, **changes,
     }
 
@@ -36,6 +36,7 @@ class ActivationTests(unittest.TestCase):
         self.log = self.stack.enter_context(patch.object(backend, "_webhook_log"))
         self.status = self.stack.enter_context(patch.object(backend, "_update_webhook_event_status"))
         self.stack.enter_context(patch.object(backend, "_set_webhook_app_setting"))
+        self.stack.enter_context(patch.object(shopify_sync, "graphql_request", return_value=({"orders":{"nodes":[],"pageInfo":{"hasNextPage":False}}},"2026-04")))
         self.fetch = self.stack.enter_context(patch.object(shopify_sync, "fetch_product_by_shopify_id", return_value=collector()))
         self.mirror = self.stack.enter_context(patch.object(shopify_sync, "sync_complete_product_edition_metafields"))
         self.stack.enter_context(patch.object(backend, "_ensure_active_edition_runs_for_products", side_effect=AssertionError("No global run rewrite")))
@@ -182,10 +183,10 @@ class ActivationTests(unittest.TestCase):
     def test_http_sparse_payload_and_failed_database_returns_retryable_500(self):
         with patch.object(webhook_server, "verify_shopify_webhook_hmac", return_value={"ok": True}), patch.object(
             backend, "is_configured", return_value=True
-        ), patch.object(backend, "claim_product_create_webhook_receipt", return_value={"webhook_id": "test"}):
-            client = TestClient(webhook_server.app)
+        ), patch.object(backend, "claim_product_create_webhook_receipt", return_value={"webhook_id": "test"}) as claim, patch.dict(webhook_server.os.environ, {"SHOPIFY_STORE_DOMAIN": "test.myshopify.com"}):
+            client = TestClient(webhook_server.app, headers={"X-Shopify-Shop-Domain": "test.myshopify.com"})
             self.assertEqual(client.post("/webhooks/shopify/products-update", json={"id": 987}).status_code, 200)
-            self.status.side_effect = RuntimeError("database unavailable")
+            claim.side_effect = RuntimeError("database unavailable")
             self.assertEqual(client.post("/webhooks/shopify/products-update", json={"id": 987}).status_code, 500)
 
 

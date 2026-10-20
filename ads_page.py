@@ -12819,6 +12819,8 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
         issues += _creative_refresh_asset_issues(result, workflow)
         issues += _creative_refresh_visual_review_issues(result, workflow)
     if issues:
+        st.button("POST NOW", type="primary", disabled=True,
+                  key=f"ads-post-now::{result['context_key']}")
         st.caption("Before POST NOW: " + " · ".join(dict.fromkeys(issues)))
         return
     package = workflow.get(posting_handoff.SAVED_PACKAGE_KEY)
@@ -12828,12 +12830,20 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
     if not package:
         if workflow.get("posting_package_error"):
             st.info(str(workflow["posting_package_error"]))
+        if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+            st.button("POST NOW", type="primary", disabled=True,
+                      key=f"ads-post-now::{result['context_key']}")
+            st.caption('Save this refresh successfully before POST NOW. Retry any failed save above.')
         return
     if not source_matches or package.get("source_signature") != _ads_saved_source_signature(result, workflow):
+        st.button("POST NOW", type="primary", disabled=True,
+                  key=f"ads-post-now::{result['context_key']}")
         st.caption("This ad has unsaved changes. Save the updated package before POST NOW.")
         return
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         if not workflow.get('refresh_workspace_saved'):
+            st.button("POST NOW", type="primary", disabled=True,
+                      key=f"ads-post-now::{result['context_key']}")
             st.caption('Save this refresh before POST NOW.')
             return
         import ads_refresh_saved
@@ -14243,8 +14253,9 @@ def _creative_refresh_visual_review_issues(result, workflow):
     # Empty saved drafts may enter Posting to add assets; Create Ad still validates them.
     if not _ads_image_valid_slots(result, workflow):
         return []
-    if not st.session_state.get(_creative_refresh_visual_review_key(result, workflow), False):
-        return ["Visually compare each uploaded image with its exact product and winning card before POST NOW."]
+    key = _creative_refresh_visual_review_key(result, workflow)
+    if not st.session_state.get(key, workflow.get('refresh_visual_review_key') == key):
+        return ["Open Final visual verification above, compare every image with its product and winning card, then tick the confirmation."]
     return []
 
 
@@ -14257,12 +14268,25 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
             # Keep the existing Save / POST NOW actions compact. Only posting needs
             # the explicit visual sign-off; draft saving remains completely unchanged.
             if _ads_image_valid_slots(result, workflow):
-                with st.expander("Final visual verification — required before POST NOW", expanded=False):
+                with st.expander("Final visual verification — required before POST NOW",
+                                 expanded=bool(_creative_refresh_visual_review_issues(result, workflow))):
                     st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, clear acrylic/glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
-                    st.checkbox(
+                    review_key = _creative_refresh_visual_review_key(result, workflow)
+                    reviewed = st.checkbox(
                         "I checked every refreshed image against its product and winner references",
-                        key=_creative_refresh_visual_review_key(result, workflow),
+                        key=review_key,
+                        value=workflow.get('refresh_visual_review_key') == review_key,
                     )
+                    # Widget state is discarded when navigating away. Retain the
+                    # content-bound acknowledgement in the reopenable workspace.
+                    previous_review = workflow.get('refresh_visual_review_key')
+                    if reviewed:
+                        workflow['refresh_visual_review_key'] = review_key
+                    else:
+                        workflow.pop('refresh_visual_review_key', None)
+                    if previous_review != workflow.get('refresh_visual_review_key') and workflow.get('refresh_workspace_saved'):
+                        import ads_refresh_saved
+                        workflow['refresh_workspace_export'] = ads_refresh_saved.dumps(result, workflow)
             save_col, post_col = st.columns(2)
             with save_col:
                 if source_matches:

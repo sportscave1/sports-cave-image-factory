@@ -40,6 +40,8 @@ class DiskDropbox:
     def destination(self,key):
         import psd_directory
         return psd_directory.ROOT+'/product-upload-'+key+'.psd'
+    def archive(self,key,source):
+        return self.metadata_if_present(source['id'])
     def start(self):
         sid=uuid.uuid4().hex;self.sessions[sid]=self.root/sid;self.sessions[sid].touch();return sid
     def append(self,sid,offset,data):
@@ -96,7 +98,10 @@ def saved(env,selected='DRAFT',data=None):
     store,sql,provider=env;data=psd() if data is None else data;key=str(uuid.uuid4())
     store.create(key,ADMIN['id'],selected,'Design.psd',len(data),provider,digest(data))
     for offset in range(0,len(data),CHUNK):store.chunk(key,ADMIN['id'],offset,data[offset:offset+CHUNK],provider)
-    row=store.finish(key,ADMIN['id'],provider);store.copied(key,ADMIN['id'],selected)
+    row=store.finish(key,ADMIN['id'],provider)
+    # Legacy handoff fixtures stand in for a completed image/export stage.
+    with store.locked(key,ADMIN['id']) as (current,cur):current['data']['mockups_exported']=True
+    store.copied(key,ADMIN['id'],selected)
     return store.read(key,ADMIN['id'])
 
 
@@ -213,16 +218,16 @@ def test_http_auth_chunk_and_disabled_manual_route(env,monkeypatch):
     monkeypatch.setattr(files,'_request_user',lambda request,**kwargs:ADMIN)
     app=Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])
     with TestClient(app) as client:
-        assert client.get('/product-uploads').status_code==200
+        assert client.get('/product-uploads',follow_redirects=False).status_code==307
         assert client.post('/api/product-uploads/start',json={}).status_code==403
         key=str(uuid.uuid4());data=psd();headers={'Origin':'http://testserver'}
         response=client.post('/api/product-uploads/start',json=dict(id=key,mode='DRAFT',name='Design.psd',size=len(data),content_hash=digest(data)),headers=headers)
-        assert response.status_code==200,response.text
-        assert client.post('/api/product-uploads/chunk?id='+key+'&offset=0',content=data,headers=headers).status_code==200
-        assert client.post('/api/product-uploads/finish',json=dict(id=key),headers=headers).json()['upload']['basic_validated']
-        assert client.get('/api/product-uploads/state?id='+key).json()['upload']['copied'] is False
+        assert response.status_code==409 and 'Manual PSD transfers' in response.text
+        assert client.post('/api/product-uploads/chunk?id='+key+'&offset=0',content=data,headers=headers).status_code==409
+        assert client.post('/api/product-uploads/finish',json=dict(id=key),headers=headers).status_code==409
+        assert not env[2].sessions and not env[2].calls
         monkeypatch.setenv('PRODUCT_UPLOAD_AUTOMATIC_ENABLED','false')
-        assert client.get('/product-uploads').status_code==200
+        assert client.get('/product-uploads',follow_redirects=False).status_code==307
         assert client.get('/api/product-uploads/state').json()['enabled'] is False
         assert client.post('/api/product-uploads/start',json={},headers=headers).status_code==409
 
@@ -280,7 +285,7 @@ def test_prompt_only_account_keeps_access_and_expired_session_is_rejected(monkey
     token=sc_auth.create_user_auth_token(user['id'],password='synthetic-password',extra_secret='synthetic-secret')
     client=TestClient(Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES]))
     client.cookies.set(sc_auth.AUTH_COOKIE_NAME,token)
-    assert client.get('/product-uploads').status_code==200
+    assert client.get('/product-uploads',follow_redirects=False).status_code==307
     assert client.get('/api/product-uploads/state').json()==dict(enabled=False,upload=None)
     headers={'Origin':'http://testserver'}
     assert client.post('/api/product-uploads/prompt',json={'mode':'DRAFT'},headers=headers).status_code==200
@@ -288,3 +293,129 @@ def test_prompt_only_account_keeps_access_and_expired_session_is_rejected(monkey
     assert client.post('/api/product-uploads/mockups',json={},headers=headers).status_code==403
     user['session_version']=2
     assert client.get('/product-uploads').status_code==403
+
+
+def test_selection_timing_preserves_transient_auth_failure_and_no_binary_transfer(env, monkeypatch):
+    import product_upload_api as api
+    import files_upload_api as files
+    from files_upload_api import FilesUploadError
+    monkeypatch.setattr(api, 'connect', env[0].connect)
+    monkeypatch.setattr(files, '_request_user', lambda *a, **k: (_ for _ in ()).throw(
+        FilesUploadError('temporary authentication backend outage', status_code=503)))
+    app = Starlette(routes=[Route(p, e, methods=list(m)) for p, e, m in api.ROUTES])
+    with TestClient(app) as client:
+        failed = client.post('/api/product-uploads/select', headers={'Origin':'http://testserver'},json={})
+        assert failed.status_code == 503
+        assert 'total;dur=' in failed.headers['server-timing']
+        assert not env[2].calls
+
+
+def test_large_layer_section_crosses_many_chunks_without_decoding(env):
+    # Match the reported size and a realistic large layer section, not only a padded composite.
+    store, sql, provider = env; size = round(272.7 * 1048576); key = str(uuid.uuid4())
+    header = struct.pack('>4sH6sHIIHH', b'8BPS', 1, b'\0'*6, 3, 100, 200, 8, 3)
+    prefix = header + struct.pack('>III', 0, 0, size-40)
+    def block(offset):
+        length = min(CHUNK, size-offset)
+        return (prefix + bytes(length-len(prefix))) if offset == 0 else bytes(length)
+    hashes = [hashlib.sha256(block(offset)).digest() for offset in range(0, size, CHUNK)]
+    expected = hashlib.sha256(b''.join(hashes)).hexdigest()
+    store.create(key, 'admin', 'DRAFT', 'large.psd', size, provider, expected)
+    for offset in range(0, size, CHUNK):
+        row = store.chunk(key, 'admin', offset, block(offset), provider)
+        assert row['data']['offset'] == min(size, offset+CHUNK)
+    row = store.finish(key, 'admin', provider)
+    assert row['data']['basic_validated'] and row['data']['structure']['stage'] == 5
+    assert row['data']['source']['content_hash'] == expected
+    assert len(provider.calls) == 70  # 69 chunks and exactly one finish.
+
+
+def test_transport_batches_keep_legacy_hash_blocks_and_exact_retry_integrity(env):
+    store, sql, provider = env
+    data = psd(3*CHUNK+73); key = str(uuid.uuid4()); expected = digest(data)
+    store.create(key, 'admin', 'DRAFT', 'batch.psd', len(data), provider, expected)
+    # A Phase1 4 MiB acknowledgement followed by an 8 MiB Phase2 request.
+    store.chunk(key, 'admin', 0, data[:CHUNK], provider)
+    provider.lose_append = True
+    with pytest.raises(RuntimeError):
+        store.chunk(key, 'admin', CHUNK, data[CHUNK:3*CHUNK], provider)
+    assert store.read(key, 'admin')['data']['offset'] == CHUNK
+    recovered = store.chunk(key, 'admin', CHUNK, data[CHUNK:3*CHUNK], provider)
+    assert recovered['data']['offset'] == 3*CHUNK
+    store.chunk(key, 'admin', CHUNK, data[CHUNK:3*CHUNK], provider)
+    wrong = data[CHUNK:2*CHUNK] + b'x'*CHUNK
+    with pytest.raises(ValueError, match='differ'):
+        store.chunk(key, 'admin', CHUNK, wrong, provider)
+    # Old browser retries and subsequent resumes remain valid.
+    store.chunk(key, 'admin', CHUNK, data[CHUNK:2*CHUNK], provider)
+    store.chunk(key, 'admin', 3*CHUNK, data[3*CHUNK:], provider)
+    row = store.finish(key, 'admin', provider)
+    assert len(row['data']['blocks']) == 4
+    assert row['data']['source']['content_hash'] == expected
+    assert sum(k=='append' for k,n in provider.calls) == 3
+    assert max(n for k,n in provider.calls if k=='append') == 2*CHUNK
+    assert sum(k=='finish' for k,n in provider.calls) == 1
+
+
+def test_transport_size_alignment_and_partial_overlaps_are_rejected(env):
+    store, sql, provider = env; data = psd(4*CHUNK+73); key = str(uuid.uuid4())
+    store.create(key, 'admin', 'DRAFT', 'batch.psd', len(data), provider, digest(data))
+    for payload in (data[:3*CHUNK], data[:CHUNK+1], b''):
+        with pytest.raises(ValueError, match='chunk'):
+            store.chunk(key, 'admin', 0, payload, provider)
+    assert not provider.calls
+    store.chunk(key, 'admin', 0, data[:CHUNK], provider)
+    # Never silently skip an overlap which includes unconfirmed bytes.
+    with pytest.raises(ValueError):
+        store.chunk(key, 'admin', 0, data[:2*CHUNK], provider)
+    assert store.read(key, 'admin')['data']['offset'] == CHUNK
+
+
+def test_existing_storage_adapter_accepts_batched_binary_without_byte_changes(monkeypatch):
+    from types import SimpleNamespace
+    import tracemalloc
+    import dropbox_integration as dbx
+    from product_upload_services import Dropbox
+    captured = []
+    payload = bytearray(2*CHUNK)
+    payload[CHUNK] = 37
+    expected = hashlib.sha256(payload).hexdigest()
+    def append(data, cursor):
+        assert isinstance(data, bytes)
+        assert cursor.session_id == 'synthetic' and cursor.offset == CHUNK
+        captured.append((len(data), hashlib.sha256(data).hexdigest()))
+    sdk = SimpleNamespace(files=SimpleNamespace(UploadSessionCursor=lambda **kw: SimpleNamespace(**kw)))
+    monkeypatch.setattr(dbx, '_dropbox_sdk', lambda: sdk)
+    monkeypatch.setattr(dbx, 'team_space_client', lambda token: SimpleNamespace(files_upload_session_append_v2=append))
+    provider = Dropbox.__new__(Dropbox); provider.api = dbx; provider.token = 'synthetic'
+    provider._append_client = SimpleNamespace(files_upload_session_append_v2=append)
+    tracemalloc.start()
+    try:
+        assert provider.append('synthetic', CHUNK, payload) == 3*CHUNK
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert captured == [(2*CHUNK, expected)]
+    assert hashlib.sha256(payload).hexdigest() == expected
+    # The existing SDK adapter needs one bounded immutable copy, not a PSD-sized allocation.
+    assert peak < 3*CHUNK
+    with pytest.raises(ValueError, match='too large'):
+        provider.append('synthetic', CHUNK, bytearray(2*CHUNK+1))
+
+
+def test_upload_sdk_clone_reuses_pool_and_bounds_retries_without_changing_shared_client(monkeypatch):
+    import dropbox
+    import dropbox_integration as dbx
+    from product_upload_services import Dropbox
+    shared = dropbox.Dropbox('synthetic-token').with_path_root(dropbox.common.PathRoot.root('123'))
+    monkeypatch.setattr(dbx, 'team_space_client', lambda token: shared)
+    calls = []
+    monkeypatch.setattr(dropbox.Dropbox, 'files_upload_session_append_v2', lambda self,data,cursor: calls.append(self))
+    provider=Dropbox.__new__(Dropbox);provider.api=dbx;provider.token='synthetic-token'
+    provider.append('synthetic',0,b'abc');provider.append('synthetic',3,b'def')
+    bounded=provider._append_client
+    assert calls==[bounded,bounded]
+    assert bounded._session is shared._session and bounded._headers==shared._headers
+    assert bounded._max_retries_on_error==1 and bounded._max_retries_on_rate_limit==1
+    assert bounded._timeout==60
+    assert shared._max_retries_on_rate_limit is None

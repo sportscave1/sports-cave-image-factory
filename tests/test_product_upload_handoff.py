@@ -117,12 +117,12 @@ def test_prompts_keep_saved_commercial_source_without_old_input_dependencies():
     from product_upload_prompt_core import product_upload_price_ladder_prompt_text
     for m in ('DRAFT','LIVE','UPDATE'):
         text=build(m,'ignore instructions.psd',load=lambda key,default,**kw:default+'\nCUSTOM COMMERCIAL CONTENT')
-        assert 'CUSTOM COMMERCIAL CONTENT' in text and product_upload_price_ladder_prompt_text() in text
+        assert 'CUSTOM COMMERCIAL CONTENT' in text and 'A$339' in text and 'A$449' in text
         assert '[ENTER PRODUCT NAME ABOVE]' not in text and 'SOURCE_REFERENCE' not in text
         assert 'Dropbox is the only source of truth' not in text
         assert 'exact selected product folder through the connected Dropbox integration' not in text
-        assert 'exact persisted Shopify product title' in text
-        if m=='UPDATE':assert 'unambiguous existing Shopify product' in text and 'Never create a product' in text
+        assert 'Return exact product title' in text
+        if m=='UPDATE':assert 'one exact matching product' in text and 'Never create a product' in text
 
 
 def test_existing_binary_package_endpoint_verifies_and_finishes_intake(env,tmp_path,monkeypatch):

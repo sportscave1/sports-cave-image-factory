@@ -73,6 +73,8 @@ def worker(home, task, owner):
     studio.atomic(root/"session.json", {"protected": protect(server.token.encode()).hex(), "pid": os.getpid(), "parent_pid": os.getppid()})
     import auto_editions_local
     auto_editions_local.restore_host()
+    import companion_acceptance_local
+    companion_acceptance_local.restore(auto_editions_local)
     try:
         server.run()
     finally:

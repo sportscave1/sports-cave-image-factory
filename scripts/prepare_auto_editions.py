@@ -22,12 +22,31 @@ def native_cleanup_uncertain(output):
     except (OSError,ValueError,AttributeError):return True
 
 
+def native_dispatch(run, script, output):
+    # A preflight cleanup receipt cannot prove a subsequent RPC closed its doc.
+    status=Path(output)/'native-status.json'
+    if status.exists():status.replace(Path(output)/'preflight-native-status.json')
+    return run(script)
+
+
+def select_export_strategy():
+    # Retain the released method when the existing native benchmark RAM floor
+    # cannot be met. History export saved time but used ~0.7 GiB more Photoshop
+    # working set in matched 4x trials. Never restart/purge the user's app here.
+    try:
+        import psutil
+        if psutil.virtual_memory().available >= 4*1024**3:return 'history_merged_crop'
+    except (ImportError,OSError):pass
+    return 'duplicate_merged'
+
+
 def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1,
-            export_strategy='duplicate_merged',native_benchmark=False):
+            export_strategy=None,native_benchmark=False):
     if type(scale) is not int or scale not in (1,2,3,4):
         raise ValueError('Choose native, 2x, 3x or 4x TEST preparation.')
-    if export_strategy not in ('duplicate_merged','history_merged_crop') or (export_strategy!='duplicate_merged' and native_benchmark is not True):
-        raise ValueError('Unverified export strategy is restricted to an isolated native benchmark.')
+    if export_strategy is None:export_strategy=select_export_strategy()
+    if export_strategy not in ('duplicate_merged','history_merged_crop'):
+        raise ValueError('Unsupported preparation export strategy.')
     if native_benchmark is True:
         from scripts.benchmark_auto_editions_native_v19 import require_native_owner
         require_native_owner(source,output)
@@ -35,6 +54,8 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     source, output = Path(source).resolve(), Path(output).resolve()
     if output.exists():
         raise ValueError('Use a new package directory; existing work is never overwritten.')
+    ae.source_identity(identity.get('product_gid'),dict(id=identity.get('file_id'),
+        rev=identity.get('revision'),content_hash=identity.get('content_hash')))
     timings={}
     with measured(timings,'source_checksums'):
         hashes=file_hashes(source)
@@ -64,17 +85,29 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
                    report=str(output/'preparation.json'),number_layer_name=number_layer,
                    plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale,
                    export_strategy=export_strategy,native_benchmark=native_benchmark is True)
-    script = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
-    script += '\nvar SC_AUTO_EDITIONS_REQUEST = ' + json.dumps(request) + ';\n'
-    script += (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
+    from auto_editions_role_evidence import resolution
+    reviewed=resolution(identity)
+    if reviewed and reviewed.get('hidden_number'):request['approved_hidden_number']=reviewed['hidden_number']
+    inspector = (ROOT/'scripts/photoshop/inspect_psd_editions.jsx').read_text(encoding='utf-8-sig')
+    preparation = (ROOT/'scripts/photoshop/prepare_auto_editions.jsx').read_text(encoding='utf-8-sig')
+    def script_for(value):
+        return inspector+'\nvar SC_AUTO_EDITIONS_REQUEST = '+json.dumps(value)+';\n'+preparation
     # Durable intent distinguishes pre-COM failures from uncertain RPC cleanup.
     # It is local diagnostic evidence, never part of the preparation identity.
     with (output/'photoshop-dispatch.json').open('x',encoding='utf-8') as dispatched:
         json.dump(dict(export_strategy=export_strategy,started=True),dispatched)
         dispatched.flush();__import__('os').fsync(dispatched.fileno())
     try:
+        from auto_editions_preflight import validate,verify_resize
+        preflight={**request,'preflight_only':True,'report':str(output/'preflight.json')}
+        with measured(timings,'native_preflight',path=output):
+            if native_dispatch(run,script_for(preflight),output) != 'AUTO_EDITIONS_PREFLIGHT':
+                raise ValueError('Photoshop did not confirm template preflight.')
+            inspection=json.loads((output/'preflight.json').read_text(encoding='utf-8-sig'))
+            background=validate(output,inspection,identity,total,number_layer,plaque_layer,scale)
+            if background:request['opaque_resize_layer']=background
         with measured(timings,'photoshop_prepare',path=output):
-            result = run(script)
+            result = native_dispatch(run,script_for(request),output)
     finally:
         # A failed export must retain the same original/staged integrity fence.
         if ae.file_hash(source) != before or ae.file_hash(staged) != staged_hash:
@@ -82,6 +115,7 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if not result.startswith('AUTO_EDITIONS_PREPARED:'):
         raise ValueError('Photoshop did not confirm preparation.')
     report=json.loads((output/'preparation.json').read_text(encoding='utf-8-sig'))
+    if background:report['resize_evidence']=verify_resize(output)
     if report.get('source_dimensions')!=[colour['width'],colour['height']]:
         raise ColourReview('Inspector failure: Photoshop source geometry differs from the pinned PSD.')
     witness=inspect_psd(output/'profile-witness.psd')
@@ -90,8 +124,12 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     from auto_editions_colour import restore_export_profiles
     names=['original.png','master.png']+[f'number-{n}.png' for n in range(1,total+1)]
     names += [f'reference-{n}.png' for n in sorted({1,reference_number,total})]
+    if reviewed and reviewed.get('hidden_number'):names.append('uncorrected.png')
     with measured(timings,'icc_preservation'):
         restored=restore_export_profiles(output,report,names,source_icc=icc)
+    from auto_editions_artwork_recovery import verify_exports
+    correction=verify_exports(output,report,identity,names)
+    if correction:report['artwork_recovery']=correction
     report['colour_evidence']=dict(source_state=colour['state'],icc_sha256=__import__('hashlib').sha256(icc).hexdigest(),
         policy=policy,assignment=assignment,restored_exports=restored,source_sha256=before,pixels_converted=False)
     # Measurements must never change the reusable artwork identity.
@@ -112,9 +150,7 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
                   'master':asset('master.png'), 'patches':{str(n):asset(f'number-{n}.png') for n in range(1,total+1)}}
     ae.validate_manifest(manifest)
     with measured(timings,'pixel_verification',path=output):
-        proofs=[ae.compare_reference(manifest,output,n,output/f'reference-{n}.png')
-                for n in sorted({1,reference_number,total})]
-        original_proof=ae.compare_original_outside_number(manifest,output,reference_number,output/'original.png')
+        proofs,original_proof=ae.verify_preparation_pixels(manifest,output,reference_number)
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     (output/'proofs.json').write_text(json.dumps(proofs,indent=2)+'\n')
     (output/'source-proof.json').write_text(json.dumps(original_proof,indent=2)+'\n')

@@ -23,6 +23,7 @@ class Cursor:
         if 'FROM edition_products' in self.last:return [{'product_title':'Art','shopify_handle':'art'}]
         return list(self.rows.values())
     def fetchone(self):
+        if 'to_regprocedure' in self.last:return {'name':None}
         if 'to_regclass' in self.last:return {'name':getattr(self,'onboarding_schema',None)}
         return self.write
 
@@ -76,7 +77,10 @@ class VaAttachmentTests(unittest.TestCase):
     def test_authorised_va_can_attach_missing_with_actor_audit(self):
         store=self.store();result=store.attach(PID,META,VA)
         self.assertEqual(result['dropbox_file_id'],'id:one');self.assertEqual(result['actor_id'],'test-va')
-        self.assertTrue(self.cur.calls[0][0].startswith('LOCK TABLE'))
+        # A read-only hold probe now precedes the lock; all mapping writes remain locked.
+        statements=[sql for sql,args in self.cur.calls]
+        self.assertLess(next(i for i,sql in enumerate(statements) if sql.startswith('LOCK TABLE')),
+                        next(i for i,sql in enumerate(statements) if sql.startswith('INSERT INTO public.product_psd_mappings')))
         audits=[args for sql,args in self.cur.calls if 'INSERT INTO public.product_psd_mapping_audit' in sql]
         self.assertEqual(len(audits),1);self.assertEqual(audits[0][1:3],('attach','test-va'));self.assertIsNone(audits[0][3])
     def test_va_cannot_overwrite_even_same_file_or_racing_existing_mapping(self):

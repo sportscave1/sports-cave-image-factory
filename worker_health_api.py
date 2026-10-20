@@ -59,6 +59,13 @@ async def pause(request):
     try:
         import files_upload_api as files
         user=await actor(request,write=True);body=await files._json_body(request)
+        if isinstance(body,dict) and set(body)=={'instance','transfer_settings'}:
+            from companion_transfer_control import set_requested
+            from worker_health_cache import invalidate
+            service=store()
+            result=await run_in_threadpool(set_requested,service.connect,body['instance'],body['transfer_settings'],str(user['id']))
+            invalidate(service.connect)
+            return JSONResponse(dict(requested=result),headers=HEADERS)
         if not isinstance(body,dict) or set(body)!={'paused'} or type(body['paused']) is not bool:raise ValueError('Choose Pause or Resume.')
         from worker_health_cache import invalidate
         service=store();invalidate(service.connect)

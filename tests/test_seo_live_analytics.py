@@ -234,7 +234,7 @@ class LiveAnalyticsContractTests(unittest.TestCase):
 
     def test_navigation_is_gsc_first_and_legacy_routes_are_reversible(self):
         self.assertEqual(
-            seo_navigation.SEO_ROUTES,
+            seo_navigation.SEO_ROUTES[:7],
             (
                 seo_navigation.SEO_OVERVIEW_ROUTE,
                 seo_navigation.SEO_KEYWORDS_ROUTE,

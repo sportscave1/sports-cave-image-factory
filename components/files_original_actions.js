@@ -1,81 +1,18 @@
-/* Originals are fetched only inside an explicit clipboard action, never for browsing. */
+/* Shared exact-file clipboard boundary. Browsing and unsupported Copy fetch no originals. */
 window.FilesOriginal = (() => {
-  const limitation = "This format cannot be copied losslessly by this browser.";
-  function singleGifFrame(bytes) {
-    // Walk blocks rather than searching compressed pixels for frame markers.
-    let offset = 13 + ((bytes[10] & 128) ? 3 * (1 << ((bytes[10] & 7) + 1)) : 0);
-    let frames = 0;
-    const skipBlocks = () => {
-      while (offset < bytes.length) {
-        const length = bytes[offset++];
-        if (!length) return;
-        offset += length;
-      }
-    };
-    while (offset < bytes.length) {
-      const marker = bytes[offset++];
-      if (marker === 59) return frames === 1;
-      if (marker === 33) { offset++; skipBlocks(); }
-      else if (marker === 44) {
-        if (++frames > 1 || offset + 9 > bytes.length) return false;
-        const packed = bytes[offset + 8];
-        offset += 9 + ((packed & 128) ? 3 * (1 << ((packed & 7) + 1)) : 0);
-        offset++; skipBlocks();
-      } else return false;
-    }
-    return false;
+  const limitation = "Native file copying is unavailable in this browser. Use Download Original to keep filenames, formats and bytes, then copy the downloaded files in Windows Explorer.";
+  function snapshot(items) {
+    return Object.freeze(items.map(item => Object.freeze({
+      id: item.id || item.path, path: item.path, name: item.name,
+      revision: item.revision || item.rev || "", url: item.url,
+    })));
   }
-  async function pngFromOriginal(url) {
-    const response = await fetch(url, {credentials:"same-origin", cache:"no-store"});
-    if (!response.ok) throw new Error("The original file is unavailable or access has expired.");
-    const blob = await response.blob();
-    // Animation cannot be represented by the browser's still-image clipboard.
-    const bytes = new Uint8Array(await blob.arrayBuffer());
-    const ascii = (start, length) => String.fromCharCode(...bytes.subarray(start, start + length));
-    const png = ascii(1, 3) === "PNG";
-    const jpeg = bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
-    const webp = ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP";
-    const gif = ascii(0, 3) === "GIF";
-    const bmp = ascii(0, 2) === "BM";
-    if (png) {
-      const view = new DataView(bytes.buffer);
-      for (let offset = 8; offset + 12 <= bytes.length;) {
-        if (ascii(offset + 4, 4) === "acTL") throw new Error("Animated images require Download Original.");
-        offset += 12 + view.getUint32(offset);
-      }
-      return blob.type === "image/png" ? blob : new Blob([blob], {type:"image/png"});
-    }
-    if (webp && ascii(12, 4) === "VP8X" && (bytes[20] & 2)) {
-      throw new Error("Animated images require Download Original.");
-    }
-    if (gif && !singleGifFrame(bytes)) throw new Error("Animated or unreadable GIFs require Download Original.");
-    if (!jpeg && !webp && !gif && !bmp) throw new Error(limitation);
-    let bitmap;
-    try {
-      bitmap = await createImageBitmap(blob);
-      const canvas = document.createElement("canvas");
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const context = canvas.getContext("2d");
-      if (!context || !bitmap.width || !bitmap.height) throw new Error(limitation);
-      context.drawImage(bitmap, 0, 0);
-      return await new Promise((resolve, reject) => canvas.toBlob(
-        result => result ? resolve(result) : reject(new Error(limitation)), "image/png"));
-    } catch (_) {
-      throw new Error(limitation);
-    } finally {
-      bitmap?.close();
-    }
-  }
-  function copy(url) {
-    if (!navigator.clipboard?.write || typeof ClipboardItem !== "function" ||
-        (ClipboardItem.supports && !ClipboardItem.supports("image/png"))) {
-      return Promise.reject(new Error("Image clipboard access is unavailable in this browser."));
-    }
-    // Call write during user activation, before the asynchronous original fetch finishes.
-    const png = pngFromOriginal(url);
-    png.catch(() => {});
-    return navigator.clipboard.write([new ClipboardItem({"image/png":png})]);
+  async function copy(items) {
+    // The web runtime has no native file-list writer. ClipboardItem cannot encode
+    // original filenames or a Windows file list; PNG pixels are not source files.
+    // Fail before fetching originals, touching the clipboard, or copying a subset.
+    if (!Array.isArray(items) || !items.length) throw new Error("Select files to copy.");
+    throw new Error(limitation);
   }
   let closeMenu = () => {};
   function menu(event, copyAction, downloadAction) {
@@ -89,7 +26,7 @@ window.FilesOriginal = (() => {
       panel.remove(); document.removeEventListener("pointerdown", dismiss);
       document.removeEventListener("keydown", keydown);
     };
-    for (const [label, action] of [["Copy Image", copyAction], ["Download Original", downloadAction]]) {
+    for (const [label, action] of [["Copy", copyAction], ["Download Original", downloadAction]]) {
       const button = document.createElement("button");
       button.type = "button"; button.textContent = label; button.setAttribute("role", "menuitem");
       button.style.cssText = "padding:10px;text-align:left;background:transparent;color:white;border:0;cursor:pointer";
@@ -102,5 +39,5 @@ window.FilesOriginal = (() => {
     document.addEventListener("pointerdown", dismiss); document.addEventListener("keydown", keydown);
     panel.firstChild.focus();
   }
-  return {copy, menu};
+  return {copy, snapshot, menu};
 })();

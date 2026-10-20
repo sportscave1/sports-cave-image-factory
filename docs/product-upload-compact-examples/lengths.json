@@ -1,0 +1,14 @@
+{
+  "LIVE": {
+    "characters": 11231,
+    "words": 1600
+  },
+  "DRAFT": {
+    "characters": 10313,
+    "words": 1472
+  },
+  "UPDATE": {
+    "characters": 8424,
+    "words": 1198
+  }
+}

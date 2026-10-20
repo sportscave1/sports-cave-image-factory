@@ -103,8 +103,9 @@ def process(key,grant):
                 if len(items)!=1 or any(items[0].get(k)!=v for k,v in {'dropbox_id':case.FILE,'revision':case.REVISION,'content_hash':case.CONTENT_HASH}.items()):raise ValueError('Transferred PSD identity changed.')
                 partial=source.with_suffix('.part');req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':items[0]['token']}),headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
                 count=0
-                with build_opener(NoRedirect()).open(req,timeout=60) as response,partial.open('wb') as out:
-                    for block in iter(lambda:response.read(4*1024*1024),b''):
+                from auto_editions_local import transfer_controller
+                with transfer_controller().download_slot(),build_opener(NoRedirect()).open(req,timeout=60) as response,partial.open('wb') as out:
+                    for block in transfer_controller().download(response):
                         count+=len(block)
                         if count>meta['size']:raise ValueError('PSD transfer size exceeded its verified metadata.')
                         out.write(block)

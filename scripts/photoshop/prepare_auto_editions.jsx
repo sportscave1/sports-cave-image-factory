@@ -49,8 +49,8 @@ var SCAutoEditionsPreparation = (function () {
             || !r.number_layer_name || !r.plaque_layer_name) throw Error("unsafe_preparation_request");
         var strategy = r.export_strategy || "duplicate_merged";
         if (strategy !== "duplicate_merged" && strategy !== "history_merged_crop") throw Error("unsupported_export_strategy");
-        // No unmeasured native strategy is admitted by the normal companion.
-        if (strategy !== "duplicate_merged" && r.native_benchmark !== true) throw Error("unverified_strategy_requires_native_benchmark");
+        // The Python caller selects history export only with measured memory
+        // headroom. Both paths retain all independent references and proofs.
         var original = app.documents.length ? app.activeDocument : null, doc = null;
         var dialogs = app.displayDialogs, existing = {}, layer = null, plaque = null, exportProfiles = {};
         for (var e = 0; e < app.documents.length; e++) existing[String(app.documents[e].id)] = true;
@@ -109,7 +109,48 @@ var SCAutoEditionsPreparation = (function () {
             if (inspection.document.profile_state !== "tagged") throw Error("profile_inspector_failure");
             timed("icc_witness_ms",function(){profileWitness(doc,r.output_root,r.icc_path);});
             var sourceDimensions = [doc.width.as("px"), doc.height.as("px")];
+            var hidden = null, approvedHidden = r.approved_hidden_number;
+            if (approvedHidden) {
+                var hiddenMatches=[];named(doc,approvedHidden.name,hiddenMatches);
+                if(hiddenMatches.length!==1)throw Error("approved_hidden_number_changed");
+                hidden=hiddenMatches[0];
+                if(hidden.id!==approvedHidden.layer_id || hidden.kind!==LayerKind.TEXT || hidden.parent!==doc
+                    || !hidden.visible || SCPSDInspector.encode(box(hidden))!==SCPSDInspector.encode(approvedHidden.bounds_px))
+                    throw Error("approved_hidden_number_changed");
+            }
             var sourcePlaqueBounds = box(plaque), scale = r.scale || 1;
+            if (r.preflight_only === true) {
+                savePNG(doc,"preflight-original.png");
+                var bottom = null, visibility = [];
+                for (var v=0;v<doc.layers.length;v++) {
+                    visibility.push(doc.layers[v].visible);
+                    if(doc.layers[v].visible)bottom=doc.layers[v];
+                }
+                var candidate = null;
+                if(scale!==1 && bottom && bottom!==layer && bottom!==plaque && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
+                    candidate={layer_id:bottom.id,name:bottom.name};
+                    try {
+                        for(var hide=0;hide<doc.layers.length;hide++)if(doc.layers[hide]!==bottom)doc.layers[hide].visible=false;
+                        savePNG(doc,"preflight-artwork.png");
+                    } finally {
+                        for(var restore=0;restore<doc.layers.length;restore++)doc.layers[restore].visible=visibility[restore];
+                    }
+                }
+                write({inspection:inspection,resize_background:candidate});
+                completed=true;
+                return "AUTO_EDITIONS_PREFLIGHT";
+            }
+            if(r.opaque_resize_layer) {
+                var bg=[], approved=r.opaque_resize_layer;
+                named(doc,approved.name,bg);
+                if(bg.length!==1 || bg[0].id!==approved.layer_id || bg[0]===layer || bg[0]===plaque || !bg[0].visible)
+                    throw Error("resize_background_identity_changed");
+                // Only Python-verified opaque native pixels, on the disposable
+                // staged document. No fill colour and no source PSD writes.
+                if(bg[0].kind===LayerKind.SMARTOBJECT)bg[0].rasterize(RasterizeType.ENTIRELAYER);
+                bg[0].isBackgroundLayer=true;
+                savePNG(doc,"resize-original.png");
+            }
             timings.layer_inspection_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
             if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 95000000)
@@ -119,10 +160,11 @@ var SCAutoEditionsPreparation = (function () {
             if (scale !== 1) timed("layered_resize_ms",function(){doc.resizeImage(UnitValue(sourceDimensions[0]*scale,"px"),
                 UnitValue(sourceDimensions[1]*scale,"px"), null, ResampleMethod.BICUBICSMOOTHER);});
             // Keep the untouched composite as an independent outside-number proof.
+            if(hidden){savePNG(doc,"uncorrected.png");hidden.visible=false;}
             timed("original_export_ms",function(){savePNG(doc, "original.png");});
             app.fonts.getByName(layer.textItem.font);
             var text = layer.textItem.contents;
-            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
+            var m = /^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*\/\s*|\s+of\s+)(\d{1,6})(\s*)$/i.exec(text);
             if (!m || parseInt(m[4], 10) !== r.edition_total || r.edition_total < 1 || r.edition_total > 1000)
                 throw Error("edition_total_mismatch");
             var total = r.edition_total, w = doc.width.as("px"), h = doc.height.as("px");
@@ -162,18 +204,23 @@ var SCAutoEditionsPreparation = (function () {
                         timed("patch_save_ms",function(){savePNG(patch, "number-" + number + ".png");});
                     } finally { timed("patch_close_ms",function(){patch.close(SaveOptions.DONOTSAVECHANGES);}); app.activeDocument = doc; }
                 } else {
-                    // Experimental: merge the FULL composite before cropping,
+                    // Merge the FULL composite before cropping,
                     // then restore the exact layered history state. Cropping a
                     // layered document directly can change canvas-relative FX.
                     // Every patch must match the legacy output in native trials.
-                    var anchor = doc.activeHistoryState;
+                    var anchor = doc.activeHistoryState, numberLayerId = layer.id;
                     try {
                         timed("patch_merge_ms",function(){doc.mergeVisibleLayers();});
                         crop(doc);
                         timed("patch_save_ms",function(){savePNG(doc, "number-" + number + ".png");});
                     } finally {
                         timed("history_restore_ms",function(){doc.activeHistoryState = anchor;});
-                        var restored = []; named(doc,r.number_layer_name,restored);
+                        // Photoshop can rename an uncustomised text layer when
+                        // its contents change. Restore by the exact layer ID,
+                        // never the original display name or a guessed role.
+                        var restored = [];
+                        for (var ri=0;ri<doc.layers.length;ri++)
+                            if(doc.layers[ri].id===numberLayerId)restored.push(doc.layers[ri]);
                         if (restored.length !== 1 || restored[0].kind !== LayerKind.TEXT || restored[0].parent !== doc)
                             throw Error("preparation_history_restore_failed");
                         layer = restored[0];

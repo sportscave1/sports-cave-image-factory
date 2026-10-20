@@ -1,3 +1,4 @@
+from contextlib import closing
 import copy
 import unittest
 from unittest.mock import patch
@@ -189,7 +190,7 @@ class EditionOpsAllocationIntegrityTests(unittest.TestCase):
         )
         connection = _Connection([source])
 
-        with patch.object(supabase_backend, "connect", return_value=connection):
+        with patch.object(supabase_backend, "read_connection", side_effect=lambda: closing(connection)):
             rows = supabase_backend.list_edition_products_read_only(limit=10)
 
         self.assertEqual(len(rows), 1)
