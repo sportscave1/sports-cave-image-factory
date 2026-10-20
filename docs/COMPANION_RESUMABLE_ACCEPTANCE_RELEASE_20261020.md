@@ -54,6 +54,12 @@ fake metadata races and synthetic ID formatting were corrected before release;
 no production integrity or source validation was relaxed.
 
 Real-provider results are deliberately not asserted by these local tests.
+The first real attempt exposed the generic download helper normalising a
+permanent receipt ID into `/id:...`. It is corrected to preserve validated SDK
+IDs, with focused positive/negative coverage; ordinary path downloads retain
+their existing normalisation. The same retained isolated session is retried
+after that fix, without sending the household packet again. This is why actual
+provider acceptance is required before enabling normal admissions.
 Runtime release/acceptance evidence is retained in the task's ignored
 `output/companion-real-provider-acceptance/` directory. This includes exact
 Git/Render/helper revisions and module hashes, real-provider receipts, durable

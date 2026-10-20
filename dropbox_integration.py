@@ -514,7 +514,14 @@ def get_file_bytes(access_token, path):
 
 def get_file_response(access_token, path):
     """Open one Dropbox download response without buffering it in application memory."""
-    clean_path = normalize_dropbox_path(path)
+    # Permanent IDs are SDK locators, not relative folder paths. Turning an
+    # immutable receipt's id into /id:... loses the durable uploaded object.
+    clean_path = str(path or '').strip()
+    if clean_path.startswith('id:'):
+        if not re.fullmatch(r'id:[A-Za-z0-9_-]+',clean_path):
+            raise ValueError('Invalid Dropbox file or folder ID.')
+    else:
+        clean_path = normalize_dropbox_path(path)
     try:
         metadata, response = team_space_client(access_token).files_download(clean_path)
     except Exception as error:
