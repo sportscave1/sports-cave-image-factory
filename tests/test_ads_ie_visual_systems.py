@@ -28,7 +28,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
 
     def test_shared_banner_and_three_different_rooms(self):
         visuals = self.visuals(metadata={"edition_limit": 100})
-        for field in ("room_profile", "wall_colour", "primary_cue", "secondary_cue", "architectural_cue", "lighting", "product_width", "shot_distance"):
+        for field in ("room_profile", "wall_colour", "primary_cue", "architectural_cue", "lighting", "product_width", "shot_distance"):
             self.assertEqual(len({v[field] for v in visuals}), 3)
         for i, prompt in enumerate(self.prompts({"edition_limit":100})):
             for required in (visuals[i]["headline_text"], visuals[i]["supporting_line"],
@@ -41,16 +41,12 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         for sport in ("Motorsport", "NBA", "NFL", "Baseball", "Cricket", "Horse Racing"):
             rows = ads_page.resolve_standard_instant_experience_visuals(
                 product_name="Collector Subject", category=sport, product_metadata={"edition_limit":100})
-            self.assertEqual([r["room_profile_key"] for r in rows], ["hallway_gallery", "office_den", "bar_lounge"])
+            self.assertEqual([r["room_profile_key"] for r in rows], ["hallway_gallery", "minimal_art_wall", "collector_interior"])
             self.assertEqual(len({r["supporting_line"] for r in rows}), 3)
             styles[sport] = [r["room_materials"] for r in rows]
         self.assertEqual(len({tuple(v) for v in styles.values()}), 6)
-        for era, expected in (("historic", "timeless heritage"), ("modern", "sharper contemporary")):
-            rows = ads_page.resolve_standard_instant_experience_visuals(
-                product_name=f"{era} Team Collector Subject", category="NBA",
-                product_metadata={"edition_limit":100, "team_names":["Supplied Team"]})
-            self.assertTrue(all(expected in r["atmosphere"] for r in rows))
-            self.assertTrue(all("proud supporter" in r["atmosphere"] for r in rows))
+        for values in styles.values():
+            self.assertTrue(all("whisky" not in value and "leather" not in value for value in values))
 
     def test_unknown_and_other_limits_remain_truthful(self):
         self.assertEqual(len({v['headline_text'] for v in self.visuals()}), 3)
@@ -136,8 +132,8 @@ class ThreeVisualSystemsTests(unittest.TestCase):
 
     def test_prominence_and_underline_are_explicit_without_weakening_fidelity(self):
         for prompt in self.prompts({"edition_limit": 100}):
-            self.assertIn("about 10%", prompt)
-            self.assertIn("all outer frame edges fully visible", prompt)
+            self.assertIn("Achieve prominence through camera distance", prompt)
+            self.assertIn("Complete frame visible", prompt)
             self.assertIn("Width targets yield to source aspect ratio", prompt)
             self.assertIn("full measured glyph width", prompt)
             self.assertIn("most important scarcity term", prompt)

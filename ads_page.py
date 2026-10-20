@@ -5065,6 +5065,7 @@ def resolve_standard_instant_experience_visuals(
     product_metadata=None,
     campaign_moment=None,
     variation_token="",
+    recent_fingerprints=None,
 ):
     context = resolve_instant_experience_product_context(
         product_name,
@@ -5134,6 +5135,11 @@ def resolve_standard_instant_experience_visuals(
         "remaining_editions": _positive_int_or_none((product_metadata or {}).get("remaining_editions")),
         "editions_sold": (product_metadata or {}).get("editions_sold"),
     }, instant_experience_on_image_headline_is_valid)
+    ie_visuals.resolve_scene_set(resolved, {
+        "physical_product": physical_realism.physical_metadata(product_metadata),
+    }, recent_fingerprints=recent_fingerprints or (), selections=(
+        (product_metadata or {}).get("instant_experience_scene_selections") or ()
+    ))
     sibling_summaries = [
         {
             "route": visual["route"],
@@ -5296,8 +5302,8 @@ Resolved sibling fingerprints supplied for comparison:
 Within one three-image package:
 - Preserve the same immutable product and shared realism in three distinct premium rooms.
 - Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 man cave / office / den with the same fixed bottom 24–28% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 bar / lounge with the same fixed bottom 24–28% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 24–28% black/gold banner.
 - Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
 - Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned supporting line.
 
@@ -5356,6 +5362,7 @@ def build_standard_instant_experience_fingerprints(
     product_metadata=None,
     campaign_moment=None,
     variation_token="",
+    recent_fingerprints=None,
 ):
     validate_instant_experience_set_differentiation()
     visuals = resolve_standard_instant_experience_visuals(
@@ -5364,6 +5371,7 @@ def build_standard_instant_experience_fingerprints(
         product_metadata=product_metadata,
         campaign_moment=campaign_moment,
         variation_token=variation_token,
+        recent_fingerprints=recent_fingerprints,
     )
     return [
         standard_instant_experience_fingerprint(index, visual, category=category)
@@ -5386,6 +5394,7 @@ def build_standard_instant_experience_freshness_block(
         product_metadata=product_metadata,
         campaign_moment=campaign_moment,
         variation_token=variation_token,
+        recent_fingerprints=recent_fingerprints,
     )
     return f"""STRUCTURED INSTANT EXPERIENCE VISUAL FRESHNESS
 
@@ -5395,7 +5404,7 @@ Current automatic cover fingerprints:
 Recent Instant Experience fingerprints to avoid repeating:
 {_fingerprints_text(recent_fingerprints or [])}
 
-Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 man cave / office / den, LEFT-angle Room 3 bar / lounge. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
+Resolve three covers that visibly differ at thumbnail size: RIGHT-angle Room 1 hallway / gallery, CENTRE Room 2 minimal artwork-first residential wall, LEFT-angle Room 3 distinctive restrained collector interior. All three share the full-width black/gold bottom banner; use different furniture, architecture, wall treatment and lighting.
 
 Avoid repeating the same scene combination across the most recent six Instant Experience packs when recent fingerprints are supplied."""
 
@@ -5415,8 +5424,14 @@ def build_instant_experience_canonical_prompt_v4(
     category = _normalise_option_label(category) or "selected sport category"
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
-    shared_realism_rules = build_sports_cave_image_realism_rules(include_product_lock=True)
-    ie_quality_contract = build_instant_experience_image_quality_contract(visual)
+    shared_realism_rules = physical_realism.build(visual.get("physical_product"), compact=True)
+    ie_quality_contract = "\n\n".join((
+        build_instant_experience_fixed_opaque_footer_rules(),
+        build_instant_experience_on_image_copy_fit_rules(),
+        build_instant_experience_creative_cta_rules(visual["concept_id"]),
+        build_instant_experience_typography_quality_rules(visual),
+        _instant_experience_route_wording_rules(visual),
+    ))
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=country,
@@ -5426,12 +5441,6 @@ def build_instant_experience_canonical_prompt_v4(
         if campaign_moment_visual_context
         else ""
     )
-    fingerprint = standard_instant_experience_fingerprint(
-        index,
-        visual,
-        category=category,
-    )
-    resolved_json = json.dumps(fingerprint, ensure_ascii=False, indent=2)
     scarcity_note = (
         "The edition limit is verified. Use the resolved headline and route FOMO line exactly."
         if visual.get("scarcity_verified")
@@ -5448,6 +5457,7 @@ Do not generate the image automatically from this Ads-planning response.
 
 {ie_visuals.VERSION}
 
+{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
 {ie_visuals.camera_wall_rules(visual)}
 
 PRODUCT AND VERIFIED METADATA
@@ -5465,26 +5475,6 @@ PRODUCT AND VERIFIED METADATA
 - Edition limit source: {visual.get("edition_limit_source")}
 
 {scarcity_note}
-
-RESOLVED ROUTE VARIABLES — FOLLOW EXACTLY
-
-- Camera angle: {visual["camera_side"]}
-- Camera instruction: {visual["camera_instruction"]}
-- Room profile: {visual["room_profile"]}
-- Room type: {visual["room_type"]}
-- Room materials: {visual["room_materials"]}
-- Wall finish: {visual["wall_finish"]}
-- Wall colour: {visual["wall_colour"]}
-- Primary cue: {visual["primary_cue"]}
-- Secondary cue: {visual["secondary_cue"]}
-- Natural light: {visual["lighting"]}
-- Time of day: {visual["time_of_day"]}
-- Product dominance: {visual["shot_distance"]}
-- Lens character: {visual["lens"]}
-- Fixed footer: {visual["overlay_position"]}
-
-Resolved prompt metadata:
-{resolved_json}
 
 CANONICAL SPORTS CAVE MASTER PROMPT
 
@@ -5505,93 +5495,8 @@ Composition is locked:
 - Safe margins: 64-72 pixels.
 - The supplied framed product is the largest and most important visual element.
 
-The three-image package must produce:
-1. RIGHT-angle hallway / gallery, Room 1, with bottom banner.
-2. CENTRE / straight-on man cave / office / den, Room 2, with bottom banner.
-3. LEFT-angle bar / lounge, Room 3, with bottom banner.
-
-This route must deliver only its assigned camera role: {visual["route"]}.
-
-PRODUCT LOCK — ABSOLUTE
-
-The selected product and artwork are protected assets. Use original supplied product pixels wherever the current pipeline supports compositing.
-
-Preserve exactly:
-- athletes and facial features
-- bodies, hands, hairstyles, uniforms and poses
-- all existing words, numbers and signatures
-- existing badges and logos
-- artwork colours and contrast
-- artwork composition
-- frame proportions
-- complete product boundaries
-
-Never recreate, redraw, mirror, crop, extend, stretch, warp, blur, recolour or replace the artwork. Never place promotional copy inside the supplied artwork. Never add competing sports artwork to the room.
-
-ROOM SELECTION AND ENVIRONMENT
-
-Use the resolved room profile because it was selected from the product's available sport, era, artwork mood, palette and campaign context. The product supplies the sport. The room supplies the lifestyle.
-
-Room direction:
-- {visual["room_profile"]}
-- {visual["room_materials"]}
-- Primary cue: {visual["primary_cue"]}
-- Secondary cue: {visual["secondary_cue"]}
-
-Use the assigned furniture arrangement and restrained secondary styling cluster. A private drinks cabinet or bar shelf is allowed for Room 3; avoid branded bottle displays. Do not add team flags, jerseys, additional athlete pictures, readable televisions, sport-specific logos, neon signs, pool tables, excessive trophies or memorabilia.
-
-MANDATORY SEAMLESS WALL SYSTEM
-
-Every wall must be seamless, residential, premium, matte, realistically textured, visually quiet and free from unexplained lines.
-
-Approved wall finish for this route: {visual["wall_finish"]}.
-Resolved wall colour for this route: {visual["wall_colour"]}.
-
-Include extremely subtle natural microtexture, gentle organic tonal variation, realistic light falloff, soft brightness variation and approximately 2-4% visible mottling. No obvious repeated pattern.
-
-Never generate horizontal wall lines, vertical wall lines, tile lines, grout, stone-slab divisions, concrete formwork divisions, panel joins, timber slats, decorative panels, geometric grooves, repeated seams, wainscoting, moulding behind the artwork, brick outlines, wallpaper stripes, rectangular wall sections, artificial shadow bands, lines passing behind the frame, commercial hotel-lobby walls, corporate office walls or property-showroom walls.
-
-A genuine doorway, window edge or room corner is allowed only near the outer part of the scene. It must follow correct perspective and must not pass behind or visually divide the framed product. Reject an otherwise strong generation if an unexplained line appears anywhere on the wall.
-
-FRAME, GLASS AND MOUNTING REALISM
-
-Frame:
-- slim-to-medium black timber moulding
-- match the actual source's visible front moulding; no invented fixed front-face measurement
-- believable source-matched side-depth/wall projection only when evidence supports it
-- sharp 45-degree mitred corners
-- restrained satin-black finish
-- subtle irregular timber grain
-- physically consistent construction
-- natural frame depth appropriate to the selected camera angle
-
-Mounting:
-- subtle source-consistent wall separation; do not invent a precise mounting-gap depth
-- narrow contact shadow
-- softer secondary shadow
-- slightly more shadow beneath the frame
-- shadow direction consistent with room lighting
-- no black halo, uniform digital drop shadow or floating product
-
-Glass:
-- premium clear glass reflections on existing glazing, preserving verified construction
-- a restrained yet clearly visible window/room reflection across part of the correct glazing
-- gentle photographic reflection strength matched to the room lighting
-- one believable room or window reflection
-- reflection stops at the inner frame edge
-- artwork remains crisp
-- no plastic film, wrinkles, full-surface haze or glare over important faces, text or signatures
-
-LIGHTING
-
-Use one physically consistent source of soft daylight with restrained warm ambient fill. Resolved room lighting: {visual['lighting']}. Keep one coherent key-light direction.
-- Approximate temperature: 4000-4700K.
-- Match lighting across wall, furniture, frame and glass.
-- Use realistic falloff.
-- Keep peripheral room elements slightly softer than the product.
-- Do not darken or recolour the protected artwork.
-
-Never use a spotlight directly above the frame, glowing outlines, rim lighting, fog, smoke, light rays, heavy vignettes, conflicting light directions or excessive golden lighting.
+{SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0]}
+{shared_realism_rules}
 
 FIXED BLACK FOOTER AND DETERMINISTIC TYPOGRAPHY
 
@@ -5631,12 +5536,9 @@ INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 
 {ie_quality_contract}
 
-AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
+{campaign_moment_visual_block}
 
-{shared_realism_rules}
-
-{build_sport_country_visual_adaptation(category, country)}{campaign_moment_visual_block}
-
+{SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]}
 FINAL ROUTE CHECK
 
 - The three rooms are distinct at thumbnail size; each uses its assigned right / centre / left camera.
@@ -5688,6 +5590,7 @@ def build_standard_instant_experience_visual_prompts(
         product_metadata=product_metadata,
         campaign_moment=campaign_moment,
         variation_token=variation_token,
+        recent_fingerprints=recent_fingerprints,
     )
     prompts = [
         build_standard_instant_experience_image_prompt(
@@ -5733,6 +5636,7 @@ def build_standard_instant_experience_group_output_contract(
         product_metadata=product_metadata,
         campaign_moment=campaign_moment,
         variation_token=variation_token,
+        recent_fingerprints=recent_fingerprints,
     )
     for index, visual in enumerate(visuals, start=1):
         image_prompt = build_standard_instant_experience_image_prompt(
@@ -6281,7 +6185,7 @@ Do not generate images.
 
 Each standalone prompt must contain the shared Sports Cave product/realism lock exactly once and remain fully copyable into a fresh ChatGPT conversation.
 
-The three covers must visibly differ by visual family, layout and campaign signature, with product-aware camera and wall variation.
+The three covers must read as different residential properties through architecture, layout, wall treatment, furniture or peripheral cues and coherent light. Preserve the shared ad format and assigned camera roles.
 
 {build_standard_instant_experience_freshness_block(
     product_name=product_name,
@@ -6311,9 +6215,9 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
 - Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 man cave / office / den with the same fixed bottom 24–28% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 bar / lounge with the same fixed bottom 24–28% black/gold banner.
-- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glass realism, physical mounting, seamless wall rules, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 24–28% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
+- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 24–28% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 24–28% black/gold banner.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glazing realism, physical mounting, realistically textured quiet walls, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 24–28% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -8498,7 +8402,7 @@ def build_carousel_winner_examples(example_text):
     return "; ".join(example for example in examples if example)
 
 
-def build_category_winner_angle_block(category, campaign_type, country):
+def build_category_winner_angle_block(category, campaign_type, country, *, include_ie_setting=True):
     angle = get_category_winner_angle(category)
     if not angle:
         return ""
@@ -8530,7 +8434,7 @@ def build_category_winner_angle_block(category, campaign_type, country):
 - Audience: {angle["audience"]}.
 - Emotional territory: {angle["emotion"]}.
 - If the product is narrow to a team, player, rivalry, country or event, use that as the hook while keeping enough category-wide appeal for cold audiences.
-- Instant Experience setting: {angle["ie_setting"]}.
+{("- Instant Experience setting: " + angle["ie_setting"] + ".") if include_ie_setting else ""}
 - Catalogue/cards underneath should feel like a connected {category} collector range, not one isolated product.
 - Strong short-line examples for this category: {angle["headline_examples"]}.
 - Additional short copy cues for this category: {angle["description_examples"]}.
@@ -8589,7 +8493,7 @@ def build_standard_instant_experience_prompt(
         if specific_pattern or category in {"Baseball", "Football"}
         else "\nINTERNAL NOTE\nUsing generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.\n"
     )
-    category_block = build_category_winner_angle_block(category, campaign_type, country)
+    category_block = build_category_winner_angle_block(category, campaign_type, country, include_ie_setting=False)
     exact_offer = _standard_instant_experience_exact_offer(campaign_moment)
     product_context = resolve_instant_experience_product_context(
         product_name,
@@ -9390,6 +9294,7 @@ def build_ads_result_record(
             product_metadata=clean_product_metadata,
             campaign_moment=clean_campaign_moment,
             variation_token=clean_variation_token,
+            recent_fingerprints=recent_instant_experience_fingerprints,
         )
         if campaign_type == "Instant Experience" and not clean_creative_refresh_context
         else []
@@ -9539,6 +9444,8 @@ def _upgrade_saved_ads_visual_rules(result):
     """Enrich a saved image brief in memory without rebuilding its scene or saving it."""
     from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
     old = str(result.get("master_prompt") or "")
+    if ie_visuals.SCENE_VERSION in old:
+        return result
     upgraded = append_sports_cave_image_realism_rules(old, physical_product=result.get("product_metadata"))
     if upgraded == old:
         return result

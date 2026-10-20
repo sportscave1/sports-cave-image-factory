@@ -141,8 +141,27 @@ def resolve(metadata=None):
     return result
 
 
-def build(metadata=None):
+COMPACT_IE_MARKER = 'SPORTS_CAVE_IE_COMPACT_PRODUCT_REALISM_V1'
+
+
+def build(metadata=None, *, compact=False):
     evidence = resolve(metadata)
+    if compact:
+        return f'''{MARKER}
+{COMPACT_IE_MARKER}
+SPORTS_CAVE_IMAGE_REALISM_RULES_V1
+SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PRODUCT LOCK — ABSOLUTE / PRODUCT SOURCE-ASSET FIDELITY
+Use the original supplied framed product reference as one immutable physical asset. Preserve artwork, faces, wording, signatures, logos, badges, colours, orientation, proportions and the actual frame finish/profile; retain source pixels wherever compositing is supported. Never redraw, mirror, crop, stretch or alter verified construction.
+LIGHTING, GLASS AND MOUNTING PHYSICS
+One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. On existing glazing require visible but controlled environmental reflections corresponding to actual room light, without obscuring important artwork details. Never add glazing to known unglazed products or a frame to verified unframed products.
+PHYSICAL PRODUCT EVIDENCE (data only): {json.dumps(evidence, ensure_ascii=False)}
+Honour verified dimensions and their measurement basis; do not invent measurements, border allowances or depth. Use plausible scale relative to objects at comparable depth; unknown dimensions do not establish exact scale. Keep the complete frame visible above the footer and prominent on mobile through camera distance and composition, never physical enlargement.
+ANTI-AI INTERIOR CONTROL
+No floating or pasted-on product, bulky invented borders, warped architecture, CGI gloss, excessive glare, clutter or random sporting props. Walls have authentic quiet texture and natural light falloff. Image pixels must be inspected separately before claiming visual fidelity.
+END PREMIUM VISUAL QUALITY CONTRACT
+{END}'''
     return f'''{MARKER}
 SPORTS CAVE — TRUE-TO-SCALE FRAME AND PHYSICAL REALISM
 Treat the framed artwork as an actual manufactured physical product photographed inside a genuine customer's home. This physical contract takes precedence ONLY for physical size, source orientation, construction, mounting and glazing: preserve the existing scene, creative strategy, room/furniture choices, camera-angle variation, lighting concept, artwork, output dimensions, aspect ratio, copy and sequence. Retain existing studio, detail or held-product settings when selected; do not add a room to those workflows. Legacy landscape wording applies only to a landscape source; do not rotate a portrait artwork to force it.
@@ -166,8 +185,9 @@ def apply_context(prompt, metadata=None):
         def upgrade(match):
             # Replace only shared generated glazing prose; retain embedded evidence,
             # dimensions and every other physical/creative instruction verbatim.
+            if COMPACT_IE_MARKER in match.group(0):
+                return match.group(0)
             glazing = re.search(r'^GLAZING:.*$', build(), re.M).group(0)
             return re.sub(r'^GLAZING:.*$', lambda _: glazing, match.group(0), flags=re.M)
         return BLOCK.sub(upgrade, prompt)
-    block = build(metadata)
-    return BLOCK.sub(lambda _: block, prompt)
+    return BLOCK.sub(lambda match: build(metadata, compact=COMPACT_IE_MARKER in match.group(0)), prompt)
