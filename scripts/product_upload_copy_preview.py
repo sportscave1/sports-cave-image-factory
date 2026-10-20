@@ -45,4 +45,3 @@ if st.session_state.saved:
 if st.checkbox('Mount workflow assets'):
     components.declare_component('product_uploads_workflow',path=str(Path(__file__).resolve().parents[1]/'components/product_uploads'))(section='handoff',isolated_copy=True,key='workflow')
 st.text_area('Paste verification')
-

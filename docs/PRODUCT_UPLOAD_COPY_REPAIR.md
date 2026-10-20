@@ -64,3 +64,22 @@ Assets must ship with the application source, including the new
 components/product_upload_prompt_copy/index.html. No CDN or frontend build is
 needed. This is an uncommitted LOCAL implementation. Live end-to-end save and
 production cause verification remain outstanding; deployment is not claimed.
+
+## Authorized release — 20 October 2026
+
+After the user authorized commit and deployment, the patch was rebased onto
+current main c0a912f7 and committed as 7c58bfc3cd6a8f66b9c6298ace1b53c717b40f52.
+The browser regression and 35 passing/3 skipped tests were repeated on that
+revision before pushing. Existing sports-cave-os service srv-d8kl4on7f7vs73dvavv0
+auto-deployed it as dep-dbbj3jhsrm7s7389ak4g, confirmed LIVE, finished
+2026-10-20T09:21:11Z (8:21 pm Sydney).
+
+Post-live checks: root, /healthz and /_stcore/health returned 200. The production
+workflow component index.html, mapping.js and app.js returned 200 and matched
+the committed assets byte-for-byte after line-ending normalization. The new
+copy component endpoint returned 404 before a saved-product render registered
+it; live copy/paste was not exercised. No real product was saved for testing.
+
+A documentation/test-whitespace follow-up uses [skip render]; it changes no
+runtime behavior. Studio's initial static verification rejected only a trailing
+blank line in the preview harness; that blank line is removed in the follow-up.
