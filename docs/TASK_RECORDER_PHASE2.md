@@ -142,27 +142,33 @@ Evidence and screenshots stay in local application data under
 `TaskRecorderPhase2-V1Regression-64cdf0b0` directory. Original data/profile stays
 separate from these tests. Existing four companion processes remained running.
 
-**User trial:** the user approved their PC on the live HTTPS app and saved two
-recordings (11:53 and 11:54). Both were inspected: each contains only navigation
-to the local demo form; neither contains form values or a Save action. Navigation
-playback completed, but this does not verify form interaction or changed inputs.
-The guided form recording/replay remains pending the user's demonstration.
-Record/Play were corrected to bring an existing recorder window forward.
-A guided start at 12:20 was interrupted before form actions by the hosted timeout
-described above; it was saved for review, not replayed as a completed form trial.
-After correction, the 12:30 recording stayed active beyond the former timeout.
-The browser was subsequently closed before form actions were captured. Its
-checkpoint was recovered and flagged; the form trial still requires the user's
-interaction in the separate recorder browser.
-The pairing, two recordings and command receipts were transferred to the normal
-installed helper's TaskRecorderV1 data directory. The original V1 example and
-browser profile were verified unchanged, and both profiles were retained.
-No real ads, email or production writes are suitable trial actions. Meta
-automation remains unverified.
+**User trial — passed on the live HTTPS OS:** the user recorded the local demo
+form in the dedicated visible browser. `Recording 20 Oct 12:38` contains six
+supported steps: navigation, Product name, Headline, Destination URL, Approved,
+and Save demo product. Exact playback completed all six steps; the user confirmed
+`Launcher demonstration`, `Local runner restart verified`, and
+`https://example.com` in the visible result.
 
-**Live HTTPS:** commit 935960ae deployed successfully to the existing primary,
-webhook and worker services. The private migration applied; primary/webhook health
-passed and unauthenticated account/device requests were rejected. Nathan's
-authenticated popup and Connected PC state were visually verified. Real-account
-PC approval, saved navigation recordings and confirmed playback were observed
-separately from isolated automated tests. The substantive form trial is pending.
+A separate copy, `Launcher demonstration — reusable`, was converted to labelled
+inputs under Advanced. Playback completed six steps with `Launcher demonstration B`,
+`Changed inputs verified`, and `https://example.com/product-b`. The user supplied
+the visible result containing those values and `submissions: 1`. The original
+recording revision remained unchanged. These were harmless local fixture writes;
+no Meta ads, email, budgets or customer data were changed. Meta automation remains
+unverified.
+
+Earlier incomplete recordings remain preserved. Browser focus, hosted long-poll
+timeout and closed-browser recovery fixes were installed and regression tested.
+The pairing, recordings and receipts persist in the normal installed helper's
+TaskRecorderV1 directory; the original V1 profile and examples were retained.
+Local evidence: `TaskRecorderV1/human-trial.json` and
+`TaskRecorderPhase2-Acceptance-64cdf0b0/release-evidence.json` under application data.
+
+**Live HTTPS — verified:** recorder implementation through commit `2a524b19`
+was pushed to Git main and deployed to the existing primary, webhook and worker
+services. The recorder private migration applied; health checks passed and
+unauthenticated account/device requests were rejected. Real-account PC approval,
+authenticated Connected state, reconnection and both human form replays were
+verified separately from isolated automated tests. Subsequent companion releases
+are preserved. Automated revocation and fault injection used isolated storage,
+not the user's live paired device.
