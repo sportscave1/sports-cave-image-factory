@@ -121,6 +121,8 @@ def approved_upload_source(connect, pid, metadata, *, actor=None, key=None):
         if key and str(row['id']) != str(key) or actor and row['actor_id'] != str(actor):
             continue
         op = row['data'].get('upload_operation') or {}
+        if (op.get('sync_map') or {}).get('manual_takeover'):
+            continue
         source = (op.get('sync_map') or {}).get('moved') or op.get('source') or {}
         if (op.get('product_id') == pid and op.get('binding') in ('correlation', 'existing_mapping', 'operator')
                 and all(source.get(k) == metadata.get(k) for k in ('id', 'rev', 'content_hash', 'path_display'))):
@@ -158,6 +160,8 @@ class Mapping:
             with self.store.locked(key, actor['id'], provider_io=True) as (row, cur):
                 op = operation(row)
                 task = op['sync_map']
+                if task.get('manual_takeover'):
+                    raise ValueError('This attempt was retired by manual PSD mapping. Use the Edition Ops link.')
                 if task.get('lease') != lease:
                     raise ValueError('Another attempt owns Map. Refresh its progress.')
                 current_source(row, task['source_version'])
@@ -323,6 +327,8 @@ class Mapping:
             raise PermissionError('Your account needs permission to attach a product PSD.')
         prior = self.store.read(key, actor['id'])
         prior_task = ((prior or {}).get('data',{}).get('upload_operation') or {}).get('sync_map') or {}
+        if prior_task.get('manual_takeover'):
+            raise ValueError('This attempt was retired by manual PSD mapping. Use the Edition Ops link.')
         if prior_task.get('state') == 'Mapped':
             current_source(prior, source_version)
             result = self.status(key, actor)
@@ -334,6 +340,8 @@ class Mapping:
         with self.store.locked(key, actor['id']) as (row, cur):
             source = current_source(row, source_version)
             op = operation(row); task = op.setdefault('sync_map', {})
+            if task.get('manual_takeover'):
+                raise ValueError('This attempt was retired by manual PSD mapping. Use the Edition Ops link.')
             if row['data'].get('lifecycle'):
                 raise ValueError('This older upload has an existing Companion handoff. Review that retained workflow before Map; it was not changed.')
             if row['data'].get('workflow_version') != 3:
