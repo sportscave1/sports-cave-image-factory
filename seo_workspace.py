@@ -38,6 +38,7 @@ LEGACY_CITATION_FIXTURE_PATH = BASE_DIR / "data" / "seo_citations_legacy_v1.json
 SEO_STORE_CACHE_SECONDS = 30.0
 
 BLOG_STATUSES = (
+    "Deferred", "Complete",
     "Idea",
     "Brief",
     "Draft",

@@ -14,7 +14,9 @@ import os_accounts
 VIEWS = ('Pages', 'Queries', 'Channels', 'Engagement', 'Ecommerce', 'Events', 'Audience', 'Realtime', 'Overview details', 'Store operations', 'Mappings')
 
 def save(store, state, user):
-    store.save(state, actor_id=user.get('id') or '')
+    try: store.save(state, actor_id=user.get('id') or '')
+    except workspace.SEOStoreError as error:
+        st.error(str(error)); st.stop()
 
 def table(rows, *, key):
     if rows:
@@ -245,7 +247,7 @@ def plan(user, state, store, navigate, initial=None):
     types = ('All', *model.TYPES)
     kind = st.selectbox('Work type', types, index=types.index(initial) if initial in types else 0)
     status = st.selectbox('Status', ('Active', 'All', *model.STATUSES))
-    rows = [r for r in state['plan_items'] if (not r.get('admin_only') or os_accounts.is_admin(user)) and (kind=='All' or r.get('work_type')==kind) and (status=='All' or (status=='Active' and r.get('status') not in model.CLOSED) or status==r.get('status'))]
+    rows = [r for r in state['plan_items'] if (not r.get('admin_only') or os_accounts.is_admin(user)) and (kind=='All' or r.get('work_type')==kind) and (status=='All' or (status=='Active' and r.get('status') in model.ACTIONABLE) or status==r.get('status'))]
     rank = {'High':0,'Medium':1,'Low':2}
     rows.sort(key=lambda r:(rank.get(r.get('priority'),1), r['created_at']))
     table([{k:r.get(k) for k in ('id','title','target','work_type','priority','status','reason')} for r in rows], key='seo-plan-export')
@@ -265,12 +267,14 @@ def plan(user, state, store, navigate, initial=None):
             st.caption(row['id'])
             st.write('Keyword mappings', [m for m in state['keyword_mappings'] if m.get('primary_keyword','').casefold()==str(row.get('query') or '').casefold() and row.get('query')])
             st.json({'evidence':row.get('evidence'), 'context':row.get('context'), 'related_query':row.get('query'), 'related_draft':row.get('draft_id'), 'observed_at':row.get('observed_at')})
+            editable=not row.get('source_edit_admin') or os_accounts.is_admin(user)
+            if not editable: st.caption('Legacy workflow changes require an administrator.')
             with st.form('seo-task-edit'):
                 title=st.text_input('Task title',value=row['title'])
                 priority=st.selectbox('Priority', ('High','Medium','Low'), index=('High','Medium','Low').index(row.get('priority','Medium')))
                 task_status=st.selectbox('Task status',model.STATUSES,index=model.STATUSES.index(row.get('status','Open')))
                 reason=st.text_area('Reason / next action',value=row.get('reason',''))
-                if st.form_submit_button('Save task'):
+                if st.form_submit_button('Save task',disabled=not editable):
                     model.update_task(state,row,{'title':title,'priority':priority,'status':task_status,'reason':reason},user)
                     save(store,state,user); st.rerun()
             if st.button('Prepare linked content draft'):
@@ -382,7 +386,7 @@ def worker(user,state,store,reports,navigate):
         else:
             loaded=any(k[0]==label and bool(value) for k,value in st.session_state.get('seo-phase1-results',{}).items())
             col.write('Report available in this session' if loaded else 'Selected; report not yet verified' if connection.get(key) else 'Unavailable in local mode' if model.local_mode() else 'Not verified')
-    active=[r for r in state['plan_items'] if r.get('status') not in model.CLOSED and (not r.get('admin_only') or os_accounts.is_admin(user))]
+    active=[r for r in state['plan_items'] if r.get('status') in model.ACTIONABLE and (not r.get('admin_only') or os_accounts.is_admin(user))]
     reviewable=[r for r in [*state['blog_records'],*state['blog_projects']] if not r.get('archived_at') and (not r.get('project_id') or os_accounts.is_admin(user) or r.get('owner_id')==user.get('id'))]
     reviews=[r for r in reviewable if model.valid_decision(state,r)!='Approved']
     technical=sum(r.get('work_type')=='Technical fix' for r in active)
@@ -431,7 +435,7 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
         st.error('You do not have access to this workspace.')
         return
     destination,initial=model.destination(route)
-    store=store or model.store_for_workspace()
+    store=store or model.store_for_workspace(user)
     # Local mode never discovers database credentials or launches a production integration.
     if reports is None and not model.local_mode():
         from google_direct_reporting import GoogleReports

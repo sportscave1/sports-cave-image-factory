@@ -16,15 +16,19 @@ import analytics_contracts as contracts
 CLOSED = {'Dismissed', 'Done'}
 TYPES = ('Content', 'Product / collection', 'Technical fix', 'Internal links', 'Other')
 STATUSES = ('Open', 'In progress', 'Deferred', 'Ready for review', 'Done', 'Dismissed')
+ACTIONABLE = {'Open','In progress','Ready for review'}
 
 def local_mode():
     # Explicit development boundary; a configured database never opts into remote writes.
-    return os.environ.get('SEO_PHASE1_MODE', 'local') != 'shared'
+    mode=os.environ.get('SEO_PHASE1_MODE')
+    if mode:return mode != 'shared'
+    return not bool(os.environ.get('RENDER_SERVICE_ID') or os.environ.get('RENDER'))
 
-def store_for_workspace():
+def store_for_workspace(user=None):
     if local_mode():
         return workspace.LocalSEOStore(Path(__file__).parent / '.local' / 'seo-phase1.json')
-    return workspace.default_store()
+    from seo_phase1_store import SharedSEOStore
+    return SharedSEOStore(user=user)
 
 def destination(route):
     return {
@@ -47,7 +51,7 @@ def event(state, action, target='', *, source='SEO', status='Saved', detail=None
         'detail': detail or {}, 'time': workspace.utc_now(),
     })
 
-def create_task(state, *, title, target='', query='', work_type='Content', intent='improve', evidence=None, context=None, actor=None):
+def create_task(state, *, title, target='', query='', work_type='Content', intent='improve', evidence=None, context=None, actor=None, task_id=''):
     # Keep URL identity intact, including meaningful query parameters. Query intent is distinct.
     from seo_technical_audit import normalize_url
     identity = json.dumps([normalize_url(target) or target.strip(), query.strip().casefold(), work_type, intent], ensure_ascii=False)
@@ -61,7 +65,7 @@ def create_task(state, *, title, target='', query='', work_type='Content', inten
         'reason': (evidence or {}).get('explanation') or 'Manually selected for review',
         'evidence': deepcopy(evidence or {}), 'context': deepcopy(context or {}),
         'observed_at': workspace.utc_now(),
-    }, actor=actor)
+    }, actor=actor,record_id=task_id)
     event(state, 'Task change', row['id'], detail={'change': 'created', 'title': title})
     return row, True
 
@@ -208,7 +212,10 @@ def import_saved_work(state, *, tasks=(), recommendations=(), actor=None):
             target=item.get('target_page') or item.get('target_url') or item.get('recommended_page') or item.get('current_page') or '',
             query=item.get('target_keyword') or item.get('primary_keyword') or '',
             work_type='Content' if source=='draft' else 'Internal links' if source=='link_plan' else 'Other',
-            intent=ref, evidence=item, actor=actor)
+            intent=ref, evidence=item, actor={},task_id='seo-source-'+sha256(ref.encode()).hexdigest()[:32])
+        row['created_at']=item.get('created_at') or item.get('updated_at') or ''
+        row['updated_at']=item.get('updated_at') or row['created_at']
+        row['observed_at']=row['updated_at']
         row['source_ref'] = ref
         row['admin_only'] = source=='growth_task' and item.get('status') not in {'approved','assigned','in_progress','completed','measuring','measured'}
         if source=='draft': row['draft_id'] = item['id']

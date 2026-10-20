@@ -2938,7 +2938,7 @@ def _render_tasks_results(user, *, growth_store=None):
         st.info("Approved SEO tasks and measurements will appear after the Growth Intelligence migration is applied.")
         return
     _section_heading("Approved SEO Tasks")
-    visible_tasks = tasks if os_accounts.is_admin(user) else [row for row in tasks if row.get("status") in {"approved", "assigned", "in_progress", "completed", "measuring", "measured"}]
+    visible_tasks = tasks if os_accounts.is_admin(user) else [row for row in tasks if row.get("status") in {"approved", "assigned", "in_progress", "deferred", "ready_for_review", "completed", "measuring", "measured"}]
     _table(
         [
             {
