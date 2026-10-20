@@ -23,6 +23,28 @@ assert.equal(context.state.tasks[0].id,'new-task');
 context.update({devices:[]});assert.equal(context.device,null);assert.equal(context.selected,'');
 console.log('PASS compact metadata merge, fresh task changes, stale response rejection, revocation clears selection');
 
+const statusSource=source.slice(source.indexOf('function status(){'),source.indexOf('function renderControls(){'));
+const statusContext={device:{connected:true,state:{}},transportOK:true,online:()=>true,pending:new Map(),starting:()=>false,
+ active:()=>false,tasks:()=>[],selected:'',state:{mode:'interrupted',message:'The scrolled control has no supported scroll position. Draft preserved.'}};
+vm.createContext(statusContext);vm.runInContext(statusSource,statusContext);
+assert.equal(statusContext.status(),statusContext.state.message);
+statusContext.device.needs_review=true;
+assert.equal(statusContext.status(),statusContext.state.message);
+statusContext.state.message='';
+assert.equal(statusContext.status(),'Interrupted · Review the recorder, then Stop');
+console.log('PASS interruption reason survives rendering and reconnect review');
+statusContext.device.needs_review=false;
+statusContext.state={mode:'completed',active_task_id:'new-copy'};
+statusContext.selected='old-copy';
+statusContext.tasks=()=>[{id:'old-copy',result:'stopped'},{id:'new-copy',result:'completed'}];
+assert.equal(statusContext.status(),'Stopped');
+statusContext.selected='new-copy';assert.equal(statusContext.status(),'Completed');
+statusContext.selected='';assert.equal(statusContext.status(),'Ready');
+statusContext.state={mode:'stopped',active_task_id:'old-copy',message:'Stopped.'};
+statusContext.selected='old-copy';statusContext.tasks=()=>[{id:'old-copy',result:'interrupted'}];
+assert.equal(statusContext.status(),'Needs review · Previous action is unconfirmed');
+console.log('PASS terminal status belongs to the selected recording');
+
 const poll=source.slice(source.indexOf('async function poll(){'),source.indexOf("$('record').onclick"));
 (async()=>{
  let calls=0,resolve;

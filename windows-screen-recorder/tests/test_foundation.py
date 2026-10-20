@@ -132,6 +132,30 @@ class FoundationTests(unittest.TestCase):
             validate(old)
         self.assertEqual(old, original)
 
+    def test_scroll_contract_rejects_unbounded_or_unclassified_positions(self):
+        task = self.repo.get(self.saved()["id"])
+        item = {**action(), "version":2, "kind":"scroll", "requires":["uia.scroll.v2"],
+                "target":{**action()["target"], "scope":[]},
+                "value":{"horizontal":-1, "vertical":37.5}}
+        task["actions"] = [item]
+        self.assertEqual(validate(task)["actions"][0]["value"]["vertical"], 37.5)
+        for bad in (-2, 101, True, "30", float("nan"), float("inf")):
+            item["value"]["vertical"] = bad
+            with self.subTest(bad=bad), self.assertRaises(Invalid):
+                validate(task)
+        item["value"] = {"horizontal":-1, "vertical":-1}
+        with self.assertRaises(Invalid):
+            validate(task)
+
+    def test_menu_expansion_requires_an_explicit_state(self):
+        task = self.repo.get(self.saved()["id"])
+        task["actions"] = [{**action(), "version":2, "kind":"expand", "requires":["uia.expand.v2"],
+                            "target":{**action()["target"], "scope":[]}, "value":False}]
+        self.assertIs(validate(task)["actions"][0]["value"], False)
+        task["actions"][0]["value"] = 0
+        with self.assertRaises(Invalid):
+            validate(task)
+
     def test_draft_write_failure_stops_capture(self):
         self.start()
         def fail(*args):

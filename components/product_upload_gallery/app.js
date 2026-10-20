@@ -7,16 +7,16 @@
   const resize=()=>requestAnimationFrame(()=>{const next=Math.ceil(root.getBoundingClientRect().height);if(next!==height){height=next;post('streamlit:setFrameHeight',{height:next});}});
   const url=value=>value?new URL(value,location.origin).href:'';
   const active=version=>{if(version!==epoch||controller.signal.aborted)throw new Error('Selection changed. Reopen the current image.');};
-  const button=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.id=id;return b;};
+  const button=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-label',label);b.title=label+' to clipboard';b.id=id;return b;};
   const feedbackTimers=new Map();
   const clearFeedback=b=>{clearTimeout(feedbackTimers.get(b));feedbackTimers.delete(b);};
   const clearAllFeedback=()=>{for(const timer of feedbackTimers.values())clearTimeout(timer);feedbackTimers.clear();};
-  function copyFeedback(b){
-    const original=b.innerHTML;
+  function copyFeedback(b,successMessage){
+    const original=b.innerHTML,originalTitle=b.title,originalMinWidth=b.style.minWidth||'';
     return {
-      begin(){clearFeedback(b);b.textContent='Copying…';b.disabled=true;resize();},
-      restore(){clearFeedback(b);b.innerHTML=original;resize();},
-      success(){clearFeedback(b);b.textContent='Copied';feedbackTimers.set(b,setTimeout(()=>{feedbackTimers.delete(b);b.innerHTML=original;resize();},2000));}
+      begin(){clearFeedback(b);const width=b.getBoundingClientRect().width;if(width>0)b.style.minWidth=width+'px';b.textContent='Copying…';b.title='Copying…';b.disabled=true;resize();},
+      restore(){clearFeedback(b);b.innerHTML=original;b.title=originalTitle;b.style.minWidth=originalMinWidth;resize();},
+      success(){clearFeedback(b);b.textContent='Copied';b.title=successMessage;feedbackTimers.set(b,setTimeout(()=>{feedbackTimers.delete(b);b.innerHTML=original;b.title=originalTitle;b.style.minWidth=originalMinWidth;resize();},2000));}
     };
   }
   function link(original,label){const a=document.createElement('a');a.href=url(original);a.target='_blank';a.rel='noopener';a.setAttribute('aria-label','Open '+label+' full-resolution original');return a;}
@@ -45,7 +45,7 @@
   function actions(args){
     const row=document.createElement('div');row.className='actions';
     const copyImage=button('Copy black frame','copyImage'),copyPrompt=button('Copy prompt','copyPrompt');
-    const imageFeedback=copyFeedback(copyImage),promptFeedback=copyFeedback(copyPrompt);
+    const imageFeedback=copyFeedback(copyImage,'Image copied'),promptFeedback=copyFeedback(copyPrompt,'Prompt copied');
     copyImage.disabled=!args.original;row.append(copyImage,copyPrompt);root.append(row);
     const status=document.createElement('div');status.id='status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(status);
     copyPrompt.onclick=async()=>{

@@ -111,7 +111,7 @@ class DeviceAgent:
                 s["tasks"].append({"id":draft["id"],"name":draft["name"],"inputs":[],"steps":len(draft["steps"]),
                                    "duration_ms":None,"updated_at":None,"result":"Recording","revision":None})
         settings=self.settings()
-        s.update(protocol=4,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
+        s.update(protocol=4,operation_id=self.operation_id,selected_id=s.get("selected_id",self.runner.draft.get("id")),
                  starting_url=settings.get("url",""),startup=settings.get("startup",False),
                  connection="connected" if self.connected else "reconnecting")
         if self.preparing and s["mode"] in {"idle","stopped","completed"}:

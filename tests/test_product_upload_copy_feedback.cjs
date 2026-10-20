@@ -6,8 +6,8 @@ function harness(){
   set textContent(v){this.html=v;this.children=[];}get textContent(){return this.html;}
   set innerHTML(v){this.html=v;}get innerHTML(){return this.html;}
   set id(v){elements.set(v,this);}append(...items){this.children.push(...items);}
-  replaceChildren(...items){this.children=items;}setAttribute(){}addEventListener(){}
-  getBoundingClientRect(){return {height:60};}
+  replaceChildren(...items){this.children=items;}setAttribute(k,v){(this.attributes??={})[k]=v;}addEventListener(){}
+  getBoundingClientRect(){return {height:60,width:120};}
  }
  const root=new Element();elements.set('root',root);
  const writes=[];let failure=false,pending=null;
@@ -26,12 +26,20 @@ function harness(){
 (async()=>{
  const h=harness();h.render('Unchanged master prompt');const prompt=h.elements.get('copyPrompt'),image=h.elements.get('copyImage');
  let resolve;h.pending(new Promise(r=>resolve=r));const copying=prompt.onclick();
+ assert.equal(prompt.style.minWidth,'120px');
  assert.equal(prompt.textContent,'Copying…');assert.equal(h.timers.size,0);resolve();await copying;h.pending(null);
+ assert.equal(prompt.attributes['aria-label'],'Copy prompt');assert.equal(image.attributes['aria-label'],'Copy black frame');
+ assert.equal(prompt.title,'Prompt copied');
+ assert.equal(prompt.style.minWidth,'120px');
  assert.equal(prompt.textContent,'Copied');h.tick(1000);await image.onclick();assert.equal(image.textContent,'Copied');
  h.tick(999);assert.equal(prompt.textContent,'Copied');h.tick(1);assert.equal(prompt.textContent,'Copy prompt');assert.equal(image.textContent,'Copied');
  h.tick(1000);assert.equal(image.textContent,'Copy black frame');
+ assert.equal(prompt.title,'Copy prompt to clipboard');assert.equal(image.title,'Copy black frame to clipboard');
+ assert.equal(prompt.style.minWidth,'');assert.equal(image.style.minWidth,'');
  await prompt.onclick();h.tick(1500);await prompt.onclick();h.tick(500);assert.equal(prompt.textContent,'Copied');h.tick(1500);assert.equal(prompt.textContent,'Copy prompt');
  h.fail(true);await prompt.onclick();assert.equal(prompt.textContent,'Copy prompt');assert.match(h.elements.get('status').textContent,/Could not copy prompt/);assert.equal(h.timers.size,0);
+ assert.equal(prompt.title,'Copy prompt to clipboard');
+ assert.equal(prompt.style.minWidth,'');
  await image.onclick();assert.equal(image.textContent,'Copy black frame');assert.match(h.elements.get('status').textContent,/Could not copy image/);
  h.fail(false);await prompt.onclick();await image.onclick();assert.equal(h.timers.size,2);h.render('new master');assert.equal(h.timers.size,0);
  await h.elements.get('copyPrompt').onclick();h.events.pagehide();assert.equal(h.timers.size,0);

@@ -80,7 +80,7 @@ async function confirmCommand(command,result){
   if(confirmDelete===command.payload.id)confirmDelete='';notice('Recording deleted.');
  }
  if(command.kind==='rename'){renames.set(command.payload.id,receipt.name||command.payload.name);editing='';notice('Recording renamed.');}
- if(command.kind==='record'){selected='';details=null;values={};}
+ if(command.kind==='record'){selected='';details=null;values={};if(desktopCapable())notice(receipt.message||'Choose your prepared window on the Windows toolbar.');}
  if(command.kind==='repair-copy'){selected=receipt.new_task_id;details=null;values={};notice('Corrected copy saved. Original preserved. Review it, then press Play.');}
  if(command.kind==='edit-copy'){selected=receipt.new_task_id;details=null;values={};notice('Edited copy saved. Original preserved. Press Play when ready.');}
  if(receipt.tasks)state={...state,tasks:receipt.tasks};
@@ -125,20 +125,26 @@ async function reconcile(){
 function status(){
  if(device?.connected&&transportOK&&!device.state)return 'Loading recordings…';
  if(!online())return 'PC offline · Start the Windows helper';
- if(device?.needs_review)return 'Interrupted · Check the browser, then Stop';
+ if(device?.needs_review)return state.message||'Interrupted · Review the recorder, then Stop';
  const mode=state.mode||'idle';
  if([...pending.values()].some(c=>c.kind==='pause'))return 'Pausing…';
  if([...pending.values()].some(c=>['stop','stop-save'].includes(c.kind)))return 'Stopping…';
  if(starting())return 'Starting…';
+ if(mode==='starting')return state.message||'Starting…';
  if(mode==='running')return state.message?.startsWith('Step ')?state.message:`Playing · ${state.step} of ${state.total}`;
  if(mode==='pausing')return 'Pausing… The current action is finishing.';
  if(mode==='recording')return 'Recording · Stop to save';
  if(mode==='recording_paused')return state.message||'Recording paused';
  if(mode==='paused')return state.message||'Paused';
  if(!active()&&tasks().find(t=>t.id===selected)?.issue_count)return 'Needs attention · Review the flagged step below';
+ if(!active()&&tasks().find(t=>t.id===selected)?.result==='interrupted')return 'Needs review · Previous action is unconfirmed';
+ if(['completed','stopped'].includes(mode)&&state.active_task_id&&selected!==state.active_task_id){
+  const result=tasks().find(t=>t.id===selected)?.result;
+  return {completed:'Completed',stopped:'Stopped',interrupted:'Needs review'}[result]||'Ready';
+ }
  if(mode==='completed')return 'Completed';
- if(mode==='stopped')return state.message==='Recording saved.'?'Recording saved.':'Stopped';
- if(mode==='interrupted')return 'Interrupted. Check the browser, then Stop.';
+ if(mode==='stopped')return state.message||'Stopped';
+ if(mode==='interrupted')return state.message||'Interrupted. Review the recorder, then Stop.';
  return 'Ready';
 }
 function renderControls(){
@@ -149,7 +155,7 @@ function renderControls(){
  $('name').disabled=$('website').disabled=busy;
  $('view').disabled=!enabled||!device?.state;
  $('play').hidden=busy;$('play').disabled=!enabled||!capable||!task||!!stepEditor||editorLoading||(desktopTask(task)&&(!desktopCapable()||!task.playback_available));
- $('website').hidden=desktopCapable();$('view').hidden=desktopCapable();
+ $('website').closest('label').hidden=desktopCapable();$('name').closest('label').hidden=desktopCapable();$('view').hidden=desktopCapable();
  $('pause').hidden=!['running','recording'].includes(mode);
  $('resume').hidden=!(mode==='recording_paused'||mode==='paused'&&state.can_resume);
  $('stop').hidden=!busy&&mode!=='interrupted';
@@ -163,7 +169,7 @@ function renderControls(){
 }
 function date(value){return value?new Date(value).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'}):'—';}
 function duration(value){if(!Number.isFinite(value)||value<0)return '—';const secs=Math.floor(value/1000);return String(Math.floor(secs/60)).padStart(2,'0')+':'+String(secs%60).padStart(2,'0');}
-function select(id){$('inputs').replaceChildren();selected=id;sessionStorage.setItem('recorder-selected',id);details=null;values={};render();const t=tasks().find(t=>t.id===id);if(t?.inputs?.length)inspect(id);}
+function select(id){$('inputs').replaceChildren();selected=id;sessionStorage.setItem('recorder-selected',id);details=null;values={};notice('');render();const t=tasks().find(t=>t.id===id);if(t?.inputs?.length)inspect(id);}
 async function inspect(id){
  const request=++detailRequest;const result=await send('inspect',{id});
  if(result&&selected===id&&request===detailRequest){details=result;values={...result.values};renderInputs();}
@@ -228,15 +234,17 @@ function renderTable(){
   cells[4].textContent=isActive?(mode==='running'?'Playing':mode==='pausing'?'Pausing…':mode==='recording_paused'?'Recording paused':mode==='paused'?'Paused':mode==='recording'?'Recording':'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Interrupted',running:'Interrupted',paused:'Interrupted'}[t.result]||t.result||'Saved');
   if(!isActive&&t.attention?.length){cells[4].replaceChildren(button('Needs attention','Review step '+t.attention[0].step+' of '+t.name,()=>review(t.id)));cells[4].firstChild.className='needs-attention';}
   const actions=document.createElement('div');actions.className='actions';
-  actions.append(button('▶ Play','Play '+t.name,()=>play(t.id),!online()||!modern()||active()||starting()));
+  const immutable=desktopTask(t),unplayable=immutable&&(!desktopCapable()||!t.playback_available||!t.revision);
+  actions.append(button('▶ Play','Play '+t.name,()=>play(t.id),!online()||!modern()||active()||starting()||unplayable));
   if(isActive){
    if(mode==='running')actions.append(button('Pause','Pause '+t.name,()=>send('pause')));
    if(mode==='paused'&&state.can_resume||mode==='recording_paused')actions.append(button('Resume','Resume '+t.name,()=>send('resume')));
    actions.append(button('Stop','Stop '+t.name,stop,!online()));
   }
-  actions.append(button('Rename','Rename '+t.name,()=>{editing=t.id;editName=t.name;confirmDelete='';renderTable();},isActive||!online()||!modern()));
-  actions.append(button('Edit','Edit '+t.name,()=>editRecording(t.id),active()||starting()||!online()));
-  const trash=button('','Delete '+t.name,()=>{confirmDelete=t.id;editing='';renderTable();},!online()||!modern());trash.className='icon';
+  actions.append(button('Rename','Rename '+t.name,()=>{editing=t.id;editName=t.name;confirmDelete='';renderTable();},immutable||isActive||!online()||!modern()));
+  actions.append(button('Edit','Edit '+t.name,()=>editRecording(t.id),immutable||active()||starting()||!online()));
+  const trash=button('','Delete '+t.name,()=>{confirmDelete=t.id;editing='';renderTable();},immutable||!online()||!modern());trash.className='icon';
+  if(immutable)for(const control of actions.children)if(control.disabled)control.title='Saved desktop recordings are immutable. Record another task from the Windows toolbar.';
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','14');svg.setAttribute('height','14');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.8');svg.setAttribute('aria-hidden','true');
   const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');svg.append(path);trash.append(svg);actions.append(trash);cells[5].append(actions);
   if(confirmDelete===t.id){const c=document.createElement('div');c.className='confirm';c.append(document.createTextNode('Delete '+t.name+'? '),button('Delete','Confirm delete '+t.name,()=>send('delete',{id:t.id}),!online()||[...pending.values()].some(v=>v.kind==='delete'&&v.payload.id===t.id)),button('Cancel','Cancel delete '+t.name,()=>{confirmDelete='';renderTable();}));cells[5].append(c);}
@@ -253,7 +261,7 @@ function render(){
  $('pc').textContent=device?device.name+' · '+(online()?'Connected':'Offline'):'No PC connected';
  $('setup').hidden=online();$('setupText').textContent=device?'Start Task Recorder from the Windows Start menu on '+device.name+'.':'Connect your Windows PC once to get started.';
  $('seen').textContent=device?'Last seen '+date(device.last_seen*1000):'';
- $('selectedSettings').hidden=!selected;$('selectedName').textContent=tasks().find(t=>t.id===selected)?.name||'';
+ $('selectedSettings').hidden=!selected||desktopTask(tasks().find(t=>t.id===selected));$('selectedName').textContent=tasks().find(t=>t.id===selected)?.name||'';
  $('reusable').disabled=!online()||!modern()||active()||starting();
  renderControls();renderTable();renderAttention();stepEditor?.refresh();fit();
 }

@@ -1,10 +1,8 @@
 """Same-origin OS panel and outbound helper transport; no browser control on Render."""
 import asyncio
-import io
 import json
 import os
 import time
-import zipfile
 from collections import defaultdict, deque
 from pathlib import Path
 from starlette.concurrency import run_in_threadpool
@@ -210,14 +208,17 @@ async def exchange(request):
 @bounded
 async def setup(request):
     await actor(request)
-    stream=io.BytesIO()
-    with zipfile.ZipFile(stream,"w",zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted((ROOT/"task_recorder").glob("*")):
-            if path.is_file() and path.suffix in {".py",".js",".css",".html",".txt"}:
-                archive.write(path,"task_recorder/"+path.name)
-        archive.write(ROOT/"scripts/Install-TaskRecorder.ps1","Install.ps1")
-        archive.writestr("Install.cmd",'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install.ps1"\r\nif errorlevel 1 pause\r\n')
-    return Response(stream.getvalue(),media_type="application/zip",headers={**HEADERS,"Content-Disposition":'attachment; filename="SportsCaveTaskRecorder.zip"'})
+    from .release import build_package, verify_archive
+    package = os.environ.get("SPORTS_CAVE_RECORDER_WINDOWS_PACKAGE")
+    native = ROOT / "windows-screen-recorder/native/bin/DesktopRecorder.exe"
+    if package:
+        data = Path(package).read_bytes()
+        verify_archive(data)
+    elif native.is_file():
+        data = await run_in_threadpool(build_package, ROOT, native)
+    else:
+        return JSONResponse({"error":"The reviewed Windows recorder package is not available yet."},status_code=503,headers=HEADERS)
+    return Response(data,media_type="application/zip",headers={**HEADERS,"Content-Disposition":'attachment; filename="SportsCaveTaskRecorder.zip"'})
 
 ROUTES = (
  ("/task-recorder/panel",panel,("GET",)),

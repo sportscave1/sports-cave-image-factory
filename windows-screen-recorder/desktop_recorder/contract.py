@@ -1,6 +1,7 @@
 """Data-only desktop format; browser version 1 remains owned by its adapter."""
 from copy import deepcopy
 import json
+import math
 import re
 import uuid
 
@@ -12,6 +13,8 @@ CAPABILITIES = {
     "toggle": "uia.toggle.v1",
     "focus_window": "windows.focus.v1",
     "wait_ready": "uia.readiness.v1",
+    "expand": "uia.expand.v1",
+    "scroll": "uia.scroll.v1",
 }
 PRIVATE = re.compile(r"password|passwd|credential|secret|token|authorization|one.?time|otp|api.?key", re.I)
 TOKEN = re.compile(r"Bearer\s+\S+|eyJ[\w-]{12,}\.[\w-]+|(?:sk-|ghp_|xoxb-)[\w-]{10,}", re.I)
@@ -107,9 +110,20 @@ def validate(raw):
         if kind in {"set_text", "select"}:
             if not (kind == "set_text" and action.get("value") == ""):
                 text(action.get("value"), 2000)
-        elif kind == "toggle":
+        elif kind in {"toggle", "expand"}:
             if type(action.get("value")) is not bool:
-                raise Invalid("Toggle requires an explicit boolean.")
+                raise Invalid("Toggle and expansion require an explicit boolean.")
+        elif kind == "scroll":
+            if action["version"] != 2:
+                raise Invalid("Scrolling requires a scoped version-2 action.")
+            position = action.get("value")
+            fields(position, ("horizontal", "vertical"))
+            for percent in position.values():
+                if (type(percent) not in {int, float} or not math.isfinite(percent) or
+                    not (percent == -1 or 0 <= percent <= 100)):
+                    raise Invalid("Scroll percentages must be finite, -1 or between 0 and 100.")
+            if all(percent == -1 for percent in position.values()):
+                raise Invalid("At least one axis must be scrollable.")
         elif "value" in action:
             raise Invalid("This action has no value.")
     if len(json.dumps(task).encode()) > 1_000_000:

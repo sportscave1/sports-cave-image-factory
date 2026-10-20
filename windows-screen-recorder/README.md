@@ -1,56 +1,60 @@
-# Windows desktop recorder — Phase 1
+# Windows Task Recorder V1
 
-Status: **local foundation and bounded Windows assessment complete; desktop recording and playback are not implemented or installed.**
+Local development candidate. Native recording and playback are implemented;
+this revision has not been approved for installation or production release.
+Work belongs to Studio task `20261020-ff6cc91d`, owner
+`codex-windows-recorder-release-01a1589a`, in its assigned release worktree.
 
-This is a component folder in the existing repository on `main`, not an isolated
-checkout. The user explicitly assigned this folder. See `ownership.json` before
-editing shared files. No parent branch, Studio registry or existing worktree was
-changed. There is no registered Studio task for this folder; do not report it as
-Studio-tested or release-ready.
+The recorder uses the existing Task Recorder panel, DeviceAgent, relay and durable
+receipts. It captures supported interactions in prepared, already-open Windows
+applications. Saved desktop recordings are immutable; results live in separate
+journals. Pending unknown effects are preserved and never automatically replayed
+following a disconnect or restart.
 
-- [Assessment, reuse map and Phase 2 handoff](PHASE1.md)
-- [Recovery manifest](recovery/manifest.json) — 67 source files; all 40 dirty/untracked paths.
-- [Recoverable source archive](recovery/recorder-source.zip)
-- [Windows observations](windows-observations.json)
-- [Verification](verification.json)
+Local physical acceptance includes Edge/Notepad text and taskbar transitions,
+Pause/Resume, focused-field Stop flush, checkbox/selection/menu expansion,
+scrolling, Emergency Stop, manual intervention and protected-field exclusion.
+Controls playback also passed on a second monitor after Edge's tab count changed.
+The current candidate recorded and replayed the real embedded Product Uploads
+Copy control with synthetic providers; the user's post-play clipboard paste
+matched the expected prompt exactly. See [current evidence and limitations](V1-HANDOFF.md).
 
-The Python foundation implements a serialized recording lifecycle, explicit
-desktop schema and capability checks, immutable saved definitions, recoverable
-drafts, and cancellation/cleanup boundaries. It has no native input backend,
-global hooks, toolbar, background service, task runner or network connection.
-The storage adapter takes the existing recorder's `atomic` and `Store.revision`
-functions; tests load those unchanged from the checkpoint into disposable storage.
-Do not point it at installed helper data.
+Text, toggle, selection, expansion and scroll results require fresh semantic
+readback. General buttons are invoked once and then remain uncertain unless an
+application-specific result can be verified. Product Copy has that verification;
+general Generate button playback does not. Unsupported/ambiguous controls and
+unclassified or protected text fields interrupt rather than guessing.
 
-Run these checks from this folder:
+The native process uses UI Automation, explicit local Start playback confirmation,
+bounded identity checks and Ctrl+Alt+F12 cancellation. Playback does not use
+coordinate clicks or raw keyboard injection. Edge tab-count changes require an
+independently verified top-level page; profile, executable and uniqueness checks
+remain enforced. Local operation diagnostics measure CPU/memory and contain
+neither clipboard contents nor field values.
+
+## Local development
+
+Use a disposable data directory and an existing Python environment with the
+recorder requirements. This launcher builds the native development candidate;
+it is not an installer and does not replace the installed helper:
 
 ```powershell
-& '..\.venv\Scripts\python.exe' -B -m unittest discover -s tests -p test_foundation.py -v
-node tests/diagnostics.test.mjs
+& windows-screen-recorder/Start-LocalRecorder.ps1 `
+  -PythonExecutable C:\path\to\existing-env\Scripts\python.exe `
+  -DataDirectory C:\path\to\disposable-recorder-data
 ```
 
-Read-only Windows diagnostic entry point, within the supported Computer Use
-`node_repl` runtime after following that skill's initialization:
+The normal reviewed Python package is loaded directly. Recovery archives and
+the historical Phase 1/2 assessments are not runtime dependencies. The
+`AcceptInjectedTestInput` development switch is never physical acceptance and
+is unreachable from the normal helper integration.
 
-```javascript
-var diagnostic = await import("file:///C:/Users/hello/Documents/sports-cave-image-factory/windows-screen-recorder/diagnostics.mjs");
-nodeRepl.write(await diagnostic.listWindows(sky));
-// Select one current, non-sensitive test window ID from that returned inventory.
-nodeRepl.write(await diagnostic.inspectWindow(sky, selectedWindowId));
-```
+## Packaging and release
 
-No direct COM, PowerShell UIA, helper protocol or debugging port is used. The
-diagnostic requests a single accessibility snapshot of the selected window,
-without screenshot or activation. It emits at most 100 control roles/indexes,
-disabled flags and focus presence. Indexes are diagnostic-only and expire with
-the snapshot. It does not persist names, titles, values or document text.
-The runtime internally returns a window tree which can contain document text:
-select harmless windows; this is not yet the production privacy-safe capture
-adapter. No automatic repetition, arbitrary background monitoring or execution
-is available. Normal Node without the supported `sky` client cannot inspect
-Windows through this module.
-
-Extract the source archive into a separate review directory to recover it.
-Verify its entries against the manifest SHA-256 hashes. Do not extract over the
-old owned task or the shared parent repository. The archive is a source subset,
-not a runnable whole-project clone or backup of installed task data.
+See [the package and rollback procedure](PACKAGING.md). The Windows archive
+includes native code, its sources, the Python adapter and pinned dependencies.
+Disposable preparation, startup, update selection, rollback and data-retention
+checks have run. Installed-helper setup, startup/update/rollback, remaining
+acceptance and final Studio integration review are still release gates.
+No commit, push, merge, Render deployment or installed-helper replacement is
+authorized by these local results.

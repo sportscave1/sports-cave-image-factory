@@ -83,6 +83,7 @@ class Capture {
     public volatile bool Armed;
     public volatile bool Broken;
     public long BusySince;
+    NativeMetrics metrics;
     int generation;
     IntPtr own,lastWindow;
     IntPtr preparedWindow;
@@ -91,16 +92,26 @@ class Capture {
     AutomationElement field;
     AutomationElement editorAnchor;
     Dictionary<string,object> editorAnchorTarget;
+    readonly PendingEditorClick pendingEditorClick=new PendingEditorClick();
+    System.Windows.Rect pendingWindowBounds;
+    uint pendingWindowDpi,pendingWindowPid;
     Dictionary<string,object> fieldTarget;
     long fieldAt;
     bool dirty;
     string fieldValue;
     readonly bool injected;
     int traceCount,ownExclusions;
+    class WheelBurst {
+        public Native.Point Point;public IntPtr Window;public int Epoch;
+        public long LastAt;public bool Closed;
+    }
+    readonly object wheelGate=new object();
+    WheelBurst wheelBurst;
     public Capture(IntPtr own,Action<string,object> send,Action<string> fail,bool injected) {
         this.own=own;this.send=send;this.fail=fail;this.injected=injected;
         mouse=OnMouse;key=OnKey;
         var worker=new Thread(()=>{foreach(var work in queue.GetConsumingEnumerable()){
+            if(Broken)continue; // Never inspect queued targets after an interruption.
             Interlocked.Exchange(ref BusySince,Stopwatch.GetTimestamp());
             try { work(); } catch(Exception e){Interrupt(e is ElementNotAvailableException?"The target window disappeared.":e.Message);}
             finally{Interlocked.Exchange(ref BusySince,0);}
@@ -115,11 +126,13 @@ class Capture {
     public void Start(int epoch) {
         if(Broken&&(Interlocked.Read(ref BusySince)!=0||queue.Count!=0))throw new Exception("Restart the candidate after an accessibility interruption.");
         Broken=false;field=null;fieldTarget=null;dirty=false;editorAnchor=null;editorAnchorTarget=null;
+        pendingEditorClick.Clear();
         generation=epoch;lastWindow=IntPtr.Zero;lastTitle=null;
         mh=Native.SetWindowsHookEx(14,mouse,Native.GetModuleHandle(null),0);
         kh=Native.SetWindowsHookEx(13,key,Native.GetModuleHandle(null),0);
         if(mh==IntPtr.Zero||kh==IntPtr.Zero) {Detach();throw new Exception("Windows capture hooks could not be armed.");}
         Armed=true;
+        metrics=NativeMetrics.Begin("recording");
         clock.Start();
     }
     public void PrepareRecord(IntPtr selected) {
@@ -134,17 +147,23 @@ class Capture {
             },IntPtr.Zero);
             preparedWindow=selected;clock.Reset();traceCount=0;ownExclusions=0;send("record",new {window=target});});
     }
-    public void Detach() {
+    public void Detach(bool finishMetrics=true) {
         Armed=false;
         clock.Stop();
         if(mh!=IntPtr.Zero)Native.UnhookWindowsHookEx(mh);
         if(kh!=IntPtr.Zero)Native.UnhookWindowsHookEx(kh);
         mh=kh=IntPtr.Zero;
+        if(finishMetrics)FinishMetrics();
     }
-    public void Barrier(string command) {
-        Detach();
-        if(Broken){send(command,new { });return;}
-        Put(()=>{Flush();send("diagnostic",new {kind="capture_barrier",toolbar_inputs_excluded=ownExclusions});send(command,new { });});
+    void FinishMetrics() {
+        var completed=Interlocked.Exchange(ref metrics,null);
+        if(completed!=null)completed.Finish(send);
+    }
+    public void Barrier(string command,string requestId=null) {
+        CloseWheelBurst();
+        Detach(false);
+        if(Broken){FinishMetrics();send(command,new {request_id=requestId});return;}
+        Put(()=>{Flush();FinishMetrics();send("diagnostic",new {kind="capture_barrier",toolbar_inputs_excluded=ownExclusions});send(command,new {request_id=requestId});});
     }
     bool Mine(IntPtr h) { uint id;Native.GetWindowThreadProcessId(h,out id);return WindowIdentity.IsToolbar(id,(uint)Process.GetCurrentProcess().Id); }
     IntPtr OnMouse(int c,IntPtr w,IntPtr l) {
@@ -153,19 +172,103 @@ class Capture {
             if(injected||(m.flags&1)==0){
                 var hit=Native.WindowFromPoint(m.point);var window=Native.Root(hit);
                 if(Mine(window)){if(w.ToInt32()==0x202)ownExclusions++;return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
-                if(w.ToInt32()==0x202){var point=m.point;int epoch=generation;
+                if(w.ToInt32()==0x20A){QueueWheel(m.point,window,generation);}
+                else if(w.ToInt32()==0x202){CloseWheelBurst();var point=m.point;int epoch=generation;
                     var foreground=Native.Root(Native.GetForegroundWindow());
                     Put(()=>{TraceWindow("mouse",window,foreground,hit);Flush();Click(point,window,epoch);});}
-                else if(w.ToInt32()==0x20A||w.ToInt32()==0x205) Put(()=>{Flush();Interrupt("Scrolling and secondary clicks are not yet supported. Draft preserved.");});
+                else {CloseWheelBurst();Put(()=>{Flush();Interrupt("Secondary clicks are not yet supported. Draft preserved.");});}
             }
         }
         return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
+    }
+    void CloseWheelBurst(){lock(wheelGate){if(wheelBurst!=null)wheelBurst.Closed=true;}}
+    void QueueWheel(Native.Point point,IntPtr window,int epoch) {
+        WheelBurst burst;
+        lock(wheelGate){
+            if(wheelBurst!=null&&!wheelBurst.Closed&&wheelBurst.Window==window&&wheelBurst.Epoch==epoch&&
+               wheelBurst.Point.X==point.X&&wheelBurst.Point.Y==point.Y){wheelBurst.LastAt=MonotonicMs();return;}
+            if(wheelBurst!=null)wheelBurst.Closed=true;
+            burst=new WheelBurst(){Point=point,Window=window,Epoch=epoch,LastAt=MonotonicMs()};wheelBurst=burst;
+        }
+        Put(()=>{Flush();CaptureScroll(burst);});
+    }
+    void CaptureScroll(WheelBurst burst) {
+        var wait=Stopwatch.StartNew();
+        while(!Broken){
+            lock(wheelGate){if(burst.Closed||MonotonicMs()-burst.LastAt>=80||wait.ElapsedMilliseconds>=300){burst.Closed=true;break;}}
+            Thread.Sleep(10);
+        }
+        if(Broken)return;
+        InputWindow(burst.Window);
+        var e=AutomationElement.FromPoint(new System.Windows.Point(burst.Point.X,burst.Point.Y));
+        var page=e.Current.ControlType==ControlType.Document&&e.Current.AutomationId=="RootWebArea"?e:null;
+        uint pid;Native.GetWindowThreadProcessId(burst.Window,out pid);
+        var inspected=new List<object>();
+        // Scroll containers can be layout elements omitted from Control View.
+        // Follow the provider's raw ancestry, still bounded to the selected app.
+        for(int depth=0;e!=null&&depth<16;depth++,e=TreeWalker.RawViewWalker.GetParent(e)){
+            if(e.Current.ProcessId!=pid)throw new Exception("Scroll target left the intended application. Draft preserved.");
+            Privacy(e);object pattern;
+            bool supported=e.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern);
+            var bounds=e.Current.BoundingRectangle;
+            inspected.Add(new {control_type=e.Current.ControlType.ProgrammaticName,
+                automation_id=Safe(e.Current.AutomationId),is_control=e.Current.IsControlElement,
+                contains_pointer=bounds.Contains(new System.Windows.Point(burst.Point.X,burst.Point.Y)),
+                scroll_pattern=supported});
+            if(supported){
+                var scroll=((ScrollPattern)pattern).Current;
+                if(!scroll.HorizontallyScrollable&&!scroll.VerticallyScrollable)continue;
+                var target=Target(e,burst.Window);WindowAction(burst.Window,burst.Epoch);
+                Emit("scroll",target,new Dictionary<string,object>{
+                    {"horizontal",scroll.HorizontallyScrollable?scroll.HorizontalScrollPercent:ScrollPattern.NoScroll},
+                    {"vertical",scroll.VerticallyScrollable?scroll.VerticalScrollPercent:ScrollPattern.NoScroll}},burst.Epoch);
+                return;
+            }
+            if(e.Current.NativeWindowHandle==burst.Window.ToInt32())break;
+        }
+        // Chromium sometimes reports only the document for a wheel hit, while
+        // the actual overflow container is a raw descendant. Search only that
+        // page, only branches under the pointer, and require one eligible target.
+        if(page!=null) {
+            var point=new System.Windows.Point(burst.Point.X,burst.Point.Y);
+            var search=new ScrollTargetSearch<AutomationElement>(
+                node=>node.Current.ProcessId==pid&&!node.Current.IsOffscreen&&node.Current.BoundingRectangle.Contains(point),
+                node=>{object candidate;if(!node.TryGetCurrentPattern(ScrollPattern.Pattern,out candidate))return false;
+                    var position=((ScrollPattern)candidate).Current;return position.HorizontallyScrollable||position.VerticallyScrollable;},
+                RawChildren);
+            var container=search.Find(page);
+            if(container!=null) {
+                if(Broken)return;
+                if(Native.Root(Native.GetForegroundWindow())!=burst.Window)
+                    throw new Exception("Focus changed while identifying the scroll container. Draft preserved.");
+                var target=Target(container,burst.Window);object pattern;
+                if(!container.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern))
+                    throw new Exception("The scroll container changed before its position was read. Draft preserved.");
+                var position=((ScrollPattern)pattern).Current;
+                if(!position.HorizontallyScrollable&&!position.VerticallyScrollable)
+                    throw new Exception("The scroll container is no longer scrollable. Draft preserved.");
+                WindowAction(burst.Window,burst.Epoch);
+                Emit("scroll",target,new Dictionary<string,object>{
+                    {"horizontal",position.HorizontallyScrollable?position.HorizontalScrollPercent:ScrollPattern.NoScroll},
+                    {"vertical",position.VerticallyScrollable?position.VerticalScrollPercent:ScrollPattern.NoScroll}},burst.Epoch);
+                send("diagnostic",new {kind="scroll_descendant_resolved",control_type=target["control_type"],automation_id=target["automation_id"]});
+                return;
+            }
+        }
+        send("diagnostic",new {kind="scroll_position_unavailable",ancestors=inspected,
+            window_title=Safe(Native.Title(burst.Window))});
+        throw new Exception("The scrolled control has no supported scroll position. Draft preserved.");
+    }
+    static IEnumerable<AutomationElement> RawChildren(AutomationElement parent) {
+        for(var child=TreeWalker.RawViewWalker.GetFirstChild(parent);child!=null;child=TreeWalker.RawViewWalker.GetNextSibling(child))
+            yield return child;
     }
     IntPtr OnKey(int c,IntPtr w,IntPtr l) {
         if(c>=0&&Armed&&!Mine(Native.Root(Native.GetForegroundWindow()))&&(w.ToInt32()==0x101||w.ToInt32()==0x105)){
             var k=(Native.Key)Marshal.PtrToStructure(l,typeof(Native.Key));
             if(injected||(k.flags&16)==0){
                 if(k.vk==16||k.vk==17||k.vk==18||k.vk==91||k.vk==92||(k.vk>=160&&k.vk<=165))return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
+                CloseWheelBurst();
                 var window=Native.Root(Native.GetForegroundWindow());int epoch=generation;
                 long observed=Stopwatch.GetTimestamp();
                 bool ctrl=(Native.GetAsyncKeyState(17)&0x8000)!=0;
@@ -181,7 +284,7 @@ class Capture {
         }
         return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
     }
-    static string Safe(string s) {
+    internal static string Safe(string s) {
         if(s==null||s.Length>2000||System.Text.RegularExpressions.Regex.IsMatch(s,@"password|passwd|credential|secret|token|authorization|one.?time|api.?key",System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             throw new Exception("Protected or unclassified control. Capture suspended before reading its value.");
         return s;
@@ -193,6 +296,10 @@ class Capture {
         Safe(e.Current.AutomationId);Safe(e.Current.Name);
         if(!e.Current.IsEnabled)throw new Exception("The target is disabled.");
     }
+    internal static bool SafeAnonymousHost(AutomationElement e) {
+        object password=e.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty,true);
+        return !(password is bool&&(bool)password)&&e.Current.IsEnabled;
+    }
     Dictionary<string,object> Target(AutomationElement e,IntPtr h) {
         Native.CheckProcess(h);Privacy(e);
         var proc=Native.ProcessFor(h);
@@ -201,11 +308,17 @@ class Capture {
         if(id.Length==0&&name.Length==0)throw new Exception("This control has no reliable identity. Draft preserved.");
         if(title.Length==0)throw new Exception("This window has no document identity.");
         var scope=new List<object>();
+        bool productCopy=ProductCopyResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name),hostSkipped=false;
         bool reachedRoot=e.Current.NativeWindowHandle==h.ToInt32();
         var parent=reachedRoot?null:TreeWalker.ControlViewWalker.GetParent(e);
         for(int depth=0;parent!=null&&depth<16;depth++){
             if(parent.Current.NativeWindowHandle==h.ToInt32()){reachedRoot=true;break;}
             if(parent.Current.ProcessId!=proc.Id)throw new Exception("Control ancestry left the intended application.");
+            if(productCopy&&!hostSkipped&&ProductCopyResult.HasFrameAnchors(scope)&&
+               ProductCopyResult.HostBoundary(scope.Count,parent.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),parent.Current.AutomationId)) {
+                if(!SafeAnonymousHost(parent))throw new Exception("Protected or unavailable component host. Draft preserved.");
+                hostSkipped=true;parent=TreeWalker.ControlViewWalker.GetParent(parent);continue;
+            }
             Privacy(parent);
             string parentId=Safe(parent.Current.AutomationId),parentName=Safe(parent.Current.Name);
             if(parentId.Length>0||parentName.Length>0)scope.Add(new Dictionary<string,object>{
@@ -247,7 +360,7 @@ class Capture {
     }
     void Emit(string kind,Dictionary<string,object> target,object value,int epoch) {
         if(Broken)return;
-        var caps=new Dictionary<string,string>{{"invoke","uia.invoke.v1"},{"set_text","uia.value.v1"},{"select","uia.selection.v1"},{"toggle","uia.toggle.v1"},{"focus_window","windows.focus.v1"}};
+        var caps=new Dictionary<string,string>{{"invoke","uia.invoke.v1"},{"set_text","uia.value.v1"},{"select","uia.selection.v1"},{"toggle","uia.toggle.v1"},{"focus_window","windows.focus.v1"},{"expand","uia.expand.v1"},{"scroll","uia.scroll.v1"}};
         var a=new Dictionary<string,object>{{"version",2},{"kind",kind},{"requires",new[]{caps[kind].Replace(".v1",".v2")}},{"target",target},{"timeout_ms",8000},{"observed_ms",clock.ElapsedMilliseconds}};
         if(value!=null)a["value"]=value;
         send("event",new {generation=epoch,privacy="safe",action=a});
@@ -262,27 +375,66 @@ class Capture {
         var e=AutomationElement.FromPoint(new System.Windows.Point(p.X,p.Y));
         uint expectedPid;Native.GetWindowThreadProcessId(h,out expectedPid);
         if(e.Current.ProcessId!=expectedPid)throw new Exception("The intended window is obscured or changed focus. Capture stopped.");
-        if((e.Current.ControlType==ControlType.Pane||e.Current.ControlType==ControlType.Document||e.Current.ControlType==ControlType.Edit)
+        if((e.Current.ControlType==ControlType.Pane||e.Current.ControlType==ControlType.Document||e.Current.ControlType==ControlType.Edit||e.Current.ControlType==ControlType.Text)
             &&WaitForClickedEditor(p,h,expectedPid)){
             send("diagnostic",new {kind="editor_focus_click",window_title=Native.Title(h),resolution="focused editor contains click; no value read"});
             return;
         }
+        var linked=FocusedSemanticControl(p,h,expectedPid);
+        if(linked!=null)e=linked;
+        else if(e.Current.ControlType==ControlType.Document&&e.Current.AutomationId=="RootWebArea") {
+            var pointed=PointedSemanticControl(e,p,h,expectedPid,epoch);
+            if(pointed!=null)e=pointed;
+        }
         var seen=new List<string>();
-        for(int i=0;i<7&&e!=null;i++,e=TreeWalker.ControlViewWalker.GetParent(e)){
+        for(int i=0;i<16&&e!=null;i++,e=TreeWalker.RawViewWalker.GetParent(e)){
+            if(e.Current.ProcessId!=expectedPid)throw new Exception("Clicked control ancestry left the intended application. Draft preserved.");
             seen.Add(e.Current.ControlType.ProgrammaticName);
             Privacy(e);object pattern;
             if(e.Current.ControlType==ControlType.Edit||e.Current.ControlType==ControlType.Document){
                 if(e.Current.AutomationId=="RootWebArea")
-                    throw new Exception("The browser did not expose the clicked text field in time. Draft preserved; no page contents were read.");
+                {
+                    var focused=AutomationElement.FocusedElement;
+                    if(focused!=null&&focused.Current.ControlType!=ControlType.Edit&&
+                       focused.Current.ControlType!=ControlType.Document&&focused.Current.ControlType!=ControlType.Pane&&
+                       focused.Current.ControlType!=ControlType.Text) {
+                        send("diagnostic",new {kind="unresolved_semantic_click",control_type=focused.Current.ControlType.ProgrammaticName,
+                            focused_process_matches=focused.Current.ProcessId==expectedPid,
+                            contains_click=EditorClickTarget.Matches(new System.Windows.Point(p.X,p.Y),focused.Current.BoundingRectangle,System.Windows.Rect.Empty,false)});
+                        Interrupt("The clicked control could not be identified at the click location. Draft preserved; no page contents were read.");
+                        return;
+                    }
+                    // The editor may be published only once real typing begins.
+                    // Retain the unresolved click; never anchor/read RootWebArea.
+                    editorAnchor=null;editorAnchorTarget=null;
+                    pendingEditorClick.Begin(h,p.X,p.Y,epoch,MonotonicMs());
+                    pendingWindowBounds=AutomationElement.FromHandle(h).Current.BoundingRectangle;
+                    pendingWindowDpi=Native.GetDpiForWindow(h);pendingWindowPid=expectedPid;
+                    send("diagnostic",new {kind="editor_focus_pending",window_title=Native.Title(h),control_types=seen,
+                        focused_type=focused==null?null:focused.Current.ControlType.ProgrammaticName,
+                        focused_process_matches=focused!=null&&focused.Current.ProcessId==expectedPid,
+                        linked_label_available=focused!=null&&focused.GetCurrentPropertyValue(AutomationElement.LabeledByProperty,true) is AutomationElement,
+                        resolution="Awaiting matching editor on input; no value read"});
+                    return;
+                }
                 // Focus alone is not a text edit. Never read a field until input intent.
                 AnchorEditor(e,h);
                 return;
             }
             if(e.TryGetCurrentPattern(TogglePattern.Pattern,out pattern)){
+                if(((TogglePattern)pattern).Current.ToggleState==ToggleState.Indeterminate)throw new Exception("Indeterminate toggles are not supported. Draft preserved.");
                 var t=Target(e,h);WindowAction(h,epoch);Emit("toggle",t,((TogglePattern)pattern).Current.ToggleState==ToggleState.On,epoch);return;
             }
             if(e.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)){
+                if(!((SelectionItemPattern)pattern).Current.IsSelected)throw new Exception("The clicked option was not selected. Draft preserved.");
                 var t=Target(e,h);WindowAction(h,epoch);Emit("select",t,Safe(e.Current.Name),epoch);return;
+            }
+            if(e.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern)){
+                Thread.Sleep(50);
+                var expanded=((ExpandCollapsePattern)pattern).Current.ExpandCollapseState;
+                if(expanded!=ExpandCollapseState.Expanded&&expanded!=ExpandCollapseState.Collapsed)
+                    throw new Exception("This menu has no definite open/closed state. Draft preserved.");
+                var t=Target(e,h);WindowAction(h,epoch);Emit("expand",t,expanded==ExpandCollapseState.Expanded,epoch);return;
             }
             if(e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern)){
                 var t=Target(e,h);WindowAction(h,epoch);Emit("invoke",t,null,epoch);return;
@@ -291,6 +443,66 @@ class Capture {
         send("diagnostic",new {kind="unsupported_click",control_types=seen,window_title=Native.Title(h),
             foreground_title=Native.Title(Native.Root(Native.GetForegroundWindow()))});
         Interrupt("This clicked control is not supported ("+String.Join(", ",seen.ToArray())+"). Draft preserved.");
+    }
+    AutomationElement PointedSemanticControl(AutomationElement page,Native.Point point,IntPtr h,uint expectedPid,int epoch) {
+        var location=new System.Windows.Point(point.X,point.Y);
+        var bounds=AutomationElement.FromHandle(h).Current.BoundingRectangle;uint dpi=Native.GetDpiForWindow(h);
+        var search=new ScrollTargetSearch<AutomationElement>(
+            node=>node.Current.ProcessId==expectedPid&&!node.Current.IsOffscreen&&node.Current.BoundingRectangle.Contains(location),
+            node=>{object pattern;return node.TryGetCurrentPattern(TogglePattern.Pattern,out pattern)||
+                node.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)||
+                node.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern)||
+                (node.Current.ControlType==ControlType.Button&&node.TryGetCurrentPattern(InvokePattern.Pattern,out pattern));},
+            RawChildren,256,16,"Clicked control",500);
+        var control=search.Find(page);
+        if(control==null) {
+            send("diagnostic",new {kind="pointer_semantic_absent",resolution="No supported semantic control uniquely exposed under the physical click"});
+            return null;
+        }
+        // Do not turn a click on a disabled control into an action later.
+        // Target/Privacy below must accept its current enabled state.
+        if(Broken)return null;
+        uint pid;Native.GetWindowThreadProcessId(h,out pid);
+        if(epoch!=generation||pid!=expectedPid||Native.Root(Native.GetForegroundWindow())!=h||
+           Native.GetDpiForWindow(h)!=dpi||AutomationElement.FromHandle(h).Current.BoundingRectangle!=bounds||
+           control.Current.IsOffscreen||!control.Current.BoundingRectangle.Contains(location))
+            throw new Exception("The clicked control or its window changed before identification. Draft preserved.");
+        var target=Target(control,h);
+        send("diagnostic",new {kind="pointer_semantic_resolved",control_type=target["control_type"],
+            automation_id=target["automation_id"],resolution="Unique supported control under physical click; full ancestry validated"});
+        return control;
+    }
+    AutomationElement FocusedSemanticControl(Native.Point point,IntPtr h,uint expectedPid) {
+        if(Native.Root(Native.GetForegroundWindow())!=h)return null;
+        var control=AutomationElement.FocusedElement;
+        if(control==null||control.Current.ProcessId!=expectedPid||!control.Current.HasKeyboardFocus||control.Current.IsOffscreen)return null;
+        // Chromium can hit-test an embedded component as RootWebArea even
+        // after publishing a focused semantic control. Focus alone is
+        // insufficient: require the physical click inside it and ancestry.
+        object pattern;
+        bool stateful=control.TryGetCurrentPattern(TogglePattern.Pattern,out pattern)||
+            control.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)||
+            control.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern);
+        bool button=control.Current.ControlType==ControlType.Button&&control.TryGetCurrentPattern(InvokePattern.Pattern,out pattern);
+        if((stateful||button)&&
+           EditorClickTarget.Matches(new System.Windows.Point(point.X,point.Y),control.Current.BoundingRectangle,System.Windows.Rect.Empty,false)) {
+            Target(control,h);
+            send("diagnostic",new {kind="focused_semantic_click",control_type=control.Current.ControlType.ProgrammaticName,
+                automation_id=Safe(control.Current.AutomationId),control_name=Safe(control.Current.Name),
+                window_title=Safe(Native.Title(h)),resolution="physical click inside focused semantic control; ancestry validated"});
+            return control;
+        }
+        // A label may focus a checkbox/radio without its text being a descendant
+        // of that input. Accept only the provider's explicit relationship.
+        if(!stateful)return null;
+        var label=control.GetCurrentPropertyValue(AutomationElement.LabeledByProperty,true) as AutomationElement;
+        if(label==null||label.Current.ProcessId!=expectedPid||label.Current.ControlType!=ControlType.Text||label.Current.IsOffscreen)return null;
+        Privacy(control);Privacy(label);
+        if(!EditorClickTarget.Matches(new System.Windows.Point(point.X,point.Y),System.Windows.Rect.Empty,label.Current.BoundingRectangle,true))return null;
+        Target(control,h);Target(label,h);
+        send("diagnostic",new {kind="semantic_label_click",control_type=control.Current.ControlType.ProgrammaticName,
+            automation_id=Safe(control.Current.AutomationId),window_title=Safe(Native.Title(h))});
+        return control;
     }
     void CaptureTaskbarSwitch(IntPtr taskbar,int epoch) {
         Native.CheckProcess(taskbar);
@@ -333,6 +545,32 @@ class Capture {
             Thread.Sleep(15);
         } while(true);
     }
+    static long MonotonicMs(){return (long)(Stopwatch.GetTimestamp()*1000.0/Stopwatch.Frequency);}
+    void ResolvePendingEditorClick() {
+        if(!pendingEditorClick.Active)return;
+        var h=pendingEditorClick.Window;
+        if(!pendingEditorClick.CanResolve(Native.Root(Native.GetForegroundWindow()),generation,MonotonicMs()))
+            throw new Exception("The clicked editor was not identified before focus or timing changed. Draft preserved; no page contents were read.");
+        uint pid;Native.GetWindowThreadProcessId(h,out pid);
+        if(pid!=pendingWindowPid||Native.GetDpiForWindow(h)!=pendingWindowDpi||
+           AutomationElement.FromHandle(h).Current.BoundingRectangle!=pendingWindowBounds)
+            throw new Exception("The clicked window moved or changed before its editor was identified. Draft preserved.");
+        var point=new Native.Point(){X=pendingEditorClick.X,Y=pendingEditorClick.Y};
+        if(!FocusedEditorContains(point,h,pid)) {
+            var focused=AutomationElement.FocusedElement;
+            // Metadata only; never collect the document or an unclassified value.
+            send("diagnostic",new {kind="editor_focus_unresolved",window_title=Native.Title(h),
+                focused_type=focused==null?null:focused.Current.ControlType.ProgrammaticName,
+                focused_process_matches=focused!=null&&focused.Current.ProcessId==pid,
+                has_keyboard_focus=focused!=null&&focused.Current.HasKeyboardFocus,
+                is_page_root=focused!=null&&focused.Current.AutomationId=="RootWebArea",
+                contains_click=focused!=null&&focused.Current.BoundingRectangle.Contains(new System.Windows.Point(point.X,point.Y)),
+                linked_label_available=focused!=null&&focused.GetCurrentPropertyValue(AutomationElement.LabeledByProperty,true) is AutomationElement});
+            throw new Exception("The click did not identify the focused editor or its linked label. Draft preserved; no page contents were read.");
+        }
+        pendingEditorClick.Clear();
+        send("diagnostic",new {kind="editor_focus_resolved",window_title=Native.Title(h),resolution="Matching editor validated after click; no value read"});
+    }
     bool FocusedEditorContains(Native.Point point,IntPtr h,uint expectedPid) {
         if(Native.Root(Native.GetForegroundWindow())!=h)return false;
         var editor=AutomationElement.FocusedElement;
@@ -342,7 +580,18 @@ class Capture {
         if(editor.Current.AutomationId=="RootWebArea")return false;
         Privacy(editor,true); // Classification only: never reads text on a click.
         var bounds=editor.Current.BoundingRectangle;
-        if(bounds.IsEmpty||!bounds.Contains(new System.Windows.Point(point.X,point.Y)))return false;
+        var location=new System.Windows.Point(point.X,point.Y);
+        if(!EditorClickTarget.Matches(location,bounds,System.Windows.Rect.Empty,false)) {
+            // Clicking an associated label focuses the editor without falling
+            // inside the editor rectangle. Require the provider's explicit
+            // relationship and same-window ancestry, not a matching label name.
+            var label=editor.GetCurrentPropertyValue(AutomationElement.LabeledByProperty,true) as AutomationElement;
+            if(label==null||label.Current.ProcessId!=expectedPid||label.Current.ControlType!=ControlType.Text||label.Current.IsOffscreen)return false;
+            Privacy(label);
+            if(!EditorClickTarget.Matches(location,bounds,label.Current.BoundingRectangle,true))return false;
+            Target(label,h); // Verifies the linked label's ancestry and identity.
+            send("diagnostic",new {kind="editor_label_click",window_title=Native.Title(h),resolution="Explicit UIA label relationship validated; no value read"});
+        }
         AnchorEditor(editor,h); // Require stable identity and ancestry in this window.
         return true;
     }
@@ -369,6 +618,7 @@ class Capture {
     void TextIntent(IntPtr h,int epoch) {
         if(Broken)return;
         InputWindow(h);
+        ResolvePendingEditorClick();
         var e=AutomationElement.FocusedElement;
         uint expectedPid;Native.GetWindowThreadProcessId(h,out expectedPid);
         if(e.Current.ProcessId!=expectedPid)throw new Exception("Focus moved to a different application. Capture stopped.");
@@ -404,6 +654,7 @@ class Capture {
         return Safe(value);
     }
     void Flush() {
+        if(!Broken)ResolvePendingEditorClick();
         if(!dirty||Broken)return;
         if(ReadText(field)!=fieldValue)throw new Exception("Text changed after the observed input. Draft preserved; the later value was not recorded.");
         Emit("set_text",fieldTarget,fieldValue,(int)fieldAt);dirty=false;field=null;fieldValue=null;
@@ -446,6 +697,7 @@ class Host : Window {
     DesktopPlayback playback;
     int instructionSerial;
     bool playbackPaused;
+    bool awaitingPlayback;
     public Host(bool testInput) {
         this.testInput=testInput;
         Title="Sports Cave Recorder — Local candidate";Width=470;SizeToContent=SizeToContent.Height;Topmost=true;
@@ -463,7 +715,7 @@ class Host : Window {
             hwnd=new WindowInteropHelper(this).Handle;
             playback=new DesktopPlayback(hwnd,Send);
             HwndSource.FromHwnd(hwnd).AddHook((IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled)=>{
-                if(msg==0x312&&w.ToInt32()==DesktopPlayback.Hotkey){playback.Stop();Send("play_stop",new {reason="Emergency Stop requested."});handled=true;}return IntPtr.Zero;
+                if(msg==0x312&&w.ToInt32()==DesktopPlayback.Hotkey){playback.Stop();Send("diagnostic",new {kind="emergency_stop",source="registered_windows_hotkey"});Send("play_stop",new {reason="Emergency Stop requested."});handled=true;}return IntPtr.Zero;
             });
             capture=new Capture(hwnd,Send,reason=>Dispatcher.BeginInvoke(new Action(()=>{capture.Detach();Send("interrupt",new {reason});status.Text=reason;})),testInput);
             RefreshWindows();Render();
@@ -495,7 +747,14 @@ class Host : Window {
         string id=Guid.NewGuid().ToString();
         if(pending&&kind!="event"&&kind!="diagnostic")pendingId=id;
         string message=json.Serialize(new {v=1,id=id,kind=kind,payload=payload});
-        if(!outbound.TryAdd(message)){if(capture!=null)capture.Armed=false;Dispatcher.BeginInvoke(new Action(()=>status.Text="Connection queue full; capture suspended."));}
+        if(!outbound.TryAdd(message)){
+            // The interruption itself cannot be delivered on a full connection.
+            // End this candidate so the helper observes EOF, preserves its last
+            // acknowledged draft/journal and marks the outcome interrupted.
+            if(capture!=null){capture.Broken=true;capture.Armed=false;}
+            if(playback!=null)playback.Stop();
+            Environment.Exit(78);
+        }
     }
     void Command(string kind,object payload){if(pending)return;pending=true;status.Text=kind=="save"?"Saving…":"Waiting for acknowledgement…";Send(kind,payload);}
     void RefreshWindows() {
@@ -505,6 +764,18 @@ class Host : Window {
         status.Text="Choose the prepared window explicitly, then Record.";
     }
     void Stop(){if(pending)return;pending=true;capture.Barrier("stop");}
+    void StartPlayback() {
+        if(pending)return;
+        uint foregroundPid;Native.GetWindowThreadProcessId(Native.GetForegroundWindow(),out foregroundPid);
+        if(!WindowIdentity.IsToolbar(foregroundPid,(uint)Process.GetCurrentProcess().Id))
+            throw new Exception("Click Start playback on this toolbar to give Windows foreground control.");
+        try {
+            playback.Arm();awaitingPlayback=false;
+            Command("play_ready",new {});
+        } catch(Exception ex) {
+            awaitingPlayback=false;playback.Disarm();Send("play_stop",new {reason=ex.Message});
+        }
+    }
     void Render(){
         // Interrupted recordings require explicit review before Save is accepted.
         controls.Children.Clear();savePanel.Visibility=state=="draft"?Visibility.Visible:Visibility.Collapsed;
@@ -520,7 +791,8 @@ class Host : Window {
                 Command("play",new {id=selected["id"],revision=selected["revision"]});
             }));
         }else if(state=="playing"){
-            controls.Children.Add(Button(playbackPaused?"Resume playback":"Pause playback",()=>Command(playbackPaused?"play_resume":"play_pause",new {})));
+            if(awaitingPlayback)controls.Children.Add(Button("Start playback",StartPlayback));
+            else controls.Children.Add(Button(playbackPaused?"Resume playback":"Pause playback",()=>Command(playbackPaused?"play_resume":"play_pause",new {})));
             controls.Children.Add(Button("Stop playback",()=>{playback.Stop();Send("play_stop",new {reason="Stopped from the toolbar."});}));
         }else if(state=="recording"){
             controls.Children.Add(Button("Pause",()=>{if(pending)return;pending=true;capture.Barrier("pause");}));
@@ -540,16 +812,8 @@ class Host : Window {
         } else if(next!="recording"&&capture!=null)capture.Detach();
         state=next;generation=epoch;elapsed=Convert.ToInt64(d["elapsed_ms"]);segment.Reset();if(state=="recording")segment.Start();
         if(state=="idle"&&d.ContainsKey("tasks")){
-            string selectedTask=tasks.SelectedItem==null?null:(string)((Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag)["id"];
-            if(d.ContainsKey("run")&&d["run"]!=null)
-                selectedTask=(string)((Dictionary<string,object>)d["run"])["task_id"];
-            tasks.Items.Clear();
-            foreach(Dictionary<string,object> task in (System.Collections.ArrayList)d["tasks"]){
-                var item=new ComboBoxItem(){Content=task["name"],Tag=task};
-                tasks.Items.Add(item);
-                if((string)task["id"]==selectedTask)tasks.SelectedItem=item;
-            }
-            if(tasks.Items.Count>0&&tasks.SelectedItem==null)tasks.SelectedIndex=0;
+            string previousRun=d.ContainsKey("run")&&d["run"]!=null?(string)((Dictionary<string,object>)d["run"])["task_id"]:null;
+            TaskList.Update(tasks,(System.Collections.ArrayList)d["tasks"],previousRun);
         }
         playbackPaused=d.ContainsKey("run")&&d["run"]!=null&&(bool)((Dictionary<string,object>)d["run"])["pause_requested"];
         playbackProgress=null;
@@ -566,16 +830,26 @@ class Host : Window {
                 instructionSerial=serial;
                 try{
                     string kind=(string)instruction["kind"];
-                    if(kind=="arm"){playback.Arm();Send("play_ready",new {});}
+                    if(kind=="arm"){
+                        uint foregroundPid;Native.GetWindowThreadProcessId(Native.GetForegroundWindow(),out foregroundPid);
+                        bool localConfirmation=instruction.ContainsKey("require_local_confirmation")&&(bool)instruction["require_local_confirmation"];
+                        if(!localConfirmation&&WindowIdentity.IsToolbar(foregroundPid,(uint)Process.GetCurrentProcess().Id))StartPlayback();
+                        else {
+                            awaitingPlayback=true;playbackProgress="Awaiting Start playback";
+                            status.Text="Click Start playback here to let Windows focus the recorded applications. No actions have run.";
+                            Render();
+                        }
+                    }
                     else if(kind=="execute")playback.Execute(Convert.ToInt32(instruction["step"]),(Dictionary<string,object>)instruction["action"]);
-                    else if(kind=="disarm")playback.Disarm();
+                    else if(kind=="disarm"){awaitingPlayback=false;playback.Disarm();}
                     else if(kind=="pause")playback.Pause();
                     else if(kind=="resume")playback.Resume();
-                    else if(kind=="capture_pause")capture.Barrier("pause");
-                    else if(kind=="capture_stop")capture.Barrier("stop");
+                    else if(kind=="capture_pause")capture.Barrier("pause",(string)instruction["request_id"]);
+                    else if(kind=="capture_stop")capture.Barrier("stop",(string)instruction["request_id"]);
                 }catch(Exception ex){playback.Disarm();Send("play_stop",new {reason=ex.Message});}
             }
         }
+        if(awaitingPlayback)playbackProgress="Awaiting Start playback";
     }
     [STAThread] public static void Main(string[] args) {
         if(!args.Contains("--candidate"))return;

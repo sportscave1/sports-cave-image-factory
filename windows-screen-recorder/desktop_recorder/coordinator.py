@@ -91,8 +91,8 @@ class Coordinator:
             if any(a["version"] != 2 for a in task["actions"]):
                 raise Invalid("This early desktop draft lacks scoped targets. Record a new task; the original is unchanged.")
             self.pending_play = dict(run_id=command["id"], task_id=data["id"], revision=data["revision"])
-            self.instruct("arm")
-            self.message = "Establishing emergency Stop before playback."
+            self.instruct("arm", require_local_confirmation=data.get("confirm_on_toolbar") is True)
+            self.message = "Starting. Confirm Start playback on the Windows toolbar if requested."
         elif kind == "play_ready":
             if not self.pending_play:
                 raise Invalid("No pending Play.")
@@ -119,7 +119,7 @@ class Coordinator:
                 self.message = "Stopped. " + self.message
                 self.instruct("disarm")
         elif kind == "play_stop":
-            self.playback.stop()
+            self.playback.stop(reason=str(data.get("reason", "Playback stopped."))[:240])
             self.pending_play = None
             self.instruct("disarm")
             self.message = str(data.get("reason", "Playback stopped."))[:240]

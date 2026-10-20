@@ -71,7 +71,7 @@ class Playback:
             self.run["result_received"] = True
             if not verified:
                 self.run["pause_requested"] = False
-                self.run["message"] = str(message)[:240] or "Action outcome is uncertain. Check the application."
+                self.run["message"] = self.run.get("stop_reason") or str(message)[:240] or "Action outcome is uncertain. Check the application."
                 if no_effect is True:
                     self.run["results"].append(dict(step=index, verified=False, no_effect=True))
                     self.run["pending"] = None
@@ -105,11 +105,14 @@ class Playback:
             self._write()
             self.ready.set()
 
-    def stop(self):
+    def stop(self, reason=None):
         self.stop_event.set()
         self.ready.set()
         with self.lock:
-            if self.run:
+            if self.run and self.run["state"] not in {"completed", "stopped"}:
+                if reason:
+                    self.run["stop_reason"] = str(reason)[:240]
+                    self.run["message"] = self.run["stop_reason"]
                 # Stop cannot turn an unknown side effect into a known failure.
                 if self.run["pending"] is None:
                     self.run["state"] = "stopped"
@@ -119,7 +122,7 @@ class Playback:
         import json
         recovered = []
         with self.lock:
-            for path in self.root.glob("*.json"):
+            for path in sorted(self.root.glob("*.json"), key=lambda path:path.stat().st_mtime_ns):
                 run = json.loads(path.read_text(encoding="utf-8"))
                 if run["state"] == "uncertain" and run.get("result_received") and run["pending"] is not None:
                     task = self.repository.get(run["task_id"])

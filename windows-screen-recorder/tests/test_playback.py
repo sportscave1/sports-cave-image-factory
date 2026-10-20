@@ -52,6 +52,19 @@ class PlaybackTests(TestCase):
         with self.assertRaises(Invalid):
             p.dispatch(0)
 
+    def test_shutdown_preserves_completed_run_and_journal_bytes(self):
+        p = Playback(self.c.repository)
+        self.begin(p, self.saved())
+        p.dispatch(0)
+        p.acknowledge(0, verified=True)
+        path = p.root / (p.run["id"] + ".json")
+        before = path.read_bytes()
+        self.assertEqual(p.run["state"], "completed")
+        p.stop()
+        self.assertEqual(path.read_bytes(), before)
+        recovered = Playback(self.c.repository).recover()
+        self.assertEqual(recovered[0]["state"], "completed")
+
     def test_stop_preserves_uncertainty_and_late_verified_result(self):
         p = Playback(self.c.repository)
         self.begin(p, self.saved())
@@ -73,6 +86,19 @@ class PlaybackTests(TestCase):
             p.begin(str(uuid4()), saved["id"], saved["revision"], CAPABILITIES.values(),
                     controls_visible=True, emergency_stop_ready=False)
         self.assertIsNone(p.run)
+
+    def test_late_cancellation_result_preserves_manual_stop_reason(self):
+        p = Playback(self.c.repository)
+        self.begin(p, self.saved())
+        p.dispatch(0)
+        reason = "Manual input stopped playback. Check any unconfirmed action."
+        p.stop(reason=reason)
+        self.assertEqual(p.run["state"], "uncertain")
+        p.acknowledge(0, verified=False, message="Playback stopped.", no_effect=True)
+        recovered = Playback(self.c.repository).recover()[0]
+        self.assertEqual(recovered["message"], reason)
+        self.assertEqual(recovered["state"], "stopped")
+        self.assertIsNone(recovered["pending"])
 
     def test_unverified_invoke_cannot_continue_or_resume(self):
         p = Playback(self.c.repository)

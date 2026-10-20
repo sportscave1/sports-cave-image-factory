@@ -31,6 +31,8 @@ class DesktopRunner(Runner):
         self.native_pump = None
         self.native_lock = asyncio.Lock()
         self.last_engine = None
+        self.capture_waiters = {}
+        self.message = "Windows recorder ready. Choose Record to select a prepared window."
 
     def desktop_busy(self):
         return self.desktop.recording.state != "idle" or self.desktop.pending_play is not None or (
@@ -52,11 +54,19 @@ class DesktopRunner(Runner):
         r = self.desktop.recording
         run = self.desktop.playback.run
         if r.state != "idle":
+            state["tasks"].append(dict(id=r.task["id"], name=r.task["name"], format=FORMAT,
+                format_version=1, playback_available=False, inputs=[], steps=len(r.task["actions"]),
+                revision=None, duration_ms=r.elapsed_ms, updated_at=None, result="Unsaved desktop recording"))
             state.update(mode={"recording":"recording", "paused":"recording_paused",
                                "draft":"interrupted", "interrupted":"interrupted"}[r.state],
                          recording=r.state == "recording", message=r.problem or self.desktop.message,
-                         active_task_id=r.task["id"], active_task_name=r.task["name"],
+                         active_task_id=r.task["id"], active_task_name=r.task["name"], selected_id=r.task["id"],
                          step=len(r.task["actions"]), total=len(r.task["actions"]))
+        elif self.desktop.pending_play:
+            selected = next(t for t in state["tasks"] if t["id"] == self.desktop.pending_play["task_id"])
+            state.update(mode="starting", message=self.desktop.message,
+                         active_task_id=selected["id"], active_task_name=selected["name"],
+                         total=selected["steps"], selected_id=selected["id"])
         elif run and self.last_engine == "desktop":
             mode = {"playing":"running", "paused":"paused", "uncertain":"running",
                     "stopped":"stopped", "completed":"completed"}[run["state"]]
@@ -64,7 +74,16 @@ class DesktopRunner(Runner):
                 mode = "interrupted"
             state.update(mode=mode, message=self.desktop.message, step=run["next_step"],
                          total=run["total"], active_task_id=run["task_id"],
+                         active_task_name=next((t["name"] for t in state["tasks"] if t["id"] == run["task_id"]), "Desktop recording"),
+                         selected_id=run["task_id"],
                          can_resume=run["pause_requested"])
+        elif self.last_engine == "desktop":
+            state["message"] = self.desktop.message
+        # Results are projections of durable run journals, never saved-definition edits.
+        for history in [*self.desktop.recovered_runs, *([run] if run else [])]:
+            for row in state["tasks"]:
+                if row["id"] == history["task_id"] and row.get("revision") == history["revision"]:
+                    row["result"] = {"uncertain":"interrupted", "playing":"running"}.get(history["state"], history["state"])
         return state
 
     async def publish_native(self, state=None):
@@ -92,6 +111,13 @@ class DesktopRunner(Runner):
             self.desktop.message = str(error)[:240]
             state = self.desktop.state()
             state["ack"] = command.get("id")
+            waiter = self.capture_waiters.get(command.get("payload", {}).get("request_id"))
+            if waiter and not waiter[1].done():
+                waiter[1].set_exception(Invalid(self.desktop.message))
+        else:
+            waiter = self.capture_waiters.get(command.get("payload", {}).get("request_id"))
+            if waiter and command.get("kind") == waiter[0] and not waiter[1].done():
+                waiter[1].set_result(None)
         await self.publish_native(state)
 
     async def open_toolbar(self):
@@ -124,36 +150,59 @@ class DesktopRunner(Runner):
         except Exception as error:
             self.desktop.message = "Native connection interrupted: " + type(error).__name__
         finally:
-            self.desktop.playback.stop()
+            self.desktop.message = "Native toolbar disconnected. Review the preserved recording or run before continuing."
+            self.desktop.pending_play = None
+            self.desktop.playback.stop(reason=self.desktop.message)
             if self.desktop.recording.state in {"recording", "paused"}:
-                self.desktop.recording.interrupt("Native toolbar disconnected. Review the draft.")
+                try:
+                    self.desktop.recording.interrupt("Native toolbar disconnected. Review the draft.")
+                except OSError:
+                    self.desktop.recording.problem = "Disk write failed. Draft retained in memory; review after restoring disk access."
+            for _, future in self.capture_waiters.values():
+                if not future.done():
+                    future.set_exception(ConnectionError("Native toolbar disconnected before capture confirmation."))
             self.notify_state()
 
     async def desktop_command(self, kind, data, command_id):
         if kind != "inspect":
             self.last_engine = "desktop"
-        await self.open_toolbar()
-        if kind == "record":
-            if self.busy() or self.recording:
-                raise Invalid("Stop the current session first.")
-            return {"message":"Choose your prepared window and press Record on the toolbar."}
         if kind == "inspect":
             task = self.desktop.repository.get(data["id"])
             return {"task":task, "revision":self.store.revision(task), "values":{},
                     "desktop":True, "playback_available":True}
+        await self.open_toolbar()
+        if kind == "record":
+            if self.busy() or self.recording:
+                raise Invalid("Stop the current session first.")
+            self.desktop.message = "Choose your prepared window and press Record on the Windows toolbar."
+            await self.publish_native()
+            return {"message":self.desktop.message}
         if kind in {"pause", "resume", "stop"}:
             if self.desktop.recording.state in {"recording", "paused"}:
                 if kind == "resume":
                     native_kind = "resume"
                 else:
                     # Native flush barrier must acknowledge before changing state.
-                    self.desktop.instruct("capture_" + kind)
-                    await self.publish_native()
-                    return {"message":"Waiting for native capture acknowledgement."}
+                    future = asyncio.get_running_loop().create_future()
+                    self.capture_waiters[command_id] = (kind, future)
+                    try:
+                        self.desktop.instruct("capture_" + kind, request_id=command_id)
+                        await self.publish_native()
+                        await asyncio.wait_for(future, timeout=4)
+                    except (asyncio.TimeoutError, ConnectionError, asyncio.CancelledError):
+                        if self.desktop.recording.state in {"recording", "paused"}:
+                            self.desktop.recording.interrupt("Native capture confirmation was lost. Review the preserved draft.")
+                        self.notify_state()
+                        raise
+                    finally:
+                        self.capture_waiters.pop(command_id, None)
+                    return {"message":self.desktop.message}
             else:
                 native_kind = "play_" + kind
         else:
             native_kind = kind
+        if kind == "play":
+            data = {**data, "confirm_on_toolbar":True}
         async with self.native_lock:
             self.desktop.apply(dict(v=1, id=command_id, kind=native_kind, payload=data))
             await self.publish_native()
