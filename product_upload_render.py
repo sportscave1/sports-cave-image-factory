@@ -123,7 +123,12 @@ async def host(request):
     from product_upload_api import connect, Dropbox, failure, HEADERS
     from starlette.concurrency import run_in_threadpool
     from starlette.responses import JSONResponse
-    import tempfile
+    import tempfile,time,re
+    started=time.monotonic();timings={}
+    correlation=request.headers.get('x-sc-transfer-id','')
+    if not re.fullmatch('[a-f0-9]{32}',correlation):correlation=__import__('uuid').uuid4().hex
+    request_id=request.headers.get('x-sc-request-id','')
+    timings['request_id']=request_id if re.fullmatch('[a-f0-9]{32}',request_id) else __import__('uuid').uuid4().hex
     try:
         if not request.headers.get('x-sports-cave-preparation-host'):
             raise PermissionError('The existing scoped preparation host is required.')
@@ -159,6 +164,8 @@ async def host(request):
             await run_in_threadpool(renders.fail, body['id'], user['id'], body['token'], body['reason'], body.get('retryable',False))
             return JSONResponse(dict(ok=True), headers=HEADERS)
         if op != 'complete': raise ValueError('Unknown render action.')
+        timings['authentication_context_seconds']=time.monotonic()-started
+        receive_started=time.monotonic()
         receipt = json.loads(request.headers.get('x-render-receipt', '{}'))
         with tempfile.TemporaryDirectory(prefix='product-render-') as folder:
             path = Path(folder)/'render.png'
@@ -168,10 +175,16 @@ async def host(request):
                     length += len(block)
                     if length > 20*1024**2: raise ValueError('Render exceeds the bounded transfer limit.')
                     output.write(block)
+            timings['body_receive_seconds']=time.monotonic()-receive_started
+            timings['server_received_bytes']=length
+            phase=time.monotonic()
             provider = await run_in_threadpool(Dropbox)
             await run_in_threadpool(renders.finish, request.query_params['id'], user['id'],
                                     request.headers.get('x-render-token'), receipt, path, provider)
-        return JSONResponse(dict(ok=True), headers=HEADERS)
+        timings['validation_publication_receipt_seconds']=time.monotonic()-phase
+        timings['handler_total_seconds']=time.monotonic()-started
+        timings['correlation_id']=correlation
+        return JSONResponse(dict(ok=True,timings=timings), headers={**HEADERS,'X-SC-Transfer-ID':correlation,'X-SC-Received-Bytes':str(length)})
     except Exception as error: return failure(error)
 
 

@@ -64,13 +64,17 @@ def run_one(config, host):
                 req=Request(grant['base_url']+'/api/files-native-transfer/content?'+urlencode({'ticket':grant['ticket'],'item':item['token']}),headers={'X-Sports-Cave-Transfer-Secret':grant['secret']})
                 count=0
                 temporary=root/'input.partial'
-                with build_opener(host.transfer.NoRedirect()).open(req,timeout=300) as response,temporary.open('wb') as destination:
-                    while block:=response.read(4*1024*1024):
+                with host.transfer_controller().download_slot(host.HOST_STOP.is_set),build_opener(host.transfer.NoRedirect()).open(req,timeout=300) as response,temporary.open('wb') as destination:
+                    for block in host.transfer_controller().download(response):
                         count+=len(block)
                         if count>job['metadata']['size']:raise ValueError('PSD exceeds its verified size.')
                         destination.write(block)
                 if count!=job['metadata']['size']:raise ValueError('Incomplete PSD download; retry retained transfer.')
                 temporary.replace(source)
+            try:
+                from companion_source_cache import remember
+                remember(source,job['source'],job['metadata']['size'])
+            except (OSError,KeyError,ValueError):pass
             lease=host.processor_lease()
             try:
                 from scripts.render_product_upload_psd import render
@@ -90,9 +94,12 @@ def run_one(config, host):
                 safe=not dispatched or status.exists() and json.loads(status.read_text(encoding='utf-8-sig')).get('owned_document_closed') is True
                 if safe:lease.unlink(missing_ok=True)
         host.JOBS[job_key]['phase']='Uploading'
-        with path.open('rb') as image:
-            response=requests.post(config['base_url']+'/api/product-uploads/render/complete?'+urlencode({'id':job['id']}),data=image,
-                headers={'X-Sports-Cave-Preparation-Host':config['token'],'X-Render-Token':job['token'],'X-Render-Receipt':json.dumps(receipt,separators=(',',':'))},allow_redirects=False,timeout=300)
+        from companion_transfer import post_file
+        response,trace=post_file(host.transfer_controller(),config['base_url']+'/api/product-uploads/render/complete?'+urlencode({'id':job['id']}),path,
+            {'X-Sports-Cave-Preparation-Host':config['token'],'X-Render-Token':job['token'],'X-Render-Receipt':json.dumps(receipt,separators=(',',':'))},
+            correlation=__import__('hashlib').sha256(('render:'+job['id']).encode()).hexdigest()[:32],
+            stopped=host.HOST_STOP.is_set,timeout=(20,300),
+            on_trace=lambda t:host.atomic_json(root/'transfer-timing.json',{k:v for k,v in t.items() if k!='started_monotonic'}))
         response.raise_for_status()
         host.atomic_json(root/'completed.json',dict(source=job['source'],verified=True))
     except ValueError as error:

@@ -17,8 +17,8 @@ def render(source, output, identity, *, dispatch=None):
         raise ColourReview('Mockups needs an RGB8 working PSD. Preserve the original and review its supported export.')
     icc, policy = colour['icc'], None
     if not icc:
-        from auto_editions_colour_policy import resolve
-        icc, policy = resolve(identity)
+        from product_upload_colour import resolve_web
+        icc, policy = resolve_web(identity)
     output.mkdir(parents=True)
     staged = output/'working.psd'
     assignment = stage_profile(source, staged, icc) if policy else None

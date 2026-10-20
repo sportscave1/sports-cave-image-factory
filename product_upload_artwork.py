@@ -138,7 +138,7 @@ def settings(connect):
     root=Path(__file__).parent
     payload=dict(version='server-psd-composite-v1',pillow=__version__,edge=factory.MAX_WORKING_EDGE,
                  colour=configuration(connect),code={name:hashlib.sha256((root/name).read_bytes()).hexdigest()
-                 for name in ('product_upload_artwork.py','image_factory.py','auto_editions_colour_source.py','auto_editions_colour_policy.py')})
+                 for name in ('product_upload_artwork.py','product_upload_colour.py','image_factory.py','auto_editions_colour_source.py','auto_editions_colour_policy.py')})
     return hashlib.sha256(json.dumps(payload,sort_keys=True,default=str).encode()).hexdigest()
 
 
@@ -198,9 +198,9 @@ def decode(psd, destination, row, connect):
     icc=inspection['icc'];policy=None
     if not icc:
         from auto_editions_colour_store import configuration
-        from auto_editions_colour_policy import resolve
+        from product_upload_colour import resolve_web
         config=configuration(connect)
-        icc,policy=resolve(source(row),policies=config['policies'],memberships=config['memberships'],default_group=config['default_group'])
+        icc,policy=resolve_web(source(row),config)
     srgb=ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB'))
     factory.validate_image_dimensions(inspection['width'],inspection['height'])
     factory.validate_processing_memory(inspection['width'],inspection['height'])

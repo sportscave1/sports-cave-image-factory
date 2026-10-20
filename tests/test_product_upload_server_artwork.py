@@ -186,3 +186,23 @@ def test_live_source_lease_blocks_duplicate_download_and_is_not_overwritten(env,
         artwork.prepare(store.connect,provider,str(row['id']),ADMIN['id'])
     provider.download.assert_not_called()
     assert store.read(str(row['id']),ADMIN['id'])['data']['server_artwork']==spec
+
+
+def test_exact_source_owner_approval_recovers_failed_preparation_without_companion(env,tmp_path,monkeypatch):
+    store,sql,provider=env;row,meta,original=source_fixture(env,tmp_path,monkeypatch,tagged=False)
+    before=original.read_bytes();key=str(row['id'])
+    monkeypatch.setattr('auto_editions_colour_store.configuration',lambda _:dict(policies=[],memberships=[],default_group=''))
+    with pytest.raises(artwork.PreparationError,match='no matching exact-source approval'):
+        artwork.prepare(store.connect,provider,key,ADMIN['id'])
+    assert store.read(key,ADMIN['id'])['data']['state']=='Error'
+    # Approval belongs to the identical physical source under its old product
+    # identity. Web conversion neither fabricates nor changes a product mapping.
+    identity={k:v for k,v in artwork.source(row).items() if k!='template_id'}
+    identity['product_gid']='gid://shopify/Product/123'
+    policy=approved(identity)
+    monkeypatch.setattr('auto_editions_colour_store.configuration',lambda _:dict(policies=[policy],memberships=[],default_group=''))
+    ready=artwork.prepare(store.connect,provider,key,ADMIN['id'])
+    folder=artwork.ready(ready,store.connect,provider)
+    with Image.open(folder/'artwork.png') as image:assert image.size==(640,480) and image.info['icc_profile']
+    assert ready['data']['state']=='Ready' and not ready['data'].get('mockup_render')
+    assert original.read_bytes()==before

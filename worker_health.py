@@ -43,10 +43,13 @@ def set_pause(connect,paused,actor):
 
 
 def validate_heartbeat(value):
-    allowed={'state','stage','revision','code_hash','protocol','product_gid','last_progress_at','retry_at','recovery_failures','checkpoint_pending','processor_lock','diagnostic'}
+    allowed={'state','stage','revision','code_hash','protocol','product_gid','last_progress_at','retry_at','recovery_failures','checkpoint_pending','processor_lock','diagnostic','transfer_control'}
     if not isinstance(value,dict) or set(value)-allowed:raise ValueError('Bounded worker evidence required.')
     out={}
     for key,val in value.items():
+        if key=='transfer_control':
+            from companion_transfer_control import evidence
+            out[key]=evidence(val);continue
         if key=='diagnostic':out[key]=diagnostics.accepted(val);continue
         if key=='state' and val not in STATES:raise ValueError('Invalid worker state.')
         if key=='stage' and val not in diagnostics.STAGES:raise ValueError('Invalid worker stage.')
@@ -194,7 +197,12 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if counts['remaining'] and health_lookup['Companion']['status']=='Offline':overall='Offline'
     starts=[stamp(r.get('claimed_at')) for r in rows if r.get('claimed_at')]
     last_output=stamp(last['created_at']) if last else min(starts) if starts else None
-    stalled=bool(not pause['paused'] and counts['remaining'] and last_output and seconds(last_output,now)>2700)
+    recovery=latest.get('Companion',{}).get('payload',{})
+    transfer=recovery.get('transfer_control') or {}
+    intentional_transfer_wait=bool(current and current['stage'] in ('Claimed','Uploading') and (
+        transfer.get('pause_state') in ('Transfers paused','Pause after current transfer','Paused at chunk boundary','Pausing at chunk boundary')
+        or transfer.get('protection')=='Calibration needed'))
+    stalled=bool(not pause['paused'] and not intentional_transfer_wait and counts['remaining'] and last_output and seconds(last_output,now)>2700)
     if any(h['status'] in ('Degraded','Offline','Unavailable','Failed','Recovering') for h in subsystem) or counts['unavailable'] or stalled or telemetry_error:
         if overall!='Offline':overall='Degraded'
     if counts['eligible'] and not counts['remaining'] and not counts['completed'] and counts['failed']+counts['repair']:
@@ -203,7 +211,6 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if overall in ('Offline','Degraded','Failed') and counts['remaining']:eta=None;eta_label='Unavailable'
     if not pause['paused'] and any(j['validation_pending'] for j in jobs):eta=None;eta_label='Unavailable'
     expired=sum(j['lease_expired'] for j in jobs)
-    recovery=latest.get('Companion',{}).get('payload',{})
     upload_fail=next((j for j in jobs if (j.get('diagnostic') or {}).get('code')=='UPLOAD_INTERRUPTED'),None)
     subsystem.extend([
         dict(component='Dropbox',label='Dropbox/cloud upload',status='Degraded' if upload_fail else 'Last verified' if last else 'Unavailable',
@@ -219,7 +226,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     if stalled:warnings.append('Worker has runnable jobs but no verified successful output in 45 minutes.')
     if current and (current['elapsed_seconds'] or 0)>900:warnings.append('Current job has no measured completion after 15 minutes; inspect its durable stage.')
     last_progress=recovery.get('last_progress_at')
-    if current and recovery.get('product_gid')==current['id'] and last_progress and now.timestamp()-last_progress>900:
+    if current and not intentional_transfer_wait and recovery.get('product_gid')==current['id'] and last_progress and now.timestamp()-last_progress>900:
         warnings.append('Companion reports no stage change for 15 minutes; current-job progress is not measurable.')
         if overall not in ('Paused','Pausing','Offline'):overall='Degraded';eta=None;eta_label='Unavailable'
     if telemetry_error:warnings.append('Independent heartbeat telemetry unavailable; apply the reviewed migration/setting before relying on subsystem health.')
@@ -228,6 +235,7 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     affected=[j for j in jobs if j['colour_affected'] or (j.get('diagnostic') or {}).get('code') in colour_codes]
     repaired=sum(j['colour_recovered'] and j['completed'] for j in affected)
     return dict(colour=dict(affected=len(affected),repaired=repaired,remaining=len(affected)-repaired),
+        transfer_control=dict(instance=latest.get('Companion',{}).get('instance_id'),age_seconds=health_lookup['Companion'].get('age_seconds'),effective=recovery.get('transfer_control')),
         overall=overall,current=current,counts=counts,progress=dict(completed=counts['completed'],total=counts['eligible'],
         ratio=counts['completed']/counts['eligible'] if counts['eligible'] else None,current_job_ratio=None),
         eta_seconds=eta,eta_label=eta_label,eta_samples=len(durations),last_completed=dict(design=last.get('product_title') or last['product_gid'],at=sydney(last['created_at'])) if last else None,
@@ -304,6 +312,10 @@ class Health:
             state_rows.extend(part['rows']);state_reads+=part['query_count']
         states=dict(rows=state_rows,query_count=state_reads)
         result=project(rows,{r['product_gid']:r for r in states['rows']},beats,successes,pause,telemetry_error=telemetry_error)
+        instance=result['transfer_control']['instance']
+        if instance and result['transfer_control']['effective']:
+            from companion_transfer_control import requested
+            result['transfer_control']['requested']=requested(self.connect,instance)
         from auto_editions_recovery import enabled as recovery_enabled
         # Read-only durable scanner telemetry. Missing/stale scans never imply
         # completion, and blocked backlog is never labelled healthy Monitoring.

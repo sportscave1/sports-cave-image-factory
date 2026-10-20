@@ -71,16 +71,19 @@ def test_resize_proof_rejects_painting_and_the_demonstrated_222_alpha(tmp_path):
 
 
 @pytest.mark.parametrize('status,attempts,reconnects,waits',[(422,1,0,[]),(429,3,2,[1,2]),(503,3,2,[1,2])])
-def test_only_transient_uploads_retry_with_bounded_backoff(tmp_path,status,attempts,reconnects,waits):
+def test_only_transient_uploads_retry_with_bounded_backoff(tmp_path,status,attempts,reconnects,waits,monkeypatch):
     import requests
     from tests.test_auto_editions_preparation_host import local
+    from companion_transfer import Controller
+    controller=Controller();controller.configure({'mode':'Maximum speed'})
+    monkeypatch.setattr(local,'transfer_controller',lambda:controller)
     archive=tmp_path/'prepared.zip';archive.write_bytes(b'verified intermediate')
     row=dict(folder=tmp_path,grant={'base_url':'https://sandbox.invalid','ticket':'test','secret':'test'},
              context={'automatic':True},status='Working')
     response=Mock(status_code=status)
     error=requests.HTTPError(f'HTTP {status}',response=response)
     with patch.object(local,'JOBS',{'job':row}),patch.object(local,'cancellation_check',return_value=False),\
-         patch('requests.post',side_effect=error) as post,patch.object(local,'reconnect',return_value=None) as reconnect,\
+         patch('requests.Session.send',side_effect=error) as post,patch.object(local,'reconnect',return_value=None) as reconnect,\
          patch.object(local.HOST_STOP,'wait',return_value=False) as wait,patch.object(local,'report_failure'),\
          patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)

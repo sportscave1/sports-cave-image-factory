@@ -284,8 +284,12 @@ def test_native_upload_reconnect_uses_verified_cache_without_rerender(tmp_path,m
     host=SimpleNamespace(HOST_FILE=base/'host.dpapi',JOBS={},host_request=lambda *a:{'job':job},atomic_json=lambda path,value:path.write_text(json.dumps(value)),processor_lease=Mock())
     render=Mock(side_effect=AssertionError('Successful native work must not run again'))
     monkeypatch.setattr('scripts.render_product_upload_psd.render',render)
-    post=Mock(side_effect=[requests.ConnectionError('offline'),SimpleNamespace(raise_for_status=lambda:None)])
-    monkeypatch.setattr(requests,'post',post)
+    import threading
+    from companion_transfer import Controller
+    controller=Controller();controller.configure({'mode':'Maximum speed'})
+    host.transfer_controller=lambda:controller;host.HOST_STOP=threading.Event()
+    post=Mock(side_effect=[requests.ConnectionError('offline'),SimpleNamespace(headers={},raise_for_status=lambda:None)])
+    monkeypatch.setattr(requests.Session,'send',post)
     with pytest.raises(requests.ConnectionError):run_one({'base_url':'https://synthetic','token':'host'},host)
     assert run_one({'base_url':'https://synthetic','token':'host'},host)
     render.assert_not_called();host.processor_lease.assert_not_called()

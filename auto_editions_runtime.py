@@ -106,6 +106,8 @@ def _loop():
                         assets.discard_cache(row['id'],row['result']['output'])
                         jobs.forget_expired_output(row['id'])
                 last_cleanup=time.monotonic()
+            from companion_package_api import run_one as run_package
+            if run_package():continue
             if run_one(jobs):continue
         except Exception:
             LOG.warning('AUTO_EDITIONS queue temporarily unavailable')

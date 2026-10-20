@@ -66,7 +66,7 @@ def test_recovery_journal_contains_no_transfer_secret_and_uses_same_owned_lease(
     with patch.object(local,'host_request',return_value={'grant':{'base_url':'scoped'}}) as request,patch.object(local,'start') as start:
         assert local.recover_retained({'base_url':'scoped'})
     assert request.call_args.args[2]=={'product_gid':PID,'lease_token':'owned'}
-    start.assert_called_once_with({'base_url':'scoped'},resume_folder=folder,package_transport=0)
+    start.assert_called_once_with({'base_url':'scoped'},resume_folder=folder,package_transport=0,upload_protocol=0)
 
 
 def test_lost_response_receipt_recovers_without_photoshop_or_second_upload(tmp_path,monkeypatch):

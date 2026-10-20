@@ -13,6 +13,9 @@ def isolated_host_file(monkeypatch,tmp_path):
     # Never inspect or use this computer's registered host capability in tests.
     monkeypatch.setattr(local,'HOST_FILE',tmp_path/'isolated-host.dpapi')
     monkeypatch.setattr(local,'cancellation_check',lambda *a,**kw:False)
+    from companion_transfer import Controller
+    controller=Controller();controller.configure({'mode':'Maximum speed'})
+    monkeypatch.setattr(local,'transfer_controller',lambda:controller)
 
 
 def test_completed_bulk_jobs_do_not_exhaust_interactive_slots(tmp_path):
@@ -96,7 +99,7 @@ def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):
              context={'automatic':True},status='Working')
     failed=Mock();failed.raise_for_status.side_effect=requests.HTTPError('expired transfer')
     success=Mock();success.json.return_value={'preparation_hash':'c'*64}
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=[failed,success]) as post,\
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=[failed,success]) as post,\
          patch.object(local,'reconnect') as reconnect,patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
         assert row['status']=='Prepared' and post.call_count==2
@@ -108,7 +111,7 @@ def test_failed_upload_keeps_recoverable_package(tmp_path):
     archive=tmp_path/'prepared.zip';archive.write_bytes(b'retained')
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.ConnectionError()),\
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.ConnectionError()),\
          patch.object(local,'reconnect'),patch.object(local,'report_failure'),patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
         assert row['status']=='Recovering' and archive.read_bytes()==b'retained'
@@ -153,7 +156,7 @@ def test_lost_success_response_uses_receipt_without_second_upload(tmp_path):
     archive=tmp_path/'prepared.zip';archive.write_bytes(b'recovery')
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
-    with patch.object(local,'JOBS',{'job':row}),patch('requests.post',side_effect=requests.Timeout()) as post,\
+    with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.Timeout()) as post,\
          patch.object(local,'reconnect',return_value={'preparation_hash':'c'*64,'timings':{'validation_seconds':5}}),\
          patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)

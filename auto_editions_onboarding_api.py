@@ -68,12 +68,32 @@ async def heartbeat(request):
         if not request.headers.get('x-sports-cave-preparation-host'):raise PermissionError('Preparation host required.')
         user=await preparation_actor(request)
         body=await files._json_body(request)
-        await run_in_threadpool(host_health,request,body.pop('health',None))
+        transfer_settings=await run_in_threadpool(host_health,request,body.pop('health',None))
+        transfer_ticket=body.pop('transfer_ticket',None)
         if body:
             if set(body)!={'product_gid','lease_token','stage'}:raise ValueError('Exact preparation lease required.')
             await run_in_threadpool(queue().heartbeat,body['product_gid'],body['lease_token'],str(user['id']),body['stage'])
-        return JSONResponse(dict(ok=True),headers=api.HEADERS)
+        if transfer_ticket:
+            await run_in_threadpool(renew_transfer,request,body,transfer_ticket)
+        return JSONResponse(dict(ok=True,transfer_settings=transfer_settings),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
+
+
+def renew_transfer(request, body, ticket):
+    # Renew only an unexpired grant bound to this authenticated host and exact
+    # already-renewed product lease. Ticket/secret never enter telemetry.
+    import files_upload_api as files
+    digest=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest()
+    manager=files.NATIVE_TRANSFER_MANAGER
+    with manager._lock:
+        record=manager._records.get(str(ticket))
+        if not record or record.expires_at<=time.monotonic():return False
+        setup=getattr(record,'v6_setup',{})
+        ctx=setup.get('context',{})
+        if setup.get('host_token_hash')!=digest or any(ctx.get(k)!=body.get(k) for k in ('product_gid','lease_token')):
+            raise PermissionError('Transfer grant belongs to another host or lease.')
+        record.expires_at=time.monotonic()+45*60
+    return True
 
 
 async def colour_configuration(request):
@@ -93,7 +113,11 @@ def host_health(request,value):
     token=request.headers.get('x-sports-cave-preparation-host')
     if not token:raise PermissionError('Scoped preparation host required for telemetry.')
     from worker_health import record_heartbeat
-    record_heartbeat(queue().connect,'Companion',hashlib.sha256(token.encode()).hexdigest()[:24],value)
+    instance=hashlib.sha256(token.encode()).hexdigest()[:24]
+    record_heartbeat(queue().connect,'Companion',instance,value)
+    if value.get('transfer_control',{}).get('capability') in (1,2):
+        from companion_transfer_control import requested
+        return requested(queue().connect,instance)
 async def cancellation(request):
     try:
         import files_upload_api as files
@@ -349,7 +373,7 @@ async def claim(request):
         import files_upload_api as files
         user=await preparation_actor(request)
         body=await files._json_body(request)
-        await run_in_threadpool(host_health,request,body.pop('health',None))
+        transfer_settings=await run_in_threadpool(host_health,request,body.pop('health',None))
         if body!={}:raise ValueError('Preparation reads authoritative product identities.')
         from auto_editions_priority import refresh
         store=queue()
@@ -372,7 +396,7 @@ async def claim(request):
         row=await run_in_threadpool(store.claim,str(user['id']))
         if not row:
             from product_upload_services import enabled as uploads_enabled
-            return JSONResponse(dict(grant=None,product_mockup_renders=uploads_enabled()),headers=api.HEADERS)
+            return JSONResponse(dict(grant=None,product_mockup_renders=uploads_enabled(),transfer_settings=transfer_settings),headers=api.HEADERS)
         ctx=await run_in_threadpool(product_context,row['product_gid'],str(row['lease_token']))
         await run_in_threadpool(store.checkpoint,row['product_gid'],str(row['lease_token']),str(user['id']),
                                 'Preparing',source=ctx['source'],total=ctx['total'])
@@ -386,7 +410,7 @@ async def claim(request):
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
         if host:record.v6_setup['host_token_hash']=hashlib.sha256(host.encode()).hexdigest()
-        return JSONResponse(dict(package_transport=1,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,transfer_settings=transfer_settings,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
             ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:
         if row:
@@ -453,7 +477,7 @@ async def reconnect(request):
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
             host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())
-        return JSONResponse(dict(package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

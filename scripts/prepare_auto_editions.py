@@ -138,9 +138,7 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
                   'master':asset('master.png'), 'patches':{str(n):asset(f'number-{n}.png') for n in range(1,total+1)}}
     ae.validate_manifest(manifest)
     with measured(timings,'pixel_verification',path=output):
-        proofs=[ae.compare_reference(manifest,output,n,output/f'reference-{n}.png')
-                for n in sorted({1,reference_number,total})]
-        original_proof=ae.compare_original_outside_number(manifest,output,reference_number,output/'original.png')
+        proofs,original_proof=ae.verify_preparation_pixels(manifest,output,reference_number)
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     (output/'proofs.json').write_text(json.dumps(proofs,indent=2)+'\n')
     (output/'source-proof.json').write_text(json.dumps(original_proof,indent=2)+'\n')

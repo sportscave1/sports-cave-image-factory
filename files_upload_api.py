@@ -2268,6 +2268,8 @@ async def native_transfer_manifest(request: Request):
             }
             for item in record.items
         ]
+        if record.purpose=='photoshop_master':
+            for public,item in zip(public_items,record.items):public['source_path']=item['dropbox_path']
         public_roots = [
             {
                 key: item[key]

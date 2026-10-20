@@ -24,6 +24,38 @@ RECOVERY_CURSOR=0
 HOST_RETRY_AT=0
 HOST_FAILURES=0
 HOST_LAST_DIAGNOSTIC=None
+TRANSFER_CONTROLLER=None
+TRANSFER_LOCK=threading.Lock()
+
+
+def transfer_controller():
+    global TRANSFER_CONTROLLER
+    from companion_transfer import Controller
+    path=HOST_FILE.parent/'transfer-settings.json'
+    with TRANSFER_LOCK:
+        if TRANSFER_CONTROLLER is None or TRANSFER_CONTROLLER.path!=path:
+            TRANSFER_CONTROLLER=Controller(path)
+        return TRANSFER_CONTROLLER
+
+
+def apply_transfer_settings(data):
+    command=data.get('transfer_settings')
+    if command:transfer_controller().configure(command['settings'],command['revision'])
+    return data
+
+
+def preparation_watchdog(row,stage,controller,now=None):
+    now=time.time() if now is None else now
+    state=controller.snapshot()
+    # Keep the native watchdog independent of intentional transfer waits. A
+    # read/send socket still has its own inactivity timeout and bounded retries.
+    bulk_wait=(stage=='Claimed' and (state['settings']['download_mbps'] is not None
+        or state['pause_state']!='Running')) or (stage=='Uploading' and (
+        state['pause_state']!='Running' or state['protection']=='Calibration needed'
+        or controller.active is not None))
+    if bulk_wait:row['_processing_watchdog_started']=now
+    if now-row.get('_processing_watchdog_started',row.get('started_at',now))>2700:
+        raise RuntimeError('Preparation exceeded the recovery window; inspect Photoshop. Lock retained.')
 
 
 def health_payload():
@@ -43,6 +75,11 @@ def health_payload():
         retry_at=max(HOST_RETRY_AT,row.get('retry_at',0)),recovery_failures=max(HOST_FAILURES,row.get('recovery_failures',0)),
         checkpoint_pending=bool(row.get('checkpoint_pending')),processor_lock=locked and not bool(active))
     if row.get('diagnostic') or HOST_LAST_DIAGNOSTIC:result['diagnostic']=row.get('diagnostic') or HOST_LAST_DIAGNOSTIC
+    result['transfer_control']=transfer_controller().snapshot()
+    byte_count=result['transfer_control']['transfer'].get('transport_bytes')
+    if active and byte_count is not None and row.get('_last_transfer_bytes')!=byte_count:
+        row['_last_transfer_bytes']=byte_count;row['last_progress_at']=time.time()
+        result['last_progress_at']=row['last_progress_at']
     return result
 
 
@@ -128,7 +165,8 @@ def restore_host():
 def journal(row):
     if not row.get('context',{}).get('automatic'):return
     atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
-        package_transport=row.get('package_transport',0),
+        package_transport=row.get('package_transport',0),upload_protocol=row.get('upload_protocol',0),
+        generation=row.get('generation'),
         phase=row.get('phase','Preparing'),status=row['status'],error=row.get('error',''),
         cancellation_confirmed=bool(row.get('cancellation_confirmed')),
         repair=bool(row.get('repair')),checkpoint_pending=bool(row.get('checkpoint_pending')),
@@ -140,7 +178,7 @@ def host_request(config,path,body):
     if path.rsplit('/',1)[-1] in ('claim','heartbeat','reconnect'):body={**body,'health':health_payload()}
     response=requests.post(config['base_url']+path,json=body,
         headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=20)
-    response.raise_for_status();return response.json()
+    response.raise_for_status();return apply_transfer_settings(response.json())
 
 
 def sync_colour_configuration(config):
@@ -205,7 +243,7 @@ def recover_retained(config):
         if data.get('checkpoint_pending'):
             row=dict(data,grant=result['grant'],folder=file.parent)
             report_failure(row);return True
-        start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0))
+        start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0),upload_protocol=data.get('upload_protocol',0))
         return True
     return False
 
@@ -233,11 +271,10 @@ def host_loop():
                         cancellation_check(row,stopped=True,config=config)
                     HOST_BUSY.clear();HOST_STOP.wait(delay);continue
                 # A stuck COM call keeps its processor lock. Never steal it or renew forever.
-                if time.time()-row.get('started_at',time.time())>2700:
-                    state='Failed';raise RuntimeError('Preparation exceeded the recovery window; inspect Photoshop. Lock retained.')
+                preparation_watchdog(row,stage,transfer_controller())
                 state=stage
                 host_request(config,'/api/auto-editions/onboarding/heartbeat',
-                    dict(product_gid=row['context']['product_gid'],lease_token=row['context']['lease_token'],stage=stage))
+                    dict(product_gid=row['context']['product_gid'],lease_token=row['context']['lease_token'],stage=stage,transfer_ticket=row.get('grant',{}).get('ticket')))
             elif (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
                 state='Recovering'
                 host_request(config,'/api/auto-editions/onboarding/heartbeat',{})
@@ -250,7 +287,7 @@ def host_loop():
                 claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):
-                    started=start(data['grant'],initial_context=data.get('context'),package_transport=data.get('package_transport',0))
+                    started=start(data['grant'],initial_context=data.get('context'),package_transport=data.get('package_transport',0),upload_protocol=data.get('upload_protocol',0))
                     timings=JOBS[started['job_id']].setdefault('timings',{})
                     timings['claim_seconds']=round(time.monotonic()-claim_started,6)
                     if HOST_LAST_COMPLETED_AT is not None:timings['completed_to_claim_request_seconds']=round(claim_started-HOST_LAST_COMPLETED_AT,6)
@@ -293,7 +330,7 @@ def context(grant):
     return transfer.get(grant,'/api/auto-editions/context?'+urlencode({'ticket':grant['ticket']}))
 
 
-def start(grant,resume_folder=None,initial_context=None,package_transport=0):
+def start(grant,resume_folder=None,initial_context=None,package_transport=0,upload_protocol=0):
     verified=initial_context or context(grant)
     with LOCK:
         for key,row in list(JOBS.items()):
@@ -312,10 +349,16 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0):
                 raise ValueError('Retained preparation identity changed.')
         else:folder.mkdir(parents=True,exist_ok=False)
         JOBS[key]=dict(grant=grant,context=verified,folder=folder,created=time.monotonic(),status='Working',
-                       package_transport=1 if type(package_transport) is int and package_transport==1 else 0)
+                       package_transport=1 if type(package_transport) is int and package_transport==1 else 0,
+                       upload_protocol=1 if type(upload_protocol) is int and upload_protocol==1 else 0)
+        if (folder/'upload-session.json').exists():JOBS[key]['upload_protocol']=1 # Never downgrade a partial session.
+        JOBS[key]['generation']=json.loads((folder/'job-state.json').read_text()).get('generation') if resume_folder else __import__('companion_package_identity').generation()
         if resume_folder:JOBS[key]['recovery_failures']=json.loads((folder/'job-state.json').read_text()).get('recovery_failures',0)
         journal(JOBS[key])
-        package=find_reusable_package(verified)
+        package=find_reusable_package(verified,generation=__import__('companion_package_identity').generation() if JOBS[key]['upload_protocol']==1 else None)
+        if (folder/'upload-session.json').exists():
+            package=folder/'prepared.zip'
+            if not package.is_file() or package.is_symlink():raise ValueError('Retained resumable package missing; automatic regeneration refused.')
         if not package and resume_folder:package=package_finished(row=JOBS[key],ctx=verified)
         if package:
             JOBS[key]['reused_package']=str(package)
@@ -336,6 +379,7 @@ def package_finished(row,ctx):
     import auto_editions as ae
     from auto_editions_onboarding import preparation_scale
     from auto_editions_package import MAX_PACKAGE_BYTES
+    if row.get('upload_protocol')==1 and row.get('generation')!=__import__('companion_package_identity').generation():return None
     for folder in row['folder'].glob('prepared*'):
         if not folder.is_dir() or folder.is_symlink():continue
         try:
@@ -361,7 +405,7 @@ def package_finished(row,ctx):
     return None
 
 
-def find_reusable_package(ctx):
+def find_reusable_package(ctx,generation=None):
     """Only reuse exact source/edition identities. The server revalidates pixels."""
     if not ctx.get('automatic'):return None
     from auto_editions_package import MAX_PACKAGE_BYTES
@@ -370,10 +414,14 @@ def find_reusable_package(ctx):
         if package.is_symlink() or package.parent.is_symlink():continue
         try:
             if package.stat().st_size>MAX_PACKAGE_BYTES:continue
+            if generation is not None:
+                provenance=json.loads((package.parent/'package-identity.json').read_text(encoding='utf-8'))
+                if provenance.get('generation')!=generation or provenance.get('sha256')!=__import__('auto_editions').file_hash(package):continue
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
                 if sum(info.file_size for info in archive.infolist())>MAX_PACKAGE_BYTES:continue
                 manifest=json.loads(archive.read('manifest.json'))
+            if generation is not None and provenance.get('preparation_hash')!=__import__('auto_editions').fingerprint(manifest):continue
             colour=manifest.get('colour_evidence') or {}
             import re
             if not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256',''))) or colour.get('pixels_converted') is not False:continue
@@ -401,7 +449,29 @@ def reconnect(row):
         if data['completed'].get('source')!=ctx['source']:raise ValueError('Completed source changed.')
         return data['completed']
     row['grant']=data['grant']
+    if row.get('upload_protocol')==1 and data.get('upload_protocol')!=1:raise ValueError('Resumable backend compatibility is required; legacy replay refused.')
+    row['upload_protocol']=data.get('upload_protocol',row.get('upload_protocol',0))
     if context(row['grant'])!=ctx:raise ValueError('Preparation identity changed.')
+
+
+def record_transfer(row, trace):
+    clean={k:v for k,v in trace.items() if k!='started_monotonic'}
+    if not trace.get('resumable'):
+        if 'transfer_totals' not in row:
+            try:
+                retained=row['folder']/'transfer-totals.json'
+                saved=json.loads(retained.read_text(encoding='utf-8')) if retained.stat().st_size<4096 else {}
+                row['transfer_totals']={k:v for k,v in saved.items() if k in ('payload_bytes','bulk_requests') and type(v) is int and v>=0}
+            except (OSError,ValueError,TypeError):pass
+        totals=row.setdefault('transfer_totals',{})
+        totals['payload_bytes']=totals.get('payload_bytes',0)+trace.get('transport_bytes',0)
+        totals['bulk_requests']=totals.get('bulk_requests',0)+1
+        try:atomic_json(row['folder']/'transfer-totals.json',totals)
+        except OSError:pass
+    row.setdefault('transfer_attempts',[]).append(clean)
+    row['transfer_attempts']=row['transfer_attempts'][-3:]
+    try:atomic_json(row['folder']/'transfer-timing.json',row['transfer_attempts'])
+    except OSError:pass
 
 
 @cancellable
@@ -418,13 +488,36 @@ def upload_prepared(key,archive):
                 boundary(row)
                 grant=row['grant']
                 row['timings']['upload_attempts']+=1
-                with archive.open('rb',buffering=1024*1024) as content:
-                    response=requests.post(grant['base_url']+'/api/auto-editions/package?'+urlencode({'ticket':grant['ticket']}),
-                        data=content,headers={'X-Sports-Cave-Transfer-Secret':grant['secret'],'Content-Type':'application/zip'},
-                        allow_redirects=False,timeout=600)
+                if row.get('upload_protocol')==1 or (row['folder']/'upload-session.json').exists():
+                    from device_trust import protect
+                    from companion_package_client import upload
+                    config=json.loads(protect(HOST_FILE.read_bytes(),decrypt=True))
+                    result=upload(transfer_controller(),archive,grant,config,row['folder']/'upload-session.json',
+                        correlation=__import__('hashlib').sha256(str(key).encode()).hexdigest()[:32],
+                        stopped=lambda:HOST_STOP.is_set() or bool(row.get('cancel_requested')),
+                        on_trace=lambda trace:record_transfer(row,trace))
+                    boundary(row)
+                    finish_upload(row,result,started)
+                    return
+                from companion_transfer import post_file
+                correlation=__import__('hashlib').sha256(str(key).encode()).hexdigest()[:32]
+                response,trace=post_file(transfer_controller(),
+                    grant['base_url']+'/api/auto-editions/package?'+urlencode({'ticket':grant['ticket']}),archive,
+                    {'X-Sports-Cave-Transfer-Secret':grant['secret'],'Content-Type':'application/zip'},
+                    correlation=correlation,stopped=lambda: HOST_STOP.is_set() or bool(row.get('cancel_requested')),
+                    on_trace=lambda trace: record_transfer(row,trace))
+
                 boundary(row)
                 response.raise_for_status();result=response.json()
                 if not result.get('preparation_hash'):raise ValueError('Cloud preparation was not confirmed.')
+                if result.get('timings',{}).get('correlation_id',correlation)!=correlation:
+                    raise ValueError('Cloud transfer correlation changed.')
+                trace['state']='Cloud Ready' if result.get('status')=='Cloud Ready' else 'Waiting for server verification'
+                trace['client_confirmation_seconds']=time.monotonic()-trace['started_monotonic']
+                transfer_controller().last=dict(trace)
+                row['transfer_attempts'][-1].update(state=trace['state'],client_confirmation_seconds=trace['client_confirmation_seconds'])
+                try:atomic_json(row['folder']/'transfer-timing.json',row['transfer_attempts'])
+                except OSError:pass
                 finish_upload(row,result,started)
                 return
             except requests.RequestException as error:
@@ -439,6 +532,9 @@ def upload_prepared(key,archive):
                 if isinstance(completed,dict) and completed.get('preparation_hash'):
                     finish_upload(row,completed,started)
                     return
+    except InterruptedError:
+        if HOST_STOP.is_set() or row.get('cancel_requested'):raise Cancelled()
+        raise
     except Cancelled:raise
     except Exception as error:
         response=getattr(error,'response',None)
@@ -537,17 +633,27 @@ def inspect(key):
         from auto_editions_local_cache import reuse_source,cached_inspection,inspection_receipt
         from auto_editions_performance import file_hashes
         cached=reuse_source(HOST_FILE.parent,source,row['context']['source'],meta['size'])
+        if not cached and not source.exists():
+            from companion_source_cache import reuse
+            cached=reuse(source,row['context']['source'],meta['size'])
+            if not cached and item.get('source_path'):
+                from product_upload_local_source import reuse_synced
+                cached=reuse_synced({**meta,'path_display':item['source_path']},source)
         complete=bool(cached)
         if source.exists() and not complete:source.rename(source.with_name('input.incomplete-'+secrets.token_hex(6)+'.psd'))
         count=meta['size'] if complete else 0
         if not complete:
-            with build_opener(transfer.NoRedirect()).open(req,timeout=300) as response,source.open('xb') as output:
-                while block:=response.read(4*1024*1024):
+            with transfer_controller().download_slot(HOST_STOP.is_set),build_opener(transfer.NoRedirect()).open(req,timeout=300) as response,source.open('xb') as output:
+                for block in transfer_controller().download(response):
                     count+=len(block)
                     if count>meta['size']:raise ValueError('Source exceeded its verified size.')
                     output.write(block)
         hashes=cached or file_hashes(source)
         if count!=meta['size'] or hashes['dropbox']!=meta['content_hash']:raise ValueError('Source checksum failed.')
+        try:
+            from companion_source_cache import remember
+            remember(source,row['context']['source'],meta['size'])
+        except OSError:pass # Bounded cache availability never gates verified work.
         row.setdefault('timings',{})['psd_retrieval_seconds']=round(time.monotonic()-row['created'],3)
         row['timings'].update(source_bytes=meta['size'],source_transfer_bytes=0 if complete else count,source_reused=complete)
         boundary(row)
@@ -720,6 +826,8 @@ def prepare_worker(key,roles,scale=1):
             timings=row.get('timings',{}),package_sha256=packet_hash,prepared_at=time.time()))
         # Photoshop is finished; independent uploads must not occupy its lease.
         lease.unlink(missing_ok=True);lease=None
+        from companion_package_identity import generation
+        atomic_json(archive.parent/'package-identity.json',dict(generation=generation(),preparation_hash=__import__('auto_editions').fingerprint(manifest),sha256=__import__('auto_editions').file_hash(archive)))
         upload_prepared(key,archive)
     except Cancelled:raise
     except Exception as error:
@@ -737,14 +845,8 @@ def prepare_worker(key,roles,scale=1):
 
 
 def atomic_json(path,data):
-    """Commit the receipt before any destructive cleanup; never truncate the old one."""
-    temporary=path.with_name(path.name+'.'+secrets.token_hex(8)+'.tmp')
-    try:
-        with temporary.open('x',encoding='utf-8') as output:
-            json.dump(data,output);output.flush();os.fsync(output.fileno())
-        os.replace(temporary,path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    from companion_atomic import atomic_json as write
+    return write(path,data)
 
 
 def retry_verified_cleanup():
