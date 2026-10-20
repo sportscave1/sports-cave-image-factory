@@ -319,7 +319,8 @@ def post_file(controller, url, path, headers, *, correlation=None, stopped=lambd
                 count=response.headers.get('X-SC-Received-Bytes','')
                 if count.isdigit() and int(count)<=trace['total_bytes']: trace['server_received_bytes']=int(count)
             trace['state']='Response received'
-            trace['capacity_eligible'] &= type(response.status_code) is int and 200<=response.status_code<300 and trace['_capacity_epoch']==controller.epoch
+            status=getattr(response,'status_code',None)
+            trace['capacity_eligible'] &= type(status) is int and 200<=status<300 and trace['_capacity_epoch']==controller.epoch
             for header,field in (('X-SC-Handler-Seconds','server_handler_seconds'),('X-SC-Body-Receive-Seconds','server_body_receive_seconds'),('X-SC-Body-Wait-Seconds','server_body_wait_seconds'),('X-SC-Durable-Seconds','server_durable_seconds')):
                 value=response.headers.get(header,'')
                 if isinstance(value,str) and __import__('re').fullmatch(r'[0-9]{1,6}(\.[0-9]{1,6})?',value):trace[field]=float(value)
