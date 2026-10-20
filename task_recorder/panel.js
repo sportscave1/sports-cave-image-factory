@@ -106,7 +106,9 @@ function renderControls(){
  $('resume').hidden=!(mode==='recording_paused'||mode==='paused'&&state.can_resume);
  $('stop').hidden=!busy&&mode!=='interrupted';
  for(const k of ['pause','resume','stop'])$(k).disabled=!enabled||[...pending.values()].some(c=>c.kind===k);
- $('activeName').textContent=busy?(state.active_task_name||'Current task'):(task?.name||'Select a recording');
+ const request=[...pending.values()].find(c=>['record','play'].includes(c.kind));
+ const requestName=request?.kind==='record'?(request.payload.name||'New recording'):tasks().find(t=>t.id===request?.payload.id)?.name;
+ $('activeName').textContent=starting()&&(mode==='starting'||!activeModes.has(mode))?(requestName||'Starting task'):busy?(state.active_task_name||requestName||'Current task'):(task?.name||'Select a recording');
  $('message').textContent=status();
  $('startup').checked=!!state.startup;$('startup').disabled=!enabled||!capable;
  $('revoke').disabled=!device;$('outdated').hidden=!device||capable;
