@@ -69,6 +69,15 @@ class LazyConversationTests(unittest.TestCase):
                    message_key=reference_key(self.thread['messages'][3]))
         self.assertEqual(len(self.bodies()), 1)
 
+    def test_legacy_response_stops_the_previous_frontend_autoload_scheduler(self):
+        self.open()
+        self.event('load_conversation_body', thread_key=self.key,
+                   message_key=reference_key(self.thread['messages'][3]))
+        rows = self.f.w.model()['messages']
+        self.assertFalse(any(not m['expanded'] and not m['body_error'] for m in rows))
+        self.assertTrue(all('Reload Email' in m['body_error'] for m in rows[1:]))
+        self.assertEqual(self.bodies(), [('body', '1000')])
+
     def test_failure_retry_is_message_local_and_does_not_refetch_list(self):
         self.open()
         key = reference_key(self.thread['messages'][2])

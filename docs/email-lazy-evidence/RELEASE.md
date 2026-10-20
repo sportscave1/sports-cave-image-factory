@@ -36,6 +36,13 @@ Live verification is recorded in Studio/external release evidence after the exac
 committed revision is pushed and Render reports it live. Customer inbox content
 is not opened for release verification because that could change read state.
 
+Compatibility follow-up: an already-open tab can still run the previous automatic
+hydration scheduler. Its legacy request now marks collapsed rows with a reload
+instruction, stopping that scheduler after one compatibility response instead of
+repeatedly acknowledging no-op requests. No collapsed MIME is fetched. The
+previous released JavaScript is exercised against the new backend by
+`tests/email_lazy_legacy.cjs`; the expanded Python suite has 241 tests.
+
 Focused Python modules: `test_support_email_performance`,
 `test_email_inbox_reliability`, `test_email_loading_performance`,
 `test_email_v2b_privacy`, `test_email_send_ux`, `test_email_v2d`,

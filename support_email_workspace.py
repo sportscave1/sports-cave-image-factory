@@ -824,6 +824,14 @@ class Workspace:
                         self.state.pop('body_completion', None)
             elif action == 'load_conversation_body':
                 # Older embedded clients must not speculatively fetch collapsed MIME.
+                # Their scheduler retries every row without body_error. Mark all
+                # collapsed rows once so an already-open old tab cannot spin.
+                if event.get('thread_key') == self.state.get('selected') and self.state['view'] == 'mail':
+                    errors = self.state.setdefault('body_errors', {})
+                    for message in self.state.get('conversation', []):
+                        key = reference_key(message)
+                        if key not in self.state['expanded']:
+                            errors.setdefault(key, 'Reload Email to expand this message.')
                 return True
             elif action == 'mark_visible_read':
                 key = self.state.pop('read_mark_pending', None)
