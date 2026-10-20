@@ -109,12 +109,12 @@ class NavigationTests(unittest.TestCase):
         with patch.dict(sys.modules,{"streamlit":st,"streamlit.components.v1":component,"os_accounts":accounts}):
             with patch.dict("os.environ",{},clear=True):
                 namespace["render_selected_page"]("Task Recorder")
-                component.iframe.assert_called_once_with("/task-recorder/panel",height=480,scrolling=True)
+                component.iframe.assert_called_once_with("/task-recorder/panel",height=640,scrolling=False)
             component.iframe.reset_mock()
             st.session_state.clear()
             with patch.dict("os.environ",{"RENDER":"true"},clear=True):
                 task_recorder_page.render_page({"role":"admin"})
-                component.iframe.assert_called_once_with("/task-recorder/panel",height=480,scrolling=True)
+                component.iframe.assert_called_once_with("/task-recorder/panel",height=640,scrolling=False)
             task_recorder_page.render_page({"role":"worker"})
             st.error.assert_called()
         self.assertEqual(navigation_runtime.active_disclosure_group("Task Recorder"),"developer")

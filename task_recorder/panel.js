@@ -1,104 +1,209 @@
-'use strict';
+ 'use strict';
 const $=id=>document.getElementById(id),base='/api/task-recorder/';
-let devices=[],device=null,state={},selected='',runnerSelected='',after='',stopped=false,pending=false,values={},detail=null,reconciled=false;
+let devices=[],device=null,state={},selected=sessionStorage.getItem('recorder-selected')||'',after='',lastSeq=-1,stopped=false,transportOK=true;
+let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='';
+const activeModes=new Set(['recording','recording_paused','running','pausing','paused','starting']);
 const uuid=()=>crypto.randomUUID();
-function message(error){$('error').textContent=error||'';$('error').hidden=!error;}
+const tasks=()=> (state.tasks||[]).filter(t=>!deleted.has(t.id)).map(t=>renames.has(t.id)?{...t,name:renames.get(t.id)}:t);
+const active=()=>activeModes.has(state.mode)||!!device?.active_run||!!device?.needs_review;
+const starting=()=>[...pending.values()].some(c=>['record','play'].includes(c.kind));
+const online=()=>!!device?.connected&&transportOK;
+const modern=()=>state.protocol>=2;
+function error(text){$('error').textContent=text||'';$('error').hidden=!text;}
+function notice(text){$('notice').textContent=text||'';$('notice').hidden=!text;}
+function button(text,label,fn,disabled=false){const b=document.createElement('button');b.type='button';b.textContent=text;b.title=b.ariaLabel=label;b.disabled=disabled;b.onclick=e=>{e.stopPropagation();fn();};return b;}
 async function api(path,data,signal){
  const response=await fetch(base+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal});
- const result=await response.json();if(!response.ok)throw Error(result.error||'Connection unavailable. Try again.');return result;
+ const result=await response.json();if(!response.ok)throw Error(result.error||'Connection unavailable. Refresh the connection and try again.');return result;
 }
-async function send(kind,payload={},reuse){
- if(!device)return message('Start Task Recorder on your PC, or choose Connect PC.');
- if(['record','play'].includes(kind)&&pending&&!reuse)return;
- const command={device_id:device.id,id:reuse||uuid(),kind,payload};
- pending=['record','play'].includes(kind);renderControls();
- if(pending)sessionStorage.setItem('recorder-pending',JSON.stringify(command));
+function remember(){sessionStorage.setItem('recorder-commands',JSON.stringify([...pending.values()]));}
+function update(result){
+ const oldDevice=device?.id,keepActive=active();
+ const nextDevices=result.devices,current=nextDevices.find(d=>d.id===oldDevice);
+ const next=current&&(current.connected||keepActive)?current:nextDevices.find(d=>d.connected)||current||nextDevices[0]||null;
+ if(next?.id===oldDevice&&next&&next.seq<lastSeq)return;
+ if(next?.id!==oldDevice)lastSeq=-1;
+ devices=nextDevices;device=next;
+ if(device){lastSeq=device.seq;state=device.state||{};after=String(device.seq);}else{state={};after='';lastSeq=-1;}
+ transportOK=true;
+ for(const t of state.tasks||[])if(renames.get(t.id)===t.name)renames.delete(t.id);
+ if(selected&&!tasks().some(t=>t.id===selected)){selected='';details=null;values={};}
+ if(!selected&&!active()&&state.selected_id&&tasks().some(t=>t.id===state.selected_id))selected=state.selected_id;
+ sessionStorage.setItem('recorder-selected',selected);render();
+}
+async function confirmCommand(command,result){
+ for(let n=0;n<120&&['queued','dispatched'].includes(result.status)&&!stopped;n++){
+  await new Promise(r=>setTimeout(r,350));
+  result=await api('receipt?device='+encodeURIComponent(command.device_id)+'&id='+command.id);
+ }
+ if(result.status!=='applied')throw Error(result.receipt?.message||'This control is not confirmed. Check the browser and use Stop before trying again.');
+ const receipt=result.receipt||{};
+ if(command.kind==='delete'){
+  deleted.add(command.payload.id);if(selected===command.payload.id){selected='';details=null;values={};}
+  if(confirmDelete===command.payload.id)confirmDelete='';notice('Recording deleted.');
+ }
+ if(command.kind==='rename'){renames.set(command.payload.id,receipt.name||command.payload.name);editing='';notice('Recording renamed.');}
+ if(command.kind==='record'){selected='';details=null;values={};}
+ if(receipt.tasks)state={...state,tasks:receipt.tasks};
+ // The receipt is durable; read the helper's acknowledged snapshot rather than
+ // guessing a mode from button clicks. A stale in-flight poll cannot undo it.
+ update(await api('state'));
+ if(command.kind==='record'&&state.active_task_id)selected=state.active_task_id;
+ return receipt;
+}
+async function send(kind,payload={}){
+ const taskId=payload.id;
+ if(!online()){error('PC is offline. Start Task Recorder from the Windows Start menu, then refresh the connection.');return null;}
+ if(!modern()&&!['stop','stop-save','view'].includes(kind)){error('Update the PC helper using Settings, then try again.');return null;}
+ if([...pending.values()].some(c=>c.kind===kind&&c.payload.id===taskId))return null;
+ if(['record','play'].includes(kind)&&(starting()||active()))return null;
+ const command={device_id:device.id,id:uuid(),kind,payload};
+ pending.set(command.id,command);remember();error('');notice('');render();
  try{
-   let result=await api('command',command);
-   for(let n=0;n<100&&['queued','dispatched'].includes(result.status);n++){
-     await new Promise(resolve=>setTimeout(resolve,250));
-     result=await api('receipt?device='+encodeURIComponent(device.id)+'&id='+command.id);
-   }
-   if(result.status!=='applied')throw Error(result.receipt?.message||'This control was not confirmed. Check the browser, then press Stop.');
-   if(kind==='inspect'){detail=result.receipt;renderDetail();}
-   if(kind==='reusable'){await send('inspect');}
-   message('');
-   if(sessionStorage.getItem('recorder-pending')&&JSON.parse(sessionStorage.getItem('recorder-pending')).id===command.id)sessionStorage.removeItem('recorder-pending');
- }catch(error){message(error.message);}
- finally{pending=false;renderControls();after='';}
+  const receipt=await confirmCommand(command,await api('command',command));
+  pending.delete(command.id);remember();if(taskId)rowErrors.delete(taskId);return receipt;
+ }catch(e){
+  // Retain uncertain command identity for navigation/reconnect reconciliation;
+  // never submit a fresh duplicate start automatically.
+  try{const r=await api('receipt?device='+command.device_id+'&id='+command.id);if(!['queued','dispatched'].includes(r.status))pending.delete(command.id);}catch{}
+  error(e.message);if(taskId)rowErrors.set(taskId,e.message);return null;
+ }finally{remember();after='';render();}
+}
+async function reconcile(){
+ let saved=[];try{saved=JSON.parse(sessionStorage.getItem('recorder-commands')||'[]');}catch{}
+ for(const command of saved){
+  if(command.device_id!==device?.id)continue;
+  pending.set(command.id,command);render();
+  try{await confirmCommand(command,await api('receipt?device='+command.device_id+'&id='+command.id));}
+  catch(e){error(e.message);}finally{pending.delete(command.id);remember();render();}
+ }
+}
+function status(){
+ if(!online())return 'PC offline · Start the Windows helper';
+ if(device?.needs_review)return 'Interrupted · Check the browser, then Stop';
+ const mode=state.mode||'idle';
+ if([...pending.values()].some(c=>c.kind==='pause'))return 'Pausing…';
+ if([...pending.values()].some(c=>['stop','stop-save'].includes(c.kind)))return 'Stopping…';
+ if(starting())return 'Starting…';
+ if(mode==='running')return `Playing · ${state.step} of ${state.total}`;
+ if(mode==='pausing')return 'Pausing… The current action is finishing.';
+ if(mode==='recording')return 'Recording · Stop to save';
+ if(mode==='recording_paused')return state.message||'Recording paused';
+ if(mode==='paused')return state.message||'Paused';
+ if(mode==='completed')return 'Completed';
+ if(mode==='stopped')return state.message==='Recording saved.'?'Recording saved.':'Stopped';
+ if(mode==='interrupted')return 'Interrupted. Check the browser, then Stop.';
+ return 'Ready';
 }
 function renderControls(){
- const online=!!device?.connected,mode=state.mode||'idle';
- const recording=mode==='recording'||mode==='recording_paused',playing=['running','paused','starting'].includes(mode)||pending;
- $('record').hidden=recording||playing||!!device?.needs_review;
- $('play').hidden=recording||playing||!selected||!!device?.needs_review;
- $('stop').hidden=!(recording||playing||device?.needs_review||mode==='interrupted');
- $('resume').hidden=!(mode==='recording_paused'||(mode==='paused'&&state.can_resume));
- for(const name of ['record','play','stop','resume','view'])$(name).disabled=!online;
- $('saved').disabled=recording||playing;
- $('savedLabel').hidden=$('saved').hidden=recording||playing||!(state.tasks||[]).length;
- $('message').textContent=device?.needs_review?'Previous run interrupted. Check the browser, then press Stop.':state.message||'Ready';
- if(mode==='running')$('message').textContent='Playing · '+state.step+' of '+state.total;
+ const mode=state.mode||'idle',busy=active()||starting(),enabled=online(),capable=modern();
+ const task=tasks().find(t=>t.id===selected);
+ $('record').disabled=!enabled||!capable||busy;
+ $('name').disabled=$('website').disabled=busy;
+ $('view').disabled=!enabled;
+ $('play').hidden=busy;$('play').disabled=!enabled||!capable||!task;
+ $('pause').hidden=!['running','recording'].includes(mode);
+ $('resume').hidden=!(mode==='recording_paused'||mode==='paused'&&state.can_resume);
+ $('stop').hidden=!busy&&mode!=='interrupted';
+ for(const k of ['pause','resume','stop'])$(k).disabled=!enabled||[...pending.values()].some(c=>c.kind===k);
+ $('activeName').textContent=busy?(state.active_task_name||'Current task'):(task?.name||'Select a recording');
+ $('message').textContent=status();
+ $('startup').checked=!!state.startup;$('startup').disabled=!enabled||!capable;
+ $('revoke').disabled=!device;$('outdated').hidden=!device||capable;
+}
+function date(value){return value?new Date(value).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'}):'—';}
+function duration(value){if(!Number.isFinite(value)||value<0)return '—';const secs=Math.floor(value/1000);return String(Math.floor(secs/60)).padStart(2,'0')+':'+String(secs%60).padStart(2,'0');}
+function select(id){$('inputs').replaceChildren();selected=id;sessionStorage.setItem('recorder-selected',id);details=null;values={};render();const t=tasks().find(t=>t.id===id);if(t?.inputs?.length)inspect(id);}
+async function inspect(id){
+ const request=++detailRequest;const result=await send('inspect',{id});
+ if(result&&selected===id&&request===detailRequest){details=result;values={...result.values};renderInputs();}
+}
+async function play(id){
+ const t=tasks().find(t=>t.id===id);if(!t)return;
+ // Exact playback uses local defaults; selecting a row does not retarget an
+ // existing run. Pause/Stop are always device/run controls, not selection controls.
+ const supplied=selected===id?{...values}:{};await send('play',{id,revision:t.revision,values:supplied});
+}
+function renderInputs(){
+ $('inputs').replaceChildren();if(!details||details.task.id!==selected)return;
+ for(const input of details.task.inputs){
+  const label=document.createElement('label');label.textContent=input.name.replaceAll('_',' ');
+  const field=document.createElement('input');field.value=values[input.name]||'';field.ariaLabel=label.textContent;
+  field.oninput=()=>values[input.name]=field.value;label.append(field);$('inputs').append(label);
+ }
+}
+function renderTable(){
+ const rows=tasks(),mode=state.mode||'idle';
+ const sig=JSON.stringify([rows,selected,mode,state.active_task_id,active(),online(),modern(),[...pending.values()].map(c=>[c.kind,c.payload.id]),editing,confirmDelete,[...rowErrors]]);
+ if(sig===tableSignature)return;tableSignature=sig;
+ const focused=document.activeElement,focusId=focused?.dataset?.editId,start=focused?.selectionStart,end=focused?.selectionEnd;
+ $('recordings').replaceChildren();$('empty').hidden=rows.length>0;
+ const counts=new Map();for(const t of rows)counts.set(t.name,(counts.get(t.name)||0)+1);
+ rows.forEach((t,index)=>{
+  const tr=document.createElement('tr');tr.dataset.taskId=t.id;tr.classList.toggle('selected',t.id===selected);tr.setAttribute('aria-selected',String(t.id===selected));
+  const isActive=active()&&state.active_task_id===t.id;tr.classList.toggle('active-row',isActive);
+  const cells=Array.from({length:6},()=>{const td=document.createElement('td');tr.append(td);return td;});
+  if(editing===t.id){
+   const form=document.createElement('form');form.className='rename';const field=document.createElement('input');field.value=editName;field.maxLength=100;field.ariaLabel='New name for '+t.name;field.dataset.editId=t.id;field.oninput=()=>editName=field.value;
+   const save=button('Save','Save name for '+t.name,()=>send('rename',{id:t.id,name:editName}),!online());
+   form.onsubmit=e=>{e.preventDefault();send('rename',{id:t.id,name:editName});};form.append(field,save,button('Cancel','Cancel rename',()=>{editing='';renderTable();}));cells[0].append(form);
+  }else{
+   const name=button(t.name,'Select '+t.name,()=>select(t.id));name.className='row-name';
+   if(counts.get(t.name)>1){const s=document.createElement('small');s.textContent=date(t.updated_at)+(t.updated_at?' · ':'')+'Copy '+(index+1);name.append(s);}cells[0].append(name);
+  }
+  cells[1].textContent=duration(t.duration_ms);cells[2].textContent=t.steps??'—';cells[3].textContent=date(t.updated_at);
+  cells[4].textContent=isActive?(mode==='running'?'Playing':mode==='pausing'?'Pausing…':mode==='recording_paused'?'Recording paused':mode==='paused'?'Paused':mode==='recording'?'Recording':'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Interrupted',running:'Interrupted',paused:'Interrupted'}[t.result]||t.result||'Saved');
+  const actions=document.createElement('div');actions.className='actions';
+  actions.append(button('▶ Play','Play '+t.name,()=>play(t.id),!online()||!modern()||active()||starting()));
+  if(isActive){
+   if(mode==='running')actions.append(button('Pause','Pause '+t.name,()=>send('pause')));
+   if(mode==='paused'&&state.can_resume||mode==='recording_paused')actions.append(button('Resume','Resume '+t.name,()=>send('resume')));
+   actions.append(button('Stop','Stop '+t.name,stop,!online()));
+  }
+  actions.append(button('Rename','Rename '+t.name,()=>{editing=t.id;editName=t.name;confirmDelete='';renderTable();},isActive||!online()||!modern()));
+  const trash=button('','Delete '+t.name,()=>{confirmDelete=t.id;editing='';renderTable();},!online()||!modern());trash.className='icon';
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','14');svg.setAttribute('height','14');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.8');svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');svg.append(path);trash.append(svg);actions.append(trash);cells[5].append(actions);
+  if(confirmDelete===t.id){const c=document.createElement('div');c.className='confirm';c.append(document.createTextNode('Delete '+t.name+'? '),button('Delete','Confirm delete '+t.name,()=>send('delete',{id:t.id}),!online()||[...pending.values()].some(v=>v.kind==='delete'&&v.payload.id===t.id)),button('Cancel','Cancel delete '+t.name,()=>{confirmDelete='';renderTable();}));cells[5].append(c);}
+  if(rowErrors.has(t.id)){const e=document.createElement('span');e.className='row-error';e.setAttribute('role','alert');e.textContent=rowErrors.get(t.id);cells[5].append(e);}
+  $('recordings').append(tr);
+ });
+ if(focusId){const field=[...$('recordings').querySelectorAll('input')].find(e=>e.dataset.editId===focusId);if(field){field.focus();field.setSelectionRange(start,end);}}
 }
 function render(){
- device=devices.find(d=>d.id===device?.id)||devices[0]||null;state=device?.state||{};
- $('pc').textContent=device?device.name+' · '+(device.connected?'Connected':'Offline'):'No PC connected';
- $('setup').hidden=!!device?.connected;$('setupText').textContent=device?'Start Task Recorder from the Start menu on '+device.name+'.':'Connect your Windows PC once to get started.';
- const tasks=state.tasks||[],next=state.selected_id;
- if(next&&tasks.some(t=>t.id===next)&&next!==runnerSelected){selected=next;runnerSelected=next;values={};detail=null;}
- if(selected&&!tasks.some(t=>t.id===selected))selected='';
- const signature=JSON.stringify(tasks.map(t=>[t.id,t.name,t.revision]));
- if($('saved').dataset.signature!==signature){
-   $('saved').replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent=tasks.length?'Choose a recording':'No recordings yet';$('saved').append(empty);
-   for(const task of tasks){const option=document.createElement('option');option.value=task.id;option.textContent=task.name;$('saved').append(option);}
-   $('saved').dataset.signature=signature;
- }
- $('saved').value=selected;$('savedLabel').hidden=$('saved').hidden=tasks.length===0;
- $('seen').textContent=device?'Last seen '+new Date(device.last_seen*1000).toLocaleTimeString():'';
- $('startup').checked=!!state.startup;renderControls();
+ if(!details||details.task.id!==selected)$('inputs').replaceChildren();
+ $('pc').textContent=device?device.name+' · '+(online()?'Connected':'Offline'):'No PC connected';
+ $('setup').hidden=online();$('setupText').textContent=device?'Start Task Recorder from the Windows Start menu on '+device.name+'.':'Connect your Windows PC once to get started.';
+ $('seen').textContent=device?'Last seen '+date(device.last_seen*1000):'';
+ $('selectedSettings').hidden=!selected;$('selectedName').textContent=tasks().find(t=>t.id===selected)?.name||'';
+ $('reusable').disabled=!online()||!modern()||active()||starting();
+ renderControls();renderTable();fit();
 }
+function stop(){return send(state.recording||state.mode==='recording_paused'?'stop-save':'stop');}
 async function poll(){
+ let reconciled=false;
  while(!stopped){
   try{
    const result=await api('state'+(device?'?device='+encodeURIComponent(device.id)+(after?'&after='+after:''):''));
-   devices=result.devices;render();after=device?String(device.seq):'';
-   if(device&&!reconciled){reconciled=true;reconcile();}
+   update(result);if(device&&!reconciled){reconciled=true;reconcile();}
    if(!device)await new Promise(r=>setTimeout(r,5000));
-  }catch(error){$('pc').textContent='Connection unavailable';message(error.message);await new Promise(r=>setTimeout(r,3000));}
+  }catch(e){transportOK=false;error('Connection unavailable. Check your internet connection and refresh.');render();await new Promise(r=>setTimeout(r,3000));}
  }
 }
-async function reconcile(){
- const saved=sessionStorage.getItem('recorder-pending');if(!saved)return;
- try{
-  const previous=JSON.parse(saved);if(previous.device_id!==device.id)return;
-  pending=true;renderControls();
-  const result=await api('receipt?device='+encodeURIComponent(device.id)+'&id='+previous.id);
-  if(['queued','dispatched'].includes(result.status))await send(previous.kind,previous.payload,previous.id);
-  else {sessionStorage.removeItem('recorder-pending');if(result.status!=='applied')message(result.receipt?.message||'The previous start was interrupted. Press Stop before trying again.');}
- }catch{message('The previous start could not be confirmed. Press Stop before trying again.');}
- finally{pending=false;renderControls();}
-}
-function renderDetail(){
- $('detail').hidden=false;$('taskJson').value=JSON.stringify(detail.task,null,2);$('rename').value=detail.task.name;
- values={...detail.values};$('inputs').replaceChildren();
- for(const input of detail.task.inputs){
-   const label=document.createElement('label');label.textContent=input.name.replaceAll('_',' ');
-   const field=document.createElement('input');field.value=values[input.name]||'';field.setAttribute('aria-label',label.textContent);field.oninput=()=>values[input.name]=field.value;
-   $('inputs').append(label,field);
- }
-}
-$('record').onclick=()=>send('record',$('website').value?{url:$('website').value}:{});
-$('stop').onclick=()=>send(state.recording||state.mode==='recording_paused'?'stop-save':'stop');
-$('play').onclick=()=>{const task=state.tasks?.find(t=>t.id===selected);if(task)send('play',{id:task.id,revision:task.revision,values});};
-$('resume').onclick=()=>send('resume');$('pause').onclick=()=>send('pause');$('view').onclick=()=>send('view');
-$('new').onclick=()=>{selected='';detail=null;values={};send('new');};
-$('saved').onchange=()=>{selected=$('saved').value;detail=null;values={};$('detail').hidden=true;if(selected)send('load',{id:selected});};
-$('renameButton').onclick=()=>send('rename',{name:$('rename').value});
-$('inspect').onclick=()=>send('inspect');$('reusable').onclick=()=>send('reusable');
-$('edit').onclick=()=>{try{send('edit',{task:JSON.parse($('taskJson').value)});}catch{message('Check the step format before saving.');}};
-$('files').onclick=()=>send('choose-files');$('startup').onchange=()=>send('startup',{enabled:$('startup').checked});
-$('revoke').onclick=async()=>{if(!device)return;if(!confirm('Disconnect this PC? You will need to approve pairing on the PC again.'))return;try{await api('revoke',{device_id:device.id});device=null;after='';}catch(e){message(e.message);}};
-$('pair').onclick=async()=>{try{const data=await api('pairing',{});$('challenge').hidden=false;$('code').textContent=data.code;$('approve').href='http://127.0.0.1:18931/pair#'+new URLSearchParams({origin:location.origin,code:data.code}).toString();message('');}catch(e){message(e.message);}};
-$('refresh').onclick=()=>{after='';api('state').then(r=>{devices=r.devices;render();}).catch(e=>message(e.message));};
-window.addEventListener('pagehide',()=>{stopped=true;});
+$('record').onclick=()=>send('record',{name:$('name').value.trim(),...($('website').value?{url:$('website').value}:{})});
+$('play').onclick=()=>play(selected);$('pause').onclick=()=>send('pause');$('resume').onclick=()=>send('resume');$('stop').onclick=stop;$('view').onclick=()=>send('view');
+$('reusable').onclick=async()=>{if(!selected)return;const id=selected;if(await send('reusable',{id}))await inspect(id);};
+$('startup').onchange=()=>send('startup',{enabled:$('startup').checked});
+$('revoke').onclick=async()=>{if(!device)return;try{await api('revoke',{device_id:device.id});device=null;state={};after='';lastSeq=-1;error('');render();}catch(e){error(e.message);}};
+$('pair').onclick=async()=>{try{const data=await api('pairing',{});$('challenge').hidden=false;$('code').textContent=data.code;$('approve').href='http://127.0.0.1:18931/pair#'+new URLSearchParams({origin:location.origin,code:data.code}).toString();error('');fit();}catch(e){error(e.message);}};
+$('refresh').onclick=()=>{after='';api('state').then(update).catch(e=>error(e.message));};
+// Fit the same-origin OS frame to content: the OS owns vertical scrolling.
+// Scroll events move only the compact toolbar inside the frame; no polling or
+// desktop capture. Direct diagnostic viewing uses ordinary CSS sticky positioning.
+let frame=null,fitQueued=false;
+try{if(window.parent!==window&&window.parent.location.origin===location.origin)frame=window.frameElement;}catch{}
+function sticky(){if(!frame)return;const top=frame.getBoundingClientRect().top;const y=Math.min(Math.max(0,64-top),Math.max(0,document.querySelector('main').offsetHeight-$('toolbar').offsetTop-$('toolbar').offsetHeight));$('toolbar').style.transform=`translateY(${y}px)`;}
+function fit(){if(!frame||fitQueued)return;fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;frame.style.height=Math.ceil(document.querySelector('main').offsetHeight+2)+'px';sticky();});}
+if(frame){new ResizeObserver(fit).observe(document.querySelector('main'));window.parent.addEventListener('scroll',sticky,true);window.parent.addEventListener('resize',fit);}
+window.addEventListener('pagehide',()=>{stopped=true;if(frame){window.parent.removeEventListener('scroll',sticky,true);window.parent.removeEventListener('resize',fit);}});
 poll();

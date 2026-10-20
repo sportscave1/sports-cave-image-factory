@@ -28,7 +28,7 @@ def main():
                 state=json.load(response)
         except (OSError,ValueError,KeyError):state=None
         if state:
-            if state["mode"] in {"recording","recording_paused","running","paused","starting"}:
+            if state["mode"] in {"recording","recording_paused","running","paused","pausing","starting"}:
                 raise SystemExit("Stop the current recorder task before updating the helper.")
             with urlopen(Request(site+"/api/shutdown",data=b"{}",headers={"X-Recorder-Key":key,"Content-Type":"application/json"}),timeout=15):pass
             for _ in range(40):

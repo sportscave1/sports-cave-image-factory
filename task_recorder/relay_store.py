@@ -7,7 +7,7 @@ import uuid
 from .schema import Invalid, text
 
 KINDS = {"record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
-         "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files"}
+         "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files", "delete"}
 STARTS = {"record", "play"}
 TERMINAL = {"idle", "completed", "stopped", "interrupted"}
 PREFIX = "task_recorder_private."
@@ -121,6 +121,10 @@ class Relay:
                 return self.public_command(old)
             if self.clock()-device["last_seen"]>35:
                 raise Invalid("This PC is offline. Start Task Recorder on that PC, then try again.")
+            if kind in {"delete","rename"} and payload.get("id")==device["state"].get("active_task_id") and device["active_run"]:
+                raise Invalid("Stop this task first.")
+            if kind == "delete" and device["state"].get("protocol",1)<2:
+                raise Invalid("Update the PC helper from Settings before deleting recordings.")
             if kind in STARTS:
                 if device["active_run"]: raise Invalid("A recording or playback is already in progress. Use Stop first.")
                 if device["needs_review"]: raise Invalid("The last run was interrupted. Check the browser, then press Stop before starting again.")
@@ -154,7 +158,7 @@ class Relay:
         if snapshot is not None and (not isinstance(snapshot,dict) or len(json.dumps(snapshot))>180000): raise Invalid("Invalid helper state.")
         # These keys are produced by the helper, never cookies or browser sessions.
         allowed={"mode","message","step","total","action","can_resume","browser_open","recording","privacy_pause","tasks",
-                 "operation_id","starting_url","selected_id","startup","connection"}
+                 "operation_id","starting_url","selected_id","startup","connection","protocol","active_task_id","active_task_name"}
         if snapshot is not None and set(snapshot)-allowed: raise Invalid("Unsupported helper state fields.")
         if not isinstance(body.get("acks",[]),list):raise Invalid("Invalid command acknowledgements.")
         with self.connect() as conn, conn.cursor() as cur:
