@@ -136,7 +136,7 @@ def settings(connect):
     from PIL import __version__
     from auto_editions_colour_store import configuration
     root=Path(__file__).parent
-    payload=dict(version='server-psd-composite-v1',pillow=__version__,edge=factory.MAX_WORKING_EDGE,
+    payload=dict(version='server-psd-composite-v2-fast-lossless-png',pillow=__version__,edge=factory.MAX_WORKING_EDGE,
                  colour=configuration(connect),code={name:hashlib.sha256((root/name).read_bytes()).hexdigest()
                  for name in ('product_upload_artwork.py','product_upload_colour.py','image_factory.py','auto_editions_colour_source.py','auto_editions_colour_policy.py')})
     return hashlib.sha256(json.dumps(payload,sort_keys=True,default=str).encode()).hexdigest()
@@ -212,7 +212,10 @@ def decode(psd, destination, row, connect):
         image.load()
         image.thumbnail((factory.MAX_WORKING_EDGE,factory.MAX_WORKING_EDGE),Image.Resampling.LANCZOS,reducing_gap=3.0)
         converted=ImageCms.profileToProfile(image,ImageCms.ImageCmsProfile(io.BytesIO(icc)),srgb,outputMode='RGBA' if image.mode=='RGBA' else 'RGB')
-        try:converted.save(destination,format='PNG',icc_profile=srgb.tobytes())
+        # This private working PNG is consumed locally by the same WEBP-only
+        # factory. Lower DEFLATE effort is lossless; final image encoding and
+        # uploaded bytes stay unchanged. The existing 8-entry cache bound stays.
+        try:converted.save(destination,format='PNG',icc_profile=srgb.tobytes(),compress_level=1)
         finally:converted.close()
     if destination.stat().st_size>factory.MAX_UPLOAD_SIZE_BYTES:raise ValueError('Prepared artwork exceeds the existing Mockups image limit.')
     return dict(source_profile_sha256=hashlib.sha256(icc).hexdigest(),policy=policy,operation='server ICC conversion to sRGB',decoder='Pillow full-resolution PSD saved composite')

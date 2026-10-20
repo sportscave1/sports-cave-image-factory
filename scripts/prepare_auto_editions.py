@@ -29,12 +29,24 @@ def native_dispatch(run, script, output):
     return run(script)
 
 
+def select_export_strategy():
+    # Retain the released method when the existing native benchmark RAM floor
+    # cannot be met. History export saved time but used ~0.7 GiB more Photoshop
+    # working set in matched 4x trials. Never restart/purge the user's app here.
+    try:
+        import psutil
+        if psutil.virtual_memory().available >= 4*1024**3:return 'history_merged_crop'
+    except (ImportError,OSError):pass
+    return 'duplicate_merged'
+
+
 def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1,
-            export_strategy='duplicate_merged',native_benchmark=False):
+            export_strategy=None,native_benchmark=False):
     if type(scale) is not int or scale not in (1,2,3,4):
         raise ValueError('Choose native, 2x, 3x or 4x TEST preparation.')
-    if export_strategy not in ('duplicate_merged','history_merged_crop') or (export_strategy!='duplicate_merged' and native_benchmark is not True):
-        raise ValueError('Unverified export strategy is restricted to an isolated native benchmark.')
+    if export_strategy is None:export_strategy=select_export_strategy()
+    if export_strategy not in ('duplicate_merged','history_merged_crop'):
+        raise ValueError('Unsupported preparation export strategy.')
     if native_benchmark is True:
         from scripts.benchmark_auto_editions_native_v19 import require_native_owner
         require_native_owner(source,output)

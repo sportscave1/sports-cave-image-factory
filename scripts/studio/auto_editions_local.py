@@ -164,6 +164,9 @@ def restore_host():
 
 def journal(row):
     if not row.get('context',{}).get('automatic'):return
+    from companion_job_summary import summary
+    try:atomic_json(row['folder']/'job-summary.json',summary(row))
+    except OSError:pass
     atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
         package_transport=row.get('package_transport',0),upload_protocol=row.get('upload_protocol',0),
         generation=row.get('generation'),
@@ -176,9 +179,13 @@ def journal(row):
 def host_request(config,path,body):
     import requests
     if path.rsplit('/',1)[-1] in ('claim','heartbeat','reconnect'):body={**body,'health':health_payload()}
+    control_started=time.monotonic()
     response=requests.post(config['base_url']+path,json=body,
         headers={'X-Sports-Cave-Preparation-Host':config['token']},allow_redirects=False,timeout=20)
-    response.raise_for_status();return apply_transfer_settings(response.json())
+    response.raise_for_status()
+    if path.endswith('/heartbeat') or path.endswith('/claim') and not response.json().get('grant'):
+        transfer_controller().observe_control(time.monotonic()-control_started)
+    return apply_transfer_settings(response.json())
 
 
 def sync_colour_configuration(config):
@@ -455,22 +462,28 @@ def reconnect(row):
 
 
 def record_transfer(row, trace):
-    clean={k:v for k,v in trace.items() if k!='started_monotonic'}
+    clean={k:v for k,v in trace.items() if not k.startswith('_') and k not in ('started_monotonic','capacity_eligible')}
     if not trace.get('resumable'):
         if 'transfer_totals' not in row:
             try:
                 retained=row['folder']/'transfer-totals.json'
                 saved=json.loads(retained.read_text(encoding='utf-8')) if retained.stat().st_size<4096 else {}
-                row['transfer_totals']={k:v for k,v in saved.items() if k in ('payload_bytes','bulk_requests') and type(v) is int and v>=0}
+                row['transfer_totals']={k:v for k,v in saved.items() if k in ('payload_bytes','bulk_requests','body_stream_seconds','allowance_wait_seconds','disk_read_seconds') and type(v) in (int,float) and 0<=v<=10**12}
             except (OSError,ValueError,TypeError):pass
         totals=row.setdefault('transfer_totals',{})
         totals['payload_bytes']=totals.get('payload_bytes',0)+trace.get('transport_bytes',0)
         totals['bulk_requests']=totals.get('bulk_requests',0)+1
+        totals['body_stream_seconds']=totals.get('body_stream_seconds',0)+max(0,trace.get('body_last_handoff_seconds',0)-trace.get('body_first_handoff_seconds',0))
+        totals['allowance_wait_seconds']=totals.get('allowance_wait_seconds',0)+trace.get('allowance_wait_seconds',0)
+        totals['disk_read_seconds']=totals.get('disk_read_seconds',0)+trace.get('disk_read_seconds',0)
         try:atomic_json(row['folder']/'transfer-totals.json',totals)
         except OSError:pass
     row.setdefault('transfer_attempts',[]).append(clean)
     row['transfer_attempts']=row['transfer_attempts'][-3:]
-    try:atomic_json(row['folder']/'transfer-timing.json',row['transfer_attempts'])
+    try:
+        atomic_json(row['folder']/'transfer-timing.json',row['transfer_attempts'])
+        from companion_job_summary import summary
+        atomic_json(row['folder']/'job-summary.json',summary(row))
     except OSError:pass
 
 
@@ -560,8 +573,12 @@ def finish_upload(row,result,started):
     throughput(row['timings'],'package_bytes','upload_validate_seconds','upload_end_to_end')
     resources(row['timings'],row['folder'])
     row['server_timings']=result.get('timings',{})
+    row['completion_state']='Cloud Ready' if result.get('status')=='Cloud Ready' else 'Uploaded, verifying'
+    from companion_job_summary import summary
+    try:atomic_json(row['folder']/'job-summary.json',summary(row,result))
+    except OSError:pass
     row['checkpoint_pending']=False; journal(row)
-    if row['context'].get('automatic'):
+    if row['context'].get('automatic') and result.get('status')=='Cloud Ready':
         try:release_verified_temporary_files(row)
         except (OSError,ValueError):row['cleanup_pending']=True
     HOST_LAST_COMPLETED_AT=time.monotonic()

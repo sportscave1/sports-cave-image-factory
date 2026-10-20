@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 from PIL import Image, ImageCms
 from auto_editions_performance import file_hashes
+from auto_editions import file_hash
 from auto_editions_colour_source import inspect_psd, stage_profile, ColourReview
 
 
@@ -37,7 +38,10 @@ def render(source, output, identity, *, dispatch=None):
     try:
         result = dispatch('var SC_PRODUCT_RENDER = '+json.dumps(request)+';\n'+script)
     finally:
-        if file_hashes(source)['sha256'] != hashes['sha256'] or file_hashes(staged)['sha256'] != staged_hash:
+        # The provider content hash was already checked before dispatch. These
+        # preservation fences require SHA-256 only; do not calculate a second,
+        # unused provider digest over both full PSDs after every native render.
+        if file_hash(source) != hashes['sha256'] or file_hash(staged) != staged_hash:
             raise ValueError('Original PSD preservation check failed.')
     status = json.loads((output/'native-status.json').read_text(encoding='utf-8-sig'))
     if result != 'SC_PRODUCT_RENDERED' or not status.get('owned_document_closed'):
@@ -55,7 +59,7 @@ def render(source, output, identity, *, dispatch=None):
         else:
             image.save(output/'tagged.png', icc_profile=srgb)
             (output/'tagged.png').replace(path)
-    receipt = dict(renderer_version='native-web-v1',renderer_sha256=__import__('hashlib').sha256(script.encode()).hexdigest(),render_sha256=file_hashes(path)['sha256'],source=identity,source_sha256=hashes['sha256'],source_unchanged=True,
+    receipt = dict(renderer_version='native-web-v1',renderer_sha256=__import__('hashlib').sha256(script.encode()).hexdigest(),render_sha256=file_hash(path),source=identity,source_sha256=hashes['sha256'],source_unchanged=True,
                    native_render=True,owned_document_closed=True,dimensions=status['dimensions'],
                    colour=dict(source_profile=original_profile,policy=policy,assignment=assignment,
                                web_profile='sRGB IEC61966-2.1',operation='native colour-managed web conversion',

@@ -49,8 +49,8 @@ var SCAutoEditionsPreparation = (function () {
             || !r.number_layer_name || !r.plaque_layer_name) throw Error("unsafe_preparation_request");
         var strategy = r.export_strategy || "duplicate_merged";
         if (strategy !== "duplicate_merged" && strategy !== "history_merged_crop") throw Error("unsupported_export_strategy");
-        // No unmeasured native strategy is admitted by the normal companion.
-        if (strategy !== "duplicate_merged" && r.native_benchmark !== true) throw Error("unverified_strategy_requires_native_benchmark");
+        // The Python caller selects history export only with measured memory
+        // headroom. Both paths retain all independent references and proofs.
         var original = app.documents.length ? app.activeDocument : null, doc = null;
         var dialogs = app.displayDialogs, existing = {}, layer = null, plaque = null, exportProfiles = {};
         for (var e = 0; e < app.documents.length; e++) existing[String(app.documents[e].id)] = true;
@@ -204,18 +204,23 @@ var SCAutoEditionsPreparation = (function () {
                         timed("patch_save_ms",function(){savePNG(patch, "number-" + number + ".png");});
                     } finally { timed("patch_close_ms",function(){patch.close(SaveOptions.DONOTSAVECHANGES);}); app.activeDocument = doc; }
                 } else {
-                    // Experimental: merge the FULL composite before cropping,
+                    // Merge the FULL composite before cropping,
                     // then restore the exact layered history state. Cropping a
                     // layered document directly can change canvas-relative FX.
                     // Every patch must match the legacy output in native trials.
-                    var anchor = doc.activeHistoryState;
+                    var anchor = doc.activeHistoryState, numberLayerId = layer.id;
                     try {
                         timed("patch_merge_ms",function(){doc.mergeVisibleLayers();});
                         crop(doc);
                         timed("patch_save_ms",function(){savePNG(doc, "number-" + number + ".png");});
                     } finally {
                         timed("history_restore_ms",function(){doc.activeHistoryState = anchor;});
-                        var restored = []; named(doc,r.number_layer_name,restored);
+                        // Photoshop can rename an uncustomised text layer when
+                        // its contents change. Restore by the exact layer ID,
+                        // never the original display name or a guessed role.
+                        var restored = [];
+                        for (var ri=0;ri<doc.layers.length;ri++)
+                            if(doc.layers[ri].id===numberLayerId)restored.push(doc.layers[ri]);
                         if (restored.length !== 1 || restored[0].kind !== LayerKind.TEXT || restored[0].parent !== doc)
                             throw Error("preparation_history_restore_failed");
                         layer = restored[0];

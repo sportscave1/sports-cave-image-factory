@@ -37,7 +37,7 @@ class Sessions:
     def public(row):
         return dict(protocol=1,id=row['id'],state=row['state'],offset=row['data']['offset'],
                     bytes=row['descriptor']['bytes'],sha256=row['descriptor']['sha256'],
-                    preparation_hash=row['descriptor']['preparation_hash'],result=row.get('result'))
+                    preparation_hash=row['descriptor']['preparation_hash'],generation=row['descriptor']['generation'],result=row.get('result'))
 
     def create(self,owner,host,shop,context,descriptor,correlation=None):
         validate(descriptor,context)

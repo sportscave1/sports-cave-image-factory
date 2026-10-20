@@ -234,8 +234,11 @@ def project(rows,states,beats,successes,pause,*,now=None,expected_revision=None,
     colour_codes={'PROFILE_MISSING','COLOUR_POLICY_PENDING','PROFILE_INSPECTOR_FAILURE','ICC_MISMATCH','COLOUR_INCOMPATIBLE','PROFILE_APPROVED'}
     affected=[j for j in jobs if j['colour_affected'] or (j.get('diagnostic') or {}).get('code') in colour_codes]
     repaired=sum(j['colour_recovered'] and j['completed'] for j in affected)
+    recent_failure=max((j for j in jobs if j['category']=='Failed' and seconds(j['last_activity_iso'],now)<900),
+                       key=lambda j:j['last_activity_iso'],default=None)
+    attention=({k:recent_failure[k] for k in ('design','diagnostic')} if recent_failure else None)
     return dict(colour=dict(affected=len(affected),repaired=repaired,remaining=len(affected)-repaired),
-        transfer_control=dict(instance=latest.get('Companion',{}).get('instance_id'),age_seconds=health_lookup['Companion'].get('age_seconds'),effective=recovery.get('transfer_control')),
+        transfer_control=dict(instance=latest.get('Companion',{}).get('instance_id'),age_seconds=health_lookup['Companion'].get('age_seconds'),effective=recovery.get('transfer_control'),attention=attention),
         overall=overall,current=current,counts=counts,progress=dict(completed=counts['completed'],total=counts['eligible'],
         ratio=counts['completed']/counts['eligible'] if counts['eligible'] else None,current_job_ratio=None),
         eta_seconds=eta,eta_label=eta_label,eta_samples=len(durations),last_completed=dict(design=last.get('product_title') or last['product_gid'],at=sydney(last['created_at'])) if last else None,

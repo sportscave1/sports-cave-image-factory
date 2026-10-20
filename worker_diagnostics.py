@@ -2,6 +2,7 @@
 import re
 
 RULES=(
+ ('MEMORY_PRESSURE','Photoshop',('not enough memory','insufficient memory','available ram','out of memory'),'Preparation computer has insufficient available memory.','Close applications you are finished with, then retry the retained job. Do not remove active locks or lower output quality.'),
  ('FONT_MISSING','Photoshop',('missing font','font is not installed','font unavailable','font is unavailable','fonts are unavailable','font is missing'),'A required PSD font is unavailable.','Install or repair the required font on the preparation computer, then confirm the correction and retry.'),
  ('EDITION_GEOMETRY','Photoshop',('psd edition total differs','not contained in its plaque','number does not lie inside'),'PSD edition text or plaque geometry does not match the required design.','Repair the mapped PSD to match the authoritative limit and plaque. Do not change issued edition numbers.'),
  ('PSD_MISSING','Dropbox',('path/not_found','file not found','mapped psd is missing'),'The mapped source PSD could not be found.','Restore or verify the existing mapped source. Do not silently select another PSD.'),

@@ -154,7 +154,10 @@ async def package(request):
             cleanup_started=time.monotonic()
         timings['temporary_cleanup_seconds']=round(time.monotonic()-cleanup_started,6)
         timings['handler_total_seconds']=round(time.monotonic()-started,6)
-        return JSONResponse(result,headers={**api.HEADERS,'X-SC-Transfer-ID':correlation,'X-SC-Received-Bytes':str(size)})
+        return JSONResponse(result,headers={**api.HEADERS,'X-SC-Transfer-ID':correlation,'X-SC-Received-Bytes':str(size),
+            'X-SC-Handler-Seconds':str(timings['handler_total_seconds']),
+            'X-SC-Body-Receive-Seconds':str(timings['first_body_to_complete_seconds']),
+            'X-SC-Body-Wait-Seconds':str(round((first_body or body_complete)-receive_started,6))})
     except Exception as error:
         if acquired and isinstance(error,ValueError) and setup and setup['context'].get('reset_id'):
             try:

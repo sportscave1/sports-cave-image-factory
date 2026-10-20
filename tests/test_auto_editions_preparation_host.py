@@ -98,7 +98,7 @@ def test_upload_reconnects_after_restart_without_reopening_photoshop(tmp_path):
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
     failed=Mock();failed.raise_for_status.side_effect=requests.HTTPError('expired transfer')
-    success=Mock();success.json.return_value={'preparation_hash':'c'*64}
+    success=Mock();success.json.return_value={'preparation_hash':'c'*64,'status':'Cloud Ready'}
     with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=[failed,success]) as post,\
          patch.object(local,'reconnect') as reconnect,patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
@@ -157,7 +157,7 @@ def test_lost_success_response_uses_receipt_without_second_upload(tmp_path):
     row=dict(grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
              context={'automatic':True},status='Working')
     with patch.object(local,'JOBS',{'job':row}),patch('requests.Session.send',side_effect=requests.Timeout()) as post,\
-         patch.object(local,'reconnect',return_value={'preparation_hash':'c'*64,'timings':{'validation_seconds':5}}),\
+         patch.object(local,'reconnect',return_value={'preparation_hash':'c'*64,'status':'Cloud Ready','timings':{'validation_seconds':5}}),\
          patch.object(local,'release_verified_temporary_files') as cleanup:
         local.upload_prepared('job',archive)
     assert row['status']=='Prepared' and post.call_count==1

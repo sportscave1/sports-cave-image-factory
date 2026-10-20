@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 
-CAPABILITY = 2
+CAPABILITY = 3
 DEFAULTS = dict(mode='Balanced', manual_mbps=None, sustainable_mbps=None,
                 headroom_percent=25, background_percent=25, download_mbps=None,
                 paused=False)
@@ -47,12 +47,23 @@ def allowance(value):
     return rate * 1_000_000 / 8
 
 
+def burst_allowance(rate):
+    # A 16 KiB bucket discards credit when Windows wakes a short wait late.
+    # Cover at most 32 ms at higher rates, capped at 256 KiB. Reader chunks
+    # remain 16 KiB; low-rate behaviour retains its existing 1–16 KiB bound.
+    # This is a burst allowance, not an increase in the aggregate rate.
+    return min(262144, max(1024, min(16384, rate*.1), rate*.032))
+
+
 class Controller:
     def __init__(self, path=None):
         self.path = Path(path) if path else None
         self.cv = threading.Condition()
+        from companion_bandwidth import Policy
+        self.policy = Policy()
         self.value = dict(DEFAULTS)
         self.revision = 'local'
+        self.epoch = 0
         self.busy = False
         self.download_busy = False
         self.session = None
@@ -63,7 +74,9 @@ class Controller:
         self.download_tokens = 0.
         self.download_tick = self.tick
         if self.path and self.path.exists():
+            if self.path.stat().st_size>16384:raise ValueError('Bounded transfer settings required.')
             saved = json.loads(self.path.read_text())
+            self.policy = Policy(saved.get('calibration'))
             self.value = settings(saved['settings']); self.revision = saved['revision']
 
     def configure(self, value, revision='local'):
@@ -76,37 +89,72 @@ class Controller:
                     if int(revision[8:]) < int(self.revision[8:]):return
                 except ValueError:raise ValueError('Invalid ordered settings revision.')
             if value == self.value and revision == self.revision: return
-            if self.path:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
-                temporary = self.path.with_suffix('.tmp')
-                with temporary.open('w') as output:
-                    json.dump(dict(settings=value, revision=revision), output); output.flush(); os.fsync(output.fileno())
-                os.replace(temporary, self.path)
-            self.value = value; self.revision = revision
+            reset=value['sustainable_mbps']!=self.value['sustainable_mbps']
+            calibration=self.policy.saved()
+            if reset:calibration={**calibration,'factor':1.}
+            self._persist(value,revision,calibration)
+            if reset:self.policy.factor=1.;self.policy.loaded=[]
+            self.value = value; self.revision = revision; self.epoch += 1
             self.tokens = self.download_tokens = 0.
             self.tick = self.download_tick = time.monotonic()
             self.cv.notify_all()
 
+    def _persist(self,value=None,revision=None,calibration=None):
+        if not self.path:return
+        self.path.parent.mkdir(parents=True,exist_ok=True)
+        from companion_atomic import atomic_json
+        atomic_json(self.path,dict(settings=value or self.value,revision=revision or self.revision,
+                                  calibration=self.policy.saved() if calibration is None else calibration))
+
+    def rate(self):
+        rate=self.policy.allowance(self.value)
+        # Calibration expiry must block the next transfer, not deadlock an
+        # already admitted finite body. An explicit settings change still wins.
+        if rate==0 and self.active and self.active.get('_admitted_epoch')==self.epoch:
+            return self.active.get('_admitted_rate',0)
+        return rate
+
+    def observe_transfer(self,trace):
+        with self.cv:
+            if self.policy.observe_transfer(trace):
+                try:self._persist()
+                except OSError:pass
+                self.cv.notify_all()
+
+    def observe_control(self,seconds,*,loaded=None):
+        with self.cv:
+            transferring=bool(self.active and self.active.get('state') in ('Uploading','Resuming') and self.active.get('transport_bytes',0)>0)
+            if loaded is not None:transferring=loaded
+            # Do not train an idle baseline during server verification/downloads.
+            if not transferring and (self.active or self.download_busy):return
+            if self.policy.observe_latency(seconds,loaded=transferring):
+                self.tokens=0.;self.tick=time.monotonic()
+                try:self._persist()
+                except OSError:pass
+                self.cv.notify_all()
+
     def snapshot(self):
         with self.cv:
-            rate = allowance(self.value)
+            rate = self.rate()
             progress = dict(self.active or self.last or {})
             if self.active:
-                elapsed = progress.get('transfer_seconds',0) if progress.get('resumable') else time.monotonic() - progress['started_monotonic']
+                elapsed = progress.get('transfer_seconds',0) if progress.get('resumable') else max(0,time.monotonic() - progress['started_monotonic']-progress.get('body_first_handoff_seconds',0))
                 # Average payload handoff rate; deliberately includes throttle waits.
                 speed = progress['transport_bytes'] / max(elapsed, .001)
-                progress['payload_bytes_per_second'] = round(speed, 1) if elapsed >= 2 else None
+                progress['payload_bytes_per_second'] = round(speed, 1) if elapsed >= 2 and progress.get('state') in ('Uploading','Resuming') else None
                 eta_speed=min(speed,rate) if rate is not None else speed
-                progress['eta_seconds'] = round((progress['total_bytes']-progress.get('progress_bytes',progress['transport_bytes']))/eta_speed, 1) if elapsed >= 2 and progress['transport_bytes'] >= 65536 and eta_speed > 0 and progress['state'] in ('Uploading','Resuming') else None
+                progress['eta_seconds'] = round((progress['total_bytes']-progress.get('progress_bytes',progress['transport_bytes']))/eta_speed, 1) if elapsed >= 3 and progress['transport_bytes'] >= 262144 and eta_speed > 0 and progress['state'] in ('Uploading','Resuming') else None
             progress.pop('started_monotonic', None)
+            progress={k:v for k,v in progress.items() if not k.startswith('_') and k!='capacity_eligible'}
             pause='Running'
             if self.value['paused']:
-                if self.active and self.active.get('resumable') and self.active.get('state') in ('Uploading','Resuming','Paused'):
+                if self.active and self.active.get('resumable') and self.active.get('state') not in ('Uploaded, verifying','Cloud Ready'):
                     pause='Paused at chunk boundary' if self.active['state']=='Paused' else 'Pausing at chunk boundary'
                 elif self.download_busy or self.active and not self.active.get('resumable'):pause='Pause after current transfer'
                 else:pause='Transfers paused'
             return dict(capability=CAPABILITY, revision=self.revision, settings=dict(self.value),
                         active_upload=self.active is not None,active_download=self.download_busy,
+                        calibration=self.policy.snapshot(self.value),
                         effective_mbps=None if rate is None else rate*8/1_000_000,
                         protection='Calibration needed' if rate == 0 else 'Maximum speed (uncapped)' if rate is None else 'Limited',
                         pause_state=pause,
@@ -117,7 +165,7 @@ class Controller:
         waits=dict(slot_wait_seconds=0.,pause_wait_seconds=0.,calibration_wait_seconds=0.)
         with self.cv:
             if stopped():raise InterruptedError('Transfer stopped before dispatch.')
-            while self.busy or not verification_only and (self.value['paused'] or allowance(self.value) == 0):
+            while self.busy or not verification_only and (self.value['paused'] or self.rate() == 0):
                 if stopped(): raise InterruptedError('Transfer stopped before dispatch.')
                 waiting='slot_wait_seconds' if self.busy else 'pause_wait_seconds' if self.value['paused'] else 'calibration_wait_seconds'
                 phase=time.monotonic();self.cv.wait(.1);waits[waiting]+=time.monotonic()-phase
@@ -127,6 +175,9 @@ class Controller:
                          request_id=uuid.uuid4().hex, **waits, allowance_wait_seconds=0.,
                          resumable=resumable,state='Uploading', started_monotonic=time.monotonic(),
                          connection_seconds=None, connection_observability='Not exposed by requests/urllib3')
+            trace['_admitted_rate']=self.rate();trace['_admitted_epoch']=self.epoch
+            trace['capacity_eligible']=self.rate() is None
+            trace['_capacity_epoch']=self.epoch
             self.active = trace
         try: yield trace
         finally:
@@ -137,8 +188,8 @@ class Controller:
     def chunk_boundary(self,trace,stopped=lambda:False):
         with self.cv:
             waiting=False
-            while self.value['paused'] or allowance(self.value)==0:
-                trace['state']='Paused';waiting=True
+            while self.value['paused'] or self.rate()==0:
+                trace['state']='Paused' if self.value['paused'] else 'Calibration needed';waiting=True
                 if stopped():raise InterruptedError('Resumable transfer stopped at a confirmed boundary.')
                 reason='pause_wait_seconds' if self.value['paused'] else 'calibration_wait_seconds'
                 start=time.monotonic();self.cv.wait(.1);trace[reason]+=time.monotonic()-start
@@ -151,11 +202,11 @@ class Controller:
         with self.cv:
             while True:
                 if stopped(): raise InterruptedError('Transfer stopped.')
-                rate = self.value['download_mbps']*1_000_000/8 if download and self.value['download_mbps'] else None if download else allowance(self.value)
+                rate = self.value['download_mbps']*1_000_000/8 if download and self.value['download_mbps'] else None if download else self.rate()
                 if rate is None: n = min(maximum, 16384); break
                 now = time.monotonic()
                 token_key, tick_key = ('download_tokens', 'download_tick') if download else ('tokens', 'tick')
-                burst = min(16384, max(1024, rate*.1))
+                burst = burst_allowance(rate)
                 tokens = min(burst, getattr(self, token_key) + (now-getattr(self, tick_key))*rate)
                 setattr(self, token_key, tokens); setattr(self, tick_key, now)
                 n = min(maximum, 16384, max(1024, int(rate*.05)))
@@ -223,6 +274,7 @@ class Body:
         t['body_last_handoff_seconds']=now
         if self.read_count==self.total:
             t['state']='Waiting for server verification'
+            if self.progress is not None:self.progress['state']='Waiting for durable chunk acknowledgement'
         return block
 
 
@@ -237,6 +289,9 @@ def post_file(controller, url, path, headers, *, correlation=None, stopped=lambd
         allowance_wait_seconds=0.,correlation_id=correlation or uuid.uuid4().hex,request_id=uuid.uuid4().hex,started_monotonic=time.monotonic())
     scope=nullcontext(child) if _parent is not None else controller.slot(total,correlation,stopped)
     with scope as trace:
+        with controller.cv:
+            trace.setdefault('capacity_eligible',controller.rate() is None)
+            trace.setdefault('_capacity_epoch',controller.epoch)
         # Only the single slot owner touches this Session, including when a
         # later job runs on another thread. Control requests use another client.
         if controller.session is None:controller.session=requests.Session()
@@ -259,13 +314,13 @@ def post_file(controller, url, path, headers, *, correlation=None, stopped=lambd
                 response=session.send(request, allow_redirects=False, timeout=timeout, **environment)
             trace['request_seconds']=time.monotonic()-started
             trace['response_after_last_handoff_seconds']=max(0, trace['request_seconds']-trace.get('body_last_handoff_seconds',trace['request_seconds']))
-            if _parent is not None:_parent['allowance_wait_seconds']+=trace['allowance_wait_seconds']
             # A server echo is proof of receipt, not an assumption based on reads.
             if response.headers.get('X-SC-Transfer-ID') == trace['correlation_id']:
                 count=response.headers.get('X-SC-Received-Bytes','')
                 if count.isdigit() and int(count)<=trace['total_bytes']: trace['server_received_bytes']=int(count)
             trace['state']='Response received'
-            for header,field in (('X-SC-Handler-Seconds','server_handler_seconds'),('X-SC-Body-Receive-Seconds','server_body_receive_seconds'),('X-SC-Durable-Seconds','server_durable_seconds')):
+            trace['capacity_eligible'] &= type(response.status_code) is int and 200<=response.status_code<300 and trace['_capacity_epoch']==controller.epoch
+            for header,field in (('X-SC-Handler-Seconds','server_handler_seconds'),('X-SC-Body-Receive-Seconds','server_body_receive_seconds'),('X-SC-Body-Wait-Seconds','server_body_wait_seconds'),('X-SC-Durable-Seconds','server_durable_seconds')):
                 value=response.headers.get(header,'')
                 if isinstance(value,str) and __import__('re').fullmatch(r'[0-9]{1,6}(\.[0-9]{1,6})?',value):trace[field]=float(value)
             return response, trace
@@ -273,9 +328,13 @@ def post_file(controller, url, path, headers, *, correlation=None, stopped=lambd
             trace['request_seconds']=time.monotonic()-started
             trace['failure_class']='Response inactivity or server wait' if isinstance(error,requests.ReadTimeout) else 'Connection/send inactivity' if isinstance(error,(requests.ConnectionError,requests.ConnectTimeout)) else type(error).__name__
             trace['state']='Transfer failed'
+            trace['capacity_eligible']=False
             raise
         finally:
             trace['unattributed_transport_response_seconds']=max(0,trace.get('request_seconds',0)-trace.get('request_preparation_seconds',0)-trace['allowance_wait_seconds']-trace['disk_read_seconds'])
+            if _parent is not None:_parent['allowance_wait_seconds']+=trace['allowance_wait_seconds']
+            controller.observe_transfer(trace)
+            trace.pop('capacity_eligible',None);trace.pop('_capacity_epoch',None)
             # Diagnostics cannot turn a verified upload into a failed job.
             try:on_trace(trace)
             except OSError:pass

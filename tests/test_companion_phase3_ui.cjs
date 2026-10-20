@@ -20,13 +20,13 @@ const {chromium}=require('playwright'),fs=require('node:fs'),assert=require('nod
  await page.locator('#transfer-pause').click();await page.getByText(/awaiting companion acknowledgement/).waitFor();assert.equal(writes[1].transfer_settings.paused,true);
  ack=true;await page.locator('#refresh').click();await page.locator('#transfer-status').getByText(/Paused at chunk boundary/).waitFor();
  await page.locator('#transfer-resume').click();assert.equal(writes.at(-1).transfer_settings.paused,false);ack=true;
- mode='Uploaded, verifying';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Uploaded, verifying/).waitFor();assert(!/ETA/.test(await page.locator('#transfer-progress').innerText()));
+ mode='Uploaded, verifying';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Uploaded — verifying/).waitFor();assert(!/ETA/.test(await page.locator('#transfer-progress').innerText()));
  mode='Resuming';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Resuming/).waitFor();
  mode='Cloud Ready';await page.locator('#refresh').click();await page.locator('#transfer-progress').getByText(/Cloud Ready.*server received 131,072 B/).waitFor();
  age=151;await page.locator('#refresh').click();await page.getByText(/offline; settings acknowledgement unavailable/).waitFor();assert(await page.locator('#transfer-apply').isDisabled());
  age=1;await page.locator('#refresh').click();await page.getByText(/Effective: Manual/).waitFor();
  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
- capability=1;await page.locator('#refresh').click();await page.waitForFunction(()=>document.getElementById('transfer-pause').textContent==='Pause after current transfer');capability=2;await page.locator('#refresh').click();await page.waitForFunction(()=>document.getElementById('transfer-pause').textContent==='Pause at chunk boundary');
+ capability=1;await page.locator('#refresh').click();await page.waitForFunction(()=>document.getElementById('transfer-pause').textContent==='Pause after current transfer');capability=2;mode='Uploading';await page.locator('#refresh').click();await page.waitForFunction(()=>document.getElementById('transfer-pause').textContent==='Pause at chunk boundary');
  fs.mkdirSync('output/companion-phase3',{recursive:true});await page.screenshot({path:`output/companion-phase3/worker-health-${width}.png`});await page.close();
  console.log(`Phase 3 UI ${width}: unsupported, calibration, requested/effective, pause/resume, progress, verification and stale acknowledgement passed`);
  }}finally{await browser.close();}})().catch(e=>{console.error(e);process.exitCode=1});

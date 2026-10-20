@@ -17,7 +17,16 @@ from companion_package_store import Sessions
 def enabled():return os.getenv('COMPANION_RESUMABLE_UPLOADS_ENABLED','').lower()=='true'
 
 
-def capability():return 1 if enabled() and runtime.enabled() else 0
+def accepted():
+    # Explicit release acceptance, separate from installing code/schema. Default
+    # closed, including installations which prematurely enabled the old flag.
+    from companion_package_identity import generation
+    return (os.getenv('COMPANION_RESUMABLE_ACCEPTANCE','')=='provider-postgres-retention-v1'
+        and os.getenv('COMPANION_RESUMABLE_ACCEPTANCE_GENERATION','')==generation()
+        and re.fullmatch('[a-f0-9]{64}',os.getenv('COMPANION_RESUMABLE_ACCEPTANCE_EVIDENCE_SHA256','')) is not None)
+
+
+def capability():return 1 if enabled() and runtime.enabled() and accepted() else 0
 
 
 def service():
@@ -67,8 +76,9 @@ async def host(request):
         user=await preparation_actor(request)
         if not runtime.enabled():raise ValueError('Existing durable processing worker must be enabled before resumable uploads.')
         host_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest()
-        owner=str(user['id']);store=await run_in_threadpool(service)
         action=request.path_params['upload_action']
+        if action=='create' and not accepted():raise ValueError('Resumable production acceptance is incomplete; use the negotiated legacy route for new work.')
+        owner=str(user['id']);store=await run_in_threadpool(service)
         received_size=None
         if action=='create':
             from auto_editions_setup_api import grant_context
@@ -97,12 +107,13 @@ async def host(request):
                 if not text.isdecimal() or len(text)>12:raise ValueError('Explicit chunk offset required.')
                 length=request.headers.get('content-length','')
                 if not length.isdecimal() or not 0<int(length)<=CHUNK:raise ValueError('Bounded chunk Content-Length required.')
-                content=bytearray();started=time.monotonic()
+                content=bytearray();started=time.monotonic();first_body=None
                 async for block in request.stream():
+                    if block and first_body is None:first_body=time.monotonic()
                     if len(content)+len(block)>int(length):raise ValueError('Chunk exceeds its declared length.')
                     content.extend(block)
                 if len(content)!=int(length):raise ValueError('Incomplete chunk body.')
-                body_seconds=time.monotonic()-started
+                body_seconds=time.monotonic()-(first_body or time.monotonic())
                 received_size=len(content)
                 started=time.monotonic()
                 result=await run_in_threadpool(store.chunk,key,owner,host_hash,int(text),content,request.headers.get('x-sc-chunk-sha256',''))

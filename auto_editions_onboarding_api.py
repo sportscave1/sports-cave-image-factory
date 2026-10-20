@@ -115,7 +115,7 @@ def host_health(request,value):
     from worker_health import record_heartbeat
     instance=hashlib.sha256(token.encode()).hexdigest()[:24]
     record_heartbeat(queue().connect,'Companion',instance,value)
-    if value.get('transfer_control',{}).get('capability') in (1,2):
+    if value.get('transfer_control',{}).get('capability') in (1,2,3):
         from companion_transfer_control import requested
         return requested(queue().connect,instance)
 async def cancellation(request):

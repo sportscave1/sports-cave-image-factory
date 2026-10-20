@@ -199,6 +199,9 @@ def test_resumable_api_requires_existing_host_auth_before_any_storage(monkeypatc
     from starlette.requests import Request
     from unittest.mock import Mock
     monkeypatch.setenv('COMPANION_RESUMABLE_UPLOADS_ENABLED','true')
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE','provider-postgres-retention-v1')
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE_GENERATION',__import__('companion_package_identity').generation())
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE_EVIDENCE_SHA256','f'*64)
     storage=Mock(side_effect=AssertionError('Unauthorized provider access'))
     monkeypatch.setattr(api,'service',storage)
     request=Request(dict(type='http',method='POST',path='/api/auto-editions/uploads/create',path_params={'upload_action':'create'},headers=[],query_string=b''))
@@ -212,6 +215,9 @@ def http_receiver(e,monkeypatch,*,lose_chunk_ack=False,port=0):
     import auto_editions_setup_api as setup
     import auto_editions_onboarding_api as onboarding
     monkeypatch.setenv('COMPANION_RESUMABLE_UPLOADS_ENABLED','true')
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE','provider-postgres-retention-v1')
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE_GENERATION',__import__('companion_package_identity').generation())
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE_EVIDENCE_SHA256','f'*64)
     token='fixture-host';host=hashlib.sha256(token.encode()).hexdigest()
     monkeypatch.setenv('SPORTS_CAVE_AUTO_EDITIONS_V6','true')
     monkeypatch.setattr(api,'service',lambda:e.store)
@@ -429,6 +435,9 @@ def test_completed_resume_rejects_changed_generation_before_provider_access(env,
 def test_protocol_negotiation_requires_existing_durable_worker(monkeypatch):
     import companion_package_api as api
     monkeypatch.setenv('COMPANION_RESUMABLE_UPLOADS_ENABLED','true')
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE','provider-postgres-retention-v1')
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE_GENERATION',__import__('companion_package_identity').generation())
+    monkeypatch.setenv('COMPANION_RESUMABLE_ACCEPTANCE_EVIDENCE_SHA256','f'*64)
     monkeypatch.setenv('SPORTS_CAVE_AUTO_EDITIONS_V6','false');assert api.capability()==0
     monkeypatch.setenv('SPORTS_CAVE_AUTO_EDITIONS_V6','true');assert api.capability()==1
     monkeypatch.setenv('COMPANION_RESUMABLE_UPLOADS_ENABLED','false');assert api.capability()==0

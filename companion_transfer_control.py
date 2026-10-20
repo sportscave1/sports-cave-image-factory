@@ -25,7 +25,7 @@ def set_requested(connect, instance, value, actor):
         cur.execute("""SELECT payload FROM auto_edition_worker_heartbeats WHERE component='Companion'
             AND instance_id=%s AND seen_at>now()-interval '150 seconds'""",(instance,))
         row=cur.fetchone()
-        if not row or (row['payload'].get('transfer_control') or {}).get('capability') not in (1,2):
+        if not row or (row['payload'].get('transfer_control') or {}).get('capability') not in (1,2,3):
             raise ValueError('Companion transfer controls unavailable; update/reconnect the companion first.')
         command=dict(revision=uuid.uuid4().hex,settings=value)
         cur.execute("""INSERT INTO auto_edition_onboarding_audit(product_gid,actor_id,event,detail)
@@ -38,16 +38,27 @@ def set_requested(connect, instance, value, actor):
 
 def evidence(value):
     # No arbitrary dictionaries/messages, URLs or credentials in health payloads.
-    if not isinstance(value,dict) or set(value)!={'capability','revision','settings','effective_mbps','protection','pause_state','transfer','active_upload','active_download'}:
+    fields={'capability','revision','settings','effective_mbps','protection','pause_state','transfer','active_upload','active_download'}
+    if not isinstance(value,dict) or set(value)!=fields|({'calibration'} if value.get('capability')==3 else set()):
         raise ValueError('Bounded transfer evidence required.')
     if any(type(value[k]) is not bool for k in ('active_upload','active_download')):raise ValueError('Invalid active transfer flags.')
-    if value['capability'] not in (1,2) or not re.fullmatch('[a-zA-Z0-9_-]{1,64}',str(value['revision'])):
+    if value['capability'] not in (1,2,3) or not re.fullmatch('[a-zA-Z0-9_-]{1,64}',str(value['revision'])):
         raise ValueError('Unsupported transfer protocol.')
     settings(value['settings'])
+    if value['capability']==3:
+        calibration=value['calibration']
+        fields={'state','source','sustainable_mbps','sample_count','adaptive_percent','idle_rtt_ms','loaded_rtt_ms','reason'}
+        if not isinstance(calibration,dict) or set(calibration)!=fields:raise ValueError('Bounded calibration evidence required.')
+        if calibration['state'] not in ('Calibrated','Calibration needed') or calibration['source'] not in ('Operator supplied','Transfer observations','Unmeasured') or calibration['reason'] not in ('Calibration needed','Transfer calibration','Sustained control latency','Gradual headroom recovery'):
+            raise ValueError('Invalid calibration label.')
+        import math
+        for key in fields-{'state','source','reason'}:
+            n=calibration[key]
+            if n is not None and (type(n) not in (int,float) or not math.isfinite(n) or not 0<=n<=100000):raise ValueError('Invalid calibration counter.')
     if value['protection'] not in ('Calibration needed','Limited','Maximum speed (uncapped)') or value['pause_state'] not in ('Running','Transfers paused','Pause after current transfer','Paused at chunk boundary','Pausing at chunk boundary'):
         raise ValueError('Invalid transfer state.')
     transfer=value['transfer']
-    numbers={'confirmed_bytes','progress_bytes','transfer_seconds','verification_seconds','resumed_bytes','retries','pause_wait_seconds','calibration_wait_seconds','disk_read_seconds','unattributed_transport_response_seconds','total_bytes','disk_bytes','transport_bytes','server_received_bytes','slot_wait_seconds','allowance_wait_seconds','payload_bytes_per_second','eta_seconds','connection_seconds','body_first_handoff_seconds','body_last_handoff_seconds','request_preparation_seconds','request_seconds','response_after_last_handoff_seconds','client_confirmation_seconds'}
+    numbers={'server_body_wait_seconds','server_handler_seconds','server_body_receive_seconds','server_durable_seconds','confirmed_bytes','progress_bytes','transfer_seconds','verification_seconds','resumed_bytes','retries','pause_wait_seconds','calibration_wait_seconds','disk_read_seconds','unattributed_transport_response_seconds','total_bytes','disk_bytes','transport_bytes','server_received_bytes','slot_wait_seconds','allowance_wait_seconds','payload_bytes_per_second','eta_seconds','connection_seconds','body_first_handoff_seconds','body_last_handoff_seconds','request_preparation_seconds','request_seconds','response_after_last_handoff_seconds','client_confirmation_seconds'}
     booleans={'resumable'}
     strings={'request_id','correlation_id','state','connection_observability','failure_class'}
     if not isinstance(transfer,dict) or set(transfer)-numbers-strings-booleans or len(json.dumps(value))>4096:
