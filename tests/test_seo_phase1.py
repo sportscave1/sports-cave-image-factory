@@ -108,4 +108,10 @@ class Phase1Tests(unittest.TestCase):
         self.assertEqual(detail['rows_evaluated'],500)
         self.assertEqual(detail['rows_available'],501)
 
+    def test_render_uses_shared_storage_and_local_override_is_explicit(self):
+        with patch.dict('os.environ',{'RENDER_SERVICE_ID':'srv-fixture'},clear=True):
+            self.assertFalse(m.local_mode())
+            with patch.dict('os.environ',{'SEO_PHASE1_MODE':'local'}):self.assertTrue(m.local_mode())
+        with patch.dict('os.environ',{},clear=True):self.assertTrue(m.local_mode())
+
 if __name__=='__main__':unittest.main()

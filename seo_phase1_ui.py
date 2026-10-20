@@ -284,7 +284,10 @@ def plan(user, state, store, navigate, initial=None):
                     model.event(state,'Draft/proposal change',draft['id'],detail={'change':'created'})
                     save(store,state,user)
                 if navigate:
-                    st.session_state['seo-blog-edit-select']=row.get('draft_id') or draft['id']
+                    linked_id=row.get('draft_id') or draft['id']
+                    st.session_state['seo-blog-edit-select']=linked_id
+                    st.session_state['seo-blog-builder-record']=linked_id
+                    st.session_state['seo-blog-view']='Blog Builder'
                     navigate(nav.SEO_REVIEW_ROUTE)
                     st.rerun()
                 else: st.success('Linked draft is available in Review.')
@@ -338,7 +341,9 @@ def review(user,state,store,initial=None):
         # The existing editor owns drafting, research, links, media references and pack export.
         drafts=workspace.active_records(state,'blog_records')
         if drafts:
-            selected=st.selectbox('Internal review',range(len(drafts)),format_func=lambda i:drafts[i].get('article_title') or drafts[i]['id'])
+            focused=st.session_state.get('seo-blog-builder-record') or st.session_state.get('seo-blog-edit-select') or ''
+            focus_index=next((i for i,d in enumerate(drafts) if d['id']==focused),0)
+            selected=st.selectbox('Internal review',range(len(drafts)),index=focus_index,format_func=lambda i:drafts[i].get('article_title') or drafts[i]['id'],key='seo-phase1-review-draft::'+focused)
             draft=drafts[selected]
             st.caption('Current revision: '+model.valid_decision(state,draft)+'. Approval never publishes to Shopify.')
             decision=st.selectbox('Decision',('Approved','Changes requested'))
@@ -426,8 +431,8 @@ def worker(user,state,store,reports,navigate):
     with st.expander('Recent activity'):
         for row in state['workspace_events'][-5:][::-1]: st.write(row.get('time'),row.get('action'),row.get('status'))
     st.caption('Recorder and companion remain in Developer tooling. No SEO execution session or command contract is connected.')
-    if navigate and os_accounts.can_access_page(user,'Developer') and st.button('Open Developer tooling'):
-        navigate('Developer'); st.rerun()
+    if navigate and os_accounts.can_access_page(user,'Task Recorder') and st.button('Open Task Recorder'):
+        navigate('Task Recorder'); st.rerun()
 
 
 def render(user,route,*,store=None,navigate=None,google_store=None,reporting_reader=None,reports=None):

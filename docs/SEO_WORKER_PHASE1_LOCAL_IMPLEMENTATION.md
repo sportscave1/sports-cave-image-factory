@@ -1,5 +1,8 @@
 # SEO Worker Phase 1 — local implementation and review notes
 
+Historical first checkpoint. The remaining-work list and release status below
+are superseded by [Phase 1 completion](SEO_WORKER_PHASE1_COMPLETION.md).
+
 Task: `20261020-57995487`, owner `seo-phase1-20261020-01a156b4`.
 Worktree: `C:\Dev\SportsCaveWorktrees\sports-cave-growth-seo-worker-phase-1-consolidated-workspace-20261020-57995487`.
 Branch: `codex/task/growth-seo-worker-phase-1-consolidated-workspace-20261020-57995487`.
