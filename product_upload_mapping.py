@@ -1,6 +1,6 @@
 """Resumable upload -> existing Shopify product -> Edition Ops registration.
 
-Sync & Map reuses catalogue registration and authoritative PSD mapping.
+Map reads webhook registration and reuses authoritative PSD mapping.
 Only an explicit click starts work. Preparation follows verified finalisation.
 """
 from copy import deepcopy
@@ -129,9 +129,8 @@ class Mapping:
         self.shopify = shopify or shopify_sync
         self.mappings = mappings or PostgresMappings(connect)
         self.register = register or (lambda p, n: register_edition(connect, p, n))  # legacy callers only
-        from shopify_product_onboarding import ensure
         self.shop_domain = shopify_sync.normalize_store_domain(shop_domain or self.shopify.get_config()['store_domain'])
-        self.onboard = onboard or (lambda pid: ensure(connect, self.shop_domain, pid))
+        self.onboard = onboard  # Retained constructor compatibility; MAP never starts sync.
     def source(self, row):
         op = operation(row)
         meta = self.provider.metadata_if_present(op['source']['id'])
@@ -168,7 +167,7 @@ class Mapping:
                 op = operation(row)
                 task = op['sync_map']
                 if task.get('lease') != lease:
-                    raise ValueError('Another attempt owns Sync & Map. Refresh its progress.')
+                    raise ValueError('Another attempt owns Map. Refresh its progress.')
                 current_source(row, task['source_version'])
                 if row['mode'] != task['mode']:
                     raise ValueError('The upload mode changed. Retry with the current saved operation.')
@@ -268,9 +267,10 @@ class Mapping:
             verify(cur, key, product['shopify_product_id'], source['id'])
             live_path = roots['live']['path']
             # Preserve a pre-existing master name; Review masters use the existing
-            # title sanitisation convention. The intent never changes on retry.
+            # Edition Ops display name and existing filename sanitiser. The intent
+            # never changes on retry; edition_name is a run label, not this name.
             target = (source['path_display'] if source['path_display'].rsplit('/',1)[0].casefold() == live_path.casefold()
-                      else live_path+'/'+filename(product['title']))
+                      else live_path+'/'+filename(task['edition_title']))
             task.setdefault('move_intent', dict(source=deepcopy(source), to=target, folder=roots['live']))
             if task['move_intent']['folder'] != roots['live']:
                 raise ValueError('The configured live-designs destination changed. Review the saved move intent.')
@@ -321,9 +321,9 @@ class Mapping:
             source = current_source(row, source_version)
             op = operation(row); task = op.setdefault('sync_map', {})
             if row['data'].get('lifecycle'):
-                raise ValueError('This older upload has an existing Companion handoff. Review that retained workflow before Sync & Map; it was not changed.')
+                raise ValueError('This older upload has an existing Companion handoff. Review that retained workflow before Map; it was not changed.')
             if row['data'].get('workflow_version') != 3:
-                raise ValueError('Sync & Map requires the current Dropbox PSD selection workflow.')
+                raise ValueError('Map requires the current Dropbox PSD selection workflow.')
             if task.get('lease_until') and datetime.fromisoformat(task['lease_until']) > now():
                 return self._status_row(row)
             task.update(lease=lease, lease_until=(now()+timedelta(minutes=5)).isoformat(), state='Mapping…', error='',
@@ -354,18 +354,19 @@ class Mapping:
                           publication_binding=dict(shop=self.shop_domain,product_id=pid,source_version=source['version'],source=deepcopy(original)))
                 row['data'].update(product_gid=pid, product_title=product['title'], product_url=product.get('admin_url',''))
                 task['reused_mapping']=reuse
+            step('Linking PSD')
+            # Webhooks own registration. A retry only reads their persisted result.
+            edition = read_edition(self.connect, pid)
+            if not edition:
+                error = ValueError('Product found in Shopify; waiting for its Edition Ops record. Retry lookup after automatic sync completes. No PSD was moved.')
+                error.waiting = True
+                raise error
+            edition = self._edition(edition, captured['data']['upload_operation']['sync_map'])
+            if not (edition.get('product_title') or '').strip():
+                raise ValueError('The Edition Ops product name is missing. Correct it before moving the PSD.')
+            self._step(key, actor, lease, stage, edition_id=edition['id'], run_id=edition['run_id'],
+                       confirmed_limit=edition['edition_total'], edition_title=edition['product_title'])
             if not reuse:acquire(self.connect, key, actor['id'], pid, original['id'])
-            step('Syncing Edition Ops')
-            # Wait outside the intake transaction; only the shared server consumer
-            # may initialize editions. A queue receipt or cache entry is not ready.
-            edition = self.onboard(pid)
-            limit = edition['edition_total']
-            with self._guard(key, actor, lease) as (row, op, task, cur):
-                task['confirmed_limit'] = limit
-            step('Checking edition setup')
-            # Fresh read after canonical registration's transaction has committed.
-            edition = self._edition(read_edition(self.connect, pid), captured['data']['upload_operation']['sync_map'])
-            self._step(key, actor, lease, stage, edition_id=edition['id'], run_id=edition['run_id'])
             step('Moving PSD')
             self._mapping_conflicts(pid, original)
             moved = self.source(captured) if reuse else self._move(key, actor, lease, product)
@@ -414,13 +415,12 @@ class Mapping:
                 self.mappings._audit(cur,pid,'attach',str(actor['id']),None,dict(product_id=pid,run_id=task['run_id'],ready=True,source=moved))
         except Exception as error:
             import logging
-            logging.getLogger(__name__).exception('Upload Sync & Map failed: operation=%s stage=%s', key, stage)
-            from shopify_product_onboarding import PendingRegistration
-            message = str(error) if isinstance(error,(ValueError,PermissionError,PendingRegistration)) else 'Service unavailable. Retry this step; completed steps and the original PSD identity are retained.'
+            logging.getLogger(__name__).exception('Upload Map failed: operation=%s stage=%s', key, stage)
+            message = str(error) if isinstance(error,(ValueError,PermissionError)) else f'{stage} failed: service unavailable. Retry to resume; completed steps and the original PSD identity are retained.'
             with self.store.locked(key, actor['id']) as (row, cur):
                 task = operation(row).get('sync_map', {})
                 if task.get('lease') == lease:
-                    task.update(state='Pending sync' if isinstance(error,PendingRegistration) or hasattr(error,'candidates') else 'Mapping failed',
+                    task.update(state='Waiting for product' if getattr(error,'waiting',False) or hasattr(error,'candidates') else 'Mapping failed',
                                 needs_product=hasattr(error,'candidates'), candidates=getattr(error,'candidates',[]),
                                 error=message, stage=stage, elapsed_ms=round((monotonic()-started)*1000,2))
         finally:
@@ -448,7 +448,7 @@ class Mapping:
                       preparation_held=task.get('preparation_held',False), elapsed_ms=task.get('elapsed_ms'),
                       timings_ms=task.get('timings_ms',{}))
         if result['state']=='Mapping…' and (not task.get('lease_until') or datetime.fromisoformat(task['lease_until'])<=now()):
-            result.update(state='Pending sync',reason='Sync & Map was interrupted. Retry to resume its saved steps.')
+            result.update(state='Mapping incomplete',reason='Mapping was interrupted. Retry to resume its saved steps.')
         return result
 
     def status(self, key, actor):
@@ -460,13 +460,13 @@ class Mapping:
             op = row['data'].get('upload_operation') or {}; task = op.get('sync_map') or {}
             if task:
                 current_source(row, task.get('source_version'))
-                if task.get('mode') != row['mode']: raise ValueError('Upload mode changed. Retry Sync & Map.')
+                if task.get('mode') != row['mode']: raise ValueError('Upload mode changed. Retry Map.')
             result = self._status_row(row)
             if result['state']=='Mapped':
                 with self.connect() as conn, conn.cursor() as cur:
                     self._verify_database(cur,key,op,task)
-                result['reason'] = 'Success — synced and PSD mapped'
+                result['reason'] = 'Success — PSD mapped'
             return result
         except Exception as error:
             return dict(state='Status unavailable', reason=str(error) if isinstance(error,ValueError) else
-                        'Could not verify saved mapping status. Retry Sync & Map; no mapping was changed.')
+                        'Could not verify saved mapping status. Retry Map; no mapping was changed.')

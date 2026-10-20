@@ -1,9 +1,9 @@
-/* Only explicit Sync & Map starts work. Closing the popup does not cancel it. */
+/* Only explicit Map product starts work. Closing the popup does not cancel it. */
 'use strict';
 window.ProductUploadMapping = ({request, getRow}) => {
   const $ = id => document.getElementById(id);
-  const steps=['Finding product','Syncing if needed','Linking PSD'];
-  const stageLabel=s=>s==='Finding Shopify product'?'Finding product':['Syncing Edition Ops','Checking edition setup'].includes(s)?'Syncing if needed':'Linking PSD';
+  const steps=['Finding product','Linking PSD'];
+  const stageLabel=s=>s==='Finding Shopify product'?'Finding product':'Linking PSD';
   let key='',source='',mode='',serial=0,value=null,dialog=null,pending=false,disposed=false,visible=false;
   let announced='';
   let requests=new AbortController(),pollTimer=null,returnFocus=null,sequence=0;
@@ -21,8 +21,8 @@ window.ProductUploadMapping = ({request, getRow}) => {
     if(success&&announced!==key&&window.location?.origin){
       parent.postMessage({type:'sports-cave-product-upload-linked',product_id:value?.product?.id,run_id:value?.run_id},window.location.origin);announced=key;
     }
-    $('mapping-status').textContent=success?'✓ Success — synced and PSD mapped':state;
-    $('mapping-status').style.color=success?'#197341':['Mapping…','Pending sync'].includes(state)?'#876614':state==='Unmapped'?'#62676e':'#ad2929';
+    $('mapping-status').textContent=success?'✓ Success — PSD mapped':state;
+    $('mapping-status').style.color=success?'#197341':['Mapping…','Waiting for product','Mapping incomplete'].includes(state)?'#876614':state==='Unmapped'?'#62676e':'#ad2929';
     $('mapping-reason').textContent=success?value?.product?.title||'':value?.reason||'';
     $('map').disabled=!visible||!key||pending||state==='Mapping…';
     $('map').textContent=success?'Mapped ✓':state==='Mapping…'?stageLabel(value?.stage):'MAP';
@@ -31,14 +31,14 @@ window.ProductUploadMapping = ({request, getRow}) => {
     const d=id=>dialog.querySelector('[data-field="'+id+'"]');
     d('title').textContent=value?.product?.title||'Product from this upload';
     d('psd').textContent=value?.psd||getRow()?.name||'';
-    d('state').textContent=success?'Success — synced and PSD mapped':state;
+    d('state').textContent=success?'Success — PSD mapped':state;
     d('reason').textContent=success?'':value?.reason||'';
     d('edition').textContent=value?.edition_id?`Edition Ops record ${value.edition_id} · Run ${value.run_id}`:'';
     d('edition-link').hidden=!success;
     d('steps').replaceChildren();
     for(const step of steps){
       const item=dialog.ownerDocument.createElement('li');
-      item.textContent=(value?.completed?.includes({'Finding product':'Finding Shopify product','Syncing if needed':'Checking edition setup','Linking PSD':'Verifying'}[step])?'✓ ':stageLabel(value?.stage)===step?'→ ':'')+step;
+      item.textContent=(value?.completed?.includes({'Finding product':'Finding Shopify product','Linking PSD':'Verifying'}[step])?'✓ ':stageLabel(value?.stage)===step?'→ ':'')+step;
       if(stageLabel(value?.stage)===step)item.setAttribute('aria-current','step');
       d('steps').append(item);
     }
@@ -50,7 +50,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
     d('product-id').hidden=(value?.candidates||[]).length>0;
     d('retry').hidden=success;
     d('retry').disabled=pending||state==='Mapping…';
-    d('retry').textContent=value?.needs_product?'Confirm product & map':value?.needs_limit?'Confirm & resume':'Retry';
+    d('retry').textContent=value?.needs_product&&(value.candidates||[]).length?'Confirm product & map':value?.needs_limit?'Confirm & resume':'Retry';
   }
   function schedule(){
     clearTimeout(pollTimer);pollTimer=null;
@@ -88,7 +88,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
     recoveryURL(); // Existing authenticated upload-resume route; metadata only.
     let doc=document;try{if(parent.document)doc=parent.document;}catch{}
     returnFocus=$('map');dialog=doc.createElement('dialog');
-    dialog.className='sc-upload-edition-dialog';dialog.setAttribute('aria-label','Sync & Map');
+    dialog.className='sc-upload-edition-dialog';dialog.setAttribute('aria-label','Map product');
     dialog.innerHTML=`<style>
       .sc-upload-edition-dialog{box-sizing:border-box;width:500px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 48px);overflow:auto;margin:auto;padding:18px;border:1px solid #d5d2c9;border-radius:8px;background:#fffdf9;color:#252930;font:14px/1.4 "Segoe UI",system-ui,sans-serif}
       .sc-upload-edition-dialog::backdrop{background:rgba(20,20,18,.28)}
@@ -100,7 +100,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
       .sc-upload-edition-dialog button:focus-visible,.sc-upload-edition-dialog input:focus-visible{outline:2px solid #aa8439;outline-offset:2px}
       .sc-upload-edition-dialog input{width:100%;margin:7px 0}.sc-upload-edition-dialog .sc-edition-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
       .sc-upload-edition-dialog [data-field=retry]{background:#b08b40;border-color:#b08b40;color:white}
-    </style><h2>Sync &amp; Map</h2><strong data-field="title"></strong>
+    </style><h2>Map product</h2><strong data-field="title"></strong>
     <ol data-field="steps"></ol><p>PSD: <span data-field="psd"></span></p><p data-field="edition"></p><p><a data-field="edition-link" href="?page=edition_ops" target="_top" hidden>Open Edition Ops</a></p>
     <strong data-field="state" role="status" aria-live="polite"></strong><p data-field="reason"></p>
     <label data-field="limit-row" hidden>Confirmed edition limit<input data-field="limit" type="number" min="1" max="1000" step="1" placeholder="Confirmed product edition limit"></label>
@@ -114,8 +114,8 @@ window.ProductUploadMapping = ({request, getRow}) => {
       const extra=value?.needs_limit?{edition_limit:Number(input.value)}:{};
       if(value?.needs_product){
         const chosen=(value.candidates||[]).length?dialog.querySelector('[data-field="product-choice"]').value:dialog.querySelector('[data-field="product-id"]').value.trim();
-        if(!chosen)return;
-        extra.product_id=/^\d+$/.test(chosen)?'gid://shopify/Product/'+chosen:chosen;extra.confirm_product=true;
+        if(chosen){extra.product_id=/^\d+$/.test(chosen)?'gid://shopify/Product/'+chosen:chosen;extra.confirm_product=true;}
+        else if((value.candidates||[]).length)return;
       }
       map(extra);
     };

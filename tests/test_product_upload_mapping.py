@@ -24,7 +24,7 @@ def restore_provider_boundaries(monkeypatch):
         monkeypatch.setattr(module,name,getattr(module,name))
 
 
-def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, production_grants=False):
+def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, production_grants=False, arrived=True):
     store,sql,provider=env
     sql.execute((ROOT/'supabase/migrations/20261019070000_product_upload_verified_psd_mapping.sql').read_text(encoding='utf-8'))
     if production_grants:
@@ -53,8 +53,9 @@ def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, pr
     db.shopify_sync.graphql_request=lambda *a,**kw:({'orders':{'nodes':[],'pageInfo':{'hasNextPage':False}}},'2026-04')
     import product_sport_tag_sync
     product_sport_tag_sync.sync_product_sport_tags=lambda *a,**kw:dict(status='verified',review=[])
-    ensure=lambda pid:onboarding.ensure(store.connect,'fixture.myshopify.com',pid,timeout=2,poll=lambda:onboarding.drain(db))
-    return Mapping(store.connect,provider,shopify=shop,shop_domain='fixture.myshopify.com',onboard=ensure),key,meta,p
+    service=Mapping(store.connect,provider,shopify=shop,shop_domain='fixture.myshopify.com',onboard=Mock(side_effect=AssertionError('MAP must not sync')))
+    if arrived and limit:service.register(p,limit)  # Simulate completed webhook registration before MAP.
+    return service,key,meta,p
 
 
 def count(sql,table):
@@ -76,14 +77,14 @@ def no_jobs(env):
 
 
 @pytest.mark.parametrize('mode',['LIVE','UPDATE'])
-def test_complete_real_path_from_missing_catalogue_idempotent_no_customer_allocation(env,mode):
+def test_webhook_synced_product_direct_finalisation_idempotent_no_customer_allocation(env,mode):
     service,key,meta,p=setup(env,mode=mode)
     before=deepcopy(env[0].read(key,ADMIN['id']))
-    assert read_edition(env[0].connect,PID) is None
+    assert read_edition(env[0].connect,PID) is not None
     result=service.map(key,ADMIN)
     assert result['state']=='Mapped',result
-    assert result['reason']=='Success — synced and PSD mapped' and not result['preparation_held']
-    assert result['edition_id'] and result['run_id'] and len(result['completed'])==6
+    assert result['reason']=='Success — PSD mapped' and not result['preparation_held']
+    assert result['edition_id'] and result['run_id'] and len(result['completed'])==5
     assert result['psd'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/New Art.psd')
     saved=env[0].read(key,ADMIN['id'])
     op=saved['data']['upload_operation']
@@ -158,16 +159,19 @@ def test_exact_correlation_conflicts_never_guess(env,kind):
     result=service.map(key,ADMIN)
     assert result['state']!='Mapped' and result['reason']
     if kind=='none':assert result['reason'].startswith('Product not found in Shopify yet') and result['needs_product']
-    assert not env[2].api.move_path.called and not read_edition(env[0].connect,PID)
+    assert not env[2].api.move_path.called
     no_jobs(env)
 
 
 def test_unknown_edition_choice_resumes_without_recreating_product(env):
     service,key,meta,p=setup(env,limit=None)
     result=service.map(key,ADMIN)
-    assert 'edition limit' in result['reason'] and result['state']=='Pending sync'
+    assert 'waiting for its Edition Ops record' in result['reason'] and result['state']=='Waiting for product'
+    service.onboard.assert_not_called()
+    assert count(env[1],'webhook_events')==0
     assert read_edition(env[0].connect,PID) is None
     p['tags'].append('sc-edition-limit-75')
+    service.register(p,75)  # The webhook arrives between explicit retries.
     assert service.map(key,ADMIN)['state']=='Mapped'
     assert read_edition(env[0].connect,PID)['edition_total']==75
     no_jobs(env)
@@ -175,7 +179,7 @@ def test_unknown_edition_choice_resumes_without_recreating_product(env):
 
 @pytest.mark.parametrize('kind',['revision','destination','mapping','run','history','partial','missing-guards','existing-job'])
 def test_conflicts_fail_closed_and_never_move_or_show_green(env,kind):
-    service,key,meta,p=setup(env)
+    service,key,meta,p=setup(env,arrived=kind!='history')
     if kind=='revision':env[2].files[meta['id']]['rev']='b2'
     if kind=='destination':
         from product_upload_dropbox import ROOTS
@@ -362,7 +366,7 @@ def test_expired_attempt_and_late_owner_are_fenced(env):
     with env[0].locked(key,ADMIN['id']) as (row,cur):
         row['data']['upload_operation']['sync_map']=dict(state='Mapping…',lease='expired',
             lease_until=(now()-timedelta(minutes=1)).isoformat(),source_version=current_source(row)['version'],mode='LIVE')
-    assert service.status(key,ADMIN)['state']=='Pending sync'
+    assert service.status(key,ADMIN)['state']=='Mapping incomplete'
     assert service.map(key,ADMIN)['state']=='Mapped'
     with pytest.raises(ValueError,match='Another attempt'):
         with service._guard(key,ADMIN,'expired'):raise AssertionError('Stale attempt must not mutate')
@@ -455,3 +459,32 @@ def test_verified_saved_identity_survives_removal_of_mutable_correlation_tag(env
     service.shopify.fetch_catalog_page.side_effect=AssertionError('Persisted publication ID is authoritative')
     env[2].api.move_path.side_effect=original
     assert service.map(key,ADMIN)['state']=='Mapped'
+
+
+def test_edition_ops_display_name_used_for_move_not_edition_label(env):
+    service,key,meta,p=setup(env)
+    env[1].execute("UPDATE edition_products SET product_title=%s,edition_name='Numbered Edition'", ('CON: Hero / Star?.PSD',))
+    before=read_edition(env[0].connect,PID)
+    result=service.map(key,ADMIN)
+    assert result['state']=='Mapped',result
+    assert result['psd'].endswith('/CON_ Hero _ Star_.psd')
+    assert read_edition(env[0].connect,PID)==before
+    assert service.mappings.read_one(PID)['dropbox_file_id']==meta['id']
+    assert service.map(key,ADMIN)['state']=='Mapped'
+    assert env[2].api.move_path.call_count==1
+    service.onboard.assert_not_called()
+    assert count(env[1],'webhook_events')==0
+
+
+def test_not_found_lookup_retry_does_not_move_or_sync(env):
+    service,key,meta,p=setup(env)
+    service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[],has_next_page=False)
+    result=service.map(key,ADMIN)
+    assert result['state']=='Waiting for product' and result['needs_product']
+    assert not env[2].api.move_path.called
+    service.shopify.fetch_catalog_page.side_effect=lambda **kw:dict(products=[p],has_next_page=False)
+    result=service.map(key,ADMIN)
+    assert result['state']=='Mapped',result
+    assert 'Syncing Edition Ops' not in result['completed']
+    assert 'Checking edition setup' not in result['completed']
+    service.onboard.assert_not_called()
