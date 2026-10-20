@@ -1,0 +1,137 @@
+[
+  {
+    "kw": {
+      "product_name": "Lionel Messi World Cup 2022",
+      "category": "Football",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "images": [
+      "0fad15086265ca0bb9ad2ecf85853e0f5ecc52cff76b60e47b6bff589a2bf05f",
+      "48916f99f058b0b4100d022398628b4409c141dafcf4adbbad2839b8535e8e9f",
+      "e40500db1d5248396920cd63a77a175a9912e885180942f71188cf0332a3a345"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Lionel Messi World Cup 2022",
+      "category": "Football",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "images": [
+      "8a7e33b77d9fcc8994fb2a7a473c671623854024d4070ebe660efc5137bb5e48",
+      "d28fe16cb9ebf4d8950727dd545a5c32723ea4632cf4473fc06a3838f7861cc9",
+      "1ce51dbcc78e5f6faeb79728eb9f77690ec7a24315817ef31f6b426e21a7a149"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Lionel Messi World Cup 2022",
+      "category": "Football",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "three"
+    },
+    "images": [
+      "10b1fc23ce4ebd763daefa4047f1a5da2362d45394fadb143f9fd97c025b78d2",
+      "4b457ec9e85357cc917301a62b037dc7214793c77edfa96d4fcf44ff878a35b0",
+      "8eea24cde068500e91a15e56b1b76b78dda816f574c44b20ad732ad20b8eb704"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Senna vs Prost Rivalry",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "images": [
+      "c74d6dfb0a601390782deb5feb53164b366e6469364ed46ac2e965bf932f8087",
+      "80b9fbf35e21632cdf182bdf0d83780102e2b55bd492e61da9a338cbe8f045cc",
+      "acadcb289d7b2e804339c679ce105567e84f44569ad839e45344c099bf50ad7f"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Senna vs Prost Rivalry",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "images": [
+      "7779bfcc5bc8d20362f000acc8651619e02c9a0fdf233a5b41857b70e91550bc",
+      "3fb939c5d37d6449353b018f83706442e55167bb30f2e260cd8dcb383edd9485",
+      "ab9118af3bafda1fcfa7e901146665f4e1845b0724d256da0458a63224cf6993"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Senna vs Prost Rivalry",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "three"
+    },
+    "images": [
+      "dca7f264954fa45d70ae2c7ced2490c84737835584047300550c74ca9597c5e9",
+      "acae5b3682bf05c30e94a748bfea31f0f58aaaaf0913806a2e772a61e8ed186a",
+      "3debbb4098983b2ee0ea4cd4c532bc76ee29b3c134db332fc961dcc7a7dd719e"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Peter Brock Six Laps Ahead",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "one"
+    },
+    "images": [
+      "8a074c53f6c458c1cc38ff6d4817a464fdd7a2e2987c35ad527a64aa487df950",
+      "6661835925de598bb3964aeab15428c50f0aea33500dbf682052883b3b987aa8",
+      "6a9fb04b17fc638983c3676194d4c593b4aaac290f743df839124f8b90f6c19b"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Peter Brock Six Laps Ahead",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "two"
+    },
+    "images": [
+      "99e9df601b35bc979ffce4ab1d0ecbac4c1a41528c509889646af15565532895",
+      "6deb25587f9ce66e3aef0c6b3251e77874624aa7412ea976dfb021df2427cc20",
+      "3202e1f49b845799dcc22a9ec4ff73c98b9dc47842e2d390d0256d9ddaee7767"
+    ]
+  },
+  {
+    "kw": {
+      "product_name": "Peter Brock Six Laps Ahead",
+      "category": "Motorsport",
+      "product_metadata": {
+        "edition_limit": 100
+      },
+      "variation_token": "three"
+    },
+    "images": [
+      "9e8c5d851a032846dd8e3be19312e3a155a570f845a07aa06a50a1be84df4324",
+      "d58a49bd67b05f2e3256b7bbe542edb2a1064a811ebade9c10a1163972d83e25",
+      "205a1c8a373def6323ade04cdc2df0352c91e6407f36f2b06f9f865b30b54de5"
+    ]
+  }
+]

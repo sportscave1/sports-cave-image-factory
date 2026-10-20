@@ -4598,6 +4598,7 @@ def resolve_instant_experience_description_context(
         "CAMPAIGN_MARKET": _normalise_option_label(country),
         "SCARCITY_VERIFIED": bool(base_context.get("edition_limit")),
         "EDITION_LIMIT_SOURCE": base_context.get("edition_limit_source") or "",
+        "VERIFIED_FACTS": ie_copy.verified_facts(metadata),
     }
 
 
@@ -7149,7 +7150,7 @@ Before returning the campaign, privately compare several product-specific candid
 
 def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_settings=None):
     if campaign_type == "Instant Experience":
-        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in locked order legacy_standard, framed_greatness, choose_a_side; one final AD COPY block per group. Preserve the defining hooks, product truth, setup and approved route CTAs."
+        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in order legacy/identity, moment/emotion, insider/verified fact with a grounded fallback; one final AD COPY block per group. Preserve product truth, existing headline behaviour, setup and approved route CTAs."
     single_primary_rule = (
         "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
@@ -7285,10 +7286,12 @@ def _record_ie_copy_history(result, concept_notes):
         row = rows[0] if rows else {}
         if not all(str(row.get(field) or "").strip() for field in ("primary_text", "headline", "cta")):
             continue
-        first = re.split(r"[.!?]\s|\n", str(row["primary_text"]).strip(), maxsplit=1)[0]
         entries.append({**cues_by_key.get(key, {}), "visual_family": "premium_scarcity", "copy_family": ie_copy.ROUTES[key][2],
                         "market": result.get("country"), "sport": result.get("category"),
-                        "first_sentence_normalized": " ".join(first.casefold().split()),
+                        "first_sentence_normalized": ie_copy.opening(row["primary_text"]),
+                        "copy_product_key": ie_copy.product_key(result.get("product_name")),
+                        "product_name": result.get("product_name"),
+                        "primary_text": str(row["primary_text"])[:3000],
                         "headline": " ".join(str(row["headline"]).casefold().split())})
     update_recent_instant_experience_fingerprints(entries)
 
@@ -7532,7 +7535,7 @@ def compose_final_ads_prompt(
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
             workflow_mode=workflow_mode,
         )
-    if campaign_type == "Instant Experience":
+    if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         prompt += "\n\nCOPY FATIGUE CONTEXT\n" + json.dumps(
             [item for item in (recent_instant_experience_fingerprints or []) if item.get("market") == country and item.get("sport") == category], ensure_ascii=False)
         prompt += "\nVary product-specific supporting lines and headlines where appropriate; keep all three locked legacy copy frameworks and defining hooks unchanged. Product truth wins."
@@ -8508,17 +8511,16 @@ def build_standard_instant_experience_prompt(
         campaign_moment=campaign_moment,
         country=country,
     )
+    if product_context.get("edition_limit_source") == "approved Baseball Instant Experience claim path":
+        product_context = {**product_context, "edition_limit": None, "edition_limit_source": ""}
+        description_context = {**description_context, "EDITION_LIMIT": None, "SCARCITY_VERIFIED": False}
     edition_context_line = (
         f"Verified edition limit: {product_context['edition_limit']} "
         f"({product_context['edition_limit_source']})."
         if product_context.get("edition_limit")
         else "Verified edition limit: not supplied; use evidence-gated non-numeric fallback wording."
     )
-    claim_block = (
-        build_baseball_instant_experience_claim_block()
-        if category == "Baseball"
-        else "Use only verified edition, certificate, manufacturing, review or scarcity claims supplied by the product data or visible artwork. Never invent proof."
-    )
+    claim_block = "Use only verified claims supplied by product metadata or visible artwork. Description quantities require a verified edition limit; never use a category default as evidence."
     product_set_guidance = (
         BASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME
         if category == "Baseball"
@@ -9394,11 +9396,12 @@ def ads_prompt_contract_version_for_campaign(
 
 
 def _instant_experience_visual_contract_is_current(prompt):
-    required = (ie_copy.VERSION, ie_visuals.VERSION,
+    required = (ie_visuals.VERSION,
                 "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
                 "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
                 "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE")
-    return (all(marker in prompt for marker in required)
+    return (any(version in prompt for version in (ie_copy.VERSION, ie_copy.LEGACY_VERSION))
+            and all(marker in prompt for marker in required)
             and prompt.count(SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]) == 3
             and "FOR THE ROOM THAT REMEMBERS." not in prompt
             and "full-height right graphic column" not in prompt)
@@ -9416,6 +9419,8 @@ def ensure_current_ads_result_prompt(result):
     )
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
     content_current = not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"]))
+    if is_standard_ie and content_current and ie_copy.LEGACY_VERSION in str(result["master_prompt"]):
+        return result  # New description defaults apply only to a fresh pack, never saved copy.
     if result.get("prompt_contract_version") == expected_version and content_current:
         return _upgrade_saved_ads_visual_rules(result)
     old_master_prompt = str(result.get("master_prompt") or "")
@@ -11098,6 +11103,13 @@ def parse_instant_experience_copy_csv(data, result):
         raise InstantExperienceCopyCSVError(
             f"Missing required route {route_key} variation {variation_number}."
         )
+    if _is_ie_copy_v2(result) and ie_copy.VERSION in str(result.get("master_prompt") or ""):
+        errors = ie_copy.quality_errors(
+            [parsed[key][0]["primary_text"] for key in ie_copy.ROUTES],
+            product=result.get("product_name"), recent=result.get("recent_instant_experience_fingerprints") or (),
+        )
+        if errors:
+            raise InstantExperienceCopyCSVError(" ".join(errors) + " Revise only the conflicting descriptions; use at most four writing passes.")
     return {key: rows[:1] for key, rows in parsed.items()} if requested_refresh else parsed
 
 

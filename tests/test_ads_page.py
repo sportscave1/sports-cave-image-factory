@@ -144,7 +144,10 @@ def instant_experience_csv_notes():
                     "description_key": description_variant["key"],
                     "description_label": description_variant["label"],
                     "primary_text": (
-                        f"{concept['display_name']} variation {variation}, first line.\n"
+                        f"{concept['display_name']} variation {variation}, first line.\n" +
+                        ("The name means years of loyalty and a collector identity that lasts beyond any result. ",
+                         "Recall the anticipation, the atmosphere and the feeling behind this artwork's depicted moment. ",
+                         "A specific detail gives knowledgeable fans a different way into the subject's significance. ")[concept_index] +
                         "Second line with \"quotes\", apostrophe’s, ampersand & emoji 🏁. "
                         f"{ads_page.INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]}"
                     ),
