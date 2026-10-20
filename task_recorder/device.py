@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import json
 import re
+import random
 import secrets
 import socket
 import sqlite3
@@ -81,6 +82,7 @@ class DeviceAgent:
         self.connected=False
         self.stopping=False
         self.wake=asyncio.Event()
+        self.publish_wake=asyncio.Event()
         self.acks={}
         self.fence=0
         self.active_commands={}
@@ -101,8 +103,9 @@ class DeviceAgent:
             if draft.get("id") and not any(t["id"]==draft["id"] for t in s["tasks"]):
                 s["tasks"].append({"id":draft["id"],"name":draft["name"],"inputs":[],"steps":len(draft["steps"]),
                                    "duration_ms":None,"updated_at":None,"result":"Recording","revision":None})
+        settings=self.settings()
         s.update(protocol=3,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
-                 starting_url=self.settings().get("url",""),startup=self.settings().get("startup",False),
+                 starting_url=settings.get("url",""),startup=settings.get("startup",False),
                  connection="connected" if self.connected else "reconnecting")
         if self.preparing and s["mode"] in {"idle","stopped","completed"}: s["mode"]="starting"
         return s
@@ -168,22 +171,36 @@ class DeviceAgent:
             command["valid_for"]-=time.monotonic()-started
         return result
 
-    async def publish(self,device):
-        last=None
+    async def publish(self,device,initial=None,delta_supported=False):
+        last=initial
+        last_version=self.state_version
         while not self.stopping and self.credentials()==device:
+            # Clear before taking the snapshot: a command finishing while we send
+            # leaves the event set, so its acknowledgement is never delayed/lost.
+            self.publish_wake.clear()
             s=self.snapshot()
-            fingerprint=json.dumps(s,sort_keys=True)
-            if fingerprint!=last or self.acks:
+            if s!=last or self.acks:
                 self.state_version+=1
                 outgoing=list(self.acks.values())
-                await self.exchange(device,{"state":s,"state_version":self.state_version,"acks":outgoing})
+                data={"state_version":self.state_version,"acks":outgoing}
+                if delta_supported and last is not None:
+                    data["state_delta"]={"base_version":last_version,
+                                         "changes":{k:v for k,v in s.items() if last.get(k)!=v}}
+                else:data["state"]=s
+                result=await self.exchange(device,data)
                 for ack in outgoing:
                     if self.acks.get(ack["id"])==ack:self.acks.pop(ack["id"],None)
-                last=fingerprint
-            await asyncio.sleep(.65 if self.runner.busy() or self.runner.recording or self.preparing else 2)
+                # A lost baseline requires a full snapshot, never a guessed merge.
+                last=None if result.get("state_resync") else s
+                last_version=self.state_version
+                if last is None:continue
+            try:
+                await asyncio.wait_for(self.publish_wake.wait(),timeout=.65 if self.runner.busy() or self.runner.recording or self.preparing else 2)
+            except asyncio.TimeoutError:pass
 
     async def loop(self):
         self.client=httpx.AsyncClient(follow_redirects=False,trust_env=False)
+        retry=0
         try:
             while not self.stopping:
                 device=self.credentials()
@@ -196,8 +213,10 @@ class DeviceAgent:
                 poll=None
                 try:
                     self.state_version+=1
-                    first=await self.exchange(device,{"state":self.snapshot(),"state_version":self.state_version})
-                    publisher=asyncio.create_task(self.publish(device))
+                    initial=self.snapshot()
+                    first=await self.exchange(device,{"state":initial,"state_version":self.state_version})
+                    retry=0
+                    publisher=asyncio.create_task(self.publish(device,initial,first.get("state_delta",False)))
                     result=first
                     while self.credentials()==device and not self.stopping:
                         self.fence=max(self.fence,result["fence"])
@@ -214,14 +233,20 @@ class DeviceAgent:
                             await publisher
                             break
                         result=await poll
+                        retry=0
                 except asyncio.CancelledError:raise
                 except Exception as error:
                     if time.monotonic()-self.last_failure>30:
                         atomic(self.root/"transport-status.json",{"error_type":type(error).__name__,
                                "at":datetime.now().astimezone().isoformat()})
                         self.last_failure=time.monotonic()
+                    for pending in (poll,publisher):
+                        if pending:
+                            pending.cancel()
+                            with contextlib.suppress(asyncio.CancelledError,Exception):await pending
                     await self.network_lost()
-                    await asyncio.sleep(2)
+                    retry=min(retry+1,5)
+                    await asyncio.sleep(min(30,2**retry*random.uniform(.8,1.2)))
                 finally:
                     if poll:
                         poll.cancel()
@@ -242,6 +267,7 @@ class DeviceAgent:
                 self.acks[key]={"id":key,"status":"rejected","receipt":{"message":"Command content changed."}}
             else:
                 self.acks[key]={"id":key,"status":"uncertain" if previous[1]=="accepted" else previous[1],"receipt":json.loads(previous[2])}
+            self.publish_wake.set()
             return
         self.db.execute("INSERT INTO commands VALUES(?,?,?,?)",(key,fingerprint,"accepted","{}"));self.db.commit()
         try:
@@ -269,6 +295,7 @@ class DeviceAgent:
             status="uncertain";result={"message":"This control could not be confirmed. Press Stop and check the browser."}
         self.db.execute("UPDATE commands SET status=?,receipt=? WHERE id=?",(status,json.dumps(result),key));self.db.commit()
         self.acks[key]={"id":key,"status":status,"receipt":result}
+        self.publish_wake.set()
 
     async def perform(self,kind,data,key):
         r=self.runner

@@ -105,6 +105,9 @@ async def state(request):
         except asyncio.TimeoutError: pass
         await actor(request)
         rows=await run_in_threadpool(relay(request).devices,str(user["id"]))
+    if selected and request.query_params.get("compact")=="1":
+        rows=[{k:v for k,v in row.items() if k!="state"} if row["id"]==device_id and
+              request.query_params.get("after")==str(row["seq"]) else row for row in rows]
     return JSONResponse({"devices":rows},headers=HEADERS)
 
 @bounded
@@ -154,8 +157,16 @@ async def command(request):
 @bounded
 async def receipt(request):
     user=await actor(request)
-    return JSONResponse(await run_in_threadpool(relay(request).receipt,str(user["id"]),
-                      request.query_params.get("device"),request.query_params.get("id")),headers=HEADERS)
+    device_id=request.query_params.get("device")
+    command_id=request.query_params.get("id")
+    signal=event("state:"+str(device_id))
+    result=await run_in_threadpool(relay(request).receipt,str(user["id"]),device_id,command_id)
+    if request.query_params.get("wait")=="1" and result["status"] in {"queued","dispatched"}:
+        try:await asyncio.wait_for(signal.wait(),timeout=15)
+        except asyncio.TimeoutError:pass
+        user=await actor(request)
+        result=await run_in_threadpool(relay(request).receipt,str(user["id"]),device_id,command_id)
+    return JSONResponse(result,headers=HEADERS)
 
 @bounded
 async def exchange(request):
