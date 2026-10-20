@@ -72,6 +72,7 @@ class DeviceAgent:
         self.preparing=False
         self.client=None
         self.task=None
+        self.last_failure=0
 
     def credentials(self):
         return self.vault.read().get("device")
@@ -133,7 +134,9 @@ class DeviceAgent:
         data={**data,"device_id":device["device_id"],"boot_id":self.boot_id,"epoch":self.epoch,"wait":wait}
         response=await self.client.post(device["origin"]+"/api/task-recorder/device/exchange",
                     headers={"Authorization":"Bearer "+device["key"]},json=data,
-                    timeout=httpx.Timeout(22 if wait else 5,connect=4))
+                    # A healthy long poll includes the 15-second server wait
+                    # plus two authenticated database exchanges across regions.
+                    timeout=httpx.Timeout(45 if wait else 20,connect=8))
         if response.status_code==403:
             await self.network_lost(True)
             raise Invalid("Device disconnected.")
@@ -191,7 +194,11 @@ class DeviceAgent:
                             break
                         result=await poll
                 except asyncio.CancelledError:raise
-                except Exception:
+                except Exception as error:
+                    if time.monotonic()-self.last_failure>30:
+                        atomic(self.root/"transport-status.json",{"error_type":type(error).__name__,
+                               "at":datetime.now().astimezone().isoformat()})
+                        self.last_failure=time.monotonic()
                     await self.network_lost()
                     await asyncio.sleep(2)
                 finally:

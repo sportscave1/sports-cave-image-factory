@@ -77,6 +77,12 @@ again. Completed submissions are never retried automatically.
 State uses bounded metadata and long polls (15-second PC / 20-second panel waits),
 with changed-state pushes while active. There is no continuous desktop stream,
 hosted screenshot, new UI framework or paid/AI automation service.
+The PC allows 45 seconds for a long-poll response and 20 seconds for a state
+exchange, including authenticated database work. A healthy live long poll measured
+22.48 seconds; V1 Phase 2's original 22-second client budget could falsely abort
+a recording. The corrected budget is covered by a regression check. Safe local
+transport diagnostics record only an exception class and timestamp in
+`transport-status.json`, without credentials or request bodies.
 
 ## Supported actions and limitations
 
@@ -112,7 +118,7 @@ No production database or provider APIs are used for development acceptance.
 Automated evidence:
 
 - `tests/test_task_recorder.py`: seven original contract/authentication checks
-  plus a regression ensuring Record/Play bring an existing browser forward.
+  plus existing-browser foreground and hosted timeout-budget regressions.
 - `tests/test_task_recorder_relay.py`: seven real PostgreSQL security, ownership,
   pairing, duplicate, Stop, expiry and restart checks.
 - Sidebar/retirement/navigation regression suites.
@@ -136,6 +142,8 @@ to the local demo form; neither contains form values or a Save action. Navigatio
 playback completed, but this does not verify form interaction or changed inputs.
 The guided form recording/replay remains pending the user's demonstration.
 Record/Play were corrected to bring an existing recorder window forward.
+A guided start at 12:20 was interrupted before form actions by the hosted timeout
+described above; it was saved for review, not replayed as a completed form trial.
 The pairing, two recordings and command receipts were transferred to the normal
 installed helper's TaskRecorderV1 data directory. The original V1 example and
 browser profile were verified unchanged, and both profiles were retained.

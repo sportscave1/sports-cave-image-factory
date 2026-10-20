@@ -135,6 +135,23 @@ class NavigationTests(unittest.TestCase):
         self.assertFalse(entry["worker_assignable"])
 
 class BrowserFocusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_exchange_allows_server_wait_and_database_round_trips(self):
+        import httpx
+        from task_recorder.runner import Runner
+        from task_recorder.device import DeviceAgent
+        with tempfile.TemporaryDirectory() as directory:
+            runner=Runner(directory)
+            agent=DeviceAgent(runner,"http://127.0.0.1:18931",preview=True)
+            response=httpx.Response(200,json={"commands":[],"fence":0},request=httpx.Request("POST","https://example.invalid"))
+            agent.client=SimpleNamespace(post=AsyncMock(return_value=response))
+            device={"device_id":"synthetic-device","origin":"https://example.invalid","key":"synthetic"}
+            try:
+                await agent.exchange(device,{},wait=True)
+                self.assertGreater(agent.client.post.call_args.kwargs["timeout"].read,30)
+                await agent.exchange(device,{})
+                self.assertGreaterEqual(agent.client.post.call_args.kwargs["timeout"].read,15)
+            finally:await agent.close()
+
     async def test_record_and_play_bring_existing_browser_forward(self):
         from task_recorder.runner import Runner
         from task_recorder.device import DeviceAgent
