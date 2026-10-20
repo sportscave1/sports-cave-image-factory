@@ -5,6 +5,7 @@ import secrets
 import time
 import uuid
 from .schema import Invalid, text
+from .state_updates import merge_tasks
 
 KINDS = {"record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
          "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files", "delete", "repair-copy"}
@@ -159,7 +160,7 @@ class Relay:
         snapshot=body.get("state")
         delta=body.get("state_delta")
         if delta is not None and (snapshot is not None or not isinstance(delta,dict) or
-                set(delta)!={"base_version","changes"} or not isinstance(delta["base_version"],int) or
+                not {"base_version","changes"}<=set(delta) or set(delta)-{"base_version","changes","tasks"} or not isinstance(delta["base_version"],int) or
                 not isinstance(delta["changes"],dict) or len(json.dumps(delta))>180000):
             raise Invalid("Invalid helper state update.")
         if snapshot is not None and (not isinstance(snapshot,dict) or len(json.dumps(snapshot))>180000): raise Invalid("Invalid helper state.")
@@ -168,6 +169,9 @@ class Relay:
                  "operation_id","starting_url","selected_id","startup","connection","protocol","active_task_id","active_task_name"}
         if snapshot is not None and set(snapshot)-allowed: raise Invalid("Unsupported helper state fields.")
         if delta is not None and set(delta["changes"])-allowed: raise Invalid("Unsupported helper state fields.")
+        if delta is not None and "tasks" in delta:
+            if "tasks" in delta["changes"]:raise Invalid("Ambiguous task summary update.")
+            merge_tasks([],delta["tasks"])  # Validate even if a stale baseline requests resync.
         if not isinstance(body.get("acks",[]),list):raise Invalid("Invalid command acknowledgements.")
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT * FROM task_recorder_private.devices WHERE id=%s AND key_hash=%s AND revoked=false FOR UPDATE",(device_id,digest(key)))
@@ -190,6 +194,7 @@ class Relay:
                     resync=True
                 else:
                     snapshot={**device["state"],**delta["changes"]}
+                    if "tasks" in delta:snapshot["tasks"]=merge_tasks(device["state"].get("tasks",[]),delta["tasks"])
                     if len(json.dumps(snapshot))>180000: raise Invalid("Invalid helper state.")
             if snapshot is None or version<=device["state_version"]:
                 snapshot=device["state"]
@@ -228,4 +233,4 @@ class Relay:
             for command in commands:
                 cur.execute("UPDATE task_recorder_private.commands SET status='dispatched' WHERE id=%s",(command["id"],))
         return {"commands":[{k:c[k] for k in ("id","kind","payload","fence","boot_id")} | {"valid_for":max(0,c["expires"]-self.clock())} for c in commands],
-                "fence":device["fence"],"state_delta":True,"state_resync":resync}
+                "fence":device["fence"],"state_delta":True,"task_delta":True,"state_resync":resync}

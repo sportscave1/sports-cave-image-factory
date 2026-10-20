@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 import httpx
 from .schema import Invalid, keys, text, validate_task, safe_url
 from .store import atomic
+from .state_updates import task_changes
 from .windows import startup, choose_file
 
 PRODUCTION = "https://sports-cave-image-factory.onrender.com"
@@ -83,11 +84,13 @@ class DeviceAgent:
         self.stopping=False
         self.wake=asyncio.Event()
         self.publish_wake=asyncio.Event()
+        self.runner.state_changed=self.publish_wake.set
         self.acks={}
         self.fence=0
         self.active_commands={}
         self.control_lock=asyncio.Lock()
         self.preparing=False
+        self.preparing_task=None
         self.client=None
         self.task=None
         self.last_failure=0
@@ -107,7 +110,9 @@ class DeviceAgent:
         s.update(protocol=3,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
                  starting_url=settings.get("url",""),startup=settings.get("startup",False),
                  connection="connected" if self.connected else "reconnecting")
-        if self.preparing and s["mode"] in {"idle","stopped","completed"}: s["mode"]="starting"
+        if self.preparing and s["mode"] in {"idle","stopped","completed"}:
+            s["mode"]="starting"
+            if self.preparing_task:s.update(active_task_id=self.preparing_task["id"],active_task_name=self.preparing_task["name"])
         return s
 
     def settings(self):
@@ -171,7 +176,7 @@ class DeviceAgent:
             command["valid_for"]-=time.monotonic()-started
         return result
 
-    async def publish(self,device,initial=None,delta_supported=False):
+    async def publish(self,device,initial=None,delta_supported=False,task_delta_supported=False):
         last=initial
         last_version=self.state_version
         while not self.stopping and self.credentials()==device:
@@ -186,6 +191,9 @@ class DeviceAgent:
                 if delta_supported and last is not None:
                     data["state_delta"]={"base_version":last_version,
                                          "changes":{k:v for k,v in s.items() if last.get(k)!=v}}
+                    if task_delta_supported and "tasks" in data["state_delta"]["changes"]:
+                        data["state_delta"]["tasks"]=task_changes(last.get("tasks",[]),s["tasks"])
+                        del data["state_delta"]["changes"]["tasks"]
                 else:data["state"]=s
                 result=await self.exchange(device,data)
                 for ack in outgoing:
@@ -216,7 +224,7 @@ class DeviceAgent:
                     initial=self.snapshot()
                     first=await self.exchange(device,{"state":initial,"state_version":self.state_version})
                     retry=0
-                    publisher=asyncio.create_task(self.publish(device,initial,first.get("state_delta",False)))
+                    publisher=asyncio.create_task(self.publish(device,initial,first.get("state_delta",False),first.get("task_delta",False)))
                     result=first
                     while self.credentials()==device and not self.stopping:
                         self.fence=max(self.fence,result["fence"])
@@ -277,9 +285,10 @@ class DeviceAgent:
             if kind in {"stop","stop-save"}:
                 for other,task in list(self.active_commands.items()):
                     if other!=key:task.cancel()
+                was_recording=self.runner.recording or self.runner.mode=="recording_paused"
                 await self.runner.stop()
                 self.preparing=False
-                self.runner.message="Recording saved." if self.runner.draft.get("steps") and self.runner.simple_recording else "Stopped."
+                self.runner.message="Recording saved." if was_recording and self.runner.draft.get("steps") and self.runner.simple_recording else "Stopped."
                 result={}
             else:
                 async with self.control_lock:
@@ -317,19 +326,23 @@ class DeviceAgent:
                 await r.set_recording(True)
             finally:self.preparing=False
         elif kind=="play":
-            task=r.store.get(data["id"])
-            defaults=self.vault.read().get("defaults",{}).get(task["id"],{})
-            values={**defaults,**data.get("values",{})}
-            for step in task["steps"]:
-                if step["action"]=="upload" and isinstance(step.get("value"),dict) and "input" in step["value"]:
-                    name=step["value"]["input"]
-                    from pathlib import Path
-                    if not values.get(name) or not Path(values[name]).is_file():
-                        chosen=await asyncio.to_thread(r.file_selector or choose_file)
-                        if not chosen:raise Invalid("Choose the file on this PC before pressing Play.")
-                        values[name]=chosen
-            await r.play(data["id"],values,data["revision"],key)
-            r.draft=task
+            self.preparing=True
+            try:
+                task=r.store.get(data["id"])
+                self.preparing_task={"id":task["id"],"name":task["name"]}
+                defaults=self.vault.read().get("defaults",{}).get(task["id"],{})
+                values={**defaults,**data.get("values",{})}
+                for step in task["steps"]:
+                    if step["action"]=="upload" and isinstance(step.get("value"),dict) and "input" in step["value"]:
+                        name=step["value"]["input"]
+                        from pathlib import Path
+                        if not values.get(name) or not Path(values[name]).is_file():
+                            chosen=await asyncio.to_thread(r.file_selector or choose_file)
+                            if not chosen:raise Invalid("Choose the file on this PC before pressing Play.")
+                            values[name]=chosen
+                await r.play(data["id"],values,data["revision"],key)
+                r.draft=task
+            finally:self.preparing=False;self.preparing_task=None
         elif kind=="view":
             if r.page and not r.page.is_closed():await r.page.bring_to_front()
             else:await r.open_browser(self.settings().get("url") or self.local_origin+"/demo")
@@ -404,4 +417,5 @@ class DeviceAgent:
             with contextlib.suppress(asyncio.CancelledError):await self.task
         for task in list(self.active_commands.values()):task.cancel()
         if self.active_commands:await asyncio.gather(*self.active_commands.values(),return_exceptions=True)
+        self.runner.state_changed=None
         self.db.close()

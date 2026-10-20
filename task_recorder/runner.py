@@ -37,6 +37,7 @@ class Runner:
         self.last_click = 0
         self.run_id = None
         self.total = 0
+        self.state_changed = None
         self.simple_recording = False
         self.recording_started = None
         self.recorded_ms = 0
@@ -78,6 +79,9 @@ class Runner:
                 "active_task_id": self.draft.get("id") if self.recording or self.mode == "recording_paused" else self.run_id,
                 "active_task_name": self.draft.get("name") if self.recording or self.mode == "recording_paused" else getattr(self, "run_name", ""),
                 "draft": self.draft, "tasks": self.store.list()}
+
+    def notify_state(self):
+        if self.state_changed:self.state_changed()
 
     def busy(self):
         return bool(self.job and not self.job.done())
@@ -344,6 +348,7 @@ class Runner:
         if self.pause_requested:
             self.mode = "paused"
             self.message = "Paused. Resume to continue at the next unfinished action."
+            self.notify_state()
             await self.gate.wait()
 
     async def target(self, step):
@@ -416,6 +421,7 @@ class Runner:
                         self.gate.clear()
                         self.message = str(exc)
                         self.store.result(self.run_id, "paused", i, self.message)
+                        self.notify_state()
                         await self.gate.wait()
                 self.store.result(self.run_id, "running", i + 1, "Step completed.")
                 self.message = "Completed step " + str(i + 1) + " of " + str(self.total)
@@ -425,6 +431,7 @@ class Runner:
             self.mode = "completed"
             self.message = "Task completed. Verify the result in the browser."
             self.store.result(self.run_id, "completed", self.total, self.message)
+            self.notify_state()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -432,6 +439,7 @@ class Runner:
             self.can_resume = False
             self.message = "Action failed or browser closed; outcome may be uncertain. Inspect the browser, then Stop. Completed actions will not be replayed automatically."
             self.store.result(self.run_id, "interrupted", self.index, self.message)
+            self.notify_state()
             # Keep the job owned until Stop; Play must not overwrite uncertain work.
             await asyncio.Event().wait()
 
@@ -499,6 +507,7 @@ class Runner:
         self.mode = "stopped"
         self.can_resume = False
         self.message = "Stopped; dedicated browser closed to cancel pending actions. Session profile is retained."
+        self.notify_state()
 
     async def preview(self):
         if not self.page or self.page.is_closed(): raise Invalid("Open Browser first.")

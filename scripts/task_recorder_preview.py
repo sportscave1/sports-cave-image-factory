@@ -13,22 +13,31 @@ def main():
     p.add_argument("--root",type=Path,required=True)
     p.add_argument("--port",type=int,default=18961)
     p.add_argument("--serve",action="store_true")
+    p.add_argument("--benchmark-account",default="",help="Unique synthetic benchmark administrator namespace.")
+    p.add_argument("--recorder-source",type=Path,help="Local benchmark package parent; never used by production.")
     args=p.parse_args()
     root=args.root.resolve();root.mkdir(parents=True,exist_ok=True)
+    import re
+    if args.benchmark_account and not re.fullmatch("[a-z0-9-]{1,40}",args.benchmark_account):raise SystemExit("Invalid synthetic account label.")
+    preview_email="recorder-"+args.benchmark_account+"@example.invalid" if args.benchmark_account else "recorder-preview@example.invalid"
+    database="recorder_bench_64cdf0b0_"+args.benchmark_account.replace("-","_") if args.benchmark_account else "recorder"
     repo=Path(__file__).resolve().parents[1]
+    recorder_source=args.recorder_source.resolve() if args.recorder_source else repo
+    if not (recorder_source/"task_recorder/device.py").is_file():raise SystemExit("Recorder package missing.")
+    sys.path.insert(0,str(recorder_source))
     if not args.serve:
         allowed={"PATH","SYSTEMROOT","WINDIR","COMSPEC","PATHEXT","USERPROFILE","APPDATA","LOCALAPPDATA","PROGRAMFILES","PROGRAMFILES(X86)"}
         env={k:v for k,v in os.environ.items() if k.upper() in allowed}
-        env.update({"PYTHONDONTWRITEBYTECODE":"1","DATABASE_URL":"postgresql://postgres:synthetic-recorder-only@127.0.0.1:55439/recorder?sslmode=disable",
+        env.update({"PYTHONDONTWRITEBYTECODE":"1","DATABASE_URL":"postgresql://postgres:synthetic-recorder-only@127.0.0.1:55439/"+database+"?sslmode=disable",
             "SPORTS_CAVE_AUTH_SECRET":"synthetic-recorder-preview-64cdf0b0-only",
-            "SPORTS_CAVE_ADMIN_EMAIL":"recorder-preview@example.invalid","SPORTS_CAVE_ADMIN_PASSWORD":"RecorderPreview-Only-2026",
+            "SPORTS_CAVE_ADMIN_EMAIL":preview_email,"SPORTS_CAVE_ADMIN_PASSWORD":"RecorderPreview-Only-2026",
             "SPORTS_CAVE_ADMIN_NAME":"Recorder preview admin","SPORTS_CAVE_DB_PATH":str(root/"synthetic.db"),
             "STREAMLIT_BROWSER_GATHER_USAGE_STATS":"false","STREAMLIT_SERVER_FILE_WATCHER_TYPE":"none",
-            "TEMP":str(root),"TMP":str(root),"PYTHONPATH":str(repo)})
-        return subprocess.call([sys.executable,str(Path(__file__).resolve()),"--serve","--root",str(root),"--port",str(args.port)],cwd=repo,env=env)
+            "TEMP":str(root),"TMP":str(root),"PYTHONPATH":str(recorder_source)+os.pathsep+str(repo)})
+        return subprocess.call([sys.executable,str(Path(__file__).resolve()),"--serve","--root",str(root),"--port",str(args.port),"--recorder-source",str(recorder_source),"--benchmark-account",args.benchmark_account],cwd=repo,env=env)
     from urllib.parse import urlsplit
     dsn=urlsplit(os.environ.get("DATABASE_URL",""))
-    if dsn.hostname!="127.0.0.1" or dsn.port!=55439 or dsn.path!="/recorder":
+    if dsn.hostname!="127.0.0.1" or dsn.port!=55439 or dsn.path!="/"+database:
         raise SystemExit("Preview requires the isolated recorder database.")
     import dotenv
     dotenv.load_dotenv=lambda *a,**k:False
@@ -58,12 +67,21 @@ def main():
     import os_accounts
     accounts=os_accounts.DEFAULT_STORE
     accounts.ensure_schema()
-    user=accounts.find_user_by_login("recorder-preview@example.invalid")
+    user=accounts.find_user_by_login(preview_email)
     if not user:
-        user=accounts.create_user(username="recorder-preview",email="recorder-preview@example.invalid",
+        user=accounts.create_user(username="recorder-"+(args.benchmark_account or "preview"),email=preview_email,
             display_name="Recorder preview admin",password_hash=os_accounts.hash_password("RecorderPreview-Only-2026"),role="admin")
     from starlette.routing import Route
     from streamlit.web.server.starlette import App
+    from task_recorder import hosted_api as recorder_api
+    original_failure=recorder_api.failure
+    def preview_failure(error):
+        import traceback
+        diagnostic={"type":type(error).__name__,"sqlstate":getattr(error,"sqlstate",None),
+                    "stack":[{"file":Path(frame.filename).name,"line":frame.lineno,"function":frame.name} for frame in traceback.extract_tb(error.__traceback__)]}
+        with (root/"recorder-errors.jsonl").open("a",encoding="utf-8") as handle:handle.write(json.dumps(diagnostic)+"\n")
+        return original_failure(error)
+    recorder_api.failure=preview_failure
     from task_recorder.hosted_api import ROUTES
     from auth_cookie_cleanup import ROUTES as CLEANUP
     app=App(str(repo/"app.py"),routes=[Route(path,fn,methods=list(methods)) for path,fn,methods in (*ROUTES,*CLEANUP)])

@@ -1,7 +1,8 @@
  'use strict';
 const $=id=>document.getElementById(id),base='/api/task-recorder/';
 let devices=[],device=null,state={},selected=sessionStorage.getItem('recorder-selected')||'',after='',lastSeq=-1,stopped=false,transportOK=true;
-let pollRunning=false,pollAbort=null;
+let pollRunning=false,pollAbort=null,compactLevel=1;
+const rowCache=new Map();
 const requests=new Set();
 let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='',attentionKey='';
 const activeModes=new Set(['recording','recording_paused','running','pausing','paused','starting']);
@@ -27,12 +28,27 @@ async function api(path,data,signal){
 }
 function remember(){sessionStorage.setItem('recorder-commands',JSON.stringify([...pending.values()]));}
 function update(result){
+ compactLevel=result.compact===2?2:1;
  const oldDevice=device?.id,keepActive=active();
  // Compact responses omit only an unchanged device snapshot. Keep metadata
  // fresh (including offline/revoked state) without clearing its recordings.
- const nextDevices=result.devices.map(d=>{const previous=devices.find(p=>p.id===d.id);return !d.state&&previous?.seq===d.seq?{...d,state:previous.state}:d;}),current=nextDevices.find(d=>d.id===oldDevice);
+ let resync=false;
+ const nextDevices=result.devices.map(d=>{
+  const previous=devices.find(p=>p.id===d.id);
+  if(d.state_delta){
+   if(!previous?.state||previous.seq!==d.state_delta.base_seq){resync=true;return d;}
+   const rows=new Map((previous.state.tasks||[]).map(t=>[t.id,t]));
+   for(const id of d.state_delta.tasks.remove)rows.delete(id);
+   for(const task of d.state_delta.tasks.upsert)rows.set(task.id,task);
+   return {...d,state:{...previous.state,...d.state_delta.changes,tasks:[...rows.values()].sort((a,b)=>a.name.toLowerCase()<b.name.toLowerCase()?-1:a.name.toLowerCase()>b.name.toLowerCase()?1:a.id.localeCompare(b.id))}};
+  }
+  return !d.state&&previous?.seq===d.seq?{...d,state:previous.state}:d;
+ });
+ if(resync){after="";return;}
+ const current=nextDevices.find(d=>d.id===oldDevice);
  const next=current&&(current.connected||keepActive)?current:nextDevices.find(d=>d.connected)||current||nextDevices[0]||null;
  if(next?.id===oldDevice&&next&&next.seq<lastSeq)return;
+ if(next&&!next.state){devices=nextDevices;device=next;state={};selected="";details=null;values={};after="";lastSeq=-1;transportOK=true;render();return;}
  if(next?.id!==oldDevice)lastSeq=-1;
  devices=nextDevices;device=next;
  if(device){lastSeq=device.seq;state=device.state||{};after=String(device.seq);}else{state={};after='';lastSeq=-1;}
@@ -63,12 +79,13 @@ async function confirmCommand(command,result){
  if(receipt.tasks)state={...state,tasks:receipt.tasks};
  // The receipt is durable; read the helper's acknowledged snapshot rather than
  // guessing a mode from button clicks. A stale in-flight poll cannot undo it.
- update(await api('state'));
+ update(await api(compactLevel===2&&device?'state?compact=2&device='+encodeURIComponent(device.id)+'&after='+device.seq+'&wait=0':'state'));
  if(command.kind==='record'&&state.active_task_id)selected=state.active_task_id;
  return receipt;
 }
 async function send(kind,payload={}){
  const taskId=payload.id;
+ if(device&&!device.state){error('Loading this PC’s recordings. Wait a moment, then try again.');return null;}
  if(!online()){error('PC is offline. Start Task Recorder from the Windows Start menu, then refresh the connection.');return null;}
  if(!modern()&&!['stop','stop-save','view'].includes(kind)){error('Update the PC helper using Settings, then try again.');return null;}
  if([...pending.values()].some(c=>c.kind===kind&&c.payload.id===taskId))return null;
@@ -95,6 +112,7 @@ async function reconcile(){
  }
 }
 function status(){
+ if(device?.connected&&transportOK&&!device.state)return 'Loading recordings…';
  if(!online())return 'PC offline · Start the Windows helper';
  if(device?.needs_review)return 'Interrupted · Check the browser, then Stop';
  const mode=state.mode||'idle';
@@ -117,7 +135,7 @@ function renderControls(){
  const task=tasks().find(t=>t.id===selected);
  $('record').disabled=!enabled||!capable||busy;
  $('name').disabled=$('website').disabled=busy;
- $('view').disabled=!enabled;
+ $('view').disabled=!enabled||!device?.state;
  $('play').hidden=busy;$('play').disabled=!enabled||!capable||!task;
  $('pause').hidden=!['running','recording'].includes(mode);
  $('resume').hidden=!(mode==='recording_paused'||mode==='paused'&&state.can_resume);
@@ -128,7 +146,7 @@ function renderControls(){
  $('activeName').textContent=starting()&&(mode==='starting'||!activeModes.has(mode))?(requestName||'Starting task'):busy?(state.active_task_name||requestName||'Current task'):(task?.name||'Select a recording');
  $('message').textContent=status();
  $('startup').checked=!!state.startup;$('startup').disabled=!enabled||!capable;
- $('revoke').disabled=!device;$('outdated').hidden=!device||state.protocol>=3;
+ $('revoke').disabled=!device;$('outdated').hidden=!device||!device.state||state.protocol>=3;
 }
 function date(value){return value?new Date(value).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'}):'—';}
 function duration(value){if(!Number.isFinite(value)||value<0)return '—';const secs=Math.floor(value/1000);return String(Math.floor(secs/60)).padStart(2,'0')+':'+String(secs%60).padStart(2,'0');}
@@ -157,11 +175,16 @@ function renderTable(){
  const sig=JSON.stringify([rows,selected,mode,state.active_task_id,active(),online(),modern(),[...pending.values()].map(c=>[c.kind,c.payload.id]),editing,confirmDelete,[...rowErrors]]);
  if(sig===tableSignature)return;tableSignature=sig;
  const focused=document.activeElement,focusId=focused?.dataset?.editId,start=focused?.selectionStart,end=focused?.selectionEnd;
- $('recordings').replaceChildren();$('empty').hidden=rows.length>0;
+ const table=$('recordings'),seen=new Set();$('empty').hidden=rows.length>0;
  const counts=new Map();for(const t of rows)counts.set(t.name,(counts.get(t.name)||0)+1);
  rows.forEach((t,index)=>{
+  seen.add(t.id);
+  const isActive=active()&&state.active_task_id===t.id;
+  const rowSignature=JSON.stringify([t,t.id===selected,isActive,isActive?mode:'',active()||starting(),online(),modern(),editing===t.id,editing===t.id?editName:'',confirmDelete===t.id,rowErrors.get(t.id),counts.get(t.name)>1?index:-1,[...pending.values()].filter(c=>c.payload.id===t.id).map(c=>c.kind)]);
+  const cached=rowCache.get(t.id);
+  if(cached?.signature===rowSignature){if(table.children[index]!==cached.node)table.insertBefore(cached.node,table.children[index]||null);return;}
   const tr=document.createElement('tr');tr.dataset.taskId=t.id;tr.classList.toggle('selected',t.id===selected);tr.setAttribute('aria-selected',String(t.id===selected));
-  const isActive=active()&&state.active_task_id===t.id;tr.classList.toggle('active-row',isActive);
+  tr.classList.toggle('active-row',isActive);
   const cells=Array.from({length:6},()=>{const td=document.createElement('td');tr.append(td);return td;});
   if(editing===t.id){
    const form=document.createElement('form');form.className='rename';const field=document.createElement('input');field.value=editName;field.maxLength=100;field.ariaLabel='New name for '+t.name;field.dataset.editId=t.id;field.oninput=()=>editName=field.value;
@@ -187,8 +210,11 @@ function renderTable(){
   const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');svg.append(path);trash.append(svg);actions.append(trash);cells[5].append(actions);
   if(confirmDelete===t.id){const c=document.createElement('div');c.className='confirm';c.append(document.createTextNode('Delete '+t.name+'? '),button('Delete','Confirm delete '+t.name,()=>send('delete',{id:t.id}),!online()||[...pending.values()].some(v=>v.kind==='delete'&&v.payload.id===t.id)),button('Cancel','Cancel delete '+t.name,()=>{confirmDelete='';renderTable();}));cells[5].append(c);}
   if(rowErrors.has(t.id)){const e=document.createElement('span');e.className='row-error';e.setAttribute('role','alert');e.textContent=rowErrors.get(t.id);cells[5].append(e);}
-  $('recordings').append(tr);
+  if(cached?.node.parentNode===table)cached.node.replaceWith(tr);else table.insertBefore(tr,table.children[index]||null);
+  if(table.children[index]!==tr)table.insertBefore(tr,table.children[index]||null);
+  rowCache.set(t.id,{signature:rowSignature,node:tr});
  });
+ for(const [id,cached] of rowCache)if(!seen.has(id)){cached.node.remove();rowCache.delete(id);}
  if(focusId){const field=[...$('recordings').querySelectorAll('input')].find(e=>e.dataset.editId===focusId);if(field){field.focus();field.setSelectionRange(start,end);}}
 }
 function render(){
@@ -240,14 +266,14 @@ async function poll(){
   if(document.hidden){await pollDelay(60000);continue;}
   try{
    pollAbort=new AbortController();
-   const result=await api('state'+(device?'?compact=1&device='+encodeURIComponent(device.id)+(after?'&after='+after:''):''),undefined,pollAbort.signal);
+   const result=await api('state'+(device?'?compact='+compactLevel+'&device='+encodeURIComponent(device.id)+(after?'&after='+after:''):''),undefined,pollAbort.signal);
    if($('error').textContent==='Connection unavailable. Check your internet connection and refresh.')error('');
    update(result);failures=0;if(device&&!reconciled){reconciled=true;reconcile();}
    if(!device)await pollDelay(5000);
   }catch(e){
    if(stopped)break;if(pollAbort?.signal.aborted)continue;
    transportOK=false;error('Connection unavailable. Check your internet connection and refresh.');render();
-   await pollDelay(Math.min(30000,2000*2**Math.min(failures++,4)));
+   await pollDelay(Math.min(30000,(1600+800*Math.random())*2**Math.min(failures++,4)));
   }finally{pollAbort=null;}
  }}finally{pollRunning=false;}
 }
