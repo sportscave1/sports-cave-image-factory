@@ -99,10 +99,11 @@ Set `SEO_PHASE1_TEST_POSTGRES=1` to opt into the loopback execution tests, then 
 
 ## Verification
 
-- **25 Phase 1 model/UI/shared-Postgres tests passed** on the full runtime with
+- **26 Phase 1 model/UI/shared-Postgres tests passed** on the full runtime with
   Streamlit **1.58.0** and Python 3.14. These cover atomic rollback, concurrent
   edits, duplicate races, permissions, all legacy statuses in both directions,
   approval invalidation, source scopes/cache and persistence.
+  Saved global-search links also retain their filter in the consolidated report.
 - **69 canonical reporting, blog, audit, recorder-navigation and retired-Mockups checks passed**, with six subtests, in a clean process. These checks
   run in a separate clean process. Some legacy tests import/render `app.py` during
   collection and leave a Streamlit form context that contaminates unrelated

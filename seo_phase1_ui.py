@@ -440,6 +440,14 @@ def render(user,route,*,store=None,navigate=None,google_store=None,reporting_rea
         st.error('You do not have access to this workspace.')
         return
     destination,initial=model.destination(route)
+    # Existing saved/top-bar links retain their search parameter when a legacy
+    # reporting route is rendered by the consolidated workspace.
+    if destination==nav.SEO_ANALYTICS_ROUTE:
+        incoming=str(st.query_params.get('global_search') or '')[:180]
+        signature=(route,incoming)
+        if incoming and st.session_state.get('seo-phase1-search-context')!=signature:
+            st.session_state['seo-phase1-report-search']=incoming
+            st.session_state['seo-phase1-search-context']=signature
     store=store or model.store_for_workspace(user)
     # Local mode never discovers database credentials or launches a production integration.
     if reports is None and not model.local_mode():

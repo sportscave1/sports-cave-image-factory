@@ -59,4 +59,12 @@ class Phase1UITests(unittest.TestCase):
         self.assertFalse(app.exception)
         self.assertTrue(any(x.label=='Project' for x in app.selectbox))
 
+    def test_saved_search_link_seeds_the_consolidated_filter(self):
+        app=self.app()
+        app.query_params['global_search']='sports art'
+        self.select(app,'Workspace',nav.SEO_ANALYTICS_ROUTE)
+        self.assertEqual(next(x for x in app.text_input if x.label=='Filter rows').value,'sports art')
+        app.run()
+        self.assertFalse(app.exception)
+
 if __name__=='__main__':unittest.main()
