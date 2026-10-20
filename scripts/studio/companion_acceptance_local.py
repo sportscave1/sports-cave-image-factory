@@ -53,9 +53,9 @@ def work(host,run,restored):
         with LOCK:
             STATE.update(state=state,**kwargs)
             host.atomic_json(folder/'state.json',dict(STATE))
-    def ping(loaded=False):
+    def ping(loaded=False,progress=None):
         before=time.monotonic();value=host.host_request(config,'/api/auto-editions/acceptance/ping',{})
-        controls.append(dict(loaded=loaded,milliseconds=round((time.monotonic()-before)*1000,3)));return value
+        controls.append(dict(loaded=loaded,application_progress_at_start=progress,milliseconds=round((time.monotonic()-before)*1000,3)));return value
     def trace(value):
         # Payload telemetry only; never persist host/grant/provider capabilities.
         traces.append({k:v for k,v in value.items() if isinstance(v,(int,float,bool)) or k in ('state','failure_class')})
@@ -72,6 +72,21 @@ def work(host,run,restored):
                 controller.configure(original,revision)
             threading.Timer(.5,resume).start()
         save('Uploading',package_bytes=archive.stat().st_size)
+        monitor_stop=threading.Event()
+        def loaded_controls():
+            from companion_package_identity import CHUNK
+            # At most three independent controls during an actual body handoff.
+            # Never start another transfer or infer raw connection capacity.
+            for _ in range(100):
+                if monitor_stop.wait(.1):return
+                with controller.cv:
+                    current=controller.active or {};progress=current.get('progress_bytes',0)
+                    transferring=current.get('state')=='Uploading' and 0<progress<CHUNK
+                if transferring:
+                    try:ping(True,progress)
+                    except Exception:return
+                    if sum(c['loaded'] for c in controls)>=3:return
+        monitor=threading.Thread(target=loaded_controls,name='acceptance-controls',daemon=True);monitor.start()
         try:
             result=upload(controller,archive,grant,config,folder/'upload-session.json',correlation=run,
                 stopped=host.HOST_STOP.is_set,on_trace=trace,poll_interval=3,verification_timeout=600)
@@ -79,6 +94,7 @@ def work(host,run,restored):
             if error.response is None or error.response.status_code!=503:raise
             if not restored:
                 save('Awaiting companion restart',elapsed_seconds=time.monotonic()-started,traces=traces,controls=controls)
+                host.atomic_json(folder/'attempt-1.json',status())
                 return
             # Lost finalisation acknowledgement: resume the same durable journal.
             ping(True)
@@ -94,4 +110,5 @@ def work(host,run,restored):
     except Exception as error:
         save('Failed',error_type=type(error).__name__,traces=traces,controls=controls)
     finally:
+        if 'monitor_stop' in locals():monitor_stop.set();monitor.join(timeout=21)
         if controller.value!=original:controller.configure(original,revision)
