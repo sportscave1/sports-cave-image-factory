@@ -164,7 +164,7 @@ class Relay:
             if device["boot_id"]!=boot:
                 if epoch<=device["epoch"]: raise PermissionError("An old helper session cannot reconnect.")
                 cur.execute("UPDATE task_recorder_private.commands SET status='uncertain',payload='{}'::jsonb WHERE device_id=%s AND status IN ('queued','dispatched')",(device_id,))
-                device["needs_review"]=bool(device["active_run"]) or device["needs_review"]
+                device["needs_review"]=bool(device["active_run"]) or device["needs_review"] or (snapshot or {}).get("mode")=="interrupted"
                 device["active_run"]=None
                 device["state_version"]=0
                 cur.execute("UPDATE task_recorder_private.devices SET boot_id=%s,epoch=%s,active_run=NULL,needs_review=%s,state_version=0 WHERE id=%s",

@@ -36,6 +36,7 @@ function renderControls(){
  $('resume').hidden=!(mode==='recording_paused'||(mode==='paused'&&state.can_resume));
  for(const name of ['record','play','stop','resume','view'])$(name).disabled=!online;
  $('saved').disabled=recording||playing;
+ $('savedLabel').hidden=$('saved').hidden=recording||playing||!(state.tasks||[]).length;
  $('message').textContent=device?.needs_review?'Previous run interrupted. Check the browser, then press Stop.':state.message||'Ready';
  if(mode==='running')$('message').textContent='Playing · '+state.step+' of '+state.total;
 }

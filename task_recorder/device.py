@@ -260,7 +260,7 @@ class DeviceAgent:
             try:
                 url=data.get("url") or self.settings().get("url")
                 if url:self.save_setting("url",safe_url(url))
-                if not r.context:await r.open_browser(url or self.local_origin+"/demo")
+                if not r.context or not r.page or r.page.is_closed():await r.open_browser(url or self.local_origin+"/demo")
                 elif url:await r.open_browser(url)
                 else:await r.page.bring_to_front()
                 r.simple_recording=True

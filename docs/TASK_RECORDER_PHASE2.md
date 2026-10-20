@@ -83,6 +83,12 @@ exchange, including authenticated database work. A healthy live long poll measur
 a recording. The corrected budget is covered by a regression check. Safe local
 transport diagnostics record only an exception class and timestamp in
 `transport-status.json`, without credentials or request bodies.
+Closing the recorder browser while recording now saves and flags the unfinished
+task for review, rather than leaving a ready-looking controller with a closed
+tab. Interrupted checkpoints receive the same playback block on recovery.
+Stop clears the interrupted session; Record can then reopen the dedicated browser.
+The saved-task selector is hidden during recording/playback so it does not show
+the previous task as though it were the current recording.
 
 ## Supported actions and limitations
 
@@ -144,6 +150,10 @@ The guided form recording/replay remains pending the user's demonstration.
 Record/Play were corrected to bring an existing recorder window forward.
 A guided start at 12:20 was interrupted before form actions by the hosted timeout
 described above; it was saved for review, not replayed as a completed form trial.
+After correction, the 12:30 recording stayed active beyond the former timeout.
+The browser was subsequently closed before form actions were captured. Its
+checkpoint was recovered and flagged; the form trial still requires the user's
+interaction in the separate recorder browser.
 The pairing, two recordings and command receipts were transferred to the normal
 installed helper's TaskRecorderV1 data directory. The original V1 example and
 browser profile were verified unchanged, and both profiles were retained.

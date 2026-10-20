@@ -81,6 +81,11 @@ class RelayTests(unittest.TestCase):
         self.poll(state={"mode":"running","step":1},state_version=2)
         self.assertEqual(self.relay.devices(self.owner)[0]["state"]["step"],5)
 
+    def test_recovered_recording_requires_review_without_an_active_command(self):
+        self.relay.exchange(self.device,self.key,{"boot_id":str(uuid.uuid4()),"epoch":2,"state_version":1,"state":{"mode":"interrupted"}})
+        self.assertTrue(self.relay.devices(self.owner)[0]["needs_review"])
+        with self.assertRaises(Invalid):self.relay.enqueue(self.owner,self.device,str(uuid.uuid4()),"record",{})
+
     def test_data_only_controls_and_url_privacy(self):
         with self.assertRaises(Invalid):self.relay.enqueue(self.owner,self.device,str(uuid.uuid4()),"evaluate",{"script":"anything"})
         with self.assertRaises(Invalid):self.relay.enqueue(self.owner,self.device,str(uuid.uuid4()),"record",{"script":"anything"})

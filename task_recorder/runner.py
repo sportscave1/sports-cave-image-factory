@@ -48,8 +48,11 @@ class Runner:
                 record = json.loads(checkpoint.read_text(encoding="utf-8"))
                 self.draft = validate_task(record["task"])
                 if record.get("active"):
+                    if len(self.draft["steps"])<500:
+                        self.draft["steps"].append({"action":"unsupported","reason":"Recording was interrupted before Stop. Review the final actions before playback."})
                     self.draft = self.store.save(self.draft)
                     self.store.checkpoint(self.draft, False)
+                    self.mode = "interrupted"
                     self.message = "Interrupted recording recovered and saved. Nothing was restarted."
                 elif self.draft.get("id"):
                     self.draft = self.store.get(self.draft["id"])
@@ -77,6 +80,9 @@ class Runner:
     async def open_browser(self, url=None):
         if self.busy() or self.recording: raise Invalid("Stop the current run or recording before opening a URL.")
         if url: safe_url(url)
+        if self.context and (not self.page or self.page.is_closed()):
+            with contextlib.suppress(Exception):await self.context.close()
+            self.context=self.page=None
         if not self.context:
             if not self.pw: self.pw = await async_playwright().start()
             options = {}
@@ -125,10 +131,19 @@ class Runner:
         await chooser.set_files(path)
 
     def closed(self):
+        was_recording=self.recording or self.mode=="recording_paused"
         self.recording = False
         if not self.busy():
-            self.mode = "idle"
-            self.message = "Recorded tab closed. Use Stop to close its profile, then Open Browser."
+            if was_recording:
+                if len(self.draft["steps"])<500:
+                    self.append({"action":"unsupported","reason":"Recorder browser closed before Stop. Review the final actions before playback."})
+                self.draft=self.store.save(self.draft)
+                self.store.checkpoint(self.draft,False)
+                self.mode="interrupted"
+                self.message="Recorder browser closed. The unfinished recording was saved for review. Press Stop."
+            else:
+                self.mode = "idle"
+                self.message = "Recorder browser closed. Press Record to open it again."
 
     async def extra_page(self, page):
         if page == self.page: return

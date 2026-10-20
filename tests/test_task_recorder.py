@@ -135,6 +135,19 @@ class NavigationTests(unittest.TestCase):
         self.assertFalse(entry["worker_assignable"])
 
 class BrowserFocusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_browser_close_preserves_and_flags_unfinished_recording(self):
+        from task_recorder.runner import Runner
+        with tempfile.TemporaryDirectory() as directory:
+            runner=Runner(directory)
+            runner.draft={**runner.blank(),"steps":[{"action":"navigate","value":"https://example.com"}]}
+            runner.recording=True;runner.simple_recording=True
+            runner.closed()
+            saved=runner.store.get(runner.draft["id"])
+            self.assertEqual(runner.mode,"interrupted")
+            self.assertFalse(runner.recording)
+            self.assertTrue(any(s["action"]=="unsupported" for s in saved["steps"]))
+            with self.assertRaises(Invalid):resolve_task(saved,{})
+
     async def test_exchange_allows_server_wait_and_database_round_trips(self):
         import httpx
         from task_recorder.runner import Runner
