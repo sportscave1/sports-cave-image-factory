@@ -110,7 +110,7 @@ function status(){
  if([...pending.values()].some(c=>c.kind==='pause'))return 'Pausing…';
  if([...pending.values()].some(c=>['stop','stop-save'].includes(c.kind)))return 'Stopping…';
  if(starting())return 'Starting…';
- if(mode==='running')return `Playing · ${state.step} of ${state.total}`;
+ if(mode==='running')return state.message?.startsWith('Step ')?state.message:`Playing · ${state.step} of ${state.total}`;
  if(mode==='pausing')return 'Pausing… The current action is finishing.';
  if(mode==='recording')return 'Recording · Stop to save';
  if(mode==='recording_paused')return state.message||'Recording paused';
@@ -233,7 +233,10 @@ function renderAttention(){
  $('attentionReason').textContent=issue.explanation||issue.reason;
  $('recordedReason').textContent=issue.explanation!==issue.reason?'Recorded reason: '+issue.reason:'';
  const key=task.id+task.revision;if(key!==attentionKey){attentionKey=key;$('correctionValue').value='';}
- $('repairCopy').disabled=!online()||state.protocol<3||active()||[...pending.values()].some(c=>c.kind==='repair-copy');
+ const correctable=!['prerequisite','target'].includes(issue.kind);
+ $('correctionKind').disabled=$('correctionValue').disabled=!correctable;
+ $('repairCopy').disabled=!correctable||!online()||state.protocol<3||active()||[...pending.values()].some(c=>c.kind==='repair-copy');
+ $('repairCopy').title=correctable?'':'Use Edit to supply the exact source reference or record the missing actions. A wait cannot reconstruct them.';
  $('recordReplacement').disabled=active();
 }
 $('correctionKind').onchange=()=>{

@@ -33,10 +33,12 @@ class Runner:
         self.gate = asyncio.Event()
         self.gate.set()
         self.lock = asyncio.Lock()
+        self.capture_lock = asyncio.Lock()
         self.draft = self.blank()
         self.last_click = 0
         self.run_id = None
         self.total = 0
+        self.state_changed = None
         self.simple_recording = False
         self.recording_started = None
         self.recorded_ms = 0
@@ -75,9 +77,12 @@ class Runner:
                 "total": self.total, "action": self.current_action, "can_resume": self.can_resume,
                 "browser_open": bool(self.context and self.page and not self.page.is_closed()),
                 "recording": self.recording, "privacy_pause": self.privacy_pause,
-                "active_task_id": self.draft.get("id") if self.recording or self.mode == "recording_paused" else self.run_id,
+                "active_task_id": self.draft.get("id") if self.recording or self.mode == "recording_paused" else self.run_id if self.busy() else None,
                 "active_task_name": self.draft.get("name") if self.recording or self.mode == "recording_paused" else getattr(self, "run_name", ""),
                 "draft": self.draft, "tasks": self.store.list()}
+
+    def notify_state(self):
+        if self.state_changed:self.state_changed()
 
     def busy(self):
         return bool(self.job and not self.job.done())
@@ -127,7 +132,11 @@ class Runner:
             await chooser.set_files([])
             return
         if self.recording and self.simple_recording:
-            loc = await self.page.evaluate("(el)=>window.__scRecorder?.locator(el)", chooser.element)
+            frame = await chooser.element.owner_frame()
+            loc = await frame.evaluate("(el)=>window.__scRecorder?.locator(el)", chooser.element)
+            scope = await self.frame_scope(frame)
+            if scope is None: loc = None
+            elif loc and scope: loc["frames"] = scope
             if not loc:
                 self.unsupported("This upload control has no reliable label.")
                 return
@@ -249,6 +258,34 @@ class Runner:
             await self.page.evaluate("window.__scRecorder?.set(false)")
 
     async def record_event(self, source, data):
+        async with self.capture_lock:
+            await self._record_event(source, data)
+
+    async def frame_scope(self, frame):
+        """Only uniquely identified same-origin frames; never frame positions."""
+        from urllib.parse import urlsplit
+        scopes = []
+        while frame != self.page.main_frame:
+            if not getattr(frame, "parent_frame", None) or len(scopes) >= 4: return None
+            url = urlsplit(frame.url)
+            top = urlsplit(self.page.url)
+            if frame.url not in {"about:blank", "about:srcdoc"} and (url.scheme, url.netloc) != (top.scheme, top.netloc):
+                return None
+            element = await frame.frame_element()
+            identity = await element.evaluate("""el => {
+              for (const by of ['id','name','title']) {
+                const value=el.getAttribute(by);
+                if(value && [...el.ownerDocument.querySelectorAll('iframe,frame')].filter(x=>x.getAttribute(by)===value).length===1)
+                  return {by,value};
+              }
+              return null;
+            }""")
+            if not identity: return None
+            scopes.insert(0, identity)
+            frame = frame.parent_frame
+        return scopes
+
+    async def _record_event(self, source, data):
         if not self.recording or source["page"] != self.page: return
         if isinstance(data, dict) and data.get("kind") == "privacy":
             await self.privacy()
@@ -263,9 +300,6 @@ class Runner:
                 # accepting input; its observer pauses on later sign-in fields.
                 with contextlib.suppress(Exception):await source["frame"].evaluate("window.__scRecorder?.set(true)")
             return
-        if source["frame"] != self.page.main_frame:
-            self.unsupported("An action inside an embedded page is unsupported. Record the action in the main browser page instead.")
-            return
         if not isinstance(data, dict): return
         if data.get("kind") == "privacy":
             await self.privacy()
@@ -277,6 +311,11 @@ class Runner:
         elif data.get("kind") == "step":
             step = copy.deepcopy(data.get("step"))
             if not isinstance(step, dict): return
+            scope = await self.frame_scope(source["frame"])
+            if scope is None:
+                self.unsupported("An action inside an embedded page needs a unique same-origin frame id, name or title. Open it in the main page or ask the site to label the frame.")
+                return
+            if scope and isinstance(step.get("locator"), dict): step["locator"]["frames"] = scope
             if step.get("action") == "upload":
                 if self.selected_upload and self.selected_upload[0] == step.get("locator"):
                     step["value"] = {"file": self.selected_upload[1]}
@@ -297,6 +336,15 @@ class Runner:
             except Invalid:
                 await self.privacy()
                 return
+            if "locator" in step:
+                try:
+                    if await self.locator(step["locator"]).count() > 1:
+                        self.unsupported("The recorded target is missing or ambiguous. Record a uniquely labelled control after the page finishes loading.")
+                        return
+                except Exception:
+                    # The click may already have navigated or removed its target.
+                    # Uniqueness was checked synchronously in the capture script.
+                    pass
             if step["action"] == "click": self.last_click = time.monotonic()
             self.append(step)
 
@@ -319,31 +367,38 @@ class Runner:
                     await frame.evaluate("window.__scRecorder?.set(true)")
         else:
             if self.page and not self.page.is_closed():
-                with contextlib.suppress(Exception):
-                    await self.page.evaluate("window.__scRecorder?.flush()")
-                    await self.page.evaluate("window.__scRecorder?.set(false)")
+                for frame in list(self.page.frames):
+                    try:
+                        await asyncio.wait_for(frame.evaluate("window.__scRecorder?.flush()"), 5)
+                        await frame.evaluate("window.__scRecorder?.set(false)")
+                    except Exception:
+                        self.unsupported("A page changed or capture delivery failed while stopping. Review and rerecord the final actions.")
             self.finish_recording_segment()
             self.recording = False
             self.privacy_pause = False
             self.mode = "idle"
-            self.message = "Recording stopped. Edit inputs/steps, name the task, then Save."
+            from .attention import issues
+            problems = issues(self.draft)
+            self.message = ("Recording stopped. Needs attention: " + problems[0]["explanation"]) if problems else "Recording stopped. Edit inputs/steps, name the task, then Save."
             self.store.checkpoint(self.draft, False)
 
     def locator(self, loc):
         p, value = self.page, loc["value"]
+        for frame in loc.get("frames", []):
+            p = p.frame_locator("iframe[" + frame["by"] + "=" + json.dumps(frame["value"]) + "]")
         if loc["by"] == "role": return p.get_by_role(loc["role"], name=value, exact=True)
         if loc["by"] == "label": return p.get_by_label(value, exact=True)
         if loc["by"] == "test_id": return p.get_by_test_id(value)
         if loc["by"] == "placeholder": return p.get_by_placeholder(value, exact=True)
         if loc["by"] == "text": return p.get_by_text(value, exact=True)
         # Escape an ID as an attribute value, never accept user-supplied CSS.
-        import json
         return p.locator("[id=" + json.dumps(value) + "]")
 
     async def wait_gate(self):
         if self.pause_requested:
             self.mode = "paused"
             self.message = "Paused. Resume to continue at the next unfinished action."
+            self.notify_state()
             await self.gate.wait()
 
     async def target(self, step):
@@ -352,7 +407,13 @@ class Runner:
         while remaining > 0:
             await self.wait_gate()
             started = time.monotonic()
-            count = await loc.count()
+            try:
+                count = await asyncio.wait_for(loc.count(), min(.5, remaining))
+            except asyncio.TimeoutError:
+                remaining -= time.monotonic() - started
+                continue
+            except Exception:
+                raise TargetProblem("Embedded frame is missing or ambiguous. Check the named frame, then Resume; or Stop.")
             if count > 1: raise TargetProblem("Target is ambiguous (" + str(count) + " matches). Make the page unique, then Resume; or Stop and edit the locator.")
             if count == 1:
                 if step["action"] == "upload" or await loc.is_visible():
@@ -376,6 +437,10 @@ class Runner:
             return
         loc = await self.target(step)
         await self.wait_gate()
+        if step.get("locator", {}).get("frames"):
+            element = await loc.element_handle(timeout=step.get("timeout_ms", 8000))
+            if not element or await self.frame_scope(await element.owner_frame()) is None:
+                raise TargetProblem("Embedded page origin or identity changed. Stop and record the supported same-origin page.")
         if await self.is_sensitive():
             raise TargetProblem("Sign-in detected. Sign in manually with recording off, then Resume.")
         if action == "wait": return
@@ -399,6 +464,9 @@ class Runner:
         try:
             for i, step in enumerate(task["steps"]):
                 self.index, self.current_action = i, step["action"]
+                label = step.get("locator", {}).get("value", "Open website")
+                self.message = f"Step {i + 1} of {self.total} — {step['action'].replace('_', ' ')}: {label}"
+                self.notify_state()
                 await self.wait_gate()
                 while True:
                     try:
@@ -414,8 +482,9 @@ class Runner:
                         self.can_resume = True
                         self.pause_requested = True
                         self.gate.clear()
-                        self.message = str(exc)
+                        self.message = f"Step {i + 1} of {self.total} — {label}: {exc}"
                         self.store.result(self.run_id, "paused", i, self.message)
+                        self.notify_state()
                         await self.gate.wait()
                 self.store.result(self.run_id, "running", i + 1, "Step completed.")
                 self.message = "Completed step " + str(i + 1) + " of " + str(self.total)
@@ -425,13 +494,15 @@ class Runner:
             self.mode = "completed"
             self.message = "Task completed. Verify the result in the browser."
             self.store.result(self.run_id, "completed", self.total, self.message)
+            self.notify_state()
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             self.mode = "paused"
             self.can_resume = False
-            self.message = "Action failed or browser closed; outcome may be uncertain. Inspect the browser, then Stop. Completed actions will not be replayed automatically."
+            self.message = f"Step {self.index + 1} of {self.total} — {self.current_action} failed ({type(exc).__name__}). Outcome may be uncertain. Inspect the browser, then Stop."
             self.store.result(self.run_id, "interrupted", self.index, self.message)
+            self.notify_state()
             # Keep the job owned until Stop; Play must not overwrite uncertain work.
             await asyncio.Event().wait()
 
@@ -498,7 +569,9 @@ class Runner:
         self.job = None
         self.mode = "stopped"
         self.can_resume = False
+        self.run_id = None
         self.message = "Stopped; dedicated browser closed to cancel pending actions. Session profile is retained."
+        self.notify_state()
 
     async def preview(self):
         if not self.page or self.page.is_closed(): raise Invalid("Open Browser first.")

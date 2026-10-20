@@ -44,7 +44,17 @@ def keys(obj, allowed, required=()):
         raise Invalid("Unknown or missing fields in workflow.")
 
 def validate_locator(loc):
-    keys(loc, {"by", "value", "role"}, {"by", "value"})
+    keys(loc, {"by", "value", "role", "frames"}, {"by", "value"})
+    if "frames" in loc:
+        frames = loc["frames"]
+        if not isinstance(frames, list) or not 1 <= len(frames) <= 4:
+            raise Invalid("Use at most four identified embedded frames.")
+        for frame in frames:
+            keys(frame, {"by", "value"}, {"by", "value"})
+            if frame["by"] not in {"id", "name", "title"}:
+                raise Invalid("An embedded frame needs a stable id, name or title.")
+            text(frame["value"], 180)
+            if PRIVATE.search(frame["value"]): raise Invalid("Sensitive frame identity.")
     if loc["by"] not in LOCATORS:
         raise Invalid("Unsupported locator type.")
     text(loc["value"], 180)

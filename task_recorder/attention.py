@@ -16,7 +16,36 @@ CAPTURE_REASONS = {
 
 def issues(task):
     result=[]
+    from urllib.parse import urlsplit, parse_qs
+    import uuid
+    import re
+    product_upload = False
+    source_bound = False
     for i, step in enumerate(task["steps"],1):
+        if step["action"] in {"navigate", "wait_url"} and isinstance(step.get("value"), str):
+            query = parse_qs(urlsplit(step["value"]).query)
+            if query.get("page") == ["product_uploads"]:
+                product_upload = True
+                if step["action"] == "navigate": source_bound = False
+                try:
+                    uuid.UUID(query.get("upload", [""])[0])
+                    source_bound = True
+                except ValueError:
+                    pass
+            elif step["action"] == "navigate":
+                product_upload = source_bound = False
+        if step["action"] == "upload": source_bound = True
+        loc = step.get("locator", {})
+        needs_source = any(name in loc.get("value", "").lower() for name in ("generate mockups", "black frame", "copied"))
+        needs_source |= loc.get("by") == "test_id" and loc.get("value", "").startswith("stBaseButton")
+        if product_upload and not source_bound and needs_source:
+            reason = "Product Uploads source prerequisite is missing. Record from Choose PSD, or start with the exact saved upload recovery URL (?page=product_uploads&upload=<workflow ID>). Opening the page alone cannot restore the selected PSD."
+            result.append({"step":i,"kind":"prerequisite","reason":reason,"explanation":reason})
+            # One actionable prerequisite warning per recording.
+            product_upload = False
+        if loc.get("by") == "test_id" and re.match(r"st[A-Z]", loc.get("value", "")):
+            reason = "This older step uses a shared Streamlit widget identifier. Rerecord the intended named control; its identity cannot be recovered safely from this identifier."
+            result.append({"step":i,"kind":"target","reason":reason,"explanation":reason})
         if step["action"]!="unsupported":continue
         reason=step["reason"]
         interrupted="interrupted before Stop" in reason or "closed before Stop" in reason
