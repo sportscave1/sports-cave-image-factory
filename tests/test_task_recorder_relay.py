@@ -71,6 +71,8 @@ class RelayTests(unittest.TestCase):
         result=self.relay.exchange(self.device,self.key,{"boot_id":restarted,"epoch":2,"state_version":1,"state":{"mode":"interrupted"}})
         self.assertFalse(result["commands"])
         self.assertTrue(self.relay.devices(self.owner)[0]["needs_review"])
+        self.relay.exchange(self.device,self.key,{"boot_id":str(uuid.uuid4()),"epoch":3,"state_version":1,"state":{"mode":"idle"}})
+        self.assertTrue(self.relay.devices(self.owner)[0]["needs_review"],"Another restart must not bypass interruption review.")
         with self.assertRaises(PermissionError):self.poll()
         with self.assertRaises(Invalid):self.relay.enqueue(self.owner,self.device,str(uuid.uuid4()),"record",{})
 
