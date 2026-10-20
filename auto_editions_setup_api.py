@@ -303,4 +303,5 @@ ROUTES=(('/auto-editions/setup',page,('GET',)),('/api/auto-editions/details',det
 
 # Existing route registration imports this tuple; no parallel upload service.
 from companion_package_api import ROUTES as RESUMABLE_ROUTES
-ROUTES=ROUTES+RESUMABLE_ROUTES
+from companion_acceptance import ROUTES as ACCEPTANCE_ROUTES
+ROUTES=ROUTES+RESUMABLE_ROUTES+ACCEPTANCE_ROUTES

@@ -14,6 +14,9 @@ def upload(controller,path,grant,host_config,journal,*,correlation,stopped=lambd
     path=Path(path);journal=Path(journal)
     descriptor=describe(path);identity=ae.fingerprint(descriptor)
     base=grant['base_url']
+    prefix=grant.get('upload_path','/api/auto-editions/uploads/')
+    if prefix not in ('/api/auto-editions/uploads/','/api/auto-editions/acceptance/'):
+        raise ValueError('Unsupported upload route.')
     if host_config['base_url']!=base:raise ValueError('Preparation origin changed.')
     headers={'X-Sports-Cave-Preparation-Host':host_config['token'],'X-SC-Transfer-ID':correlation}
 
@@ -36,7 +39,7 @@ def upload(controller,path,grant,host_config,journal,*,correlation,stopped=lambd
 
     def control(action,body=None,key=None):
         query={'id':key} if key else {'ticket':grant['ticket']}
-        response=requests.post(base+'/api/auto-editions/uploads/'+action+'?'+urlencode(query),
+        response=requests.post(base+prefix+action+'?'+urlencode(query),
             json={} if body is None else body,headers={**headers,'X-Sports-Cave-Transfer-Secret':grant['secret']},
             timeout=(20,90),allow_redirects=False)
         response.raise_for_status();result=accept(response.json())
@@ -71,7 +74,7 @@ def upload(controller,path,grant,host_config,journal,*,correlation,stopped=lambd
                 if state['state']!='Receiving' or state['offset']==descriptor['bytes']:break
             offset=state['offset'];length=min(CHUNK,descriptor['bytes']-offset)
             trace['state']='Uploading'
-            response,_=post_file(controller,base+'/api/auto-editions/uploads/chunk?'+urlencode({'id':state['id']}),path,
+            response,_=post_file(controller,base+prefix+'chunk?'+urlencode({'id':state['id']}),path,
                 {**headers,'Content-Type':'application/octet-stream','X-SC-Chunk-Offset':str(offset),
                  'X-SC-Chunk-SHA256':descriptor['chunks'][offset//CHUNK]},
                 correlation=correlation,stopped=stopped,on_trace=on_trace,offset=offset,length=length,_parent=trace)

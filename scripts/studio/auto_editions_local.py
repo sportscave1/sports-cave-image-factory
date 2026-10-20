@@ -285,6 +285,9 @@ def host_loop():
             elif (Path.home()/'Documents'/'SportsCavePrintJobs'/'processor.lock').exists():
                 state='Recovering'
                 host_request(config,'/api/auto-editions/onboarding/heartbeat',{})
+            elif __import__('companion_acceptance_local').active():
+                state='Isolated acceptance'
+                host_request(config,'/api/auto-editions/onboarding/heartbeat',{})
             elif shutil.disk_usage(HOST_FILE.parent).free<8*1024**3:
                 raise RuntimeError('Preparation storage is low.')
             elif recover_retained(config):state='Recovering'
@@ -321,6 +324,7 @@ def host_loop():
 def prepare_stop():
     """Existing Close must not kill a daemon upload or an in-flight host claim."""
     with LOCK:
+        if __import__('companion_acceptance_local').active():raise ValueError('Acceptance transfer is active; wait for its durable boundary.')
         if HOST_BUSY.is_set() or any(r.get('status')=='Working' or r.get('checkpoint_pending') for r in JOBS.values()):
             raise ValueError('Preparation is active or checkpointing. Wait for it to finish before stopping this companion.')
         HOST_STOP.set()
@@ -915,6 +919,11 @@ def release_verified_temporary_files(row):
 
 def action(data):
     kind=data.get('action')
+    if kind=='edition-prepare-acceptance' and set(data)=={'action','run'}:
+        import sys,companion_acceptance_local
+        return companion_acceptance_local.start(sys.modules[__name__],data['run'])
+    if kind=='edition-prepare-acceptance-status' and set(data)=={'action'}:
+        return __import__('companion_acceptance_local').status()
     if kind=='edition-prepare-host' and set(data)=={'action','config'}:return configure_host(data['config'])
     if kind=='edition-prepare-inspect' and set(data)=={'action','grant'}:return start(data['grant'])
     if kind=='edition-prepare-build' and set(data) in ({'action','job_id','roles'},{'action','job_id','roles','scale'}):return prepare(data['job_id'],data['roles'],data.get('scale',1))
