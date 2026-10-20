@@ -39,7 +39,7 @@ def test_private_schema_real_transactions_lost_ack_and_safe_cleanup(database,tmp
     jobs,sql=database
     migrations=Path(__file__).parents[1]/'supabase/migrations'
     sql.execute((migrations/'20261020002955_companion_resumable_packages.sql').read_text())
-    sql.execute((migrations/'20261020050926_companion_isolated_acceptance.sql').read_text())
+    sql.execute((migrations/'20261020051839_companion_isolated_acceptance.sql').read_text())
     monkeypatch.setattr(supabase_backend,'connect',jobs.connect)
     monkeypatch.setenv('COMPANION_ACCEPTANCE_RUN',RUN)
     monkeypatch.setattr(auto_editions_onboarding_api,'preparation_actor',AsyncMock(return_value={'id':'fixture-admin','role':os_accounts.ROLE_ADMIN}))

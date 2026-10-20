@@ -63,6 +63,8 @@ results, and a reviewed report. Do not infer acceptance from this document alone
 ## Activation and rollback
 
 Apply the private-schema migration after local checks. Release compatible code
+(`20261020051839_companion_isolated_acceptance.sql` matches the applied
+Supabase migration version; the CLI-created draft was renamed to that version).
 backend first, then update the idle installed helper through the existing
 supervisor/action-only startup update. Keep new normal resumable sessions
 disabled during the isolated run. Preserve journals/settings/old immutable
