@@ -34,10 +34,10 @@ class CopyV2Tests(unittest.TestCase):
                     self.assertNotIn(stale, text)
                 grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES")[1]
                 self.assertEqual(grouped.count("\nAD COPY\n"), 3)
-                for cta in ("Claim Your Edition", "Secure Your Edition", "Own This Edition"):
+                for cta in ("Claim Your Edition",):
                     self.assertIn("CTA:\n" + cta, grouped)
                 if metadata.get("edition_limit"):
-                    self.assertIn("Limited to 100 worldwide.", text)
+                    self.assertIn("Limited to 100 editions.", text)
                 else:
                     self.assertIn("omit quantity and geographic scarcity", text)
                 if not metadata:

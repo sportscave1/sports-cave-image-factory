@@ -36,7 +36,7 @@ class CombinedExecutionTests(unittest.TestCase):
                          "FINAL RESPONSE TERMINATION", "no automatic image generation", "Do not generate the image automatically",
                          "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "COPY ONE ROUTE AT A TIME"):
             self.assertNotIn(obsolete, prompt)
-        self.assertLess(len(prompt), 42000)  # Resolved construction/reflection and richer home specifications.
+        self.assertLess(len(prompt), 44000)  # Includes pack-only fit coordination and required identity copy.
 
     def test_execution_priority_is_shared_with_project_template_and_text_only_gate(self):
         template = (Path(ads.__file__).parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()
@@ -87,7 +87,7 @@ class CombinedExecutionTests(unittest.TestCase):
             expanded = shared + "\n" + group
             self.assertEqual(expanded.count("PRODUCT LOCK — ABSOLUTE"), 1)
             self.assertEqual(len(physical.BLOCK.findall(expanded)), 1)
-            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], group)
+            self.assertIn(ads.ie_visuals.CAMERAS[i], group)
             self.assertIn("CTA: CLAIM YOUR EDITION", group)
             self.assertIn("1024 x 1024", expanded)
             self.assertIn("24–28%", expanded)
@@ -164,6 +164,7 @@ class CombinedExecutionTests(unittest.TestCase):
     def test_csv_contract_and_unicode_multiline_rows_round_trip(self):
         result = self.record()
         samples = json.loads((Path(__file__).parent / "fixtures/ie_description_samples.json").read_text(encoding="utf8"))[0]["descriptions"]
+        samples[0] = "This isn’t just wall art. It’s the player you back.\n\n" + samples[0]
         samples[0] += '\nA "personal, lasting" connection — yours.'
         notes = {key: [{"primary_text": text, "headline": "A Collector’s Connection", "cta": values[3]}]
                  for (key, values), text in zip(ads.ie_copy.ROUTES.items(), samples)}

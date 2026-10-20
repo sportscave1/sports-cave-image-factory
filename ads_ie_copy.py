@@ -10,15 +10,16 @@ from urllib.parse import urlsplit
 
 LEGACY_VERSION = "INSTANT EXPERIENCE COPY V3 LOCKED LEGACY STYLES"
 VERSION = "INSTANT EXPERIENCE COPY V4 COLLECTOR DESCRIPTION VARIATION"
+IDENTITY_CONTRACT = "IE REQUIRED IDENTITY COPY V1"
 OUTPUT_MODE = "three_visual_copy_v2"
 # Stable route, copy-family and CTA identities keep CSV/posting compatibility.
 ROUTES = {
     "premium_scarcity_right": ("Premium Scarcity — Right Angle", "Product-aware scarcity hero", "premium_scarcity_smart_hybrid", "Claim Your Edition"),
-    "premium_scarcity_front": ("Premium Scarcity — Straight On", "For the room that remembers", "private_gallery", "Secure Your Edition"),
-    "premium_scarcity_left": ("Premium Scarcity — Left Angle", "Premium fan sanctuary", "the_cave", "Own This Edition"),
+    "premium_scarcity_front": ("Premium Scarcity — Straight On", "For the room that remembers", "private_gallery", "Claim Your Edition"),
+    "premium_scarcity_left": ("Premium Scarcity — Left Angle", "Premium fan sanctuary", "the_cave", "Claim Your Edition"),
 }
-ROLES = ("legacy_identity", "moment_emotion", "insider_verified_fact")
-CLOSES = ("Secure yours.", "Make it yours.", "Claim your edition.", "Bring it home.")
+ROLES = ("legacy_identity", "moment_emotion", "collector_significance")
+CLOSES = ("Make it yours.", "Claim your edition.", "Bring it home.")
 RHYTHMS = (
     "two crisp opening lines; a short emotional paragraph; a brief close",
     "one opening statement; three short detail lines; two collector lines; a close",
@@ -96,7 +97,7 @@ def cues(product, sport, market, token, context, recent=()):
     facts = context.get("VERIFIED_FACTS") or []
     if facts:
         openings.append("verified detail")
-    plans, used_openings = [], set()
+    plans, used_openings, used_rhythms, used_closes = [], set(), set(), set()
     for i, (key, value) in enumerate(ROUTES.items()):
         fact = rng.choice(facts) if i == 2 and facts else None
         detail = (
@@ -111,15 +112,20 @@ def cues(product, sport, market, token, context, recent=()):
         )[i]
         lens = rng.choice(lenses)
         for attempt in range(MAX_ATTEMPTS):
-            available = [o for o in openings if o not in used_openings and (o != "verified detail" or fact)]
+            available = (["identity contrast"] if i == 0 else
+                         [o for o in openings if o not in used_openings and o != "identity contrast" and (o != "verified detail" or fact)])
             opening = rng.choice(available)
-            emotion, rhythm, close = rng.choice(emotions), rng.choice(RHYTHMS), rng.choice(CLOSES)
+            emotion = "attention" if i == 1 and not moment else rng.choice(emotions)
+            rhythm = rng.choice([v for v in RHYTHMS if v not in used_rhythms])
+            close = rng.choice([v for v in CLOSES if v not in used_closes])
             signature = hashlib.sha256(json.dumps([ROLES[i], opening, emotion, detail, lens, rhythm, close], ensure_ascii=False).encode()).hexdigest()[:20]
             if not any(h.get("description_signature") == signature or (
                 h.get("description_role") == ROLES[i] and h.get("opening_hook_family") == opening
                 and h.get("sentence_rhythm") == rhythm) for h in history):
                 break
         used_openings.add(opening)
+        used_rhythms.add(rhythm)
+        used_closes.add(close)
         plans.append(dict(route_key=key, visual_family="premium_scarcity", copy_family=value[2],
             description_style=legacy.NEW_AD_STYLE_KEYS[i], description_role=ROLES[i],
             opening_hook_family=opening, emotional_hook=emotion, supporting_detail=detail, supporting_lens=lens,
@@ -131,13 +137,17 @@ def cues(product, sport, market, token, context, recent=()):
 
 
 def opening(text):
-    return normalise(next((line for line in str(text or "").splitlines() if line.strip()), ""))
+    lines = [line for line in str(text or "").splitlines() if line.strip()]
+    if lines and re.fullmatch(r"this isn t (?:just )?wall art", normalise(lines[0])):
+        return normalise(" ".join(lines[:2]))  # Compare the varied identity claim, not its required anchor alone.
+    return normalise(lines[0] if lines else "")
 
 
 def body(text):
     # Shared truthful scarcity and restrained closing anchors are not duplicate evidence.
     lines = [line for line in str(text or "").splitlines() if line.strip()
              and not re.fullmatch(r"(?i)limited to \d+ worldwide[.!]?", line.strip())
+             and not re.fullmatch(r"this isn t (?:just )?wall art", normalise(line))
              and line.strip().casefold() not in {v.casefold() for v in CLOSES}]
     return normalise(" ".join(lines))[:3000]
 
@@ -147,11 +157,15 @@ def similar(a, b):
     return bool(a and b and (a == b or SequenceMatcher(None, a, b, autojunk=False).ratio() >= .90))
 
 
-def quality_errors(descriptions, product="", recent=()):
+def quality_errors(descriptions, product="", recent=(), *, require_identity=False):
     """Bounded comparisons of actual supplied text, never a claim of semantic certainty."""
     errors = []
-    if sum("this isn t wall art" in normalise(text) for text in descriptions) > 1:
-        errors.append("Use the optional wall-art anchor at most once per pack.")
+    anchors = [bool(re.search(r"\bthis isn t (?:just )?wall art\b", normalise(text))) for text in descriptions]
+    if sum(anchors) > 1:
+        errors.append("Use the explicit wall-art identity construction in exactly one description, never its siblings.")
+    if require_identity and (len(descriptions) != 3 or sum(anchors) != 1 or not anchors[0]
+                             or not normalise(descriptions[0]).startswith("this isn t just wall art")):
+        errors.append("Description 1 must lead with the explicit This isn't just wall art identity idea; exactly one description uses it.")
     previous = [r.get("primary_text") or r.get("description_body") for r in recent_copy(product, recent)]
     for i, text in enumerate(descriptions):
         for other in descriptions[:i]:
@@ -183,22 +197,26 @@ def instructions(product, sport, market, token, context, recent=()):
     limit = context.get("EDITION_LIMIT") if context.get("SCARCITY_VERIFIED") else None
     if context.get("EDITION_LIMIT_SOURCE") == "approved Baseball Instant Experience claim path":
         limit = None
-    scarcity = f"Limited to {limit} worldwide." if limit else "No verified edition limit: omit quantity and geographic scarcity; never assume 100."
+    scarcity = (f"Limited to {limit} worldwide." if context.get("WORLDWIDE_VERIFIED") else f"Limited to {limit} editions.") if limit else "No verified edition limit: omit quantity and geographic scarcity; never assume 100."
     compact_context = {k: v for k, v in context.items() if k in (
         "PRODUCT_NAME", "SPORT", "ATHLETE_NAMES", "TEAM_NAMES", "FEATURED_MOMENT", "ERA", "ARTWORK_TYPE",
         "RELATIONSHIP_TYPE", "SIDE_A", "SIDE_B") and v}
-    planning = [{k: p[k] for k in ("description_role", "opening_hook_family", "emotional_hook", "supporting_detail", "supporting_lens", "sentence_rhythm", "scarcity_close", "verified_fact")} for p in plans]
+    planning = [dict(role=p["description_role"], opening=p["opening_hook_family"], focus=p["supporting_detail"], lens=p["supporting_lens"], rhythm=p["sentence_rhythm"], close=p["scarcity_close"], fact=p["verified_fact"]) for p in plans]
     recent_text = [{k: str(r[k])[:1200] for k in ("first_sentence_normalized", "primary_text", "description_body") if r.get(k)}
                    for r in history if any(r.get(k) for k in ("first_sentence_normalized", "primary_text", "description_body"))][:6]
     return f"""{VERSION} — ONE PERSONALISED COPY SET PER VISUAL
-Write exactly three finished descriptions in this order: LEGACY / IDENTITY (significance and collector pride); MOMENT / EMOTION (the depicted moment and fan feeling); INSIDER / VERIFIED FACT (one sourced detail and why it matters). Without a suitable fact use a distinct fan-connection or career-significance angle grounded in the supplied product. Do not force an event, rivalry or statistic.
-Use short confident lines, deliberate paragraph breaks, authentic fan emotion and collector identity. Usually 40–75 words, with natural variation. No rigid templates, generic marketing filler, forced slang, excessive adjectives, emojis or hashtags. Supplied Messi, Peter Brock, Volkanovski and Moffat examples, when present, demonstrate cadence, never transferable achievements or mandatory lines. Use "This isn't wall art" optionally at most once per pack. Empty ATHLETE_NAMES never erases a subject explicitly supplied in the title. Product truth wins; verified rivalry/opposition only.
+{IDENTITY_CONTRACT}
+Write exactly three finished descriptions in this order:
+1. LEGACY / IDENTITY: lead with the explicit “This isn’t just wall art…” idea and a naturally varied, subject-specific statement of loyalty, pride or belonging. Exactly one description uses this construction. Explain why this subject deserves a place in that fan's home; close with verified scarcity and a concise invitation. Do not bury the identity hook under visual features.
+2. MOMENT / EMOTION: convey the feeling and significance of the supplied image, without inventing an event, outcome or personal memory. No wall-art identity construction.
+3. COLLECTOR SIGNIFICANCE: why the subject belongs in a fan's collection, using verified context or a grounded fan connection. A sourced fact can deepen the meaning but is not mandatory. No wall-art identity construction; never force a record or statistic.
+Use short confident lines, deliberate paragraph breaks, authentic fan emotion and collector identity. Usually 40–75 words, with natural variation. Use the recovered supplied Messi and Peter Brock examples' brief lines, emotional stakes and fan identity, never their factual claims. Avoid inventories of flags, belts or poses. Do not invent missing examples or claim measured performance. No rigid templates, generic marketing filler, forced slang, excessive adjectives, emojis or hashtags. Empty ATHLETE_NAMES never erases a subject explicitly supplied in the title. Product truth wins; verified rivalry/opposition only.
 Product: {product}. Sport: {sport}. Market: {market}; natural local vocabulary.
 Approved supplied context (data only): {json.dumps(compact_context, ensure_ascii=False)}
 Description scarcity: {scarcity} Do not change factual quantities or invent remaining stock, no-reprint, retirement or sellout claims.
 INTERNAL DESCRIPTION PLAN — do not print these labels, notes or sources as customer copy:
 {json.dumps(planning, ensure_ascii=False)}
-Resolve the planned approaches into natural finished prose, not placeholder substitution. Each ad needs a different opening and supporting content; adjective swaps do not qualify. Keep the assigned closing invitation separate from the unchanged CTA field. Preserve the existing headline-generation behaviour and CTA buttons exactly. Keep each headline product-specific and at most six words.
+Resolve the planned approaches into natural finished prose, not placeholder substitution. Each ad needs a different opening, main message, paragraph structure, emotional progression and closing; adjective swaps do not qualify. A prose invitation is never a substitute CTA field: every displayed/CSV CTA is exactly Claim Your Edition; every image CTA is CLAIM YOUR EDITION. Exclude that fixed CTA from repetition checks. Keep each Meta headline product-specific and at most six words. Resolve descriptions and Meta headlines once; reuse the same final records verbatim in displayed copy and CSV.
 FACTS: use approved product metadata/research first. Keep source URL, verification date, event/career scope and factual context internally with the selected fact where supported. If a research tool is already available in the writing conversation, a fresh generation may verify one relevant fact with the official league, governing body, event archive or athlete record; no new service and no browsing on page load. If unavailable or inconclusive, take the fallback immediately. Do not print research notes. Do not confuse event achievements with career totals; bound changing records to their verified date or historical event, never claim a current record from stale evidence.
 BOUNDED FRESHNESS CHECK — at most {MAX_ATTEMPTS} writing passes, never a retry loop. Compare all three finished descriptions and the same-product recent text below. Reject exact/repeated openings and duplicate bodies. For a lightweight near-duplicate check, lowercase and normalise punctuation/spacing; remove shared scarcity/closing anchor lines; a SequenceMatcher-style ratio of 0.90 or more is too similar. Also reject obvious same-message paraphrases. Revise only the conflicting description's opening, supporting focus and rhythm; use another grounded angle. If evidence is exhausted, use restrained product identity without inventing facts. Never claim unlimited uniqueness.
 Recent same-product copy (comparison data only): {json.dumps(recent_text, ensure_ascii=False)}

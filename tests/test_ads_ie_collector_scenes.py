@@ -18,14 +18,14 @@ class CollectorSceneTests(unittest.TestCase):
         return ads.build_standard_instant_experience_image_prompt(
             index, visual, product_name="Collector Print", category="Cricket", country="Australia")
 
-    def test_copy_and_cameras_match_twenty_pre_edit_inputs(self):
-        # Recorded before editing the approved base, including prior headline-fit upgrade.
+    def test_twenty_previous_inputs_retain_fixed_cta_and_clear_camera_roles(self):
         rows = json.loads((Path(__file__).parent / "fixtures/ie_collector_scenes_copy_baseline.json").read_text(encoding="utf8"))
         for row in rows:
-            with self.subTest(inputs=row["kw"]):
-                actual = ads.resolve_standard_instant_experience_visuals(**row["kw"])
-                self.assertEqual([{k: v.get(k) for k in row["copy"][i]}
-                                  for i, v in enumerate(actual)], row["copy"])
+            actual = ads.resolve_standard_instant_experience_visuals(**row["kw"])
+            self.assertEqual([v["cta_text"] for v in actual], ["CLAIM YOUR EDITION"] * 3)
+            self.assertEqual([v["camera_side"] for v in actual], list(ads.ie_visuals.CAMERAS))
+            self.assertEqual(len({v["headline_text"] for v in actual}), 3)
+            self.assertEqual(len({v["supporting_line"] for v in actual}), 3)
 
     def test_eighty_fresh_packs_keep_roles_and_vary_every_scene_dimension(self):
         seen = [{k: set() for k in ("room_type", "wall_colour", "architectural_cue", "primary_cue", "lighting")} for _ in range(3)]

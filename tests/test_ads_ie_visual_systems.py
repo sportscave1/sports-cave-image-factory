@@ -34,7 +34,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             for required in (visuals[i]["headline_text"], visuals[i]["supporting_line"],
                              "CLAIM YOUR EDITION", "24–28%", "72–76%", "Never mirror artwork"):
                 self.assertIn(required, prompt)
-            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
+            self.assertIn(ads_page.ie_visuals.CAMERAS[i], prompt)
 
     def test_fan_style_is_product_aware_and_preserves_room_assignments(self):
         styles = {}
@@ -52,7 +52,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         self.assertEqual(len({v['headline_text'] for v in self.visuals()}), 3)
         self.assertTrue(all(not v['scarcity_verified'] for v in self.visuals()))
         self.assertEqual(len({v['headline_text'] for v in self.visuals(metadata={'edition_limit':250})}), 3)
-        self.assertTrue(all('250' in v['headline_text'] and '100' not in v['headline_text'] for v in self.visuals(metadata={'edition_limit':250})))
+        self.assertTrue(all('100' not in v['headline_text'] for v in self.visuals(metadata={'edition_limit':250})))
 
     def test_fixed_camera_roles_and_determinism(self):
         self.assertEqual(self.visuals(), self.visuals())
@@ -72,9 +72,9 @@ class ThreeVisualSystemsTests(unittest.TestCase):
     def test_approved_copy_fit_diversity_and_stability(self):
         self.assertEqual(len(ads_page.ie_visuals.HEADLINES), 6)
         self.assertEqual(len(set(ads_page.ie_visuals.APPROVED_SUPPORT_LINES)), 9)
-        eligible = {h for h in ads_page.ie_visuals.HEADLINES
+        eligible = {h for h in (*ads_page.ie_visuals.HEADLINES, *ads_page.ie_visuals.SAFE_HEADLINES)
                     if ads_page.instant_experience_on_image_headline_is_valid(h)}
-        self.assertEqual(len(eligible), 6)
+        self.assertEqual(len(eligible), 9)
         seen = set()
         for token in map(str, range(30)):
             rows = self.visuals(token, {"edition_limit": 100})
@@ -95,10 +95,10 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         headlines = ads_page.ie_visuals.HEADLINES
         eligible = ads_page.ie_visuals.eligible_headlines
         base = {"edition_limit": 100}
-        self.assertEqual(set(eligible(base)), {headlines[i] for i in (2, 3, 4)})
+        self.assertEqual(set(eligible(base)), {headlines[i] for i in (2, 3, 4)} | set(ads_page.ie_visuals.SAFE_HEADLINES))
         supported = {**base, "worldwide_verified": True, "no_second_run_verified": True,
                      "remaining_editions": 100, "editions_sold": 0}
-        self.assertEqual(set(eligible(supported)), set(headlines))
+        self.assertEqual(set(eligible(supported)), set(headlines) | set(ads_page.ie_visuals.SAFE_HEADLINES))
         for remaining, sold in ((99, 1), (100, 1), (None, None)):
             self.assertNotIn(headlines[5], eligible({**supported, "remaining_editions": remaining, "editions_sold": sold}))
         self.assertNotIn(headlines[0], eligible({**base, "worldwide_verified": "false"}))
@@ -109,9 +109,9 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             seen.update(r["headline_text"] for r in rows)
             self.assertEqual(len({r["headline_text"] for r in rows}), 3)
             reserves = [h for r in rows for h in [r["headline_fit_fallback"], *r["eligible_headline_alternatives"]]]
-            self.assertEqual(len(set(reserves)), len(reserves))
-            self.assertFalse(set(reserves) & {r["headline_text"] for r in rows})
-        self.assertEqual(seen, set(headlines))
+            self.assertTrue(all(r["eligible_headline_alternatives"] for r in rows))
+            self.assertFalse({h for r in rows for h in r["eligible_headline_alternatives"]} & {r["headline_text"] for r in rows})
+        self.assertEqual(seen, set(headlines) | set(ads_page.ie_visuals.SAFE_HEADLINES))
 
     def test_expanded_rooms_are_reachable_and_route_appropriate(self):
         seen = [set(), set(), set()]

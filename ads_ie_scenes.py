@@ -10,6 +10,7 @@ SCENE_FIELDS = (
     "architectural_cue", "depth_family", "primary_cue", "furniture_cue", "lighting", "light_source",
     "light_direction", "light_softness", "light_family", "reflection_source", "reflection_placement",
     "glazing_treatment", "assigned_camera_angle", "scene_signature", "scene_near_signature", "history_exclusions_relaxed",
+    "depth_position", "light_source_position",
 )
 
 # Colour and construction are authored together, not independently randomised.
@@ -85,9 +86,9 @@ def _rank(seed, value):
 
 def signature(scene, *, near=False):
     # Deliberately excludes token, adjectives, IDs, camera role and copy.
-    keys = (("wall_visual_group", "wall_lightness", "wall_finish", "depth_family", "light_family") if near else
+    keys = (("wall_visual_group", "wall_lightness", "wall_finish", "depth_family", "light_family", "depth_position") if near else
             ("home_setting", "architecture_style", "wall_colour", "wall_lightness", "wall_finish",
-             "architectural_cue", "furniture_cue", "light_source", "light_direction", "light_softness"))
+             "architectural_cue", "depth_position", "furniture_cue", "light_source", "light_source_position", "light_direction", "light_softness"))
     values = [scene.get(k, "") for k in keys]
     if near:
         # Grey/graphite/charcoal and plaster-like treatments can look almost alike.
@@ -116,6 +117,9 @@ def candidates(slot):
                     lighting=light, light_source=source, light_direction=direction, light_softness=softness,
                     light_family=light_family, reflection_source=f"the actual {source} on the {direction}",
                     reflection_placement=placement)
+                scene["depth_position"] = (("far right background" if h % 2 == 0 else "far left background") if slot == 0 else
+                    ("far left edge" if "left" in depth else "far right edge") if slot == 1 else "deep off-centre rear recess")
+                scene["light_source_position"] = ("left side outside the composition", "right-side distant reveal", "rear-left at a grazing angle")[l]
                 scene["scene_signature"] = signature(scene)
                 scene["scene_near_signature"] = signature(scene, near=True)
                 result.append(scene)
@@ -127,10 +131,17 @@ SCENES = tuple(candidates(i) for i in range(3))
 
 def different(a, b):
     wall_distinct = a["wall_visual_group"] != b["wall_visual_group"] and a["wall_lightness"] != b["wall_lightness"]
+    # Sand and similarly lit beige/taupe are not strong contrast simply because
+    # their labels and lightness buckets differ.
+    if {a["wall_visual_group"], b["wall_visual_group"]} == {"stone", "taupe"}:
+        wall_distinct = False
+    depth_a = "left" if "left" in a.get("depth_position", "") else "right" if "right" in a.get("depth_position", "") else "rear"
+    depth_b = "left" if "left" in b.get("depth_position", "") else "right" if "right" in b.get("depth_position", "") else "rear"
     attributes = ("home_setting", "architecture_style", "wall_colour_family", "wall_lightness", "wall_finish",
                   "depth_family", "light_family", "light_direction")
     return (wall_distinct and a["home_setting"] != b["home_setting"] and a["wall_finish"] != b["wall_finish"]
             and a["light_family"] != b["light_family"]
+            and depth_a != depth_b
             and sum(a[k] != b[k] for k in attributes) >= 3
             and (a["architecture_style"] != b["architecture_style"] or a["light_family"] != b["light_family"]))
 
@@ -139,6 +150,10 @@ def _history_conflict(scene, old):
     if old.get("scene_signature") == scene["scene_signature"] or old.get("scene_near_signature") == scene["scene_near_signature"]:
         return True
     if old.get("scene_selection_version"):
+        if not old.get("depth_position"):
+            # Earlier resolved drafts stored the same five appearance dimensions,
+            # without opening position. Reuse that evidence without rewriting it.
+            return json.loads(signature(old, near=True))[:5] == json.loads(signature(scene, near=True))[:5]
         return signature(old, near=True) == scene["scene_near_signature"]
     # Use older saved appearance fields where present; they have no signature.
     wall = str(old.get("wall_colour_family", "")).lower()
@@ -157,7 +172,7 @@ def _history_conflict(scene, old):
     return old.get("room_type") == scene["room_type"]
 
 
-def select(seed, context, recent=()):
+def select(seed, context, recent=(), selections=()):
     history = [r for r in list(recent)[:HISTORY_LIMIT] if isinstance(r, dict)]
     product_key = context.get("scene_product_key")
     if product_key:
@@ -174,7 +189,23 @@ def select(seed, context, recent=()):
         related = any(word in palette for word in scene["wall_colour"].split() if word in {"olive", "navy", "forest", "ivory", "sand", "taupe", "grey"})
         contrast = ("black" in frame and scene["wall_lightness"] == "light") or ("white" in frame and scene["wall_lightness"] == "dark")
         return int.from_bytes(_rank(seed, scene["scene_signature"]), "big") // (1 + compatible + related + contrast)
-    pools = [sorted(slot, key=rank) for slot in SCENES]
+    pools = []
+    for i, slot in enumerate(SCENES):
+        saved = selections[i] if i < len(selections) and isinstance(selections[i], dict) else {}
+        pool = []
+        for candidate in slot:
+            scene = {**candidate, **{k: v for k, v in saved.items() if k in SCENE_FIELDS and v not in (None, "")}}
+            if saved.get("wall_colour") and not saved.get("wall_colour_family"):
+                wall = next((w for w in WALLS if w[0] == saved["wall_colour"]), None)
+                scene.update(wall_colour_family=wall[1] if wall else saved["wall_colour"],
+                             wall_lightness=wall[2] if wall else "explicit unclassified colour",
+                             wall_visual_group=wall[3] if wall else "explicit colour override")
+            if saved.get("wall_finish"):
+                scene["wall_material"] = saved["wall_finish"]
+            scene["scene_signature"] = signature(scene)
+            scene["scene_near_signature"] = signature(scene, near=True)
+            pool.append(scene)
+        pools.append(sorted(pool, key=rank))
     # Bounded search: first fit with backtracking over fixed finite curated pools.
     # Relax only oldest scene exclusions; never relax same-pack differentiation.
     for keep in range(len(history), -1, -1):

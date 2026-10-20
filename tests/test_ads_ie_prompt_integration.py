@@ -43,14 +43,14 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         for i, (_, _, prompt) in enumerate(groups):
             self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
             if limit == 100:
-                self.assertTrue(any("HEADLINE: " + h in prompt for h in ads_page.ie_visuals.HEADLINES))
+                self.assertTrue(any("HEADLINE: " + h in prompt for h in (*ads_page.ie_visuals.HEADLINES, *ads_page.ie_visuals.SAFE_HEADLINES)))
             else:
-                self.assertTrue(any("HEADLINE: " + h.replace("100", str(limit)) in prompt for h in ads_page.ie_visuals.HEADLINES))
+                self.assertTrue(any("HEADLINE: " + h.replace("100", str(limit)) in prompt for h in (*ads_page.ie_visuals.HEADLINES, *ads_page.ie_visuals.SAFE_HEADLINES)))
             self.assertTrue(any("SUPPORTING LINE: " + line in prompt for line in ads_page.ie_visuals.APPROVED_SUPPORT_LINES))
             self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))
             self.assertIn("VARIANT PRECEDENCE — MANDATORY", prompt)
             self.assertIn("CLAIM YOUR EDITION", prompt)
-            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
+            self.assertIn(ads_page.ie_visuals.CAMERAS[i], prompt)
             self.assertIn(f"Room {i+1}", prompt)
             self.assertIn("PRODUCT LOCK — ABSOLUTE", prompt)
             self.assertIn("Do not append geographic scope to any other claim", prompt)

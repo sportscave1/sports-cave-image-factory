@@ -155,9 +155,6 @@ INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_WORDS = 4
 INSTANT_EXPERIENCE_ON_IMAGE_CTA_MAX_CHARACTERS = 24
 INSTANT_EXPERIENCE_APPROVED_ON_IMAGE_CTAS = (
     "CLAIM YOUR EDITION",
-    "SECURE YOUR EDITION",
-    "CLAIM THIS EDITION",
-    "SECURE THIS EDITION",
 )
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_PRIMARY_TEXT_FILENAME = "primary-text.txt"
@@ -574,9 +571,9 @@ INSTANT_EXPERIENCE_COPY_CSV_IGNORED_INDEX_HEADERS = frozenset(
 )
 INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS = (
     "Claim Your Edition",
-    "Secure Your Edition",
-    "Own This Edition",
 )
+# Historical imports retain their original rows; fresh prompts never expose this bank.
+INSTANT_EXPERIENCE_LEGACY_CREATIVE_CTAS = ("Claim Your Edition", "Secure Your Edition", "Own This Edition")
 INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS = {
     "Claim Your Edition": "Claim your edition.",
     "Secure Your Edition": "Secure your edition.",
@@ -3801,7 +3798,7 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
 
 - Every customer-facing Instant Experience creative CTA must be exactly one of: {approved_ctas}.
 - The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
-- Selected Meta copy uses Claim Your Edition for Right Angle, Secure Your Edition for Premium Scarcity — Straight On and Own This Edition for Premium Scarcity — Left Angle.
+- Every displayed creative CTA and CSV CTA field uses Claim Your Edition. All three images and future packs intentionally repeat CLAIM YOUR EDITION; exclude the CTA from repetition checks.
 - The long description text does not have to end with the CTA field; it must end according to its description archetype.
 - Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
 - The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
@@ -3816,7 +3813,7 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
         route_rules = """PREMIUM SCARCITY ROOM CTA APPLICATION
 
 - All three images use the on-image CTA CLAIM YOUR EDITION.
-- Each route keeps its selected Meta CTA; all three images display CLAIM YOUR EDITION.
+- Every route uses Claim Your Edition in copy/CSV and CLAIM YOUR EDITION on the image.
 - Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
 - Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim."""
     else:
@@ -3873,9 +3870,9 @@ HEADLINE
 - Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
 - Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
-- Measure the selected premium serif headline on the 1024 x 1024 canvas within the existing 64–72 px safe margins (880–896 px usable width). Preserve headline prominence and the three-line hierarchy.
+- Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.
 - Allow only subtle font-size or letter-spacing adjustments where needed. Never use cramped tracking, stretching, distortion or an excessively small font.
-- Check readability at 256 x 256 mobile preview size. If the selected headline cannot fit attractively, choose an unused factually eligible approved headline; use this route's assigned truthful fit fallback only if no approved alternative fits. Never repeat a sibling headline or invent a claim.
+- Check readability at 256 x 256. Resolve any fit substitution at pack level before image calls, choosing another unused eligible approved option and retaining three unique headlines. Never repeat a sibling headline. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
 
 SUPPORTING LINE
 - Use no more than 12 words and no more than 70 characters including spaces and punctuation.
@@ -3884,7 +3881,7 @@ SUPPORTING LINE
 
 CTA
 - Use no more than four words and no more than 24 characters including spaces and punctuation.
-- Keep the CTA on exactly one line and use an approved collector-led action: CLAIM YOUR EDITION, SECURE YOUR EDITION, CLAIM THIS EDITION or SECURE THIS EDITION.
+- Keep the CTA on exactly one line: CLAIM YOUR EDITION. This fixed CTA is exempt from repetition checks.
 - Do not use a longer explanatory CTA.
 
 The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned."""
@@ -4609,6 +4606,7 @@ def resolve_instant_experience_description_context(
         "NO_REPRINT_VERIFIED": bool(no_reprint_verified),
         "CAMPAIGN_MARKET": _normalise_option_label(country),
         "SCARCITY_VERIFIED": bool(base_context.get("edition_limit")),
+        "WORLDWIDE_VERIFIED": _metadata_bool(metadata, "worldwide_edition_verified", "worldwide_policy_approved"),
         "EDITION_LIMIT_SOURCE": base_context.get("edition_limit_source") or "",
         "VERIFIED_FACTS": ie_copy.verified_facts(metadata),
     }
@@ -5144,11 +5142,15 @@ def resolve_standard_instant_experience_visuals(
         resolved.append(visual)
     ie_visuals.resolve_set_copy(resolved, {
         **context,
+        "copy_product_key": ie_copy.product_key(product_name),
         "worldwide_verified": _metadata_bool(product_metadata or {}, "worldwide_edition_verified", "worldwide_policy_approved"),
         "no_second_run_verified": _metadata_bool(product_metadata or {}, "no_second_run_verified", "no_reprint_verified", "no_second_run", "no_reprint"),
+        "retires_when_sold_out": _metadata_bool(product_metadata or {}, "retires_when_sold_out", "retirement_verified"),
         "remaining_editions": _positive_int_or_none((product_metadata or {}).get("remaining_editions")),
         "editions_sold": (product_metadata or {}).get("editions_sold"),
-    }, instant_experience_on_image_headline_is_valid)
+    }, instant_experience_on_image_headline_is_valid, recent_fingerprints=recent_fingerprints or (), selections=(
+        (product_metadata or {}).get("instant_experience_footer_selections") or ()
+    ))
     ie_visuals.resolve_scene_set(resolved, {
         **context, "selected_sport": category, "market": country,
         "product_metadata": product_metadata or {},
@@ -5268,9 +5270,9 @@ Permitted on-image words for this cover:
 - Supporting line: {visual.get("supporting_line")}
 - CTA: {visual.get("cta_text")}
 
-These are the only permitted advertising words for this cover, except its explicitly assigned factually eligible headline fit alternatives when measured fit fails. Never place Primary Text on the image.
+These are the only permitted advertising words for this cover. Resolve any fit substitution at pack level before the call; never pass alternatives or sibling copy to an individual image call. Never place Primary Text on the image.
 
-If edition limit used is "not verified", the supporting FOMO line for this route must not be used. Use the resolved safe fallback line above. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
+Use the resolved supporting line exactly; its claims were checked against metadata. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
 
 
 def build_three_environment_diversity_rules():
@@ -5349,6 +5351,9 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "visual_family": visual.get("visual_family", "premium_scarcity_smart_hybrid"),
         "creative_variation_token": visual.get("creative_variation_token", ""),
         "campaign_line": visual.get("headline_text", ""),
+        **{key: visual[key] for key in ie_visuals.FOOTER_FIELDS if key in visual},
+        "on_image_headline": visual.get("headline_text", ""),
+        "on_image_subline": visual.get("supporting_line", ""),
         "fan_archetype": visual.get("fan_archetype", ""),
         "room_atmosphere": visual.get("atmosphere", ""),
         "urgency_placement": visual["overlay_position"],
@@ -8274,7 +8279,7 @@ Do not apply Carousel character limits to the Instant Experience headline.
 
 CALL TO ACTION
 
-Generate exactly five creative CTA options using only Claim Your Edition, Secure Your Edition or Own This Edition.
+Every creative CTA field uses Claim Your Edition; every image displays CLAIM YOUR EDITION. Do not generate alternative CTAs. The fixed CTA intentionally repeats across all covers and packs.
 
 The Description Copy must follow its assigned archetype ending. Keep Meta's native fixed button as Shop Now.
 
@@ -8600,6 +8605,7 @@ def build_standard_instant_experience_prompt(
     description_context = resolve_instant_experience_description_context(
         product_name, category, product_metadata=product_metadata, campaign_moment=campaign_moment, country=country,
     )
+    fit_candidates = json.dumps({v["route_key"]: v["eligible_headline_alternatives"] for v in visuals}, ensure_ascii=False)
     groups = "\n\n".join(build_instant_experience_execution_image_brief(i, v) for i, v in enumerate(visuals, 1))
     return f"""{ADS_IE_COMBINED_EXECUTION_VERSION}
 {ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION}
@@ -8613,16 +8619,16 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy before any image call. Use the resolved scenes below as three different properties. Resolve one Description, one Meta Headline and the assigned CTA per route once; retain these final records for display and CSV.
+1. Resolve all three scenes and final copy before any image call. Use the resolved scenes below as three different properties. Resolve one Description and one Meta Headline per route once; every CTA field is Claim Your Edition. Retain the final records for display and CSV. Confirm three unique footer headlines and three unique sublines; the fixed CTA intentionally repeats. Complete any headline fit selection from this pack-only data before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 5. Create and attach the completed downloadable ad_copy.csv from the final copy records.
 6. Provide the existing shared Instant Experience setup below and display each finished ad's copy under its existing group label.
 Continue through the sequence without asking for "next" or approval between images. Three independent 1024 x 1024 outputs; no collage or triptych. Do not stop after writing prompts or the first image. These instructions authorise generation in the receiving conversation; they do not add an OS image backend or publish ads.
-For each image call, combine the unchanged shared ad template with that image's resolved brief and its one compact realism contract; pass the full applicable text to the image tool, never a cross-reference. Apply only that image's exact on-image wording.
+For each image call, use the ORIGINAL product reference and combine only the shared applicable ad template, that image's resolved scene/realism, and its exact selected headline, subline and CLAIM YOUR EDITION. No sibling copy, alternatives, description plans or contradictory legacy text in an image call. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 {SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]}
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Prompt/schema checks do not establish visual distinction. Use at most one correction call per image when necessary, always with the ORIGINAL product reference; then report any unresolved defect accurately. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Prompt/schema checks do not establish visual distinction. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Use at most one correction call per image, targeted to the failing output, with the ORIGINAL product reference and its complete scene/copy contract. Label a correction as the replacement for Image 1, 2 or 3, never a fourth ad; report unresolved defects accurately. Never claim pixel fidelity or inspection without evidence.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If a genuine tool failure prevents completion, identify the unfinished image/file, preserve completed outputs and final copy for resumption, and state any inspection limitation. Do not replace requested images with a text-only plan or claim a nonexistent download. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
 
@@ -9305,6 +9311,10 @@ def build_ads_result_record(
         # Mockups' draw-once scene block. Never redraw on copy/reopen/reload.
         clean_product_metadata["instant_experience_scene_selections"] = [
             {key: fingerprint[key] for key in ie_visuals.scene_library.SCENE_FIELDS if key in fingerprint}
+            for fingerprint in instant_experience_fingerprints
+        ]
+        clean_product_metadata["instant_experience_footer_selections"] = [
+            {key: fingerprint[key] for key in ie_visuals.FOOTER_FIELDS if key in fingerprint}
             for fingerprint in instant_experience_fingerprints
         ]
         copy_cues = ie_copy.cues(clean_product_name, category, country, clean_variation_token,
@@ -10704,6 +10714,7 @@ def _instant_experience_copy_variation_error(
     concept_id="",
     variation_number=0,
     copy_v2=False,
+    fixed_cta=False,
 ):
     variation = variation or {}
     expected_variant = _instant_experience_description_variant(variation_number)
@@ -10721,8 +10732,9 @@ def _instant_experience_copy_variation_error(
             return f"{label} contains an unresolved template variable."
 
     cta = str(variation.get("cta") or "").strip()
-    if cta not in INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS:
-        allowed = ", ".join(INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
+    allowed_ctas = INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS if fixed_cta else INSTANT_EXPERIENCE_LEGACY_CREATIVE_CTAS
+    if cta not in allowed_ctas:
+        allowed = ", ".join(allowed_ctas)
         return f"CTA must be exactly one of: {allowed}."
 
     expected_primary_image_cta = INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept_id)
@@ -10848,6 +10860,9 @@ def build_instant_experience_copy_csv(
             concept_notes.get(concept["id"])
         )
         for variation_number, variation in enumerate(variations[:_refresh_copy_count(result)], start=1):
+            if (ie_copy.IDENTITY_CONTRACT in str(result.get("master_prompt") or "")
+                    and not blank and variation.get("cta") and variation["cta"] != "Claim Your Edition"):
+                raise InstantExperienceCopyCSVError("CTA must be exactly Claim Your Edition.")
             variant = _instant_experience_description_variant(variation_number)
             writer.writerow(
                 {
@@ -11094,6 +11109,7 @@ def parse_instant_experience_copy_csv(data, result):
             concept_id=route_key,
             variation_number=variation_number,
             copy_v2=_is_ie_copy_v2(result),
+            fixed_cta=ie_copy.IDENTITY_CONTRACT in str(result.get("master_prompt") or "") and variation_number == 1,
         )
         if validation_error:
             raise InstantExperienceCopyCSVError(
@@ -11112,6 +11128,7 @@ def parse_instant_experience_copy_csv(data, result):
         errors = ie_copy.quality_errors(
             [parsed[key][0]["primary_text"] for key in ie_copy.ROUTES],
             product=result.get("product_name"), recent=result.get("recent_instant_experience_fingerprints") or (),
+            require_identity=ie_copy.IDENTITY_CONTRACT in str(result.get("master_prompt") or "") and all(len(rows) == 1 for rows in parsed.values()),
         )
         if errors:
             raise InstantExperienceCopyCSVError(" ".join(errors) + " Revise only the conflicting descriptions; use at most four writing passes.")
@@ -12359,6 +12376,10 @@ def _render_instant_experience_concepts(result, workflow):
                                 widget_args["value"] = _preserve_multiline_text(
                                     variation.get(field_key)
                                 )
+                            if field_key == "cta" and ie_copy.IDENTITY_CONTRACT in str(result.get("master_prompt") or ""):
+                                st.session_state[widget_key] = "Claim Your Edition"
+                                widget_args.pop("value", None)
+                                widget_args["disabled"] = True
                             variation[field_key] = st.text_area(("Description" if _is_ie_copy_v2(result) and field_key == "primary_text" else "Primary Text / Description" if field_key == "primary_text" and _refresh_copy_count(result) == 1 else field_label), **widget_args)
                             if field_key == "primary_text":
                                 render_prompt_copy_button(
@@ -14842,7 +14863,9 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                         campaign_moment=campaign_moment,
                         product_metadata={**product_metadata, **(
                             {"instant_experience_scene_selections": existing_result["product_metadata"]["instant_experience_scene_selections"]}
-                            if (existing_result.get("product_metadata") or {}).get("instant_experience_scene_selections") else {})},
+                            if (existing_result.get("product_metadata") or {}).get("instant_experience_scene_selections") else {}), **(
+                            {"instant_experience_footer_selections": existing_result["product_metadata"]["instant_experience_footer_selections"]}
+                            if (existing_result.get("product_metadata") or {}).get("instant_experience_footer_selections") else {})},
                         recent_instant_experience_fingerprints=existing_result.get("recent_instant_experience_fingerprints", []),
                         creative_refresh_context=creative_refresh_context,
                     )

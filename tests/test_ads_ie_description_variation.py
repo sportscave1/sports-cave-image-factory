@@ -68,11 +68,11 @@ class DescriptionVariationTests(unittest.TestCase):
         self.assertLess(len(text), 8500)
         for stale in ("LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "always opens", "frameworks and defining hooks unchanged", "Greatness doesn't fade."):
             self.assertNotIn(stale, text)
-        for required in ("40–75 words", "at most once per pack", "at most 4 writing passes", "career totals", "at most six words", "omit quantity", "no browsing on page load"):
+        for required in ("40–75 words", "Exactly one description", "at most 4 writing passes", "career totals", "at most six words", "omit quantity", "no browsing on page load"):
             self.assertIn(required, text)
         with_limit = self.context(metadata={"edition_limit": 250})
         text = writing.instructions("Messi", "Football", "UK", "one", with_limit)
-        self.assertIn("Limited to 250 worldwide.", text)
+        self.assertIn("Limited to 250 editions.", text)
         baseball = ads.build_ads_prompt("Historic Player", "Baseball", "USA", "Instant Experience")
         self.assertIn("omit quantity and geographic scarcity", baseball)
         self.assertNotIn("LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", baseball)

@@ -146,6 +146,7 @@ def instant_experience_csv_notes():
                     "description_key": description_variant["key"],
                     "description_label": description_variant["label"],
                     "primary_text": (
+                        ("This isn’t just wall art. It’s the name you back.\n" if concept_index == 0 else "") +
                         f"{concept['display_name']} variation {variation}, first line.\n" +
                         ("The name means years of loyalty and a collector identity that lasts beyond any result. ",
                          "Recall the anticipation, the atmosphere and the feeling behind this artwork's depicted moment. ",
@@ -5926,14 +5927,10 @@ PRIMARY TEXT VARIATIONS
             contract[route_starts[2] :],
         ]
 
-        expected = (
-            ("premium_scarcity_right", "A statement for your collection."),
-            ("premium_scarcity_front", "Made for serious collectors."),
-            ("premium_scarcity_left", "For collectors who know why it matters."),
-        )
+        expected = tuple((route, None) for route in ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left"))
         for section, (route_key, fomo) in zip(sections, expected):
             self.assertIn(f"Route key: {route_key}", section)
-            self.assertIn(fomo, section)
+            self.assertTrue(any("SUPPORTING LINE: " + line in section for line in ads_page.ie_visuals.eligible_support_lines({})))
             self.assertTrue(any("HEADLINE: " + h in section for h in ads_page.ie_visuals.eligible_headlines({})))
             self.assertIn("CTA: CLAIM YOUR EDITION", section)
             self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
