@@ -393,6 +393,7 @@ class Runner:
             raise Invalid("This recording changed. Select it again, then Play.")
         task = resolve_task(saved, values, self.vault.file)
         if not self.page or self.page.is_closed(): await self.open_browser()
+        await self.page.bring_to_front()
         self.run_id = task_id
         self.store.run_context = {"operation_id": operation_id, "task_revision": actual_revision}
         self.total = len(task["steps"])
