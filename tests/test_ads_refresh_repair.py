@@ -37,7 +37,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save now').click().run(timeout=30)
         button(app,'Save 5 images here').click().run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
         self.assertFalse(button(app,'POST NOW').disabled)
         workflow = app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
@@ -61,7 +61,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save Instant Experience Package here').click().run(timeout=30)
         self.assertFalse(app.exception)
         self.assertEqual(app.session_state[ads.ADS_CREATIVE_REFRESH_RESULT_STATE_KEY]['master_prompt'],original)
-        self.assertNotIn('POST NOW', [b.label for b in app.button])
+        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         next(c for c in app.checkbox if c.label.startswith('I checked every refreshed image')).check().run(timeout=30)
         button(app,'POST NOW').click().run(timeout=30)
         self.assertFalse(app.exception)
@@ -79,7 +79,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         button(app,'Save now').click().run(timeout=30)
         button(app,'Save 5 images here').click().run(timeout=30)
         self.assertFalse(app.exception)
-        self.assertNotIn('POST NOW',[b.label for b in app.button])
+        self.assertTrue(next(b for b in app.button if b.label == 'POST NOW').disabled)
         workflow=app.session_state[ads.ADS_CREATIVE_REFRESH_IMAGE_STATE_KEY]
         self.assertEqual(workflow['ad_notes']['refresh_executions'],records)
         _, restored=saved.loads(workflow['refresh_workspace_export'])
@@ -120,7 +120,7 @@ class ActiveRefreshRepairTests(unittest.TestCase):
         state={ads._creative_refresh_visual_review_key(value,workflow):True}
         with patch.object(ads.st,'session_state',state), patch.object(ads.st,'button') as post, patch.object(ads.st,'caption') as caption:
             ads._render_saved_ad_post_now(value,workflow,quality_issues=[])
-        post.assert_not_called()
+        self.assertTrue(post.call_args.kwargs['disabled'])
         self.assertIn('Identical output image',caption.call_args.args[0])
 
     def test_missing_analysis_draft_save_preserves_assets_without_fabricating_notes(self):
