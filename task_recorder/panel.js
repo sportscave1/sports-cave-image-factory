@@ -1,7 +1,7 @@
  'use strict';
 const $=id=>document.getElementById(id),base='/api/task-recorder/';
 let devices=[],device=null,state={},selected=sessionStorage.getItem('recorder-selected')||'',after='',lastSeq=-1,stopped=false,transportOK=true;
-let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='';
+let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='',attentionKey='';
 const activeModes=new Set(['recording','recording_paused','running','pausing','paused','starting']);
 const uuid=()=>crypto.randomUUID();
 const tasks=()=> (state.tasks||[]).filter(t=>!deleted.has(t.id)).map(t=>renames.has(t.id)?{...t,name:renames.get(t.id)}:t);
@@ -44,6 +44,7 @@ async function confirmCommand(command,result){
  }
  if(command.kind==='rename'){renames.set(command.payload.id,receipt.name||command.payload.name);editing='';notice('Recording renamed.');}
  if(command.kind==='record'){selected='';details=null;values={};}
+ if(command.kind==='repair-copy'){selected=receipt.new_task_id;details=null;values={};notice('Corrected copy saved. Original preserved. Review it, then press Play.');}
  if(receipt.tasks)state={...state,tasks:receipt.tasks};
  // The receipt is durable; read the helper's acknowledged snapshot rather than
  // guessing a mode from button clicks. A stale in-flight poll cannot undo it.
@@ -90,6 +91,7 @@ function status(){
  if(mode==='recording')return 'Recording · Stop to save';
  if(mode==='recording_paused')return state.message||'Recording paused';
  if(mode==='paused')return state.message||'Paused';
+ if(!active()&&tasks().find(t=>t.id===selected)?.issue_count)return 'Needs attention · Review the flagged step below';
  if(mode==='completed')return 'Completed';
  if(mode==='stopped')return state.message==='Recording saved.'?'Recording saved.':'Stopped';
  if(mode==='interrupted')return 'Interrupted. Check the browser, then Stop.';
@@ -111,7 +113,7 @@ function renderControls(){
  $('activeName').textContent=starting()&&(mode==='starting'||!activeModes.has(mode))?(requestName||'Starting task'):busy?(state.active_task_name||requestName||'Current task'):(task?.name||'Select a recording');
  $('message').textContent=status();
  $('startup').checked=!!state.startup;$('startup').disabled=!enabled||!capable;
- $('revoke').disabled=!device;$('outdated').hidden=!device||capable;
+ $('revoke').disabled=!device;$('outdated').hidden=!device||state.protocol>=3;
 }
 function date(value){return value?new Date(value).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'}):'—';}
 function duration(value){if(!Number.isFinite(value)||value<0)return '—';const secs=Math.floor(value/1000);return String(Math.floor(secs/60)).padStart(2,'0')+':'+String(secs%60).padStart(2,'0');}
@@ -122,6 +124,7 @@ async function inspect(id){
 }
 async function play(id){
  const t=tasks().find(t=>t.id===id);if(!t)return;
+ if(t.attention?.length){review(id);return;}
  // Exact playback uses local defaults; selecting a row does not retarget an
  // existing run. Pause/Stop are always device/run controls, not selection controls.
  const supplied=selected===id?{...values}:{};await send('play',{id,revision:t.revision,values:supplied});
@@ -155,6 +158,7 @@ function renderTable(){
   }
   cells[1].textContent=duration(t.duration_ms);cells[2].textContent=t.steps??'—';cells[3].textContent=date(t.updated_at);
   cells[4].textContent=isActive?(mode==='running'?'Playing':mode==='pausing'?'Pausing…':mode==='recording_paused'?'Recording paused':mode==='paused'?'Paused':mode==='recording'?'Recording':'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Interrupted',running:'Interrupted',paused:'Interrupted'}[t.result]||t.result||'Saved');
+  if(!isActive&&t.attention?.length){cells[4].replaceChildren(button('Needs attention','Review step '+t.attention[0].step+' of '+t.name,()=>review(t.id)));cells[4].firstChild.className='needs-attention';}
   const actions=document.createElement('div');actions.className='actions';
   actions.append(button('▶ Play','Play '+t.name,()=>play(t.id),!online()||!modern()||active()||starting()));
   if(isActive){
@@ -179,8 +183,32 @@ function render(){
  $('seen').textContent=device?'Last seen '+date(device.last_seen*1000):'';
  $('selectedSettings').hidden=!selected;$('selectedName').textContent=tasks().find(t=>t.id===selected)?.name||'';
  $('reusable').disabled=!online()||!modern()||active()||starting();
- renderControls();renderTable();fit();
+ renderControls();renderTable();renderAttention();fit();
 }
+function review(id){select(id);renderAttention();$('attention').scrollIntoView({block:'nearest'});}
+function renderAttention(){
+ const task=tasks().find(t=>t.id===selected),issue=task?.attention?.[0];
+ $('attention').hidden=!issue;if(!issue)return;
+ $('attentionHeading').textContent='Needs attention · Step '+issue.step+(issue.kind==='interrupted'?' · Interrupted recording':'');
+ $('attentionReason').textContent=issue.explanation||issue.reason;
+ $('recordedReason').textContent=issue.explanation!==issue.reason?'Recorded reason: '+issue.reason:'';
+ const key=task.id+task.revision;if(key!==attentionKey){attentionKey=key;$('correctionValue').value='';}
+ $('repairCopy').disabled=!online()||state.protocol<3||active()||[...pending.values()].some(c=>c.kind==='repair-copy');
+ $('recordReplacement').disabled=active();
+}
+$('correctionKind').onchange=()=>{
+ const nav=$('correctionKind').value==='navigate';$('correctionLabel').textContent=nav?'Website address':'Visible text to wait for';
+ $('correctionValue').placeholder=nav?'https://example.com':'A unique heading or label on the intended page';
+};
+$('repairCopy').onclick=async()=>{
+ const task=tasks().find(t=>t.id===selected),issue=task?.attention?.[0];if(!issue)return;
+ if(!$('correctionValue').value.trim())return error('Enter the website or visible text needed for this step. The original will be preserved.');
+ await send('repair-copy',{id:task.id,revision:task.revision,step:issue.step,replacement:{action:$('correctionKind').value,value:$('correctionValue').value.trim()}});
+};
+$('recordReplacement').onclick=()=>{
+ const task=tasks().find(t=>t.id===selected);$('name').value=(task?.name||'Recording')+' — replacement';
+ notice('Press Record, perform the intended actions in the marked browser, then Stop. The original is preserved.');$('name').focus();
+};
 function stop(){return send(state.recording||state.mode==='recording_paused'?'stop-save':'stop');}
 async function poll(){
  let reconciled=false;

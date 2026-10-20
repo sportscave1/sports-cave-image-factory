@@ -197,7 +197,8 @@ class Runner:
     async def navigated(self, frame):
         if not self.recording: return
         if frame != self.page.main_frame:
-            self.unsupported("Frame navigation is unsupported; V1 records only the main frame.")
+            # Embedded documents navigate while the site renders; that is not a
+            # user action. Actual frame input still reaches record_event below.
             with contextlib.suppress(Exception):
                 await frame.evaluate("window.__scRecorder?.set(true)")
             return
@@ -252,15 +253,27 @@ class Runner:
         if isinstance(data, dict) and data.get("kind") == "privacy":
             await self.privacy()
             return
+        if isinstance(data, dict) and data.get("kind")=="ready":
+            # Init scripts notify us after their recorder is installed, including
+            # dynamically created srcdoc/cross-origin frames. Check privacy before
+            # enabling capture; never infer user interaction from a frame load.
+            if AUTH_PATH.search(source["frame"].url):await self.privacy()
+            else:
+                # set(true) performs the frame-local sensitive-field check before
+                # accepting input; its observer pauses on later sign-in fields.
+                with contextlib.suppress(Exception):await source["frame"].evaluate("window.__scRecorder?.set(true)")
+            return
         if source["frame"] != self.page.main_frame:
-            self.unsupported("Iframe actions are unsupported; use a top-level page.")
+            self.unsupported("An action inside an embedded page is unsupported. Record the action in the main browser page instead.")
             return
         if not isinstance(data, dict): return
         if data.get("kind") == "privacy":
             await self.privacy()
         elif data.get("kind") == "unsupported":
             # Page scripts are untrusted; do not retain arbitrary messages.
-            self.unsupported("Unsupported browser action. Use simple labeled controls, a submit button and one tab.")
+            from .attention import CAPTURE_REASONS
+            code=data.get("code") if isinstance(data.get("code"),str) else None
+            self.unsupported(CAPTURE_REASONS.get(code,"Unsupported browser action. Record a simple labelled control in the main tab."))
         elif data.get("kind") == "step":
             step = copy.deepcopy(data.get("step"))
             if not isinstance(step, dict): return

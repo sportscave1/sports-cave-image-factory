@@ -1,5 +1,6 @@
 """Outbound HTTPS client and crash-safe command receipts for the local V1 engine."""
 import asyncio
+import copy
 import contextlib
 import hashlib
 import json
@@ -30,7 +31,7 @@ def origin(value, preview=False):
 
 def payload(kind,data):
     fields={"record":{"url","name"},"play":{"id","revision","values"},"load":{"id"},"rename":{"id","name"},"delete":{"id"},"inspect":{"id"},"reusable":{"id"},
-            "edit":{"task"},"startup":{"enabled"}}
+            "repair-copy":{"id","revision","step","replacement"},"edit":{"task"},"startup":{"enabled"}}
     keys(data,fields.get(kind,set()))
     if "id" in data:
         try: uuid.UUID(data["id"])
@@ -46,6 +47,16 @@ def payload(kind,data):
         for name,value in values.items():
             text(name,40);text(value,empty=True)
             if value.startswith(("http://","https://")):safe_url(value)
+    if kind=="repair-copy":
+        keys(data,fields[kind],fields[kind])
+        if not re.fullmatch("[a-f0-9]{64}",str(data["revision"])):raise Invalid("Select the recording again.")
+        if isinstance(data["step"],bool) or not isinstance(data["step"],int) or not 1<=data["step"]<=500:raise Invalid("Select a flagged step.")
+        item=data["replacement"];keys(item,{"action","value"},{"action","value"})
+        if item["action"]=="navigate":safe_url(item["value"])
+        elif item["action"]=="wait":
+            from .schema import validate_locator
+            validate_locator({"by":"text","value":item["value"]})
+        else:raise Invalid("Choose a website or a visible-text readiness check.")
     if kind=="edit": validate_task(data.get("task"))
     if kind=="startup" and not isinstance(data.get("enabled"),bool): raise Invalid("Choose on or off.")
     if kind=="rename": text(data.get("name"),100)
@@ -90,7 +101,7 @@ class DeviceAgent:
             if draft.get("id") and not any(t["id"]==draft["id"] for t in s["tasks"]):
                 s["tasks"].append({"id":draft["id"],"name":draft["name"],"inputs":[],"steps":len(draft["steps"]),
                                    "duration_ms":None,"updated_at":None,"result":"Recording","revision":None})
-        s.update(protocol=2,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
+        s.update(protocol=3,operation_id=self.operation_id,selected_id=self.runner.draft.get("id"),
                  starting_url=self.settings().get("url",""),startup=self.settings().get("startup",False),
                  connection="connected" if self.connected else "reconnecting")
         if self.preparing and s["mode"] in {"idle","stopped","completed"}: s["mode"]="starting"
@@ -314,6 +325,24 @@ class DeviceAgent:
             if r.draft.get("id")==task_id:r.draft=task
             if r.run_id==task_id:r.run_name=task["name"]
             return {"task_id":task_id,"name":task["name"],"tasks":r.store.list()}
+        elif kind=="repair-copy":
+            if r.busy() or r.recording or r.mode=="recording_paused":raise Invalid("Stop the current task first.")
+            original=r.store.get(data["id"])
+            if r.store.revision(original)!=data["revision"]:raise Invalid("This recording changed. Select it again.")
+            index=data["step"]-1
+            if index>=len(original["steps"]) or original["steps"][index]["action"]!="unsupported":raise Invalid("Select a flagged step to correct.")
+            task=copy.deepcopy(original);task["id"]=str(uuid.uuid4());task["name"]=original["name"][:85]+" — corrected"
+            replacement=data["replacement"]
+            task["steps"][index]=({"action":"navigate","value":replacement["value"],"timeout_ms":30000} if replacement["action"]=="navigate" else
+                                   {"action":"wait","locator":{"by":"text","value":replacement["value"]},"timeout_ms":30000})
+            task=r.store.save(task)
+            meta=r.store.metadata(original["id"])
+            r.store.metadata(task["id"],duration_ms=meta.get("duration_ms"),source_id=original["id"],source_revision=data["revision"],corrected_step=data["step"])
+            defaults=self.vault.read().get("defaults",{})
+            if original["id"] in defaults:
+                defaults[task["id"]]=copy.deepcopy(defaults[original["id"]]);self.vault.put("defaults",defaults)
+            r.draft=task
+            return {"new_task_id":task["id"],"tasks":r.store.list()}
         elif kind=="edit":await r.command("save",data)
         elif kind=="reusable":
             if r.busy() or r.recording or r.mode=="recording_paused":raise Invalid("Stop first.")

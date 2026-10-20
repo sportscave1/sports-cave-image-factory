@@ -7,6 +7,7 @@ import contextlib
 from datetime import datetime, timezone
 from pathlib import Path
 from .schema import Invalid, validate_task
+from .attention import issues
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -104,7 +105,8 @@ class Store:
                 task = self.get(p.stem)
                 meta = self.metadata(task["id"])
                 history = json.loads(paths[2].read_text(encoding="utf-8")) if paths[2].exists() else {}
-                row = {"id": task["id"], "name": task["name"], "last_run": history.get("at"),
+                problems=issues(task)
+                row = {"attention":problems[:3],"issue_count":len(problems),"id": task["id"], "name": task["name"], "last_run": history.get("at"),
                        "result": history.get("status", "Never run"), "revision": self.revision(task),
                        "inputs": task["inputs"], "steps": len(task["steps"]),
                        "duration_ms": meta.get("duration_ms"), "updated_at": meta.get("updated_at")}
