@@ -7517,7 +7517,7 @@ def _active_sidebar_group(route):
     return navigation_runtime.active_disclosure_group(
         route,
         social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE},
-        seo_routes=seo_nav.SEO_ROUTES,
+        seo_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
         reporting_routes={
             "Reporting",
             os_accounts.DAILY_PLANNER_ROUTE,
@@ -7542,7 +7542,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             current_page,
             stored=None,
             social_routes={social_media.SOCIAL_MEDIA_ROUTE, social_media.WALL_PREVIEW_ROUTE, social_media.AI_REELS_ROUTE},
-            seo_routes=seo_nav.SEO_ROUTES,
+            seo_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
             reporting_routes={
                 "Reporting",
                 os_accounts.DAILY_PLANNER_ROUTE,
@@ -7670,38 +7670,18 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
                     icon=SIDEBAR_ICON_BY_ROUTE.get(route),
                 )
 
-    if analytics_nav.ANALYTICS_OVERVIEW_ROUTE in allowed_routes:
-        if disclosure(
-            "analytics",
-            "Analytics",
-            SIDEBAR_ICON_BY_ROUTE[analytics_nav.ANALYTICS_OVERVIEW_ROUTE],
-            analytics_nav.ANALYTICS_OVERVIEW_ROUTE,
-            force_open_routes=analytics_nav.ANALYTICS_ROUTES,
-        ):
-            children = st.container(key="sidebar-analytics-children")
-            children.markdown(
-                '<span id="sidebar-analytics-children"></span>',
-                unsafe_allow_html=True,
-            )
-            for route in navigation_runtime.disclosure_child_routes(
-                analytics_nav.ANALYTICS_ROUTES,
-                analytics_nav.ANALYTICS_OVERVIEW_ROUTE,
-                include_overview=True,
-            ):
-                child_button(children, route, analytics_nav.ANALYTICS_NAV_LABELS[route])
-
-    if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes:
+    if any(route in allowed_routes for route in seo_nav.SEO_MENU_ROUTES):
         if disclosure(
             "seo",
             "SEO",
             SIDEBAR_ICON_BY_ROUTE[seo_nav.SEO_OVERVIEW_ROUTE],
-            seo_nav.SEO_OVERVIEW_ROUTE,
-            force_open_routes=seo_nav.SEO_ROUTES,
+            seo_nav.SEO_OVERVIEW_ROUTE if seo_nav.SEO_OVERVIEW_ROUTE in allowed_routes else seo_nav.SEO_ANALYTICS_ROUTE,
+            force_open_routes=(*seo_nav.SEO_ROUTES, *analytics_nav.ANALYTICS_ROUTES),
         ):
             children = st.container(key="sidebar-seo-children")
             children.markdown('<span id="sidebar-seo-children"></span>', unsafe_allow_html=True)
             for route in navigation_runtime.disclosure_child_routes(
-                seo_nav.SEO_ROUTES,
+                seo_nav.SEO_MENU_ROUTES,
                 seo_nav.SEO_OVERVIEW_ROUTE,
                 include_overview=True,
             ):

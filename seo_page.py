@@ -173,6 +173,15 @@ def _actor_name(user):
 
 
 def _persist(store, state, user, *, action, area, message, entity_type="seo_record", entity_id="", metadata=None):
+    import seo_phase1
+    if isinstance(store, seo.LocalSEOStore):
+        seo_phase1.event(state, "Draft/proposal change" if "blog" in action else "SEO record change", entity_id, detail={"action": action, "message": message, **(metadata or {})})
+        try:
+            store.save(state, actor_id=user.get("id") or "")
+            return True
+        except seo.SEOStoreError as error:
+            st.error(str(error))
+            return False
     try:
         store.save(state, actor_id=user.get("id") or "")
     except seo.SEOStoreError as error:
@@ -2606,6 +2615,10 @@ def _render_page_mapping(store, state, user, keywords):
 
 
 def _render_saved_query_intelligence(*, growth_store=None):
+    import seo_phase1
+    if seo_phase1.local_mode():
+        st.info("Shared query intelligence is unavailable in local mode. Keyword Library, CSV import and Page Mapping remain available.")
+        return
     filters = _reporting_filters()
     opportunity_options = (
         "All",
@@ -4000,7 +4013,7 @@ def _blog_activity(project_store, project, user, action, message, *, content_has
         idempotency_key=key,
         metadata={"status": project.get("status") or ""},
     )
-    if created:
+    if created and not getattr(project_store, "is_local", False):
         record_activity_log(
             action,
             "SEO / Blog",
@@ -4169,7 +4182,7 @@ def _render_blog_v2(state, user, *, phase4_store=None, reporting_reader=None, pr
     # Existing synced data only: this is a read-only research reference, never a Shopify call.
     saved_targets = list(seo.active_records(state, "target_library"))
     try:
-        live_targets = _cached_blog_shopify_targets()
+        live_targets = project_store.list_shopify_targets() if getattr(project_store, "is_local", False) else _cached_blog_shopify_targets()
     except Exception:
         live_targets = []
     product_context = [*live_targets, *saved_targets]
@@ -4790,22 +4803,6 @@ def render_page(
     reporting_reader=None,
     growth_store=None,
 ):
-    if route not in seo.SEO_ROUTES:
-        raise ValueError(f"Unknown SEO route: {route}")
-    _inject_styles()
-    _render_notice()
-    if st.button("Refresh data", key="seo-direct-refresh"):
-        invalidate_seo_overview_summary_cache()
-        st.rerun()
-    store = store or seo.default_store()
-    _render_active_route(
-        user,
-        route,
-        store,
-        navigate,
-        google_store,
-        import_store,
-        phase4_store,
-        reporting_reader,
-        growth_store,
-    )
+    import seo_phase1_ui
+    return seo_phase1_ui.render(user, route, store=store, navigate=navigate,
+        google_store=google_store, reporting_reader=reporting_reader)

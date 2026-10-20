@@ -426,6 +426,8 @@ def can_access_page(user, route_or_key):
         if is_admin(user):
             return True
         return social_media.SOCIAL_MEDIA_PAGE_KEY in permission_keys(user)
+    if page and page["route"] == seo_workspace.SEO_ANALYTICS_ROUTE:
+        return is_admin(user) or bool({"analytics", "seo"} & set(permission_keys(user)))
     if page and (
         page["key"] == seo_workspace.SEO_PAGE_KEY
         or page.get("parent_key") == seo_workspace.SEO_PAGE_KEY
