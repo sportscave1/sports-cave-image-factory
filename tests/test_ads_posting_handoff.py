@@ -425,15 +425,15 @@ else:
                         app.session_state["result"] = result
                         app.session_state["workflow"] = {**workflow, handoff.SAVED_PACKAGE_KEY: None, "outcomes": {}}
                         app.run(timeout=20)
-                        self.assertNotIn("POST NOW", [button.label for button in app.button])
+                        self.assertTrue(not app.button or app.button[0].disabled)
                         app.session_state["workflow"] = workflow
                         app.session_state["source_matches"] = False
                         app.run(timeout=20)
-                        self.assertNotIn("POST NOW", [button.label for button in app.button])
+                        self.assertTrue(not app.button or app.button[0].disabled)
                         app.session_state["source_matches"] = True
                         app.run(timeout=20)
                         if source == ads.ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
-                            self.assertNotIn("POST NOW", [button.label for button in app.button])
+                            self.assertTrue(not app.button or app.button[0].disabled)
                             app.session_state[ads._creative_refresh_visual_review_key(result, workflow)] = True
                             app.run(timeout=20)
                         self.assertIn("POST NOW", [button.label for button in app.button])

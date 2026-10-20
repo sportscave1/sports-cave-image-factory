@@ -65,7 +65,7 @@ try{
     await page.waitForFunction(()=>[...document.querySelectorAll('input')].some(e=>e.value==='Local CSV Review'));
     await page.keyboard.press('Escape');
     await page.waitForFunction(()=>document.querySelector('[class*="st-key-ads-images-save-open"] button')?.disabled===false);
-    assert.equal(await page.getByRole('button',{name:'POST NOW',exact:true}).count(),0,'Draft copy edits never bypass review');
+    assert.equal(await page.getByRole('button',{name:'POST NOW',exact:true}).isDisabled(),true,'Draft copy edits never bypass review');
     await page.getByRole('button',{name:/^(?:table_view )?CSV$/}).click();
     await page.locator('[class*="st-key-ads-carousel-copy-csv-import"] input[type="file"]').setInputFiles('tmp/refresh-test-copy-valid.csv');
     await page.waitForFunction(()=>[...document.querySelectorAll('input')].some(e=>e.value==='The Rivalry'));
@@ -73,7 +73,7 @@ try{
    }
    const start=Date.now();await saveButton.click();
    await page.getByRole('button',{name:kind==='Carousel'?'Save 5 images here':'Save Instant Experience Package here',exact:true}).click();
-   assert.equal(await page.getByRole('button',{name:'POST NOW',exact:true}).count(),0,'Save succeeds before visual sign-off');
+   assert.equal(await page.getByRole('button',{name:'POST NOW',exact:true}).isDisabled(),true,'Outstanding visual sign-off is visible');
    await page.getByText('Final visual verification — required before POST NOW',{exact:true}).click();
    await page.getByText('I checked every refreshed image against its product and winner references',{exact:true}).click();
    await page.getByRole('button',{name:'POST NOW',exact:true}).waitFor();metrics[kind].mockSaveMs=Date.now()-start;

@@ -48,6 +48,7 @@ REPORTING_OWNER_ENV_KEYS = (
 )
 
 PAGE_REGISTRY = (
+    {"key": "task_recorder", "route": "Task Recorder", "label": "Task Recorder", "worker_assignable": False, "top_level": True},
     {"key": "worker_health", "route": "Worker Health", "label": "Worker Health", "worker_assignable": False, "top_level": True},
     {"key": "developer_studio", "route": "Developer Studio", "label": "Dev Mode", "worker_assignable": False, "top_level": True},
     {"key": "image_protection", "route": "Image Protection", "label": "Image Protection", "worker_assignable": False, "top_level": False, "parent_key": "developer", "navigation_child": True},
@@ -412,7 +413,7 @@ def can_access_page(user, route_or_key):
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
     if page and page["key"] == "developer_studio":
         return is_reporting_owner(user)
-    if page and page['key']=='worker_health':return is_admin(user)
+    if page and page['key'] in {'worker_health', 'task_recorder'}:return is_admin(user)
     if page and page['key']=='crm_settings_view':
         return is_admin(user) or any(key in permission_keys(user) for key,_,_ in crm_navigation.PAGES)
     if page and page["key"] == REPORTING_PAGE_KEY:
@@ -427,6 +428,8 @@ def can_access_page(user, route_or_key):
         if is_admin(user):
             return True
         return social_media.SOCIAL_MEDIA_PAGE_KEY in permission_keys(user)
+    if page and page["route"] == seo_workspace.SEO_ANALYTICS_ROUTE:
+        return is_admin(user) or bool({"analytics", "seo"} & set(permission_keys(user)))
     if page and (
         page["key"] == seo_workspace.SEO_PAGE_KEY
         or page.get("parent_key") == seo_workspace.SEO_PAGE_KEY

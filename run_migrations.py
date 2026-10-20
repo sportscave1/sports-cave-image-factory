@@ -68,6 +68,7 @@ REVIEWS_MIGRATIONS = ('20261002152512_reviews_v1.sql',)
 WALL_PREVIEW_MIGRATIONS = ('20261004_wall_preview_inbox.sql', '20261004_wall_preview_customer_identity.sql', '20261005_wall_preview_crm_v2.sql', '20261005183000_wall_preview_hd_consent.sql', '20261005194500_wall_preview_market_country.sql', '20261005051833_wall_preview_hd_send_evidence.sql', '20261006030857_wall_preview_funnel_analytics.sql', '20261006084655_wall_preview_engagement.sql')
 EDITION_MIGRATIONS = ('20261008041452_edition_version_transitions.sql', '20261008045733_edition_version_guard_hardening.sql', '20261008065000_explicit_edition_cursor_override.sql', '20261008090000_edition_admin_cursor_repair.sql')
 REVIEWED_MIGRATION_SHA256 = {
+    '20261020001929_task_recorder_device_relay.sql': '9ab200bab139b07fe0b5f2b0d33fd3ee15baab4396bde10d3738d2e70f4f6b9b',
     '20261017001547_auto_editions_technical_completion.sql': '07cad75344b5df4d522a2b161e7093bf109d20eebf8961d477f347dd2cd4c7e3',
     '20261017010350_product_upload_intakes.sql': 'f64c1637c5d045eb0e8c40a0e36b9dd86cb6f86d4a9d28dd6f08cfde49fa0322',
     '20261016120000_auto_editions_reset_mapping_permissions.sql': '8c9c671e5a2f35b9728fb6d0b5a9b0166a8b43e2250db1e0e18bd4f0bebce6d4',
@@ -140,6 +141,7 @@ DEPLOYMENT_MIGRATIONS = (
     "20261016120000_auto_editions_reset_mapping_permissions.sql",
     "20261017001547_auto_editions_technical_completion.sql",
     "20261017010350_product_upload_intakes.sql",
+    "20261020001929_task_recorder_device_relay.sql",
 )
 MARKETPLACE_SCHEMA_MIGRATIONS = (SHOPIFY_MARKETPLACE_MIGRATION,)
 MARKETPLACE_SCHEMA_COLUMNS = {
@@ -423,8 +425,12 @@ def _existing_controls_match(cur, sql):
 
 def run_deployment_migrations(*, check=False):
     """Apply only the explicit SHA-reviewed deployment set; fail closed."""
-    selected = [(MIGRATIONS_DIR / name, (MIGRATIONS_DIR / name).read_text(encoding='utf-8'))
-                for name in DEPLOYMENT_MIGRATIONS]
+    selected = []
+    for name in DEPLOYMENT_MIGRATIONS:
+        path = MIGRATIONS_DIR / name
+        if not path.is_file():
+            path = BASE_DIR / 'supabase' / 'migrations' / name
+        selected.append((path, path.read_text(encoding='utf-8')))
     for path, sql in selected:
         if not reviewed_migration_sql(path, sql):
             raise RuntimeError(f"Deployment migration is not SHA-reviewed: {path.name}")

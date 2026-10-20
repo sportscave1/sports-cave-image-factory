@@ -31,6 +31,7 @@ from product_quiz_api import ROUTES as PRODUCT_QUIZ_ROUTES
 from auto_editions_bulk import ROUTES as AUTO_EDITIONS_BULK_ROUTES
 from worker_health_api import ROUTES as WORKER_HEALTH_ROUTES
 from product_upload_api import ROUTES as PRODUCT_UPLOAD_ROUTES
+from task_recorder.hosted_api import ROUTES as TASK_RECORDER_ROUTES
 
 
 
@@ -46,6 +47,7 @@ routes = [
         *AUTO_EDITIONS_BULK_ROUTES,
         *WORKER_HEALTH_ROUTES,
         *PRODUCT_UPLOAD_ROUTES,
+        *TASK_RECORDER_ROUTES,
 
         *COLLECTOR_VAULT_ROUTES,
         *DAILY_PLANNER_ROUTE_HANDLERS,
