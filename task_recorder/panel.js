@@ -202,7 +202,7 @@ $('refresh').onclick=()=>{after='';api('state').then(update).catch(e=>error(e.me
 // desktop capture. Direct diagnostic viewing uses ordinary CSS sticky positioning.
 let frame=null,fitQueued=false;
 try{if(window.parent!==window&&window.parent.location.origin===location.origin)frame=window.frameElement;}catch{}
-function sticky(){if(!frame)return;const top=frame.getBoundingClientRect().top;const y=Math.min(Math.max(0,64-top),Math.max(0,document.querySelector('main').offsetHeight-$('toolbar').offsetTop-$('toolbar').offsetHeight));$('toolbar').style.transform=`translateY(${y}px)`;}
+function sticky(){if(!frame)return;const top=frame.getBoundingClientRect().top;const y=Math.min(Math.max(0,64-top-$('toolbar').offsetTop),Math.max(0,document.querySelector('main').offsetHeight-$('toolbar').offsetTop-$('toolbar').offsetHeight));$('toolbar').style.transform=`translateY(${y}px)`;}
 function fit(){if(!frame||fitQueued)return;fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;frame.style.height=Math.ceil(document.querySelector('main').offsetHeight+2)+'px';sticky();});}
 if(frame){new ResizeObserver(fit).observe(document.querySelector('main'));window.parent.addEventListener('scroll',sticky,true);window.parent.addEventListener('resize',fit);}
 window.addEventListener('pagehide',()=>{stopped=true;if(frame){window.parent.removeEventListener('scroll',sticky,true);window.parent.removeEventListener('resize',fit);}});

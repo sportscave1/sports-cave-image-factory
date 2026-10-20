@@ -90,6 +90,19 @@ The full isolated page trial passed name/metadata, exact playback, inline rename
 disposable deletion, helper restart, paused-page reopening, active deletion
 protection, Resume without repeated steps, Stop and disconnected feedback.
 
+Live HTTPS verification also passed: embedded interface/table, explicit outdated-helper
+message, installed helper upgrade/reconnection, supplied-name recording/autosave,
+row Play, inline Rename surviving refresh and durable disposable deletion. All 11
+pre-upgrade task hashes, pairing and profile identity matched immediately after
+upgrade. The user subsequently confirmed deleting the older recordings themselves;
+those deletions were preserved. Only the agent's disposable release task was removed
+by this release check.
+
+A 1004px desktop layout check confirms the table has no horizontal overflow and
+all actions fit. The toolbar stays at 64px below the OS header when the page is
+scrolled. Page-specific OS padding uses the available width; no global navigation
+or unrelated page source is changed.
+
 ## Remaining limitations
 
 Supported actions and privacy protections are the existing Phase 2 set. Unsupported
