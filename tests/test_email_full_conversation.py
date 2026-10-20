@@ -1,4 +1,4 @@
-"""Offline regressions for automatic conversation hydration and sender layout."""
+"""Released conversation/layout contracts updated for explicit lazy expansion."""
 from copy import deepcopy
 import unittest
 import uuid
@@ -21,23 +21,23 @@ class FullConversationTests(unittest.TestCase):
     def event(self, fixture, action, **values):
         fixture.w.handle(dict(id=str(uuid.uuid4()), action=action, **values))
 
-    def test_all_cached_bodies_visible_without_expanded_state(self):
+    def test_cached_bodies_are_visible_only_when_explicitly_expanded(self):
         f = self.fixture()
         thread = f.state['threads'][0]
         f.w._select_thread(thread)
         first = f.state['conversation'][0]
         other = deepcopy(first)
-        other.update(uid='999', message_id='<synthetic-other@example.test>')
+        other.update(uid='999', message_id='<synthetic-other@example.test>', unread=False, flags=('\\Seen',))
         f.state['conversation'] = [first, other]
         f.w.bodies.clear()
         f.imap.calls.clear()
         for message in f.state['conversation']:
-            self.event(f, 'load_conversation_body', thread_key=thread['thread_key'], message_key=reference_key(message))
+            self.event(f, 'open_message', message_key=reference_key(message))
         f.state['expanded'] = set()
-        self.assertTrue(all(m['expanded'] for m in f.w.model()['messages']))
+        self.assertTrue(all(not m['expanded'] and 'html' not in m for m in f.w.model()['messages']))
         self.assertEqual(sum(c[0] == 'body' for c in f.imap.calls), 2)
         for message in f.state['conversation']:
-            self.event(f, 'load_conversation_body', thread_key=thread['thread_key'], message_key=reference_key(message))
+            self.event(f, 'open_message', message_key=reference_key(message))
         self.assertEqual(sum(c[0] == 'body' for c in f.imap.calls), 2)
 
     def test_stale_thread_and_unselected_inbox_bodies_never_loaded(self):
@@ -48,21 +48,21 @@ class FullConversationTests(unittest.TestCase):
         self.event(f, 'load_conversation_body', thread_key='stale', message_key=f.state.get('active_message'))
         self.assertFalse(any(c[0] == 'body' for c in f.imap.calls))
 
-    def test_historical_async_completion_without_changing_action_target(self):
+    def test_explicit_historical_async_completion_keeps_selected_action_target(self):
         f = self.fixture()
         thread = f.state['threads'][0]
         active = f.w._select_thread(thread)
         other = deepcopy(active)
-        other.update(uid='999', message_id='<async-history@example.test>')
+        other.update(uid='999', message_id='<async-history@example.test>', unread=False, flags=('\\Seen',))
         f.state['conversation'].append(other)
         key = reference_key(other)
         with patch.object(f.imap, 'read_message', side_effect=MailboxError('Pending', code='pending')):
-            self.event(f, 'load_conversation_body', thread_key=thread['thread_key'], message_key=key)
+            self.event(f, 'open_message', message_key=key)
         self.assertEqual(f.state['body_pending'], key)
         f.state['body_completion'] = {'ticket': 'synthetic'}
         self.assertEqual(f.w.model()['body_completion'], {'ticket': 'synthetic'})
         self.event(f, 'load_visible_body', message_key=key)
-        self.assertEqual(f.state['active_message'], reference_key(active))
+        self.assertEqual(f.state['active_message'], key)
         self.assertTrue(next(m for m in f.w.model()['messages'] if m['key'] == key)['expanded'])
 
     def test_unsafe_text_geometry_removed_and_image_privacy_retained(self):
@@ -74,14 +74,13 @@ class FullConversationTests(unittest.TestCase):
         self.assertNotIn(' src="https:', reader_document(safe))
         self.assertIn('display:flow-root', reader_document(safe))
 
-    def test_long_conversation_does_not_evict_itself_or_exceed_byte_budget(self):
+    def test_lazy_conversation_cache_respects_count_and_byte_budget(self):
         cache = DisplayLRU({}, 'test', limit=2, byte_limit=100)
-        cache.pinned = {'a', 'b', 'c'}
-        for key in cache.pinned:
+        for key in ['a', 'b', 'c']:
             self.assertTrue(cache.put(key, 'body'))
-        self.assertEqual(len(cache.data['entries']), 3)
+        self.assertEqual(len(cache.data['entries']), 2)
         self.assertFalse(cache.put('c', 'x' * 100))
-        self.assertIsNotNone(cache.get('a'))
+        self.assertIsNotNone(cache.get('b'))
         self.assertLessEqual(cache.data['bytes'], 100)
 
 

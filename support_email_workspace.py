@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 import os_accounts
 from support_email_provider import ImapProvider, MailboxError, folder_roles
-from support_email_logic import build_threads, cached_read, match_orders, order_numbers, workflow_for_thread
+from support_email_logic import build_threads, cached_read, match_orders, order_numbers, timestamp, workflow_for_thread
 from support_email_compose import (ComposeError, default_settings, selected_signature, new_draft, build_mime,
     sanitize_html, readable_html, split_quote, attachment_from_upload, add_attachment, make_attachment,
     edit_mailbox_draft, safe_url, sanitize_signature)
@@ -75,7 +75,6 @@ class Workspace:
             state.setdefault(key, default)
         # Content lives separately from short-lived mailbox/header snapshots and selection.
         self.bodies = DisplayLRU(state, "opened_content", limit=BODY_LIMIT, byte_limit=BODY_BYTES)
-        self.bodies.pinned = {self._content_key(m) for m in state.get('conversation', [])}
         from support_email_render import RENDER_POLICY
         reader_scope = hashlib.sha256(repr((self.config.scope, str(user['id']), RENDER_POLICY)).encode()).hexdigest()
         if state.get('reader_scope') != reader_scope:
@@ -86,6 +85,7 @@ class Workspace:
             state.pop('bulk_result', None)
             state.update(reader_scope=reader_scope, image_grants=set(), reader_session=str(uuid.uuid4()))
             self.bodies.clear()
+            state.pop('resolved_threads', None)
         self.resolved_threads = DisplayLRU(state, "resolved_threads", limit=THREAD_LIMIT, byte_limit=THREAD_BYTES)
 
     @property
@@ -277,8 +277,28 @@ class Workspace:
         elif changed and self.state.get("selected") and self.state['view'] != 'compose':
             # Refresh header flags/membership without re-fetching immutable, identity-matched MIME.
             view, context = self.state["view"], self.state.get("context", {})
+            previous_conversation = self.state.get('conversation', [])
+            active, expanded = self.state.get('active_message'), set(self.state['expanded'])
+            pending = self.state.get('body_pending')
+            read_mark = self.state.get('read_mark_pending')
+            errors = self.state.get('body_errors', {})
             self._select_thread(self._thread())
-            self.state.update(view=view, context=context)
+            # An Inbox snapshot is authoritative only for Inbox membership. Keep
+            # already-known Sent/history headers so a sync cannot retarget a reply.
+            related = [m for m in previous_conversation if m['folder'] != self.state['folder']]
+            if related:
+                groups = build_threads([*self.state['conversation'], *related], self.config.address)
+                group = next((t for t in groups if set(t['aliases']).intersection(self._thread()['aliases'])), None)
+                if group:self.state['conversation'] = group['messages']
+            valid = {reference_key(m) for m in self.state['conversation']}
+            self.state.update(view=view, context=context, expanded=expanded & valid,
+                              body_errors={key: error for key, error in errors.items() if key in valid})
+            if active in valid:self.state['active_message'] = active
+            if pending == self.state['active_message'] and pending in self.state['expanded']:
+                # Reuse the worker job; the old readiness ticket was revoked by selection.
+                self.state.update(body_pending=pending, body_loading=True, body_mark_read=pending)
+            if read_mark == self.state['active_message'] and read_mark in valid:
+                self.state['read_mark_pending'] = read_mark
         selected_first = False
         focus = self.state.get('sent_focus')
         if focus and self.state['folder'] == self.roles.get('sent'):
@@ -355,7 +375,7 @@ class Workspace:
     def show_images(self, event):
         message = self._header(event.get('message_key'))
         identity = self._reader_identity(message)
-        if (self.state['view'] != 'mail' or message not in self.state.get('conversation', [])
+        if (self.state['view'] != 'mail' or reference_key(message) not in self.state['expanded']
                 or event.get('reader_identity') != identity):
             raise MailboxError('Message changed. Open it again before showing images.')
         content = self._content(message)
@@ -368,7 +388,6 @@ class Workspace:
         self.state.setdefault('image_grants', set()).add(identity)
 
     def _body(self, message, *, defer=False):
-        self.bodies.pinned = {self._content_key(m) for m in self.state.get('conversation', [])}
         key = self._content_key(message)
         existing = self._content(message)
         if existing is not None:
@@ -412,19 +431,26 @@ class Workspace:
         self.state.pop('body_completion', None)
         return body
 
-    def _select_thread(self, thread):
+    def _cancel_body_load(self):
         from support_email_completion import revoke
         revoke(self.state['reader_session'])
-        self.state.pop('body_completion', None)
-        self.state.pop('read_mark_pending', None)
+        for key in ('body_completion', 'body_pending', 'body_mark_read'):
+            self.state.pop(key, None)
         self.state['body_loading'] = False
-        self.state.pop("body_pending", None)
+
+    def _select_thread(self, thread, *, source=None):
+        self._cancel_body_load()
+        self.state.pop('read_mark_pending', None)
         self.state['body_errors'] = {}
         self.state.update(selected=thread["thread_key"], expanded=set(), view="mail", context={})
         resolved = self.resolved_threads.get((self.state["mailbox_version"], thread["thread_key"]))
         messages = resolved if resolved is not None else thread["messages"]
+        if source is not None and not any(self._content_key(m) == self._content_key(source) for m in messages):
+            # The source was already validated before compose/draft binding. A
+            # pending header-history refresh must not hide that exact message.
+            messages = sorted([*messages, source], key=lambda m: (timestamp(m), int(m['uid'])))
         self.state["conversation"] = messages
-        active = next((m for m in reversed(messages) if m["folder"] == self.state["folder"]), messages[-1])
+        active = source if source is not None else messages[0]
         self.state["active_message"] = reference_key(active)
         self.state["expanded"].add(reference_key(active))
         self.state["history_pending"] = resolved is None and any(m["message_id"] or m["references"] or m["in_reply_to"] for m in messages)
@@ -785,7 +811,8 @@ class Workspace:
                 self.load(previews=False,defer_body=True)
             elif action == "load_visible_body":
                 key = self.state.get("body_pending")
-                if key and key == event.get("message_key") and self.state["view"] == "mail":
+                if (key and key == event.get("message_key") == self.state.get("active_message")
+                        and key in self.state["expanded"] and self.state["view"] == "mail"):
                     self.state.pop('body_pending',None)
                     message = self._header(key)
                     try:
@@ -793,15 +820,11 @@ class Workspace:
                             self._visible_ready(message)  # Paint before the explicit Open's flag write.
                     except MailboxError as error:
                         self.state.setdefault('body_errors', {})[key] = str(error)
+                        self.state['body_loading'] = False
+                        self.state.pop('body_completion', None)
             elif action == 'load_conversation_body':
-                key = event.get('message_key')
-                message = next((m for m in self.state.get('conversation', []) if reference_key(m) == key), None)
-                if (message and event.get('thread_key') == self.state.get('selected')
-                        and self.state['view'] == 'mail' and not self.state.get('body_pending')):
-                    try:
-                        self._body(message, defer=True)
-                    except MailboxError as error:
-                        self.state.setdefault('body_errors', {})[key] = str(error)
+                # Older embedded clients must not speculatively fetch collapsed MIME.
+                return True
             elif action == 'mark_visible_read':
                 key = self.state.pop('read_mark_pending', None)
                 if (key and key == event.get('message_key') == self.state.get('active_message')
@@ -853,6 +876,8 @@ class Workspace:
                 self.resolve_thread(event.get("thread_key"), event.get("mailbox_version"))
             elif action == "open_message":
                 message = self._header(event.get("message_key"))
+                self._cancel_body_load()
+                self.state.setdefault('body_errors', {}).pop(reference_key(message), None)
                 self.state["active_message"] = reference_key(message)
                 self.state["expanded"].add(reference_key(message))
                 if self._body(message, defer=True) is not None:
@@ -882,7 +907,7 @@ class Workspace:
                     text = self._body(message)["text"]
                     thread = next((t for t in self.state["threads"] if any(reference_key(m) == reference_key(message) for m in t["messages"])), self._thread())
                     if thread:
-                        self._select_thread(thread)
+                        self._select_thread(thread, source=message)
                     self._read_visible(message)
                 self.state["draft"] = new_draft(self.config.address, mode=mode, header=message, text=text,
                     signature=selected_signature(self.state["settings"], self.user, self.state.get("preference")))
@@ -994,6 +1019,12 @@ class Workspace:
                 self.state.update(send_stage="VALIDATION_FAILED", send_progress={})
             self.state["notice"] = "Could not update message. Try again." if event.get("action") in {
                 "mark_read", "mark_unread", "star", "unstar", "move", "copy", "archive", "trash", "junk"} else str(error)
+            if event.get("action") in {"open_thread", "open_message", "load_visible_body"}:
+                key = self.state.get('active_message')
+                self.state.setdefault('body_errors', {})[key] = str(error)
+                self.state.pop('body_pending', None)
+                self.state.pop('body_completion', None)
+                self.state['body_loading'] = False
             if event.get("action") in {"open_thread", "open_message"} and self.state.get("recovery_state"):
                 self.state["connection_notice"] = self.state["notice"]
             if event.get("action") == "test_connection":
@@ -1177,7 +1208,7 @@ class Workspace:
             if not found:
                 return
             thread = build_threads([found], self.config.address)[0]
-            self._select_thread(thread)
+            self._select_thread(thread, source=found)
             self._body(found)
             self.state['draft_source_unavailable'] = False
         except Exception:
@@ -1525,12 +1556,12 @@ class Workspace:
         if not s.get("error"):
             for m in s.get("conversation", []):
                 key = reference_key(m)
-                content = self._content(m)
+                content = self._content(m) if key in s["expanded"] else None
                 body = content["body"] if content else None
                 row = {"key": key, "reply_to": m.get("reply_to", []), "sender": m["sender"], "subject": m["subject"], "to": m["to"], "cc": m["cc"],
                     "time": formatted_date(m["date"] or m["received_at"], user), "folder": m["folder"],
                     "own": m["sender"]["email"].casefold() == self.config.address.casefold(), "unread": m["unread"],
-                    "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "body_error": s.get('body_errors', {}).get(key, ''), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}
+                    "starred": "\\Flagged" in m["flags"], "expanded": bool(body), "body_loading": key == s.get("body_pending"), "preview": str(m.get("snippet") or "")[:180], "body_error": s.get('body_errors', {}).get(key, ''), "attachments": [], "draft": m["folder"] == self.roles.get("drafts")}
                 if body:
                     row.update(html=content["html"], reader_document=content.get("reader_document", ""), quote=content["quote"], warnings=body.get("warnings", []),
                         attachments=[{k: a[k] for k in ("section", "filename", "content_type", "encoded_size")} for a in body["attachments"]])
@@ -1611,7 +1642,7 @@ class Workspace:
             "initial_load_pending": bool(s.get("initial_load_pending")),
             "discovery_pending": bool(s.get('discovery_pending')),
             "read_pending": bool(s.get('read_pending')), "body_loading": bool(s.get('body_loading')),
-            "body_completion": s.get('body_completion') if can_read and s['view']=='mail' and s.get('body_pending') else None,
+            "body_completion": s.get('body_completion') if can_read and s['view']=='mail' and s.get('body_pending')==s.get('active_message') else None,
             "read_mark_pending": s.get('read_mark_pending'),
             "live_pending": bool(s.get('live_pending')),
             "sync_health": (self.imap.reads.health_snapshot() if hasattr(self.imap,'reads') else {}),
