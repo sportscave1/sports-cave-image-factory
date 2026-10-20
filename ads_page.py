@@ -5151,9 +5151,13 @@ def resolve_standard_instant_experience_visuals(
         "worldwide_verified": _metadata_bool(product_metadata or {}, "worldwide_edition_verified", "worldwide_policy_approved"),
         "no_second_run_verified": _metadata_bool(product_metadata or {}, "no_second_run_verified", "no_reprint_verified", "no_second_run", "no_reprint"),
         "retires_when_sold_out": _metadata_bool(product_metadata or {}, "retires_when_sold_out", "retirement_verified"),
+        "limited_edition_verified": (_metadata_bool(product_metadata or {}, "is_limited_edition", "limited_edition") is True
+                                     or bool(re.search(r"\blimited[- ]edition\b", product_name, re.I))),
         "remaining_editions": _positive_int_or_none((product_metadata or {}).get("remaining_editions")),
         "editions_sold": (product_metadata or {}).get("editions_sold"),
-    }, instant_experience_on_image_headline_is_valid, recent_fingerprints=recent_fingerprints or (), selections=(
+    }, instant_experience_on_image_headline_is_valid,
+        pair_is_valid=lambda h, s: not validate_instant_experience_on_image_copy(h, s, "CLAIM YOUR EDITION"),
+        recent_fingerprints=recent_fingerprints or (), selections=(
         (product_metadata or {}).get("instant_experience_footer_selections") or ()
     ))
     ie_visuals.resolve_scene_set(resolved, {

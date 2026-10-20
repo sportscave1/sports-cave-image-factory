@@ -42,11 +42,12 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         self.assertEqual(text.count(footer), 1)
         for i, (_, _, prompt) in enumerate(groups):
             self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
-            if limit == 100:
-                self.assertTrue(any("HEADLINE: " + h in prompt for h in (*ads_page.ie_visuals.HEADLINES, *ads_page.ie_visuals.SAFE_HEADLINES)))
-            else:
-                self.assertTrue(any("HEADLINE: " + h.replace("100", str(limit)) in prompt for h in (*ads_page.ie_visuals.HEADLINES, *ads_page.ie_visuals.SAFE_HEADLINES)))
-            self.assertTrue(any("SUPPORTING LINE: " + line in prompt for line in ads_page.ie_visuals.APPROVED_SUPPORT_LINES))
+            headline = re.search(r"^HEADLINE: (.+)$", prompt, re.M).group(1)
+            support = re.search(r"^SUPPORTING LINE: (.+)$", prompt, re.M).group(1)
+            context = {"edition_limit": limit}
+            self.assertIn(headline, ads_page.ie_visuals.eligible_headlines(context))
+            self.assertIn(support, ads_page.ie_visuals.eligible_support_lines(context))
+            self.assertTrue(ads_page.ie_visuals.coherent_pair(headline, support))
             self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))
             self.assertIn("VARIANT PRECEDENCE — MANDATORY", prompt)
             self.assertIn("CLAIM YOUR EDITION", prompt)

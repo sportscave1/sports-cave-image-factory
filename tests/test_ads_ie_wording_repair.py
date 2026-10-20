@@ -60,8 +60,13 @@ class WordingRepairTests(unittest.TestCase):
             self.assertTrue(all(r["eligible_headline_alternatives"] for r in rows))
             history = (rows + history)[:scenes.HISTORY_LIMIT]
             previous = pairs
-        self.assertEqual(heads, set(visuals.HEADLINES) | set(visuals.SAFE_HEADLINES))
-        self.assertEqual(subs, set(visuals.APPROVED_SUPPORT_LINES))
+        context = dict(edition_limit=100, worldwide_verified=True, no_second_run_verified=True,
+                       remaining_editions=100, editions_sold=0)
+        eligible = set(visuals.eligible_headlines(context))
+        self.assertEqual(heads, eligible)
+        compatible_supports = {s for s in visuals.eligible_support_lines(context)
+                               if any(visuals.coherent_pair(h, s) for h in eligible)}
+        self.assertEqual(subs, compatible_supports)
 
     def test_claim_gates_and_empty_pools_do_not_invent_alternatives(self):
         base = {"edition_limit": 100}

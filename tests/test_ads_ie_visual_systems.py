@@ -72,9 +72,9 @@ class ThreeVisualSystemsTests(unittest.TestCase):
     def test_approved_copy_fit_diversity_and_stability(self):
         self.assertEqual(len(ads_page.ie_visuals.HEADLINES), 6)
         self.assertEqual(len(set(ads_page.ie_visuals.APPROVED_SUPPORT_LINES)), 9)
-        eligible = {h for h in (*ads_page.ie_visuals.HEADLINES, *ads_page.ie_visuals.SAFE_HEADLINES)
+        eligible = {h for h in ads_page.ie_visuals.eligible_headlines({"edition_limit": 100})
                     if ads_page.instant_experience_on_image_headline_is_valid(h)}
-        self.assertEqual(len(eligible), 9)
+        self.assertIn("LIMITED EDITION", eligible)
         seen = set()
         for token in map(str, range(30)):
             rows = self.visuals(token, {"edition_limit": 100})
@@ -84,7 +84,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             self.assertEqual(len({(r["headline_text"], r["supporting_line"]) for r in rows}), 3)
             self.assertEqual(len({r["supporting_line"] for r in rows}), 3)
             for r in rows:
-                self.assertIn(r["supporting_line"], ads_page.ie_visuals.APPROVED_SUPPORT_LINES)
+                self.assertIn(r["supporting_line"], ads_page.ie_visuals.eligible_support_lines({"edition_limit": 100}))
                 self.assertEqual(r["cta_text"], "CLAIM YOUR EDITION")
                 self.assertEqual(ads_page.validate_instant_experience_on_image_copy(
                     r["headline_text"], r["supporting_line"], r["cta_text"]), ())
@@ -95,10 +95,13 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         headlines = ads_page.ie_visuals.HEADLINES
         eligible = ads_page.ie_visuals.eligible_headlines
         base = {"edition_limit": 100}
-        self.assertEqual(set(eligible(base)), {headlines[i] for i in (2, 3, 4)} | set(ads_page.ie_visuals.SAFE_HEADLINES))
+        self.assertIn("LIMITED TO 100 EDITIONS", eligible(base))
+        self.assertIn("LIMITED EDITION", eligible(base))
+        self.assertNotIn(headlines[2], eligible(base))
+        self.assertNotIn(headlines[3], eligible(base))
         supported = {**base, "worldwide_verified": True, "no_second_run_verified": True,
                      "remaining_editions": 100, "editions_sold": 0}
-        self.assertEqual(set(eligible(supported)), set(headlines) | set(ads_page.ie_visuals.SAFE_HEADLINES))
+        self.assertTrue(set(headlines) | set(ads_page.ie_visuals.SAFE_HEADLINES) <= set(eligible(supported)))
         for remaining, sold in ((99, 1), (100, 1), (None, None)):
             self.assertNotIn(headlines[5], eligible({**supported, "remaining_editions": remaining, "editions_sold": sold}))
         self.assertNotIn(headlines[0], eligible({**base, "worldwide_verified": "false"}))
@@ -111,7 +114,8 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             reserves = [h for r in rows for h in [r["headline_fit_fallback"], *r["eligible_headline_alternatives"]]]
             self.assertTrue(all(r["eligible_headline_alternatives"] for r in rows))
             self.assertFalse({h for r in rows for h in r["eligible_headline_alternatives"]} & {r["headline_text"] for r in rows})
-        self.assertEqual(seen, set(headlines) | set(ads_page.ie_visuals.SAFE_HEADLINES))
+        self.assertTrue(seen <= set(eligible(supported)))
+        self.assertGreater(len(seen), len(headlines) + len(ads_page.ie_visuals.SAFE_HEADLINES))
 
     def test_expanded_rooms_are_reachable_and_route_appropriate(self):
         seen = [set(), set(), set()]

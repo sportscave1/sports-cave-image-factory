@@ -1,5 +1,7 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
 import hashlib
+import re
+from ads_refresh_generation import IE_REFRESH_FOOTER_HEADLINES, IE_REFRESH_FOOTER_SUPPORT
 import ads_ie_scenes as scene_library
 import sports_cave_physical_realism as physical_realism
 
@@ -49,6 +51,14 @@ def stable_rank(seed, value):
 
 
 SAFE_HEADLINES = ("SPORTS CAVE COLLECTOR", "FOR YOUR COLLECTION", "A COLLECTOR STATEMENT")
+# Recover the existing refresh banks without changing that workflow. LIMITED
+# EDITION is also approved explicitly in f96d8469's SCARCITY_RULE. The standalone
+# availability label is a requested short form of HEADLINES[5], not a newly
+# discovered historical standalone bank. The numbered subline is user-approved.
+RESTORED_HEADLINES = ("LIMITED EDITION", *IE_REFRESH_FOOTER_HEADLINES)
+AVAILABILITY_HEADLINE = "ONLY 100 AVAILABLE"
+NUMBERED_SUPPORT = "Limited to {limit} Editions"
+RESTORED_SUPPORT_LINES = tuple(dict.fromkeys((*SUPPORT_LINES[1:], *IE_REFRESH_FOOTER_SUPPORT)))
 FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_signature", "footer_emphasis", "eligible_headline_alternatives", "headline_fit_fallback")
 
 
@@ -56,21 +66,38 @@ def eligible_headlines(context):
     """Reuse the approved bank, with independent evidence gates per claim."""
     templates = list(SAFE_HEADLINES)
     limit = context.get("edition_limit")
+    if limit or context.get("limited_edition_verified"):
+        templates.append(RESTORED_HEADLINES[0])
     if limit:
-        templates += [HEADLINES[i].replace("100", str(limit)) for i in (2, 3, 4)]
+        templates += [HEADLINES[4], *[IE_REFRESH_FOOTER_HEADLINES[i] for i in (1, 3, 4, 7)]]
         if context.get("worldwide_verified") is True:
-            templates.append(HEADLINES[0].replace("100", str(limit)))
+            templates += [HEADLINES[0], IE_REFRESH_FOOTER_HEADLINES[2]]
         if context.get("no_second_run_verified") is True:
-            templates.append(HEADLINES[1].replace("100", str(limit)))
+            templates += list(HEADLINES[1:4]) + [IE_REFRESH_FOOTER_HEADLINES[i] for i in (0, 6)]
+            if context.get("worldwide_verified") is True:
+                templates.append(IE_REFRESH_FOOTER_HEADLINES[8])
         if context.get("remaining_editions") == limit and str(context.get("editions_sold")) in {"None", "0"}:
-            templates.append(HEADLINES[5].replace("100", str(limit)))
-    return templates
+            templates += [HEADLINES[5], AVAILABILITY_HEADLINE, *[IE_REFRESH_FOOTER_HEADLINES[i] for i in (5, 9)]]
+    return list(dict.fromkeys(h.replace("100", str(limit)) if limit else h for h in templates))
 
 
 def eligible_support_lines(context):
     finality = context.get("no_second_run_verified") is True or context.get("retires_when_sold_out") is True
-    return [line for i, line in enumerate(APPROVED_SUPPORT_LINES)
-            if (i not in (0, 3) or finality) and (i not in (2, 5, 6, 8) or context.get("edition_limit"))]
+    limited = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
+    lines = [line for i, line in enumerate(APPROVED_SUPPORT_LINES)
+             if (i not in (0, 3) or finality) and (i not in (2, 5, 6) or limited)]
+    lines += list(SUPPORT_LINES[1:])
+    if limited:
+        lines += ["Limited Edition", IE_REFRESH_FOOTER_SUPPORT[4], IE_REFRESH_FOOTER_SUPPORT[8]]
+    if context.get("edition_limit"):
+        lines.append(NUMBERED_SUPPORT.format(limit=context["edition_limit"]))
+    if context.get("no_second_run_verified") is True:
+        lines += [IE_REFRESH_FOOTER_SUPPORT[i] for i in (0, 1, 2, 5)]
+    if context.get("retires_when_sold_out") is True:
+        lines.append(IE_REFRESH_FOOTER_SUPPORT[6])
+    if finality:
+        lines += [IE_REFRESH_FOOTER_SUPPORT[i] for i in (3, 7, 9)]
+    return list(dict.fromkeys(lines))
 
 
 def footer_emphasis(headline):
@@ -78,19 +105,45 @@ def footer_emphasis(headline):
             "collector_identity" if headline in SAFE_HEADLINES else "scarcity")
 
 
-def coherent_pair(headline, support):
-    # A quantity headline is supported by emotion/identity, not a repeated quantity claim.
-    if footer_emphasis(headline) == "collector_identity" and support == APPROVED_SUPPORT_LINES[7]:
-        return False  # A collector label plus "Made for serious collectors" merely restates it.
-    return not (footer_emphasis(headline) == "scarcity" and support in
-                (APPROVED_SUPPORT_LINES[5], APPROVED_SUPPORT_LINES[6]))
+def explicit_scarcity(text):
+    """Recognise bounded-edition language, never vague rarity/opportunity alone."""
+    text = text.casefold()
+    return bool(re.search(r"\blimited\b|\bshort[- ]run\b|\bno second run\b|\bwon.t be repeated\b|\b(?:only|strictly|just)\s+\d+\b|\b\d+\s+(?:editions?|worldwide|can|will|are|go)\b", text))
 
 
-def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=()):
+def meaningful_words(text):
+    stop = set("a an the for your you this that it its is are as to of and or but with by in on at be been who why those they their them can not everyone some before after once when while".split())
+    words = re.findall(r"[a-z]+|\d+", text.casefold())
+    def stem(word):
+        if word.startswith("collect"): return "collect"
+        if word in {"edition", "editions"}: return "edition"
+        if word in {"limit", "limited", "limits"}: return "limit"
+        if word.startswith("availab"): return "available"
+        if word in {"own", "owns", "ownership", "claim", "claimed", "claiming"}: return "own"
+        return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+    return {stem(w) for w in words if w not in stop}
+
+
+def coherent_pair(headline, support, *, require_scarcity=True):
+    head_scarcity, sub_scarcity = explicit_scarcity(headline), explicit_scarcity(support)
+    if (require_scarcity and not (head_scarcity or sub_scarcity)) or (head_scarcity and sub_scarcity):
+        return False
+    if meaningful_words(headline) & meaningful_words(support):
+        return False
+    # A scarcity headline needs a different idea, not a vague sellout paraphrase.
+    if head_scarcity and re.search(r"\brare\b|\bgone\b|\bopportunity\b|\bcloses\b|\bends\b|\bretires\b|\bsellout\b|\bmissed\b", support, re.I):
+        return False
+    return True
+
+
+def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
     """Resolve one immutable pack, preferring unseen/least-recently-used approved copy."""
     from itertools import combinations
     eligible = [h for h in eligible_headlines(context) if headline_is_valid(h)]
     supports = eligible_support_lines(context)
+    require_scarcity = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
+    def compatible(h, sub):
+        return coherent_pair(h, sub, require_scarcity=require_scarcity) and (pair_is_valid is None or pair_is_valid(h, sub))
     if len(eligible) < 3 or len(supports) < 3:
         raise ValueError("Three distinct factually eligible footer headlines and sublines are required.")
     seed = visuals[0]["resolved_seed"]
@@ -112,12 +165,18 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
                 if not context.get("edition_limit") or len({footer_emphasis(h) for h in c}) >= 2]
         sets.sort(key=lambda c: (sum(h in old_heads for h in c), -sum(age(h, old_heads) for h in c),
                                 -len({footer_emphasis(h) for h in c}), stable_rank(seed, str(c))))
-        chosen = sorted(sets[0], key=lambda h: stable_rank(seed, h))
-        # Finite, at most 9 x 8 x 7 approved subline combinations. Recycle the
-        # least-recent eligible words in different pairs after the finite bank fills.
-        from itertools import permutations
-        pairings = [list(zip(chosen, c)) for c in permutations(supports, 3)
-                    if all(coherent_pair(h, sub) for h, sub in zip(chosen, c))]
+        # Bounded finite compatible domains; skip a headline set only if it cannot
+        # supply three distinct supports. No invented wording or unbounded retries.
+        from itertools import product
+        pairings = []
+        for option in sets:
+            chosen = sorted(option, key=lambda h: stable_rank(seed, h))
+            domains = [[s for s in supports if compatible(h, s)] for h in chosen]
+            pairings = [list(zip(chosen, c)) for c in product(*domains) if len(set(c)) == 3]
+            if pairings:
+                break
+        if not pairings:
+            raise ValueError("Three complementary approved footer pairs need verified scarcity and copy-fit evidence.")
         pairs = min(pairings, key=lambda ps: (
             sum(p in old_pairs[:3] for p in ps), sum(p in old_pairs for p in ps),
             sum(sub in old_supports for _, sub in ps), -sum(age(sub, old_supports) for _, sub in ps),
@@ -126,7 +185,7 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
         raise ValueError("Saved footer selections must have three unique headlines and sublines.")
     assigned = {h for h, _ in pairs}
     for index, (visual, (headline, support)) in enumerate(zip(visuals, pairs)):
-        alternatives = sorted([h for h in eligible if h not in assigned and coherent_pair(h, support)],
+        alternatives = sorted([h for h in eligible if h not in assigned and compatible(h, support)],
                               key=lambda h: text_rank(h, old_heads))
         if frozen and "eligible_headline_alternatives" in selections[index]:
             alternatives = list(selections[index]["eligible_headline_alternatives"])
@@ -189,7 +248,13 @@ def resolved_camera_variation(visual, index, context, variation_token):
     return CAMERA_VARIATIONS[0]
 
 
-SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline. The approved '
+SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and supporting line. '
+                 'With verified scarcity, exactly one line supplies the limited-edition/edition-size claim; '
+                 'the other adds collector or emotional meaning. Never echo meaningful words, stems, numbers '
+                 'or scarcity claims between the two lines; connecting words and the fixed CTA are exempt. '
+                 'Vague rarity or scarcity inside the artwork does not satisfy footer scarcity. '
+                 'If scarcity evidence is missing, retain the safe selected copy and report the missing verification; '
+                 'never fabricate a claim or replace selected copy with arbitrary wording. The approved '
                  'geographic wording is allowed only when explicitly included in the resolved verified headline. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '
                  'Immutable wording already inside the source artwork stays untouched.')
