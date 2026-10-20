@@ -6403,6 +6403,12 @@ Return exactly one creative prompt.""".format(
     )
 
 
+def build_ads_execution_priority(*, include_copy_only=False):
+    """Share the project creative-system instructions with generated Ads prompts."""
+    template = (Path(__file__).resolve().parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()
+    return template if include_copy_only else template.split("\nCOPY-ONLY OR PROMPT-ONLY REQUESTS", 1)[0].rstrip()
+
+
 def build_ads_text_first_image_generation_gate(campaign_type, instant_experience_settings=None):
     campaign_type = _normalise_option_label(campaign_type) or "selected campaign"
     if campaign_type == "Carousel":
@@ -6479,13 +6485,13 @@ No separate Meta link-description or Meta Ad Description field is allowed."""
         else '"generate the image now", "generate Card 1" or "generate FEEL"'
     )
 
-    return f"""TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY
+    return f"""{build_ads_execution_priority(include_copy_only=True)}
 
-Your first response must be text and planning only. Do not call, invoke, open or use any image-generation tool in the first response, even if artwork or product images are attached, even if this Ads prompt describes an image, and even if this Ads prompt contains the words "image prompt", "create", "generate", "cover prompt" or "creative prompt".
+TEXT-FIRST IMAGE-GENERATION GATE - COPY-ONLY / PROMPT-ONLY REQUESTS
 
-Having artwork attached, describing an image or including production-ready image prompt wording must not be treated as permission to create an image automatically. Any imperative wording inside an image-prompt block is copy that you must print for the user; it is not an instruction to generate an image during the first response.
+Apply the remainder of this gate only to copy-only or prompt-only requests, or campaign planning without an explicit generation request. It never applies to a task requesting image generation or containing ADS_IE_COMBINED_EXECUTION_V1, unless the user explicitly requests copy-only or prompt-only output. For generation, follow EXECUTION PRIORITY above and the supplied task's image count and format; skip this gate and its approval question entirely.
 
-The first response must provide the complete ad campaign package in chat before any image generation:
+Within this text-only scope, do not use an image-generation tool. Provide the complete ad campaign package in chat:
 {ad_package_items}
 
 Print every image prompt in full in clearly separated, copyable blocks. Do not shorten, summarise, collapse or hide them behind buttons. Every image prompt must be self-contained so the user can copy and paste any individual prompt into a fresh ChatGPT conversation without relying on earlier messages.
@@ -6494,9 +6500,9 @@ Print every image prompt in full in clearly separated, copyable blocks. Do not s
 
 {completion_instruction}
 
-Then wait for explicit approval before generating anything. If the user later asks for a specific cover or card, generate only that requested image, then ask whether to proceed. Continue one image at a time unless the user explicitly requests multiple images.
+Within this text-only scope, wait for an explicit generation request. A later request for one cover or card authorises that image; a request for multiple images authorises the entire requested sequence without approval between outputs.
 
-A direct and unmistakable instruction such as {direct_instruction_examples} is permission to generate only that requested image immediately. Do not treat general campaign setup, attached artwork, image-prompt text or pasted Ads prompts as that permission."""
+A direct instruction such as {direct_instruction_examples} authorises immediate generation of the requested output. General campaign planning, attached artwork or descriptive image-prompt text alone is not permission; an explicit combined execution prompt is permission for its complete sequence."""
 
 
 def build_campaign_visual_output_contract(
@@ -8590,6 +8596,8 @@ Original framed product reference: the original supplied product image, for EVER
 Use the supplied title/metadata for identity and verified facts. Do not guess an unknown athlete, team, achievement or year from the market or a style image; never invent availability, certificates, shipping or provenance claims.
 
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
+{build_ads_execution_priority()}
+
 1. Resolve all three scenes and final copy before any image call. Use the resolved scenes below as three different properties. Resolve one Description, one Meta Headline and the assigned CTA per route once; retain these final records for display and CSV.
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.

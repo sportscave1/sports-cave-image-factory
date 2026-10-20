@@ -36,7 +36,42 @@ class CombinedExecutionTests(unittest.TestCase):
                          "FINAL RESPONSE TERMINATION", "no automatic image generation", "Do not generate the image automatically",
                          "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "COPY ONE ROUTE AT A TIME"):
             self.assertNotIn(obsolete, prompt)
-        self.assertLess(len(prompt), 36000)  # Matching previous input was 93,400 characters.
+        self.assertLess(len(prompt), 38000)  # Includes shared execution priority and attachment recovery.
+
+    def test_execution_priority_is_shared_with_project_template_and_text_only_gate(self):
+        template = (Path(ads.__file__).parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()
+        priority = ads.build_ads_execution_priority()
+        self.assertTrue(template.startswith(priority))
+        prompt = self.record()["master_prompt"]
+        self.assertEqual(prompt.count(priority), 1)
+        self.assertNotIn("COPY-ONLY OR PROMPT-ONLY REQUESTS", prompt)
+        for campaign in ("Carousel", "Instant Experience", "Single Image / Video"):
+            gate = ads.build_ads_text_first_image_generation_gate(campaign)
+            self.assertIn(template, gate)
+            self.assertIn("Apply the remainder of this gate only to copy-only or prompt-only requests", gate)
+            self.assertIn("skip this gate and its approval question entirely", gate)
+            self.assertNotIn("Your first response must be text and planning only", gate)
+            self.assertNotIn("even if this Ads prompt contains", gate)
+            self.assertNotIn("Then wait for explicit approval before generating anything", gate)
+
+    def test_combined_authorisation_recovers_attachments_and_never_requires_a_reply(self):
+        prompt = self.record()["master_prompt"]
+        for required in (
+            "begin the requested generation workflow immediately",
+            "explicit authorisation for every requested image and downloadable CSV",
+            "output format and image count take precedence over generic carousel defaults",
+            "Read the supplied references and resolve copy internally",
+            "try the available attachment location",
+            "Once access succeeds, automatically resume the original task",
+            "An access confirmation is not task completion",
+            "Do not stop at acknowledging the request, confirming attachment access",
+            "additional approval between outputs",
+            "Never claim an image or CSV exists unless it was created",
+        ):
+            self.assertIn(required, prompt)
+        for obsolete in ("all five image prompts", "Only generate a mockup when", "Would you like me to generate Card 1?",
+                         "CARD 4 IMAGE GENERATION PROMPT", "CARD 5 IMAGE GENERATION PROMPT", "first text-only response"):
+            self.assertNotIn(obsolete, prompt)
 
     def test_shared_template_is_unchanged_and_expanded_for_each_call(self):
         prompt = self.record()["master_prompt"]
