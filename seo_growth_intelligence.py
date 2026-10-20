@@ -75,6 +75,7 @@ ANALYSIS_MODES = (
     "Prepare for ChatGPT",
 )
 RECOMMENDATION_STATUSES = (
+    "in_progress",
     "draft",
     "awaiting_approval",
     "approved",
@@ -87,6 +88,7 @@ RECOMMENDATION_STATUSES = (
     "measured",
 )
 TASK_STATUSES = (
+    "deferred", "ready_for_review",
     "approved",
     "assigned",
     "in_progress",

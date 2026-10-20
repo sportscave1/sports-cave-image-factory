@@ -38,6 +38,7 @@ LEGACY_CITATION_FIXTURE_PATH = BASE_DIR / "data" / "seo_citations_legacy_v1.json
 SEO_STORE_CACHE_SECONDS = 30.0
 
 BLOG_STATUSES = (
+    "Deferred", "Complete",
     "Idea",
     "Brief",
     "Draft",
@@ -77,6 +78,7 @@ KEYWORD_MAPPING_STATUSES = ("Unreviewed", "Approved", "Mapped", "Rejected", "Con
 TARGET_MARKETS = ("Australia", "United States", "United Kingdom", "Canada", "New Zealand")
 
 SEO_COLLECTIONS = {
+    "plan_items", "workspace_events", "review_decisions", "blog_projects",
     "blog_records",
     "link_plans",
     "target_library",
@@ -497,6 +499,7 @@ def default_state():
             "secondary_markets": ["Canada", "New Zealand"],
             "data_migrations": {},
         },
+        "plan_items": [], "workspace_events": [], "review_decisions": [], "blog_projects": [],
         "blog_records": [],
         "link_plans": [],
         "target_library": _default_target_library(),

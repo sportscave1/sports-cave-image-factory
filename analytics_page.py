@@ -520,54 +520,5 @@ def render_page(
     connection_store=None,
     operational_reader=None,
 ):
-    if route not in navigation.ANALYTICS_ROUTES:
-        raise ValueError(f"Unknown Analytics route: {route}")
-    _inject_styles()
-    title = navigation.ANALYTICS_NAV_LABELS[route]
-    subtitles = {
-        navigation.ANALYTICS_OVERVIEW_ROUTE: "GA4 performance from direct Google API reports.",
-        navigation.ANALYTICS_TRAFFIC_ROUTE: "Session acquisition by GA4 default channel group.",
-        navigation.ANALYTICS_PAGES_ROUTE: "Pages, screens and landing-page engagement.",
-        navigation.ANALYTICS_ECOMMERCE_ROUTE: "GA4 ecommerce attribution, kept distinct from Shopify operations.",
-        navigation.ANALYTICS_REALTIME_ROUTE: "Direct GA4 realtime activity.",
-    }
-    _header(title, subtitles[route])
-    connection_store = connection_store or google_seo.default_store()
-    store = store or _session_report_store(user)
-    try:
-        connection = connection_store.get_connection()
-    except Exception:
-        connection = {}
-    property_id = _property_id(connection)
-    if not property_id:
-        st.info("Connect and select a GA4 property to populate Analytics.")
-        _render_connection_settings(connection)
-        return
-    if st.button("Refresh data", key="analytics-direct-refresh"):
-        from google_direct_reporting import REPORTS
-        REPORTS.clear()
-        if isinstance(store, _ReportDisplayStore):
-            store.cache.invalidate()
-    try:
-        if route == navigation.ANALYTICS_REALTIME_ROUTE:
-            _realtime(store, property_id)
-            return
-        period = _filters(connection)
-        navigation_runtime.dispatch_selected(
-            route,
-            {
-                navigation.ANALYTICS_OVERVIEW_ROUTE: lambda: _overview(
-                    store,
-                    property_id,
-                    period,
-                    connection,
-                    operational_reader=operational_reader,
-                ),
-                navigation.ANALYTICS_TRAFFIC_ROUTE: lambda: _traffic(store, property_id, period),
-                navigation.ANALYTICS_PAGES_ROUTE: lambda: _pages(store, property_id, period),
-                navigation.ANALYTICS_ECOMMERCE_ROUTE: lambda: _ecommerce(store, property_id, period),
-            },
-        )
-    except (analytics_reporting.AnalyticsReportingError, ValueError) as error:
-        st.error(str(getattr(error, "public_message", error)))
-        st.caption("No reporting data was written to the database. Retry after checking the connection or quota cooldown.")
+    import seo_phase1_ui
+    return seo_phase1_ui.render(user, route, navigate=navigate, google_store=connection_store)

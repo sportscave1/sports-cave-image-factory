@@ -69,3 +69,13 @@ SEO_LEGACY_ROUTE_REDIRECTS = {
     SEO_INTERNAL_LINKING_ROUTE: SEO_MAPPING_ROUTE,
     SEO_BACKLINKS_ROUTE: SEO_OPPORTUNITIES_ROUTE,
 }
+
+# Visible Phase 1 workspace; old route identities remain valid and permission checked.
+SEO_ANALYTICS_ROUTE = "SEO Analytics"
+SEO_PLAN_ROUTE = "SEO Plan"
+SEO_REVIEW_ROUTE = "SEO Review"
+SEO_HISTORY_ROUTE = "SEO History"
+SEO_MENU_ROUTES = (SEO_OVERVIEW_ROUTE, SEO_ANALYTICS_ROUTE, SEO_PLAN_ROUTE, SEO_REVIEW_ROUTE, SEO_HISTORY_ROUTE)
+SEO_ROUTES = (*SEO_ROUTES, *SEO_MENU_ROUTES[1:])
+SEO_NAV_LABELS.update(dict(zip(SEO_MENU_ROUTES, ("Worker", "Analytics", "Plan", "Review", "History"))))
+SEO_PAGE_KEYS.update({SEO_ANALYTICS_ROUTE: "seo_analytics_workspace", SEO_PLAN_ROUTE: "seo_plan", SEO_REVIEW_ROUTE: "seo_review", SEO_HISTORY_ROUTE: "seo_history"})
