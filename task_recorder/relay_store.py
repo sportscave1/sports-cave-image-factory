@@ -157,17 +157,24 @@ class Relay:
         epoch=body.get("epoch")
         if not isinstance(epoch,int) or epoch<1: raise Invalid("Invalid helper session.")
         snapshot=body.get("state")
+        delta=body.get("state_delta")
+        if delta is not None and (snapshot is not None or not isinstance(delta,dict) or
+                set(delta)!={"base_version","changes"} or not isinstance(delta["base_version"],int) or
+                not isinstance(delta["changes"],dict) or len(json.dumps(delta))>180000):
+            raise Invalid("Invalid helper state update.")
         if snapshot is not None and (not isinstance(snapshot,dict) or len(json.dumps(snapshot))>180000): raise Invalid("Invalid helper state.")
         # These keys are produced by the helper, never cookies or browser sessions.
         allowed={"mode","message","step","total","action","can_resume","browser_open","recording","privacy_pause","tasks",
                  "operation_id","starting_url","selected_id","startup","connection","protocol","active_task_id","active_task_name"}
         if snapshot is not None and set(snapshot)-allowed: raise Invalid("Unsupported helper state fields.")
+        if delta is not None and set(delta["changes"])-allowed: raise Invalid("Unsupported helper state fields.")
         if not isinstance(body.get("acks",[]),list):raise Invalid("Invalid command acknowledgements.")
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT * FROM task_recorder_private.devices WHERE id=%s AND key_hash=%s AND revoked=false FOR UPDATE",(device_id,digest(key)))
             device=cur.fetchone()
             if not device: raise PermissionError("PC was disconnected.")
-            if device["boot_id"]!=boot:
+            new_boot=device["boot_id"]!=boot
+            if new_boot:
                 if epoch<=device["epoch"]: raise PermissionError("An old helper session cannot reconnect.")
                 cur.execute("UPDATE task_recorder_private.commands SET status='uncertain',payload='{}'::jsonb WHERE device_id=%s AND status IN ('queued','dispatched')",(device_id,))
                 device["needs_review"]=bool(device["active_run"]) or device["needs_review"] or (snapshot or {}).get("mode")=="interrupted"
@@ -177,6 +184,13 @@ class Relay:
                             (boot,epoch,device["needs_review"],device_id))
             version=body.get("state_version",0)
             if not isinstance(version,int): raise Invalid("Invalid helper state version.")
+            resync=False
+            if delta is not None:
+                if new_boot or delta["base_version"]!=device["state_version"] or version<=device["state_version"]:
+                    resync=True
+                else:
+                    snapshot={**device["state"],**delta["changes"]}
+                    if len(json.dumps(snapshot))>180000: raise Invalid("Invalid helper state.")
             if snapshot is None or version<=device["state_version"]:
                 snapshot=device["state"]
             else:
@@ -214,4 +228,4 @@ class Relay:
             for command in commands:
                 cur.execute("UPDATE task_recorder_private.commands SET status='dispatched' WHERE id=%s",(command["id"],))
         return {"commands":[{k:c[k] for k in ("id","kind","payload","fence","boot_id")} | {"valid_for":max(0,c["expires"]-self.clock())} for c in commands],
-                "fence":device["fence"]}
+                "fence":device["fence"],"state_delta":True,"state_resync":resync}

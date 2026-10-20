@@ -1,6 +1,8 @@
  'use strict';
 const $=id=>document.getElementById(id),base='/api/task-recorder/';
 let devices=[],device=null,state={},selected=sessionStorage.getItem('recorder-selected')||'',after='',lastSeq=-1,stopped=false,transportOK=true;
+let pollRunning=false,pollAbort=null;
+const requests=new Set();
 let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='',attentionKey='';
 const activeModes=new Set(['recording','recording_paused','running','pausing','paused','starting']);
 const uuid=()=>crypto.randomUUID();
@@ -13,13 +15,22 @@ function error(text){$('error').textContent=text||'';$('error').hidden=!text;}
 function notice(text){$('notice').textContent=text||'';$('notice').hidden=!text;}
 function button(text,label,fn,disabled=false){const b=document.createElement('button');b.type='button';b.textContent=text;b.title=b.ariaLabel=label;b.disabled=disabled;b.onclick=e=>{e.stopPropagation();fn();};return b;}
 async function api(path,data,signal){
- const response=await fetch(base+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal});
- const result=await response.json();if(!response.ok)throw Error(result.error||'Connection unavailable. Refresh the connection and try again.');return result;
+ const controller=new AbortController();requests.add(controller);
+ const abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
+ const timer=setTimeout(abort,50000);
+ try{
+  const response=await fetch(base+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data),signal:controller.signal});
+  const result=await response.json();if(!response.ok)throw Error(result.error||'Connection unavailable. Refresh the connection and try again.');return result;
+ }catch(e){if(controller.signal.aborted&&!signal?.aborted)throw Error('The connection timed out. Check the browser and use Stop before trying again.');throw e;}
+ finally{clearTimeout(timer);requests.delete(controller);signal?.removeEventListener('abort',abort);}
+
 }
 function remember(){sessionStorage.setItem('recorder-commands',JSON.stringify([...pending.values()]));}
 function update(result){
  const oldDevice=device?.id,keepActive=active();
- const nextDevices=result.devices,current=nextDevices.find(d=>d.id===oldDevice);
+ // Compact responses omit only an unchanged device snapshot. Keep metadata
+ // fresh (including offline/revoked state) without clearing its recordings.
+ const nextDevices=result.devices.map(d=>{const previous=devices.find(p=>p.id===d.id);return !d.state&&previous?.seq===d.seq?{...d,state:previous.state}:d;}),current=nextDevices.find(d=>d.id===oldDevice);
  const next=current&&(current.connected||keepActive)?current:nextDevices.find(d=>d.connected)||current||nextDevices[0]||null;
  if(next?.id===oldDevice&&next&&next.seq<lastSeq)return;
  if(next?.id!==oldDevice)lastSeq=-1;
@@ -32,9 +43,13 @@ function update(result){
  sessionStorage.setItem('recorder-selected',selected);render();
 }
 async function confirmCommand(command,result){
- for(let n=0;n<120&&['queued','dispatched'].includes(result.status)&&!stopped;n++){
-  await new Promise(r=>setTimeout(r,350));
-  result=await api('receipt?device='+encodeURIComponent(command.device_id)+'&id='+command.id);
+ const deadline=Date.now()+45000;
+ for(let n=0;Date.now()<deadline&&['queued','dispatched'].includes(result.status)&&!stopped;n++){
+  // The server waits for a helper update. Back off on old servers that ignore
+  // wait=1; this remains one receipt request at a time, with the same command ID.
+  const started=Date.now();
+  result=await api('receipt?device='+encodeURIComponent(command.device_id)+'&id='+command.id+'&wait=1');
+  if(['queued','dispatched'].includes(result.status)&&Date.now()-started<250)await new Promise(r=>setTimeout(r,Math.min(2000,350*(n+1))));
  }
  if(result.status!=='applied')throw Error(result.receipt?.message||'This control is not confirmed. Check the browser and use Stop before trying again.');
  const receipt=result.receipt||{};
@@ -66,7 +81,7 @@ async function send(kind,payload={}){
  }catch(e){
   // Retain uncertain command identity for navigation/reconnect reconciliation;
   // never submit a fresh duplicate start automatically.
-  try{const r=await api('receipt?device='+command.device_id+'&id='+command.id);if(!['queued','dispatched'].includes(r.status))pending.delete(command.id);}catch{}
+  if(!stopped){try{const r=await api('receipt?device='+command.device_id+'&id='+command.id);if(!['queued','dispatched'].includes(r.status))pending.delete(command.id);}catch{}}
   error(e.message);if(taskId)rowErrors.set(taskId,e.message);return null;
  }finally{remember();after='';render();}
 }
@@ -210,15 +225,31 @@ $('recordReplacement').onclick=()=>{
  notice('Press Record, perform the intended actions in the marked browser, then Stop. The original is preserved.');$('name').focus();
 };
 function stop(){return send(state.recording||state.mode==='recording_paused'?'stop-save':'stop');}
+function pollDelay(ms){
+ return new Promise(resolve=>{
+  const finish=()=>{clearTimeout(timer);document.removeEventListener('visibilitychange',finish);window.removeEventListener('pageshow',finish);resolve();};
+  const timer=setTimeout(finish,ms);document.addEventListener('visibilitychange',finish);window.addEventListener('pageshow',finish);
+ });
+}
 async function poll(){
- let reconciled=false;
- while(!stopped){
+ if(pollRunning)return;pollRunning=true;
+ let reconciled=false,failures=0;
+ try{while(!stopped){
+  // Returning to the page reconciles the real helper state. Hiding the page
+  // never pauses/stops a run; command receipts continue independently.
+  if(document.hidden){await pollDelay(60000);continue;}
   try{
-   const result=await api('state'+(device?'?device='+encodeURIComponent(device.id)+(after?'&after='+after:''):''));
-   update(result);if(device&&!reconciled){reconciled=true;reconcile();}
-   if(!device)await new Promise(r=>setTimeout(r,5000));
-  }catch(e){transportOK=false;error('Connection unavailable. Check your internet connection and refresh.');render();await new Promise(r=>setTimeout(r,3000));}
- }
+   pollAbort=new AbortController();
+   const result=await api('state'+(device?'?compact=1&device='+encodeURIComponent(device.id)+(after?'&after='+after:''):''),undefined,pollAbort.signal);
+   if($('error').textContent==='Connection unavailable. Check your internet connection and refresh.')error('');
+   update(result);failures=0;if(device&&!reconciled){reconciled=true;reconcile();}
+   if(!device)await pollDelay(5000);
+  }catch(e){
+   if(stopped)break;if(pollAbort?.signal.aborted)continue;
+   transportOK=false;error('Connection unavailable. Check your internet connection and refresh.');render();
+   await pollDelay(Math.min(30000,2000*2**Math.min(failures++,4)));
+  }finally{pollAbort=null;}
+ }}finally{pollRunning=false;}
 }
 $('record').onclick=()=>send('record',{name:$('name').value.trim(),...($('website').value?{url:$('website').value}:{})});
 $('play').onclick=()=>play(selected);$('pause').onclick=()=>send('pause');$('resume').onclick=()=>send('resume');$('stop').onclick=stop;$('view').onclick=()=>send('view');
@@ -226,7 +257,7 @@ $('reusable').onclick=async()=>{if(!selected)return;const id=selected;if(await s
 $('startup').onchange=()=>send('startup',{enabled:$('startup').checked});
 $('revoke').onclick=async()=>{if(!device)return;try{await api('revoke',{device_id:device.id});device=null;state={};after='';lastSeq=-1;error('');render();}catch(e){error(e.message);}};
 $('pair').onclick=async()=>{try{const data=await api('pairing',{});$('challenge').hidden=false;$('code').textContent=data.code;$('approve').href='http://127.0.0.1:18931/pair#'+new URLSearchParams({origin:location.origin,code:data.code}).toString();error('');fit();}catch(e){error(e.message);}};
-$('refresh').onclick=()=>{after='';api('state').then(update).catch(e=>error(e.message));};
+$('refresh').onclick=()=>{after='';pollAbort?.abort();document.dispatchEvent(new Event('visibilitychange'));};
 // Fit the same-origin OS frame to content: the OS owns vertical scrolling.
 // Scroll events move only the compact toolbar inside the frame; no polling or
 // desktop capture. Direct diagnostic viewing uses ordinary CSS sticky positioning.
@@ -235,5 +266,7 @@ try{if(window.parent!==window&&window.parent.location.origin===location.origin)f
 function sticky(){if(!frame)return;const top=frame.getBoundingClientRect().top;const y=Math.min(Math.max(0,64-top-$('toolbar').offsetTop),Math.max(0,document.querySelector('main').offsetHeight-$('toolbar').offsetTop-$('toolbar').offsetHeight));$('toolbar').style.transform=`translateY(${y}px)`;}
 function fit(){if(!frame||fitQueued)return;fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;frame.style.height=Math.ceil(document.querySelector('main').offsetHeight+2)+'px';sticky();});}
 if(frame){new ResizeObserver(fit).observe(document.querySelector('main'));window.parent.addEventListener('scroll',sticky,true);window.parent.addEventListener('resize',fit);}
-window.addEventListener('pagehide',()=>{stopped=true;if(frame){window.parent.removeEventListener('scroll',sticky,true);window.parent.removeEventListener('resize',fit);}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pollAbort?.abort();});
+window.addEventListener('pageshow',()=>{stopped=false;after='';if(frame){window.parent.addEventListener('scroll',sticky,true);window.parent.addEventListener('resize',fit);}poll();});
+window.addEventListener('pagehide',()=>{stopped=true;for(const request of requests)request.abort();if(frame){window.parent.removeEventListener('scroll',sticky,true);window.parent.removeEventListener('resize',fit);}});
 poll();
