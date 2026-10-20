@@ -1405,15 +1405,62 @@ def scene_texts(result, current_text, saved_base):
             angle=scenes.ANGLES[(combination[0]+index)%len(scenes.ANGLES)]
             scene=(f'{scenes.MARKER}\nSelected room: {ROOMS[index][draw]}\nSelected camera angle: {angle}\n'
                    f'{scenes.ANGLE_GUIDANCE[angle]}\nKeep this resolved room and angle stable in this workflow.\n{scenes.END}')
-            text=scenes.SCENE.sub(lambda _:scene,text)
+            text = (scenes.SCENE.sub(lambda _: scene, text) if scenes.SCENE.search(text)
+                    else text.rstrip() + '\n\n' + scene)
         texts.append(text)
     return texts
 
 
+READ_FIRST = """READ FIRST — COMPLETE MOCKUP REQUIREMENTS
+Read the entire prompt before generating any images. Review all requirements together and plan three distinct scenes before beginning. This summary supplements the detailed instructions below; every applicable instruction must be followed.
+
+- Generate exactly THREE separate finished mockup images."""
+
+DISTINCT_ROOMS = """Each image must depict a clearly different room with its own architecture, furniture, materials, colour palette and lighting. Use distinct room layouts and furniture arrangements across the set. Do not reuse the same wall, furniture composition or room with minor restyling. A changed camera angle, crop or small decorative change does not count as a different room.
+Honour the resolved room subtype and camera angle in each image brief. Scene libraries below provide supporting options within those selections; they do not authorise choosing a different subtype or angle. Vary unspecified scene details within each assigned category."""
+
+FINAL_CHECK = """FINAL CHECK — BEFORE GENERATION
+Before generating any image, check the complete plan against every detailed instruction:
+- Three separate finished images are planned.
+- Each uses its assigned room category and selected scene details and camera angle.
+- All three rooms are visibly distinct in architecture, layout, furniture arrangement, materials, colour palette and lighting.
+- Artwork fidelity, frame/glass realism, scale, dimensions, output requirements and every other detailed instruction are covered.
+If two scenes would look similar, revise their scene plans within their assigned categories and saved selections before generating. Then follow the automatic three-image sequence above."""
+
+
+def selected_details(text, index):
+    """Read the same resolved brief used below; never draw new selections at copy."""
+    import mockup_product_prompts as scenes
+    scene = scenes.SCENE.search(text)
+    source = scene.group() if scene else text
+    details = []
+    for field in ('Selected room', 'Selected camera angle'):
+        found = re.search(r'^' + field + r':[^\S\n]*(.+)$', source, re.M)
+        value = found.group(1).strip() if found else f'As specified in Image {index} saved brief below'
+        details.append(f'{field}: {value}')
+    return '; '.join(details)
+
+
 def compose(instructions, texts):
+    # Materialise once so the summary and briefs share exactly the same selections.
+    texts = list(texts)
+    if len(texts) != len(LABELS) or any(not str(text).strip() for text in texts):
+        raise ValueError('The three Product Uploads scene briefs are required before copying.')
     # Saved scene briefs may carry old execution rules, but their room/camera
     # settings remain intact. PER_IMAGE supplies the contract once per card.
     texts = [individual_prompt(text).removeprefix(FINISHED_MOCKUPS + '\n\n') for text in texts]
-    return sequential_instructions(instructions) + '\n\n' + '\n\n'.join(
-        f'{index + 1}. {label}\n{PER_IMAGE}\n\nSaved scene/composition/output requirements:\n{text}'
-        for index, (label, text) in enumerate(zip(LABELS, texts)))
+    selections = [selected_details(text, index) for index, text in enumerate(texts, 1)]
+    summary = READ_FIRST + '\n' + '\n'.join(
+        f'- Image {index}: {label}. {selection}'
+        for index, (label, selection) in enumerate(zip(LABELS, selections), 1))
+    summary += ('\n- ' + DISTINCT_ROOMS +
+                '\n- Preserve the supplied artwork, frame and all existing product-fidelity requirements.'
+                '\n- Generate each room and framed artwork together as one convincing photographic scene, including realistic glass, lighting, shadows, perspective and scale.'
+                '\n- Follow all detailed requirements below.')
+    briefs = '\n\n'.join(
+        f'## IMAGE {index} — {label.upper()}\nAssigned room category: {label}\n{selection}\n'
+        'Use this image’s saved scene details below and the shared detailed requirements above. '
+        'Keep its room layout and furniture arrangement visibly different from the other two images.\n\n'
+        f'{PER_IMAGE}\n\nSaved scene/composition/output requirements:\n{text}'
+        for index, (label, text, selection) in enumerate(zip(LABELS, texts, selections), 1))
+    return summary + '\n\n' + sequential_instructions(instructions) + '\n\n' + briefs + '\n\n' + FINAL_CHECK

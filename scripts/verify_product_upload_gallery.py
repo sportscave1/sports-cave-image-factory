@@ -63,8 +63,8 @@ def main():
   tab.close()
   actions.locator('#copyPrompt').click();expect(actions.locator('#copyPrompt')).to_have_text('Copied')
   master=page.evaluate('navigator.clipboard.readText()').replace('\r\n','\n')
-  from product_upload_lifestyle import INSTRUCTIONS,PER_IMAGE
-  assert master.startswith(INSTRUCTIONS) and master.count(PER_IMAGE)==3
+  from product_upload_lifestyle import INSTRUCTIONS,PER_IMAGE,READ_FIRST,FINAL_CHECK
+  assert master.startswith(READ_FIRST) and master.endswith(FINAL_CHECK) and INSTRUCTIONS in master and master.count(PER_IMAGE)==3
   assert all(x in master for x in ('three genuinely different homes or properties','Immediately generate Card 1','No collage, triptych or contact sheet','original uploaded full-resolution framed product'))
   actions.locator('#copyImage').click();expect(actions.locator('#copyImage')).to_have_text('Copied',timeout=15000)
   copied=page.evaluate('''async()=>{const r=await navigator.clipboard.read();const b=await r[0].getType('image/png');return Array.from(new Uint8Array(await b.arrayBuffer()))}''')
