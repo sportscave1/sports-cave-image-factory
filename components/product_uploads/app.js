@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const $=id=>document.getElementById(id),labels={DRAFT:'Upload to Draft',LIVE:'Upload to Live',UPDATE:'Update Existing'};
-  let row=null,manual=false,enabled=true,busy=false,timer=null,previewTimer=null,previewAttempts=0,previewKey='',previewBlob='',promptText='',copyMode='',copyID='',stopped=false,epoch=0,section='full',component=false,activeID='',refreshKey='',controller=new AbortController();
+  let row=null,manual=false,enabled=true,busy=false,timer=null,previewTimer=null,previewAttempts=0,previewKey='',previewBlob='',promptText='',copyMode='',copyID='',stopped=false,epoch=0,section='full',isolatedCopy=false,component=false,activeID='',refreshKey='',controller=new AbortController();
   let lastHeight=0,selectedAt=0;const timedReady=new Set();
   const copyFeedbackTimers=new Map(),copyLabels=new Map(['copy'].map(id=>[id,$(id).innerHTML]));
   function restoreCopy(id){clearTimeout(copyFeedbackTimers.get(id));copyFeedbackTimers.delete(id);$(id).innerHTML=copyLabels.get(id);}
@@ -38,7 +38,7 @@
     }
 
     const finalReady=!manual&&!!row?.saved_source_version&&section!=='upload';
-    $('prompt').hidden=!finalReady;$('action-label').textContent=labels[$('mode').value];$('copy').disabled=busy||!finalReady;
+    $('prompt').hidden=!finalReady||isolatedCopy;$('action-label').textContent=labels[$('mode').value];$('copy').disabled=busy||!finalReady;
     $('return').hidden=!finalReady;mapping.sync(row,finalReady);
     $('terminal').hidden=manual||!row?.product_title||!row?.lifecycle;$('terminal').textContent=row?.product_title?`${row.shopify_completion||'Shopify product verified'} · Linked to ${row.product_title} · ${row.state}${row.reason?' — '+row.reason:''}`:'';
     $('retry').hidden=manual||!row?.lifecycle||row.lifecycle.state!=='Error';$('retry').textContent='Retry file handoff';
@@ -120,7 +120,7 @@
   $('new').onclick=()=>{pickerRoot='review';pickerPath='';pickerPage='';$('picker-root').value='review';$('picker-search').value='';reset();};$('remove').onclick=()=>{reset();};
   $('retry').onclick=async()=>{try{await action('retry-file');await refresh();}catch(e){fail(e);}};
   window.addEventListener('pageshow',event=>{if(event.persisted)reset();});
-  window.addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='streamlit:render')return;if(!component)lastHeight=0;component=true;const args=event.data.args||{};section=args.section||'full';if(section==='handoff'&&savedRevision!==(args.source_version||'')){epoch++;controller.abort();controller=new AbortController();clearCopyFeedback();busy=false;if(row)delete row.saved_source_version;}savedRevision=args.source_version||'';if(section==='upload'&&args.refresh&&args.refresh!==refreshKey){refreshKey=args.refresh;if(row&&!busy)refresh();}if(section==='handoff'&&args.manual){manual=true;if(args.mode)$('mode').value=args.mode;}if(args.id&&(activeID!==args.id||args.mode&&row?.mode!==args.mode||section==='handoff'&&(row?.saved_source_version||'')!==(args.source_version||''))){mapping.reset();epoch++;clearCopyFeedback();controller.abort();controller=new AbortController();activeID=args.id;row={id:args.id};refresh();}render();});
+  window.addEventListener('message',event=>{if(event.source!==parent||event.data?.type!=='streamlit:render')return;if(!component)lastHeight=0;component=true;const args=event.data.args||{};section=args.section||'full';isolatedCopy=!!args.isolated_copy;if(section==='handoff'&&savedRevision!==(args.source_version||'')){epoch++;controller.abort();controller=new AbortController();clearCopyFeedback();busy=false;if(row)delete row.saved_source_version;}savedRevision=args.source_version||'';if(section==='upload'&&args.refresh&&args.refresh!==refreshKey){refreshKey=args.refresh;if(row&&!busy)refresh();}if(section==='handoff'&&args.manual){manual=true;if(args.mode)$('mode').value=args.mode;}if(args.id&&(activeID!==args.id||args.mode&&row?.mode!==args.mode||section==='handoff'&&(row?.saved_source_version||'')!==(args.source_version||''))){mapping.reset();epoch++;clearCopyFeedback();controller.abort();controller=new AbortController();activeID=args.id;row={id:args.id};refresh();}render();});
   parent.postMessage({isStreamlitMessage:true,type:'streamlit:componentReady',apiVersion:1},'*');
   document.addEventListener('visibilitychange',()=>{clearTimeout(timer);clearTimeout(previewTimer);if(section==='upload'&&!busy)notify();if(!document.hidden&&!busy){if(row?.preview_url&&!previewBlob){previewKey='';previewAttempts=0;}refresh();}});window.addEventListener('pagehide',()=>{mapping.dispose();stopped=true;epoch++;clearCopyFeedback();controller.abort();clearTimeout(timer);clearTimeout(previewTimer);if(previewBlob)URL.revokeObjectURL(previewBlob);});try{const frame=window.frameElement;if(frame){const observer=new MutationObserver(()=>{if(!frame.isConnected){stopped=true;epoch++;controller.abort();clearCopyFeedback();clearTimeout(timer);clearTimeout(previewTimer);observer.disconnect();}});observer.observe(window.parent.document,{childList:true,subtree:true});}}catch{}
   new ResizeObserver(resize).observe(document.body);

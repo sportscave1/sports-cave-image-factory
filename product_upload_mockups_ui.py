@@ -77,7 +77,9 @@ def render_page(app):
     from product_upload_intake import public
     state=public(row)
     if not state.get('saved_source_version'):return
-    linked=component(section='handoff',id=key,mode=row['mode'],source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
+    from product_upload_prompt_copy import render_copy
+    render_copy(app, row, user, state['saved_source_version'])
+    linked=component(section='handoff',isolated_copy=True,id=key,mode=row['mode'],source_version=state['saved_source_version'],key='product-upload-handoff-'+visit+'-'+key,default=None)
     if linked and linked.get('id')==key and linked.get('linked') and linked.get('nonce')!=st.session_state.get('_product_upload_linked'):
         st.session_state['_product_upload_linked']=linked['nonce']
         st.rerun()
