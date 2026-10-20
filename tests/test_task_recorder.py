@@ -99,6 +99,9 @@ class NavigationTests(unittest.TestCase):
         fn=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="render_selected_page")
         accounts=SimpleNamespace(is_admin=lambda u:u.get("role")=="admin",WEEKLY_REVIEW_ROUTE="Weekly Review")
         st=Mock()
+        st.session_state={}
+        st.button.return_value=False
+        st.dialog.side_effect=lambda *a,**kw:lambda fn:fn
         component=SimpleNamespace(iframe=Mock())
         namespace={"st":st,"os_accounts":accounts,"analytics_nav":SimpleNamespace(ANALYTICS_ROUTES=()),
                    "current_os_user":lambda:{"role":"admin"}}
@@ -106,12 +109,12 @@ class NavigationTests(unittest.TestCase):
         with patch.dict(sys.modules,{"streamlit":st,"streamlit.components.v1":component,"os_accounts":accounts}):
             with patch.dict("os.environ",{},clear=True):
                 namespace["render_selected_page"]("Task Recorder")
-                component.iframe.assert_called_once_with("http://127.0.0.1:18931/",height=650,scrolling=True)
+                component.iframe.assert_called_once_with("/task-recorder/panel",height=480,scrolling=True)
             component.iframe.reset_mock()
+            st.session_state.clear()
             with patch.dict("os.environ",{"RENDER":"true"},clear=True):
                 task_recorder_page.render_page({"role":"admin"})
-                component.iframe.assert_not_called()
-                st.info.assert_called()
+                component.iframe.assert_called_once_with("/task-recorder/panel",height=480,scrolling=True)
             task_recorder_page.render_page({"role":"worker"})
             st.error.assert_called()
         self.assertEqual(navigation_runtime.active_disclosure_group("Task Recorder"),"developer")

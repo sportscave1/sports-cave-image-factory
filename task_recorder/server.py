@@ -10,6 +10,7 @@ import secrets
 import socket
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,13 +27,8 @@ def default_root():
     return Path(os.environ.get("LOCALAPPDATA", str(Path.home() / ".local" / "share"))) / "SportsCaveOS" / "TaskRecorderV1"
 
 def protect(data, decrypt=False):
-    # Reuse existing Windows DPAPI primitive without importing its companion or queues.
-    sys.path.insert(0, str(ASSETS.parent / "scripts" / "studio"))
-    try:
-        from device_trust import protect as dpapi
-        return dpapi(data, decrypt)
-    finally:
-        sys.path.pop(0)
+    from .windows import protect as dpapi
+    return dpapi(data, decrypt)
 
 @contextlib.contextmanager
 def instance_lock(path):
@@ -61,7 +57,7 @@ class Bridge(ThreadingHTTPServer):
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
-    def __init__(self, root, port=DEFAULT_PORT, *, headless=False):
+    def __init__(self, root, port=DEFAULT_PORT, *, headless=False, preview=False):
         self.origin = "http://127.0.0.1:" + str(port)
         self.token = secrets.token_urlsafe(32)
         self.root = Path(root)
@@ -69,8 +65,15 @@ class Bridge(ThreadingHTTPServer):
         self.runner = Runner(root, headless=headless)
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = "http://127.0.0.1:" + str(self.server_port)
+        self.approval = secrets.token_urlsafe(32)
+        self.approval_until = time.time() + 300
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
+        from .device import DeviceAgent
+        self.agent = DeviceAgent(self.runner,self.origin,preview=preview)
+        async def start():
+            self.agent.task = asyncio.create_task(self.agent.loop())
+        asyncio.run_coroutine_threadsafe(start(),self.loop).result(timeout=5)
 
     def invoke(self, command, data=None):
         future = asyncio.run_coroutine_threadsafe(self.runner.command(command, data or {}), self.loop)
@@ -81,6 +84,7 @@ class Bridge(ThreadingHTTPServer):
 
     def close(self):
         try:
+            asyncio.run_coroutine_threadsafe(self.agent.close(),self.loop).result(timeout=10)
             asyncio.run_coroutine_threadsafe(self.runner.close(), self.loop).result(timeout=15)
         finally:
             self.loop.call_soon_threadsafe(self.loop.stop)
@@ -101,6 +105,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
+        if self.path in {"/","/pair"}:
+            self.send_header("Set-Cookie","recorder_pc_approval="+self.server.approval+"; Path=/; HttpOnly; SameSite=Strict")
         self.send_header("Content-Security-Policy",
             "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
             "img-src 'self' data:; frame-ancestors 'self' http://127.0.0.1:8501 http://localhost:8501; "
@@ -132,19 +138,34 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/state":
             self.reply(200, self.server.invoke("state")); return
         routes = {"/": ("ui.html", "text/html; charset=utf-8"),
+                  "/pair": ("pair.html", "text/html; charset=utf-8"),
+                  "/pair.js": ("pair.js", "text/javascript; charset=utf-8"),
                   "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
                   "/ui.css": ("ui.css", "text/css; charset=utf-8"),
                   "/demo": ("demo.html", "text/html; charset=utf-8"),
                   "/demo/form": ("demo.html", "text/html; charset=utf-8"),
                   "/demo/signin": ("demo.html", "text/html; charset=utf-8"),
                   "/demo.js": ("demo.js", "text/javascript; charset=utf-8")}
-        if self.path not in routes:
+        from urllib.parse import urlsplit
+        route_path=urlsplit(self.path).path
+        if route_path not in routes:
             self.reply(404, {"error": "Not found."}); return
-        file, mime = routes[self.path]
+        file, mime = routes[route_path]
+        if route_path in {"/","/pair"}:
+            self.server.approval_until=time.time()+300
         self.reply(200, (ASSETS / file).read_bytes(), mime)
 
     def do_POST(self):
-        if not self.guard(auth=True): return
+        local=self.path in {"/pair/inspect","/pair/approve","/local/connect"}
+        if not self.guard(auth=not local): return
+        if local:
+            from http.cookies import SimpleCookie
+            cookie=SimpleCookie(self.headers.get("Cookie",""))
+            supplied=cookie.get("recorder_pc_approval")
+            if (self.headers.get("Origin")!=self.server.origin or self.headers.get("X-Recorder-Local")!="1" or
+                time.time()>self.server.approval_until or not supplied or
+                not hmac.compare_digest(supplied.value,self.server.approval)):
+                self.reply(403,{"error":"Reopen the local approval page and try again."});return
         if self.headers.get("Content-Type") != "application/json" or self.headers.get("Transfer-Encoding"):
             self.reply(415, {"error": "JSON with Content-Length required."}); return
         try:
@@ -153,6 +174,13 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.settimeout(5)
             data = json.loads(self.rfile.read(size))
             if not isinstance(data, dict): raise Invalid("Expected a JSON object.")
+            if local:
+                if self.path=="/local/connect":
+                    self.reply(200,{"key":self.server.token});return
+                method=self.server.agent.inspect_pair if self.path.endswith("inspect") else self.server.agent.pair
+                args=(data.get("origin"),data.get("code")) if self.path.endswith("inspect") else (data.get("origin"),data.get("code"),data.get("name") or socket.gethostname())
+                result=asyncio.run_coroutine_threadsafe(method(*args),self.server.loop).result(timeout=15)
+                self.reply(200,result);return
             if self.path == "/api/shutdown":
                 self.server.invoke("stop")
                 self.reply(200, {"stopping": True})
@@ -190,6 +218,8 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open", action="store_true")
     parser.add_argument("--shutdown", action="store_true")
+    parser.add_argument("--preview", action="store_true")
+    parser.add_argument("--pair", action="store_true")
     args = parser.parse_args()
     root = args.data_dir.resolve()
     repo = ASSETS.parent.resolve()
@@ -203,15 +233,17 @@ def main():
             with urlopen(Request(origin + "/api/shutdown", data=b"{}", headers={
                 "X-Recorder-Key": key, "Content-Type": "application/json"}), timeout=15):
                 pass
+        elif args.pair: webbrowser.open(origin + "/pair")
         elif args.open: webbrowser.open(origin + "/#key=" + key)
         else: print("Task Recorder is already running.")
         return
     if args.shutdown: return
     # Independent lock: never touch editions companion locks or process IDs.
     with instance_lock(root / "recorder.lock"):
-        server = Bridge(root, args.port)
+        server = Bridge(root, args.port, preview=args.preview)
         atomic(root / "connection.json", {"origin": server.origin, "protected": protect(server.token.encode()).hex()})
         if args.open: webbrowser.open(server.origin + "/#key=" + server.token)
+        elif args.pair or not server.agent.credentials(): webbrowser.open(server.origin+"/pair")
         print("Task Recorder ready at " + server.origin + " (authenticated local control).", flush=True)
         try: server.serve_forever(poll_interval=.2)
         except KeyboardInterrupt: pass

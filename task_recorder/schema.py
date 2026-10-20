@@ -2,7 +2,7 @@
 import copy
 import re
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qsl, unquote
 
 ACTIONS = {"navigate", "wait_url", "click", "fill", "select", "check", "upload", "wait", "unsupported"}
 LOCATORS = {"role", "label", "test_id", "id", "placeholder", "text"}
@@ -25,13 +25,18 @@ def safe_url(value):
     text(value)
     try:
         u = urlsplit(value)
-        if u.scheme not in {"http", "https"} or not u.hostname or u.username or u.password or u.query or u.fragment:
-            raise Invalid("Use an HTTP(S) URL without credentials, query parameters or fragments in V1.")
-        if PRIVATE.search(u.path):
+        if u.scheme not in {"http", "https"} or not u.hostname or u.username or u.password:
+            raise Invalid("Use a website address without embedded credentials.")
+        if PRIVATE.search(unquote(u.path)) or re.search(r"/(?:login|signin|oauth|authorize)(?:/|$)", u.path, re.I):
             raise Invalid("Authentication/session URLs cannot be recorded.")
+        for name, content in parse_qsl(u.query, keep_blank_values=True) + parse_qsl(u.fragment.lstrip("/?"), keep_blank_values=True):
+            if PRIVATE.search(name) or name.lower() in {"code", "sig", "signature", "auth", "jwt", "key", "ticket"} or TOKEN.search(content):
+                raise Invalid("This address contains authentication data. Navigate to a public page first.")
+        if TOKEN.search(unquote(u.fragment)):
+            raise Invalid("This address contains authentication data.")
         _ = u.port
     except ValueError:
-        raise Invalid("Use a valid HTTP(S) URL without credentials, query parameters or fragments.")
+        raise Invalid("Use a valid website address without authentication data.")
     return value
 
 def keys(obj, allowed, required=()):
@@ -87,13 +92,18 @@ def validate_task(raw):
             allowed.add("value")
             value = step.get("value")
             if isinstance(value, dict):
-                keys(value, {"input"}, {"input"})
-                if value["input"] not in names: raise Invalid("Step refers to an undefined input.")
+                if action == "upload" and set(value) == {"file"}:
+                    try: uuid.UUID(value["file"])
+                    except (ValueError, TypeError, AttributeError): raise Invalid("Invalid local file reference.")
+                else:
+                    keys(value, {"input"}, {"input"})
+                    if value["input"] not in names: raise Invalid("Step refers to an undefined input.")
             elif action == "check":
                 if not isinstance(value, bool): raise Invalid("Check requires a boolean.")
             else:
                 text(value, empty=action == "fill")
                 if action in {"navigate", "wait_url"}: safe_url(value)
+                if action in {"fill","select"} and value.startswith(("http://","https://")):safe_url(value)
                 if action == "upload": raise Invalid("Uploads must use a local path input, never a saved literal.")
         if action == "unsupported":
             allowed.add("reason")
@@ -104,7 +114,7 @@ def validate_task(raw):
             raise Invalid("Wait timeout must be 500–30000 milliseconds.")
     return obj
 
-def resolve_task(task, values):
+def resolve_task(task, values, files=None):
     obj = validate_task(task)
     if not obj["steps"]: raise Invalid("Add or record steps first.")
     if any(s["action"] == "unsupported" for s in obj["steps"]):
@@ -117,9 +127,16 @@ def resolve_task(task, values):
     from pathlib import Path
     for step in obj["steps"]:
         if isinstance(step.get("value"), dict):
+            if "file" in step["value"]:
+                if files is None: raise Invalid("Choose this file again on the recorder PC.")
+                value = files(step["value"]["file"])
+                if not Path(value).is_file(): raise Invalid("Choose this file again on the recorder PC.")
+                step["value"] = str(value)
+                continue
             name = step["value"]["input"]
             value = values.get(name, "")
             text(value, empty=step["action"] == "fill")
+            if isinstance(value,str) and value.startswith(("http://","https://")):safe_url(value)
             if step["action"] == "check":
                 if value not in {"true", "false"}: raise Invalid("Checkbox inputs must be true or false.")
                 value = value == "true"

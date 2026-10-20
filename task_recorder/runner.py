@@ -5,6 +5,7 @@ import copy
 import os
 import re
 import time
+import json
 from pathlib import Path
 
 from playwright.async_api import async_playwright
@@ -36,8 +37,25 @@ class Runner:
         self.last_click = 0
         self.run_id = None
         self.total = 0
+        self.simple_recording = False
+        self.file_selector = None
+        self.selected_upload = None
+        from .windows import Vault
+        self.vault = Vault(root)
+        checkpoint = self.store.root / "recording.json"
+        if checkpoint.exists():
+            try:
+                record = json.loads(checkpoint.read_text(encoding="utf-8"))
+                self.draft = validate_task(record["task"])
+                if record.get("active"):
+                    self.draft = self.store.save(self.draft)
+                    self.store.checkpoint(self.draft, False)
+                    self.message = "Interrupted recording recovered and saved. Nothing was restarted."
+                elif self.draft.get("id"):
+                    self.draft = self.store.get(self.draft["id"])
+            except (ValueError, KeyError):
+                self.message = "A recording needs review in Advanced."
         if self.store.journal.exists():
-            import json
             previous = json.loads(self.store.journal.read_text(encoding="utf-8"))
             if previous.get("status") == "interrupted":
                 self.message = previous["message"]
@@ -79,6 +97,7 @@ class Runner:
             self.page.on("framenavigated", lambda frame: asyncio.create_task(self.navigated(frame)))
             self.page.on("dialog", lambda dialog: asyncio.create_task(self.dialog(dialog)))
             self.page.on("download", lambda download: asyncio.create_task(self.download(download)))
+            self.page.on("filechooser", lambda chooser: asyncio.create_task(self.filechooser(chooser)))
             self.context.on("page", lambda page: asyncio.create_task(self.extra_page(page)))
             self.page.on("close", self.closed)
             await self.page.evaluate(Path(__file__).with_name("record.js").read_text(encoding="utf-8"))
@@ -87,6 +106,23 @@ class Runner:
             except Exception: raise Invalid("Browser could not open that URL. Check the visible browser and address.")
         await self.page.bring_to_front()
         return self.state()
+
+    async def filechooser(self, chooser):
+        from .windows import choose_file
+        page=self.page
+        path = await asyncio.to_thread(self.file_selector or choose_file)
+        if self.page!=page or not page or page.is_closed():return
+        if not path:
+            await chooser.set_files([])
+            return
+        if self.recording and self.simple_recording:
+            loc = await self.page.evaluate("(el)=>window.__scRecorder?.locator(el)", chooser.element)
+            if not loc:
+                self.unsupported("This upload control has no reliable label.")
+                return
+            ref = self.vault.add_file(path)
+            self.selected_upload = (loc, ref)
+        await chooser.set_files(path)
 
     def closed(self):
         self.recording = False
@@ -155,7 +191,7 @@ class Runner:
             self.last_click = 0
             self.append({"action": action, "value": frame.url})
         except Invalid:
-            self.unsupported("Navigation uses a private or query/fragment URL; supply a safe URL input.")
+            self.unsupported("Navigation contains sign-in or secret information. Use an ordinary website address.")
 
     def unsupported(self, reason):
         self.append({"action": "unsupported", "reason": reason})
@@ -172,6 +208,7 @@ class Runner:
         if old and step["action"] == "fill" and old[-1]["action"] == "fill" and old[-1]["locator"] == step["locator"]:
             old[-1] = step
         else: old.append(step)
+        self.store.checkpoint(self.draft)
 
     async def privacy(self):
         self.recording = False
@@ -199,15 +236,20 @@ class Runner:
             step = copy.deepcopy(data.get("step"))
             if not isinstance(step, dict): return
             if step.get("action") == "upload":
-                n = 1
-                names = {i["name"] for i in self.draft["inputs"]}
-                name = "image_path"
-                while name in names:
-                    n += 1
-                    name = "image_path_" + str(n)
-                self.draft["inputs"].append({"name": name, "required": True})
-                step["value"] = {"input": name}
-                self.message = "Upload recorded. Set its absolute local path in Inputs before Play."
+                if self.selected_upload and self.selected_upload[0] == step.get("locator"):
+                    step["value"] = {"file": self.selected_upload[1]}
+                    self.selected_upload = None
+                    self.message = "File selected and remembered on this PC."
+                else:
+                    n = 1
+                    names = {i["name"] for i in self.draft["inputs"]}
+                    name = "image_path"
+                    while name in names:
+                        n += 1
+                        name = "image_path_" + str(n)
+                    self.draft["inputs"].append({"name": name, "required": True})
+                    step["value"] = {"input": name}
+                    self.message = "Choose this file again on the recorder PC before playback."
             try:
                 validate_task({**self.draft, "steps": [step]})
             except Invalid:
@@ -241,6 +283,7 @@ class Runner:
             self.privacy_pause = False
             self.mode = "idle"
             self.message = "Recording stopped. Edit inputs/steps, name the task, then Save."
+            self.store.checkpoint(self.draft, False)
 
     def locator(self, loc):
         p, value = self.page, loc["value"]
@@ -341,12 +384,17 @@ class Runner:
             # Keep the job owned until Stop; Play must not overwrite uncertain work.
             await asyncio.Event().wait()
 
-    async def play(self, task_id, values):
+    async def play(self, task_id, values, revision=None, operation_id=None):
         if self.busy() or self.recording or self.mode == "recording_paused":
             raise Invalid("Stop the current run/recording first.")
-        task = resolve_task(self.store.get(task_id), values)
+        saved = self.store.get(task_id)
+        actual_revision = self.store.revision(saved)
+        if revision and revision != actual_revision:
+            raise Invalid("This recording changed. Select it again, then Play.")
+        task = resolve_task(saved, values, self.vault.file)
         if not self.page or self.page.is_closed(): await self.open_browser()
         self.run_id = task_id
+        self.store.run_context = {"operation_id": operation_id, "task_revision": actual_revision}
         self.total = len(task["steps"])
         self.index = 0
         self.mode = "running"
@@ -379,6 +427,10 @@ class Runner:
         else: raise Invalid("This action cannot be safely resumed. Inspect the browser, then Stop.")
 
     async def stop(self):
+        if self.recording or self.mode == "recording_paused":
+            await self.set_recording(False)
+            if self.simple_recording and self.draft["steps"]:
+                self.draft = self.store.save(self.draft)
         self.recording = False
         self.privacy_pause = False
         self.pause_requested = False
@@ -411,6 +463,9 @@ class Runner:
     async def command(self, name, data):
         if name == "state": return self.state()
         if name == "preview": return await self.preview()
+        if name == "stop":
+            await self.stop()
+            return self.state()
         async with self.lock:
             if name == "open": await self.open_browser(data.get("url"))
             elif name == "record":

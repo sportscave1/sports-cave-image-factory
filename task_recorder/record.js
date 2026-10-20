@@ -9,6 +9,14 @@
       (e.type === 'password' || /username|current-password|new-password|one-time-code/.test(e.autocomplete) ||
        privateName.test([e.name,e.id,e.getAttribute('aria-label'),...(e.labels || [])].join(' '))));
   let active = false, pending = null;
+  function badge() {
+    if (!document.body || document.getElementById('__scRecorderBadge')) return;
+    const mark=document.createElement('div');mark.id='__scRecorderBadge';
+    mark.textContent='Sports Cave recorder browser';
+    mark.style.cssText='position:fixed;right:8px;top:8px;z-index:2147483647;background:#172c43;color:white;padding:5px 9px;border-radius:4px;font:12px system-ui;pointer-events:none';
+    document.body.append(mark);
+  }
+  if(document.body)badge();else document.addEventListener('DOMContentLoaded',badge,{once:true});
   const send = data => window.__scRecord(data).catch(() => {});
   const privacy = () => { if (active && sensitive()) { active = false; pending = null; send({kind:'privacy'}); return true; } return !active; };
   const unsupported = reason => send({kind:'unsupported', reason});
@@ -39,21 +47,22 @@
     if (!loc) { unsupported('No stable label, role, test ID or element ID; edit this step.'); return; }
     if (e.type === 'file') {
       if (e.files?.length !== 1) unsupported('V1 supports one file per upload control.');
-      else send({kind:'step', step:{action:'upload', locator:loc}});
+      else return send({kind:'step', step:{action:'upload', locator:loc}});
     } else if (e.tagName === 'SELECT') {
       if (e.multiple) unsupported('Multi-select controls are not supported in V1.');
-      else send({kind:'step', step:{action:'select', locator:loc, value:e.value}});
+      else return send({kind:'step', step:{action:'select', locator:loc, value:e.value}});
     } else if (['checkbox','radio'].includes(e.type)) {
-      send({kind:'step', step:{action:'check', locator:loc, value:e.checked}});
+      return send({kind:'step', step:{action:'check', locator:loc, value:e.checked}});
     } else if (e.matches('input,textarea')) {
-      send({kind:'step', step:{action:'fill', locator:loc, value:e.value}});
+      return send({kind:'step', step:{action:'fill', locator:loc, value:e.value}});
     } else if (e.isContentEditable) unsupported('Rich text/contenteditable editing needs a dedicated adapter.');
   }
-  function flush() { if (pending) { const e = pending; pending = null; capture(e); } }
+  function flush() { if (pending) { const e = pending; pending = null; return capture(e); } }
   window.__scRecorder = {
     set: value => { active = value; pending = null; privacy(); },
     flush,
-    sensitive
+    sensitive,
+    locator
   };
   document.addEventListener('input', ev => { if (!privacy()) pending = ev.target; }, true);
   document.addEventListener('change', ev => { if(pending && pending !== ev.target) flush(); pending = null; capture(ev.target); }, true);
@@ -63,7 +72,7 @@
     const raw = ev.composedPath()[0];
     if (!(raw instanceof Element)) return;
     if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.shiftKey) { unsupported('Modified clicks/new tabs are unsupported.'); return; }
-    if (raw.closest('canvas,svg,[contenteditable=true]')) { unsupported('Canvas, drawing and rich editing actions are unsupported.'); return; }
+    if (raw.closest('canvas,[contenteditable=true]') || (raw.closest('svg') && !raw.closest('button,a,[role=button]'))) { unsupported('Canvas, drawing and rich editing actions are unsupported.'); return; }
     if (raw.matches('input,textarea,select,option') || raw.closest('label')?.querySelector('input')) return;
     const e = raw.closest('button,a,[role=button],[role=tab],[role=menuitem]') || raw;
     if (e.matches('a[target=_blank]')) { unsupported('New-tab navigation is unsupported; use the recorded tab.'); return; }

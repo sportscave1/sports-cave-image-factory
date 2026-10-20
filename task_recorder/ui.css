@@ -3,3 +3,4 @@
 :root .stepsWrap{max-height:clamp(135px,calc(100dvh - 600px),240px)}
 #inputs{max-height:170px;overflow:auto}
 .inputRow label{display:flex;align-items:center;gap:3px;font-size:10px;white-space:nowrap}
+.pairMain{display:block;max-width:520px;margin:40px auto}

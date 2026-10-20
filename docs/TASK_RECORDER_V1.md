@@ -1,5 +1,9 @@
 # Task Recorder V1 — local Windows setup and verification
 
+For current hosted controls, pairing and Windows setup, see
+[TASK_RECORDER_PHASE2.md](TASK_RECORDER_PHASE2.md). The original V1 notes and
+verification below are retained as historical evidence.
+
 Implemented and verified locally on 20 October 2026 (Australia/Sydney).
 The user subsequently authorized publishing this feature to Git and the existing
 Render service. The hosted release adds the Developer entry and local-console

@@ -1,5 +1,4 @@
-"""Lazy local-only Developer entry; no runner or browser on the app server."""
-import os
+"""Native OS dialog; all controls use same-origin, account-authenticated routes."""
 
 
 def render_page(user):
@@ -8,11 +7,14 @@ def render_page(user):
     if not os_accounts.is_admin(user):
         st.error("Task Recorder is available only to administrators.")
         return
-    st.markdown("#### Task Recorder · Local V1")
-    st.caption("Start Task Recorder.cmd on your Windows PC. The browser and saved tasks stay on that PC.")
-    st.link_button("Open local Task Recorder", "http://127.0.0.1:18931/")
-    if os.environ.get("RENDER"):
-        st.info("Hosted pairing is not implemented in V1. Use the authenticated console opened by the Windows launcher. This server cannot control your PC through its own localhost.")
-        return
+    st.markdown("#### Task Recorder")
     from streamlit.components.v1 import iframe
-    iframe("http://127.0.0.1:18931/", height=650, scrolling=True)
+    @st.dialog("Task Recorder", width="small")
+    def recorder():
+        iframe("/task-recorder/panel", height=480, scrolling=True)
+    initial = not st.session_state.get("task_recorder_opened")
+    if st.button("Open recorder", key="task_recorder_open"):
+        recorder()
+    elif initial:
+        st.session_state["task_recorder_opened"] = True
+        recorder()

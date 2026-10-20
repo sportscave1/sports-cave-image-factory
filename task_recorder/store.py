@@ -2,6 +2,7 @@
 import json
 import os
 import uuid
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 from .schema import Invalid, validate_task
@@ -40,6 +41,13 @@ class Store:
         atomic(self.tasks / (task["id"] + ".json"), task)
         return task
 
+    @staticmethod
+    def revision(task):
+        return hashlib.sha256(json.dumps(task, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    def checkpoint(self, task, active=True):
+        atomic(self.root / "recording.json", {"task": validate_task(task), "active": active})
+
     def get(self, task_id):
         try:
             task_id = str(uuid.UUID(task_id))
@@ -55,12 +63,14 @@ class Store:
                 history_path = self.tasks / (task["id"] + ".result")
                 history = json.loads(history_path.read_text(encoding="utf-8")) if history_path.exists() else {}
                 result.append({"id": task["id"], "name": task["name"], "last_run": history.get("at"),
-                               "result": history.get("status", "Never run")})
+                               "result": history.get("status", "Never run"), "revision": self.revision(task),
+                               "inputs": task["inputs"]})
             except (ValueError, OSError):
                 continue
         return sorted(result, key=lambda x: x["name"].lower())
 
     def result(self, task_id, status, index, message):
         run = {"task_id": task_id, "status": status, "step": index, "message": message, "at": now()}
+        run.update(getattr(self, "run_context", {}))
         atomic(self.journal, run)
         atomic(self.tasks / (task_id + ".result"), run)

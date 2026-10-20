@@ -133,7 +133,16 @@ $('preview').onclick=async()=>{
     for(const r of p.boxes){ctx.fillStyle=r.kind==='field'?'#415c70':r.kind==='button'?'#a18c53':'#263646';ctx.fillRect(r.x*scale,r.y*scale,r.w*scale,Math.max(2,r.h*scale));}
   }catch(e){showError(e.message);}
 };
-$('connect').onclick=()=>{key=$('key').value;$('key').value='';sessionStorage.setItem('recorder-key',key);poll(true);};
+$('connect').onclick=async()=>{
+  try{
+    key=$('key').value;
+    if(!key){
+      const response=await fetch('/local/connect',{method:'POST',headers:{'Content-Type':'application/json','X-Recorder-Local':'1'},body:'{}'});
+      const data=await response.json();if(!response.ok)throw Error(data.error);key=data.key;
+    }
+    $('key').value='';sessionStorage.setItem('recorder-key',key);poll(true);
+  }catch(e){showError(e.message);}
+};
 $('copyKey').onclick=async()=>{try{await navigator.clipboard.writeText(key);$('progress').textContent='Connection key copied for the local embedded page. Treat it as a password; it expires when the runner restarts.';}catch{showError('Clipboard permission unavailable. Use the launcher console directly.');}};
 $('refresh').onclick=()=>poll(false);
 async function poll(replace=false) {
