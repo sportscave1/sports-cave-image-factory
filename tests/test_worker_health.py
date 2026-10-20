@@ -101,6 +101,46 @@ def test_progress_uses_verified_units_and_eta_uses_successful_durations():
     args[3].clear();value=health.project(*args,now=NOW);assert value['eta_seconds'] is None and value['eta_label']=='Calculating'
 
 
+@pytest.mark.parametrize('stage',['Discovering','Queued'])
+def test_paused_replacement_waiting_is_not_an_active_photoshop_operation(monkeypatch,stage):
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    args=sample('Uploading');row=args[0][0]
+    row.update(status='Blocked',replacement=dict(stage=stage),lease_until=NOW-timedelta(days=3),claimed_at=NOW-timedelta(days=3))
+    args[1][row['product_gid']]['substage']=stage
+    args[3][0]['created_at']=NOW-timedelta(days=3);args[4]['paused']=True
+    before=deepcopy(args)
+    value=health.project(*args,now=NOW,expected_revision='abcdef12')
+    assert value['overall']=='Paused' and value['current'] is None
+    assert value['counts']['active']==0 and value['counts']['queued']==1
+    assert value['jobs'][0]['elapsed_seconds'] is None and not value['warnings']
+    assert args==before # Reporting must never reset/retry an existing operation.
+
+
+@pytest.mark.parametrize('live',[False,True])
+def test_replacement_requires_a_current_preparation_lease_to_count_as_running(monkeypatch,live):
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    args=sample('Uploading');row=args[0][0]
+    row.update(status='Blocked',replacement=dict(stage='Preparing'),lease_until=NOW+timedelta(seconds=60 if live else -1))
+    args[1][row['product_gid']]['substage']='Preparing';args[4]['paused']=True
+    value=health.project(*args,now=NOW,expected_revision='abcdef12')
+    assert value['overall']==('Pausing' if live else 'Paused')
+    assert value['counts']['active']==int(live)
+    assert value['jobs'][0]['lease_expired'] is (not live)
+    assert value['health'][-1]['status']==('Monitoring' if live else 'Degraded')
+
+
+@pytest.mark.parametrize('projected',['Failed','Uploading','Cloud Ready'])
+def test_failed_replacement_retains_failure_and_does_not_count_as_running(monkeypatch,projected):
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    args=sample(projected);args[0][0].update(status='Blocked',replacement=dict(stage='Failed',reason='The exact edition-number font is unavailable.'),lease_until=NOW-timedelta(days=1))
+    args[1][args[0][0]['product_gid']].update(substage='Queued technical verification',uploaded=True)
+    value=health.project(*args,now=NOW,expected_revision='abcdef12')
+    assert value['counts']['failed']==1 and value['counts']['active']==0
+    assert value['counts']['queued']==0 and value['counts']['completed']==0
+    assert value['jobs'][0]['status']=='Failed' and not value['jobs'][0]['lease_expired']
+    assert value['jobs'][0]['diagnostic']['code']=='FONT_MISSING'
+
+
 def test_independent_stale_heartbeats_versions_and_no_output_are_visible():
     args=sample('Preparing');args[0][0]['status']='Preparing'
     args[2][1]['seen_at']=NOW-timedelta(minutes=12)

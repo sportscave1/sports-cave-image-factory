@@ -22,12 +22,12 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("11.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("11.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("14.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("14.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 11;
+    internal const int HelperVersion = 14;
     internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
     private const string MutexName = @"Local\SportsCaveOSDesktop-v9";
     private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v9";
@@ -52,21 +52,40 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        // CodeDOM targets the legacy framework: its default is SSL3/TLS1.0.
+        // Render requires modern TLS. Never relax certificate validation.
+        System.Net.ServicePointManager.SecurityProtocol = System.Net.SecurityProtocolType.Tls12;
         try
         {
             string protocol = args.Length == 1 ? args[0] : "";
+            if (protocol == "--product-uploads" || protocol.StartsWith("--product-uploads=", StringComparison.Ordinal))
+            {
+                var uploadConfig = DesktopConfig.Load();
+                string uploadUrl = new Uri(uploadConfig.AppUrl).GetLeftPart(UriPartial.Authority) + "/?page=product_uploads";
+                if (protocol.Contains("="))
+                {
+                    Guid uploadId;
+                    if (!Guid.TryParse(protocol.Substring(protocol.IndexOf('=') + 1), out uploadId)) return 1;
+                    uploadUrl += "&upload=" + uploadId.ToString();
+                }
+                // The normal server authentication and upload ownership checks
+                // still apply; the argument cannot select an arbitrary origin.
+                var uploadApp = new System.Windows.Application();
+                uploadApp.Run(new DesktopWindow(uploadConfig, uploadUrl, false));
+                return 0;
+            }
             bool show = args.Length == 1 && args[0] == "--app";
             bool openFiles = false;
             if (Uri.IsWellFormedUriString(protocol, UriKind.Absolute))
             {
                 Uri request = new Uri(protocol);
-                if (request.Scheme == "sports-cave-files" && request.Host == "launch")
+                if (request.Scheme == "sports-cave-files" && (request.Host == "launch" || request.Host == "webp"))
                 {
                     var launchConfig = DesktopConfig.Load();
                     string launchUrl = BrowserFileLaunch.Resolve(request, launchConfig);
                     var launchApp = new System.Windows.Application();
                     var launchWindow = new DesktopWindow(launchConfig, launchUrl, false);
-                    launchWindow.Title = "Sports Cave — Open file";
+                    launchWindow.Title = request.Host == "webp" ? "Sports Cave — Copy WebP files" : "Sports Cave — Open file";
                     launchWindow.Width = 580; launchWindow.Height = 360;
                     launchWindow.MinWidth = 420; launchWindow.MinHeight = 300;
                     launchApp.Run(launchWindow);
@@ -338,7 +357,25 @@ internal sealed class DesktopWindow : Window
         MinHeight = 620;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         browser = new WebView2();
-        Content = browser;
+        var shell = new System.Windows.Controls.DockPanel();
+        var toolbar = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            Margin = new Thickness(8, 4, 8, 4)
+        };
+        var filesButton = new System.Windows.Controls.Button
+        { Content = "Files", Padding = new Thickness(12, 4, 12, 4), Margin = new Thickness(0, 0, 6, 0) };
+        filesButton.Click += delegate { NavigateToFiles(); };
+        var uploadsButton = new System.Windows.Controls.Button
+        { Content = "Product Uploads", Padding = new Thickness(12, 4, 12, 4) };
+        uploadsButton.Click += delegate
+        { NavigateTrusted(new Uri(config.AppUrl).GetLeftPart(UriPartial.Authority) + "/?page=product_uploads"); };
+        toolbar.Children.Add(filesButton);
+        toolbar.Children.Add(uploadsButton);
+        System.Windows.Controls.DockPanel.SetDock(toolbar, System.Windows.Controls.Dock.Top);
+        shell.Children.Add(toolbar);
+        shell.Children.Add(browser);
+        Content = shell;
         Loaded += OnLoaded;
         Closing += delegate(object sender, System.ComponentModel.CancelEventArgs args)
         {
@@ -729,6 +766,8 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
+                    { "productUploadWebp", true },
+                    { "productUploadPreparedWebp", true },
                     { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openWith", "verifiedOpen", "appDefaults", "openPhotoshop", "openPsdApp", "openViewer", "folders", "cancel" } },
                 });
                 return;
@@ -771,6 +810,8 @@ internal sealed class DesktopWindow : Window
                 return;
             }
             if (action != "drag" && action != "copyFile"
+                && action != "copyWebpPackage" && action != "selectWebpPackage"
+                && action != "prepareWebpPackage" && action != "copyPreparedWebpPackage"
                 && action != "copyImage" && action != "openFile" && action != "openWith" && action != "openPhotoshop" && action != "openPsdApp")
             {
                 throw new DesktopException("action_denied", "The desktop action is not allowed.");
@@ -785,7 +826,12 @@ internal sealed class DesktopWindow : Window
             try
             {
                 string photoshop = action == "openPhotoshop" ? NativePhotoshop.FindRequiredApplication() : "";
-                string[] paths = (action == "openPhotoshop" || action == "openPsdApp")
+                var copyClock = Stopwatch.StartNew();
+                string[] paths = action == "copyPreparedWebpPackage"
+                    ? await cache.PreparedWebpAsync(grant, cancellation.Token)
+                    : (action == "copyWebpPackage" || action == "selectWebpPackage" || action == "prepareWebpPackage")
+                    ? await cache.MaterializeWebpPackageAsync(grant, cancellation.Token)
+                    : (action == "openPhotoshop" || action == "openPsdApp")
                     ? await cache.MaterializePhotoshopAsync(grant, cancellation.Token)
                     : await cache.MaterializeAsync(
                     grant,
@@ -800,7 +846,11 @@ internal sealed class DesktopWindow : Window
                             });
                         }));
                     });
-                if (action == "drag")
+                if (action == "prepareWebpPackage")
+                {
+                    Reply(action, requestId, true, new Dictionary<string, object> { { "count", paths.Length } });
+                }
+                else if (action == "drag")
                 {
                     if ((NativeMethods.GetAsyncKeyState(1) & 0x8000) == 0)
                     {
@@ -817,14 +867,23 @@ internal sealed class DesktopWindow : Window
                         { "effect", effect == DragDropEffects.Copy ? "copy" : "cancelled" },
                     });
                 }
-                else if (action == "copyFile")
+                else if (action == "copyFile" || action == "copyWebpPackage" || action == "copyPreparedWebpPackage")
                 {
+                    cancellation.Token.ThrowIfCancellationRequested();
                     var data = NativePayload.Create(paths);
                     SetClipboardData(data);
+                    if (action != "copyFile") VerifyClipboardFiles(paths);
                     Reply(action, requestId, true, new Dictionary<string, object>
                     {
                         { "count", paths.Length },
+                        { "copy_ms", copyClock.ElapsedMilliseconds },
                     });
+                }
+                else if (action == "selectWebpPackage")
+                {
+                    cancellation.Token.ThrowIfCancellationRequested();
+                    Process.Start(new ProcessStartInfo("explorer.exe", "\"" + Path.GetDirectoryName(paths[0]) + "\"") { UseShellExecute = true });
+                    Reply(action, requestId, true, new Dictionary<string, object> { { "count", paths.Length } });
                 }
                 // Premium files: chooser uses the existing validated transfer/cache path.
                 else if (action == "openWith")
@@ -1013,6 +1072,14 @@ internal sealed class DesktopWindow : Window
             }
         }
     }
+
+    internal static void VerifyClipboardFiles(string[] paths)
+    {
+        // Runs on the interactive WPF dispatcher (STA), immediately after write.
+        var actual = System.Windows.Clipboard.GetFileDropList().Cast<string>().ToArray();
+        if (!actual.SequenceEqual(paths, StringComparer.OrdinalIgnoreCase))
+            throw new DesktopException("clipboard_changed", "The clipboard changed before verification. Click Copy all WEBP files again.");
+    }
 }
 
 internal sealed class TransferGrant
@@ -1050,6 +1117,7 @@ internal sealed class NativeCache
     private readonly string localRoot;
     private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
     private readonly HttpClient client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false });
+    private readonly Dictionary<string, string[]> preparedWebp = new Dictionary<string, string[]>();
 
     internal NativeCache(string configuredRoot = "")
     {
@@ -1204,6 +1272,69 @@ internal sealed class NativeCache
             try { File.Delete(Path.Combine(lease, ".active")); } catch { }
             throw;
         }
+    }
+
+    internal async Task<string[]> MaterializeWebpPackageAsync(TransferGrant grant, CancellationToken cancellation)
+    {
+        var manifest = await GetJson(grant.BaseUrl + "/api/files-native-transfer/manifest?ticket=" + Uri.EscapeDataString(grant.Ticket), grant.Secret, cancellation);
+        var items = manifest.ContainsKey("items") ? manifest["items"] as IList : null;
+        var entries = manifest.ContainsKey("roots") ? manifest["roots"] as IList : null;
+        if (!manifest.ContainsKey("purpose") || Convert.ToString(manifest["purpose"]) != "product_upload_webp"
+            || items == null || entries == null || items.Count != 8 || entries.Count != 8)
+            throw new DesktopException("package_invalid", "The complete saved WebP package is required. Retry Save all.");
+        string lease = Path.Combine(root, "leases", grant.Ticket);
+        Directory.CreateDirectory(lease);
+        File.WriteAllText(Path.Combine(lease, ".active"), DateTime.UtcNow.ToString("o"));
+        var paths = new List<string>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try {
+            for (int i = 0; i < items.Count; i++) {
+                cancellation.ThrowIfCancellationRequested();
+                var item = items[i] as Dictionary<string,object>;
+                string name = item == null ? "" : SafeSegment(Convert.ToString(item["name"]));
+                if (!name.EndsWith(".webp", StringComparison.OrdinalIgnoreCase) || !names.Add(name))
+                    throw new DesktopException("package_invalid", "The saved WebP filenames are invalid.");
+                var single = new Dictionary<string,object> { { "items", new object[] {items[i]} }, { "roots", new object[] {entries[i]} } };
+                try {
+                string[] source;
+                source = await MaterializeNativeOpenAsync(grant, single, cancellation, null);
+                string output = Path.Combine(lease, "WEBP"); Directory.CreateDirectory(output);
+                string target = Path.Combine(output, name); EnsureInside(lease, target);
+                if (File.Exists(target)) File.Delete(target);
+                File.Copy(source[0], target);
+                await NativePhotoshop.VerifyMasterAsync(target, root, Convert.ToInt64(item["size"]), Convert.ToString(item["content_hash"]), cancellation);
+                paths.Add(target);
+                } catch (OperationCanceledException) { throw; }
+                  catch (DesktopException error) { throw new DesktopException(error.Code, name + ": " + error.Message); }
+                  catch (Exception) { throw new DesktopException("package_file_failed", name + ": could not hydrate or verify this file. Check the connection and retry."); }
+            }
+            // Revalidate the server operation after hydration, before touching the clipboard.
+            await GetJson(grant.BaseUrl + "/api/files-native-transfer/manifest?ticket=" + Uri.EscapeDataString(grant.Ticket), grant.Secret, cancellation);
+            File.WriteAllText(Path.Combine(lease, ".lease"), DateTime.UtcNow.AddDays(3).ToString("o"));
+            Directory.SetLastWriteTimeUtc(lease, DateTime.UtcNow);
+            preparedWebp[grant.Ticket] = paths.ToArray();
+            return paths.ToArray();
+        } finally { File.Delete(Path.Combine(lease, ".active")); }
+    }
+
+    internal async Task<string[]> PreparedWebpAsync(TransferGrant grant, CancellationToken cancellation)
+    {
+        string[] paths;
+        if (!preparedWebp.TryGetValue(grant.Ticket, out paths))
+            throw new DesktopException("package_not_ready", "Prepare the current saved files before copying.");
+        var manifest = await GetJson(grant.BaseUrl + "/api/files-native-transfer/manifest?ticket=" + Uri.EscapeDataString(grant.Ticket), grant.Secret, cancellation);
+        var items = manifest["items"] as IList;
+        if (items == null || items.Count != paths.Length)
+            throw new DesktopException("package_changed", "The saved package changed. Prepare the current files again.");
+        for (int i = 0; i < paths.Length; i++) {
+            var item = (Dictionary<string, object>)items[i];
+            try {
+                await NativePhotoshop.VerifyMasterAsync(paths[i], root, Convert.ToInt64(item["size"]), Convert.ToString(item["content_hash"]), cancellation);
+            } catch (OperationCanceledException) { throw; }
+              catch (Exception) { throw new DesktopException("prepared_file_missing", Path.GetFileName(paths[i]) + ": prepared file is missing or changed. Prepare files again."); }
+        }
+        cancellation.ThrowIfCancellationRequested();
+        return paths;
     }
 
     internal async Task<string[]> MaterializeNativeOpenAsync(TransferGrant grant,
@@ -1376,6 +1507,7 @@ internal sealed class NativeCache
     private async Task<Dictionary<string, object>> GetJson(
         string url, string secret, CancellationToken cancellation)
     {
+        try {
         using (var request = new HttpRequestMessage(HttpMethod.Get, url))
         {
             request.Headers.Add("X-Sports-Cave-Transfer-Secret", secret);
@@ -1384,10 +1516,17 @@ internal sealed class NativeCache
                 string body = await response.Content.ReadAsStringAsync();
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw new DesktopException("transfer_failed", "The selected Dropbox items could not be prepared.");
+                    DesktopLog.Write("manifest", "failed", "http_" + (int)response.StatusCode, 0);
+                    throw new DesktopException("transfer_failed", "Saved-file verification returned HTTP " + (int)response.StatusCode + ". Prepare the files again.");
                 }
                 return serializer.DeserializeObject(body) as Dictionary<string, object>;
             }
+        }
+        } catch (HttpRequestException error) {
+            var inner = error.InnerException as System.Net.WebException;
+            string reason = inner == null ? "transport" : inner.Status.ToString();
+            DesktopLog.Write("manifest", "failed", reason, 0);
+            throw new DesktopException("transfer_connection", "Cannot reach saved files (" + reason + "). Check your connection and retry.");
         }
     }
 
@@ -1723,7 +1862,7 @@ internal static class BrowserFileLaunch
 {
     internal static string Resolve(Uri uri, DesktopConfig config)
     {
-        if (uri.Scheme != "sports-cave-files" || uri.Host != "launch" || uri.AbsolutePath != ""
+        if (uri.Scheme != "sports-cave-files" || (uri.Host != "launch" && uri.Host != "webp") || uri.AbsolutePath != ""
             && uri.AbsolutePath != "/" || !String.IsNullOrEmpty(uri.UserInfo) || uri.Port != -1)
             throw new DesktopException("invalid_launch", "The desktop launch is invalid.");
         string query = uri.Query.TrimStart('?');
@@ -1739,6 +1878,6 @@ internal static class BrowserFileLaunch
         string code = uri.Fragment.TrimStart('#');
         if (!System.Text.RegularExpressions.Regex.IsMatch(code,"^[A-Za-z0-9_-]{43}$"))
             throw new DesktopException("invalid_launch", "The desktop launch is invalid or expired.");
-        return source.GetLeftPart(UriPartial.Authority)+"/files-native-launch#"+code;
+        return source.GetLeftPart(UriPartial.Authority)+(uri.Host == "webp" ? "/product-upload-native#" : "/files-native-launch#")+code;
     }
 }

@@ -1,0 +1,41 @@
+Email conversation full bodies and overlap repair
+Date: 18 October 2026 (Australia/Sydney)
+Task: 20261017-0d0ec704
+Owner: codex-email-full-body-20261018
+Base: 59b609728b182c6c997f02ed0a8786fff0483095
+Status: Implemented locally; uncommitted; not pushed or deployed.
+
+Root causes
+The server exposed only explicitly expanded bodies. The browser additionally collapsed cached older messages, hid plain-text quotes, and offered per-message and conversation expand/collapse controls.
+The received HTML sanitizer allowed zero/tiny line heights, negative margins and fixed text-container heights. A synthetic reproduction produced 44 overlapping glyph lines. The iframe measured body.scrollHeight, which cannot reliably account for content painted outside a fixed-height text block, and could retain a viewport-size floor on shrink.
+There was no production message available in this task: the historical individual email cannot be conclusively identified. The underlying permitted layout failure is reproduced and fixed with synthetic input.
+
+Implementation
+All cached conversation bodies and plain quoted replies render automatically. Missing bodies hydrate serially only for the selected conversation, through the existing async body reader, completion endpoint and caches. Historical completions cannot change the selected message used by existing actions. Stale thread requests are rejected.
+Removed expand/collapse controls. Message headers retain selection for reply, archive and other existing message actions.
+HTML remains sandboxed, sanitized and isolated per message. Remote images still require explicit per-message approval. Sender text heights, unsafe line heights and negative margins are removed; safe line boxes and wrapping are enforced.
+Frames measure a flow-root content wrapper and coalesce size updates with animation frames. ResizeObserver, image load/error and document font readiness cover content growth and shrink. Already displayed iframe documents are retained when another body arrives. Scroll anchors are preserved.
+The display cache retains the selected conversation beyond its ordinary 75-entry count limit while preserving its existing 64 MiB byte limit. This prevents automatic eviction/refetch loops. Messages exceeding the existing byte budget retain the explicit error rather than cycling requests; opening the conversation again retries. Bodies elsewhere in the inbox are not fetched.
+
+Verification
+python -m unittest tests.test_email_full_conversation tests.test_support_email_render tests.test_support_email_v2 tests.test_email_v2b_privacy tests.test_email_loading_performance tests.test_email_v2c_performance tests.test_email_v2d tests.test_email_reply_prompts -q
+139 tests run: 137 passed, 2 skipped (existing environment-dependent checks).
+All 11 tests/test*email*component.cjs suites passed.
+node tests/profile_email_render.cjs passed: 1,000 unchanged model renders caused zero reading-pane replacements, before and after. Measured JS adapter means were 0.0178 ms before / 0.0229 ms after in the final run; this is a small added computation cost, not a speed improvement.
+
+Reproduce browser fixtures:
+python tests/fixtures/email_full_conversation.py
+Set NODE_PATH to an installed Playwright package directory if needed.
+node tests/email_full_conversation_browser.cjs
+Uses headless installed Edge/Chromium, synthetic documents and intercepted loopback HTML. No application startup, production credentials, live customer data, real email sending or external resource requests.
+
+Browser evidence (browser.json)
+Same 12 messages fully loaded in both versions, 7 paint samples, 30 scrolling animation frames. This compares the old manually expanded presentation with the new automatic presentation.
+Median paint: 8.2 ms before / 7.7 ms after. Median scrolling frame: 6.9 ms / 6.9 ms. Maximum scrolling frame: 7.1 ms / 7.1 ms. Small local samples do not establish a production latency improvement.
+Overlapping glyph lines: 44 before / 0 after. Body expand/collapse controls: 18 before / 0 after. Fixed-height failing fixture frame: 275 px before / correctly grown 2596 px after.
+No internal horizontal/vertical email overflow. HTML and plain-text quoted replies visible. Tables, long links, sender font formatting and signatures checked. Resizing narrowed the frame and increased its height correctly. Late image growth and subsequent removal both resized correctly.
+Zero measured anchor drift after a body above the viewport loaded. Existing iframe document identity retained when another body hydrated. Ten rapid conversation switches passed without browser errors. A 100-message conversation hydrated its remaining 99 bodies with zero duplicates and zero expand clicks. No unapproved resource requests occurred.
+reader.png was visually inspected; readable spacing and toolbar separation confirmed.
+
+Limits
+This work is local and uncommitted, as required by AGENTS.md. There is no production deployment or live-mailbox latency measurement. Existing provider MIME/body limits and the 64 MiB display safety budget remain in effect.

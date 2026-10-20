@@ -1,121 +1,127 @@
-// Synthetic browser acceptance: original pixels, preview isolation, context menus, downloads.
-const fs=require('node:fs'),assert=require('node:assert/strict');
-const {chromium}=require('playwright');
+// Synthetic Chrome acceptance: selection, exact original downloads, honest clipboard limits.
+const fs=require('node:fs'), assert=require('node:assert/strict');
+const {execFileSync}=require('node:child_process'), {chromium}=require('playwright');
 (async()=>{
  const browser=await chromium.launch({channel:'chrome',headless:true});
  try {
-  const context=await browser.newContext({permissions:['clipboard-read','clipboard-write']});
-  const page=await context.newPage();page.setDefaultTimeout(8000);
-  await page.setContent('<canvas id="maker"></canvas>');
-  const assets=await page.evaluate(()=>{
-   const c=document.querySelector('canvas'),g=c.getContext('2d');
-   const make=(w,h,type)=>{c.width=w;c.height=h;g.fillStyle='#123456';g.fillRect(0,0,w,h);g.fillStyle='#ffcc00';g.fillRect(w-10,h-10,10,10);return c.toDataURL(type).split(',')[1]};
-   return {png:make(2400,1600,'image/png'),jpg:make(2400,1600,'image/jpeg'),webp:make(2400,1600,'image/webp'),preview:make(256,170,'image/jpeg')};
-  });
-  Object.assign(assets,{"gif":"R0lGODdhIAAYAIEAAP8AAAAAAAAAAAAAACwAAAAAIAAYAEAILwABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDihxJsqTJjQEBADs=","bmp":"Qk02CQAAAAAAADYAAAAoAAAAIAAAABgAAAABABgAAAAAAAAJAADEDgAAxA4AAAAAAAAAAAAAAAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/AAD/","animatedGif":"R0lGODlhIAAYAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQACgAAACwAAAAAIAAYAAAILwABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDihxJsqTJjQEBACH5BAEKAAEALAAAAAAgABgAgQAA/wAAAAAAAAAAAAgvAAEIHEiwoMGDCBMqXMiwocOHECNKnEixosWLGDNq3Mixo8ePIEOKHEmypMmNAQEAOw==","animatedPng":"iVBORw0KGgoAAAANSUhEUgAAACAAAAAYCAIAAAAUMWhjAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAAgAAAAGAAAAAAAAAAAAAEACgAAmQlOvAAAADBJREFUeJzt0MENAAAIwkB0/511hL749QaApHPp2vJ+PEAmQiZCJkImQiZCJkL1RA/xyAEvXzQdXQAAABpmY1RMAAAAAQAAACAAAAAYAAAAAAAAAAAAAQAKAAACeqRoAAAAN2ZkQVQAAAACeJzt0cENADAIw8CU/XemI5hPfr4BgmResmma6no8cOAPkImQiZCJkImQiVA90QfvygEvUdqnawAAAABJRU5ErkJggg==","animatedWebp":"UklGRuQAAABXRUJQVlA4WAoAAAACAAAAHwAAFwAAQU5JTQYAAAAAAAAAAABBTk1GXAAAAAAAAAAAAB8AABcAAGQAAAJWUDggRAAAALADAJ0BKiAAGAA+bTSWR6QjIiEoCACADYllAMkCgH4AAtaQY7UAAP7wm0P/yC5YXXI1//ID/kB/yA//kB/+m9mp84AAQU5NRlQAAAAAAAAAAAAfAAAXAABkAAAAVlA4IDwAAADUAgCdASogABgAPm00lkeCgIAAANiWUAdgAExQ4dowAP75Hdv//kB//kB//kB//ID//iF3shz/9P4AAAA="});
-  const calls=[],errors=[];page.on('pageerror',e=>errors.push(e.message));
-  let failure=false;
-  const item=(ext='jpg')=>({id:'id:art',path:'/Synthetic/Nested/art.'+ext,desktop_relative_path:'Nested/art.'+ext,name:'art.'+ext,tag:'file',kind:'image',extension:ext,revision:'r1',size:200000,type:'Image',thumbnail_key:'art',thumbnail_url:'/api/files-thumbnail?path=Nested/art.'+ext});
+  const context=await browser.newContext({viewport:{width:1280,height:800},permissions:['clipboard-read','clipboard-write']});
+  const page=await context.newPage();page.setDefaultTimeout(6000);
+  const errors=[],originals=[],downloads=[],report={browser:browser.version()};
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.setContent('<canvas id="c" width="64" height="48"></canvas>');
+  const bytes=Buffer.from(await page.evaluate(()=>{const c=document.querySelector('canvas');c.getContext('2d').fillRect(0,0,64,48);return c.toDataURL('image/webp').split(',')[1]}),'base64');
+  const secondBytes=Buffer.from(await page.evaluate(()=>{const c=document.querySelector('canvas');c.getContext('2d').fillStyle='red';c.getContext('2d').fillRect(0,0,64,48);return c.toDataURL('image/webp').split(',')[1]}),'base64');
+  const sourceBytes=name=>parseInt(name,10)%2?secondBytes:bytes;
+  const items=Array.from({length:400},(_,i)=>({id:'id:'+i,path:'/Synthetic/'+String(i).padStart(3,'0')+'.webp',name:String(i).padStart(3,'0')+'.webp',desktop_relative_path:String(i).padStart(3,'0')+'.webp',tag:'file',kind:'image',extension:'webp',type:'WEBP',revision:'r1'}));
+  let baseline=false;
   await context.route('**/*',async route=>{
-   const u=new URL(route.request().url());assert.equal(u.hostname,'originals.synthetic.test','no external requests');
-   if(u.pathname==='/files-original-actions.js')return route.fulfill({contentType:'text/javascript',body:fs.readFileSync('components/files_original_actions.js','utf8')});
-   if(u.pathname==='/files-window'||u.pathname==='/files-image-viewer')return route.fulfill({contentType:'text/html',body:fs.readFileSync('components/'+(u.pathname==='/files-window'?'files_window':'files_image_viewer')+'/index.html','utf8')});
-   if(u.pathname==='/api/files-list')return route.fulfill({json:{root_path:'/Synthetic',current_path:'/Synthetic/Nested',root_name:'Files',cache_namespace:'synthetic',items:[item()],has_more:false}});
-   if(u.pathname==='/api/files-image-preview')assert.equal(u.searchParams.get('representation'),'screen','viewing never requests original');
-   if(u.pathname==='/api/files-thumbnail'||u.pathname==='/api/files-image-preview')return route.fulfill({contentType:'image/jpeg',body:Buffer.from(assets.preview,'base64')});
+   const u=new URL(route.request().url());assert.equal(u.hostname,'files.synthetic.test');
+   if(u.pathname==='/files-window'||u.pathname==='/files-image-viewer'||u.pathname==='/files-original-actions.js'){
+    const name=u.pathname==='/files-original-actions.js'?'components/files_original_actions.js':'components/'+(u.pathname==='/files-window'?'files_window':'files_image_viewer')+'/index.html';
+    return route.fulfill({contentType:name.endsWith('.js')?'text/javascript':'text/html',body:baseline?execFileSync('git',['show','59b609728b182c6c997f02ed0a8786fff0483095:'+name],{encoding:'utf8'}):fs.readFileSync(name,'utf8')});
+   }
+   if(u.pathname==='/api/files-list') return route.fulfill({json:{root_path:'/Synthetic',current_path:'/Synthetic',items,has_more:false}});
+   if(u.pathname==='/api/files-preview') return route.fulfill({contentType:'image/webp',body:bytes});
    if(u.pathname==='/api/files-download'){
-    const path=u.searchParams.get('path')||u.searchParams.get('relative_path');calls.push(path);
-    if(failure)return route.fulfill({status:403,body:'denied'});
-    const ext=path.split('.').pop();
-    if(ext==='psd')return route.fulfill({contentType:'application/octet-stream',body:'8BPS original unsupported'});
-    if(path.includes('animated'))return route.fulfill({contentType:'image/'+ext,body:Buffer.from(assets['animated'+({gif:'Gif',png:'Png',webp:'Webp'})[ext]],'base64')});
-    return route.fulfill({contentType:'image/'+(ext==='jpg'?'jpeg':ext),headers:{'Content-Disposition':'attachment; filename="art.'+ext+'"'},body:Buffer.from(assets[ext],'base64')});
+    const name=(u.searchParams.get('path')||u.searchParams.get('relative_path')).split('/').pop();originals.push(name);
+    return route.fulfill({headers:{'content-type':'image/webp','content-disposition':`attachment; filename="${name}"`},body:sourceBytes(name)});
    }
    return route.fulfill({status:404,body:''});
   });
-  const clipboard=()=>page.evaluate(async()=>{
-   const entries=await navigator.clipboard.read(),blob=await entries[0].getType('image/png');
-   const bmp=await createImageBitmap(blob),c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;c.getContext('2d').drawImage(bmp,0,0);
-   const pixels=c.getContext('2d').getImageData(0,0,bmp.width,bmp.height).data;
-   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',pixels))).join(',');
-   return {width:bmp.width,height:bmp.height,digest,corner:Array.from(c.getContext('2d').getImageData(bmp.width-1,bmp.height-1,1,1).data)};
-  });
-  await page.goto('https://originals.synthetic.test/files-image-viewer?path=Nested/art.jpg');
-  await page.waitForFunction(()=>state.naturalWidth===256);
-  await page.locator('#actualButton').click();
-  assert.equal(calls.length,0,'browsing and 1:1 must never fetch original');
-  await page.locator('#copyImageButton').click();
-  await page.waitForFunction(()=>elements.dimensions.textContent.includes('Original image copied')).catch(async e=>{console.error(await page.locator('#dimensions').textContent(),calls,errors);throw e});
-  let copied=await clipboard();assert.deepEqual([copied.width,copied.height],[2400,1600]);
-  assert.equal(await page.evaluate(()=>state.naturalWidth),256,'copy must not replace preview');
-  assert.deepEqual(calls,['Nested/art.jpg']);
-  const originalDigest=await page.evaluate(async data=>{
-   const blob=new Blob([Uint8Array.from(atob(data),c=>c.charCodeAt(0))],{type:'image/jpeg'});
-   const bmp=await createImageBitmap(blob),c=document.createElement('canvas');c.width=bmp.width;c.height=bmp.height;c.getContext('2d').drawImage(bmp,0,0);
-   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',c.getContext('2d').getImageData(0,0,bmp.width,bmp.height).data))).join(',');
-  },assets.jpg);
-  assert.equal(copied.digest,originalDigest,'lossless conversion preserves every decoded source pixel');
-  // The native image menu must be intercepted even when the displayed image is tiny.
-  await page.locator('#image').click({button:'right'});
-  await page.getByRole('menuitem',{name:/^Copy image$/i}).click();
-  await page.waitForFunction(()=>elements.dimensions.textContent.includes('Original image copied')).catch(async e=>{console.error(await page.locator('#dimensions').textContent(),calls,errors);throw e});
-  await page.waitForTimeout(200);assert.equal(calls.length,2);
-  const downloadPromise=page.waitForEvent('download');
-  await page.getByRole('button',{name:'Download Original',exact:true}).click();
-  const download=await downloadPromise;assert.equal(download.suggestedFilename(),'art.jpg');
-  assert.deepEqual(fs.readFileSync(await download.path()),Buffer.from(assets.jpg,'base64'));
-  // PNG pass-through and lossless conversion of WebP both retain native dimensions.
-  for(const ext of ['png','webp','gif','bmp']){
-   await page.evaluate(ext=>FilesOriginal.copy('/api/files-download?relative_path=Nested/art.'+ext),ext);
-   copied=await clipboard();assert.deepEqual([copied.width,copied.height],['gif','bmp'].includes(ext)?[32,24]:[2400,1600]);
-   if(ext==='png')assert.deepEqual(copied.corner,[255,204,0,255]);
-  }
-  for(const ext of ['psd']) {
-   const error=await page.evaluate(async ext=>{try{await FilesOriginal.copy('/api/files-download?relative_path=Nested/art.'+ext);return ''}catch(e){return e.message}},ext);
-   assert(error,'unsupported original must reject, never copy preview');
-  }
-  for(const ext of ['gif','png','webp']) {
-   const error=await page.evaluate(async ext=>{try{await FilesOriginal.copy('/api/files-download?relative_path=Nested/animated.'+ext);return ''}catch(e){return e.message}},ext);
-   assert(error,'animated originals must offer Download Original, not silently lose frames');
-  }
-  failure=true;
-  await page.locator('#copyImageButton').click();
-  await page.waitForFunction(()=>elements.dimensions.textContent.includes('Download Original'));
-  failure=false;
-  // All folder layouts use the same item Copy and explicit Copy Image actions.
-  for(const view of ['large','medium','small','list','details']){
-   await page.goto('https://originals.synthetic.test/files-window?view='+view);
-   await page.waitForFunction(()=>state.items.length===1);
-   const before=calls.length;
-   await page.locator('.file-item').first().click({button:'right'});
-   await page.getByText('Copy Image',{exact:true}).click();
-   await page.waitForTimeout(200);
-   assert.equal(calls.length,before+1,view+' original request');
-   copied=await clipboard();assert.deepEqual([copied.width,copied.height],[2400,1600]);
-   await page.locator('.file-item').first().click({button:'right'});
-   await page.getByText('Copy',{exact:true}).click();
-   await page.waitForTimeout(200);assert.equal(calls.length,before+2,view+' Copy uses original');
-   assert.equal(await page.evaluate(()=>state.clipboard.items.length),1,'internal copy/paste reference retained');
-  }
-  // Embedded/enlarged preview uses the same original route and leaves its preview small.
+  page.on('download',d=>downloads.push(d));
+  // Reproduce both original handlers before changing behavior. This is a real
+  // browser clipboard write; decoded PNG success is not native file success.
+  baseline=true;await page.goto('https://files.synthetic.test/files-window');await page.waitForFunction(()=>state.items.length===400);
+  await page.locator('.file-item').first().click({button:'right'});await page.locator('#menu').getByText('Copy',{exact:true}).click();
+  await page.waitForFunction(()=>elements.toastText.textContent.includes('PNG clipboard')||elements.toastText.textContent.includes('Download Original'));
+  report.baselineCard=await page.locator('#toastText').textContent();
+  report.baselineClipboard=await page.evaluate(async()=> (await navigator.clipboard.read()).map(x=>x.types));
   await page.locator('.file-item').first().dblclick();
-  const viewer=page.frameLocator('#previewFrame');
-  await viewer.locator('#image').waitFor({state:'visible'});
-  await viewer.locator('#copyImageButton').click();
-  await viewer.locator('#dimensions').filter({hasText:'Original image copied'}).waitFor();
-  copied=await clipboard();assert.deepEqual([copied.width,copied.height],[2400,1600]);
-  const embeddedDownload=page.waitForEvent('download');
-  await viewer.locator('#downloadButton').click();
-  const embeddedFile=await embeddedDownload;
-  assert.deepEqual(fs.readFileSync(await embeddedFile.path()),Buffer.from(assets.jpg,'base64'));
-  const beforeUnsupported=calls.length;
-  const unsupported=await page.evaluate(async()=>{
-   Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined});
-   try {await FilesOriginal.copy('/api/files-download?relative_path=Nested/art.jpg');return ''}
-   catch(e){return e.message} finally {delete navigator.clipboard}
-  });
-  assert(unsupported.includes('unavailable'));assert.equal(calls.length,beforeUnsupported);
+  const frame=page.frameLocator('#previewFrame');await frame.locator('#copyImageButton').click();
+  await frame.locator('#dimensions').filter({hasText:/PNG clipboard|Download Original/}).waitFor();
+  report.baselinePreview=await frame.locator('#dimensions').textContent();
+  baseline=false;await page.goto('https://files.synthetic.test/files-window');await page.waitForFunction(()=>state.items.length===400);originals.length=0;
+  report.rejections=await page.evaluate(async()=>{const results={};for(const type of ['webp','multiple']){try{await navigator.clipboard.write(type==='webp'?[new ClipboardItem({'image/webp':new Blob(['synthetic'],{type:'image/webp'})})]:[new ClipboardItem({'text/plain':new Blob(['one'],{type:'text/plain'})}),new ClipboardItem({'text/plain':new Blob(['two'],{type:'text/plain'})})]);results[type]='success';}catch(e){results[type]=e.message;}}return results;});
+  assert(report.rejections.webp.includes('not supported'));assert(report.rejections.multiple.includes('multiple'));
+  report.support=await page.evaluate(()=>Object.fromEntries(['image/webp','application/octet-stream','text/uri-list','image/png'].map(t=>[t,ClipboardItem.supports(t)])));
+  const row=i=>page.locator(`.file-item[data-index="${i}"]`);
+  const selected=()=>page.evaluate(()=>[...state.selection]);
+  await row(0).click();assert.equal((await selected()).length,1);assert(await page.locator('#previewPanel').isHidden());
+  await row(2).click({modifiers:['Control']});assert.equal((await selected()).length,2);
+  await row(5).click({modifiers:['Shift']});assert.equal((await selected()).length,4);
+  await page.keyboard.press('Escape');assert.equal((await selected()).length,0);
+  await row(0).click();await page.keyboard.press('Control+a');assert.equal((await selected()).length,400);
+  await page.locator('#searchInput').focus();await page.keyboard.press('Control+a');assert.equal((await selected()).length,400);
+  await page.locator('#searchInput').press('Control+c');assert(await page.locator('#toast').evaluate(e=>!e.classList.contains('visible')));
+  await row(0).click();await page.keyboard.press('Control+c');await page.getByText('Copy unavailable',{exact:true}).waitFor();
+  assert((await page.locator('#toastText').textContent()).includes('Native file copying is unavailable'));assert.equal(originals.length,0);
+  await page.waitForTimeout(2100);assert.equal(await page.locator('#copyButton .command-label').innerText(),'Copy');
+  // Copy on a selected card snapshots all selected files, then failure fallback
+  // downloads that snapshot even if selection/navigation changes afterwards.
+  await page.evaluate(()=>{window.originalCopy=FilesOriginal.copy;FilesOriginal.copy=items=>{window.copySnapshot=items;return new Promise((resolve,reject)=>window.rejectCopy=reject)}});
+  await row(1).click({modifiers:['Control']});
+  await row(0).click({button:'right'});await page.locator('#menu').getByText('Copy 2 files',{exact:true}).click();
+  await page.waitForFunction(()=>window.copySnapshot?.length===2);assert.equal(await page.locator('#copyButton .command-label').innerText(),'Copying…');
+  await row(5).click();await page.evaluate(()=>window.rejectCopy(new Error('Native file copying is unavailable')));
+  await page.getByText('Copy unavailable',{exact:true}).waitFor();
+  const before=downloads.length;await page.locator('#toastAction').click();
+  await page.waitForTimeout(700);
+  assert.equal(downloads.length,before+2);
+  while(downloads.length<before+2)await page.waitForTimeout(50);
+  for(const [i,d] of downloads.slice(before).entries()) {assert.equal(d.suggestedFilename(),items[i].name);assert.deepEqual(fs.readFileSync(await d.path()),sourceBytes(d.suggestedFilename()));}
+  await page.evaluate(()=>FilesOriginal.copy=window.originalCopy);
+  await row(7).click({button:'right'});await page.locator('#menu').getByText('Copy',{exact:true}).click();assert.equal((await selected()).length,1);
+  // Original downloads are unchanged and exact. Selection never fetches originals.
+  const previous=originals.length;
+  async function rectangle(reverse=false){
+   await page.evaluate(()=>{elements.results.scrollTop=0;setView('medium');});
+   const b=await page.locator('#results').boundingBox(),r=await row(0).boundingBox(),last=await row(10).boundingBox();
+   const start={x:b.x+2,y:b.y+3},end={x:last.x+last.width/2,y:last.y+last.height/2};
+   await page.mouse.move(reverse?end.x:start.x,reverse?b.y+2:start.y); // empty top padding in either direction
+   if(reverse){start.x=end.x;start.y=b.y+2;end.x=r.x+r.width/2;end.y=r.y+r.height/2;}
+   await page.mouse.move(start.x,start.y);await page.mouse.down();await page.mouse.move(end.x,end.y,{steps:8});
+   assert(await page.locator('.selection-rectangle').isVisible());
+   const expected=await page.evaluate(({start,end})=>[...elements.items.querySelectorAll('.file-item')].filter(row=>{const r=row.getBoundingClientRect();return r.left<=Math.max(start.x,end.x)&&r.right>=Math.min(start.x,end.x)&&r.top<=Math.max(start.y,end.y)&&r.bottom>=Math.min(start.y,end.y)}).map(row=>row.dataset.path),{start,end});
+   await page.mouse.up();assert.deepEqual((await selected()).sort(),expected.sort());assert(expected.length>0);
+   assert.equal(await page.locator('.selection-rectangle').count(),0);
+  }
+  await rectangle();await rectangle(true);
+  // Reverse vertical drag starts in the inter-card gap, not on a card.
+  const a=await row(0).boundingBox(),z=await row(10).boundingBox(),area=await page.locator('#results').boundingBox();
+  await page.mouse.move(area.x+2,z.y+z.height);await page.mouse.down();await page.mouse.move(a.x+a.width/2,a.y+5,{steps:8});await page.mouse.up();assert((await selected()).length>0);
+  for(const zoom of [0.8,1.25]){await page.evaluate(z=>document.body.style.zoom=z,zoom);await rectangle();}
+  await page.evaluate(()=>document.body.style.zoom='1');
+  await page.evaluate(()=>elements.results.scrollTop=0);
+  const bounds=await page.locator('#results').boundingBox();await page.mouse.move(bounds.x+2,bounds.y+2);await page.mouse.down();await page.mouse.move(bounds.x+200,bounds.y+bounds.height-2,{steps:8});await page.waitForTimeout(500);
+  assert(await page.evaluate(()=>elements.results.scrollTop>100));const paths=await selected();assert(paths.length>10);await page.mouse.up();
+  // Empty click and Escape clear; mouse/touch controls retain their normal actions.
+  await page.mouse.click(bounds.x+2,bounds.y+2);assert.equal((await selected()).length,0);
+  await page.locator('#results').focus();await page.keyboard.press('Control+a');await page.keyboard.press('Escape');assert.equal((await selected()).length,0);
+  assert.equal(originals.length,previous);
+  await page.evaluate(()=>{elements.results.scrollTop=0;renderVirtualRows();});
+  await row(0).dblclick();await frame.locator('#copyImageButton').click();await frame.locator('#dimensions').filter({hasText:'Native file copying is unavailable'}).waitFor();assert.equal(originals.length,previous);
+  await frame.locator('#closeButton').click();await page.locator('#previewPanel').waitFor({state:'hidden'});
+  // Repeated immediate failures must refresh the toast's snapshot action.
+  await row(2).click();await page.locator('#copyButton').click();
+  await row(3).click();await page.locator('#copyButton').click();
+  const oneDownload=page.waitForEvent('download');await page.locator('#toastAction').click();
+  assert.equal((await oneDownload).suggestedFilename(),'003.webp');
+  await page.locator('#searchInput').fill('00');await page.waitForTimeout(250);
+  await page.locator('#results').focus();await page.keyboard.press('Control+a');
+  assert.equal((await selected()).length,13);
+  await page.locator('#searchInput').fill('');await page.waitForTimeout(250);
+  // Same geometry in the non-virtual grid, list and details views.
+  await page.evaluate(()=>{state.items=state.items.slice(0,30);elements.results.scrollTop=0;renderItems();});
+  for(const view of ['medium','large','small','list','details']){
+   await page.evaluate(view=>setView(view),view);
+   const r=await row(0).boundingBox(),b=await page.locator('#results').boundingBox();
+   await page.mouse.move(b.x+2,r.y+1);await page.mouse.down();await page.mouse.move(r.x+r.width/2,r.y+r.height/2,{steps:5});await page.mouse.up();
+   assert((await selected()).includes(items[0].path),view);
+  }
+  await page.locator('#viewButton').click();assert.equal(await page.locator('.selection-rectangle').count(),0);await page.keyboard.press('Escape');
   assert.deepEqual(errors,[]);
-  console.log('PASS: native clipboard dimensions/pixels, JPEG/PNG/WebP, original download bytes/name, right-click, five folder views, denied/unsupported assets, no browse-time original fetch.');
- } finally {await browser.close()}
-})().catch(e=>{console.error(e);process.exit(1)});
+  report.downloads=downloads.map(d=>d.suggestedFilename());report.status='Selection and exact original download fallback passed; native file copy unavailable; ChatGPT/Explorer paste unverified.';
+  fs.mkdirSync('test-results/files-selection',{recursive:true});fs.writeFileSync('test-results/files-selection/report.json',JSON.stringify(report,null,2));
+  await page.screenshot({path:'test-results/files-selection/desktop.png'});console.log(JSON.stringify(report,null,2));
+ }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

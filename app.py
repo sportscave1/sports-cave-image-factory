@@ -363,13 +363,10 @@ def get_pillow_modules():
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
-UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
 EDITION_LOG_CACHE_PATH = BASE_DIR / "output" / "_cache" / "edition-log-snapshot.json"
 EDITION_LOG_HEADER_ROW = 4
 EDITION_LOG_DATA_START_ROW = 5
 EDITION_LOG_SHEET_NAME = "Edition Log"
-UPLOAD_PREVIEW_MAX_FILE_SIZE_BYTES = 6 * 1024 * 1024
-UPLOAD_PREVIEW_MAX_SOURCE_EDGE = 4000
 ENABLE_GOOGLE_DRIVE = os.getenv("ENABLE_GOOGLE_DRIVE", "false").lower() == "true"
 GOOGLE_SHEET_URL = os.getenv(
     "GOOGLE_SHEET_URL",
@@ -463,11 +460,8 @@ MOCKUPS_MAX_CONCURRENT_GENERATIONS = max(
     int(os.getenv("MOCKUPS_MAX_CONCURRENT_GENERATIONS", "1") or "1"),
 )
 MOCKUPS_GENERATION_SEMAPHORE = threading.BoundedSemaphore(MOCKUPS_MAX_CONCURRENT_GENERATIONS)
-MOCKUPS_GENERATION_ACTIVE_KEY = "mockups_generation_active_run_id"
-MOCKUPS_LAST_RUN_SIGNATURE_KEY = "mockups_last_run_signature"
 MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY = "mockups_upload_identity_cache"
 MOCKUPS_UPLOAD_IDENTITY_CACHE_MAX_ITEMS = 64
-MOCKUPS_UPLOAD_PROCESSING_CACHE_MAX_ITEMS = 32
 MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY = "mockups_lifestyle_upload_lifecycle"
 MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_MAX_ITEMS = 64
 MOCKUPS_LIFESTYLE_UPLOAD_PROCESSING_STALE_SECONDS = 120
@@ -3168,6 +3162,11 @@ def get_current_page():
         )
     if route != session_route:
         _begin_navigation_transition(route, source=source)
+    if route == "Product Uploads" and st.session_state.get(CURRENT_PAGE_STATE_KEY) != route:
+        from product_upload_mockups import release_transient
+        release_transient(st.session_state.get('_product_upload_mockups_result'))
+        for key in ("_product_upload_visit", "_product_upload_active", "_product_upload_event", "_product_upload_manual", "_product_upload_mockups_result"):
+            st.session_state.pop(key, None)
     _store_current_page(route, source=source)
     st.session_state[CURRENT_PAGE_QUERY_STATE_KEY] = query_value
 
@@ -3193,6 +3192,11 @@ def set_current_page(page, *, source="user", sync_query=True, force=False):
     _begin_navigation_transition(route, source=source, force=force)
     # Durably store the exact route before either the query-parameter forward
     # message or the explicit Streamlit rerun can be emitted.
+    if route == "Product Uploads" and st.session_state.get(CURRENT_PAGE_STATE_KEY) != route:
+        from product_upload_mockups import release_transient
+        release_transient(st.session_state.get('_product_upload_mockups_result'))
+        for key in ("_product_upload_visit", "_product_upload_active", "_product_upload_event", "_product_upload_manual", "_product_upload_mockups_result"):
+            st.session_state.pop(key, None)
     _store_current_page(route, source=source)
     if sync_query:
         sync_current_page_to_query_params(route)
@@ -3223,26 +3227,8 @@ def init_session_state():
     if "show_add_product" not in st.session_state:
         st.session_state.show_add_product = False
 
-    if "product_name" not in st.session_state:
-        st.session_state.product_name = ""
-
-    if "last_uploaded_file_name" not in st.session_state:
-        st.session_state.last_uploaded_file_name = None
-
-    if "last_autofilled_product_name" not in st.session_state:
-        st.session_state.last_autofilled_product_name = ""
-
     if "last_generation_result" not in st.session_state:
         st.session_state.last_generation_result = None
-
-    if "uploaded_preview_signature" not in st.session_state:
-        st.session_state.uploaded_preview_signature = None
-
-    if "uploaded_preview_path" not in st.session_state:
-        st.session_state.uploaded_preview_path = None
-
-    if "mockups_upload_processing_cache" not in st.session_state:
-        st.session_state.mockups_upload_processing_cache = {}
 
     if MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY not in st.session_state:
         st.session_state[MOCKUPS_UPLOAD_IDENTITY_CACHE_KEY] = {}
@@ -3250,8 +3236,6 @@ def init_session_state():
     if MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY not in st.session_state:
         st.session_state[MOCKUPS_LIFESTYLE_UPLOAD_LIFECYCLE_KEY] = {}
 
-    if MOCKUPS_GENERATION_ACTIVE_KEY not in st.session_state:
-        st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
 
 
 def log_app_memory(stage):
@@ -4136,19 +4120,18 @@ def get_drive_storage_module():
     return import_drive_storage_module()
 
 
-def get_uploaded_file_signature(uploaded_file):
-    if uploaded_file is None:
-        return None
-
-    name = getattr(uploaded_file, "name", "")
-    size = getattr(uploaded_file, "size", 0)
-    return hashlib.sha1(f"{name}|{size}".encode("utf-8")).hexdigest()[:16]
+def _mockups_result_key():
+    return "_product_upload_mockups_result" if st.session_state.get(CURRENT_PAGE_STATE_KEY) == "Product Uploads" else "last_generation_result"
 
 
-def _mockups_upload_processing_cache():
-    if "mockups_upload_processing_cache" not in st.session_state:
-        st.session_state.mockups_upload_processing_cache = {}
-    return st.session_state.mockups_upload_processing_cache
+def _mockups_result():
+    return st.session_state.get(_mockups_result_key())
+
+
+def _set_mockups_result(value):
+    if value and value.get('_product_upload_intake') and value['_product_upload_intake'] != st.session_state.get('_product_upload_active'):
+        return
+    st.session_state[_mockups_result_key()] = value
 
 
 def _mockups_upload_identity_cache():
@@ -4254,190 +4237,6 @@ def get_mockups_uploaded_content_signature(
     return signature, measured_size
 
 
-def process_uploaded_artwork_once(uploaded_file):
-    Image, ImageOps, UnidentifiedImageError = get_pillow_modules()
-    if uploaded_file is None:
-        return None
-
-    started = time.perf_counter()
-    file_size = getattr(uploaded_file, "size", None)
-    if file_size is not None and file_size <= 0:
-        raise ValueError("Uploaded file is empty.")
-    if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
-        raise ValueError(
-            "Artwork exceeds the 20 MB upload file-size limit. "
-            "Upload a JPG, PNG, or WebP within that limit."
-        )
-
-    filename = getattr(uploaded_file, "name", "")
-    suffix = Path(filename).suffix.lower()
-    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
-        raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
-
-    read_started = time.perf_counter()
-    signature, measured_size = get_mockups_uploaded_content_signature(
-        uploaded_file,
-        max_size_bytes=image_factory.MAX_UPLOAD_SIZE_BYTES,
-        size_error_message=(
-            "Artwork exceeds the 20 MB upload file-size limit. "
-            "Upload a JPG, PNG, or WebP within that limit."
-        ),
-    )
-    logging.info(
-        "MOCKUPS_UPLOAD read_bytes signature=%s bytes=%s elapsed_ms=%s",
-        signature,
-        measured_size,
-        int((time.perf_counter() - read_started) * 1000),
-    )
-    if measured_size <= 0:
-        raise ValueError("Uploaded file is empty.")
-
-    cache = _mockups_upload_processing_cache()
-    cached = cache.get(signature)
-    if cached:
-        preview_path = cached.get("preview_path")
-        if not preview_path or Path(preview_path).exists():
-            logging.info(
-                "MOCKUPS_UPLOAD cache_hit signature=%s elapsed_ms=%s",
-                cached.get("signature"),
-                int((time.perf_counter() - started) * 1000),
-            )
-            if hasattr(uploaded_file, "seek"):
-                uploaded_file.seek(0)
-            return dict(cached)
-
-    source_image = None
-    preview_image = None
-    preview_path = None
-    try:
-        pil_started = time.perf_counter()
-        if hasattr(uploaded_file, "seek"):
-            uploaded_file.seek(0)
-        source_image = Image.open(image_factory.BorrowedImageStream(uploaded_file))
-        width, height = source_image.size
-        logging.info("MOCKUPS_ARTWORK stage=preview_metadata dimensions=%sx%s mode=%s upload_bytes=%s",
-                     width, height, source_image.mode, measured_size)
-        image_factory.validate_image_dimensions(width, height)
-        if source_image.format not in {"JPEG", "PNG", "WEBP"}:
-            raise ValueError("Upload a valid JPG, PNG, or WebP image.")
-        upload_details = {
-            "file_size": file_size if file_size is not None else measured_size,
-            "width": width,
-            "height": height,
-            "signature": signature,
-        }
-
-        if should_defer_uploaded_preview(upload_details):
-            source_image.verify()
-        else:
-            UPLOAD_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-            preview_path = UPLOAD_PREVIEW_DIR / f"{signature}.webp"
-            if not preview_path.exists():
-                if source_image.format == "JPEG":
-                    source_image.draft("RGB", (image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE))
-                image_factory.validate_processing_memory(*source_image.size)
-                ImageOps.exif_transpose(source_image, in_place=True)
-                preview_image = source_image
-                preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
-                if preview_image.mode not in {"RGB", "RGBA"}:
-                    preview_image = source_image.convert("RGBA" if "transparency" in source_image.info else "RGB")
-                image_factory.save_image_atomic(preview_image,
-                    preview_path,
-                    format="WEBP",
-                    quality=image_factory.PREVIEW_WEBP_QUALITY,
-                    method=image_factory.PREVIEW_WEBP_METHOD,
-                )
-            upload_details["preview_path"] = str(preview_path)
-
-        logging.info(
-            "MOCKUPS_UPLOAD pil_process signature=%s size=%sx%s preview=%s elapsed_ms=%s total_ms=%s",
-            signature,
-            width,
-            height,
-            bool(preview_path),
-            int((time.perf_counter() - pil_started) * 1000),
-            int((time.perf_counter() - started) * 1000),
-        )
-        _bounded_cache_store(
-            cache,
-            signature,
-            dict(upload_details),
-            max_items=MOCKUPS_UPLOAD_PROCESSING_CACHE_MAX_ITEMS,
-        )
-        if hasattr(uploaded_file, "seek"):
-            uploaded_file.seek(0)
-        return upload_details
-    except (MemoryError, image_factory.MemoryLimitExceededError) as error:
-        logging.exception("MOCKUPS_ARTWORK stage=upload_preview bytes=%s", measured_size)
-        raise image_factory.MemoryLimitExceededError(image_factory.PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE) from error
-    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
-        raise ValueError(image_factory.IMAGE_DIMENSIONS_MESSAGE) from error
-    except UnidentifiedImageError as error:
-        raise ValueError(
-            "Uploaded file is not a valid image. Please upload a valid JPG, PNG, or WEBP file."
-        ) from error
-    except (ValueError, RuntimeError):
-        raise
-    except Exception as error:
-        raise RuntimeError("Unable to validate uploaded artwork file.") from error
-    finally:
-        if hasattr(uploaded_file, "seek"):
-            uploaded_file.seek(0)
-        if preview_image is not None:
-            with suppress(Exception):
-                preview_image.close()
-        if source_image is not None:
-            with suppress(Exception):
-                source_image.close()
-        del preview_image, source_image
-
-
-def create_uploaded_preview(uploaded_file):
-    Image, ImageOps, _ = get_pillow_modules()
-    preview_signature = get_uploaded_file_signature(uploaded_file)
-    if preview_signature is None:
-        return None
-
-    UPLOAD_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    preview_path = UPLOAD_PREVIEW_DIR / f"{preview_signature}.webp"
-    if preview_path.exists():
-        return preview_path
-
-    source_image = None
-    preview_image = None
-
-    try:
-        log_app_memory("Before upload preview creation")
-        uploaded_file.seek(0)
-        source_image = Image.open(image_factory.BorrowedImageStream(uploaded_file))
-        if (source_image.format or "").upper() in {"JPEG", "JPG"}:
-            source_image.draft("RGB", (image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE))
-        image_factory.validate_image_dimensions(*source_image.size)
-        image_factory.validate_processing_memory(*source_image.size)
-        ImageOps.exif_transpose(source_image, in_place=True)
-        preview_image = source_image
-        preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
-        if preview_image.mode not in {"RGB", "RGBA"}:
-            preview_image = source_image.convert("RGBA" if "transparency" in source_image.info else "RGB")
-        image_factory.save_image_atomic(preview_image,
-            preview_path,
-            format="WEBP",
-            quality=image_factory.PREVIEW_WEBP_QUALITY,
-            method=image_factory.PREVIEW_WEBP_METHOD,
-        )
-        log_app_memory("After upload preview creation")
-        return preview_path
-    finally:
-        uploaded_file.seek(0)
-        if preview_image is not None:
-            with suppress(Exception):
-                preview_image.close()
-        if source_image is not None:
-            with suppress(Exception):
-                source_image.close()
-        del preview_image, source_image
-
-
 def get_local_recent_runs(limit=5):
     if not RUNS_DIR.exists():
         return []
@@ -4465,13 +4264,6 @@ def get_recent_runs(limit=5):
     ]
 
 
-def get_product_name_from_upload(uploaded_file):
-    if uploaded_file is None:
-        return ""
-
-    return Path(uploaded_file.name).stem.strip()
-
-
 def load_run_metadata(run_dir):
     run_dir = Path(run_dir)
     manifest_path = run_dir / "manifest.json"
@@ -4492,100 +4284,6 @@ def load_run_metadata(run_dir):
     metadata["shopify_uploads_html_path"] = str(run_dir / "shopify-uploads" / "index.html")
     metadata["prompt_dir"] = str(run_dir / "chatgpt-prompts")
     return metadata
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def validate_uploaded_artwork(uploaded_file):
-    if uploaded_file is None:
-        raise ValueError("Please upload an artwork image first.")
-    return process_uploaded_artwork_once(uploaded_file)
-
-
-
-def should_defer_uploaded_preview(upload_details):
-    if not upload_details:
-        return False
-
-    file_size = upload_details.get("file_size") or 0
-    width = upload_details.get("width") or 0
-    height = upload_details.get("height") or 0
-    pixel_count = width * height
-
-    return (
-        file_size >= UPLOAD_PREVIEW_MAX_FILE_SIZE_BYTES
-        or max(width, height) >= UPLOAD_PREVIEW_MAX_SOURCE_EDGE
-        or pixel_count >= image_factory.MAX_SOURCE_PIXELS
-    )
-
-
-def mockups_generation_signature(upload_details, product_name, sport_category):
-    payload = json.dumps(
-        {
-            "upload": {
-                "signature": (upload_details or {}).get("signature"),
-                "size": (upload_details or {}).get("file_size"),
-                "width": (upload_details or {}).get("width"),
-                "height": (upload_details or {}).get("height"),
-            },
-            "product_name": str(product_name or "").strip(),
-            "sport_category": str(sport_category or "").strip(),
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def resolve_mockups_dropbox_run(access_token, product_slug):
@@ -5184,7 +4882,7 @@ def render_download_button(label, file_path, mime, key):
         return
 
     with file_path.open("rb") as file_handle:
-        st.download_button(
+        return st.download_button(
             label=label,
             data=file_handle,
             file_name=file_path.name,
@@ -5873,7 +5571,7 @@ def apply_asset_selection_from_session(result):
 
     if selections_changed:
         result = rebuild_result_artifacts(result)
-        st.session_state.last_generation_result = result
+        _set_mockups_result(result)
 
     return result
 
@@ -6215,6 +5913,7 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
         sport_slug=result["sport_slug"],
         prompt_filename=Path(prompt_path).name,
         image_file=uploaded_file,
+        **({"export_jpg": False} if result.get("_product_upload_intake") else {}),
     )
 
     prompt_filename = Path(prompt_path).name
@@ -6356,7 +6055,7 @@ def _isolated_lifestyle_upload_result(result):
 
 
 def _current_mockups_result_for_run(result):
-    latest = st.session_state.get("last_generation_result")
+    latest = _mockups_result()
     if (
         isinstance(latest, dict)
         and str(latest.get("run_dir") or "") == str(result.get("run_dir") or "")
@@ -6384,7 +6083,7 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
             updated_result = remove_uploaded_lifestyle_result(result, prompt_path)
             st.session_state.pop(upload_signature_key, None)
             lifecycle.pop(slot_key, None)
-            st.session_state.last_generation_result = updated_result
+            _set_mockups_result(updated_result)
             return updated_result
         lifecycle.pop(slot_key, None)
         return result
@@ -6516,7 +6215,7 @@ def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
         return _current_mockups_result_for_run(result)
 
     st.session_state[upload_signature_key] = upload_signature
-    st.session_state.last_generation_result = updated_result
+    _set_mockups_result(updated_result)
     return updated_result
 
 
@@ -6683,12 +6382,12 @@ def render_primary_zip_download(result, section_key):
                         "drive_link": upload_info.get("drive_link"),
                     },
                 )
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 st.rerun()
             except Exception as error:
                 result["zip_drive_message"] = None
                 result["zip_drive_error"] = str(error)
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 st.rerun()
 
     with action_cols[1]:
@@ -6721,7 +6420,8 @@ def render_primary_zip_download(result, section_key):
 
 def _mockup_dropbox_manifest(result, selected_groups):
     selected_assets = get_selected_zip_assets(result, selected_groups)
-    return image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False)
+    return image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False,
+        **({"include_jpg": False} if result.get("_product_upload_intake") else {}))
 
 
 def _mockup_dropbox_folder_name(result):
@@ -6829,7 +6529,26 @@ def _render_mockup_folder_picker(access_token, root_path, run_key):
     return current_path
 
 
-def _save_mockups_to_dropbox(
+def _save_mockups_to_dropbox(access_token,user,result,manifest,root_path,destination_parent,folder_name,destination_conflict):
+    if not result.get("_product_upload_intake"):
+        return _save_mockups_to_dropbox_impl(access_token,user,result,manifest,root_path,destination_parent,folder_name,destination_conflict)
+    from product_upload_mockups import save,bind_export
+    from product_upload_api import connect,Dropbox
+    provider=Dropbox()
+    def perform(target):
+        scoped=dict(result,_product_upload_save_target=target)
+        return _save_mockups_to_dropbox_impl(access_token,user,scoped,manifest,root_path,destination_parent,folder_name,"merge_replace")
+    saved=save(connect,user['id'],result,manifest,provider,destination_parent,folder_name,destination_conflict,perform)
+    slots={x.get('product_slot_id') for x in manifest}
+    if not saved.get('cancelled') and saved.get('successes') and not saved.get('failures') and len(slots-{None})==8:
+        bind_export(connect,user['id'],result,'Dropbox',folder=saved['destination'])
+        result['dropbox_saved_path']=saved['destination']
+        _set_mockups_result(result)
+        st.rerun()
+    return saved
+
+
+def _save_mockups_to_dropbox_impl(
     access_token,
     user,
     result,
@@ -6843,7 +6562,9 @@ def _save_mockups_to_dropbox(
     proposed = dropbox_integration.join_upload_path(destination_parent, clean_name)
     existing = dropbox_integration.get_metadata_if_exists(access_token, proposed)
     conflict_key = str(destination_conflict or "cancel")
-    if existing:
+    if result.get("_product_upload_save_target"):
+        destination=result["_product_upload_save_target"];file_conflict="replace"
+    elif existing:
         if str(existing.get(".tag") or "").casefold() != "folder":
             raise dropbox_integration.DropboxConflictError("A file already uses this output name.")
         if conflict_key == "cancel":
@@ -6991,12 +6712,12 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
             elif saved.get("successes") and not saved.get("failures"):
                 result["dropbox_saved_path"] = saved["destination"]
                 result["dropbox_save_failures"] = []
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 st.success("Saved to Dropbox")
             elif saved.get("successes"):
                 result["dropbox_saved_path"] = saved["destination"]
                 result["dropbox_save_failures"] = list(saved.get("failures") or ())
-                st.session_state.last_generation_result = result
+                _set_mockups_result(result)
                 failed_names = ", ".join(
                     str(row.get("relative_path") or row.get("path") or "unknown file")
                     for row in saved["failures"]
@@ -7023,7 +6744,9 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
             )
         else:
             st.success("Saved to Dropbox")
-        if st.button(
+        if result.get('_product_upload_intake'):
+            st.link_button("Open folder", "/?page=files&files_path="+quote(saved_path,safe=''), icon=":material/folder_open:")
+        elif st.button(
             "Open folder",
             key=f"mockups-dropbox-open::{run_key}",
             icon=":material/folder_open:",
@@ -7118,7 +6841,7 @@ def render_final_zip_download(result):
     with action_cols[1]:
         try:
             filtered_zip_path = build_filtered_download_zip(result, selected_groups)
-            render_download_button(
+            downloaded = render_download_button(
                 "Download ZIP",
                 filtered_zip_path,
                 "application/zip",
@@ -7127,6 +6850,11 @@ def render_final_zip_download(result):
         except Exception as error:
             logging.warning("Mockups ZIP creation failed: %s", error)
             st.warning("Could not create the ZIP.")
+    if result.get('_product_upload_intake') and locals().get('downloaded') and {ASSET_CATEGORY_CORE,ASSET_CATEGORY_PRODUCT}.issubset(normalized_groups):
+        from product_upload_mockups import bind_export
+        from product_upload_api import connect
+        bind_export(connect,result['_product_upload_actor_id'],result,'ZIP')
+        st.rerun()
     _render_mockups_dropbox_save(result, selected_groups, selected_manifest, show_button=False)
 
 
@@ -7163,7 +6891,7 @@ def render_mockups_dropbox_status(result):
             logging.exception("Mockups Dropbox retry failed")
             result["dropbox_upload_status"] = "failed"
             result["dropbox_upload_failures"] = [{"error": str(error)[:300]}]
-            st.session_state.last_generation_result = result
+            _set_mockups_result(result)
             st.warning("Dropbox upload still needs attention.")
         else:
             updated["status_text"] = (
@@ -7171,7 +6899,7 @@ def render_mockups_dropbox_status(result):
                 if updated.get("dropbox_upload_status") == "saved"
                 else "Dropbox upload needs retry."
             )
-            st.session_state.last_generation_result = updated
+            _set_mockups_result(updated)
             st.rerun()
 
 
@@ -7299,7 +7027,7 @@ def render_product_image_readiness(result):
 @st.fragment
 def render_prompt_cards(result, prompt_groups):
     """Keep uploader state and every downstream image consumer in one fragment."""
-    latest_result = st.session_state.get("last_generation_result")
+    latest_result = _mockups_result()
     if (
         isinstance(latest_result, dict)
         and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
@@ -7311,7 +7039,7 @@ def render_prompt_cards(result, prompt_groups):
     for prompt_paths, heading, caption in prompt_groups:
         result = _render_prompt_card_group(result, prompt_paths, heading, caption)
 
-    latest_result = st.session_state.get("last_generation_result")
+    latest_result = _mockups_result()
     if (
         isinstance(latest_result, dict)
         and str(latest_result.get("run_dir") or "") == str(result.get("run_dir") or "")
@@ -7373,7 +7101,7 @@ def render_optional_package_controls(result):
                             "file_path": str(updated_result.get(package_spec["path_key"]) or ""),
                         },
                     )
-                    st.session_state.last_generation_result = updated_result
+                    _set_mockups_result(updated_result)
                     st.rerun()
                 except Exception as error:
                     st.error(package_spec["error_message"])
@@ -7392,7 +7120,7 @@ def render_generation_result(result):
     result = ensure_lifestyle_prompts(result)
     if not result_is_dropbox_backed(result):
         result = ensure_primary_download_zip(result)
-    st.session_state.last_generation_result = result
+    _set_mockups_result(result)
     if result.get("dropbox_upload_status") == "failed":
         st.warning("Core images were generated, but Dropbox upload needs a retry.")
     else:
@@ -7447,7 +7175,6 @@ SIDEBAR_ICON_BY_ROUTE = {
     "Orders": ":material/shopping_cart:",
     "Prodigi": ":material/inventory_2:",
     "Edition Ops": ":material/assignment:",
-    "Mockups": ":material/checkroom:",
     social_media.SOCIAL_MEDIA_ROUTE: ":material/campaign:",
     social_media.AI_REELS_ROUTE: ":material/movie_edit:",
     social_media.WALL_PREVIEW_ROUTE: ":material/photo_library:",
@@ -7467,6 +7194,7 @@ SIDEBAR_ICON_BY_ROUTE = {
     os_accounts.WEEKLY_REVIEW_ROUTE: ":material/rate_review:",
     "Developer Studio": ":material/developer_mode:",
     "Worker Health": ":material/monitor_heart:",
+    "Task Recorder": ":material/videocam:",
     "Accounts & Access": ":material/settings:"
 }
 
@@ -7510,7 +7238,7 @@ def _sidebar_route_button(
 
 def _active_sidebar_group(route):
     import crm_navigation
-    if route in {"Developer", "Worker Health", "Product Quiz"}:
+    if route in {"Developer", "Worker Health", "Task Recorder", "Product Quiz", "Image Protection"}:
         return "developer"
     if route == "Email" or route in crm_navigation.ROUTES:
         return "email"
@@ -7627,7 +7355,6 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
             set_current_page(route, source="sidebar")
             st.rerun(scope="app")
 
-    _sidebar_route_button("Mockups", current_page, allowed_routes, root=st)
     if social_media.SOCIAL_MEDIA_ROUTE in allowed_routes:
         if disclosure(
             "social",
@@ -7694,7 +7421,7 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children = st.container(key="sidebar-email-children")
         for route in email_routes:
             child_button(children, route, crm_navigation.EMAIL_LABELS[route])
-    if ('Worker Health' in allowed_routes or 'Developer' in allowed_routes) and disclosure(
+    if ('Worker Health' in allowed_routes or 'Task Recorder' in allowed_routes or 'Developer' in allowed_routes or 'Image Protection' in history_routes) and disclosure(
         'developer','Developer',':material/developer_mode:','Worker Health',
         can_open_overview='Worker Health' in allowed_routes,
     ):
@@ -7702,6 +7429,10 @@ def _render_sidebar_create_growth(current_page, allowed_routes, history_routes):
         children.markdown('<span id="sidebar-developer-children"></span>',unsafe_allow_html=True)
         if 'Worker Health' in allowed_routes:
             child_button(children,'Worker Health','Worker Health',icon=SIDEBAR_ICON_BY_ROUTE['Worker Health'])
+        if 'Task Recorder' in allowed_routes:
+            child_button(children, 'Task Recorder', 'Task Recorder', icon=SIDEBAR_ICON_BY_ROUTE['Task Recorder'])
+        if 'Image Protection' in history_routes:
+            child_button(children, 'Image Protection', 'Image Protection', icon=SIDEBAR_ICON_BY_ROUTE['Image Protection'])
         if 'Product Quiz' in history_routes:
             child_button(children, "Product Quiz", "Product Quiz")
         if 'Developer Studio' in allowed_routes:
@@ -7821,7 +7552,6 @@ def render_sidebar():
     with st.sidebar:
         _render_sidebar_create_growth(current_page, allowed_routes, history_routes)
 
-    _sidebar_route_button("Image Protection", current_page, allowed_routes)
 
     reporting_overview_allowed = os_accounts.can_access_page(user, "Reporting")
     reporting_daily_allowed = os_accounts.can_access_page(user, os_accounts.DAILY_PLANNER_ROUTE)
@@ -7843,7 +7573,7 @@ def render_sidebar():
         and current_page not in analytics_nav.ANALYTICS_ROUTES
         and current_page not in seo_nav.SEO_ROUTES
         and current_page not in ads_nav.ADS_ROUTES
-        and current_page not in {"Accounts & Access", "Product Quiz"}
+        and current_page not in {"Accounts & Access", "Product Quiz", "Image Protection"}
         and os_accounts.is_admin(user)
     ):
         st.sidebar.caption(f"{SIDEBAR_NAV_LABELS.get(current_page, current_page)} open")
@@ -7866,238 +7596,9 @@ def build_mockup_final_prompt_items(product_name, sport_category, *, artwork_ref
     )
 
 
-def render_mockups_page():
-    st.html("<style>" + (BASE_DIR / "mockups_page.css").read_text(encoding="utf-8") + "</style>")
-    with st.container(key="mockups-workspace"):
-        get_image_factory()
-        log_app_memory("Page load: Mockups")
-        st.title("Mockups")
-        st.caption("Create Shopify product images and lifestyle mockups.")
-
-
-        setup = st.columns([1.65, 1], gap="medium")
-        with setup[0]:
-            st.subheader("1. Artwork Setup")
-            st.caption("JPG, PNG or WEBP Â· Up to 20MB Â· Working images up to 2000px; previews up to 900px.")
-            uploaded_file = st.file_uploader(
-                "Upload finished Sports Cave artwork",
-                type=["jpg", "jpeg", "png", "webp"],
-                key="mockups_artwork_upload",
-            )
-
-            upload_details = None
-            upload_validation_error = None
-
-            autofill_product_name = get_product_name_from_upload(uploaded_file)
-
-            if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file_name:
-                if (
-                    not st.session_state.product_name.strip()
-                    or st.session_state.product_name == st.session_state.last_autofilled_product_name
-                ):
-                    st.session_state.product_name = autofill_product_name
-
-                st.session_state.last_uploaded_file_name = uploaded_file.name
-                st.session_state.last_autofilled_product_name = autofill_product_name
-
-            elif uploaded_file is None and st.session_state.last_uploaded_file_name is not None:
-                if st.session_state.product_name == st.session_state.last_autofilled_product_name:
-                    st.session_state.product_name = ""
-
-                st.session_state.last_uploaded_file_name = None
-                st.session_state.last_autofilled_product_name = ""
-                st.session_state.uploaded_preview_signature = None
-                st.session_state.uploaded_preview_path = None
-
-            if uploaded_file is not None:
-                try:
-                    logging.info("MOCKUPS_NAV upload_processing_start selected_page=%s", st.session_state.get("selected_page"))
-                    upload_details = process_uploaded_artwork_once(uploaded_file)
-                    logging.info("MOCKUPS_NAV upload_processing_done selected_page=%s", st.session_state.get("selected_page"))
-                except ValueError as error:
-                    upload_validation_error = str(error)
-                    st.error(upload_validation_error)
-                except image_factory.MemoryLimitExceededError as error:
-                    upload_validation_error = str(error)
-                    st.error(upload_validation_error)
-                except Exception as error:
-                    logging.exception("MOCKUPS_ARTWORK upload validation failed")
-                    upload_validation_error = (image_factory.MEMORY_TELEMETRY_MESSAGE
-                                               if str(error) == image_factory.MEMORY_TELEMETRY_MESSAGE
-                                               else "Could not validate the uploaded artwork.")
-                    st.error(upload_validation_error)
-
-            product_name = st.text_input(
-                "Product name",
-                key="product_name",
-                placeholder="Example: Arsenal The Wait Is Over",
-            )
-
-            sport_option = st.selectbox(
-                "Sport category",
-                options=alphabetize_options(SPORT_OPTIONS, last=("Custom",)),
-                index=0,
-            )
-
-            custom_sport = ""
-            if sport_option == "Custom":
-                custom_sport = st.text_input(
-                    "Custom sport category",
-                    placeholder="Example: Formula 1",
-                )
-
-            sport_category = get_sport_category(sport_option, custom_sport)
-            final_prompt_items = build_mockup_final_prompt_items(
-                product_name,
-                sport_category,
-                artwork_reference_available=uploaded_file is not None and not upload_validation_error,
-            )
-
-            generate_clicked = st.button("Generate Core Shopify Images", type="primary")
-
-        with setup[1]:
-            if uploaded_file is not None:
-                st.subheader("Uploaded Artwork")
-                if upload_validation_error:
-                    previous_preview = st.session_state.get("uploaded_preview_path")
-                    if previous_preview and Path(previous_preview).exists():
-                        st.image(str(previous_preview), caption="Previous valid artwork", width=260)
-                    st.caption("The replacement preview is unavailable until the file validates cleanly.")
-                elif should_defer_uploaded_preview(upload_details):
-                    st.session_state.uploaded_preview_signature = None
-                    st.session_state.uploaded_preview_path = None
-                    st.info(
-                        "Preview generation was skipped for this larger upload to keep Sports Cave OS stable. "
-                        "You can still generate the mockups normally."
-                    )
-                    st.caption(uploaded_file.name)
-                else:
-                    preview_signature = (upload_details or {}).get("signature")
-                    preview_path = (upload_details or {}).get("preview_path")
-                    st.session_state.uploaded_preview_signature = preview_signature
-                    st.session_state.uploaded_preview_path = preview_path
-
-                    preview_path = st.session_state.uploaded_preview_path
-                    if preview_path and Path(preview_path).exists():
-                        st.image(str(preview_path), caption=uploaded_file.name, width=260)
-                    else:
-                        st.caption("Lightweight preview unavailable until the upload is processed.")
-
-        if generate_clicked:
-            temp_artwork_path = None
-            semaphore_acquired = False
-            run_signature = None
-            status_container = st.empty()
-            progress_bar = st.progress(0)
-
-            def update_status(message, progress=None, level="info"):
-                logging.info(message)
-                if level == "error":
-                    status_container.error(message)
-                elif level == "success":
-                    status_container.success(message)
-                else:
-                    status_container.info(message)
-
-                if progress is not None:
-                    progress_bar.progress(min(max(int(progress), 0), 100))
-
-            try:
-                if uploaded_file is None:
-                    raise ValueError("Please upload an artwork image first.")
-                if upload_validation_error:
-                    raise ValueError(upload_validation_error)
-                if not product_name.strip():
-                    raise ValueError("Please enter a product name.")
-                if not sport_category:
-                    raise ValueError("Please enter a sport category.")
-
-                update_status("Validating upload...", 5)
-                upload_details = upload_details or validate_uploaded_artwork(uploaded_file)
-                run_signature = mockups_generation_signature(
-                    upload_details,
-                    product_name,
-                    sport_category,
-                )
-                if st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
-                    update_status("This generation is already running.", 5)
-                    return
-                semaphore_acquired = MOCKUPS_GENERATION_SEMAPHORE.acquire(blocking=False)
-                if not semaphore_acquired:
-                    raise RuntimeError("Another image generation is already running. Try again when it finishes.")
-                st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = run_signature
-                st.session_state[MOCKUPS_LAST_RUN_SIGNATURE_KEY] = run_signature
-
-                image_factory.cleanup_stale_temp_runs()
-                update_status("Preparing lightweight working image...", 15)
-                log_app_memory("Mockup generation start")
-                suffix = Path(uploaded_file.name).suffix or ".jpg"
-                temp_parent = image_factory.create_temp_run_parent()
-                uploaded_file.seek(0)
-                with tempfile.NamedTemporaryFile(
-                    delete=False,
-                    suffix=suffix,
-                    dir=temp_parent,
-                ) as temp_file:
-                    shutil.copyfileobj(uploaded_file, temp_file)
-                    temp_artwork_path = Path(temp_file.name)
-                uploaded_file.seek(0)
-
-                result = image_factory.generate_product_images(
-                    product_name=product_name,
-                    sport_category=sport_category,
-                    artwork_file_path=temp_artwork_path,
-                    base_dir=BASE_DIR,
-                    status_callback=lambda msg, progress=None: update_status(msg, progress),
-                    final_prompt_items=final_prompt_items,
-                    output_root=temp_parent,
-                )
-
-                update_status("Finalising previews...", 92)
-                result = normalize_generation_result(result)
-                result["status_text"] = (
-                    "Core image previews are ready. Save All to Dropbox at the bottom when finished."
-                )
-                image_factory.log_memory("Completion")
-                status_container.empty()
-                progress_bar.empty()
-                record_activity_log(
-                    "mockup_generated",
-                    "Mockups",
-                    f"Generated mockups: {product_name.strip()}",
-                    entity_type="mockup_run",
-                    entity_id=str(result.get("run_dir") or ""),
-                    metadata={
-                        "product_name": product_name.strip(),
-                        "sport_category": sport_category,
-                        "storage": "temporary_until_manual_save",
-                    },
-                )
-                st.session_state.last_generation_result = result
-            except ValueError as error:
-                logging.info("Mockups generation validation failed: %s", error)
-                status_container.error(str(error))
-            except image_factory.MemoryLimitExceededError as error:
-                logging.exception("Generation stopped by memory limit")
-                status_container.error(str(error))
-            except Exception as error:
-                logging.exception("Generation failed")
-                status_container.error("Generation failed. Full traceback is logged in Render.")
-            finally:
-                if temp_artwork_path is not None:
-                    mockup_storage.safe_unlink_temp_file(temp_artwork_path)
-                if semaphore_acquired:
-                    MOCKUPS_GENERATION_SEMAPHORE.release()
-                if run_signature and st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
-                    st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
-
-        if st.session_state.last_generation_result is not None:
-            render_generation_result(st.session_state.last_generation_result)
-
-
 def current_product_upload_source_metadata():
     factory = get_image_factory()
-    result = st.session_state.get("last_generation_result")
+    result = _mockups_result()
     result = dict(result) if isinstance(result, dict) else {}
     normalized_result = normalize_generation_result(result) if result else {}
     if normalized_result:
@@ -8188,27 +7689,29 @@ def record_product_upload_prompt_generation(user, *, product_name, upload_type):
 
 
 def render_product_uploads_page():
-    """Same-origin durable intake; manual prompt-only operation stays available."""
-    st.markdown('<iframe title="Product Uploads" src="/product-uploads" '
-                'style="width:100%;height:760px;border:0" id="product-uploads-frame"></iframe>', unsafe_allow_html=True)
-    get_components_module().html('''<script>
+    from product_upload_mockups_ui import render_page
+    from types import SimpleNamespace
+    # Preserve the existing OS product/Edition Ops invalidation after a verified
+    # link. Only a same-origin message from this workflow's own frames is read.
+    get_components_module().html("""<script>
     const host=parent;
     if(host._scProductUploadsListener)host.removeEventListener('message',host._scProductUploadsListener);
     host._scProductUploadsListener=(event)=>{
       if(event.origin!==host.location.origin)return;
-      const frame=host.document.querySelector('#product-uploads-frame');
-      if(!frame||event.source!==frame.contentWindow)return;
-      if(event.data?.type==='sports-cave-product-upload-height')
-        frame.style.height=Math.max(400,Math.min(1800,Number(event.data.height)||760))+'px';
+      const frames=[...host.document.querySelectorAll('iframe[title*="product_uploads_workflow"]')];
+      if(!frames.some(frame=>event.source===frame.contentWindow))return;
       if(event.data?.type==='sports-cave-product-upload-linked'){
         host.SportsCaveEditionStatus?.refresh?.();
         host.dispatchEvent(new CustomEvent('sports-cave-products-changed'));
       }
     };
     host.addEventListener('message',host._scProductUploadsListener);
-    host.document.querySelector('#product-uploads-frame')?.contentWindow?.postMessage(
-      {type:'sports-cave-product-upload-measure'},host.location.origin);
-    </script>''',height=0)
+    </script>""",height=0)
+    # Streamlit executes each session in its own globals, but __main__ in
+    # sys.modules is process-wide and may belong to another script/session.
+    # Bind the extracted UI to this execution's helpers and authenticated state.
+    render_page(SimpleNamespace(**globals()))
+
 
 def test_google_drive_connection():
     drive_storage = get_drive_storage_module()
@@ -14325,7 +13828,7 @@ def render_selected_page(current_page):
     if current_page in {
         "Image Protection", "Product Uploads", "Design Studio", "Ads",
         "Reporting", os_accounts.WEEKLY_REVIEW_ROUTE, "Accounts & Access",
-        "Developer Studio", "Developer", "Worker Health", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
+        "Developer Studio", "Developer", "Worker Health", "Task Recorder", "Product Quiz", "Products", "Product Assets", *analytics_nav.ANALYTICS_ROUTES,
     }:
         from page_presentation import inject_compact_page
         inject_compact_page(st)
@@ -14352,6 +13855,9 @@ def render_selected_page(current_page):
 
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
+    elif current_page == "Task Recorder":
+        from task_recorder_page import render_page
+        render_page(current_os_user())
     elif current_page == "Developer Studio":
         from developer_studio_page import render_page
         render_page(current_os_user())
@@ -14371,8 +13877,6 @@ def render_selected_page(current_page):
         render_files_page()
     elif current_page == "Products":
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
-    elif current_page == "Mockups":
-        render_mockups_page()
     elif current_page == social_media.SOCIAL_MEDIA_ROUTE:
         get_social_media_page().render_page(current_os_user())
     elif current_page == social_media.WALL_PREVIEW_ROUTE:

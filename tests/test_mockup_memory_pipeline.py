@@ -80,23 +80,6 @@ def assert_lightweight(value, path="root"):
 
 
 class MockupMemoryPipelineTests(unittest.TestCase):
-    def test_high_resolution_upload_validation_streams_without_getvalue(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            app.image_factory = image_factory
-            session_state = FakeSessionState()
-            upload = NoGetValueUpload(jpeg_bytes())
-            preview_dir = Path(tmpdir) / "previews"
-            with patch.object(app.st, "session_state", session_state), patch.object(
-                app,
-                "UPLOAD_PREVIEW_DIR",
-                preview_dir,
-            ):
-                details = app.process_uploaded_artwork_once(upload)
-
-            self.assertEqual(details["width"], 4200)
-            self.assertEqual(details["height"], 2400)
-            self.assertNotIn("data", session_state["mockups_upload_processing_cache"])
-            assert_lightweight(session_state)
 
     def test_outputs_upload_and_release_sequentially(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -292,18 +275,6 @@ class MockupMemoryPipelineTests(unittest.TestCase):
                 self.assertEqual(updated["dropbox_upload_status"], "saved")
                 self.assertEqual(updated["dropbox_retry_files"], [])
 
-    def test_mockups_generation_does_not_auto_save_to_dropbox(self):
-        source = Path(app.__file__).read_text(encoding="utf-8")
-        block = source[
-            source.index("if generate_clicked:")
-            : source.index("if st.session_state.last_generation_result is not None:")
-        ]
-
-        self.assertNotIn("_files_access_token()", block)
-        self.assertNotIn("resolve_mockups_dropbox_run", block)
-        self.assertNotIn("asset_completed_callback=", block)
-        self.assertNotIn("finalise_mockups_dropbox_result", block)
-        self.assertIn("temporary_until_manual_save", block)
 
     def test_manual_mockup_save_uses_streaming_upload_batch(self):
         source = Path(app.__file__).read_text(encoding="utf-8")
@@ -322,16 +293,6 @@ class MockupMemoryPipelineTests(unittest.TestCase):
             self.assertFalse(app.MOCKUPS_GENERATION_SEMAPHORE.acquire(blocking=False))
         finally:
             app.MOCKUPS_GENERATION_SEMAPHORE.release()
-
-    def test_memory_error_is_rendered_once_in_mockups_page(self):
-        source = Path(app.__file__).read_text(encoding="utf-8")
-        source = source[source.index("    if generate_clicked:"):]
-        block = source[
-            source.index("except image_factory.MemoryLimitExceededError")
-            : source.index("except Exception as error:", source.index("except image_factory.MemoryLimitExceededError"))
-        ]
-        self.assertEqual(block.count("status_container.error(str(error))"), 1)
-        self.assertNotIn("st.error(str(error))", block)
 
 
 if __name__ == "__main__":

@@ -506,6 +506,11 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
         **_safe_hmac_log_fields(hmac_result),
     )
 
+    expected_shop = str(os.getenv("SHOPIFY_STORE_DOMAIN") or "").strip().lower()
+    expected_shop = expected_shop.removeprefix("https://").removeprefix("http://").rstrip("/")
+    if not expected_shop or shop_domain.strip().lower() != expected_shop:
+        return Response("Unexpected Shopify shop.", status_code=401)
+
     if _is_shopify_test_webhook(request.headers):
         _webhook_log(
             "webhook_shopify_test_verified",
@@ -563,28 +568,10 @@ async def _shopify_products_webhook(request: Request, *, default_topic: str):
             "source": "webhook",
             "webhook_id": webhook_id,
         }
-    try:
-        result = await run_in_threadpool(
-            supabase_backend.process_product_create_webhook,
-            payload,
-            claim.get("webhook_id") or webhook_id,
-            topic,
-            claim_event=False,
-        )
-    except Exception as error:
-        _webhook_log("webhook_product_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
-        return Response("Webhook product could not be processed.", status_code=500)
+    return {"ok": True, "status": "queued", "source": "webhook",
+            "webhook_id": claim.get("webhook_id") or webhook_id,
+            "shopify_product_id": claim.get("shopify_product_id") or ""}
 
-    return {
-        "ok": True,
-        "status": result.get("status") or ("processed" if not (result.get("errors") or []) else "processed_with_warnings"),
-        "eligibility_results": result.get("eligibility_results") or [],
-        "sport_tagging": result.get("sport_tagging") or {},
-        "source": "webhook",
-        "webhook_id": claim.get("webhook_id") or webhook_id,
-        "shopify_product_id": result.get("shopify_product_id") or claim.get("shopify_product_id") or "",
-        "shopify_handle": result.get("shopify_handle") or claim.get("shopify_handle") or "",
-    }
 
 
 @app.post("/webhooks/shopify/products-create")

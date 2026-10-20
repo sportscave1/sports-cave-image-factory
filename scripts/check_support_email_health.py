@@ -73,11 +73,14 @@ def check(configuration=None, emit=print):
         stage("status", lambda: ok(conn.status('"INBOX"', "(UNSEEN MESSAGES UIDNEXT UIDVALIDITY)")))
     except Exception as error:
         emit(f"FAIL {current} category={_failure(error, current).code} duration_ms={int((time.monotonic()-started)*1000)}")
-        if current == "tcp":emit("EXTERNAL CONNECTIVITY BLOCKER: failed before authentication; see per-family transport diagnostics.")
+        if current == "tcp":emit("TCP failed before TLS/authentication; firewall or routing cause is unconfirmed.")
         result = 1
     finally:
         if conn is not None:
             try:
+                sock = vars(conn).get('sock')
+                if sock is not None:
+                    sock.settimeout(1)
                 stage("logout", conn.logout)
             except Exception:
                 emit("FAIL logout category=server_disconnect")

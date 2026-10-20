@@ -11788,5 +11788,5 @@ def render_placeholder_page(title):
     render_page_intro(
         title,
         "Coming in a later phase.",
-        "Use Dashboard, Files, Product Uploads, Mockups, Orders, or Limited Editions for current workflows.",
+        "Use Dashboard, Files, Product Uploads, Orders, or Limited Editions for current workflows.",
     )

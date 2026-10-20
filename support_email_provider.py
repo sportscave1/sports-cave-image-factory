@@ -104,7 +104,10 @@ def _retry_read(method):
                     LOGGER.info("email_imap_reconnect_succeeded operation=%s", method.__name__)
                 return result
             except MailboxError as error:
-                if attempt or not error.retryable:
+                # A failed dial has no established session to recover. Respect
+                # the circuit opened by that failure instead of forcing another
+                # DNS/TCP attempt immediately (including background index polls).
+                if attempt or not error.retryable or error.stage in {"dns", "tcp"}:
                     LOGGER.warning("email_imap_operation_failed operation=%s code=%s attempts=%d", method.__name__, error.code, attempt+1)
                     raise
                 LOGGER.info("email_imap_reconnect_started operation=%s code=%s retry=1", method.__name__, error.code)

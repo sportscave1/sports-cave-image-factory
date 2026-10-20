@@ -1192,7 +1192,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         selection = self.client[self.client.index("function updateSelectionUi") : self.client.index("function setSingleSelection")]
         self.assertIn("chosen.every(item => item.tag !== \"folder\")", selection)
         self.assertIn("elements.downloadButton.disabled = !allFiles", selection)
-        for label in ("Open", "Download", "Rename", "Delete", "Copy path", "Properties"):
+        for label in ("Open", "Download Original", "Rename", "Delete", "Copy path", "Properties"):
             self.assertIn(f'label: "{label}"', self.client)
         self.assertNotIn("Open in Windows File Explorer", self.client)
         self.assertNotIn("Open in Finder", self.client)
@@ -1416,11 +1416,11 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("Failed items remain in the clipboard", self.client)
         self.assertIn("Skipped items remain in the clipboard", self.client)
         self.assertIn(".file-item.cut-pending", self.client)
-        for label in ("Cut", "Copy", "Paste"):
+        for label in ("Cut", "Copy in Files", "Paste"):
             self.assertIn(f'label: "{label}"', self.client)
         for choice in ("Skip", "Keep both", "Replace"):
             self.assertIn(f'choice("{choice}"', self.client)
-        self.assertIn("event.target.matches(\"input, textarea, select, [contenteditable='true']\")", self.client)
+        self.assertIn("event.target.closest?.(\"input, textarea, select, [contenteditable]", self.client)
         self.assertIn('shortcut && key === "c"', self.client)
         self.assertIn('shortcut && key === "x"', self.client)
         self.assertIn('shortcut && key === "v"', self.client)
@@ -1448,7 +1448,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertNotIn("Open in desktop app", block)
         self.assertNotIn(">Open in desktop app<", self.client)
         self.assertIn('{ label: "Open"', block)
-        self.assertIn('{ label: "Copy"', block)
+        self.assertIn('{ label: "Copy in Files"', block)
 
     def test_folder_render_reuses_sorted_items_and_updates_only_target_thumbnail(self):
         self.assertIn("visibleItemsCache:", self.client)
@@ -1478,9 +1478,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         ]
         self.assertNotIn("background: var(--accent);", app_mark_block)
 
-    def test_viewer_copies_pixels_without_native_clipboard(self):
+    def test_viewer_uses_shared_exact_file_clipboard_boundary(self):
         self.assertIn('id="copyImageButton"', self.viewer)
-        self.assertIn('await FilesOriginal.copy(`/api/files-download?relative_path=', self.viewer)
+        self.assertIn('await FilesOriginal.copy(FilesOriginal.snapshot(', self.viewer)
+        self.assertNotIn('PNG clipboard', self.viewer)
         self.assertIn('window.sportsCaveCopyImagePixels = copyImagePixels', self.viewer)
         self.assertIn('draggable="false"', self.viewer)
         self.assertNotIn('copyFileButton', self.viewer)

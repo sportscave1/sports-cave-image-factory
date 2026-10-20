@@ -14,7 +14,6 @@ STARTUP_ROUTES = (
     "Orders",
     "Prodigi",
     "Edition Ops",
-    "Mockups",
     "Product Uploads",
     "Design Studio",
     "Ads",

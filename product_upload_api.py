@@ -1,13 +1,41 @@
 """Same-origin account-authenticated Product Uploads routes, independently gated."""
 import os
+import logging
+from time import perf_counter
 from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse, JSONResponse, Response
-from product_upload_intake import Intakes, public, CHUNK
+from product_upload_intake import Intakes, public, TRANSPORT_CHUNK
 from product_upload_services import Dropbox, Handoff, enabled, reconcile
 
 HEADERS = {'Cache-Control':'private, no-store', 'X-Content-Type-Options':'nosniff',
            'X-Frame-Options':'SAMEORIGIN', 'Referrer-Policy':'no-referrer'}
+
+
+class MeasuredStorage:
+    """Request-local timing only; never retain tokens or artwork in metrics."""
+    def __init__(self, provider, timings):
+        self.provider, self.timings = provider, timings
+
+    def __getattr__(self, name):
+        member = getattr(self.provider, name)
+        if not callable(member):
+            return member
+        def call(*args, **kwargs):
+            started = perf_counter()
+            try:
+                return member(*args, **kwargs)
+            finally:
+                self.timings['storage'] = self.timings.get('storage', 0) + (perf_counter() - started) * 1000
+        return call
+
+
+def measured_response(response, timings, started, operation):
+    timings['total'] = (perf_counter() - started) * 1000
+    response.headers['Server-Timing'] = ', '.join(f'{key};dur={value:.2f}' for key, value in timings.items())
+    logging.getLogger(__name__).info('product_upload operation=%s status=%s timings_ms=%s',
+                                  operation, response.status_code, {k: round(v, 2) for k, v in timings.items()})
+    return response
 
 
 def connect():
@@ -33,16 +61,23 @@ async def actor(request, *, write=False, automatic=True):
 
 def failure(error):
     from files_upload_api import FilesUploadError
+    from product_upload_relay import RelayBusy
+    if isinstance(error, RelayBusy):
+        return JSONResponse(dict(error=str(error)), status_code=503, headers={**HEADERS, 'Retry-After':'1'})
+    from product_upload_artwork import PreparationError
+    if isinstance(error, PreparationError):
+        return JSONResponse(dict(error=str(error), **({'upload':error.upload} if hasattr(error,'upload') else {})), status_code=error.status_code, headers=HEADERS)
     known = isinstance(error, (ValueError, PermissionError, FilesUploadError))
     return JSONResponse(dict(error=str(error) if known else 'The service is temporarily unavailable. Your saved upload is retained; retry shortly.'),
-                        status_code=403 if isinstance(error, PermissionError) or isinstance(error, FilesUploadError) and error.status_code == 403 else 409 if known else 503,
+                        status_code=403 if isinstance(error, PermissionError) else error.status_code if isinstance(error, FilesUploadError) else 409 if known else 503,
                         headers=HEADERS)
 
 
 async def page(request):
     try:
         await actor(request, automatic=False)
-        return HTMLResponse((Path(__file__).parent/'components/product_uploads/index.html').read_text(encoding='utf-8'), headers=HEADERS)
+        from starlette.responses import RedirectResponse
+        return RedirectResponse('/?page=product_uploads', headers=HEADERS)
     except Exception as error:
         return failure(error)
 
@@ -55,14 +90,26 @@ async def script(request):
         return failure(error)
 
 
+async def mapping_script(request):
+    try:
+        await actor(request, automatic=False)
+        return Response((Path(__file__).parent/'components/product_uploads/mapping.js').read_text(encoding='utf-8'), media_type='application/javascript', headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
 async def state(request):
     try:
         user = await actor(request, automatic=False)
         import os_accounts
         if not enabled() or not os_accounts.can_attach_missing_psd(user):
             return JSONResponse(dict(enabled=False, upload=None), headers=HEADERS)
-        row = await run_in_threadpool(Intakes(connect).read, request.query_params.get('id'), user['id'])
-        if row and row['data'].get('product_gid'):
+        key = request.query_params.get('id')
+        row = await run_in_threadpool(Intakes(connect).read, key, user['id']) if key else None
+        if row and row['data'].get('workflow_version') == 3:
+            from product_upload_dropbox import status
+            row = await run_in_threadpool(status, row, connect)
+        elif row and row['data'].get('product_gid'):
             row = await run_in_threadpool(reconcile, row, connect)
             # Persist the exact technical completion for refresh/recovery; polling
             # has no provider side effects and cannot approve other jobs.
@@ -77,40 +124,107 @@ async def state(request):
 
 
 async def action(request):
+    started = perf_counter(); timings = {}; op = request.path_params['action']
     try:
         import files_upload_api as files
         op = request.path_params['action']
         manual = op in ('prompt', 'mockups')
         user = await actor(request, write=True, automatic=not manual)
+        timings['auth'] = (perf_counter() - started) * 1000
         body = await files._json_body(request)
+        operation_started = perf_counter()
         store = Intakes(connect); key = body.get('id'); uid = user['id']
-        if op == 'start':
+        if op in ('browse', 'select'):
+            from product_upload_dropbox import browse, select, status
+            provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
+            if op == 'browse':
+                result = await run_in_threadpool(browse, provider, uid, body.get('root','review'), body.get('path',''), body.get('page',''), body.get('search',''))
+                return measured_response(JSONResponse(result, headers=HEADERS), timings, started, op)
+            row = await run_in_threadpool(select, connect, provider, key, uid, body.get('mode'), body.get('file_id'), body.get('revision'))
+            row = await run_in_threadpool(status, row, connect)
+        elif op in ('start', 'finish', 'resume'):
+            raise ValueError('Choose an existing PSD from Dropbox. Manual PSD transfers have been removed.')
+        elif op == 'prepare':
+            from product_upload_jobs import prepare
+            from product_upload_dropbox import status
+            await run_in_threadpool(prepare,connect,key,uid,Dropbox)
+            row = await run_in_threadpool(store.read,key,uid)
+            row = await run_in_threadpool(status,row,connect)
+        elif op == 'saved-transfer':
+            from product_upload_package import native_grant
+            import os_accounts
+            if not os_accounts.can_access_page(user, 'Files'):
+                raise PermissionError('Files access is required to copy saved files.')
+            row = await run_in_threadpool(store.read, key, uid)
             provider = await run_in_threadpool(Dropbox)
-            row = await run_in_threadpool(store.create, key, uid, body.get('mode'), body.get('name'), body.get('size'), provider, body.get('content_hash'))
-        elif op == 'finish':
-            row = await run_in_threadpool(store.finish, key, uid, await run_in_threadpool(Dropbox))
+            context = await run_in_threadpool(files._dropbox_context)
+            record = await run_in_threadpool(native_grant, row, body.get('version'), provider, user, context)
+            record.validate = lambda: __import__('product_upload_package').package(store.read(key, uid), body.get('version'))
+            return JSONResponse(dict(transfer=dict(base_url=str(request.base_url).rstrip('/'), ticket=record.ticket, secret=record.secret)), headers=HEADERS)
         elif op == 'mode':
             row = await run_in_threadpool(store.change_mode, key, uid, body.get('mode'))
         elif op == 'copied':
-            row = await run_in_threadpool(store.copied, key, uid, body.get('mode'))
+            row = await run_in_threadpool(store.copied, key, uid, body.get('mode'), body.get('source_version', ''))
         elif op == 'prompt':
             from product_upload_prompts import build
             row = await run_in_threadpool(store.read, key, uid) if key else None
             if key and (not row or not row['data'].get('basic_validated') or row['mode'] != body.get('mode')):
                 raise ValueError('Finish the PSD upload and copy the current action.')
-            prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'] if row else '')
+            from product_upload_source import current_source, execution_opening
+            source = current_source(row, body.get('source_version', ''))
+            prompt = await run_in_threadpool(build, body.get('mode'), row['data']['name'], source=source)
+            context_prompt = ''
+            if row and row['data'].get('mockups_context'):
+                import json
+                output = row['data']['upload_operation']['output']
+                context = {k: output[k] for k in ('design_name', 'sport_category', 'images') if k in output}
+                context_prompt = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(context, ensure_ascii=False) + '\n\n'
+            if row:
+                def correlated():
+                    from product_upload_identity import correlation_prompt
+                    with store.locked(key, uid) as (current, cur):
+                        current_source(current, source['version'])
+                        if current['mode'] != body.get('mode'):
+                            raise ValueError('The selected action changed. Copy the current prompt again.')
+                        return correlation_prompt(current)
+                context_prompt = await run_in_threadpool(correlated) + context_prompt
+            opening = execution_opening(source)
+            if not prompt.startswith(opening):
+                raise ValueError('The current Dropbox source opening is missing. Copy the current prompt again.')
+            prompt = opening + context_prompt + prompt[len(opening):]
             return JSONResponse(dict(prompt=prompt), headers=HEADERS)
+        elif op == 'map':
+            from product_upload_mapping import Mapping
+            from product_upload_jobs import JOBS
+            from product_upload_source import current_source
+            if not isinstance(body.get('source_version'), str) or not body['source_version']:
+                raise ValueError('Save All first, then use Sync & Map for the current saved images.')
+            row = await run_in_threadpool(store.read, key, uid)
+            source = await run_in_threadpool(current_source, row, body.get('source_version'))
+            def work(progress):
+                return Mapping(connect, Dropbox()).map(key, user, source_version=source['version'],
+                    product_id=body.get('product_id'), confirmed_limit=body.get('edition_limit'), confirm_product=body.get('confirm_product') is True)
+            JOBS.submit(key, uid, 'sync-map', [source['version'], body.get('edition_limit'), body.get('product_id'), body.get('confirm_product')], work)
+            return JSONResponse(dict(mapping=await run_in_threadpool(mapping_snapshot, key, user)), headers=HEADERS)
         elif op == 'mockups':
             import os_accounts
             if not os_accounts.can_access_page(user,'Files'):
                 raise PermissionError('Files access is required to browse mockups. You can still copy a prompt using the manual workflow.')
-            provider = await run_in_threadpool(Dropbox)
+            provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
             return JSONResponse(await run_in_threadpool(provider.mockups), headers=HEADERS)
         elif op in ('resolve', 'link'):
-            provider = await run_in_threadpool(Dropbox)
+            provider = MeasuredStorage(await run_in_threadpool(Dropbox), timings)
             service = Handoff(connect, provider)
             row = await run_in_threadpool(service.resolve if op == 'resolve' else service.link, key, user,
                                           body.get('value') if op == 'resolve' else body.get('product_id'))
+        elif op == 'retry-file':
+            def retry_file():
+                with store.locked(key, uid) as (current, cur):
+                    task = current['data'].get('lifecycle')
+                    if not task or task['state'] != 'Error': raise ValueError('No failed file handoff needs retrying.')
+                    task.update(state='Queued', checked_at=None, reason='')
+                    return current
+            row = await run_in_threadpool(retry_file)
         elif op == 'retry':
             row = await run_in_threadpool(store.read, key, uid)
             if not row or not row['data'].get('product_gid'):
@@ -128,26 +242,35 @@ async def action(request):
             await run_in_threadpool(retry)
         else:
             raise ValueError('Unknown Product Uploads action.')
-        return JSONResponse(dict(upload=public(row)), headers=HEADERS)
+        timings['handoff' if op in ('link', 'resolve') else 'operation'] = (perf_counter() - operation_started) * 1000
+        return measured_response(JSONResponse(dict(upload=public(row)), headers=HEADERS), timings, started, op)
     except Exception as error:
-        return failure(error)
+        return measured_response(failure(error), timings, started, op)
 
 
 async def chunk(request):
+    return failure(ValueError('Manual PSD transfers have been removed. Choose PSD from Dropbox.'))
+
+
+async def mapping_status(request):
     try:
-        user = await actor(request, write=True)
-        # Starlette's body() would allow an unbounded request allocation.
-        data = bytearray()
-        async for block in request.stream():
-            if len(data) + len(block) > CHUNK:
-                raise ValueError('Upload chunk exceeds 4 MiB.')
-            data.extend(block)
-        provider = await run_in_threadpool(Dropbox)
-        row = await run_in_threadpool(Intakes(connect).chunk, request.query_params['id'], user['id'],
-                                     int(request.query_params['offset']), data, provider)
-        return JSONResponse(dict(upload=public(row)), headers=HEADERS)
+        user = await actor(request)
+        result = await run_in_threadpool(mapping_snapshot, request.query_params.get('id'), user)
+        return JSONResponse(dict(mapping=result), headers=HEADERS)
     except Exception as error:
         return failure(error)
+
+
+def mapping_snapshot(key, user):
+    from product_upload_mapping import Mapping
+    from product_upload_jobs import JOBS
+    result = Mapping(connect, None).status(key, user)
+    job = JOBS.snapshot(key, user['id'], 'sync-map')
+    if job and job['state'] in ('Queued','Running'):
+        result.update(state='Mapping…', running=True)
+    elif job and job['state']=='Failed':
+        result.update(state='Mapping failed', reason=job.get('error','Sync & Map failed. Retry.'))
+    return result
 
 
 async def preview(request):
@@ -176,6 +299,157 @@ async def preview(request):
         return failure(error)
 
 
-ROUTES = (('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+from product_upload_render import ROUTES as RENDER_ROUTES
+
+
+async def source_preview(request):
+    try:
+        user = await actor(request)
+        row = await run_in_threadpool(Intakes(connect).read, request.query_params['id'], user['id'])
+        if not row or row['data'].get('workflow_version') != 3: raise ValueError('Select a Dropbox PSD first.')
+        provider = await run_in_threadpool(Dropbox)
+        expected = row['data']['source']
+        if (row['data'].get('server_artwork') or {}).get('state') == 'Ready':
+            from product_upload_artwork import ready
+            folder = await run_in_threadpool(ready,row,connect,provider)
+            return Response(await run_in_threadpool((folder/'preview.webp').read_bytes),media_type='image/webp',headers=HEADERS)
+        meta = await run_in_threadpool(provider.metadata_if_present, expected['id'])
+        if not meta or any(meta.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
+            raise ValueError('The selected revision changed. Select its current PSD again.')
+        data = await run_in_threadpool(provider.api.get_psd_thumbnail_bytes, provider.token, meta['id'])
+        after = await run_in_threadpool(provider.metadata_if_present, expected['id'])
+        if not after or any(after.get(k) != expected.get(k) for k in ('id','rev','content_hash')):
+            raise ValueError('PSD revision changed while loading the preview. Choose its current revision again.')
+        return Response(data, media_type='image/jpeg', headers=HEADERS)
+    except Exception as error: return failure(error)
+
+async def original_asset(request):
+    try:
+        user = await actor(request, automatic=False)
+        from product_upload_gallery import resolve
+        from starlette.responses import FileResponse
+        path = await run_in_threadpool(resolve, request.query_params.get('token', ''), user['id'], Intakes(connect).read)
+        return FileResponse(path, headers=HEADERS)
+    except Exception as error:
+        return failure(error)
+
+
+async def saved_package(request):
+    try:
+        from product_upload_package import view
+        user = await actor(request)
+        row = await run_in_threadpool(Intakes(connect).read, request.query_params.get('id'), user['id'])
+        provider = await run_in_threadpool(Dropbox)
+        return JSONResponse(await run_in_threadpool(view, row, provider), headers=HEADERS)
+    except Exception as error: return failure(error)
+
+
+async def clipboard_launch(request):
+    try:
+        from product_upload_clipboard import REQUESTS
+        from product_upload_package import package
+        from urllib.parse import quote
+        import os_accounts
+        user = await actor(request, write=True)
+        if not os_accounts.can_access_page(user, 'Files'):
+            raise PermissionError('Files access is required to copy saved files.')
+        body = await request.json()
+        key, version = body.get('id'), body.get('version')
+        if not key or not version: raise ValueError('Select the current saved package first.')
+        validate = lambda: package(Intakes(connect).read(key, user['id']), version)
+        code = await run_in_threadpool(REQUESTS.create, user, key, version, validate)
+        origin = str(request.base_url).rstrip('/')
+        return JSONResponse(dict(code=code, url='sports-cave-files://webp?origin='+quote(origin, safe='')+'#'+code), headers=HEADERS)
+    except Exception as error: return failure(error)
+
+
+async def clipboard_status(request):
+    try:
+        from product_upload_clipboard import REQUESTS
+        user = await actor(request, write=True)
+        body = await request.json()
+        result = await run_in_threadpool(REQUESTS.status, body.get('code'), user, body.get('cancel') is True, body.get('copy') is True)
+        return JSONResponse(result, headers=HEADERS)
+    except Exception as error: return failure(error)
+
+
+async def clipboard_native(request):
+    """One-use capability was issued by an authenticated, authorised browser."""
+    try:
+        from product_upload_clipboard import REQUESTS
+        from product_upload_package import native_grant
+        import files_upload_api as files
+        if not request.headers.get('origin') or not files._same_origin(request):
+            raise PermissionError('Request origin rejected.')
+        body = await request.json()
+        code = body.get('code')
+        if request.url.path.endswith('/clipboard-complete'):
+            result = await run_in_threadpool(REQUESTS.native, code, body.get('secret'), body.get('event'),
+                body.get('count', 0), body.get('sequence', 0), body.get('error', ''), body.get('copy_ms'))
+            return JSONResponse(result, headers=HEADERS)
+        record = await run_in_threadpool(REQUESTS.claim, code)
+        try:
+            row = await run_in_threadpool(Intakes(connect).read, record['key'], record['user']['id'])
+            provider = await run_in_threadpool(Dropbox)
+            context = await run_in_threadpool(files._dropbox_context)
+            grant = await run_in_threadpool(native_grant, row, record['version'], provider, record['user'], context)
+            grant.validate = lambda: REQUESTS.active(code)
+            return JSONResponse(dict(secret=record['secret'], transfer=dict(base_url=str(request.base_url).rstrip('/'),
+                ticket=grant.ticket, secret=grant.secret)), headers=HEADERS)
+        except Exception as error:
+            await run_in_threadpool(REQUESTS.native, code, record['secret'], 'failed', error=
+                str(error) if isinstance(error, ValueError) else 'Could not prepare saved files. Retry Copy all WEBP files.')
+            raise
+    except Exception as error: return failure(error)
+
+
+async def clipboard_page(request):
+    name = 'native_clipboard.js' if request.url.path.endswith('.js') else 'native_clipboard.html'
+    return Response((Path(__file__).parent/'components/product_uploads'/name).read_text(encoding='utf-8'),
+        media_type='application/javascript' if name.endswith('.js') else 'text/html',
+        headers={**HEADERS, 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'"})
+
+
+async def saved_image(request):
+    upstream = None
+    try:
+        from product_upload_package import package, verified
+        from starlette.responses import StreamingResponse
+        import files_upload_api as files
+        user = await actor(request)
+        row = await run_in_threadpool(Intakes(connect).read, request.query_params.get('id'), user['id'])
+        result = package(row, request.query_params.get('version', ''))
+        item = next((x for x in result['items'] if x['role'] == request.query_params.get('role')), None)
+        if not item: raise ValueError('This saved image is unavailable.')
+        provider = await run_in_threadpool(Dropbox)
+        meta = await run_in_threadpool(verified, provider, item)
+        if request.query_params.get('thumbnail') == '1':
+            data = await run_in_threadpool(provider.api.get_thumbnail_bytes, provider.token, meta.get('path_display') or meta['path_lower'], size='w128h128')
+            await run_in_threadpool(verified, provider, item)
+            return Response(data, media_type='image/jpeg', headers=HEADERS)
+        actual, upstream = await run_in_threadpool(provider.api.get_psd_file_response, provider.token, meta['id'], meta['rev'])
+        if any(actual.get(k) != meta.get(k) for k in ('id', 'rev', 'content_hash', 'size')):
+            raise ValueError(item['name'] + ' changed during retrieval. Retry Save all.')
+        disposition = 'attachment' if request.query_params.get('download') == '1' else 'inline'
+        return StreamingResponse(files._stream_upstream_response(upstream), media_type='image/webp',
+            headers={**HEADERS, 'Content-Length': str(meta['size']), 'Content-Disposition': files._content_disposition(disposition, item['name'])})
+    except Exception as error:
+        if upstream is not None: upstream.close()
+        return failure(error)
+
+
+ROUTES = (*RENDER_ROUTES, ('/product-uploads', page, ('GET',)), ('/product-uploads.js', script, ('GET',)),
+          ('/product-upload-native', clipboard_page, ('GET',)),
+          ('/product-upload-native.js', clipboard_page, ('GET',)),
+          ('/api/product-uploads/clipboard-launch', clipboard_launch, ('POST',)),
+          ('/api/product-uploads/clipboard-status', clipboard_status, ('POST',)),
+          ('/api/product-uploads/clipboard-claim', clipboard_native, ('POST',)),
+          ('/api/product-uploads/clipboard-complete', clipboard_native, ('POST',)),
+          ('/api/product-uploads/saved-package', saved_package, ('GET',)),
+          ('/api/product-uploads/saved-image', saved_image, ('GET',)),
+          ('/product-upload-mapping.js', mapping_script, ('GET',)),
+          ('/api/product-uploads/asset', original_asset, ('GET',)),
+          ('/api/product-uploads/source-preview', source_preview, ('GET',)),
+          ('/api/product-uploads/mapping-status', mapping_status, ('GET',)),
           ('/api/product-uploads/state', state, ('GET',)), ('/api/product-uploads/chunk', chunk, ('POST',)),
           ('/api/product-uploads/preview', preview, ('GET',)), ('/api/product-uploads/{action}', action, ('POST',)))

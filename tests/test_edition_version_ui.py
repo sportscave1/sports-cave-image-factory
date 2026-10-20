@@ -66,3 +66,14 @@ class EditionVersionUiTests(TestCase):
             ui.refresh_handle('art')
         self.assertEqual(state[ops.ROWS_KEY][0]['edition_next_number'],11)
         self.assertEqual(state[ops.ROWS_KEY][1],other)
+
+    def test_onboarding_revision_refreshes_without_discarding_edits(self):
+        from shopify_product_onboarding import REVISION
+        for dirty in (False, True):
+            state={ops.SNAPSHOT_LOADED_KEY:True, ops.EDITOR_KEY:{"edited_rows":{0:{"edition_total":90}}} if dirty else {}}
+            fake=SimpleNamespace(session_state=state)
+            backend=SimpleNamespace(get_app_setting=lambda *a, **k:"new-product")
+            with patch.object(ops,"st",fake), patch.object(ops,"_configured_supabase_backend",return_value=backend), patch("product_upload_services.enabled",return_value=False), patch.object(ops,"_invalidate_edition_ops_cache") as invalidate:
+                ops._hydrate_from_snapshot_once()
+            self.assertEqual(invalidate.call_count,0 if dirty else 1)
+            self.assertEqual(state.get(REVISION),None if dirty else "new-product")

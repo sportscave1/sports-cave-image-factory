@@ -58,6 +58,31 @@ class FakeConnection:
 
 
 class DropboxIntegrationTests(unittest.TestCase):
+    def test_metadata_preserves_stable_file_and_folder_ids(self):
+        client = MagicMock()
+        client.files_get_metadata.return_value = {'.tag':'folder','id':'id:AbCd-_12'}
+        with patch.object(dropbox_integration, 'team_space_client', return_value=client):
+            result = dropbox_integration.get_file_metadata('token', 'id:AbCd-_12')
+        self.assertEqual(result['id'], 'id:AbCd-_12')
+        client.files_get_metadata.assert_called_once_with('id:AbCd-_12',include_media_info=False,include_deleted=False)
+
+    def test_metadata_rejects_malformed_id_before_provider_request(self):
+        with patch.object(dropbox_integration, 'team_space_client') as provider:
+            for target in ('id:', 'id:abc/other', 'id:abc\\other', 'id:abc?query'):
+                with self.subTest(target=target), self.assertRaises(ValueError):
+                    dropbox_integration.get_file_metadata('token', target)
+            provider.assert_not_called()
+
+    def test_product_upload_adapter_resolves_real_folder_id(self):
+        from product_upload_services import Dropbox
+        folder={'.tag':'folder','id':'id:AbCd-_12','path_display':'/Sportscave Team Folder/04_OUTPUT/product-images'}
+        client=MagicMock();client.files_get_metadata.return_value=folder
+        provider=Dropbox.__new__(Dropbox);provider.api=dropbox_integration;provider.token='token';provider.context={'root_path':'/Sportscave Team Folder'}
+        with patch.object(dropbox_integration,'team_space_client',return_value=client):
+            self.assertEqual(provider.mockups(),dict(id=folder['id'],path=folder['path_display']))
+            self.assertEqual(provider.metadata_if_present(folder['id']),folder)
+        self.assertEqual([c.args[0] for c in client.files_get_metadata.call_args_list],[folder['path_display'],folder['id'],folder['id']])
+
     def setUp(self):
         dropbox_integration.clear_team_space_client_cache()
 
