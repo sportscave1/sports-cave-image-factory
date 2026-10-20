@@ -26,7 +26,7 @@ try:
    copy.click();expect(copy).to_have_text('Copied \u2713')
    paste.fill('');paste.click();paste.press('Control+V');return paste.input_value()
   first=copied_text()
-  assert 'RETURN TO PRODUCT UPLOADS' in first and 'Synthetic product.psd' in first and 'product (2)/WEBP' in first
+  assert 'COMPLETION CHECK AND RETURN TO MAP' in first and 'Synthetic product.psd' in first and 'product (2)/WEBP' in first
   save.click();expect(copy).to_have_text('Copy Upload Prompt');assert copied_text()!=first
   f=next(f for f in page.frames if 'product_upload_prompt_copy' in f.url)
   f.evaluate("() => {window.originalWrite=navigator.clipboard.writeText.bind(navigator.clipboard);navigator.clipboard.writeText=()=>Promise.reject(new Error('denied'));}")

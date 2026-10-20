@@ -64,24 +64,25 @@ def test_complete_prompt_keeps_saved_template_and_mode_rules(mode):
     row = saved_row()
     load = Mock(side_effect=lambda key, default, **kw: default + '\nDEVELOPER CUSTOM COMMERCIAL COPY')
     text = build(mode, 'Selected.psd', source=current_source(row), load=load)
-    from product_upload_source import execution_opening
-    assert text.startswith(execution_opening(current_source(row)))
-    assert text.count('DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST') == 1
+    from product_upload_source import prompt_section
+    from product_upload_prompt_core import PRODUCT_UPLOAD_AUD_PRICING
+    assert text.startswith('1. SELECTED ACTION AND PRODUCT CONTEXT')
+    assert text.count('2. DROPBOX FOLDER AND ORDERED WEBP MANIFEST') == 1
     assert 'DEVELOPER CUSTOM COMMERCIAL COPY' in text
-    from product_upload_modes import common_build
-    assert product_upload_price_ladder_prompt_text() in common_build(text)
-    assert 'DROPBOX SOURCE — EXACT SAVED WEBP MANIFEST' in text
+    for group in PRODUCT_UPLOAD_AUD_PRICING.values():
+        for _, price, rrp, saving, discount in group:
+            assert all(value in text for value in (price, rrp, saving, discount))
+    assert prompt_section(current_source(row)).strip() in text
     assert 'product (2)/WEBP' in text and '"expected_webp_count": 8' in text
-    assert 'do not need to be attached separately' in text
-    assert 'before creating or changing the Shopify product' in text
-    assert 'Do not claim an upload succeeded without verification' in text
+    assert 'local-file/imageFile' in text and 'single-use' in text
+    assert 'before any Shopify write' not in text
     assert 'SOURCE CONTEXT — ATTACHED' not in text and 'MISSING - open/select' not in text
     assert '[ENTER PRODUCT NAME ABOVE]' not in text
     assert 'variant' in text.lower() and 'collection' in text.lower()
     assert load.call_args.kwargs['seed_default'] is False
     if mode == 'UPDATE': assert 'Never create a product in Update Existing mode' in text
-    elif mode == 'DRAFT': assert 'Status: Draft' in text
-    else: assert 'Online Store' in text and 'Active' in text
+    elif mode == 'DRAFT': assert 'Create as DRAFT, published false' in text
+    else: assert 'Online Store' in text and 'set ACTIVE' in text
 
 
 def test_successful_transfer_captures_webp_folder_metadata(env, tmp_path):

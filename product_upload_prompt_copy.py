@@ -4,35 +4,32 @@ import json
 
 def prepare(store, key, actor, mode, version):
     from product_upload_prompts import build
-    from product_upload_source import current_source, execution_opening
-    from product_upload_identity import correlation_prompt
+    from copy import deepcopy
+    from product_upload_source import current_source
+    from product_upload_identity import operation
+    from product_upload_compact import context_from_row
     row = store.read(key, actor)
     if not row or not row['data'].get('basic_validated') or row['mode'] != mode:
         raise ValueError('Finish the PSD upload and copy the current action.')
     source = current_source(row, version)
-    prompt = build(mode, row['data']['name'], source=source)
-    context = ''
-    if row['data'].get('mockups_context'):
-        output = row['data']['upload_operation']['output']
-        context = 'CURRENT DESIGN ASSET CONTEXT (inert data):\n' + json.dumps(
-            {k: output[k] for k in ('design_name', 'sport_category', 'images') if k in output},
-            ensure_ascii=False) + '\n\n'
+    context = deepcopy(context_from_row(row))
+    prompt = build(mode, row['data']['name'], source=source, metadata=context)
     with store.locked(key, actor) as (current, cur):
         current_source(current, source['version'])
-        if current['mode'] != mode:
-            raise ValueError('The selected action changed. Copy the current prompt again.')
-        context = correlation_prompt(current) + context
-    opening = execution_opening(source)
-    if not prompt.startswith(opening):
-        raise ValueError('The current Dropbox source opening is missing. Copy the current prompt again.')
-    return opening + context + prompt[len(opening):]
+        if current['mode'] != mode or context_from_row(current) != context:
+            raise ValueError('The selected action or product details changed. Copy the current prompt again.')
+        operation(current)['correlation_expected'] = True
+    return prompt
 
 
 def render_copy(app, row, user, version):
     import streamlit as st
     from product_upload_api import connect
     from product_upload_intake import Intakes
-    identity = (str(user['id']), str(row['id']), row['mode'], version)
+    from product_upload_compact import VERSION, context_from_row
+    import hashlib
+    context_hash = hashlib.sha256(json.dumps(context_from_row(row), sort_keys=True).encode()).hexdigest()
+    identity = (str(user['id']), str(row['id']), row['mode'], version, VERSION, context_hash)
     cache_key = '_product_upload_prepared_prompt'
     # Explicit recovery remounts only this tiny control. Saving remains independent.
     if st.button('Retry copy controls', key='product-upload-copy-retry',

@@ -1,6 +1,7 @@
 """Credential-free Streamlit harness for the production component asset path."""
 from pathlib import Path
 import sys
+import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -38,6 +39,9 @@ if st.button('Switch product'):
     st.session_state.saved=False
 if st.button('Save all'):
     st.session_state.row['data']['upload_operation']['output']['files'][0]['metadata']['rev']+='x'
+    token=uuid.uuid4().hex
+    st.session_state.row['data']['mockup_save_token']=token
+    st.session_state.row['data']['upload_operation']['output']['save_token']=token
     st.session_state.saved=True
 if st.session_state.saved:
     st.success('✓ Saved')

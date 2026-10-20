@@ -75,10 +75,10 @@ class ModeTests(unittest.TestCase):
         from product_upload_prompts import build
         live=build('LIVE',load=lambda key,default,**kw:default)
         draft=build('DRAFT',load=lambda key,default,**kw:default)
-        self.assertIn('SELECTED ACTION: Upload to Live',live)
-        self.assertIn(modes.LIVE_FINAL,live)
+        self.assertIn('SELECTED ACTION AND PRODUCT CONTEXT\nUpload to Live',live)
+        self.assertIn('set ACTIVE and publish',live)
         self.assertNotIn(modes.LIVE_FINAL,draft)
-        self.assertIn(modes.DRAFT_FINAL,draft)
+        self.assertIn('Create as DRAFT, published false',draft)
 
 
 if __name__=='__main__': unittest.main()

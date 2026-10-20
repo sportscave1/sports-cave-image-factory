@@ -172,8 +172,10 @@ def test_copy_upload_prompt_preserves_mode_and_operation(monkeypatch,mode):
         def locked(self,*_):yield row,None
     async def actor(*a,**kw):return {'id':'fixture'}
     monkeypatch.setattr(api,'actor',actor);monkeypatch.setattr(api,'Intakes',Store)
-    from product_upload_source import current_source, execution_opening
-    build=Mock(side_effect=lambda m,n,source:execution_opening(source)+m+' original prompt for '+n);monkeypatch.setattr(product_upload_prompts,'build',build)
+    from product_upload_source import current_source
+    real_build=product_upload_prompts.build
+    build=Mock(side_effect=lambda *a,**kw:real_build(*a,**kw,load=lambda k,d,**options:d))
+    monkeypatch.setattr(product_upload_prompts,'build',build)
     provider=Mock(side_effect=AssertionError('Prompt copy must not access Dropbox or download files'))
     monkeypatch.setattr(api,'Dropbox',provider)
     app=Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])
@@ -181,11 +183,13 @@ def test_copy_upload_prompt_preserves_mode_and_operation(monkeypatch,mode):
         response=client.post('/api/product-uploads/prompt',json=dict(id=row['id'],mode=mode,source_version=current_source(row)['version']))
     assert response.status_code==200
     prompt=response.json()['prompt']
-    assert tag(row['id']) in prompt and mode+' original prompt for Exact.psd' in prompt
+    assert tag(row['id']) in prompt and 'Exact.psd' in prompt
+    assert row['data']['upload_operation']['correlation_expected'] is True
     assert '/exact/saved/WEBP' not in prompt
-    build.assert_called_once_with(mode,'Exact.psd',source=current_source(row))
+    from product_upload_compact import context_from_row
+    build.assert_called_once_with(mode,'Exact.psd',source=current_source(row),metadata=context_from_row(row))
     assert 'product (2)/WEBP' in prompt and 'id:webp-folder' in prompt
-    assert 'attached separately' in prompt
+    assert 'local-file/imageFile' in prompt
     provider.assert_not_called()
 
 
