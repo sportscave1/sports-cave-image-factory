@@ -1,0 +1,10 @@
+<!doctype html><meta charset="utf-8"><title>Recorder harmless acceptance</title>
+<style>body{font:20px system-ui;max-width:650px;margin:60px}button,input,select{font:inherit;padding:12px;margin:12px}label{display:block}</style>
+<h1>Recorder harmless acceptance</h1>
+<p id="marker">Prepared document — no reload required</p>
+<label>Example text <input id="example" aria-label="Example text"></label>
+<label>Example choice <select id="choice" aria-label="Example choice"><option>First</option><option>Second</option></select></label>
+<label><input id="enabled" type="checkbox" aria-label="Example enabled">Example enabled</label>
+<button id="action" onclick="document.getElementById('result').textContent='Local button activated'">Harmless action</button>
+<p id="result"></p>
+<script>document.getElementById('marker').dataset.instance=crypto.randomUUID()</script>

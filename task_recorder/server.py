@@ -62,7 +62,15 @@ class Bridge(ThreadingHTTPServer):
         self.token = secrets.token_urlsafe(32)
         self.root = Path(root)
         self.loop = asyncio.new_event_loop()
-        self.runner = Runner(root, headless=headless)
+        runner_type = Runner
+        # The reviewed Windows package opts in by shipping both Python adapter
+        # and native binary. An old package remains a browser-only helper.
+        import importlib.util
+        if importlib.util.find_spec("desktop_recorder"):
+            from desktop_recorder.helper import DesktopRunner, native_path
+            if native_path().is_file():
+                runner_type = DesktopRunner
+        self.runner = runner_type(root, headless=headless)
         super().__init__(("127.0.0.1", port), Handler)
         self.origin = "http://127.0.0.1:" + str(self.server_port)
         self.approval = secrets.token_urlsafe(32)
