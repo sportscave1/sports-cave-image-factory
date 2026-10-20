@@ -121,7 +121,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
                 seen[i].add(row["room_type"])
         for i in range(3):
             self.assertEqual(seen[i], set(ads_page.ie_visuals.ROOM_OPTIONS[i]))
-            self.assertEqual(len(seen[i]), 6)
+            self.assertGreaterEqual(len(seen[i]), 8)
 
     def test_unverified_baseball_has_no_assumed_limit(self):
         rows = ads_page.resolve_standard_instant_experience_visuals(

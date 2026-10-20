@@ -1,5 +1,7 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
 import hashlib
+import ads_ie_scenes as scene_library
+import sports_cave_physical_realism as physical_realism
 
 
 
@@ -187,41 +189,11 @@ def resolve_visual_system(visual, index, context, variation_token):
     )
 
 
-# Curated whole scenes follow the product-page draw-once/preserve-selection approach.
-# Slot palettes are disjoint so every resolved pack reads as three properties.
-SCENES = (
-    (
-        ("terrace collector hallway", "long narrow Victorian passage with high ceiling", "chalk-white lime plaster", "slim painted console at outer left", "warm picture light with cool side daylight"),
-        ("apartment entrance gallery", "broad apartment passage receding past a recessed opening", "pale sage matte paint", "slender pale ash console at outer left", "soft north-window daylight with warm picture-light fill"),
-        ("heritage collector hallway", "tall Edwardian passage with distant archway", "dusty blue mineral plaster", "narrow ebonised console at outer left", "overcast side daylight with gentle warm picture lighting"),
-        ("modern courtyard hallway", "low wide passage receding toward a courtyard", "warm grey fine microcement", "slim travertine console at outer left", "filtered courtyard daylight with warm picture-light accents"),
-        ("coastal collector corridor", "airy deep passage with distant stair return", "soft ivory limewash", "narrow bleached-oak console at outer left", "bright diffused morning daylight with gentle picture lighting"),
-        ("mid-century entrance gallery", "compact offset passage with clerestory depth", "warm mineral-grey brushed plaster", "slim tubular steel console at outer left", "late afternoon clerestory daylight with warm picture-light fill"),
-    ),
-    (
-        ("minimal apartment art wall", "tightly cropped high-ceiling apartment wall", "mineral-blue matte paint", "one small doorway glimpse into a softly focused sitting room at the far left", "cool soft east-window morning light"),
-        ("minimal courtyard-house art wall", "close composition on a low modern residential wall", "pale warm-stone limewash", "one shallow corridor return at the far right", "diffused courtyard noon light"),
-        ("minimal townhouse art wall", "tightly framed tall townhouse wall", "deep teal fine plaster", "one doorway sliver at the far left", "soft lateral daylight from the right"),
-        ("minimal coastal art wall", "close composition on a compact coastal cottage wall", "pale sea-glass green brushed plaster", "one window recess with a partial furniture silhouette at the far right", "luminous coastal overcast daylight"),
-        ("minimal loft art wall", "tightly composed broad loft wall", "cool charcoal mineral paint", "one distant room glimpse at the far right", "broad diffuse skylight"),
-        ("minimal garden-home art wall", "close composition on a modest garden-home wall", "smoked taupe mineral paint", "one narrow doorway into a softly focused room at the far right", "soft garden-reflected afternoon light"),
-    ),
-    (
-        ("refined bay-window sitting room", "angled bay-window seating recess", "deep olive lime plaster", "one oatmeal wool seating edge at the outer perimeter", "cool bay-window daylight with soft neutral lamp fill"),
-        ("architectural split-level living corner", "sunken living corner with distant floor-level change", "pale silver-grey mineral plaster", "one low cobalt fabric settee edge at the far side", "high side-window afternoon light"),
-        ("heritage library lounge", "off-centre library alcove with a deep side-window reveal", "desaturated navy mineral paint", "one painted reading-bench edge deep in the alcove", "soft rear-window daylight with a shaded reading light"),
-        ("quiet modern private retreat", "low-ceiling intimate seating corner with deep window reveal", "warm off-white textured plaster", "one moss-green banquette edge at the far side of the recess", "gentle early-evening window light with neutral indirect fill"),
-        ("courtyard collector sitting room", "open residential seating corner looking toward an offset courtyard", "muted petrol-blue limewash", "one cream woven settee edge near the courtyard opening", "balanced courtyard morning daylight"),
-        ("contemporary collector living recess", "double-height living recess with an off-centre window", "pale sand fine plaster", "one ink-blue upholstered seating edge at the outer perimeter", "soft high-window overcast light"),
-    ),
-)
-ROOM_OPTIONS = tuple(tuple(scene[0] for scene in slot) for slot in SCENES)
-SCENE_VERSION = "IE COLLECTOR SCENES V2 ARTWORK FIRST"
-COMBAT_PALETTES = (
-    ("warm stone fine plaster", "mineral grey subtle limewash"),
-    ("charcoal mineral paint", "graphite fine plaster"),
-    ("smoked taupe limewash", "muted olive mineral paint", "desaturated navy fine plaster"),
-)
+# Reuse the draw-once/preserve-selection contract with richer curated attributes.
+SCENES = scene_library.SCENES
+ROOM_OPTIONS = tuple(tuple(dict.fromkeys(s["room_type"] for s in slot)) for slot in SCENES)
+SCENE_VERSION = "IE COLLECTOR SCENES V2 ARTWORK FIRST"  # Saved prompt recognition stays stable.
+COMBAT_PALETTES = tuple(tuple(dict.fromkeys(s["wall_colour"] for s in slot)) for slot in SCENES)
 
 
 def is_combat(context):
@@ -229,63 +201,63 @@ def is_combat(context):
     return any(word in sport for word in ("combat", "boxing", "mma", "ufc", "martial", "wrestling", "kickboxing", "muay thai"))
 
 
-
 def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
-    """Resolve all slots before rendering; saved selections win, history only on draws.
-
-    Callers pass the snapshot of recent fingerprints captured at fresh-pack creation,
-    never the mutable live history when reopening. No new persistence is needed.
-    """
+    """Draw once against captured history; complete saved attributes never redraw."""
     seed = f"{visuals[0]['resolved_seed']}|{context.get('market', '')}"
-    for index, visual in enumerate(visuals):
-        saved = selections[index] if index < len(selections) else {}
-        saved = saved if isinstance(saved, dict) else {}
-        heritage = context.get("product_era") == "historic" or context.get("artwork_mood") == "heritage"
-        def scene_rank(scene):
-            suitable = heritage and any(word in scene[0] for word in ("heritage", "terrace", "library"))
-            return int.from_bytes(stable_rank(seed, scene[0]), "big") // (2 if suitable else 1)
-        candidates = sorted(SCENES[index], key=scene_rank)
-        recent = {f.get("room_type") for f in list(recent_fingerprints)[:18] if isinstance(f, dict)}
-        history = [f.get("room_type") for f in list(recent_fingerprints)[:18] if isinstance(f, dict)]
-        # Exhausted libraries fall back to the least recently seen scene.
-        fallback = max(candidates, key=lambda s: min(
-            (i for i, room in enumerate(history) if room == s[0]), default=len(history)))
-        scene = next((s for s in candidates if s[0] not in recent), fallback)
-        room, architecture, wall, cue, light = scene
-        if is_combat(context):
-            # Slot palettes span lighter/darker neutral homes and stay distinct.
-            wall = min(COMBAT_PALETTES[index], key=lambda value: stable_rank(seed, f"{index}:{value}"))
-        visual.update(
-            room_profile_key=("hallway_gallery", "minimal_art_wall", "collector_interior")[index],
-            room_profile=f"Room {index + 1}: {room}", room_type=room,
-            wall_colour=wall, wall_material=wall, wall_finish=wall,
-            room_materials=f"{wall}; {cue}", primary_cue=cue,
-            secondary_cue="no additional styling", architectural_cue=architecture,
-            lighting=light, time_of_day=light,
+    fully_saved = len(selections) == 3 and all(isinstance(s, dict) and all(s.get(k) for k in
+        ("scene_signature", "room_type", "wall_colour", "wall_finish", "lighting")) for s in selections)
+    construction = physical_realism.resolve(context.get("physical_product"))
+    chosen = [dict(s) for s in selections] if fully_saved else scene_library.select(seed, {**context, "frame_finish": construction.get("frame_finish", "")}, recent_fingerprints)
+    glazing = str(construction.get("glazing", "")).casefold()
+    for index, (visual, scene) in enumerate(zip(visuals, chosen)):
+        saved = selections[index] if index < len(selections) and isinstance(selections[index], dict) else {}
+        scene.update({k: saved[k] for k in scene_library.SCENE_FIELDS if saved.get(k)})
+        for key in ("room_materials", "secondary_cue", "time_of_day"):
+            if saved.get(key):
+                scene[key] = saved[key]
+        if saved.get("wall_finish") and not saved.get("wall_material"):
+            scene["wall_material"] = saved["wall_finish"]
+        if saved.get("wall_colour") and not saved.get("wall_finish") and not saved.get("wall_material"):
+            scene["wall_finish"] = scene["wall_material"] = saved["wall_colour"]
+            scene["wall_colour_family"] = saved["wall_colour"]  # Do not mislabel an explicit override.
+        if saved.get("wall_colour") and not saved.get("wall_colour_family"):
+            scene.update(wall_colour_family=saved["wall_colour"], wall_visual_group="explicit colour override",
+                         wall_lightness=saved.get("wall_lightness") or "user override; lightness not classified")
+        scene["scene_signature"] = scene_library.signature(scene)
+        scene["scene_near_signature"] = scene_library.signature(scene, near=True)
+        if "unglazed" in glazing or "no glazing" in glazing or glazing == "none":
+            reflection = "Verified unglazed: no glazing, pane or glazing reflection. Preserve surface texture and natural frame-edge highlights."
+        else:
+            material = construction.get("glazing") or "existing glazing, only if present in the original product"
+            reflection = (f"On {material}, a subtle but perceptible reflection from {scene['reflection_source']}: "
+                f"{scene['reflection_placement']}, consistent with camera/light even straight-on. "
+                "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane or call acrylic glass.")
+        scene["glazing_treatment"] = saved.get("glazing_treatment") or reflection
+        visual.update(scene)
+        visual["assigned_camera_angle"] = visual["camera_side"]
+        wall = f"{visual['wall_colour']} ({visual['wall_colour_family']}, {visual['wall_lightness']}); {visual['wall_finish']}"
+        visual.update(room_profile_key=("hallway_gallery", "minimal_art_wall", "collector_interior")[index],
+            room_profile=f"Room {index + 1}: {visual['room_type']}",
+            room_materials=saved.get("room_materials") or f"{wall}; {visual['primary_cue']}",
+            secondary_cue=saved.get("secondary_cue") or "no additional styling",
+            time_of_day=saved.get("time_of_day") or visual["lighting"],
             atmosphere="restrained collector home; authentic residential materials",
             shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one edge glimpse of home", "close product view with restrained alcove depth")[index],
-        )
-        # Explicit saved/editable scene fields retain precedence over automatic choices.
-        for key in ("room_type", "wall_colour", "wall_material", "wall_finish", "room_materials",
-                    "primary_cue", "secondary_cue", "architectural_cue", "lighting", "time_of_day"):
-            if saved.get(key):
-                visual[key] = saved[key]
-        if saved.get("wall_finish") and not saved.get("wall_material"):
-            visual["wall_material"] = saved["wall_finish"]
-        if saved.get("wall_colour") and not saved.get("wall_finish") and not saved.get("wall_material"):
-            visual["wall_finish"] = visual["wall_material"] = saved["wall_colour"]
-        wall_description = "; ".join(dict.fromkeys((visual["wall_colour"], visual["wall_finish"])))
-        visual["room_materials"] = saved.get("room_materials") or f"{wall_description}; {visual['primary_cue']}"
-        visual["room_profile"] = f"Room {index + 1}: {visual['room_type']}"
+            physical_product=context.get("physical_product", {}))
         visual["purpose"] = f"Image {index + 1}: {visual['room_type']}; {visual['camera_side']}"
-        visual["physical_product"] = context.get("physical_product", {})
         visual["scene_brief"] = (
-            f"{visual['room_profile']}; {visual['architectural_cue']}; {wall_description}; "
-            f"{visual['primary_cue']}; {visual['lighting']}. " + (
-                "Premium collector hallway: close artwork-first view, subtle visible passage depth, restrained console at the perimeter, warm picture light balanced with natural daylight.",
-                "Minimal artwork-first wall composition: complete frame straight on and prominent on mobile, a modest calm wall margin and exactly one understated architectural glimpse at an outer edge. The glimpse stays secondary. No full-room arrangement, large foreground desk, chair, cabinet or decorative cluster.",
-                "Distinctive collector interior: dominant artwork, off-centre alcove/window/adjoining-room depth and one peripheral furniture anchor. Neither a hallway nor a nearly empty wall; simplify the setting if it competes with the product. No bland empty-wall-and-armchair formula, flat light or showroom staging.",
-            )[index]
+            "Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. "
+            "Never use a previously generated mockup as the artwork source. "
+            f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}). "
+            f"WALL: {wall}. DEPTH: {visual['architectural_cue']}. PERIPHERAL CUE: {visual['primary_cue']}. "
+            f"LIGHT: {visual['lighting']}. GLAZING: {visual['glazing_treatment']} " + (
+                "Premium collector hallway: close artwork, subtle visible passage depth, peripheral console, warm picture light balanced with daylight.",
+                "Minimal artwork-first wall: complete frame straight on, exactly one understated architectural glimpse at an outer edge. No full-room arrangement or foreground furniture.",
+                "Distinctive collector interior: off-centre alcove depth and one peripheral furniture anchor. Neither a hallway nor a nearly empty wall; simplify competing architecture/furniture.",
+            )[index] +
+            " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
+            "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "
+            "CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
         )
 
 

@@ -47,7 +47,7 @@ class CollectorSceneTests(unittest.TestCase):
         first = self.visuals()
         recent = [ads.standard_instant_experience_fingerprint(i, v) for i, v in enumerate(first, 1)]
         fresh = self.visuals("next-pack", recent_fingerprints=recent)
-        self.assertTrue(all(a["room_type"] != b["room_type"] for a, b in zip(first, fresh)))
+        self.assertTrue(all(a["scene_signature"] != b["scene_signature"] for a, b in zip(first, fresh)))
         kwargs = dict(product_name="Collector Print", category="Cricket", variation_token="next-pack", recent_fingerprints=recent, country="Australia")
         fps = ads.build_standard_instant_experience_fingerprints(**kwargs)
         self.assertEqual([f["room_type"] for f in fps], [v["room_type"] for v in fresh])

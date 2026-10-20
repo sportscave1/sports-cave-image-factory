@@ -2435,13 +2435,25 @@ def update_recent_instant_experience_fingerprints(fingerprints):
     for fingerprint in fingerprints:
         if fingerprint not in recent:
             recent.insert(0, fingerprint)
-    st.session_state[ADS_IE_RECENT_FINGERPRINTS_KEY] = recent[:12]
+    st.session_state[ADS_IE_RECENT_FINGERPRINTS_KEY] = recent[:ie_visuals.scene_library.HISTORY_LIMIT]
 
 
 def _fingerprints_text(fingerprints):
     if not fingerprints:
         return "No recent Instant Experience fingerprints are available in this session."
     return json.dumps(fingerprints[:12], ensure_ascii=False, indent=2)
+
+
+def recent_instant_experience_scene_history(result=None):
+    """Reuse available session and reopened draft history, without a new store."""
+    result = result if isinstance(result, dict) else {}
+    recent = []
+    for item in (list(st.session_state.get(ADS_IE_RECENT_FINGERPRINTS_KEY) or [])
+                 + list(result.get("instant_experience_fingerprints") or [])
+                 + list(result.get("recent_instant_experience_fingerprints") or [])):
+        if isinstance(item, dict) and item not in recent:
+            recent.append(item)
+    return recent[:ie_visuals.scene_library.HISTORY_LIMIT]
 
 
 IE_WIDGET_KEYS = {
@@ -5139,6 +5151,8 @@ def resolve_standard_instant_experience_visuals(
     }, instant_experience_on_image_headline_is_valid)
     ie_visuals.resolve_scene_set(resolved, {
         **context, "selected_sport": category, "market": country,
+        "product_metadata": product_metadata or {},
+        "scene_product_key": ie_copy.product_key(product_name),
         "physical_product": physical_realism.physical_metadata(product_metadata),
     }, recent_fingerprints=recent_fingerprints or (), selections=(
         (product_metadata or {}).get("instant_experience_scene_selections") or ()
@@ -5224,7 +5238,7 @@ def build_instant_experience_typography_quality_rules(visual=None, *, shared=Fal
     return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
 INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 
-- Add promotional typography as a deterministic post-production layer inside the fixed opaque footer after the room/product photograph is composed. Do not rely on the image model to invent text organically inside the room.
+- Render promotional typography inside the fixed opaque footer, never organically inside the photographed room. If the receiving environment has a real font compositor, use it for geometry, glyph measurement and export. This prompt generator has no deterministic Ads footer renderer; image-model instructions alone do not implement post-production or guarantee exact typography. Inspect the actual footer and report unresolved text or alignment defects.
 - Use the fixed footer geometry and opacity contract exactly. Keep its one thin 1-pixel muted-gold top separator. No glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture.
 - Use a premium Sports Cave editorial serif for the headline, Montserrat Regular or Medium for the supporting line and Montserrat SemiBold or Bold for the CTA.
 - Subtly polish serif weight, kerning and baseline alignment while preserving existing proportions and hierarchy. Keep the supporting sans clean and mobile-readable; no decorative flourishes or luxury-magazine styling.
@@ -5341,7 +5355,8 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "creative_cta": visual["copy_row"],
         "room_type": visual["room_type"],
         "room_profile": visual.get("room_profile", visual["room_type"]),
-        "wall_colour_family": visual["wall_colour"],
+        **{key: visual[key] for key in ie_visuals.scene_library.SCENE_FIELDS if key in visual},
+        "wall_colour_family": visual.get("wall_colour_family", visual["wall_colour"]),
         "wall_material": visual["wall_material"],
         "wall_finish": visual.get("wall_finish", visual["wall_material"]),
         "camera_family": visual["camera_side"],
@@ -5512,7 +5527,7 @@ Composition is locked:
 {SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0]}
 {shared_realism_rules}
 
-FIXED BLACK FOOTER AND DETERMINISTIC TYPOGRAPHY
+FIXED BLACK FOOTER AND EXACT TYPOGRAPHY
 
 Use the centralized fixed opaque footer and on-image copy-fit contracts below without altering the existing typography hierarchy:
 - deep matte charcoal near #101112 or #121314
@@ -5520,7 +5535,7 @@ Use the centralized fixed opaque footer and on-image copy-fit contracts below wi
 - one 1-pixel muted-gold boundary line across the scene transition
 - no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
 
-Add all promotional typography as a deterministic flat post-production layer inside the footer using real fonts after the room/product photograph is composed. Do not rely on the image-generation model to organically render copy in the photographed scene.
+Keep all promotional typography flat inside the footer, never inside the photographed room. Use a real font compositor if available; this generator supplies instructions, not a deterministic footer-rendering backend. Verify the actual wording, geometry and glyph alignment; report unresolved defects.
 
 Resolved on-image copy:
 HEADLINE: {visual.get("headline_text")}
@@ -8502,17 +8517,17 @@ def build_instant_experience_shared_template():
         "64–72 px safe margins; readable at 256 x 256. Near-black charcoal #101112/#121314, "
         "subtle paper grain and one 1-pixel muted-gold top separator. Artwork first; "
         "the complete frame stays above the footer. No fake button, price or extra CTA.",
-        "ARTWORK-FIRST COMPOSITION: camera close, modest calm wall margin, subtle residential context. "
-        "Keep architecture/furniture at the perimeter or deeper behind the frame; no wide interior, "
-        "excess empty wall, dominant furniture or distracting background brightness. Width targets yield "
-        "to source proportions and complete-frame visibility, never physical enlargement. Resolve all "
-        "three homes together; architecture, layout, palette, materials, light and peripheral cues must "
-        "differ at thumbnail size. Automatic walls exclude red, pink, rose, salmon, peach and strong "
-        "orange; preserve explicit saved overrides. Combat palettes use lighter/darker charcoal, graphite, "
-        "warm stone, smoked taupe, muted olive, desaturated navy and mineral grey. Other palettes remain "
-        "restrained and product/era/market appropriate, without forced team colours or cultural stereotypes. "
-        "Quiet plaster, limewash, mineral paint and restrained stone/timber accents; natural separation "
-        "from the unchanged frame. Avoid repeated brown/walnut/leather/whiskey/orange-light staging.",
+        "PACK COMPOSITION: resolve three different homes before the calls. Each pair differs in at least three "
+        "meaningful attributes, including wall appearance and architecture or lighting. Use three different "
+        "home settings, colour families, lightness levels and compatible wall treatments; grey/graphite/charcoal "
+        "with similar texture/light count as potential duplicates. Never solve variation by widening the camera "
+        "or enlarging the product. Peripheral/deep furniture only; no excess empty wall, bright competing opening, "
+        "clutter, loud patterns, glossy feature walls or sports-bar staging. Quiet panelling or oak details stay "
+        "at the perimeter. Use supplied artwork colours, era, mood and actual frame contrast; sport informs "
+        "atmosphere, never invented memorabilia, stereotypes or compulsory team colours. Ensure local tonal "
+        "separation from the supplied frame through wall choice and physical light; never change its finish. Automatic walls exclude "
+        "red, pink, rose, salmon, peach and strong orange; explicit saved overrides remain authoritative. "
+        "Use the resolved choices as one coherent home per image; prompt differences are not proof of distinct pixels.",
         build_instant_experience_fixed_opaque_footer_rules(),
         build_instant_experience_on_image_copy_fit_rules(),
         build_instant_experience_creative_cta_rules("premium_scarcity_right"),
@@ -8607,7 +8622,7 @@ AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 Continue through the sequence without asking for "next" or approval between images. Three independent 1024 x 1024 outputs; no collage or triptych. Do not stop after writing prompts or the first image. These instructions authorise generation in the receiving conversation; they do not add an OS image backend or publish ads.
 For each image call, combine the unchanged shared ad template with that image's resolved brief and its one compact realism contract; pass the full applicable text to the image tool, never a cross-reference. Apply only that image's exact on-image wording.
 {SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]}
-Inspect accessible image outputs at full size and 256 x 256: original-product integrity, prominent complete frame, distinct scene, coherent glazing/reflections, rigid geometry and exact footer wording/fit. Use at most one correction call per image when necessary, always with the ORIGINAL product reference; then report any unresolved defect accurately. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Prompt/schema checks do not establish visual distinction. Use at most one correction call per image when necessary, always with the ORIGINAL product reference; then report any unresolved defect accurately. Never claim pixel fidelity or inspection without evidence.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If a genuine tool failure prevents completion, identify the unfinished image/file, preserve completed outputs and final copy for resumption, and state any inspection limitation. Do not replace requested images with a text-only plan or claim a nonexistent download. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
 
@@ -9286,6 +9301,12 @@ def build_ads_result_record(
         else []
     )
     if instant_experience_fingerprints:
+        # Persist the actual chosen attributes with the draft, like Product Page
+        # Mockups' draw-once scene block. Never redraw on copy/reopen/reload.
+        clean_product_metadata["instant_experience_scene_selections"] = [
+            {key: fingerprint[key] for key in ie_visuals.scene_library.SCENE_FIELDS if key in fingerprint}
+            for fingerprint in instant_experience_fingerprints
+        ]
         copy_cues = ie_copy.cues(clean_product_name, category, country, clean_variation_token,
             resolve_instant_experience_description_context(clean_product_name, category, product_metadata=clean_product_metadata),
             recent_instant_experience_fingerprints or [])
@@ -14684,11 +14705,16 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         except ValueError as error:
             st.error(str(error))
             return
+    fresh_ie_pack = bool(
+        not is_google and not is_creative_refresh and campaign_type == "Instant Experience"
+        and isinstance(result, dict) and result.get("campaign_type") == "Instant Experience" and result.get("master_prompt")
+        and st.button("Fresh pack", key="ads-ie-fresh-pack")
+    )
     submitted = st.button(
         "Submit",
         type="primary",
         use_container_width=True,
-    ) or (bool(creative_refresh_context) and deliberate_new)
+    ) or fresh_ie_pack or (bool(creative_refresh_context) and deliberate_new)
 
     if is_google:
         if submitted:
@@ -14793,7 +14819,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                 creative_refresh_context=creative_refresh_context,
             )
             existing_result = result if isinstance(result, dict) else {}
-            if existing_result.get("context_key") == context_key:
+            if existing_result.get("input_context_key", existing_result.get("context_key")) == context_key and not fresh_ie_pack:
                 if (
                     _clean_product_url(product_url) != existing_result.get("product_url")
                     or normalize_campaign_moment(
@@ -14814,13 +14840,14 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                         product_url=product_url,
                         variation_token=existing_result.get("variation_token"),
                         campaign_moment=campaign_moment,
-                        product_metadata=product_metadata,
-                        recent_instant_experience_fingerprints=st.session_state.get(
-                            ADS_IE_RECENT_FINGERPRINTS_KEY,
-                            [],
-                        ),
+                        product_metadata={**product_metadata, **(
+                            {"instant_experience_scene_selections": existing_result["product_metadata"]["instant_experience_scene_selections"]}
+                            if (existing_result.get("product_metadata") or {}).get("instant_experience_scene_selections") else {})},
+                        recent_instant_experience_fingerprints=existing_result.get("recent_instant_experience_fingerprints", []),
                         creative_refresh_context=creative_refresh_context,
                     )
+                    if existing_result.get("input_context_key"):
+                        result.update(input_context_key=existing_result["input_context_key"], context_key=existing_result["context_key"])
                 else:
                     result = existing_result
             else:
@@ -14834,12 +14861,14 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                     variation_token=build_visual_variation_token(),
                     campaign_moment=campaign_moment,
                     product_metadata=product_metadata,
-                    recent_instant_experience_fingerprints=st.session_state.get(
-                        ADS_IE_RECENT_FINGERPRINTS_KEY,
-                        [],
-                    ),
+                    recent_instant_experience_fingerprints=recent_instant_experience_scene_history(existing_result),
                     creative_refresh_context=creative_refresh_context,
                 )
+                if fresh_ie_pack:
+                    # Reuse existing draft isolation: keep the prior workflow under
+                    # its key and give fresh uploads/copy their own widget namespace.
+                    result["input_context_key"] = result["context_key"]
+                    result["context_key"] += "::pack::" + result["variation_token"]
                 _reset_ads_image_workflow(result)
             st.session_state[result_state_key] = result
             if campaign_type == "Instant Experience":

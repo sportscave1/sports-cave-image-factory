@@ -36,7 +36,7 @@ class CombinedExecutionTests(unittest.TestCase):
                          "FINAL RESPONSE TERMINATION", "no automatic image generation", "Do not generate the image automatically",
                          "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "COPY ONE ROUTE AT A TIME"):
             self.assertNotIn(obsolete, prompt)
-        self.assertLess(len(prompt), 38000)  # Includes shared execution priority and attachment recovery.
+        self.assertLess(len(prompt), 42000)  # Resolved construction/reflection and richer home specifications.
 
     def test_execution_priority_is_shared_with_project_template_and_text_only_gate(self):
         template = (Path(ads.__file__).parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()
@@ -123,22 +123,24 @@ class CombinedExecutionTests(unittest.TestCase):
             self.assertIn("explicit pink mineral paint", rows[1]["scene_brief"])
 
     def test_exhausted_scene_library_uses_oldest_available_fingerprint(self):
-        rows = ads.resolve_standard_instant_experience_visuals(product_name="Collector", category="Cricket")
-        history = [{"room_type": ads.ie_visuals.SCENES[slot][age][0]}
-                   for age in range(6) for slot in range(3)]  # Newest first, as stored by the app.
-        ads.ie_visuals.resolve_scene_set(rows, {}, recent_fingerprints=history)
-        self.assertEqual([r["room_type"] for r in rows], [slot[-1][0] for slot in ads.ie_visuals.SCENES])
-        # A repeated old room at the newest position counts as recently used.
-        history.insert(0, {"room_type": ads.ie_visuals.SCENES[0][-1][0]})
-        ads.ie_visuals.resolve_scene_set(rows, {}, recent_fingerprints=history)
-        self.assertEqual(rows[0]["room_type"], ads.ie_visuals.SCENES[0][-2][0])
+        library = ads.ie_visuals.scene_library
+        old = library.select("old", {})
+        new = library.select("new", {}, old)
+        # Constrain to six known compatible candidates to force finite exhaustion.
+        pools = tuple((new[i], old[i]) for i in range(3))
+        with patch.object(library, "SCENES", pools):
+            selected = library.select("exhausted", {}, new + old)
+        self.assertGreater(selected[0]["history_exclusions_relaxed"], 0)
+        self.assertTrue(all(s["scene_signature"] not in {n["scene_signature"] for n in new} for s in selected))
+        for a, b in ((0, 1), (0, 2), (1, 2)):
+            self.assertTrue(library.different(selected[a], selected[b]))
 
     def test_market_history_and_saved_results_are_stable(self):
         first = self.record("first")
         next_pack = self.record("second", recent=first["instant_experience_fingerprints"])
         self.assertNotEqual(first["master_prompt"], next_pack["master_prompt"])
         for old, new in zip(first["instant_experience_fingerprints"], next_pack["instant_experience_fingerprints"]):
-            self.assertNotEqual(old["room_type"], new["room_type"])
+            self.assertNotEqual(old["scene_signature"], new["scene_signature"])
         self.assertEqual(self.record("second", recent=first["instant_experience_fingerprints"])["master_prompt"], next_pack["master_prompt"])
         self.assertIs(ads.ensure_current_ads_result_prompt(next_pack), next_pack)
         self.assertEqual(ads.creation_instructions(next_pack["master_prompt"]), next_pack["master_prompt"])
