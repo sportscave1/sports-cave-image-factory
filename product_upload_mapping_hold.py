@@ -45,7 +45,12 @@ def acquire(connect, key, actor, pid, file_id):
         if rows:
             if len(rows) != 1 or any(str(rows[0][k]) != str(v) for k,v in
                     dict(operation_id=key, actor_id=actor, product_gid=pid, file_id=file_id).items()):
-                raise ValueError('Another upload owns the preparation hold for this product or PSD. Nothing was replaced.')
+                error = ValueError('Another upload owns the preparation hold for this product or PSD. Nothing was replaced.')
+                if len(rows)==1 and all(str(rows[0][k])==str(v) for k,v in
+                        dict(actor_id=actor,product_gid=pid,file_id=file_id).items()):
+                    error = ValueError('This PSD has an earlier saved mapping attempt. Open that attempt and retry to resume its retained progress; no files or holds were replaced.')
+                    error.resume_upload_id = str(rows[0]['operation_id'])
+                raise error
         cur.execute("SELECT 1 FROM auto_edition_onboarding WHERE (product_gid=%s OR file_id=%s)", (pid,file_id))
         if cur.fetchone():
             raise ValueError('This product or PSD already has preparation work. Resolve that existing work before mapping; it was not changed.')

@@ -64,6 +64,11 @@ function harness(){
   waiting.dialog().querySelector('[data-field="retry"]').onclick();await tick();
   assert.equal(waiting.calls.at(-1).path,'map');
   assert.equal(waiting.calls.at(-1).body.product_id,undefined);
+  waiting.respond(async()=>({mapping:{state:'Mapping failed',resume_upload_id:'original-operation'}}));
+  await waiting.el('mapping-refresh').onclick();
+  const recovery=waiting.dialog().querySelector('[data-field="resume-link"]');
+  assert.equal(recovery.hidden,false);
+  assert.equal(recovery.href,'?page=product_uploads&upload=original-operation&sync_map=1');
   waiting.panel.dispose();
   console.log('PASS: no mount requests; explicit start; double-click; non-cancelling close; recovery; failure never green; stale operation/save fencing; timers and unmount.');
 })().catch(error=>{console.error(error);process.exitCode=1;});

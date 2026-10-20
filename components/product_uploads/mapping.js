@@ -35,6 +35,9 @@ window.ProductUploadMapping = ({request, getRow}) => {
     d('reason').textContent=success?'':value?.reason||'';
     d('edition').textContent=value?.edition_id?`Edition Ops record ${value.edition_id} · Run ${value.run_id}`:'';
     d('edition-link').hidden=!success;
+    const resume=value?.resume_upload_id;
+    d('resume-link').hidden=!resume||success;
+    if(resume)d('resume-link').href='?page=product_uploads&upload='+encodeURIComponent(resume)+'&sync_map=1';
     d('steps').replaceChildren();
     for(const step of steps){
       const item=dialog.ownerDocument.createElement('li');
@@ -102,6 +105,7 @@ window.ProductUploadMapping = ({request, getRow}) => {
       .sc-upload-edition-dialog [data-field=retry]{background:#b08b40;border-color:#b08b40;color:white}
     </style><h2>Map product</h2><strong data-field="title"></strong>
     <ol data-field="steps"></ol><p>PSD: <span data-field="psd"></span></p><p data-field="edition"></p><p><a data-field="edition-link" href="?page=edition_ops" target="_top" hidden>Open Edition Ops</a></p>
+    <p><a data-field="resume-link" target="_top" hidden>Open original mapping attempt</a></p>
     <strong data-field="state" role="status" aria-live="polite"></strong><p data-field="reason"></p>
     <label data-field="limit-row" hidden>Confirmed edition limit<input data-field="limit" type="number" min="1" max="1000" step="1" placeholder="Confirmed product edition limit"></label>
     <label data-field="product-row" hidden>Confirm Edition Ops product<select data-field="product-choice"></select><input data-field="product-id" placeholder="Stored Shopify product ID for the Edition Ops record" aria-label="Shopify product ID"></label><div class="sc-edition-actions"><button data-field="retry" type="button">Retry</button><button data-field="close" type="button" autofocus>Close</button></div>`;

@@ -350,8 +350,9 @@ def test_other_operation_cannot_take_hold_and_changed_run_cannot_reuse_success(e
     assert service.map(key,ADMIN)['state']=='Mapped'
     from product_upload_mapping_hold import acquire
     import uuid
-    with pytest.raises(ValueError,match='Another upload'):
+    with pytest.raises(ValueError,match='earlier saved mapping attempt') as conflict:
         acquire(env[0].connect,str(uuid.uuid4()),ADMIN['id'],PID,meta['id'])
+    assert conflict.value.resume_upload_id==key
     env[1].execute('UPDATE edition_products SET active_edition_run_id=NULL')
     assert service.status(key,ADMIN)['state']!='Mapped'
     with pytest.raises(ValueError,match='replacement workflow'):service.map(key,ADMIN)

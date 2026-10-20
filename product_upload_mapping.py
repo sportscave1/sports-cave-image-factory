@@ -62,7 +62,14 @@ def read_edition(connect, pid):
     if rows and any(rows[0].get(field) and str(rows[0][field]) not in (pid, pid.rsplit('/',1)[-1])
                     for field in ('shopify_product_gid','shopify_product_id','run_shopify_id')):
         raise ValueError('Conflicting Shopify identity on the Edition Ops record or edition run.')
-    return dict(rows[0]) if rows else None
+    if not rows:
+        return None
+    edition = dict(rows[0])
+    # Psycopg returns production UUID run IDs as UUID objects. Mapping receipts
+    # are JSON; retain the exact ID as text, including on subsequent comparisons.
+    if isinstance(edition.get('run_id'), uuid.UUID):
+        edition['run_id'] = str(edition['run_id'])
+    return edition
 
 
 def register_edition(connect, product, total):
@@ -334,7 +341,7 @@ class Mapping:
             if task.get('lease_until') and datetime.fromisoformat(task['lease_until']) > now():
                 return self._status_row(row)
             task.update(lease=lease, lease_until=(now()+timedelta(minutes=5)).isoformat(), state='Mapping…', error='',
-                        stage='Finding product in Edition Ops', source_version=source['version'], mode=row['mode'], needs_limit=False, needs_product=False, candidates=[])
+                        stage='Finding product in Edition Ops', source_version=source['version'], mode=row['mode'], needs_limit=False, needs_product=False, candidates=[], resume_upload_id=None)
             task.setdefault('completed', [])
             captured = deepcopy(row)
         stage = 'Finding product in Edition Ops'; phase = monotonic()
@@ -394,7 +401,7 @@ class Mapping:
                 self._verify_database(cur, key, op, task)
                 # Fence a concurrent edition restart through final persistence.
                 cur.execute('SELECT active_edition_run_id FROM edition_products WHERE id=%s FOR UPDATE',(task['edition_id'],))
-                if cur.fetchone()['active_edition_run_id'] != task['run_id']:
+                if str(cur.fetchone()['active_edition_run_id']) != str(task['run_id']):
                     raise ValueError('The edition run changed before finalisation.')
                 cur.execute('SELECT status FROM edition_runs WHERE id=%s FOR UPDATE',(task['run_id'],))
                 if cur.fetchone()['status'] != 'active':
@@ -423,13 +430,17 @@ class Mapping:
         except Exception as error:
             import logging
             logging.getLogger(__name__).exception('Upload Map failed: operation=%s stage=%s', key, stage)
-            message = str(error) if isinstance(error,(ValueError,PermissionError)) else f'{stage} failed: service unavailable. Retry to resume; completed steps and the original PSD identity are retained.'
+            if isinstance(error,(ValueError,PermissionError)):
+                message = str(error)
+            else:
+                cause = 'service unavailable' if isinstance(error,(ConnectionError,TimeoutError)) else 'unexpected application error (' + type(error).__name__ + ')'
+                message = f'{stage} failed: {cause}. Retry to resume; completed steps and the original PSD identity are retained. If it persists, check server logs for mapping {key}.'
             with self.store.locked(key, actor['id']) as (row, cur):
                 task = operation(row).get('sync_map', {})
                 if task.get('lease') == lease:
                     task.update(state='Waiting for product in Edition Ops' if getattr(error,'waiting',False) or hasattr(error,'candidates') else 'Mapping failed',
                                 needs_product=hasattr(error,'candidates'), candidates=getattr(error,'candidates',[]),
-                                error=message, stage=stage, elapsed_ms=round((monotonic()-started)*1000,2))
+                                error=message, resume_upload_id=getattr(error,'resume_upload_id',None), stage=stage, elapsed_ms=round((monotonic()-started)*1000,2))
         finally:
             with self.store.locked(key, actor['id']) as (row, cur):
                 task = operation(row).get('sync_map', {})
@@ -452,7 +463,7 @@ class Mapping:
                       completed=task.get('completed',[]), needs_limit=task.get('needs_limit',False), product=op.get('product'), needs_product=task.get('needs_product',False), candidates=task.get('candidates',[]),
                       psd=(task.get('moved') or op.get('source') or {}).get('path_display',''),
                       edition_id=task.get('edition_id'), run_id=task.get('run_id'), edition_limit=task.get('confirmed_limit'),
-                      preparation_held=task.get('preparation_held',False), elapsed_ms=task.get('elapsed_ms'),
+                      resume_upload_id=task.get('resume_upload_id'), preparation_held=task.get('preparation_held',False), elapsed_ms=task.get('elapsed_ms'),
                       timings_ms=task.get('timings_ms',{}))
         if result['state']=='Mapping…' and (not task.get('lease_until') or datetime.fromisoformat(task['lease_until'])<=now()):
             result.update(state='Mapping incomplete',reason='Mapping was interrupted. Retry to resume its saved steps.')
