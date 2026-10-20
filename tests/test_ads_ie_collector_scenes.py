@@ -39,7 +39,7 @@ class CollectorSceneTests(unittest.TestCase):
                 for i, v in enumerate(rows):
                     seen[i][key].add(v[key])
             self.assertIn("visible passage depth", rows[0]["scene_brief"])
-            self.assertIn("exactly one understated architectural glimpse", rows[1]["scene_brief"])
+            self.assertIn("one tiny but recognisable softly lit home-context glimpse", rows[1]["scene_brief"])
             self.assertIn("Neither a hallway nor a nearly empty wall", rows[2]["scene_brief"])
         self.assertTrue(all(len(values) >= 5 for slot in seen for values in slot.values()))
 

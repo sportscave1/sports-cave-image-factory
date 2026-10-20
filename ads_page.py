@@ -3871,7 +3871,7 @@ HEADLINE
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
 - Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
 - Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.
-- Allow only subtle font-size or letter-spacing adjustments where needed. Never use cramped tracking, stretching, distortion or an excessively small font.
+- Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
 - Check readability at 256 x 256. Resolve any fit substitution at pack level before image calls, choosing another unused eligible approved option and retaining three unique headlines. Never repeat a sibling headline. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
 
 SUPPORTING LINE
@@ -3993,7 +3993,6 @@ def build_instant_experience_on_image_copy_fit_rules():
 SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2"
 IE_COLLECTOR_FOOTER_TYPE_TARGETS = {
     "headline_px": "42–48", "support_px": "24–26", "cta_px": "26–28",
-    "headline_reference_scale": "80–85%", "cta_reference_scale": "70–75%",
     "cta_tracking_em": "0.04–0.06", "underline_px": 1,
 }
 SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2 = "SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2"
@@ -5253,7 +5252,7 @@ INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 - Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
 - Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
 - STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined editorial serif Regular/Medium; supporting line {targets['support_px']} px, Montserrat Regular; CTA {targets['cta_px']} px, Montserrat Medium. Design targets, not measured-rendering claims.
-- Relative guidance is a headline about 15–20% smaller ({targets['headline_reference_scale']}) and CTA about 25–30% smaller ({targets['cta_reference_scale']}) than the recent oversized reference. Use the fixed targets above for every pack; never reduce a previous generation again. Do not compound percentage reductions.
+- These fixed targets are the sole typography specification for every image and pack; never reduce a previous generation again. Do not compound percentage reductions or rescale from a reference. Uppercase wording is casing only, never permission for oversized heavy block capitals or bold promotional-banner styling. Never enlarge text to fill empty panel space.
 - Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. Supporting text is clearly secondary in softer warm off-white. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
 - Preserve the full 24–28% opaque panel and existing safe margins. Use the extra space for calm breathing room, with about 22–30 px clear vertical separation between the three text lines; do not shrink the panel or fill the space with larger type. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
 - Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. Supporting text is warm off-white. CTA is muted antique gold.
@@ -5552,7 +5551,7 @@ Use the centralized fixed opaque footer and on-image copy-fit contracts below wi
 - one 1-pixel muted-gold boundary line across the scene transition
 - no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
 
-Keep all promotional typography flat inside the footer, never inside the photographed room. Use a real font compositor if available; this generator supplies instructions, not a deterministic footer-rendering backend. Verify the actual wording, geometry and glyph alignment; report unresolved defects.
+Keep all collector typography flat inside the footer, never inside the photographed room. Use a real font compositor if available; this generator supplies instructions, not a deterministic footer-rendering backend. Verify the actual wording, geometry and glyph alignment; report unresolved defects.
 
 Resolved on-image copy:
 HEADLINE: {visual.get("headline_text")}
@@ -8507,6 +8506,8 @@ def get_instant_experience_setting(category):
 
 
 ADS_IE_COMBINED_EXECUTION_VERSION = "ADS_IE_COMBINED_EXECUTION_V1"
+IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as the straight-on architectural product wall with a small residential glimpse, and Ad 3 as the collector sitting-room setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
+Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 
 def build_instant_experience_shared_template():
@@ -8612,6 +8613,8 @@ Product: {product_name}
 Sport: {category}; selected market: {country}.
 Original framed product reference: the original supplied product image, for EVERY image call.
 Use the supplied title/metadata for identity and verified facts. Do not guess an unknown athlete, team, achievement or year from the market or a style image; never invent availability, certificates, shipping or provenance claims.
+
+{IE_CREATIVE_VARIETY_AND_TYPOGRAPHY}
 
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}

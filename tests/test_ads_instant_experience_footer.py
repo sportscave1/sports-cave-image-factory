@@ -133,7 +133,7 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             "no more than 12 words and no more than 70 characters",
             "no more than four words and no more than 24 characters",
             "880–896 px usable width",
-            "Allow only subtle font-size or letter-spacing adjustments",
+            "Keep size and weight within the shared collector typography targets",
             "Check readability at 256 x 256",
             "Never repeat a sibling headline",
             "on exactly one line",

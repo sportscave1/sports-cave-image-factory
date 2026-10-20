@@ -10,7 +10,7 @@ SCENE_FIELDS = (
     "architectural_cue", "depth_family", "primary_cue", "furniture_cue", "lighting", "light_source",
     "light_direction", "light_softness", "light_family", "reflection_source", "reflection_placement",
     "glazing_treatment", "assigned_camera_angle", "scene_signature", "scene_near_signature", "history_exclusions_relaxed",
-    "depth_position", "light_source_position", "spatial_family", "residential_cue_family",
+    "depth_position", "light_source_position", "spatial_family", "residential_cue_family", "scene_slot",
 )
 
 # Colour and construction are authored together, not independently randomised.
@@ -53,13 +53,13 @@ HOMES = (
     ),
     (
         ("Refined apartment living corner", "quiet contemporary apartment", "one tall recessed window reveal with a distant furniture silhouette at the far left", "none; architecture is the single peripheral cue", (0, 3, 5, 7, 9, 13, 14, 17), "tall window"),
-        ("Contemporary courtyard home", "single-storey courtyard house", "one broad closed limestone wall return at the far right; no passage opening", "none; architecture is the single peripheral cue", (2, 3, 6, 10, 14, 17), "courtyard window"),
-        ("Heritage collector hallway", "quiet heritage townhouse interior", "one solid heritage wall pier and a shallow cornice return at the far left; no doorway", "none; architecture is the single peripheral cue", (0, 1, 4, 8, 12, 18), "side window"),
+        ("Contemporary courtyard home", "single-storey courtyard house", "one shallow limestone passage return at the far right with a tiny softly lit adjoining sitting-area glimpse", "none; architecture is the single peripheral cue", (2, 3, 6, 10, 14, 17), "courtyard window"),
+        ("Heritage collector hallway", "quiet heritage townhouse interior", "one solid heritage wall pier framing a softly lit stair-landing glimpse at the far left", "none; architecture is the single peripheral cue", (0, 1, 4, 8, 12, 18), "side window"),
         ("Bay-window sitting room", "restrained bay-window home", "one window recess with a partial distant furniture silhouette at the far right", "none beyond the silhouette inside the single window recess", (0, 4, 11, 12, 15, 16), "bay window"),
         ("Quiet home study", "garden-facing reading home", "one garden-facing window recess with a distant seating silhouette at the far right", "none; no desk in the photographic foreground", (0, 4, 5, 10, 14, 19), "garden window"),
-        ("Architectural entry alcove", "oak-accented architectural home", "one small oak-lined ceiling step over a closed shallow niche at the far left", "none; architecture is the single peripheral cue", (2, 3, 5, 10, 15, 17), "clerestory window"),
-        ("Split-level lounge", "mid-century split-level home", "one lowered floor-plane glimpse beyond a low residential ledge at the far right", "none; architecture is the single peripheral cue", (2, 6, 7, 9, 10, 13, 17), "high side window"),
-        ("Restrained media lounge", "contemporary private residential retreat", "one broad layered rear wall plane beyond a shallow closed reveal at the far left", "none; architecture is the single peripheral cue", (0, 5, 6, 9, 11, 14, 16), "corner window"),
+        ("Architectural entry alcove", "oak-accented architectural home", "one small oak-lined opening at the far left revealing a softly lit recessed window seat", "none; architecture is the single peripheral cue", (2, 3, 5, 10, 15, 17), "clerestory window"),
+        ("Split-level lounge", "mid-century split-level home", "one lowered floor-plane glimpse beyond a low residential ledge at the far right with a softly lit recessed bench edge", "none; architecture is the single peripheral cue", (2, 6, 7, 9, 10, 13, 17), "high side window"),
+        ("Restrained media lounge", "contemporary private residential retreat", "one broad layered wall return at the far left revealing a softly lit sliver of an adjoining living area", "none; architecture is the single peripheral cue", (0, 5, 6, 9, 11, 14, 16), "corner window"),
     ),
     (
         ("Bay-window sitting room", "refined Victorian sitting room", "off-centre bay-window seating recess", "one oatmeal wool banquette edge at the outer perimeter", (0, 1, 4, 11, 12, 15), "bay window"),
@@ -79,7 +79,7 @@ HOMES = (
 SPATIAL_FAMILIES = (
     ("circulation axis",) * 8,
     ("window volume", "folded wall plane", "solid architectural pier", "window volume",
-     "window volume", "ceiling step", "split-level plane", "layered wall planes"),
+     "window volume", "recessed seating opening", "split-level plane", "layered wall planes"),
     ("window volume", "split-level plane", "intersecting-wall corner", "window volume",
      "courtyard court", "double-height volume", "ceiling step", "intersecting-wall corner"),
 )
@@ -131,7 +131,7 @@ def candidates(slot):
                 light = f"{softness} from the {source} on the {direction}"
                 if slot == 0:
                     light += "; gentle warm picture-light fill balanced with daylight"
-                scene = dict(scene_selection_version=VERSION, scene_id=f"{slot}:{h}:{w}:{l}",
+                scene = dict(scene_selection_version=VERSION, scene_id=f"{slot}:{h}:{w}:{l}", scene_slot=slot,
                     home_setting=setting, architecture_style=architecture,
                     room_type=(f"{architecture} collector hallway" if slot == 0 else
                                f"minimal {architecture} product wall" if slot == 1 else architecture),
@@ -206,6 +206,7 @@ def _history_conflict(scene, old):
 
 def select(seed, context, recent=(), selections=()):
     history = [r for r in list(recent)[:HISTORY_LIMIT] if isinstance(r, dict)]
+    recency_history = list(history)
     product_key = context.get("scene_product_key")
     if product_key:
         # Same-product exclusions survive longest; broader history still reduces
@@ -216,11 +217,33 @@ def select(seed, context, recent=(), selections=()):
     palette = " ".join(str(metadata.get(k, "")) for k in ("artwork_colours", "artwork_colors", "dominant_colours", "dominant_colors", "colour_palette")).casefold()
     heritage = context.get("product_era") == "historic" or context.get("artwork_mood") == "heritage"
     frame = str(context.get("frame_finish", "")).casefold()
-    def rank(scene):
+    def slot_of(old):
+        if isinstance(old.get("scene_slot"), int):
+            return old["scene_slot"]
+        route = str(old.get("route_key") or "")
+        if route in ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left"):
+            return ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left").index(route)
+        camera = str(old.get("assigned_camera_angle") or old.get("camera_role") or "").upper()
+        return next((i for i, name in enumerate(("RIGHT", "FRONT", "LEFT")) if camera.startswith(name)), None)
+    # Keep actual recency across ALL products for role-level palette/layout ranking.
+    # Same-product ordering above still governs bounded exact/near exclusions.
+    role_history = [[old for old in recency_history if slot_of(old) == i] for i in range(3)]
+    def rank(scene, slot):
         compatible = (heritage and any(w in scene["architecture_style"].lower() for w in ("heritage", "victorian", "edwardian", "georgian")))
         related = any(word in palette for word in scene["wall_colour"].split() if word in {"olive", "navy", "forest", "ivory", "sand", "taupe", "grey"})
         contrast = ("black" in frame and scene["wall_lightness"] == "light") or ("white" in frame and scene["wall_lightness"] == "dark")
-        return int.from_bytes(_rank(seed, scene["scene_signature"]), "big") // (1 + compatible + related + contrast)
+        recent_role = role_history[slot]
+        latest = recent_role[:1]
+        palette_use = sum((HISTORY_LIMIT - i) for i, old in enumerate(recent_role)
+                          if old.get("wall_visual_group") == scene["wall_visual_group"])
+        layout_use = sum((HISTORY_LIMIT - i) for i, old in enumerate(recent_role)
+                         if old.get("architecture_style") == scene["architecture_style"])
+        return (any(old.get("wall_visual_group") == scene["wall_visual_group"] for old in latest),
+                any(old.get("architecture_style") == scene["architecture_style"] for old in latest),
+                any(old.get("depth_position") == scene["depth_position"] for old in latest),
+                any(old.get("light_family") == scene["light_family"] for old in latest),
+                palette_use, layout_use,
+                int.from_bytes(_rank(seed, scene["scene_signature"]), "big") // (1 + compatible + related + contrast))
     pools = []
     for i, slot in enumerate(SCENES):
         saved = selections[i] if i < len(selections) and isinstance(selections[i], dict) else {}
@@ -239,16 +262,22 @@ def select(seed, context, recent=(), selections=()):
             scene["scene_signature"] = signature(scene)
             scene["scene_near_signature"] = signature(scene, near=True)
             pool.append(scene)
-        pools.append(sorted(pool, key=rank))
+        pools.append(sorted(pool, key=lambda scene: rank(scene, i)))
     # Bounded search: first fit with backtracking over fixed finite curated pools.
     # Relax only oldest scene exclusions; never relax same-pack differentiation.
     for keep in range(len(history), -1, -1):
-        eligible = [[s for s in pool if not any(_history_conflict(s, old) for old in history[:keep])] for pool in pools]
-        for a in eligible[0]:
-            for b in eligible[1]:
-                if different(a, b):
-                    c = next((c for c in eligible[2] if different(a, c) and different(b, c)
-                              and any(s["wall_finish"] in {"smooth matte paint", "restrained painted wall panelling", "honed limestone"} for s in (a, b, c))), None)
-                    if c:
-                        return [dict(s, history_exclusions_relaxed=len(history) - keep) for s in (a, b, c)]
+        unseen = [[s for s in pool if not any(_history_conflict(s, old) for old in history[:keep])] for pool in pools]
+        # Coordinate rotation as a pack, so a greedy first scene cannot force a
+        # later role back into its previous palette. Fall back finitely for
+        # constrained explicit selections; exact/near exclusions remain stronger.
+        for rotation_axes in (2, 1, 0):
+            eligible = [[s for s in pool if not any(rank(s, i)[:rotation_axes])]
+                        for i, pool in enumerate(unseen)]
+            for a in eligible[0]:
+                for b in eligible[1]:
+                    if different(a, b):
+                        c = next((c for c in eligible[2] if different(a, c) and different(b, c)
+                                  and any(s["wall_finish"] in {"smooth matte paint", "restrained painted wall panelling", "honed limestone"} for s in (a, b, c))), None)
+                        if c:
+                            return [dict(s, history_exclusions_relaxed=len(history) - keep) for s in (a, b, c)]
     raise ValueError("Curated scene library needs three compatible differentiated homes.")

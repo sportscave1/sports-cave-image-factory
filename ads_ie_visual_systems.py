@@ -284,7 +284,7 @@ def resolve_visual_system(visual, index, context, variation_token):
         product_width=("79-86%", "84-87%", "77-84%")[index],
         overlay_position="fixed opaque full-width black/gold footer across bottom 24–28%",
         product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
-        composition="1024 x 1024 square; upper 72–76% lifestyle room; bottom 24–28% opaque promotional banner",
+        composition="1024 x 1024 square; upper 72–76% lifestyle room; bottom 24–28% opaque collector footer",
     )
 
 
@@ -353,8 +353,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
             f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
                 "Premium collector hallway: close artwork, subtle visible passage depth, peripheral console, warm picture light balanced with daylight.",
-                "Minimal artwork-first wall: complete frame straight on, exactly one understated architectural glimpse of the resolved structure. Do not substitute a default side doorway or corridor. No full-room arrangement or foreground furniture.",
-                "Distinctive collector interior: follow this resolved spatial arrangement with one peripheral furniture anchor. Neither a hallway nor a nearly empty wall; never substitute a default side-opening composition.",
+                "Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence.",
+                "Refined collector sitting-room setting: follow this resolved spatial arrangement with one peripheral seating anchor. Neither a hallway nor a nearly empty wall; never substitute a default side-opening composition.",
             )[index] +
             " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
             "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "
