@@ -255,6 +255,7 @@ class DeviceAgent:
                 if url:self.save_setting("url",safe_url(url))
                 if not r.context:await r.open_browser(url or self.local_origin+"/demo")
                 elif url:await r.open_browser(url)
+                else:await r.page.bring_to_front()
                 r.simple_recording=True
                 r.draft={**r.blank(),"id":str(uuid.uuid4()),"name":"Recording "+datetime.now().strftime("%d %b %H:%M")}
                 await r.set_recording(True)

@@ -9,7 +9,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 from types import SimpleNamespace
 from pathlib import Path
 from urllib.error import HTTPError
@@ -133,6 +133,29 @@ class NavigationTests(unittest.TestCase):
         self.assertTrue(namespace["can_access_page"]({"role":"admin"},"Task Recorder"))
         self.assertFalse(namespace["can_access_page"]({"role":"worker"},"Task Recorder"))
         self.assertFalse(entry["worker_assignable"])
+
+class BrowserFocusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_record_and_play_bring_existing_browser_forward(self):
+        from task_recorder.runner import Runner
+        from task_recorder.device import DeviceAgent
+        with tempfile.TemporaryDirectory() as directory:
+            runner=Runner(directory)
+            runner.context=SimpleNamespace(close=AsyncMock())
+            runner.page=SimpleNamespace(bring_to_front=AsyncMock(),is_closed=lambda:False)
+            runner.set_recording=AsyncMock()
+            agent=DeviceAgent(runner,"http://127.0.0.1:18931",preview=True)
+            try:
+                await agent.perform("record",{},"synthetic-focus-check")
+                runner.page.bring_to_front.assert_awaited_once()
+                runner.page.bring_to_front.reset_mock()
+                task=runner.store.save({**runner.blank(),"steps":[{"action":"navigate","value":"https://example.com"}]})
+                runner.run=AsyncMock()
+                await runner.play(task["id"],{})
+                await runner.job
+                runner.page.bring_to_front.assert_awaited_once()
+            finally:
+                await agent.close()
+                await runner.close()
 
 if __name__=="__main__":
     unittest.main()

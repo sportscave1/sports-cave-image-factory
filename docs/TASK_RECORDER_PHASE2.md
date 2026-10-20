@@ -111,7 +111,8 @@ No production database or provider APIs are used for development acceptance.
 
 Automated evidence:
 
-- `tests/test_task_recorder.py`: seven original contract/authentication checks.
+- `tests/test_task_recorder.py`: seven original contract/authentication checks
+  plus a regression ensuring Record/Play bring an existing browser forward.
 - `tests/test_task_recorder_relay.py`: seven real PostgreSQL security, ownership,
   pairing, duplicate, Stop, expiry and restart checks.
 - Sidebar/retirement/navigation regression suites.
@@ -129,12 +130,21 @@ Evidence and screenshots stay in local application data under
 `TaskRecorderPhase2-V1Regression-64cdf0b0` directory. Original data/profile stays
 separate from these tests. Existing four companion processes remained running.
 
-**User trial:** pending the user's actual demonstration; automated synthetic
-recording is not their recording. Prepare the visible dedicated browser and OS
-preview, then let the user Record → demonstrate a harmless task → Stop. Verify
-Play while they watch, then changed inputs. No real ads, email or production
-writes are suitable trial actions. Meta automation remains unverified.
+**User trial:** the user approved their PC on the live HTTPS app and saved two
+recordings (11:53 and 11:54). Both were inspected: each contains only navigation
+to the local demo form; neither contains form values or a Save action. Navigation
+playback completed, but this does not verify form interaction or changed inputs.
+The guided form recording/replay remains pending the user's demonstration.
+Record/Play were corrected to bring an existing recorder window forward.
+The pairing, two recordings and command receipts were transferred to the normal
+installed helper's TaskRecorderV1 data directory. The original V1 example and
+browser profile were verified unchanged, and both profiles were retained.
+No real ads, email or production writes are suitable trial actions. Meta
+automation remains unverified.
 
-**Live HTTPS:** publication and checks are reported separately from local
-acceptance. Real-account PC approval and the user's actual HTTPS recording trial
-must not be claimed from the isolated automated tests.
+**Live HTTPS:** commit 935960ae deployed successfully to the existing primary,
+webhook and worker services. The private migration applied; primary/webhook health
+passed and unauthenticated account/device requests were rejected. Nathan's
+authenticated popup and Connected PC state were visually verified. Real-account
+PC approval, saved navigation recordings and confirmed playback were observed
+separately from isolated automated tests. The substantive form trial is pending.
