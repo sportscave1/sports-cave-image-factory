@@ -104,3 +104,53 @@ through the normal authenticated workflow, then record the new Render commit and
 installed companion revision independently. A successful deploy alone is insufficient.
 The historical 288-second ingress question and household browsing performance
 remain unmeasured; further optimisation is paused pending this functional release.
+
+## Production acceptance completed — 20 October 2026
+
+Released task commit `acf5866c`, integrated as `8aa18bb2`. The primary Render
+deployment `dep-dbbce2m7bikc73ai8270` became live at 01:45:47 UTC. The subsequent
+`e91d5d6e` release contains the identical application code plus another task's
+completed recording documentation; primary, webhooks and SEO worker deployments
+are live on that revision. No active task was overwritten. Historical dirty
+snapshots that would replace newer production implementations were not released.
+
+Applied the existing Phase 3 resumable-package migration to the production
+database and enabled protocol negotiation on the primary service. RLS and service
+role isolation were verified. Backend-first rollout preceded the companion update.
+No resumable production package upload was performed as an acceptance test.
+
+The Windows companion was updated through its existing supervisor while idle,
+using an immutable Git archive and checked helper hashes. The final installed
+revision is `e91d5d6e`; helper code hash is
+`8ed083cf5b3ed5a24951084425abd9075402fa12494577b9624206f8e759d253`.
+All 392 retained job journals remained unchanged. The existing scheduled task's
+runtime path was updated; its owner, triggers, permissions and settings were
+preserved. No competing listener, forced process termination or backlog release
+was used. Owner-selected **Maximum speed** was acknowledged as `request_5670`
+and persisted in `transfer-settings.json`: uncapped, unpaused, one client upload.
+There is no claimed calibration or household internet protection in this mode.
+
+The existing upload `06251083-2675-41c2-b379-8f8ecd1fe254` was retried through the
+authenticated Product Uploads UI. Its exact immutable source prepared successfully
+and reached **Ready**. Normal Generate mockups produced the five automatic
+Black Framed, Oak Framed, White Framed, Unframed and Size Guide images. Their
+previews and copy controls were visibly verified in production. Temporary gallery
+404s during the concurrent deployment cleared after reloading its completed
+version; no gallery bypass or extra patch was required. The three lifestyle
+cards remain the existing separate upload workflow, so the correct UI count is
+**5 of 8**. Save all and Shopify handoff were not performed. No product, edition,
+allocation, certificate or order was created or changed. The original PSD hash
+and revision remain unchanged.
+
+Validation: combined focused suite **188 passed, 1 skipped, 1 known baseline
+deselected**; post-integration suite **31 passed, 9 skipped**. Desktop/mobile
+Worker Health checks, topology and Studio verification passed. The pre-existing
+colour/preflight mock failures and synthetic missing-edition-limit test remain
+documented exclusions; validation gates were preserved. Screenshots and runtime,
+migration, source-hash and test evidence are retained under
+`output/product-upload-colour-20261020/` in this task worktree.
+
+This completes the functional production release and publishes the completed
+Phase 1/2/3 code. It does not establish improved live upload speed, explain the
+historical 288-second interval, or measure browsing responsiveness. Further speed
+optimisation is paused; Phase 4 Photoshop profiling remains future work.
