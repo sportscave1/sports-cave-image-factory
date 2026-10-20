@@ -10,7 +10,7 @@ SCENE_FIELDS = (
     "architectural_cue", "depth_family", "primary_cue", "furniture_cue", "lighting", "light_source",
     "light_direction", "light_softness", "light_family", "reflection_source", "reflection_placement",
     "glazing_treatment", "assigned_camera_angle", "scene_signature", "scene_near_signature", "history_exclusions_relaxed",
-    "depth_position", "light_source_position",
+    "depth_position", "light_source_position", "spatial_family", "residential_cue_family",
 )
 
 # Colour and construction are authored together, not independently randomised.
@@ -52,26 +52,50 @@ HOMES = (
         ("Restrained media lounge", "contemporary garden-home entrance", "low collector corridor with a distant stepped wall return", "slim pale oak console at outer left", (3, 5, 6, 9, 11, 15, 17), "corner window"),
     ),
     (
-        ("Refined apartment living corner", "quiet contemporary apartment", "one small doorway glimpse into a softly focused room at the far left", "none; architecture is the single peripheral cue", (0, 3, 5, 7, 9, 13, 14, 17), "tall window"),
-        ("Contemporary courtyard home", "single-storey courtyard house", "one shallow corridor return at the far right", "none; architecture is the single peripheral cue", (2, 3, 6, 10, 14, 17), "courtyard window"),
-        ("Heritage collector hallway", "quiet heritage townhouse interior", "one doorway sliver at the far left into a distant residential passage", "none; architecture is the single peripheral cue", (0, 1, 4, 8, 12, 18), "side window"),
+        ("Refined apartment living corner", "quiet contemporary apartment", "one tall recessed window reveal with a distant furniture silhouette at the far left", "none; architecture is the single peripheral cue", (0, 3, 5, 7, 9, 13, 14, 17), "tall window"),
+        ("Contemporary courtyard home", "single-storey courtyard house", "one broad closed limestone wall return at the far right; no passage opening", "none; architecture is the single peripheral cue", (2, 3, 6, 10, 14, 17), "courtyard window"),
+        ("Heritage collector hallway", "quiet heritage townhouse interior", "one solid heritage wall pier and a shallow cornice return at the far left; no doorway", "none; architecture is the single peripheral cue", (0, 1, 4, 8, 12, 18), "side window"),
         ("Bay-window sitting room", "restrained bay-window home", "one window recess with a partial distant furniture silhouette at the far right", "none beyond the silhouette inside the single window recess", (0, 4, 11, 12, 15, 16), "bay window"),
-        ("Quiet home study", "garden-facing reading home", "one narrow doorway into a softly focused study at the far right", "none; no desk in the photographic foreground", (0, 4, 5, 10, 14, 19), "garden window"),
-        ("Architectural entry alcove", "oak-accented architectural home", "one shallow oak-lined corridor return at the far left", "none; architecture is the single peripheral cue", (2, 3, 5, 10, 15, 17), "clerestory window"),
-        ("Split-level lounge", "mid-century split-level home", "one distant room glimpse through an offset opening at the far right", "none; architecture is the single peripheral cue", (2, 6, 7, 9, 10, 13, 17), "high side window"),
-        ("Restrained media lounge", "contemporary private residential retreat", "one doorway glimpse into a softly focused room at the far left", "none; architecture is the single peripheral cue", (0, 5, 6, 9, 11, 14, 16), "corner window"),
+        ("Quiet home study", "garden-facing reading home", "one garden-facing window recess with a distant seating silhouette at the far right", "none; no desk in the photographic foreground", (0, 4, 5, 10, 14, 19), "garden window"),
+        ("Architectural entry alcove", "oak-accented architectural home", "one small oak-lined ceiling step over a closed shallow niche at the far left", "none; architecture is the single peripheral cue", (2, 3, 5, 10, 15, 17), "clerestory window"),
+        ("Split-level lounge", "mid-century split-level home", "one lowered floor-plane glimpse beyond a low residential ledge at the far right", "none; architecture is the single peripheral cue", (2, 6, 7, 9, 10, 13, 17), "high side window"),
+        ("Restrained media lounge", "contemporary private residential retreat", "one broad layered rear wall plane beyond a shallow closed reveal at the far left", "none; architecture is the single peripheral cue", (0, 5, 6, 9, 11, 14, 16), "corner window"),
     ),
     (
         ("Bay-window sitting room", "refined Victorian sitting room", "off-centre bay-window seating recess", "one oatmeal wool banquette edge at the outer perimeter", (0, 1, 4, 11, 12, 15), "bay window"),
-        ("Split-level lounge", "mid-century split-level lounge", "sunken living alcove with a distant floor-level change and high window", "one ink-blue fabric settee edge at the far side", (2, 3, 6, 7, 10, 14), "high side window"),
-        ("Quiet home study", "heritage library retreat", "off-centre reading alcove with a deep side-window reveal", "one painted reading-bench edge deep in the alcove", (0, 1, 4, 8, 12, 18), "garden window"),
-        ("Restrained media lounge", "quiet contemporary media retreat", "low residential seating alcove with a deep corner-window recess", "one moss wool banquette edge at the far side", (0, 5, 6, 9, 11, 15, 16), "corner window"),
+        ("Split-level lounge", "mid-century split-level lounge", "sunken living platform beyond a low offset parapet, with a high window; no side passage", "one ink-blue fabric settee edge at the far side", (2, 3, 6, 7, 10, 14), "high side window"),
+        ("Quiet home study", "heritage library retreat", "two perpendicular walls meeting around a shallow reading bench, with lateral window light; no doorway", "one painted reading-bench edge deep in the alcove", (0, 1, 4, 8, 12, 18), "garden window"),
+        ("Restrained media lounge", "quiet contemporary media retreat", "low residential seating corner with two planes of corner glazing; no narrow side opening", "one moss wool banquette edge at the far side", (0, 5, 6, 9, 11, 15, 16), "corner window"),
         ("Contemporary courtyard home", "refined contemporary courtyard sitting room", "off-centre living recess looking toward a courtyard opening", "one cream woven settee edge near the distant opening", (2, 3, 6, 10, 14, 17), "courtyard window"),
-        ("Refined apartment living corner", "high-ceiling apartment living corner", "double-height living alcove with an off-centre tall-window reveal", "one pale grey linen seating edge at the outer perimeter", (0, 5, 7, 9, 13, 16, 19), "tall window"),
-        ("Architectural entry alcove", "architectural home adjoining-room retreat", "deep oak-lined adjoining sitting-room alcove", "one quiet woven bench edge deep in the recess", (2, 3, 5, 10, 15, 17), "clerestory window"),
-        ("Quiet home study", "contemporary garden library lounge", "off-centre reading recess overlooking a softly focused garden", "one pale oak reading-bench edge at the outer perimeter", (0, 4, 5, 10, 14, 19), "side window"),
+        ("Refined apartment living corner", "high-ceiling apartment living corner", "double-height living volume with an upper clerestory and a visible ceiling-height change", "one pale grey linen seating edge at the outer perimeter", (0, 5, 7, 9, 13, 16, 19), "tall window"),
+        ("Architectural entry alcove", "architectural home adjoining-room retreat", "oak-detailed sitting-room corner with an adjoining-room ceiling step; no receding passage", "one quiet woven bench edge deep in the recess", (2, 3, 5, 10, 15, 17), "clerestory window"),
+        ("Quiet home study", "contemporary garden library lounge", "garden-facing reading corner formed by intersecting walls and a broad window sill", "one pale oak reading-bench edge at the outer perimeter", (0, 4, 5, 10, 14, 19), "side window"),
     ),
 )
+
+# Structural classes describe the space, not the light source or room label.
+# The same eight home options remain available in each role; only their small
+# architectural glimpse is made explicit, so colour changes cannot pass as variety.
+SPATIAL_FAMILIES = (
+    ("circulation axis",) * 8,
+    ("window volume", "folded wall plane", "solid architectural pier", "window volume",
+     "window volume", "ceiling step", "split-level plane", "layered wall planes"),
+    ("window volume", "split-level plane", "intersecting-wall corner", "window volume",
+     "courtyard court", "double-height volume", "ceiling step", "intersecting-wall corner"),
+)
+INTERIOR_DEPTH_POSITIONS = (
+    "rear bay volume", "low rear floor-level step", "rear intersecting-wall corner", "rear corner glazing",
+    "rear courtyard threshold", "upper rear vertical volume", "rear sitting-room ceiling step", "rear reading corner",
+)
+
+
+def cue_family(text, fallback):
+    text = str(text).lower()
+    if "console" in text: return "console"
+    if "bench" in text or "banquette" in text: return "built-in seating"
+    if any(w in text for w in ("chair", "settee", "sofa", "seating edge")): return "upholstered seating"
+    return fallback
+
 
 LIGHTS = (
     ("left", "soft directional morning daylight", "morning-side", "soft upper-left peripheral window shape"),
@@ -86,9 +110,9 @@ def _rank(seed, value):
 
 def signature(scene, *, near=False):
     # Deliberately excludes token, adjectives, IDs, camera role and copy.
-    keys = (("wall_visual_group", "wall_lightness", "wall_finish", "depth_family", "light_family", "depth_position") if near else
+    keys = (("wall_visual_group", "wall_lightness", "wall_finish", "depth_family", "light_family", "depth_position", "spatial_family") if near else
             ("home_setting", "architecture_style", "wall_colour", "wall_lightness", "wall_finish",
-             "architectural_cue", "depth_position", "furniture_cue", "light_source", "light_source_position", "light_direction", "light_softness"))
+             "architectural_cue", "depth_position", "furniture_cue", "light_source", "light_source_position", "light_direction", "light_softness", "spatial_family", "residential_cue_family"))
     values = [scene.get(k, "") for k in keys]
     if near:
         # Grey/graphite/charcoal and plaster-like treatments can look almost alike.
@@ -117,8 +141,10 @@ def candidates(slot):
                     lighting=light, light_source=source, light_direction=direction, light_softness=softness,
                     light_family=light_family, reflection_source=f"the actual {source} on the {direction}",
                     reflection_placement=placement)
+                scene["spatial_family"] = SPATIAL_FAMILIES[slot][h]
+                scene["residential_cue_family"] = cue_family(scene["primary_cue"], "architectural cue")
                 scene["depth_position"] = (("far right background" if h % 2 == 0 else "far left background") if slot == 0 else
-                    ("far left edge" if "left" in depth else "far right edge") if slot == 1 else "deep off-centre rear recess")
+                    ("far left edge" if "left" in depth else "far right edge") if slot == 1 else INTERIOR_DEPTH_POSITIONS[h])
                 scene["light_source_position"] = ("left side outside the composition", "right-side distant reveal", "rear-left at a grazing angle")[l]
                 scene["scene_signature"] = signature(scene)
                 scene["scene_near_signature"] = signature(scene, near=True)
@@ -140,7 +166,11 @@ def different(a, b):
     attributes = ("home_setting", "architecture_style", "wall_colour_family", "wall_lightness", "wall_finish",
                   "depth_family", "light_family", "light_direction")
     return (wall_distinct and a["home_setting"] != b["home_setting"] and a["wall_finish"] != b["wall_finish"]
-            and a["light_family"] != b["light_family"]
+            and (a["light_family"] != b["light_family"] or a["light_direction"] != b["light_direction"])
+            and a.get("spatial_family") != b.get("spatial_family")
+            and a["architecture_style"] != b["architecture_style"]
+            and a.get("residential_cue_family") != b.get("residential_cue_family")
+            and a["primary_cue"] != b["primary_cue"]
             and depth_a != depth_b
             and sum(a[k] != b[k] for k in attributes) >= 3
             and (a["architecture_style"] != b["architecture_style"] or a["light_family"] != b["light_family"]))
@@ -150,6 +180,8 @@ def _history_conflict(scene, old):
     if old.get("scene_signature") == scene["scene_signature"] or old.get("scene_near_signature") == scene["scene_near_signature"]:
         return True
     if old.get("scene_selection_version"):
+        if not old.get("spatial_family") and old.get("depth_position"):
+            return json.loads(signature(old, near=True))[:6] == json.loads(signature(scene, near=True))[:6]
         if not old.get("depth_position"):
             # Earlier resolved drafts stored the same five appearance dimensions,
             # without opening position. Reuse that evidence without rewriting it.
@@ -202,6 +234,8 @@ def select(seed, context, recent=(), selections=()):
                              wall_visual_group=wall[3] if wall else "explicit colour override")
             if saved.get("wall_finish"):
                 scene["wall_material"] = saved["wall_finish"]
+            if saved.get("primary_cue") and not saved.get("residential_cue_family"):
+                scene["residential_cue_family"] = cue_family(saved["primary_cue"], scene["residential_cue_family"])
             scene["scene_signature"] = signature(scene)
             scene["scene_near_signature"] = signature(scene, near=True)
             pool.append(scene)

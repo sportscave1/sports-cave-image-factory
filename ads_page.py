@@ -3866,7 +3866,7 @@ These limits apply only to wording rendered inside the Instant Experience cover 
 
 HEADLINE
 - Assess rendered glyph width, not character or word count: all six approved headline templates are recognised, including the longer options.
-- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the existing Instant Experience headline scale.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
 - Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
 - Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
@@ -3876,7 +3876,7 @@ HEADLINE
 
 SUPPORTING LINE
 - Use no more than 12 words and no more than 70 characters including spaces and punctuation.
-- Express one clean supporting thought on exactly one line at the existing supporting-copy size.
+- Express one clean supporting thought on exactly one line at the shared secondary supporting-copy target below.
 - Never wrap or compress the supporting typography.
 
 CTA
@@ -3991,6 +3991,11 @@ def build_instant_experience_on_image_copy_fit_rules():
 
 
 SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2"
+IE_COLLECTOR_FOOTER_TYPE_TARGETS = {
+    "headline_px": "42–48", "support_px": "24–26", "cta_px": "26–28",
+    "headline_reference_scale": "80–85%", "cta_reference_scale": "70–75%",
+    "cta_tracking_em": "0.04–0.06", "underline_px": 1,
+}
 SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2 = "SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2"
 
 
@@ -5229,6 +5234,7 @@ def build_instant_experience_image_quality_contract(visual):
 
 def build_instant_experience_typography_quality_rules(visual=None, *, shared=False):
     visual = visual or {}
+    targets = IE_COLLECTOR_FOOTER_TYPE_TARGETS
     resolved_wording = (
         "- Use the active image brief's exact HEADLINE, SUPPORTING LINE and CTA fields."
         if shared else (
@@ -5240,10 +5246,12 @@ def build_instant_experience_typography_quality_rules(visual=None, *, shared=Fal
     return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
 INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 
-- Render promotional typography inside the fixed opaque footer, never organically inside the photographed room. If the receiving environment has a real font compositor, use it for geometry, glyph measurement and export. This prompt generator has no deterministic Ads footer renderer; image-model instructions alone do not implement post-production or guarantee exact typography. Inspect the actual footer and report unresolved text or alignment defects.
-- Use the fixed footer geometry and opacity contract exactly. Keep its one thin 1-pixel muted-gold top separator. No glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture.
-- Use a premium Sports Cave editorial serif for the headline, Montserrat Regular or Medium for the supporting line and Montserrat SemiBold or Bold for the CTA.
-- Subtly polish serif weight, kerning and baseline alignment while preserving existing proportions and hierarchy. Keep the supporting sans clean and mobile-readable; no decorative flourishes or luxury-magazine styling.
+- Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
+- Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
+- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined editorial serif Regular/Medium; supporting line {targets['support_px']} px, Montserrat Regular; CTA {targets['cta_px']} px, Montserrat Medium. Design targets, not measured-rendering claims.
+- Relative guidance is a headline about 15–20% smaller ({targets['headline_reference_scale']}) and CTA about 25–30% smaller ({targets['cta_reference_scale']}) than the recent oversized reference. Use the fixed targets above for every pack; never reduce a previous generation again. Do not compound percentage reductions.
+- Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. Supporting text is clearly secondary in softer warm off-white. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
+- Preserve the full 24–28% opaque panel and existing safe margins. Use the extra space for calm breathing room, with about 22–30 px clear vertical separation between the three text lines; do not shrink the panel or fill the space with larger type. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
 - Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. Supporting text is warm off-white. CTA is muted antique gold.
 {resolved_wording}
 - Keep the headline, supporting line and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
@@ -5252,7 +5260,7 @@ INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 MEANINGFUL SPORTS CAVE GOLD UNDERLINE
 
 - If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
-- Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 5-7 px. Thickness is 2 px. Colour is close to #C7A15A.
+- Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately {targets['underline_px']} px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
 - Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
 - The underline must move automatically when the edition limit changes.
 - Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; for a safe non-scarcity fallback underline COLLECTOR when present, otherwise COLLECTION, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
@@ -5548,23 +5556,6 @@ SUPPORTING LINE: {visual.get("supporting_line")}
 CTA: {visual.get("cta_text")}
 
 Use this image’s assigned supporting line exactly. The other two images must use their own different supporting lines. Keep the exact selected headline per route. Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
-
-Typography:
-- Headline: premium Sports Cave editorial serif, warm ivory.
-- Supporting line: Montserrat Regular or Medium, warm off-white.
-- CTA: Montserrat SemiBold or Bold, muted antique gold.
-- No fake button, price, discount, arrow or second CTA.
-
-Meaningful gold underline:
-- If the headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number.
-- Width: visible number width plus approximately 4-8 pixels.
-- Gap beneath the number: approximately 5-7 pixels.
-- Thickness: 2 pixels.
-- Colour close to #C7A15A.
-- Use clean or subtly tapered ends.
-- No floating centred dash, bright yellow, orange, glitter, metallic gradient or strong glow.
-- The underline must move automatically when the edition limit changes.
-- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; for a safe non-scarcity fallback underline COLLECTOR when present, otherwise COLLECTION, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
 
 INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 
@@ -8522,8 +8513,9 @@ def build_instant_experience_shared_template():
         "64–72 px safe margins; readable at 256 x 256. Near-black charcoal #101112/#121314, "
         "subtle paper grain and one 1-pixel muted-gold top separator. Artwork first; "
         "the complete frame stays above the footer. No fake button, price or extra CTA.",
-        "PACK COMPOSITION: resolve three different homes before the calls. Each pair differs in at least three "
-        "meaningful attributes, including wall appearance and architecture or lighting. Use three different "
+        "PACK COMPOSITION: resolve three different homes before the calls. Each pair must differ in architectural "
+        "structure AND visible depth arrangement, wall family AND treatment, lighting character/direction, and "
+        "peripheral residential cue. Colour, angle or accessory changes alone are insufficient. Use three different "
         "home settings, colour families, lightness levels and compatible wall treatments; grey/graphite/charcoal "
         "with similar texture/light count as potential duplicates. Never solve variation by widening the camera "
         "or enlarging the product. Peripheral/deep furniture only; no excess empty wall, bright competing opening, "
@@ -8626,9 +8618,9 @@ AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 5. Create and attach the completed downloadable ad_copy.csv from the final copy records.
 6. Provide the existing shared Instant Experience setup below and display each finished ad's copy under its existing group label.
 Continue through the sequence without asking for "next" or approval between images. Three independent 1024 x 1024 outputs; no collage or triptych. Do not stop after writing prompts or the first image. These instructions authorise generation in the receiving conversation; they do not add an OS image backend or publish ads.
-For each image call, use the ORIGINAL product reference and combine only the shared applicable ad template, that image's resolved scene/realism, and its exact selected headline, subline and CLAIM YOUR EDITION. No sibling copy, alternatives, description plans or contradictory legacy text in an image call. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
+For each image call, use the ORIGINAL product reference and combine only the shared applicable ad template, that image's resolved scene/realism, and its exact selected headline, subline and CLAIM YOUR EDITION. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 {SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]}
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Prompt/schema checks do not establish visual distinction. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Use at most one correction call per image, targeted to the failing output, with the ORIGINAL product reference and its complete scene/copy contract. Label a correction as the replacement for Image 1, 2 or 3, never a fourth ad; report unresolved defects accurately. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. If two outputs still look alike, use the existing correction allowance on the weaker image’s architecture and depth arrangement, preserving its assigned camera, selected copy, explicit saved selections and working realism with the ORIGINAL product reference. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Use at most one correction call per image, targeted to the failing output, with the ORIGINAL product reference and its complete scene/copy contract. Label corrections explicitly “Replacement for Image 1”, “Replacement for Image 2” or “Replacement for Image 3”. A replacement is never a fourth ad: return exactly three selected final covers and exclude earlier attempts from the final ad set; report unresolved defects accurately. Never claim pixel fidelity or inspection without evidence.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If a genuine tool failure prevents completion, identify the unfinished image/file, preserve completed outputs and final copy for resumption, and state any inspection limitation. Do not replace requested images with a text-only plan or claim a nonexistent download. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
 

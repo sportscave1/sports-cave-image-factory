@@ -278,18 +278,18 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             secondary_cue=saved.get("secondary_cue") or "no additional styling",
             time_of_day=saved.get("time_of_day") or visual["lighting"],
             atmosphere="restrained collector home; authentic residential materials",
-            shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one edge glimpse of home", "close product view with restrained alcove depth")[index],
+            shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one resolved architectural glimpse", "close product view with the resolved residential depth arrangement")[index],
             physical_product=context.get("physical_product", {}))
         visual["purpose"] = f"Image {index + 1}: {visual['room_type']}; {visual['camera_side']}"
         visual["scene_brief"] = (
             "Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. "
             "Never use a previously generated mockup as the artwork source. "
-            f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}). "
+            f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}); spatial structure: {visual.get('spatial_family', 'as saved')}. "
             f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
             f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
                 "Premium collector hallway: close artwork, subtle visible passage depth, peripheral console, warm picture light balanced with daylight.",
-                "Minimal artwork-first wall: complete frame straight on, exactly one understated architectural glimpse at an outer edge. No full-room arrangement or foreground furniture.",
-                "Distinctive collector interior: off-centre alcove depth and one peripheral furniture anchor. Neither a hallway nor a nearly empty wall; simplify competing architecture/furniture.",
+                "Minimal artwork-first wall: complete frame straight on, exactly one understated architectural glimpse of the resolved structure. Do not substitute a default side doorway or corridor. No full-room arrangement or foreground furniture.",
+                "Distinctive collector interior: follow this resolved spatial arrangement with one peripheral furniture anchor. Neither a hallway nor a nearly empty wall; never substitute a default side-opening composition.",
             )[index] +
             " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
             "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "

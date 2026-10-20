@@ -36,7 +36,7 @@ class CombinedExecutionTests(unittest.TestCase):
                          "FINAL RESPONSE TERMINATION", "no automatic image generation", "Do not generate the image automatically",
                          "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "COPY ONE ROUTE AT A TIME"):
             self.assertNotIn(obsolete, prompt)
-        self.assertLess(len(prompt), 44000)  # Includes pack-only fit coordination and required identity copy.
+        self.assertLess(len(prompt), 45000)  # Includes pack-only fit coordination and required identity copy.
 
     def test_execution_priority_is_shared_with_project_template_and_text_only_gate(self):
         template = (Path(ads.__file__).parent / "prompts" / "sports_cave_universal_creative_system.txt").read_text(encoding="utf-8").strip()
@@ -104,7 +104,7 @@ class CombinedExecutionTests(unittest.TestCase):
                 for i, v in enumerate(rows):
                     self.assertIsNone(forbidden.search(v["wall_colour"]))
                     seen[i].add(v["room_type"])
-                self.assertRegex(rows[1]["primary_cue"], r"doorway|corridor return|window recess|room glimpse")
+                self.assertRegex(rows[1]["primary_cue"], r"window|wall return|wall pier|ceiling step|floor-plane|wall plane")
                 self.assertNotRegex(rows[1]["primary_cue"], r"lamp|console|chair")
                 if category in {"MMA", "UFC", "Boxing", "Combat sports"}:
                     for i, v in enumerate(rows):
