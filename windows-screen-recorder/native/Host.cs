@@ -790,13 +790,18 @@ class Capture {
 class Host : Window {
     static readonly JavaScriptSerializer json=new JavaScriptSerializer(){MaxJsonLength=65536};
     readonly BlockingCollection<string> outbound=new BlockingCollection<string>(128);
-    readonly ComboBox windows=new ComboBox(){Width=320,Margin=new Thickness(5)};
-    readonly ComboBox tasks=new ComboBox(){Width=320,Margin=new Thickness(5)};
+    readonly ComboBox windows=new ComboBox(){Margin=new Thickness(0,4,0,6),MinHeight=30};
+    readonly ComboBox tasks=new ComboBox(){Margin=new Thickness(0,4,0,6),MinHeight=30};
+    readonly StackPanel windowPanel=new StackPanel();
+    readonly TextBlock heading=new TextBlock(){FontSize=18,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,5,0,2)};
+    readonly TextBlock contextName=new TextBlock(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,6)};
+    readonly Expander advanced=new Expander(){Header="Details",Margin=new Thickness(0,8,0,0)};
     readonly TextBlock status=new TextBlock(){Margin=new Thickness(7),TextWrapping=TextWrapping.Wrap};
     readonly TextBlock timer=new TextBlock(){Margin=new Thickness(7),FontSize=17};
     readonly StackPanel controls=new StackPanel(){Orientation=Orientation.Horizontal};
     readonly StackPanel savePanel=new StackPanel();
-    readonly TextBox name=new TextBox(){Text="New desktop task",Margin=new Thickness(5),MaxLength=100};
+    readonly TextBox name=new TextBox(){Margin=new Thickness(0,4,0,6),MaxLength=100,MinHeight=30};
+    Button saveButton,discardButton;
     Capture capture;IntPtr hwnd;string state="idle";string playbackProgress;int generation;long elapsed;Stopwatch segment=new Stopwatch();
     bool closeAllowed;bool pending;bool testInput;
     volatile string pendingId;
@@ -804,19 +809,33 @@ class Host : Window {
     int instructionSerial;
     bool playbackPaused;
     bool awaitingPlayback;
+    bool connected=true,stopRequested;
+    string pendingKind="";
+    string lastSavedId;
     public Host(bool testInput) {
         this.testInput=testInput;
-        Title="Sports Cave Recorder — Local candidate";Width=470;SizeToContent=SizeToContent.Height;Topmost=true;
-        ResizeMode=ResizeMode.NoResize;WindowStartupLocation=WindowStartupLocation.CenterScreen;
-        Background=new SolidColorBrush(Color.FromRgb(240,244,248));Foreground=new SolidColorBrush(Color.FromRgb(20,44,67));
-        var layout=new StackPanel(){Margin=new Thickness(9)};Content=layout;
-        var title=new TextBlock(){Text="Sports Cave · Record",FontSize=17,Margin=new Thickness(5)};
+        Title="Sports Cave · Task Recorder";Width=390;SizeToContent=SizeToContent.Height;Topmost=true;
+        MaxHeight=SystemParameters.WorkArea.Height-30;FontFamily=new FontFamily("Segoe UI");FontSize=12;
+        ResizeMode=ResizeMode.CanMinimize;WindowStartupLocation=WindowStartupLocation.Manual;
+        Left=Math.Max(SystemParameters.WorkArea.Left,SystemParameters.WorkArea.Right-Width-20);Top=SystemParameters.WorkArea.Top+70;
+        Background=new SolidColorBrush(Color.FromRgb(255,253,248));Foreground=new SolidColorBrush(Color.FromRgb(36,39,32));
+        var layout=new StackPanel(){Margin=new Thickness(14)};Content=new ScrollViewer(){Content=layout,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+        var title=new TextBlock(){Text="SPORTS CAVE  /  TASK RECORDER",FontSize=10,Foreground=Brushes.DimGray};
         title.MouseLeftButtonDown+=(s,e)=>DragMove();layout.Children.Add(title);
-        layout.Children.Add(windows);layout.Children.Add(tasks);layout.Children.Add(controls);layout.Children.Add(timer);layout.Children.Add(status);
-        savePanel.Children.Add(new TextBlock(){Text="Recording name",Margin=new Thickness(5)});
+        layout.Children.Add(heading);layout.Children.Add(contextName);
+        windowPanel.Children.Add(new TextBlock(){Text="Window to record",Foreground=Brushes.DimGray});windowPanel.Children.Add(windows);layout.Children.Add(windowPanel);
+        layout.Children.Add(controls);layout.Children.Add(timer);layout.Children.Add(status);
+        savePanel.Children.Add(new TextBlock(){Text="Recording name"});
         savePanel.Children.Add(name);var row=new StackPanel(){Orientation=Orientation.Horizontal};
-        row.Children.Add(Button("Save",()=>Command("save",new {name=name.Text})));
-        row.Children.Add(Button("Discard",()=>Command("discard",new {})));savePanel.Children.Add(row);layout.Children.Add(savePanel);
+        saveButton=Button("Save recording",()=>Command("save",new {name=name.Text.Trim()}));
+        discardButton=Button("Discard draft",()=>{if(MessageBox.Show(this,"Discard this unsaved recording?","Discard recording",MessageBoxButton.YesNo,MessageBoxImage.Question)==MessageBoxResult.Yes)Command("discard",new {});});
+        row.Children.Add(saveButton);row.Children.Add(discardButton);savePanel.Children.Add(row);layout.Children.Add(savePanel);
+        var details=new StackPanel();details.Children.Add(new TextBlock(){Text="Saved recording",Margin=new Thickness(0,6,0,0)});details.Children.Add(tasks);
+        var tools=new StackPanel(){Orientation=Orientation.Horizontal};tools.Children.Add(Button("Refresh windows",RefreshWindows));
+        tools.Children.Add(Button("Inspect window",()=>{if(windows.SelectedItem!=null)capture.Diagnostic((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);}));
+        details.Children.Add(tools);details.Children.Add(new TextBlock(){Text="Ctrl+Alt+F12 stops playback immediately.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,0)});
+        advanced.Content=details;layout.Children.Add(advanced);
+        windows.SelectionChanged+=(s,e)=>Render();tasks.DropDownClosed+=(s,e)=>Render();
         SourceInitialized+=(s,e)=>{
             hwnd=new WindowInteropHelper(this).Handle;
             playback=new DesktopPlayback(hwnd,Send);
@@ -824,7 +843,7 @@ class Host : Window {
                 if(msg==0x312&&w.ToInt32()==DesktopPlayback.Hotkey){playback.Stop();Send("diagnostic",new {kind="emergency_stop",source="registered_windows_hotkey"});Send("play_stop",new {reason="Emergency Stop requested."});handled=true;}return IntPtr.Zero;
             });
             capture=new Capture(hwnd,Send,reason=>Dispatcher.BeginInvoke(new Action(()=>{capture.Detach();Send("interrupt",new {reason});status.Text=reason;})),testInput);
-            RefreshWindows();Render();
+            RefreshWindows();Render();Send("diagnostic",new {kind="toolbar_ready"});
         };
         Closing+=(s,e)=>{
             if(state=="playing"){playback.Disarm();Send("play_stop",new {reason="Toolbar closed. Pending effects remain uncertain."});closeAllowed=true;}
@@ -835,7 +854,7 @@ class Host : Window {
         tick.Tick+=(s,e)=>{string display=playbackProgress??((state=="recording"?"● Recording  ":state=="paused"?"Paused  ":"")+TimeSpan.FromMilliseconds(elapsed+segment.ElapsedMilliseconds).ToString(@"hh\:mm\:ss"));if(timer.Text!=display)timer.Text=display;if(capture!=null)capture.Watchdog();if(playback!=null)playback.Watchdog();};tick.Start();
         Task.Run(()=>{foreach(string line in outbound.GetConsumingEnumerable()){Console.Out.WriteLine(line);Console.Out.Flush();}});
         Task.Run(()=>{try{string line;while((line=ReadFrame())!=null){var d=json.Deserialize<Dictionary<string,object>>(line);Dispatcher.Invoke(new Action(()=>Apply(d)));}}
-            catch{} Dispatcher.BeginInvoke(new Action(()=>{if(capture!=null)capture.Detach();if(playback!=null)playback.Disarm();status.Text="Coordinator disconnected. Draft retained on disk. Close and restart.";closeAllowed=true;}));});
+            catch{} Dispatcher.BeginInvoke(new Action(()=>{if(capture!=null)capture.Detach();if(playback!=null)playback.Disarm();connected=false;pending=false;status.Text="Connection lost. Your draft is retained. Reopen the Windows popup from Sports Cave OS.";closeAllowed=true;Render();}));});
     }
     static string ReadFrame() {
         var buffer=new System.Text.StringBuilder();
@@ -848,7 +867,7 @@ class Host : Window {
         if(buffer.Length!=0)throw new Exception("Incomplete IPC frame.");
         return null;
     }
-    Button Button(string text,Action action){var b=new Button(){Content=text,Padding=new Thickness(10,5,10,5),Margin=new Thickness(3)};b.Click+=(s,e)=>{try{action();}catch(Exception ex){status.Text=ex.Message;pending=false;}};return b;}
+    Button Button(string text,Action action){var b=new Button(){Content=text,Padding=new Thickness(12,6,12,6),Margin=new Thickness(0,0,6,0),MinWidth=64,Background=Brushes.White,BorderBrush=new SolidColorBrush(Color.FromRgb(211,207,195))};b.Click+=(s,e)=>{try{action();}catch(Exception ex){status.Text=ex.Message;pending=false;pendingKind="";Render();}};return b;}
     void Send(string kind,object payload) {
         string id=Guid.NewGuid().ToString();
         if(pending&&kind!="event"&&kind!="diagnostic")pendingId=id;
@@ -862,19 +881,20 @@ class Host : Window {
             Environment.Exit(78);
         }
     }
-    void Command(string kind,object payload){if(pending)return;pending=true;status.Text=kind=="save"?"Saving…":"Waiting for acknowledgement…";Send(kind,payload);}
+    void Command(string kind,object payload){if(pending||stopRequested||!connected)return;pending=true;pendingKind=kind;status.Text=kind=="save"?"Saving…":"Updating…";Send(kind,payload);Render();}
     void RefreshWindows() {
+        var old=windows.SelectedItem as ComboBoxItem;
         windows.Items.Clear();
         Native.EnumWindows((h,l)=>{if(h!=hwnd&&Native.IsWindowVisible(h)){string title=Native.Title(h);if(title.Length>0){try{Native.CheckProcess(h);windows.Items.Add(new ComboBoxItem(){Content=title,Tag=h});}catch{}}}return true;},IntPtr.Zero);
-        windows.SelectedIndex=-1;
-        status.Text="Choose the prepared window explicitly, then Record.";
+        if(old!=null)foreach(ComboBoxItem item in windows.Items)if(Equals(item.Tag,old.Tag)&&Equals(item.Content,old.Content))windows.SelectedItem=item;
+        status.Text="Choose a window, then Record.";
     }
-    void Stop(){if(pending)return;pending=true;capture.Barrier("stop");}
+    void Stop(){if(stopRequested||!connected)return;stopRequested=true;pending=true;pendingKind="stop";capture.Barrier("stop");Render();}
     void StartPlayback() {
         if(pending)return;
         uint foregroundPid;Native.GetWindowThreadProcessId(Native.GetForegroundWindow(),out foregroundPid);
         if(!WindowIdentity.IsToolbar(foregroundPid,(uint)Process.GetCurrentProcess().Id))
-            throw new Exception("Click Start playback on this toolbar to give Windows foreground control.");
+            throw new Exception("Click Play in this popup to give Windows foreground control.");
         try {
             playback.Arm();awaitingPlayback=false;
             Command("play_ready",new {});
@@ -884,35 +904,49 @@ class Host : Window {
     }
     void Render(){
         // Interrupted recordings require explicit review before Save is accepted.
+        heading.Text=ToolbarPresentation.Label(state,awaitingPlayback,playbackPaused,pendingKind,connected);
+        if(state=="idle"&&tasks.SelectedItem!=null)contextName.Text="Selected recording: "+((Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag)["name"];
         controls.Children.Clear();savePanel.Visibility=state=="draft"?Visibility.Visible:Visibility.Collapsed;
-        windows.Visibility=state=="idle"?Visibility.Visible:Visibility.Collapsed;
-        tasks.Visibility=state=="idle"&&tasks.Items.Count>0?Visibility.Visible:Visibility.Collapsed;
+        windowPanel.Visibility=state=="idle"?Visibility.Visible:Visibility.Collapsed;
+        windows.IsEnabled=ToolbarPresentation.CanStart(state,pending||stopRequested,connected);
+        advanced.IsEnabled=state=="idle"&&!pending&&!stopRequested&&connected;
+        saveButton.IsEnabled=discardButton.IsEnabled=name.IsEnabled=connected&&!pending&&!stopRequested;
+        contextName.Visibility=contextName.Text.Length==0?Visibility.Collapsed:Visibility.Visible;
         if(state=="idle"){
-            controls.Children.Add(Button("Record",()=>{if(pending)return;if(windows.SelectedItem==null)throw new Exception("Choose your prepared window first.");pending=true;status.Text="Checking the prepared window…";capture.PrepareRecord((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);}));
-            controls.Children.Add(Button("Refresh windows",RefreshWindows));
-            controls.Children.Add(Button("Details",()=>{if(windows.SelectedItem!=null)capture.Diagnostic((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);}));
-            if(tasks.Items.Count>0)controls.Children.Add(Button("Play candidate",()=>{
+            controls.Children.Add(Button("Record",()=>{if(pending||stopRequested)return;if(windows.SelectedItem==null)throw new Exception("Choose the window you want to record.");pending=true;pendingKind="record";status.Text="Checking window…";capture.PrepareRecord((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);Render();}));
+            if(tasks.SelectedItem!=null)controls.Children.Add(Button("Play",()=>{
                 if(tasks.SelectedItem==null)throw new Exception("Choose a saved task.");
                 var selected=(Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag;
                 Command("play",new {id=selected["id"],revision=selected["revision"]});
             }));
         }else if(state=="playing"){
-            if(awaitingPlayback)controls.Children.Add(Button("Start playback",StartPlayback));
-            else controls.Children.Add(Button(playbackPaused?"Resume playback":"Pause playback",()=>Command(playbackPaused?"play_resume":"play_pause",new {})));
-            controls.Children.Add(Button("Stop playback",()=>{playback.Stop();Send("play_stop",new {reason="Stopped from the toolbar."});}));
+            if(awaitingPlayback)controls.Children.Add(Button("Play",StartPlayback));
+            else controls.Children.Add(Button(playbackPaused?"Resume":"Pause",()=>Command(playbackPaused?"play_resume":"play_pause",new {})));
+            controls.Children.Add(Button("Stop",()=>{if(stopRequested)return;stopRequested=true;pendingKind="stop";playback.Stop();Send("play_stop",new {reason="Stopped from the Windows popup."});Render();}));
         }else if(state=="recording"){
-            controls.Children.Add(Button("Pause",()=>{if(pending)return;pending=true;capture.Barrier("pause");}));
+            controls.Children.Add(Button("Pause",()=>{if(pending||stopRequested)return;pending=true;pendingKind="pause";capture.Barrier("pause");Render();}));
             controls.Children.Add(Button("Stop",Stop));
         }else if(state=="paused"){
             controls.Children.Add(Button("Resume",()=>Command("resume",new {})));
             controls.Children.Add(Button("Stop",Stop));
         }else if(state=="interrupted")controls.Children.Add(Button("Review preserved draft",()=>Command("review",new {})));
+        foreach(Button control in controls.Children){
+            control.IsEnabled=ToolbarPresentation.CanControl(state,(string)control.Content,pending||stopRequested,connected);
+            if((string)control.Content=="Record"&&windows.SelectedItem==null)control.IsEnabled=false;
+            if((string)control.Content=="Record"||(string)control.Content=="Play"){
+                control.Background=new SolidColorBrush(Color.FromRgb(184,154,66));control.Foreground=Brushes.White;
+            }
+        }
     }
     void Apply(Dictionary<string,object> d){
         if(!d.ContainsKey("v")||Convert.ToInt32(d["v"])!=1)return;
-        if(d.ContainsKey("ack")&&(string)d["ack"]==pendingId){pending=false;pendingId=null;}
-        if((string)d["state"]=="interrupted"){pending=false;pendingId=null;}
+        if(d.ContainsKey("ack")&&(string)d["ack"]==pendingId){pending=false;pendingKind="";pendingId=null;}
+        if((string)d["state"]=="interrupted"){pending=false;pendingKind="";pendingId=null;}
         string next=(string)d["state"];int epoch=Convert.ToInt32(d["generation"]);
+        bool showSave=next=="draft"&&state!="draft";
+        if(next=="idle"||next=="draft"||next=="interrupted")stopRequested=false;
+        if(showSave&&d.ContainsKey("suggested_name"))name.Text=(string)d["suggested_name"];
+        if(d.ContainsKey("recording_name"))contextName.Text=(string)d["recording_name"];
         if(next=="recording"&&(state!="recording"||epoch!=generation)){
             try{capture.Start(epoch);}catch(Exception e){Send("interrupt",new {reason=e.Message});return;}
         } else if(next!="recording"&&capture!=null)capture.Detach();
@@ -920,6 +954,10 @@ class Host : Window {
         if(state=="idle"&&d.ContainsKey("tasks")){
             string previousRun=d.ContainsKey("run")&&d["run"]!=null?(string)((Dictionary<string,object>)d["run"])["task_id"]:null;
             TaskList.Update(tasks,(System.Collections.ArrayList)d["tasks"],previousRun);
+            if(d.ContainsKey("last_saved")&&d["last_saved"]!=null){
+                string saved=(string)((Dictionary<string,object>)d["last_saved"])["id"];
+                if(saved!=lastSavedId){lastSavedId=saved;foreach(ComboBoxItem item in tasks.Items)if((string)((Dictionary<string,object>)item.Tag)["id"]==saved)tasks.SelectedItem=item;}
+            }
         }
         playbackPaused=d.ContainsKey("run")&&d["run"]!=null&&(bool)((Dictionary<string,object>)d["run"])["pause_requested"];
         playbackProgress=null;
@@ -929,6 +967,8 @@ class Host : Window {
                 +" · "+run["next_step"]+"/"+run["total"]+" steps";
         }
         status.Text=(string)d["message"];Render();
+        if(showSave){name.Focus();name.SelectAll();}
+        if(d.ContainsKey("show_toolbar")&&(bool)d["show_toolbar"]){WindowState=WindowState.Normal;Show();if(state!="playing")Activate();}
         if(d.ContainsKey("instruction")&&d["instruction"]!=null){
             var instruction=(Dictionary<string,object>)d["instruction"];
             int serial=Convert.ToInt32(instruction["serial"]);
@@ -941,8 +981,8 @@ class Host : Window {
                         bool localConfirmation=instruction.ContainsKey("require_local_confirmation")&&(bool)instruction["require_local_confirmation"];
                         if(!localConfirmation&&WindowIdentity.IsToolbar(foregroundPid,(uint)Process.GetCurrentProcess().Id))StartPlayback();
                         else {
-                            awaitingPlayback=true;playbackProgress="Awaiting Start playback";
-                            status.Text="Click Start playback here to let Windows focus the recorded applications. No actions have run.";
+                            awaitingPlayback=true;playbackProgress="Ready to play";
+                            status.Text="Keep the recorded windows ready, then press Play here. Nothing has run yet.";
                             Render();
                         }
                     }
@@ -955,7 +995,7 @@ class Host : Window {
                 }catch(Exception ex){playback.Disarm();Send("play_stop",new {reason=ex.Message});}
             }
         }
-        if(awaitingPlayback)playbackProgress="Awaiting Start playback";
+        if(awaitingPlayback)playbackProgress="Ready to play";
     }
     [STAThread] public static void Main(string[] args) {
         if(!args.Contains("--candidate"))return;

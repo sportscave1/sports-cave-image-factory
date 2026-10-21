@@ -10,7 +10,7 @@ const activeModes=new Set(['recording','recording_paused','running','pausing','p
 const uuid=()=>crypto.randomUUID();
 const tasks=()=> (state.tasks||[]).filter(t=>!deleted.has(t.id)).map(t=>renames.has(t.id)?{...t,name:renames.get(t.id)}:t);
 const active=()=>activeModes.has(state.mode)||!!device?.active_run||!!device?.needs_review;
-const starting=()=>[...pending.values()].some(c=>['record','play','record-replacement'].includes(c.kind));
+const starting=()=>[...pending.values()].some(c=>['record','open-popup','play','record-replacement'].includes(c.kind));
 const online=()=>!!device?.connected&&transportOK;
 const modern=()=>state.protocol>=2;
 const desktopCapable=()=>state.desktop_capabilities?.format==='sports-cave.desktop'&&state.desktop_capabilities?.version===1&&state.desktop_capabilities?.action_versions?.includes(2);
@@ -80,14 +80,14 @@ async function confirmCommand(command,result){
   if(confirmDelete===command.payload.id)confirmDelete='';notice('Recording deleted.');
  }
  if(command.kind==='rename'){renames.set(command.payload.id,receipt.name||command.payload.name);editing='';notice('Recording renamed.');}
- if(command.kind==='record'){selected='';details=null;values={};if(desktopCapable())notice(receipt.message||'Choose your prepared window on the Windows toolbar.');}
+ if(['record','open-popup'].includes(command.kind)){selected='';details=null;values={};if(desktopCapable())notice(receipt.message||'Choose your prepared window on the Windows toolbar.');}
  if(command.kind==='repair-copy'){selected=receipt.new_task_id;details=null;values={};notice('Corrected copy saved. Original preserved. Review it, then press Play.');}
  if(command.kind==='edit-copy'){selected=receipt.new_task_id;details=null;values={};notice('Edited copy saved. Original preserved. Press Play when ready.');}
  if(receipt.tasks)state={...state,tasks:receipt.tasks};
  // The receipt is durable; read the helper's acknowledged snapshot rather than
  // guessing a mode from button clicks. A stale in-flight poll cannot undo it.
  update(await api(compactLevel===2&&device?'state?compact=2&device='+encodeURIComponent(device.id)+'&after='+device.seq+'&wait=0':'state'));
- if(command.kind==='record'&&state.active_task_id)selected=state.active_task_id;
+ if(['record','open-popup'].includes(command.kind)&&state.active_task_id)selected=state.active_task_id;
  return receipt;
 }
 async function send(kind,payload={}){
@@ -96,7 +96,8 @@ async function send(kind,payload={}){
  if(!online()){error('PC is offline. Start Task Recorder from the Windows Start menu, then refresh the connection.');return null;}
  if(!modern()&&!['stop','stop-save','view'].includes(kind)){error('Update the PC helper using Settings, then try again.');return null;}
  if([...pending.values()].some(c=>c.kind===kind&&c.payload.id===taskId))return null;
- if(['record','play','record-replacement'].includes(kind)&&(starting()||active()))return null;
+ const reopen=kind==='open-popup'&&desktopCapable()&&state.desktop_capabilities?.popup_reopen;
+ if(['record','open-popup','play','record-replacement'].includes(kind)&&(starting()||active()&&!reopen))return null;
  if(stepEditor&&['record','play','reusable','rename','delete','repair-copy'].includes(kind)){error('Save or cancel the edit first.');return null;}
  const command={device_id:device.id,id:uuid(),kind,payload};
  let dispatched=false;
@@ -155,12 +156,26 @@ function renderControls(){
  $('name').disabled=$('website').disabled=busy;
  $('view').disabled=!enabled||!device?.state;
  $('play').hidden=busy;$('play').disabled=!enabled||!capable||!task||!!stepEditor||editorLoading||(desktopTask(task)&&(!desktopCapable()||!task.playback_available));
- $('website').closest('label').hidden=desktopCapable();$('name').closest('label').hidden=desktopCapable();$('view').hidden=desktopCapable();
+ $('view').hidden=false;
+ const legacy=task&&!desktopTask(task),nativeTask=tasks().find(t=>t.id===state.active_task_id);
+ const nativeBusy=desktopCapable()&&(busy||mode==='interrupted')&&(desktopTask(nativeTask)||!nativeTask);
+ $('activity').hidden=!nativeBusy;
+ $('popupStatus').textContent={recording:'Recording',recording_paused:'Paused',running:'Playing',paused:'Paused',starting:'Ready to play',interrupted:'Review draft'}[mode]||'Windows popup';
+ $('popupMessage').textContent=state.message||'Continue in the Windows popup.';
+ const stoppedRecovery=!!device?.needs_review&&['idle','stopped','completed'].includes(mode);
+ $('acknowledgeStop').hidden=!stoppedRecovery;
+ $('acknowledgeStop').disabled=!enabled||[...pending.values()].some(c=>c.kind==='stop');
+ if(stoppedRecovery){$('popupStatus').textContent='Previous session needs review';$('popupMessage').textContent='The previous connection was interrupted. Check the application’s result, then acknowledge Stop to enable playback. Saved recordings are preserved.';}
+ $('openPopup').disabled=!enabled||!state.desktop_capabilities?.popup_reopen||starting();
+ $('openPopup').title=state.desktop_capabilities?.popup_reopen?'Return to the current recording or playback':'Update the Windows helper to reopen an active popup.';
+ $('record').hidden=nativeBusy;
+ $('toolbar').hidden=!legacy&&!(busy&&nativeTask&&!desktopTask(nativeTask));
+ if(busy&&nativeTask&&!desktopTask(nativeTask)){$('advanced').open=true;$('legacyTools').open=true;}
  $('pause').hidden=!['running','recording'].includes(mode);
  $('resume').hidden=!(mode==='recording_paused'||mode==='paused'&&state.can_resume);
  $('stop').hidden=!busy&&mode!=='interrupted';
  for(const k of ['pause','resume','stop'])$(k).disabled=!enabled||[...pending.values()].some(c=>c.kind===k);
- const request=[...pending.values()].find(c=>['record','play','record-replacement'].includes(c.kind));
+ const request=[...pending.values()].find(c=>['record','open-popup','play','record-replacement'].includes(c.kind));
  const requestName=request?.kind==='record'?(request.payload.name||'New recording'):tasks().find(t=>t.id===request?.payload.id)?.name;
  $('activeName').textContent=starting()&&(mode==='starting'||!activeModes.has(mode))?(requestName||'Starting task'):busy?(state.active_task_name||requestName||'Current task'):(task?.name||'Select a recording');
  $('message').textContent=status();
@@ -196,7 +211,9 @@ async function play(id){
  if(t.attention?.length){review(id);return;}
  // Exact playback uses local defaults; selecting a row does not retarget an
  // existing run. Pause/Stop are always device/run controls, not selection controls.
- const supplied=selected===id?{...values}:{};await send('play',{id,revision:t.revision,values:supplied});
+ const supplied=selected===id?{...values}:{};
+ selected=id;sessionStorage.setItem('recorder-selected',id);details=null;values=supplied;render();
+ await send('play',{id,revision:t.revision,values:supplied});
 }
 function renderInputs(){
  $('inputs').replaceChildren();if(!details||details.task.id!==selected)return;
@@ -207,68 +224,63 @@ function renderInputs(){
  }
 }
 function renderTable(){
- const rows=tasks(),mode=state.mode||'idle';
- const sig=JSON.stringify([rows,selected,mode,state.active_task_id,active(),online(),modern(),[...pending.values()].map(c=>[c.kind,c.payload.id]),editing,confirmDelete,[...rowErrors]]);
+ const rows=tasks().filter(t=>!desktopTask(t)||t.revision),mode=state.mode||'idle';
+ const sig=JSON.stringify([rows,selected,mode,state.active_task_id,active(),online(),modern(),state.desktop_capabilities?.library_management,[...pending.values()].map(c=>[c.kind,c.payload.id]),editing,confirmDelete,[...rowErrors]]);
  if(sig===tableSignature)return;tableSignature=sig;
  const focused=document.activeElement,focusId=focused?.dataset?.editId,start=focused?.selectionStart,end=focused?.selectionEnd;
- const table=$('recordings'),seen=new Set();$('empty').hidden=rows.length>0;
- const counts=new Map();for(const t of rows)counts.set(t.name,(counts.get(t.name)||0)+1);
- rows.forEach((t,index)=>{
-  seen.add(t.id);
-  const isActive=active()&&state.active_task_id===t.id;
-  const rowSignature=JSON.stringify([t,t.id===selected,isActive,isActive?mode:'',active()||starting(),online(),modern(),editing===t.id,editing===t.id?editName:'',confirmDelete===t.id,rowErrors.get(t.id),counts.get(t.name)>1?index:-1,[...pending.values()].filter(c=>c.payload.id===t.id).map(c=>c.kind)]);
+ const seen=new Set(),positions={recordings:0,legacyRecordings:0};$('empty').hidden=rows.some(desktopTask);
+ rows.forEach(t=>{
+  seen.add(t.id);const native=desktopTask(t),table=$(native?'recordings':'legacyRecordings'),index=positions[table.id]++;
+  const isActive=active()&&state.active_task_id===t.id,busy=active()||starting();
+  const signature=JSON.stringify([t,t.id===selected,isActive,mode,busy,online(),modern(),state.desktop_capabilities?.library_management,editing===t.id,editing===t.id?editName:'',confirmDelete===t.id,rowErrors.get(t.id)]);
   const cached=rowCache.get(t.id);
-  if(cached?.signature===rowSignature){if(table.children[index]!==cached.node)table.insertBefore(cached.node,table.children[index]||null);return;}
+  if(cached?.signature===signature){if(table.children[index]!==cached.node)table.insertBefore(cached.node,table.children[index]||null);return;}
   const tr=document.createElement('tr');tr.dataset.taskId=t.id;tr.classList.toggle('selected',t.id===selected);tr.setAttribute('aria-selected',String(t.id===selected));
-  tr.classList.toggle('active-row',isActive);
-  const cells=Array.from({length:6},()=>{const td=document.createElement('td');tr.append(td);return td;});
+  const cells=Array.from({length:4},()=>{const td=document.createElement('td');tr.append(td);return td;});
   if(editing===t.id){
    const form=document.createElement('form');form.className='rename';const field=document.createElement('input');field.value=editName;field.maxLength=100;field.ariaLabel='New name for '+t.name;field.dataset.editId=t.id;field.oninput=()=>editName=field.value;
-   const save=button('Save','Save name for '+t.name,()=>send('rename',{id:t.id,name:editName}),!online());
-   form.onsubmit=e=>{e.preventDefault();send('rename',{id:t.id,name:editName});};form.append(field,save,button('Cancel','Cancel rename',()=>{editing='';renderTable();}));cells[0].append(form);
-  }else{
-   const name=button(t.name,'Select '+t.name,()=>select(t.id));name.className='row-name';
-   if(counts.get(t.name)>1){const s=document.createElement('small');s.textContent=date(t.updated_at)+(t.updated_at?' · ':'')+'Copy '+(index+1);name.append(s);}cells[0].append(name);
-  }
-  cells[1].textContent=duration(t.duration_ms);cells[2].textContent=t.steps??'—';cells[3].textContent=date(t.updated_at);
-  cells[4].textContent=isActive?(mode==='running'?'Playing':mode==='pausing'?'Pausing…':mode==='recording_paused'?'Recording paused':mode==='paused'?'Paused':mode==='recording'?'Recording':'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Interrupted',running:'Interrupted',paused:'Interrupted'}[t.result]||t.result||'Saved');
-  if(!isActive&&t.attention?.length){cells[4].replaceChildren(button('Needs attention','Review step '+t.attention[0].step+' of '+t.name,()=>review(t.id)));cells[4].firstChild.className='needs-attention';}
+   const save=button('Save','Save name for '+t.name,()=>send('rename',{id:t.id,name:editName}),!online()||busy);
+   form.onsubmit=e=>{e.preventDefault();if(!save.disabled)send('rename',{id:t.id,name:editName});};form.append(field,save,button('Cancel','Cancel rename',()=>{editing='';renderTable();}));cells[0].append(form);
+  }else{const label=button(t.name,'Select '+t.name,()=>select(t.id));label.className='row-name';cells[0].append(label);}
+  cells[1].textContent=date(t.updated_at);
+  cells[2].textContent=isActive?({running:'Playing',paused:'Paused',recording:'Recording',recording_paused:'Paused'}[mode]||'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Needs review',running:'Needs review',paused:'Paused'}[t.result]||'Saved');
+  if(!isActive&&t.attention?.length){cells[2].replaceChildren(button('Needs attention','Review '+t.name,()=>review(t.id)));}
   const actions=document.createElement('div');actions.className='actions';
-  const immutable=desktopTask(t),unplayable=immutable&&(!desktopCapable()||!t.playback_available||!t.revision);
-  actions.append(button('▶ Play','Play '+t.name,()=>play(t.id),!online()||!modern()||active()||starting()||unplayable));
-  if(isActive){
-   if(mode==='running')actions.append(button('Pause','Pause '+t.name,()=>send('pause')));
-   if(mode==='paused'&&state.can_resume||mode==='recording_paused')actions.append(button('Resume','Resume '+t.name,()=>send('resume')));
-   actions.append(button('Stop','Stop '+t.name,stop,!online()));
-  }
-  actions.append(button('Rename','Rename '+t.name,()=>{editing=t.id;editName=t.name;confirmDelete='';renderTable();},immutable||isActive||!online()||!modern()));
-  actions.append(button('Edit','Edit '+t.name,()=>editRecording(t.id),immutable||active()||starting()||!online()));
-  const trash=button('','Delete '+t.name,()=>{confirmDelete=t.id;editing='';renderTable();},immutable||!online()||!modern());trash.className='icon';
-  if(immutable)for(const control of actions.children)if(control.disabled)control.title='Saved desktop recordings are immutable. Record another task from the Windows toolbar.';
-  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('width','14');svg.setAttribute('height','14');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.8');svg.setAttribute('aria-hidden','true');
-  const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d','M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7');svg.append(path);trash.append(svg);actions.append(trash);cells[5].append(actions);
-  if(confirmDelete===t.id){const c=document.createElement('div');c.className='confirm';c.append(document.createTextNode('Delete '+t.name+'? '),button('Delete','Confirm delete '+t.name,()=>send('delete',{id:t.id}),!online()||[...pending.values()].some(v=>v.kind==='delete'&&v.payload.id===t.id)),button('Cancel','Cancel delete '+t.name,()=>{confirmDelete='';renderTable();}));cells[5].append(c);}
-  if(rowErrors.has(t.id)){const e=document.createElement('span');e.className='row-error';e.setAttribute('role','alert');e.textContent=rowErrors.get(t.id);cells[5].append(e);}
+  const unavailable=native&&(!desktopCapable()||!t.playback_available);
+  actions.append(button('Play','Play '+t.name,()=>play(t.id),!online()||!modern()||busy||unavailable));
+  const menu=document.createElement('details');menu.className='row-menu';
+  const summary=document.createElement('summary');summary.textContent='⋯';summary.setAttribute('aria-label','More options for '+t.name);menu.append(summary);
+  const tools=document.createElement('div');tools.className='menu-tools';
+  const mutable=!native||state.desktop_capabilities?.library_management===true;
+  const rename=button('Rename','Rename '+t.name,()=>{editing=t.id;editName=t.name;confirmDelete='';renderTable();const field=[...document.querySelectorAll('input')].find(e=>e.dataset.editId===t.id);field?.focus();field?.select();},!mutable||busy||!online());
+  const edit=button(native?'Edit actions (read-only)':'Edit','Edit '+t.name,()=>editRecording(t.id),native||busy||!online());
+  edit.title=native?'Recorded actions are protected. Make a new recording to change the steps.':'';
+  const remove=button('Delete','Delete '+t.name,()=>{confirmDelete=t.id;editing='';renderTable();},!mutable||busy||!online());
+  if(!mutable){rename.title=remove.title='Update the Windows helper to manage this recording.';}
+  tools.append(rename,edit,remove);menu.append(tools);actions.append(menu);cells[3].append(actions);
+  if(confirmDelete===t.id){const confirm=document.createElement('div');confirm.className='confirm';confirm.append(document.createTextNode(native?'Remove this recording from the library? ':'Delete this recording? '),button('Delete','Confirm delete '+t.name,()=>send('delete',{id:t.id}),!online()||busy),button('Cancel','Cancel delete',()=>{confirmDelete='';renderTable();}));cells[3].append(confirm);}
+  if(rowErrors.has(t.id)){const error=document.createElement('span');error.className='row-error';error.setAttribute('role','alert');error.textContent=rowErrors.get(t.id);cells[3].append(error);}
   if(cached?.node.parentNode===table)cached.node.replaceWith(tr);else table.insertBefore(tr,table.children[index]||null);
-  if(table.children[index]!==tr)table.insertBefore(tr,table.children[index]||null);
-  rowCache.set(t.id,{signature:rowSignature,node:tr});
+  rowCache.set(t.id,{signature,node:tr});
  });
  for(const [id,cached] of rowCache)if(!seen.has(id)){cached.node.remove();rowCache.delete(id);}
- if(focusId){const field=[...$('recordings').querySelectorAll('input')].find(e=>e.dataset.editId===focusId);if(field){field.focus();field.setSelectionRange(start,end);}}
+ if(focusId){const field=[...document.querySelectorAll('input')].find(e=>e.dataset.editId===focusId);if(field){field.focus();field.setSelectionRange(start,end);}}
 }
 function render(){
  if(!details||details.task.id!==selected)$('inputs').replaceChildren();
  $('pc').textContent=device?device.name+' · '+(online()?'Connected':'Offline'):'No PC connected';
- $('setup').hidden=online();$('setupText').textContent=device?'Start Task Recorder from the Windows Start menu on '+device.name+'.':'Connect your Windows PC once to get started.';
+ $('setup').hidden=online();$('setupText').textContent=!transportOK?'Connection unavailable. Check your internet connection, then refresh.':device?'The Windows recorder is unavailable. Open Task Recorder from the Windows Start menu, then refresh the connection.':'Connect this Windows PC to use the recorder popup. You only need to do this once.';
+ $('pair').hidden=!!device;
+ $('legacySummary').textContent='Older browser recordings ('+tasks().filter(t=>!desktopTask(t)).length+')';
  $('seen').textContent=device?'Last seen '+date(device.last_seen*1000):'';
  $('selectedSettings').hidden=!selected||desktopTask(tasks().find(t=>t.id===selected));$('selectedName').textContent=tasks().find(t=>t.id===selected)?.name||'';
  $('reusable').disabled=!online()||!modern()||active()||starting();
  renderControls();renderTable();renderAttention();stepEditor?.refresh();fit();
 }
-function review(id){select(id);renderAttention();$('attention').scrollIntoView({block:'nearest'});}
+function review(id){$('advanced').open=true;$('legacyTools').open=true;select(id);renderAttention();$('attention').scrollIntoView({block:'nearest'});}
 function renderAttention(){
  const task=tasks().find(t=>t.id===selected),issue=task?.attention?.[0];
- $('attention').hidden=!issue;if(!issue)return;
+ $('attention').hidden=!issue||desktopTask(task);if(!issue||desktopTask(task))return;
  $('attentionHeading').textContent='Needs attention · Step '+issue.step+(issue.kind==='interrupted'?' · Interrupted recording':'');
  $('attentionReason').textContent=issue.explanation||issue.reason;
  $('recordedReason').textContent=issue.explanation!==issue.reason?'Recorded reason: '+issue.reason:'';
@@ -288,10 +300,7 @@ $('repairCopy').onclick=async()=>{
  if(!$('correctionValue').value.trim())return error('Enter the website or visible text needed for this step. The original will be preserved.');
  await send('repair-copy',{id:task.id,revision:task.revision,step:issue.step,replacement:{action:$('correctionKind').value,value:$('correctionValue').value.trim()}});
 };
-$('recordReplacement').onclick=()=>{
- const task=tasks().find(t=>t.id===selected);$('name').value=(task?.name||'Recording')+' — replacement';
- notice('Press Record, perform the intended actions in the marked browser, then Stop. The original is preserved.');$('name').focus();
-};
+$('recordReplacement').onclick=()=>send(state.desktop_capabilities?.popup_reopen?'open-popup':'record',{});
 function stop(){return send(state.recording||state.mode==='recording_paused'?'stop-save':'stop');}
 function pollDelay(ms){
  return new Promise(resolve=>{
@@ -314,12 +323,14 @@ async function poll(){
    if(!device)await pollDelay(5000);
   }catch(e){
    if(stopped)break;if(pollAbort?.signal.aborted)continue;
-   transportOK=false;error('Connection unavailable. Check your internet connection and refresh.');render();
+   transportOK=false;render();
    await pollDelay(Math.min(30000,(1600+800*Math.random())*2**Math.min(failures++,4)));
   }finally{pollAbort=null;}
  }}finally{pollRunning=false;}
 }
-$('record').onclick=()=>send('record',desktopCapable()?{}:{name:$('name').value.trim(),...($('website').value?{url:$('website').value}:{})});
+$('record').onclick=()=>send(state.desktop_capabilities?.popup_reopen?'open-popup':'record',{});
+$('openPopup').onclick=()=>send('open-popup',{});
+$('acknowledgeStop').onclick=()=>send('stop');
 $('play').onclick=()=>play(selected);$('pause').onclick=()=>send('pause');$('resume').onclick=()=>send('resume');$('stop').onclick=stop;$('view').onclick=()=>send('view');
 $('reusable').onclick=async()=>{if(!selected)return;const id=selected;if(await send('reusable',{id}))await inspect(id);};
 $('startup').onchange=()=>send('startup',{enabled:$('startup').checked});
@@ -327,14 +338,13 @@ $('revoke').onclick=async()=>{if(!device)return;try{await api('revoke',{device_i
 $('pair').onclick=async()=>{try{const data=await api('pairing',{});$('challenge').hidden=false;$('code').textContent=data.code;$('approve').href='http://127.0.0.1:18931/pair#'+new URLSearchParams({origin:location.origin,code:data.code}).toString();error('');fit();}catch(e){error(e.message);}};
 $('refresh').onclick=()=>{after='';pollAbort?.abort();document.dispatchEvent(new Event('visibilitychange'));};
 // Fit the same-origin OS frame to content: the OS owns vertical scrolling.
-// Scroll events move only the compact toolbar inside the frame; no polling or
-// desktop capture. Direct diagnostic viewing uses ordinary CSS sticky positioning.
 let frame=null,fitQueued=false;
 try{if(window.parent!==window&&window.parent.location.origin===location.origin)frame=window.frameElement;}catch{}
-function sticky(){if(!frame)return;const top=frame.getBoundingClientRect().top;const y=Math.min(Math.max(0,64-top-$('toolbar').offsetTop),Math.max(0,document.querySelector('main').offsetHeight-$('toolbar').offsetTop-$('toolbar').offsetHeight));$('toolbar').style.transform=`translateY(${y}px)`;}
-function fit(){if(!frame||fitQueued)return;fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;frame.style.height=Math.ceil(document.querySelector('main').offsetHeight+2)+'px';sticky();});}
-if(frame){new ResizeObserver(fit).observe(document.querySelector('main'));window.parent.addEventListener('scroll',sticky,true);window.parent.addEventListener('resize',fit);}
+function fit(){if(!frame||fitQueued)return;fitQueued=true;requestAnimationFrame(()=>{fitQueued=false;frame.style.height=Math.ceil(document.querySelector('main').offsetHeight+2)+'px';});}
+if(frame){new ResizeObserver(fit).observe(document.querySelector('main'));window.parent.addEventListener('resize',fit);}
+document.addEventListener('click',e=>{for(const menu of document.querySelectorAll('.row-menu[open]'))if(!menu.contains(e.target))menu.open=false;});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')for(const menu of document.querySelectorAll('.row-menu[open]')){menu.open=false;menu.querySelector('summary').focus();}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)pollAbort?.abort();});
-window.addEventListener('pageshow',()=>{stopped=false;after='';if(frame){window.parent.addEventListener('scroll',sticky,true);window.parent.addEventListener('resize',fit);}poll();});
-window.addEventListener('pagehide',()=>{stopped=true;for(const request of requests)request.abort();if(frame){window.parent.removeEventListener('scroll',sticky,true);window.parent.removeEventListener('resize',fit);}});
+window.addEventListener('pageshow',()=>{stopped=false;after='';if(frame)window.parent.addEventListener('resize',fit);poll();});
+window.addEventListener('pagehide',()=>{stopped=true;for(const request of requests)request.abort();if(frame)window.parent.removeEventListener('resize',fit);});
 poll();

@@ -46,6 +46,28 @@ assert.equal(statusContext.status(),'Needs review · Previous action is unconfir
 console.log('PASS terminal status belongs to the selected recording');
 
 const poll=source.slice(source.indexOf('async function poll(){'),source.indexOf("$('record').onclick"));
+{
+ const html=fs.readFileSync('task_recorder/panel.html','utf8');
+ const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(match=>[match[1],{}]));
+ const c={state:{mode:'idle',protocol:4,desktop_capabilities:{popup_reopen:true}},device:{needs_review:true,state:{}},
+  selected:'saved',stepEditor:null,editorLoading:false,pending:new Map(),
+  tasks:()=>[{id:'saved',format:'sports-cave.desktop',playback_available:true}],
+  $:id=>{assert(id in elements,'Missing panel element '+id);return elements[id];},
+  active:()=>c.device.needs_review,starting:()=>false,online:()=>true,modern:()=>true,
+  desktopCapable:()=>true,desktopTask:t=>t?.format==='sports-cave.desktop',status:()=>''};
+ vm.createContext(c);vm.runInContext(source.slice(source.indexOf('function renderControls(){'),source.indexOf('function date(')),c);
+ c.renderControls();
+ assert.equal(elements.acknowledgeStop.hidden,false);assert.equal(elements.acknowledgeStop.disabled,false);
+ assert.equal(elements.activity.hidden,false);assert.equal(elements.record.hidden,true);
+ assert.equal(elements.popupStatus.textContent,'Previous session needs review');
+ c.device.needs_review=false;c.renderControls();
+ assert.equal(elements.acknowledgeStop.hidden,true);assert.equal(elements.record.hidden,false);
+ c.device.needs_review=true;c.state.mode='recording';c.renderControls();
+ assert.equal(elements.acknowledgeStop.hidden,true);assert.equal(elements.popupStatus.textContent,'Recording');
+ c.state.mode='idle';c.online=()=>false;c.renderControls();
+ assert.equal(elements.acknowledgeStop.disabled,true);
+ console.log('PASS stopped-session recovery is actionable; active capture and offline controls remain guarded');
+}
 (async()=>{
  let calls=0,resolve;
  const c={compactLevel:1,pollRunning:false,pollAbort:null,stopped:false,device:{id:'pc'},after:'7',document:{hidden:false},AbortController,

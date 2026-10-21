@@ -29,6 +29,7 @@ class DesktopRunner(Runner):
         self.catalogue = Catalogue(self.desktop.repository, self.store, playback_available=True)
         self.native = None
         self.native_pump = None
+        self.native_ready = None
         self.native_lock = asyncio.Lock()
         self.last_engine = None
         self.capture_waiters = {}
@@ -50,6 +51,7 @@ class DesktopRunner(Runner):
         state["desktop_capabilities"] = {
             "format": FORMAT, "version": 1, "action_versions": [2],
             "capture": True, "playback": True,
+            "library_management": True, "popup_reopen": True,
             "actions": [c.replace(".v1", ".v2") for c in CAPABILITIES.values()],
         }
         r = self.desktop.recording
@@ -116,6 +118,9 @@ class DesktopRunner(Runner):
             if waiter and not waiter[1].done():
                 waiter[1].set_exception(Invalid(self.desktop.message))
         else:
+            if command.get("kind") == "diagnostic" and command.get("payload", {}).get("kind") == "toolbar_ready":
+                if self.native_ready and not self.native_ready.done():
+                    self.native_ready.set_result(None)
             waiter = self.capture_waiters.get(command.get("payload", {}).get("request_id"))
             if waiter and command.get("kind") == waiter[0] and not waiter[1].done():
                 waiter[1].set_result(None)
@@ -133,12 +138,22 @@ class DesktopRunner(Runner):
         if not executable.is_file():
             raise Invalid("Update required: native recorder package is missing.")
         # No injected-input acceptance flag is reachable from this entry point.
+        self.native_ready = asyncio.get_running_loop().create_future()
         self.native = await asyncio.create_subprocess_exec(
             str(executable), "--candidate", stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=65538)
         self.native_pump = asyncio.create_task(self.read_native(self.native))
-        await self.publish_native()
+        try:
+            await self.publish_native()
+            await asyncio.wait_for(self.native_ready, timeout=5)
+        except (asyncio.TimeoutError, ConnectionError, OSError):
+            if self.native.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    self.native.terminate()
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(self.native.wait(), timeout=3)
+            raise Invalid("The Windows popup could not open. Close any other recorder popup, then try New recording again.") from None
 
     async def read_native(self, process=None):
         process = process or self.native
@@ -164,6 +179,8 @@ class DesktopRunner(Runner):
                 self.native_disconnected()
 
     def native_disconnected(self):
+        if self.native_ready and not self.native_ready.done():
+            self.native_ready.set_exception(ConnectionError("Popup closed before it was ready."))
         self.desktop.message = "Native toolbar disconnected. Review the preserved recording or run before continuing."
         self.desktop.pending_play = None
         self.desktop.playback.stop(reason=self.desktop.message)
@@ -184,12 +201,19 @@ class DesktopRunner(Runner):
             task = self.desktop.repository.get(data["id"])
             return {"task":task, "revision":self.store.revision(task), "values":{},
                     "desktop":True, "playback_available":True}
-        await self.open_toolbar()
-        if kind == "record":
+        if kind in {"rename", "delete"}:
             if self.busy() or self.recording:
-                raise Invalid("Stop the current session first.")
-            self.desktop.message = "Choose your prepared window and press Record on the Windows toolbar."
+                raise Invalid("Stop and save the current task before changing the library.")
+            result = self.desktop.repository.manage(data["id"], name=data.get("name"), deleted=kind == "delete")
             await self.publish_native()
+            return {**result, "tasks": self.catalogue.summaries()}
+        await self.open_toolbar()
+        if kind in {"record", "open-popup"}:
+            if super().busy() or self.recording:
+                raise Invalid("Stop the current session first.")
+            if not self.desktop_busy():
+                self.desktop.message = "Choose a window and press Record in the Windows popup."
+            await self.publish_native({**self.desktop.state(), "show_toolbar": True})
             return {"message":self.desktop.message}
         if kind in {"pause", "resume", "stop"}:
             if self.desktop.recording.state in {"recording", "paused"}:
@@ -219,11 +243,11 @@ class DesktopRunner(Runner):
             data = {**data, "confirm_on_toolbar":True}
         async with self.native_lock:
             self.desktop.apply(dict(v=1, id=command_id, kind=native_kind, payload=data))
-            await self.publish_native()
+            await self.publish_native({**self.desktop.state(), "show_toolbar": True} if kind == "play" else None)
         return {"message":self.desktop.message}
 
     def is_desktop(self, task_id):
-        return any(t["id"] == task_id and t.get("format") == FORMAT for t in self.catalogue.summaries())
+        return self.catalogue.is_desktop(task_id)
 
     async def stop(self):
         if self.closing:
