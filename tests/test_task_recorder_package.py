@@ -129,6 +129,15 @@ def test_authenticated_download_serves_verified_bundle_or_reports_unavailable(tm
     assert response.status_code == 200 and response.body == data
     assert response.media_type == "application/zip"
     assert actor.await_count == 2
+    # Linux production serves the exact reviewed Windows artifact, without
+    # compiling native code or changing service environment variables.
+    reviewed = hosted_api.ROOT / "recorder-releases/windows/SportsCaveTaskRecorder.zip"
+    reviewed.parent.mkdir(parents=True)
+    reviewed.write_bytes(data)
+    monkeypatch.delenv("SPORTS_CAVE_RECORDER_WINDOWS_PACKAGE")
+    response = asyncio.run(hosted_api.setup(object()))
+    assert response.status_code == 200 and response.body == data
+    assert actor.await_count == 3
 
 
 def test_generated_launchers_accept_prepared_and_previous_release_ids(tmp_path):

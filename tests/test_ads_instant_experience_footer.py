@@ -37,9 +37,9 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
     def test_all_three_contain_fixed_footer_contract(self):
         prompt = instant_experience_prompt()
         marker = ads_page.SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]
-        self.assertEqual(prompt.count(marker), 3)
+        self.assertEqual(prompt.count(marker), 1)
         for index, section in enumerate(route_sections(prompt)):
-            self.assertEqual(section.count(marker), 1)
+            self.assertEqual(section.count(marker), 0)  # Shared template is applied to every call.
 
     def test_footer_is_fixed_opaque_full_width_and_bottom_anchored(self):
         contract = ads_page.build_instant_experience_fixed_opaque_footer_rules()
@@ -77,10 +77,10 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
         footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
         australia = instant_experience_prompt("Australia")
         usa = instant_experience_prompt("USA")
-        self.assertEqual(australia.count(footer), 3)
-        self.assertEqual(usa.count(footer), 3)
+        self.assertEqual(australia.count(footer), 1)
+        self.assertEqual(usa.count(footer), 1)
         for country in ("Australia", "USA", "UK", "Canada", "New Zealand"):
-            self.assertEqual(instant_experience_prompt(country).count(footer), 3)
+            self.assertEqual(instant_experience_prompt(country).count(footer), 1)
         self.assertIn("Never create separate Australian layout behaviour", footer)
 
     def test_all_approved_headlines_survive_validation_and_resolution(self):
@@ -133,7 +133,7 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             "no more than 12 words and no more than 70 characters",
             "no more than four words and no more than 24 characters",
             "880–896 px usable width",
-            "Allow only subtle font-size or letter-spacing adjustments",
+            "Keep size and weight within the shared collector typography targets",
             "Check readability at 256 x 256",
             "Never repeat a sibling headline",
             "on exactly one line",
@@ -159,8 +159,8 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             grouped.count("\nAD COPY\n"),
             3,
         )
-        self.assertEqual(prompt.count("PRODUCT SOURCE-ASSET FIDELITY"), 3)
-        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
+        self.assertEqual(prompt.count("PRODUCT SOURCE-ASSET FIDELITY"), 1)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
 
     def test_non_instant_experience_prompts_do_not_receive_footer_contract(self):
         marker = ads_page.SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]

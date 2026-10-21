@@ -41,8 +41,8 @@ def select_export_strategy():
 
 
 def prepare(source, output, identity, *, number_layer, plaque_layer, total, reference_number, scale=1,
-            export_strategy=None,native_benchmark=False):
-    if type(scale) is not int or scale not in (1,2,3,4):
+            export_strategy=None,native_benchmark=False,preparation_plan=None,preparation_context=None):
+    if preparation_plan is None and (type(scale) is not int or scale not in (1,2,3,4)):
         raise ValueError('Choose native, 2x, 3x or 4x TEST preparation.')
     if export_strategy is None:export_strategy=select_export_strategy()
     if export_strategy not in ('duplicate_merged','history_merged_crop'):
@@ -66,6 +66,17 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     from auto_editions_colour_source import inspect_psd,stage_profile,ColourReview
     from auto_editions_colour_policy import resolve
     colour=inspect_psd(source)
+    if preparation_context is not None:
+        from auto_editions_preparation_geometry import for_context
+        candidate=for_context([colour['width'],colour['height']],preparation_context,legacy_scale=scale)
+        if candidate['references']:preparation_plan=candidate
+    if preparation_plan is not None:
+        from auto_editions_preparation_geometry import validate
+        scale=preparation_plan['scale']
+        planned=preparation_plan['output_dimensions']
+        validate([colour['width'],colour['height']],planned,
+                 dict(plan=preparation_plan,scale=scale,method='native' if scale==1 else 'photoshop_layered_bicubic_smoother',
+                      supplier_verified=False,quality_approval_required=scale!=1))
     if colour['mode']!=3 or colour['depth']!=8:
         raise ColourReview('Print-colour incompatibility: conversion requires separate approval.')
     policy=None;assignment=None
@@ -85,6 +96,8 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
                    report=str(output/'preparation.json'),number_layer_name=number_layer,
                    plaque_layer_name=plaque_layer,edition_total=total,reference_number=reference_number,scale=scale,
                    export_strategy=export_strategy,native_benchmark=native_benchmark is True)
+    if preparation_plan is not None:
+        request.update(target_dimensions=preparation_plan['output_dimensions'],preparation_plan=preparation_plan)
     from auto_editions_role_evidence import resolution
     reviewed=resolution(identity)
     if reviewed and reviewed.get('hidden_number'):request['approved_hidden_number']=reviewed['hidden_number']
@@ -118,6 +131,8 @@ def prepare(source, output, identity, *, number_layer, plaque_layer, total, refe
     if background:report['resize_evidence']=verify_resize(output)
     if report.get('source_dimensions')!=[colour['width'],colour['height']]:
         raise ColourReview('Inspector failure: Photoshop source geometry differs from the pinned PSD.')
+    if preparation_plan is not None and report.get('dimensions')!=preparation_plan['output_dimensions']:
+        raise ValueError('Photoshop output differs from the pinned proportional preparation plan.')
     witness=inspect_psd(output/'profile-witness.psd')
     if witness['icc']!=icc:
         raise ColourReview('ICC export mismatch: Photoshop opened the source under a different ICC profile.')

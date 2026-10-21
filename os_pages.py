@@ -4793,6 +4793,8 @@ def _prodigi_selected_line_summary(row):
         columns[4].write(prodigi_shopify_variant_label(row) or "-")
         columns[5].caption("Expected Fulfilment code")
         columns[5].write(row.get("prodigi_code") or row.get("prodigi_product_code") or "-")
+        from auto_editions_resolution import manual_notice
+        st.caption(manual_notice(row))
 
 
 def _prodigi_qa_step(number, title, question, *, key, default=False, helper_text="", note_default=""):

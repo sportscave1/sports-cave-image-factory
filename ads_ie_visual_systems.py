@@ -1,5 +1,9 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
 import hashlib
+import re
+from ads_refresh_generation import IE_REFRESH_FOOTER_HEADLINES, IE_REFRESH_FOOTER_SUPPORT
+import ads_ie_scenes as scene_library
+import sports_cave_physical_realism as physical_realism
 
 
 
@@ -10,12 +14,6 @@ SUPPORT_LINES = (
     "Made for serious collectors.",
     "For collectors who know why it matters.",
 )
-ROOMS = (
-    ("hallway_gallery", "premium residential hallway / gallery corridor", "floating narrow console at outer left", "one small sculptural object", "deep passage receding at outer left", "warm gallery picture light with soft side daylight"),
-    ("office_den", "premium man cave / home office / collector den", "central writing desk below artwork", "shaded desk lamp and two closed books at one edge", "recessed bookcase at outer right", "soft frontal window light with shaded task-lamp fill"),
-    ("bar_lounge", "private home bar / lounge / entertaining corner", "low drinks cabinet at outer right", "one lounge seat crop beside a restrained bar shelf", "recessed bar niche at outer left", "moody pendant light and low indirect amber cabinet lighting"),
-)
-
 # Approved copy remains separate from fit eligibility; never truncate a claim.
 HEADLINES = (
     "LIMITED TO 100 WORLDWIDE",
@@ -36,13 +34,14 @@ APPROVED_SUPPORT_LINES = (
     "Made for serious collectors only.",
     "Some moments are worth claiming while you can.",
 )
-# Each option retains the route's architectural/furniture/lighting grammar.
-ROOM_OPTIONS = (
-    (ROOMS[0][1], "luxury apartment entrance gallery", "dark executive gallery corridor",
+# Frozen legacy room labels are copy-selection seeds only, never scene directions.
+# Retain them so matching inputs keep their exact approved supporting lines.
+COPY_ROOM_OPTIONS = (
+    ("premium residential hallway / gallery corridor", "luxury apartment entrance gallery", "dark executive gallery corridor",
      "modern architectural foyer", "warm heritage hallway", "minimalist private collector gallery"),
-    (ROOMS[1][1], "walnut executive study", "contemporary home office",
+    ("premium man cave / home office / collector den", "walnut executive study", "contemporary home office",
      "premium heritage library", "modern collector media den", "understated luxury apartment workspace"),
-    (ROOMS[2][1], "private whisky lounge", "modern home bar", "luxury leather lounge",
+    ("private home bar / lounge / entertaining corner", "private whisky lounge", "modern home bar", "luxury leather lounge",
      "refined entertainment room", "private club-style home retreat"),
 )
 
@@ -51,49 +50,149 @@ def stable_rank(seed, value):
     return hashlib.sha256(f"{seed}|{value}".encode("utf-8")).digest()
 
 
+SAFE_HEADLINES = ("SPORTS CAVE COLLECTOR", "FOR YOUR COLLECTION", "A COLLECTOR STATEMENT")
+# Recover the existing refresh banks without changing that workflow. LIMITED
+# EDITION is also approved explicitly in f96d8469's SCARCITY_RULE. The standalone
+# availability label is a requested short form of HEADLINES[5], not a newly
+# discovered historical standalone bank. The numbered subline is user-approved.
+RESTORED_HEADLINES = ("LIMITED EDITION", *IE_REFRESH_FOOTER_HEADLINES)
+AVAILABILITY_HEADLINE = "ONLY 100 AVAILABLE"
+NUMBERED_SUPPORT = "Limited to {limit} Editions"
+RESTORED_SUPPORT_LINES = tuple(dict.fromkeys((*SUPPORT_LINES[1:], *IE_REFRESH_FOOTER_SUPPORT)))
+FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_signature", "footer_emphasis", "eligible_headline_alternatives", "headline_fit_fallback")
+
+
 def eligible_headlines(context):
-    """Image-only claims: verified edition total is not remaining inventory."""
+    """Reuse the approved bank, with independent evidence gates per claim."""
+    templates = list(SAFE_HEADLINES)
     limit = context.get("edition_limit")
-    if not limit:
-        return ["SPORTS CAVE COLLECTOR", "FOR YOUR COLLECTION", "A COLLECTOR STATEMENT"]
-    templates = [HEADLINES[i] for i in (2, 3, 4)]
-    if context.get("worldwide_verified") is True:
-        templates.append(HEADLINES[0])
+    if limit or context.get("limited_edition_verified"):
+        templates.append(RESTORED_HEADLINES[0])
+    if limit:
+        templates += [HEADLINES[4], *[IE_REFRESH_FOOTER_HEADLINES[i] for i in (1, 3, 4, 7)]]
+        if context.get("worldwide_verified") is True:
+            templates += [HEADLINES[0], IE_REFRESH_FOOTER_HEADLINES[2]]
+        if context.get("no_second_run_verified") is True:
+            templates += list(HEADLINES[1:4]) + [IE_REFRESH_FOOTER_HEADLINES[i] for i in (0, 6)]
+            if context.get("worldwide_verified") is True:
+                templates.append(IE_REFRESH_FOOTER_HEADLINES[8])
+        if context.get("remaining_editions") == limit and str(context.get("editions_sold")) in {"None", "0"}:
+            templates += [HEADLINES[5], AVAILABILITY_HEADLINE, *[IE_REFRESH_FOOTER_HEADLINES[i] for i in (5, 9)]]
+    return list(dict.fromkeys(h.replace("100", str(limit)) if limit else h for h in templates))
+
+
+def eligible_support_lines(context):
+    finality = context.get("no_second_run_verified") is True or context.get("retires_when_sold_out") is True
+    limited = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
+    lines = [line for i, line in enumerate(APPROVED_SUPPORT_LINES)
+             if (i not in (0, 3) or finality) and (i not in (2, 5, 6) or limited)]
+    lines += list(SUPPORT_LINES[1:])
+    if limited:
+        lines += ["Limited Edition", IE_REFRESH_FOOTER_SUPPORT[4], IE_REFRESH_FOOTER_SUPPORT[8]]
+    if context.get("edition_limit"):
+        lines.append(NUMBERED_SUPPORT.format(limit=context["edition_limit"]))
     if context.get("no_second_run_verified") is True:
-        templates.append(HEADLINES[1])
-    # A remaining count equal to the total is required; contradictory sales data wins.
-    if context.get("remaining_editions") == limit and str(context.get("editions_sold")) in {"None", "0"}:
-        templates.append(HEADLINES[5])
-    return [h.replace("100", str(limit)) for h in templates]
+        lines += [IE_REFRESH_FOOTER_SUPPORT[i] for i in (0, 1, 2, 5)]
+    if context.get("retires_when_sold_out") is True:
+        lines.append(IE_REFRESH_FOOTER_SUPPORT[6])
+    if finality:
+        lines += [IE_REFRESH_FOOTER_SUPPORT[i] for i in (3, 7, 9)]
+    return list(dict.fromkeys(lines))
 
 
-def resolve_set_copy(visuals, context, headline_is_valid):
-    """Resolve together so fit, distinctness and evidence hold across all slots."""
+def footer_emphasis(headline):
+    return ("ownership" if headline == SAFE_HEADLINES[1] else
+            "collector_identity" if headline in SAFE_HEADLINES else "scarcity")
+
+
+def explicit_scarcity(text):
+    """Recognise bounded-edition language, never vague rarity/opportunity alone."""
+    text = text.casefold()
+    return bool(re.search(r"\blimited\b|\bshort[- ]run\b|\bno second run\b|\bwon.t be repeated\b|\b(?:only|strictly|just)\s+\d+\b|\b\d+\s+(?:editions?|worldwide|can|will|are|go)\b", text))
+
+
+def meaningful_words(text):
+    stop = set("a an the for your you this that it its is are as to of and or but with by in on at be been who why those they their them can not everyone some before after once when while".split())
+    words = re.findall(r"[a-z]+|\d+", text.casefold())
+    def stem(word):
+        if word.startswith("collect"): return "collect"
+        if word in {"edition", "editions"}: return "edition"
+        if word in {"limit", "limited", "limits"}: return "limit"
+        if word.startswith("availab"): return "available"
+        if word in {"own", "owns", "ownership", "claim", "claimed", "claiming"}: return "own"
+        return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+    return {stem(w) for w in words if w not in stop}
+
+
+def coherent_pair(headline, support, *, require_scarcity=True):
+    head_scarcity, sub_scarcity = explicit_scarcity(headline), explicit_scarcity(support)
+    if (require_scarcity and not (head_scarcity or sub_scarcity)) or (head_scarcity and sub_scarcity):
+        return False
+    if meaningful_words(headline) & meaningful_words(support):
+        return False
+    # A scarcity headline needs a different idea, not a vague sellout paraphrase.
+    if head_scarcity and re.search(r"\brare\b|\bgone\b|\bopportunity\b|\bcloses\b|\bends\b|\bretires\b|\bsellout\b|\bmissed\b", support, re.I):
+        return False
+    return True
+
+
+def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
+    """Resolve one immutable pack, preferring unseen/least-recently-used approved copy."""
+    from itertools import combinations
     eligible = [h for h in eligible_headlines(context) if headline_is_valid(h)]
-    if len(eligible) < len(visuals):
-        raise ValueError("Three distinct factually eligible image headlines are required.")
+    supports = eligible_support_lines(context)
+    require_scarcity = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
+    def compatible(h, sub):
+        return coherent_pair(h, sub, require_scarcity=require_scarcity) and (pair_is_valid is None or pair_is_valid(h, sub))
+    if len(eligible) < 3 or len(supports) < 3:
+        raise ValueError("Three distinct factually eligible footer headlines and sublines are required.")
     seed = visuals[0]["resolved_seed"]
-    eligible.sort(key=lambda h: stable_rank(seed, h))
-    used_support = set()
-    for index, visual in enumerate(visuals):
-        visual["headline_text"] = eligible[index]
-        limit = context.get("edition_limit")
-        visual["headline_fit_fallback"] = (
-            (f"LIMITED TO {limit} EDITIONS", f"{limit} EDITIONS TOTAL", f"AN EDITION OF {limit}")[index]
-            if limit else eligible[index]
-        )
-        visual["eligible_headline_alternatives"] = [h for h in eligible[len(visuals) + index:len(visuals) + index + 1]]
-        if context.get("edition_limit"):
-            # Quantity headlines pair with meaning/identity, not repeated quantity
-            # or final-run claims. All nine remain approved for future fit contexts.
-            choices = [APPROVED_SUPPORT_LINES[i] for i in (1, 2, 4, 7, 8)]
-            preferred = (4 if context.get("product_era") == "historic" else
-                         (7 if "study" in visual["room_type"] or "gallery" in visual["room_type"] else 2))
-            choices.sort(key=lambda line: (line != APPROVED_SUPPORT_LINES[preferred],
-                         stable_rank(f"{seed}|{visual['room_type']}", line)))
-            support = next(line for line in choices if line not in used_support)
-            visual.update(supporting_line=support, fomo_line=support)
-            used_support.add(support)
+    product_key = context.get("copy_product_key")
+    history = [r for r in list(recent_fingerprints)[:scene_library.HISTORY_LIMIT] if isinstance(r, dict)
+               and (not product_key or r.get("copy_product_key") == product_key)]
+    old_heads = [r.get("on_image_headline") or r.get("campaign_line") for r in history]
+    old_supports = [r.get("on_image_subline") or r.get("fomo_line") for r in history]
+    old_pairs = list(zip(old_heads, old_supports))
+    def age(value, values):
+        return values.index(value) if value in values else len(history) + 1
+    def text_rank(value, values):
+        return (value in values, -age(value, values), stable_rank(seed, value))
+    frozen = len(selections) == 3 and all(isinstance(v, dict) and v.get("headline_text") and v.get("supporting_line") for v in selections)
+    if frozen:
+        pairs = [(v["headline_text"], v["supporting_line"]) for v in selections]
+    else:
+        sets = [c for c in combinations(eligible, 3)
+                if not context.get("edition_limit") or len({footer_emphasis(h) for h in c}) >= 2]
+        sets.sort(key=lambda c: (sum(h in old_heads for h in c), -sum(age(h, old_heads) for h in c),
+                                -len({footer_emphasis(h) for h in c}), stable_rank(seed, str(c))))
+        # Bounded finite compatible domains; skip a headline set only if it cannot
+        # supply three distinct supports. No invented wording or unbounded retries.
+        from itertools import product
+        pairings = []
+        for option in sets:
+            chosen = sorted(option, key=lambda h: stable_rank(seed, h))
+            domains = [[s for s in supports if compatible(h, s)] for h in chosen]
+            pairings = [list(zip(chosen, c)) for c in product(*domains) if len(set(c)) == 3]
+            if pairings:
+                break
+        if not pairings:
+            raise ValueError("Three complementary approved footer pairs need verified scarcity and copy-fit evidence.")
+        pairs = min(pairings, key=lambda ps: (
+            sum(p in old_pairs[:3] for p in ps), sum(p in old_pairs for p in ps),
+            sum(sub in old_supports for _, sub in ps), -sum(age(sub, old_supports) for _, sub in ps),
+            -sum(age(p, old_pairs) for p in ps), stable_rank(seed, str(ps))))
+    if len({h for h, _ in pairs}) != 3 or len({sub for _, sub in pairs}) != 3:
+        raise ValueError("Saved footer selections must have three unique headlines and sublines.")
+    assigned = {h for h, _ in pairs}
+    for index, (visual, (headline, support)) in enumerate(zip(visuals, pairs)):
+        alternatives = sorted([h for h in eligible if h not in assigned and compatible(h, support)],
+                              key=lambda h: text_rank(h, old_heads))
+        if frozen and "eligible_headline_alternatives" in selections[index]:
+            alternatives = list(selections[index]["eligible_headline_alternatives"])
+        visual.update(headline_text=headline, supporting_line=support, fomo_line=support,
+            cta_text="CLAIM YOUR EDITION", footer_emphasis=footer_emphasis(headline),
+            footer_pair_signature=hashlib.sha256(f"{headline}|{support}".encode()).hexdigest()[:20],
+            eligible_headline_alternatives=alternatives, headline_fit_fallback=headline)
 
 
 # Aesthetic directions supplied by the campaign brief, not demographic facts.
@@ -136,29 +235,26 @@ def fan_style(context):
     return key, mood, wood, metal, walls
 
 
-CAMERAS = ("RIGHT ANGLE, camera positioned to the RIGHT viewing diagonally toward the artwork; not straight-on",
-           "CENTRE / STRAIGHT-ON, camera directly facing the frame, central hero and balanced composition",
-           "LEFT ANGLE, camera positioned to the LEFT viewing diagonally toward the artwork; not straight-on")
-# Five carefully limited natural viewpoints. The RIGHT / FRONT / LEFT identity of
-# each image is unchanged; only camera height and subtle distance/offset varies.
-CAMERA_VARIATIONS = (
-    "eye-level, balanced natural perspective",
-    "a little above artwork centre with minimal downward perspective",
-    "just below artwork centre with very subtle upward perspective",
-    "eye-level with a restrained 1–2 degree lateral shift inward, staying within the assigned right/centre/left camera role",
-    "eye-level with a restrained 1–2 degree lateral shift outward, staying within the assigned right/centre/left camera role",
+CAMERAS = (
+    "RIGHT: camera physically to the right of the artwork, looking left towards it",
+    "FRONT: camera centred, directly facing the artwork",
+    "LEFT: camera physically to the left of the artwork, looking right towards it",
 )
+# Compatibility metadata only; no independent shift, height or contradictory angle.
+CAMERA_VARIATIONS = ("assigned camera role; level perspective",)
+
 
 def resolved_camera_variation(visual, index, context, variation_token):
-    """Deterministically choose one of five safe angles; edits and reruns stay stable."""
-    user_choice = str(visual.get("resolved_camera_variation") or "").strip()
-    if user_choice:
-        return user_choice
-    identity = "|".join((str(variation_token or "standard"), str(index)))
-    digest = hashlib.sha256(identity.encode("utf-8")).digest()
-    return CAMERA_VARIATIONS[int.from_bytes(digest[:4], "big") % len(CAMERA_VARIATIONS)]
+    return CAMERA_VARIATIONS[0]
 
-SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline. The approved '
+
+SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and supporting line. '
+                 'With verified scarcity, exactly one line supplies the limited-edition/edition-size claim; '
+                 'the other adds collector or emotional meaning. Never echo meaningful words, stems, numbers '
+                 'or scarcity claims between the two lines; connecting words and the fixed CTA are exempt. '
+                 'Vague rarity or scarcity inside the artwork does not satisfy footer scarcity. '
+                 'If scarcity evidence is missing, retain the safe selected copy and report the missing verification; '
+                 'never fabricate a claim or replace selected copy with arbitrary wording. The approved '
                  'geographic wording is allowed only when explicitly included in the resolved verified headline. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '
                  'Immutable wording already inside the source artwork stays untouched.')
@@ -166,63 +262,130 @@ SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headlin
 
 
 def resolve_visual_system(visual, index, context, variation_token):
-    """Extend the existing resolved product context, never resolve commercial facts here."""
-    room_key, room, primary, secondary, architecture, lighting = ROOMS[index]
-    options = ROOM_OPTIONS[index]
+    """Preserve existing copy seeds and camera/format choices before scene resolution."""
+    options = COPY_ROOM_OPTIONS[index]
     seed = visual["resolved_seed"]
-    # Heritage/modern context gently favours suitable options without eliminating variety.
     preferred = [option for option in options if
                  (context.get("product_era") == "historic" and any(w in option for w in ("heritage", "walnut", "club"))) or
                  (context.get("product_era") == "modern" and any(w in option for w in ("modern", "contemporary", "apartment")))]
     candidates = list(options) + preferred
-    room = candidates[int.from_bytes(stable_rank(seed, f"room:{index}")[:4], "big") % len(candidates)]
-    fan_key, atmosphere, wood, metal, walls = fan_style(context)
-    wall = walls[index]
-    camera = CAMERAS[index]
+    # These labels affect the established supporting-line choice, never the scene.
+    copy_room = candidates[int.from_bytes(stable_rank(seed, f"room:{index}")[:4], "big") % len(candidates)]
     support = SUPPORT_LINES[index]
-    camera_variation = resolved_camera_variation(visual, index, context, variation_token)
     if index == 0 and not context.get("edition_limit"):
         support = "A statement for your collection."
-    visual.update(visual_family=FAMILIES[index], camera_role=("RIGHT", "FRONT", "LEFT")[index],
-                  resolved_camera_variation=camera_variation,
-                  camera_side=camera, camera_instruction=camera + ". Keep verticals straight and complete frame rigid. Never mirror artwork.",
-                  creative_variation_token=variation_token or "standard", room_profile_key=room_key,
-                  room_profile=f"Room {index + 1}: {room}", room_type=room,
-                  purpose=f"Image {index + 1}: {room}; {camera}; {atmosphere}",
-                  fan_archetype=fan_key, atmosphere=atmosphere,
-                  wall_colour=wall, wall_material=wall, wall_finish=wall,
-                  room_materials=f"{wall}; {wood} furniture; restrained {metal} detailing; {atmosphere}",
-                  primary_cue=f"{wood} {primary}", secondary_cue=secondary,
-                  architectural_cue=architecture, lighting=lighting,
-                  time_of_day=("soft late-afternoon gallery light", "warm afternoon workspace", "intimate early-evening entertaining light")[index],
-                  supporting_line=support, fomo_line=support,
-                  product_width=("79-86%", "84-87%", "77-84%")[index],
-                  shot_distance=("closer editorial passage context", "closer frontal product hero", "closer intimate entertaining context")[index],
-                  overlay_position="fixed opaque full-width black/gold footer across bottom 24–28%",
-                  product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
-                  composition="1024 x 1024 square; upper 72–76% lifestyle room; bottom 24–28% opaque promotional banner")
+    camera = CAMERAS[index]
+    visual.update(
+        visual_family=FAMILIES[index], camera_role=("RIGHT", "FRONT", "LEFT")[index],
+        resolved_camera_variation=resolved_camera_variation(visual, index, context, variation_token),
+        camera_side=camera, camera_instruction=camera + ". Keep verticals straight and complete frame rigid. Never mirror artwork.",
+        creative_variation_token=variation_token or "standard", room_type=copy_room,
+        fan_archetype=fan_style(context)[0], supporting_line=support, fomo_line=support,
+        product_width=("79-86%", "84-87%", "77-84%")[index],
+        overlay_position="fixed opaque full-width black/gold footer across bottom 24–28%",
+        product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
+        composition="1024 x 1024 square; upper 72–76% lifestyle room; bottom 24–28% opaque collector footer",
+    )
 
 
-def camera_wall_rules(visual):
-    return f"""LOCKED CAMERA / ROOM / WALL RESOLUTION
-CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']}
-Use the token only for creative freshness; never display it or internal metadata on the image.
-Selected camera: {visual['camera_side']}.
-Selected one of five subtle photographic viewpoint refinements: {visual['resolved_camera_variation']}. This never changes the assigned RIGHT / FRONT / LEFT role; never mirror, crop or shrink the product.
-Resolve exactly ONE camera: use the selected value above, not a menu of alternatives. Keep the assigned right / centre / left camera role. Never mirror artwork.
-Resolved room: {visual['room_profile']}.
-Framing: {visual['shot_distance']}; product width {visual['product_width']} of canvas; {visual['product_position']}. Increase apparent frame prominence by about 10% relative to previous results: move the camera modestly closer, not enlarge or distort the product. The artwork anchors the upper photographed area; room context supports it. Keep all outer frame edges fully visible, natural perspective, realistic hanging and controlled glass reflections. Width targets yield to source aspect ratio, complete-frame visibility and clean breathing room above the footer. Leave enough room context to identify this environment while keeping the artwork the largest visual element.
-Resolved wall: {visual['wall_colour']}.
-Resolved material treatment: {visual['room_materials']}.
-Analyse the actual attached product, SPORT, MARKET, title, palette, brightness, frame colour, emotional mood, era/nostalgia and campaign context. The actual product wins over sport tendencies. Preserve the one resolved scene and ensure the unchanged frame separates clearly from its wall.
-VARIANT PRECEDENCE — MANDATORY
-The assigned room, camera and support line override generic lifestyle suggestions. Sibling metadata is comparison data only: never blend rooms or copy another slot's support line. The hallway must visibly read as a passage; the office as a workspace; the bar/lounge as a private entertaining space. Never substitute the same console-and-chair room or mirror another image.
-Fan styling for this product: {visual['atmosphere']}.
-Express this through the resolved furniture, finishes and lighting. Never add literal sports props, extra posters, team logos, themed novelty decor or clutter. Product palette and frame contrast guide subtle tonal adjustments without changing the room type or artwork.
-Use the resolved primary furniture arrangement and secondary styling cluster. The three banners share design; their selected headlines and supporting text must differ. Never display internal selection notes. No showroom, AI-catalogue styling or commercial bar.
-This image's ONLY banner supporting line: {visual['supporting_line']}
-The only exception to exact resolved headline wording is a measured visual-fit failure. Headline fit alternatives, only if the assigned headline fails actual rendered mobile fit: {visual.get('eligible_headline_alternatives', [])}.
-Reserve this route's truthful compact fallback: {visual.get('headline_fit_fallback', visual.get('headline_text'))}. Other routes must never use this reserved fallback. Select an unused eligible alternative first; compare sibling headlines and never repeat one. Display only the final selected headline, never this list or selection notes.
-Use neutral collector language only; never attach a sport name to collector labels.
-Avoid identical wall/camera combinations across recent fingerprints and this package without changing the assigned camera side; product fidelity wins. Vary only visual interpretation, never product identity, branding, edition limits or verified facts.
+# Reuse the draw-once/preserve-selection contract with richer curated attributes.
+SCENES = scene_library.SCENES
+ROOM_OPTIONS = tuple(tuple(dict.fromkeys(s["room_type"] for s in slot)) for slot in SCENES)
+SCENE_VERSION = "IE COLLECTOR SCENES V2 ARTWORK FIRST"  # Saved prompt recognition stays stable.
+COMBAT_PALETTES = tuple(tuple(dict.fromkeys(s["wall_colour"] for s in slot)) for slot in SCENES)
+SCENE_REFERENCE_RULES = (
+    "Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. "
+    "Never use a previously generated mockup as the artwork source. "
+)
+SCENE_VISIBILITY_RULES = (
+    " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
+    "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "
+    "CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
+)
+
+
+def is_combat(context):
+    sport = f"{context.get('product_sport', '')} {context.get('selected_sport', '')}".casefold()
+    return any(word in sport for word in ("combat", "boxing", "mma", "ufc", "martial", "wrestling", "kickboxing", "muay thai"))
+
+
+def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
+    """Draw once against captured history; complete saved attributes never redraw."""
+    seed = f"{visuals[0]['resolved_seed']}|{context.get('market', '')}"
+    fully_saved = len(selections) == 3 and all(isinstance(s, dict) and all(s.get(k) for k in
+        ("scene_signature", "room_type", "wall_colour", "wall_finish", "lighting")) for s in selections)
+    construction = physical_realism.resolve(context.get("physical_product"))
+    chosen = [dict(s) for s in selections] if fully_saved else scene_library.select(seed, {**context, "frame_finish": construction.get("frame_finish", "")}, recent_fingerprints, selections)
+    glazing = str(construction.get("glazing", "")).casefold()
+    for index, (visual, scene) in enumerate(zip(visuals, chosen)):
+        saved = selections[index] if index < len(selections) and isinstance(selections[index], dict) else {}
+        scene.update({k: saved[k] for k in scene_library.SCENE_FIELDS if saved.get(k)})
+        for key in ("room_materials", "secondary_cue", "time_of_day"):
+            if saved.get(key):
+                scene[key] = saved[key]
+        if saved.get("wall_finish") and not saved.get("wall_material"):
+            scene["wall_material"] = saved["wall_finish"]
+        if saved.get("wall_colour") and not saved.get("wall_finish") and not saved.get("wall_material"):
+            scene["wall_finish"] = scene["wall_material"] = saved["wall_colour"]
+            scene["wall_colour_family"] = saved["wall_colour"]  # Do not mislabel an explicit override.
+        if saved.get("wall_colour") and not saved.get("wall_colour_family"):
+            match = next((w for w in scene_library.WALLS if w[0] == saved["wall_colour"]), None)
+            scene.update(wall_colour_family=match[1] if match else saved["wall_colour"],
+                         wall_visual_group=match[3] if match else "explicit colour override",
+                         wall_lightness=saved.get("wall_lightness") or (match[2] if match else "user override; lightness not classified"))
+        scene["scene_signature"] = scene_library.signature(scene)
+        scene["scene_near_signature"] = scene_library.signature(scene, near=True)
+        if "unglazed" in glazing or "no glazing" in glazing or glazing == "none":
+            reflection = "Verified unglazed: no glazing, pane or glazing reflection. Preserve surface texture and natural frame-edge highlights."
+        else:
+            material = construction.get("glazing") or "existing glazing, only if present in the original product"
+            reflection = (f"On {material}, a subtle but perceptible reflection from {scene['reflection_source']}: "
+                f"{scene['reflection_placement']}, consistent with camera/light even straight-on. "
+                "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane or call acrylic glass.")
+        scene["glazing_treatment"] = saved.get("glazing_treatment") or reflection
+        visual.update(scene)
+        visual["assigned_camera_angle"] = visual["camera_side"]
+        wall = f"{visual['wall_colour']} ({visual['wall_colour_family']}, {visual['wall_lightness']}); {visual['wall_finish']}"
+        visual.update(room_profile_key=("hallway_gallery", "minimal_art_wall", "collector_interior")[index],
+            room_profile=f"Room {index + 1}: {visual['room_type']}",
+            room_materials=saved.get("room_materials") or f"{wall}; {visual['primary_cue']}",
+            secondary_cue=saved.get("secondary_cue") or "no additional styling",
+            time_of_day=saved.get("time_of_day") or visual["lighting"],
+            atmosphere="restrained collector home; authentic residential materials",
+            shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one resolved architectural glimpse", "close product view with the resolved residential depth arrangement")[index],
+            physical_product=context.get("physical_product", {}))
+        visual["purpose"] = f"Image {index + 1}: {visual['room_type']}; {visual['camera_side']}"
+        visual["scene_brief"] = (
+            SCENE_REFERENCE_RULES +
+            f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}); spatial structure: {visual.get('spatial_family', 'as saved')}. "
+            f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
+            f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
+                "Premium collector hallway: close artwork, subtle visible passage depth, peripheral console, warm picture light balanced with daylight.",
+                "Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence.",
+                "Refined collector sitting-room setting: follow this resolved spatial arrangement with one peripheral seating anchor. Neither a hallway nor a nearly empty wall; never substitute a default side-opening composition.",
+            )[index] +
+            SCENE_VISIBILITY_RULES
+        )
+
+
+def camera_wall_rules(visual, *, compact=False):
+    if compact:
+        return f"""LOCKED CAMERA / ROOM / WALL RESOLUTION
+{SCENE_VERSION}
+Selected camera: {visual['camera_side']}. Keep verticals straight; never mirror the artwork.
+SCENE: {visual['scene_brief']}
+Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Camera distance determines prominence; never enlarge the physical product.
+VARIANT PRECEDENCE — MANDATORY: use this one scene and camera; saved selections take precedence. Never mirror artwork.
+Use only the exact selected headline and subline below. Pack-level fit selection is completed before this image call; do not pass alternatives or sibling copy into the call.
 {SCARCITY_RULE}"""
+    return f'''LOCKED CAMERA / ROOM / WALL RESOLUTION
+{SCENE_VERSION}
+Selected camera: {visual['camera_side']}.
+Resolve exactly ONE camera using only this assigned definition. Keep verticals straight and Never mirror artwork.
+SCENE: {visual['scene_brief']}
+Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and a modest calm margin above the footer. Keep furniture/architecture near the perimeter or deeper behind the artwork. Avoid wide room views, excessive empty wall, dominating furniture and distracting background brightness. Retain enough subtle context to read as a real home.
+VARIANT PRECEDENCE — MANDATORY
+Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Automatic wall palettes exclude red, pink, rose, salmon, peach and strongly orange; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
+Use only this image's exact selected headline and subline. Complete any pack-level fit substitution before generation; pass no sibling copy or alternative lists into the image call.
+Use neutral collector language only; never attach a sport name to collector labels.
+{SCARCITY_RULE}'''

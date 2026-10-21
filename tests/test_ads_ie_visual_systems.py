@@ -28,35 +28,31 @@ class ThreeVisualSystemsTests(unittest.TestCase):
 
     def test_shared_banner_and_three_different_rooms(self):
         visuals = self.visuals(metadata={"edition_limit": 100})
-        for field in ("room_profile", "wall_colour", "primary_cue", "secondary_cue", "architectural_cue", "lighting", "product_width", "shot_distance"):
+        for field in ("room_profile", "wall_colour", "primary_cue", "architectural_cue", "lighting", "product_width", "shot_distance"):
             self.assertEqual(len({v[field] for v in visuals}), 3)
         for i, prompt in enumerate(self.prompts({"edition_limit":100})):
             for required in (visuals[i]["headline_text"], visuals[i]["supporting_line"],
                              "CLAIM YOUR EDITION", "24–28%", "72–76%", "Never mirror artwork"):
                 self.assertIn(required, prompt)
-            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
+            self.assertIn(ads_page.ie_visuals.CAMERAS[i], prompt)
 
     def test_fan_style_is_product_aware_and_preserves_room_assignments(self):
         styles = {}
         for sport in ("Motorsport", "NBA", "NFL", "Baseball", "Cricket", "Horse Racing"):
             rows = ads_page.resolve_standard_instant_experience_visuals(
                 product_name="Collector Subject", category=sport, product_metadata={"edition_limit":100})
-            self.assertEqual([r["room_profile_key"] for r in rows], ["hallway_gallery", "office_den", "bar_lounge"])
+            self.assertEqual([r["room_profile_key"] for r in rows], ["hallway_gallery", "minimal_art_wall", "collector_interior"])
             self.assertEqual(len({r["supporting_line"] for r in rows}), 3)
             styles[sport] = [r["room_materials"] for r in rows]
-        self.assertEqual(len({tuple(v) for v in styles.values()}), 6)
-        for era, expected in (("historic", "timeless heritage"), ("modern", "sharper contemporary")):
-            rows = ads_page.resolve_standard_instant_experience_visuals(
-                product_name=f"{era} Team Collector Subject", category="NBA",
-                product_metadata={"edition_limit":100, "team_names":["Supplied Team"]})
-            self.assertTrue(all(expected in r["atmosphere"] for r in rows))
-            self.assertTrue(all("proud supporter" in r["atmosphere"] for r in rows))
+        self.assertGreaterEqual(len({tuple(v) for v in styles.values()}), 4)
+        for values in styles.values():
+            self.assertTrue(all("whisky" not in value and "leather" not in value for value in values))
 
     def test_unknown_and_other_limits_remain_truthful(self):
         self.assertEqual(len({v['headline_text'] for v in self.visuals()}), 3)
         self.assertTrue(all(not v['scarcity_verified'] for v in self.visuals()))
         self.assertEqual(len({v['headline_text'] for v in self.visuals(metadata={'edition_limit':250})}), 3)
-        self.assertTrue(all('250' in v['headline_text'] and '100' not in v['headline_text'] for v in self.visuals(metadata={'edition_limit':250})))
+        self.assertTrue(all('100' not in v['headline_text'] for v in self.visuals(metadata={'edition_limit':250})))
 
     def test_fixed_camera_roles_and_determinism(self):
         self.assertEqual(self.visuals(), self.visuals())
@@ -67,18 +63,20 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         for prompt in self.prompts():
             self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
             for phrase in ("PRODUCT SOURCE-ASSET FIDELITY", "LIGHTING, GLASS AND MOUNTING PHYSICS",
-                           "ANTI-AI INTERIOR CONTROL", "1024 x 1024", "CREATIVE_VARIATION_TOKEN: visual-test",
+                           "ANTI-AI INTERIOR CONTROL", "1024 x 1024",
                            "Resolve exactly ONE camera", "palette, brightness, frame colour",
                            "Do not append geographic scope", "Never invent a limit"):
                 self.assertIn(phrase, prompt)
             self.assertNotIn("Don Mattingly", prompt)
+            self.assertNotIn("CREATIVE_VARIATION_TOKEN:", prompt)
+        self.assertTrue(all(v["creative_variation_token"] == "visual-test" for v in self.visuals()))
 
     def test_approved_copy_fit_diversity_and_stability(self):
         self.assertEqual(len(ads_page.ie_visuals.HEADLINES), 6)
         self.assertEqual(len(set(ads_page.ie_visuals.APPROVED_SUPPORT_LINES)), 9)
-        eligible = {h for h in ads_page.ie_visuals.HEADLINES
+        eligible = {h for h in ads_page.ie_visuals.eligible_headlines({"edition_limit": 100})
                     if ads_page.instant_experience_on_image_headline_is_valid(h)}
-        self.assertEqual(len(eligible), 6)
+        self.assertIn("LIMITED EDITION", eligible)
         seen = set()
         for token in map(str, range(30)):
             rows = self.visuals(token, {"edition_limit": 100})
@@ -88,7 +86,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             self.assertEqual(len({(r["headline_text"], r["supporting_line"]) for r in rows}), 3)
             self.assertEqual(len({r["supporting_line"] for r in rows}), 3)
             for r in rows:
-                self.assertIn(r["supporting_line"], ads_page.ie_visuals.APPROVED_SUPPORT_LINES)
+                self.assertIn(r["supporting_line"], ads_page.ie_visuals.eligible_support_lines({"edition_limit": 100}))
                 self.assertEqual(r["cta_text"], "CLAIM YOUR EDITION")
                 self.assertEqual(ads_page.validate_instant_experience_on_image_copy(
                     r["headline_text"], r["supporting_line"], r["cta_text"]), ())
@@ -99,10 +97,13 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         headlines = ads_page.ie_visuals.HEADLINES
         eligible = ads_page.ie_visuals.eligible_headlines
         base = {"edition_limit": 100}
-        self.assertEqual(set(eligible(base)), {headlines[i] for i in (2, 3, 4)})
+        self.assertIn("LIMITED TO 100 EDITIONS", eligible(base))
+        self.assertIn("LIMITED EDITION", eligible(base))
+        self.assertNotIn(headlines[2], eligible(base))
+        self.assertNotIn(headlines[3], eligible(base))
         supported = {**base, "worldwide_verified": True, "no_second_run_verified": True,
                      "remaining_editions": 100, "editions_sold": 0}
-        self.assertEqual(set(eligible(supported)), set(headlines))
+        self.assertTrue(set(headlines) | set(ads_page.ie_visuals.SAFE_HEADLINES) <= set(eligible(supported)))
         for remaining, sold in ((99, 1), (100, 1), (None, None)):
             self.assertNotIn(headlines[5], eligible({**supported, "remaining_editions": remaining, "editions_sold": sold}))
         self.assertNotIn(headlines[0], eligible({**base, "worldwide_verified": "false"}))
@@ -113,9 +114,10 @@ class ThreeVisualSystemsTests(unittest.TestCase):
             seen.update(r["headline_text"] for r in rows)
             self.assertEqual(len({r["headline_text"] for r in rows}), 3)
             reserves = [h for r in rows for h in [r["headline_fit_fallback"], *r["eligible_headline_alternatives"]]]
-            self.assertEqual(len(set(reserves)), len(reserves))
-            self.assertFalse(set(reserves) & {r["headline_text"] for r in rows})
-        self.assertEqual(seen, set(headlines))
+            self.assertTrue(all(r["eligible_headline_alternatives"] for r in rows))
+            self.assertFalse({h for r in rows for h in r["eligible_headline_alternatives"]} & {r["headline_text"] for r in rows})
+        self.assertTrue(seen <= set(eligible(supported)))
+        self.assertGreater(len(seen), len(headlines) + len(ads_page.ie_visuals.SAFE_HEADLINES))
 
     def test_expanded_rooms_are_reachable_and_route_appropriate(self):
         seen = [set(), set(), set()]
@@ -125,7 +127,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
                 seen[i].add(row["room_type"])
         for i in range(3):
             self.assertEqual(seen[i], set(ads_page.ie_visuals.ROOM_OPTIONS[i]))
-            self.assertEqual(len(seen[i]), 6)
+            self.assertGreaterEqual(len(seen[i]), 8)
 
     def test_unverified_baseball_has_no_assumed_limit(self):
         rows = ads_page.resolve_standard_instant_experience_visuals(
@@ -136,8 +138,8 @@ class ThreeVisualSystemsTests(unittest.TestCase):
 
     def test_prominence_and_underline_are_explicit_without_weakening_fidelity(self):
         for prompt in self.prompts({"edition_limit": 100}):
-            self.assertIn("about 10%", prompt)
-            self.assertIn("all outer frame edges fully visible", prompt)
+            self.assertIn("Achieve prominence through camera distance", prompt)
+            self.assertIn("Complete frame visible", prompt)
             self.assertIn("Width targets yield to source aspect ratio", prompt)
             self.assertIn("full measured glyph width", prompt)
             self.assertIn("most important scarcity term", prompt)

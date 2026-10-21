@@ -210,6 +210,9 @@ async def setup(request):
     await actor(request)
     from .release import build_package, verify_archive
     package = os.environ.get("SPORTS_CAVE_RECORDER_WINDOWS_PACKAGE")
+    reviewed = ROOT / "recorder-releases/windows/SportsCaveTaskRecorder.zip"
+    if not package and reviewed.is_file():
+        package = str(reviewed)
     native = ROOT / "windows-screen-recorder/native/bin/DesktopRecorder.exe"
     if package:
         data = Path(package).read_bytes()

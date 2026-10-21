@@ -5,6 +5,8 @@ from ads_meta_contract import META_AD_URL_PARAMETERS
 
 def creation_instructions(text):
     text = str(text or '')
+    if 'ADS_IE_COMBINED_EXECUTION_V1' in text:
+        return text  # The executable master includes its exact destination/UTM setup.
     # The persisted prompt/CSV and Posting contract remain unchanged. Old drafts
     # pass through the same presentation boundary as newly generated prompts.
     text = re.sub(r'META URL PARAMETERS\s*\n\s*For every Meta ad created from this prompt,.*?Do not rewrite, localise, encode, shorten, remove, or add to these URL parameters\.', '', text, flags=re.S)

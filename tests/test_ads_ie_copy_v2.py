@@ -28,15 +28,18 @@ class CopyV2Tests(unittest.TestCase):
             with self.subTest(name=name):
                 r = self.record(name, sport, market, product_metadata=metadata)
                 text = r["master_prompt"]
-                for marker in (copy.VERSION, name, "LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS", "Empty ATHLETE_NAMES", "product truth", "verified rivalry/opposition", "Shop Now", ads.META_AD_URL_PARAMETERS):
+                for marker in (copy.VERSION, name, "INTERNAL DESCRIPTION PLAN", "Empty ATHLETE_NAMES", "Product truth", "verified rivalry/opposition", "Shop Now", ads.META_AD_URL_PARAMETERS):
                     self.assertIn(marker, text)
-                for stale in ("exactly nine", "three-row", "Description 1", "Description 2", "Description 3", "COPY VARIATIONS"):
+                for stale in ("exactly nine", "three-row", "COPY VARIATIONS"):
                     self.assertNotIn(stale, text)
-                grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME")[1]
+                grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES")[1]
                 self.assertEqual(grouped.count("\nAD COPY\n"), 3)
-                for cta in ("Claim Your Edition", "Secure Your Edition", "Own This Edition"):
+                for cta in ("Claim Your Edition",):
                     self.assertIn("CTA:\n" + cta, grouped)
-                self.assertIn("Limited to 100 worldwide.", text)
+                if metadata.get("edition_limit"):
+                    self.assertIn("Limited to 100 editions.", text)
+                else:
+                    self.assertIn("omit quantity and geographic scarcity", text)
                 if not metadata:
                     self.assertNotIn("LIMITED TO 100", grouped)
                     visuals = ads.resolve_standard_instant_experience_visuals(product_name=name, category=sport, product_metadata=metadata, variation_token="copy-v2")
@@ -46,9 +49,10 @@ class CopyV2Tests(unittest.TestCase):
         for sport in ("NBA", "NFL", "Cricket", "Motorsport", "Other"):
             for token in ("first", "second"):
                 result = copy.cues("Collector Subject", sport, "USA", token, {})
-                self.assertEqual([c["opening_hook_family"] for c in result],
-                                 ["legacy_standard", "framed_greatness", "choose_a_side"])
-                self.assertEqual(result, copy.cues("Collector Subject", sport, "USA", token, {}, recent=result))
+                self.assertEqual([c["description_role"] for c in result],
+                                 list(copy.ROLES))
+                self.assertEqual(result, copy.cues("Collector Subject", sport, "USA", token, {}))
+                self.assertEqual(len({c["opening_hook_family"] for c in result}), 3)
 
     def test_copy_history_accepts_old_and_current_visual_identities(self):
         args = ("Single Athlete", "Baseball", "USA", "seed", {})

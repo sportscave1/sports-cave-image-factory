@@ -1,12 +1,14 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Download JPG</title>
 <style>body{font:14px system-ui;margin:18px;color:#243145}h1{font-size:17px;margin:0 0 12px}a,button{font:inherit;padding:8px 12px;border:1px solid #ccd3dd;border-radius:6px;background:#fff;color:#174d92}small{display:block;margin-top:12px;color:#5c6470}.spin:before{content:'';display:inline-block;width:12px;height:12px;border:2px solid #ddd;border-top-color:#174d92;border-radius:50%;animation:spin 1s linear infinite;margin-right:8px}@keyframes spin{to{transform:rotate(360deg)}}</style></head>
-<body><h1>Download JPG</h1><p id="state" role="status" class="spin">Preparing JPG…</p><a id="download" hidden>Download JPG</a><button id="retry" hidden>Retry</button><small id="certification">Preview output unless supplier validation is confirmed.</small>
+<body><h1>Download JPG</h1><p id="state" role="status" class="spin">Preparing JPG…</p><a id="download" hidden>Download JPG</a><button id="retry" hidden>Retry</button><small id="certification">TEST / NOT PRINT READY unless existing supplier validation is confirmed. Download returns the archived original; previews are for viewing.</small>
+<details id="resolution" hidden><summary id="resolution-summary"></summary><p id="resolution-details"></p><small id="resolution-notes"></small></details>
 <script>
 const state=document.getElementById('state'),link=document.getElementById('download'),retry=document.getElementById('retry');
 const id=new URLSearchParams(location.search).get('allocation_id');let stopped=false,busy=false,job=null,ready=null,cancelDelivery=null;
 const requests=new Set();
 addEventListener('pagehide',()=>{stopped=true;for(const c of requests)c.abort();cancelDelivery?.();});
 function progress(text,spinning=true){state.className=spinning?'spin':'';state.textContent=text;}
+function resolutionInfo(info){if(!info)return;document.getElementById('resolution').hidden=false;document.getElementById('resolution-summary').textContent=info.output_status+' · '+info.summary;document.getElementById('resolution-details').textContent=info.details;document.getElementById('resolution-notes').textContent=(info.notes||[]).join(' ');}
 async function request(path,options={}){const c=new AbortController();requests.add(c);const timer=setTimeout(()=>c.abort(),20000);
  try{const r=await fetch(path,{credentials:'same-origin',...options,signal:c.signal});const j=await r.json();if(!r.ok)throw Error(j.error||'JPG preparation is unavailable.');return j;}
  catch(e){if(e.name==='AbortError'&&!stopped)throw Error('JPG preparation request timed out. Retry to check the same job.');throw e;}
@@ -36,7 +38,7 @@ async function begin(){
    const suffix=query+'&job_id='+encodeURIComponent(job.job_id),deadline=performance.now()+360000;
    while(!stopped&&performance.now()<deadline){const r=await request('/api/auto-editions/state'+suffix);
     if(r.status==='Blocked')throw Error('JPG preparation is blocked. Ask an administrator to review this design.');
-    if(r.status==='Ready'){ready=r;document.getElementById('certification').textContent=r.test_only===false?'Supplier-validated output. Order fulfilment requires separate authorisation.':'Preview output. Supplier validation is required for production printing.';link.href='/api/auto-editions/file'+suffix;link.download=r.filename;link.hidden=false;break;}
+    if(r.status==='Ready'){ready=r;resolutionInfo(r.resolution_info);document.getElementById('certification').textContent=r.resolution_info?.output_status==='TEST / NOT PRINT READY'?'TEST / NOT PRINT READY. Archived original download; supplier validation remains required.':r.test_only===false?'Supplier-validated output. Order fulfilment requires separate authorisation.':'TEST / NOT PRINT READY. Archived original download; supplier validation remains required.';link.href='/api/auto-editions/file'+suffix;link.download=r.filename;link.hidden=false;break;}
     await new Promise(resolve=>setTimeout(resolve,750));
    }
    if(stopped)return;if(!ready)throw Error('JPG preparation is taking longer than expected. Retry to check the same job.');

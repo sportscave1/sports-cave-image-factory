@@ -388,7 +388,7 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0,uplo
 def package_finished(row,ctx):
     """A crash after Photoshop/validation must not rerender a verified finished set."""
     import auto_editions as ae
-    from auto_editions_onboarding import preparation_scale
+    from auto_editions_preparation_geometry import matches
     from auto_editions_package import MAX_PACKAGE_BYTES
     if row.get('upload_protocol')==1 and row.get('generation')!=__import__('companion_package_identity').generation():return None
     for folder in row['folder'].glob('prepared*'):
@@ -397,7 +397,7 @@ def package_finished(row,ctx):
             manifest=json.loads((folder/'manifest.json').read_text())
             if (manifest['source']!=ctx['source'] or manifest['edition_total']!=ctx['total']
                 or not manifest.get('confirmed_roles') or
-                manifest.get('preparation_geometry',{}).get('scale',1)!=preparation_scale(manifest.get('source_dimensions',manifest['dimensions']))
+                not matches(manifest,ctx)
                 or (ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id'])):continue
             ae.validate_manifest(manifest)
             from auto_editions_artwork_recovery import verify_package
@@ -437,10 +437,9 @@ def find_reusable_package(ctx,generation=None):
             import re
             if not re.fullmatch('[a-f0-9]{64}',str(colour.get('icc_sha256',''))) or colour.get('pixels_converted') is not False:continue
             if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:continue
-            from auto_editions_onboarding import preparation_scale
-            expected=preparation_scale(manifest.get('source_dimensions',manifest.get('dimensions',[])))
+            from auto_editions_preparation_geometry import matches
             if (manifest.get('source')==ctx['source'] and manifest.get('edition_total')==ctx['total']
-                    and manifest.get('preparation_geometry',{}).get('scale',1)==expected):
+                    and matches(manifest,ctx)):
                 return package
         except (OSError,ValueError,KeyError,zipfile.BadZipFile):continue
     return None
@@ -821,7 +820,8 @@ def prepare_worker(key,roles,scale=1):
         boundary(row)
         build_started=time.monotonic()
         build(row['folder']/'input.psd',output,ctx['source'],number_layer=roles['number'],
-              plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'],scale=scale)
+              plaque_layer=roles['plaque'],total=ctx['total'],reference_number=ctx['number'],scale=scale,
+              preparation_context=ctx)
         row.setdefault('timings',{})['prepare_validate_seconds']=round(time.monotonic()-build_started,3)
         boundary(row)
         if (output/'timings.json').exists():row['timings'].update(json.loads((output/'timings.json').read_text()))

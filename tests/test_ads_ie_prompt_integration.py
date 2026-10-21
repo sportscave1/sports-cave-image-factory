@@ -34,26 +34,27 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
     def assert_three_formats(self, text, limit=100, *, clipboard=False):
         for old in ("PRIVATE GALLERY", "SMART HYBRID", "GROUP 3 — THE CAVE", "FOR THE ROOM THAT REMEMBERS.", "full-height right graphic column"):
             self.assertNotIn(old, text)
-        grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE ROUTE AT A TIME", 1)[1]
+        grouped = text.split("GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES", 1)[1]
         groups = re.findall(r"^GROUP ([123]) — ([^\n]+)\n\nIMAGE GENERATION PROMPT\n(.*?)\nAD COPY\n", grouped, re.M | re.S)
         self.assertEqual([label for _, label, _ in groups], [
             "PREMIUM SCARCITY — RIGHT ANGLE", "PREMIUM SCARCITY — STRAIGHT ON", "PREMIUM SCARCITY — LEFT ANGLE"])
         footer = ads_page.build_instant_experience_fixed_opaque_footer_rules()
-        self.assertEqual(text.count(footer), 3)
+        self.assertEqual(text.count(footer), 1)
         for i, (_, _, prompt) in enumerate(groups):
-            self.assertIn(footer, prompt)
-            if limit == 100:
-                self.assertTrue(any("HEADLINE: " + h in prompt for h in ads_page.ie_visuals.HEADLINES))
-            else:
-                self.assertTrue(any("HEADLINE: " + h.replace("100", str(limit)) in prompt for h in ads_page.ie_visuals.HEADLINES))
-            self.assertTrue(any("SUPPORTING LINE: " + line in prompt for line in ads_page.ie_visuals.APPROVED_SUPPORT_LINES))
+            self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
+            headline = re.search(r"^HEADLINE: (.+)$", prompt, re.M).group(1)
+            support = re.search(r"^SUPPORTING LINE: (.+)$", prompt, re.M).group(1)
+            context = {"edition_limit": limit}
+            self.assertIn(headline, ads_page.ie_visuals.eligible_headlines(context))
+            self.assertIn(support, ads_page.ie_visuals.eligible_support_lines(context))
+            self.assertTrue(ads_page.ie_visuals.coherent_pair(headline, support))
             self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))
-            self.assertIn("VARIANT PRECEDENCE — MANDATORY", prompt)
+            self.assertIn("explicit user selections remain authoritative", text)
             self.assertIn("CLAIM YOUR EDITION", prompt)
-            self.assertIn(("RIGHT ANGLE", "CENTRE / STRAIGHT-ON", "LEFT ANGLE")[i], prompt)
+            self.assertIn(ads_page.ie_visuals.CAMERAS[i], prompt)
             self.assertIn(f"Room {i+1}", prompt)
-            self.assertIn("PRODUCT LOCK — ABSOLUTE", prompt)
-            self.assertIn("Do not append geographic scope to any other claim", prompt)
+            self.assertIn("PRODUCT LOCK — ABSOLUTE", text)
+            self.assertIn("Do not append geographic scope to any other claim", text)
         self.assertEqual(grouped.count("\nAD COPY\n"), 3)
         self.assertNotIn("COPY VARIATIONS", grouped)
         self.assertNotRegex(text.casefold(), r"\b(?:motorsport|basketball|football|cricket|baseball|sports|racing) collectors\b")

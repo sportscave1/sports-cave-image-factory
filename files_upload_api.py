@@ -2685,7 +2685,9 @@ async def attach_product_psd(request: Request):
         record = await run_in_threadpool(STORE.attach,pid,metadata,user,
                                         expected_file_id=payload.get('expected_file_id') or '',
                                         confirm_replace=payload.get('confirm_replace') is True,
-                                        confirm_mismatch=payload.get('confirm_mismatch') is True)
+                                        confirm_mismatch=payload.get('confirm_mismatch') is True,
+                                        **({'manual_takeover_operation':payload['manual_takeover_operation']}
+                                           if payload.get('manual_takeover_operation') else {}))
         # PostgreSQL returns datetime values. The mapping transaction has already
         # committed here; a JSON serialization failure must not report it as an
         # unsuccessful attachment and encourage a duplicate retry.
@@ -2694,7 +2696,9 @@ async def attach_product_psd(request: Request):
     except PermissionError as error:
         return _response_error(FilesUploadError(str(error),status_code=403))
     except ValueError as error:
-        return _response_error(FilesUploadError(str(error),status_code=409))
+        return _response_error(FilesUploadError(str(error),status_code=409,
+            details=({'manual_takeover_operation':error.manual_takeover_operation}
+                     if getattr(error,'manual_takeover_operation',None) else {})))
     except Exception as error:
         return _response_error(error)
 

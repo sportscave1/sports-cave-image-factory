@@ -109,7 +109,7 @@ class PostgresMappings:
         cur.execute('INSERT INTO public.product_psd_mapping_audit(shopify_product_gid,action,actor_id,before_state,after_state) VALUES(%s,%s,%s,%s::jsonb,%s::jsonb)',
                     (pid, action, actor, json.dumps(before, default=str) if before else None, json.dumps(after, default=str)))
 
-    def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False, upload_operation=None):
+    def attach(self, pid, metadata, actor, *, expected_file_id='', confirm_replace=False, confirm_mismatch=False, upload_operation=None, manual_takeover_operation=None):
         import psd_directory as psd
         import os_accounts
         if not os_accounts.can_attach_missing_psd(actor):
@@ -126,6 +126,10 @@ class PostgresMappings:
             raise ValueError('An approved main-folder PSD and valid product are required.')
         fid = metadata['id']
         with self.connect() as conn, conn.cursor() as cur:
+            takeover = False
+            if not upload_operation:
+                from product_upload_manual_takeover import prepare
+                takeover = prepare(cur, pid, metadata, actor, manual_takeover_operation)
             cur.execute('LOCK TABLE public.product_psd_mappings IN SHARE ROW EXCLUSIVE MODE')
             product = self.product(cur, pid)
             if psd.filename_key(metadata['name'][:-4]) not in psd.title_filename_keys(product['product_title']) and confirm_mismatch is not True:
@@ -152,7 +156,7 @@ class PostgresMappings:
                 raise PermissionError('Only an administrator can replace an existing PSD mapping.')
             if (before or {}).get('dropbox_file_id', '') != expected_file_id:
                 raise MappingConflict('Mapping changed while selecting. Reopen the picker.')
-            if before and before['dropbox_file_id'] == fid and before.get('source') == 'manual':
+            if before and before['dropbox_file_id'] == fid and before.get('source') == 'manual' and not takeover:
                 return before
             if before and confirm_replace is not True:
                 raise MappingConflict('Replacing an existing mapping requires administrator confirmation.')
@@ -164,7 +168,13 @@ class PostgresMappings:
             cur.execute("INSERT INTO public.product_psd_mappings(shopify_product_gid,dropbox_file_id,file_path,namespace_path,source,actor_id) VALUES(%s,%s,%s,%s,'manual',%s) ON CONFLICT(shopify_product_gid) DO UPDATE SET dropbox_file_id=EXCLUDED.dropbox_file_id,file_path=EXCLUDED.file_path,namespace_path=EXCLUDED.namespace_path,source='manual',actor_id=EXCLUDED.actor_id,updated_at=now() RETURNING *",
                         (pid, fid, metadata.get('path_display') or metadata.get('path_lower'), metadata.get('namespace_path') or '', actor_id))
             after = _record(cur.fetchone())
-            self._audit(cur, pid, 'replace' if before else 'attach', actor_id, before, after)
+            if takeover:
+                cur.execute('SELECT dropbox_file_id,file_path FROM product_psd_mappings WHERE shopify_product_gid=%s', (pid,))
+                saved = cur.fetchone()
+                if not saved or saved['dropbox_file_id'] != fid or saved['file_path'] != metadata['path_display']:
+                    raise MappingConflict('Manual mapping could not be verified; takeover was rolled back.')
+            audited = dict(after, manual_takeover_operation=str(manual_takeover_operation)) if takeover else after
+            self._audit(cur, pid, 'replace' if before else 'attach', actor_id, before, audited)
             # Add and its preparation checkpoint commit together. Older schemas
             # keep the existing mapping behavior during a rolling deployment.
             cur.execute("SELECT to_regclass('public.auto_edition_onboarding') AS name")

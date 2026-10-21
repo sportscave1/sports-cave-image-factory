@@ -80,6 +80,8 @@ def set_product_url(app_test, value="https://sportscave.com.au/products/six-laps
 
 
 def visual_contract(prompt):
+    if ads_page.ADS_IE_COMBINED_EXECUTION_VERSION in prompt:
+        return prompt
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
     return prompt[prompt.index(marker) :]
 
@@ -144,7 +146,11 @@ def instant_experience_csv_notes():
                     "description_key": description_variant["key"],
                     "description_label": description_variant["label"],
                     "primary_text": (
-                        f"{concept['display_name']} variation {variation}, first line.\n"
+                        ("This isn’t just wall art. It’s the name you back.\n" if concept_index == 0 else "") +
+                        f"{concept['display_name']} variation {variation}, first line.\n" +
+                        ("The name means years of loyalty and a collector identity that lasts beyond any result. ",
+                         "Recall the anticipation, the atmosphere and the feeling behind this artwork's depicted moment. ",
+                         "A specific detail gives knowledgeable fans a different way into the subject's significance. ")[concept_index] +
                         "Second line with \"quotes\", apostrophe’s, ampersand & emoji 🏁. "
                         f"{ads_page.INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]}"
                     ),
@@ -5887,22 +5893,19 @@ PRIMARY TEXT VARIATIONS
             1,
         )
         for marker in image_markers:
-            self.assertEqual(contract.count(marker), 3, marker)
+            shared = marker in (ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1, ads_page.SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2, SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER)
+            self.assertEqual(contract.count(marker), 1 if shared else 0, marker)
         restored_effects = (
-            "clear gallery-style glass that is always visible",
-            "approximately 8-15% of the glass at approximately 3-6% opacity",
-            "stop at the inner frame edge",
-            "narrow contact shadow, a softer secondary wall shadow and a slightly stronger shadow beneath the frame",
-            "premium natural side lighting around 4000-4700K",
-            "uniform black drop shadow",
-            "glass is missing, unrealistic",
-            "mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing",
-            "premium professional interior photography",
+            "source-matched moulding",
+            "narrow contact shadows and soft directional secondary shadows",
+            "visible but controlled environmental reflections",
+            "Never add glazing to known unglazed products",
+            "One coherent interior photograph",
         )
         for expected in restored_effects:
-            self.assertEqual(contract.count(expected), 3, expected)
+            self.assertEqual(contract.count(expected), 1, expected)
         self.assertEqual(contract.count("\nAD COPY\n"), 3)
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V10 THREE PREMIUM ROOMS", contract)
+        self.assertIn(ads_page.ADS_IE_COMBINED_EXECUTION_VERSION, contract)
 
     def test_instant_experience_route_wording_and_typography_are_route_specific(self):
         prompt = ads_page.build_ads_prompt(
@@ -5924,18 +5927,14 @@ PRIMARY TEXT VARIATIONS
             contract[route_starts[2] :],
         ]
 
-        expected = (
-            ("premium_scarcity_right", "A statement for your collection."),
-            ("premium_scarcity_front", "Made for serious collectors."),
-            ("premium_scarcity_left", "For collectors who know why it matters."),
-        )
+        expected = tuple((route, None) for route in ("premium_scarcity_right", "premium_scarcity_front", "premium_scarcity_left"))
         for section, (route_key, fomo) in zip(sections, expected):
             self.assertIn(f"Route key: {route_key}", section)
-            self.assertIn(fomo, section)
+            self.assertTrue(any("SUPPORTING LINE: " + line in section for line in ads_page.ie_visuals.eligible_support_lines({})))
             self.assertTrue(any("HEADLINE: " + h in section for h in ads_page.ie_visuals.eligible_headlines({})))
-            self.assertIn("Exact resolved CTA: CLAIM YOUR EDITION", section)
-            self.assertIn("place the gold underline directly beneath the measured glyph bounds", section)
-            self.assertIn("Never place Primary Text on the image.", section)
+            self.assertIn("CTA: CLAIM YOUR EDITION", section)
+            self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
+            self.assertIn("Never place the long description or Meta headline inside the image.", ads_page.build_instant_experience_shared_template())
             self.assertNotIn("LIMITED TO 100 WORLDWIDE", section)
 
     def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):

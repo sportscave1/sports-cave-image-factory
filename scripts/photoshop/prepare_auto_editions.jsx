@@ -124,7 +124,9 @@ var SCAutoEditionsPreparation = (function () {
                 var bottom = null, visibility = [];
                 for (var v=0;v<doc.layers.length;v++) {
                     visibility.push(doc.layers[v].visible);
-                    if(doc.layers[v].visible)bottom=doc.layers[v];
+                    // The exact reviewed obsolete number is removed on the staged copy.
+                    // It cannot be an artwork/background candidate. All pixel proofs still apply.
+                    if(doc.layers[v].visible && doc.layers[v]!==hidden)bottom=doc.layers[v];
                 }
                 var candidate = null;
                 if(scale!==1 && bottom && bottom!==layer && bottom!==plaque && bottom.typename==="ArtLayer" && !bottom.isBackgroundLayer) {
@@ -152,13 +154,19 @@ var SCAutoEditionsPreparation = (function () {
                 savePNG(doc,"resize-original.png");
             }
             timings.layer_inspection_ms = new Date().getTime()-tick; tick = new Date().getTime();
-            if (scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
-            if (sourceDimensions[0]*sourceDimensions[1]*scale*scale > 95000000)
+            var target = r.target_dimensions || [sourceDimensions[0]*scale,sourceDimensions[1]*scale];
+            if (!r.preparation_plan && scale !== 1 && scale !== 2 && scale !== 3 && scale !== 4) throw Error("unsupported_preparation_scale");
+            if (target.length!==2 || target[0]!==Math.floor(target[0]) || target[1]!==Math.floor(target[1])
+                || target[0]<sourceDimensions[0] || target[1]<sourceDimensions[1]
+                || target[1]!==Math.floor(sourceDimensions[1]*target[0]/sourceDimensions[0]+0.5))
+                throw Error("nonproportional_preparation_target");
+            if (target[0]*target[1] > 95000000)
                 throw Error("canvas_exceeds_worker_limit");
             // Resize the layered staged document, never the source or another template.
             // Photoshop rerenders editable text/shapes; raster layers use bicubic smoother.
-            if (scale !== 1) timed("layered_resize_ms",function(){doc.resizeImage(UnitValue(sourceDimensions[0]*scale,"px"),
-                UnitValue(sourceDimensions[1]*scale,"px"), null, ResampleMethod.BICUBICSMOOTHER);});
+            if (scale !== 1) timed("layered_resize_ms",function(){doc.resizeImage(UnitValue(target[0],"px"),
+                r.preparation_plan && scale!==Math.floor(scale) ? null : UnitValue(target[1],"px"), null, ResampleMethod.BICUBICSMOOTHER);});
+            if(doc.width.as("px")!==target[0] || doc.height.as("px")!==target[1])throw Error("preparation_target_rounding_changed");
             // Keep the untouched composite as an independent outside-number proof.
             if(hidden){savePNG(doc,"uncorrected.png");hidden.visible=false;}
             timed("original_export_ms",function(){savePNG(doc, "original.png");});
@@ -232,9 +240,11 @@ var SCAutoEditionsPreparation = (function () {
                 timings.completed_number_count=number;
             }
             timings.numbering_assets_ms = new Date().getTime()-tick;
+            var geometry={scale:scale,method:scale===1?"native":"photoshop_layered_bicubic_smoother",
+                    supplier_verified:false,aspect_preserved:true,quality_approval_required:scale!==1};
+            if(r.preparation_plan)geometry.plan=r.preparation_plan;
             write({timings:timings,dimensions:[w,h],source_dimensions:sourceDimensions,upscaled:scale!==1,
-                preparation_geometry:{scale:scale,method:scale===1?"native":"photoshop_layered_bicubic_smoother",
-                    supplier_verified:false,aspect_preserved:true,quality_approval_required:scale!==1},
+                preparation_geometry:geometry,
                 source_plaque_bounds:sourcePlaqueBounds,
                 edition_total:total,number_region:region,original_number_bounds:originalBounds,
                 plaque_bounds:plaqueBounds,original_text:text,number_layer_name:r.number_layer_name,
