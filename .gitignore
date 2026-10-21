@@ -55,3 +55,6 @@ htmlcov/
 
 # Isolated SEO Phase 1 runtime and dependency target
 .local/
+
+# Isolated recorder native build and policy-check outputs.
+/.local-data/

@@ -39,6 +39,9 @@
         min-height: 0;
         overflow: hidden;
       }
+      .app:has(#editionResolution:not([hidden])) {
+        grid-template-rows: auto auto auto minmax(0, 1fr) auto 27px;
+      }
       .app-title {
         align-items: center;
         background: #fafafa;
@@ -763,6 +766,10 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
         <div class="drop-overlay" id="dropOverlay" role="status">Drop files to upload to this folder</div>
         <div class="sc-loading-only" id="loadingIndicator" role="status" aria-label="Loading"><span class="sc-loading-spinner" aria-hidden="true"></span></div>
       </div>
+      <details id="editionResolution" hidden style="flex:none;padding:6px 10px;max-height:180px;overflow:auto;font:12px system-ui;overflow-wrap:anywhere">
+        <summary id="editionResolutionSummary"></summary><p id="editionResolutionDetails"></p><small id="editionResolutionNotes"></small>
+        <p>Download Original retains the checksum-verified archived JPEG bytes. Viewer previews are for viewing. This browser cannot copy a native file list; download the original for Windows file copying.</p>
+      </details>
       <footer class="status-bar"><span id="itemCount"></span><span id="selectionCount"></span></footer>
     </div>
 
@@ -830,6 +837,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       const query = new URLSearchParams(location.search);
       const linkedProduct = query.get('psd_product_gid');
       let savedEditionId = null;
+      let savedEditionResolution = null;
       const requestedRelativePath = query.get("relative_path") || "";
       const state = {
         rootPath: "",
@@ -1373,6 +1381,15 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       }
 
       function renderStatus() {
+        const resolution = document.getElementById('editionResolution');
+        const selection = selectedItems();
+        resolution.hidden = !(savedEditionId && selection.length === 1 && selection[0].id === savedEditionId);
+        if (!resolution.hidden) {
+          const info = savedEditionResolution || {summary:'Resolution not verified',details:'Legacy output dimensions and source/scaling provenance are unknown.',notes:[],output_status:'Output approval unknown'};
+          document.getElementById('editionResolutionSummary').textContent = info.output_status + ' · ' + info.summary;
+          document.getElementById('editionResolutionDetails').textContent = info.details;
+          document.getElementById('editionResolutionNotes').textContent = (info.notes || []).join(' ');
+        }
         elements.loadingIndicator.hidden = !(state.loading && !state.items.length);
         if (state.loading && !state.items.length) {
           elements.itemCount.textContent = "";
@@ -3272,7 +3289,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
       async function openSavedEdition() {
         const selectionRequest=++editionSelectionRequest;
         const navigation = ++state.navigationToken;
-        abortStaleFolderRequests(); clearSelection(); savedEditionId=null; state.restorePosition=null;
+        abortStaleFolderRequests(); clearSelection(); savedEditionId=null; savedEditionResolution=null; state.restorePosition=null;
         try {
           const target = await apiJson('/api/auto-editions/location?allocation_id='+encodeURIComponent(query.get('edition_allocation'))+'&job_id='+encodeURIComponent(query.get('edition_job')||''));
           if (selectionRequest!==editionSelectionRequest || navigation!==state.navigationToken) return;
@@ -3283,7 +3300,7 @@ html[data-sc-table-host="files"] :is(.view-details,.view-list) .file-item.select
           state.searchByPath[payload.current_path]='';
           state.pinnedItem=item; state.pinnedFolder=payload.current_path;
           applyFolderPayload(payload); state.loading=false; state.loadingMore=true;
-          renderAll(); savedEditionId=item.id; setSingleSelection(item.path); revealItem(item.path,true);
+          renderAll(); savedEditionId=item.id; savedEditionResolution=target.resolution_info; setSingleSelection(item.path); revealItem(item.path,true);
           document.body.dataset.editionSelected=target.file_id;
           showToast('Saved edition JPG selected - TEST / NOT PRINT READY. Use Download for the full-resolution file.',{duration:7000});
           // The exact file is already usable while the containing folder arrives.

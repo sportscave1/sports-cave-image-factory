@@ -156,8 +156,11 @@ def validate_manifest(manifest):
     dimensions(manifest.get('source_dimensions'))
     if manifest.get('source_dimensions') != canvas and manifest.get('upscaled') is not True:
         raise ValueError('Resampling must be disclosed explicitly.')
-    if manifest.get('upscaled') is True:
-        geometry = manifest.get('preparation_geometry') or {}
+    geometry = manifest.get('preparation_geometry') or {}
+    if geometry.get('plan'):
+        from auto_editions_preparation_geometry import validate
+        validate(manifest['source_dimensions'], canvas, geometry)
+    elif manifest.get('upscaled') is True:
         scale = geometry.get('scale')
         if (type(scale) is not int or scale not in (2, 3, 4)
                 or geometry.get('method') != 'photoshop_layered_bicubic_smoother'

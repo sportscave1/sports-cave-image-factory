@@ -1,16 +1,15 @@
 """Same-origin OS panel and outbound helper transport; no browser control on Render."""
 import asyncio
-import io
 import json
 import os
 import time
-import zipfile
 from collections import defaultdict, deque
 from pathlib import Path
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse, JSONResponse, Response
 from .relay_store import Relay
 from .schema import Invalid
+from .state_updates import task_changes
 
 ROOT = Path(__file__).resolve().parents[1]
 HEADERS = {"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
@@ -102,15 +101,32 @@ async def state(request):
     signal=event("state:"+device_id)
     rows=await run_in_threadpool(relay(request).devices,str(user["id"]))
     selected=next((d for d in rows if d["id"]==device_id),None)
-    if selected and request.query_params.get("after")==str(selected["seq"]):
+    if selected and request.query_params.get("after")==str(selected["seq"]) and request.query_params.get("wait")!="0":
         try: await asyncio.wait_for(signal.wait(),timeout=20)
         except asyncio.TimeoutError: pass
         await actor(request)
         rows=await run_in_threadpool(relay(request).devices,str(user["id"]))
-    if selected and request.query_params.get("compact")=="1":
-        rows=[{k:v for k,v in row.items() if k!="state"} if row["id"]==device_id and
-              request.query_params.get("after")==str(row["seq"]) else row for row in rows]
-    return JSONResponse({"devices":rows},headers=HEADERS)
+    compact=request.query_params.get("compact")
+    if selected and compact in {"1","2"}:
+        condensed=[]
+        for row in rows:
+            if row["id"]!=device_id:
+                condensed.append({k:v for k,v in row.items() if k!="state"} if compact=="2" else row);continue
+            metadata={k:v for k,v in row.items() if k!="state"}
+            if request.query_params.get("after")==str(row["seq"]):
+                condensed.append(metadata)
+            elif compact=="2" and request.query_params.get("after")==str(selected["seq"]):
+                # The held poll's initial snapshot is the exact client baseline.
+                # No per-client history/cache is required; missed baselines fall
+                # back to full state, including across server restarts.
+                previous=selected["state"];current=row["state"]
+                metadata["state_delta"]={"base_seq":selected["seq"],
+                    "changes":{k:v for k,v in current.items() if k!="tasks" and previous.get(k)!=v},
+                    "tasks":task_changes(previous.get("tasks",[]),current.get("tasks",[]))}
+                condensed.append(metadata)
+            else:condensed.append(row)
+        rows=condensed
+    return JSONResponse({"devices":rows,"compact":2},headers=HEADERS)
 
 @bounded
 async def pairing(request):
@@ -192,14 +208,20 @@ async def exchange(request):
 @bounded
 async def setup(request):
     await actor(request)
-    stream=io.BytesIO()
-    with zipfile.ZipFile(stream,"w",zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted((ROOT/"task_recorder").glob("*")):
-            if path.is_file() and path.suffix in {".py",".js",".css",".html",".txt"}:
-                archive.write(path,"task_recorder/"+path.name)
-        archive.write(ROOT/"scripts/Install-TaskRecorder.ps1","Install.ps1")
-        archive.writestr("Install.cmd",'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install.ps1"\r\nif errorlevel 1 pause\r\n')
-    return Response(stream.getvalue(),media_type="application/zip",headers={**HEADERS,"Content-Disposition":'attachment; filename="SportsCaveTaskRecorder.zip"'})
+    from .release import build_package, verify_archive
+    package = os.environ.get("SPORTS_CAVE_RECORDER_WINDOWS_PACKAGE")
+    reviewed = ROOT / "recorder-releases/windows/SportsCaveTaskRecorder.zip"
+    if not package and reviewed.is_file():
+        package = str(reviewed)
+    native = ROOT / "windows-screen-recorder/native/bin/DesktopRecorder.exe"
+    if package:
+        data = Path(package).read_bytes()
+        verify_archive(data)
+    elif native.is_file():
+        data = await run_in_threadpool(build_package, ROOT, native)
+    else:
+        return JSONResponse({"error":"The reviewed Windows recorder package is not available yet."},status_code=503,headers=HEADERS)
+    return Response(data,media_type="application/zip",headers={**HEADERS,"Content-Disposition":'attachment; filename="SportsCaveTaskRecorder.zip"'})
 
 ROUTES = (
  ("/task-recorder/panel",panel,("GET",)),

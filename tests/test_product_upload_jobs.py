@@ -87,14 +87,14 @@ def test_generate_callback_uses_latest_form_values_without_doing_image_work(monk
     def button(label,**kwargs):
         if label=='Generate mockups':callbacks['generate']=kwargs['on_click']
         return False
-    st=SimpleNamespace(session_state={'_product_upload_active':'one'},subheader=Mock(),caption=Mock(),
+    st=SimpleNamespace(session_state={'_product_upload_active':'one'},subheader=Mock(),caption=Mock(),html=Mock(),
         container=lambda **kw:__import__('contextlib').nullcontext(),
         text_input=lambda *a,**k:k.get('value',''),selectbox=lambda *a,**k:'Football',button=button,error=Mock())
     app=SimpleNamespace(_mockups_result=lambda:None,alphabetize_options=lambda values,**k:values,
         SPORT_OPTIONS=['Football'],get_sport_category=lambda value,custom:value,BASE_DIR=Path('.'),
         MOCKUPS_GENERATION_SEMAPHORE=threading.Semaphore(1),build_mockup_final_prompt_items=Mock())
     row=dict(id='one',data=dict(name='Original.psd',workflow_version=3,server_artwork={'state':'Ready'},source={'content_hash':'a'*64}))
-    submit=Mock();monkeypatch.setattr(jobs,'generate',submit);monkeypatch.setattr(jobs.JOBS,'snapshot',lambda *a:None)
+    submit=Mock(return_value=dict(token='submitted-job',state='Queued'));monkeypatch.setattr(jobs,'generate',submit);monkeypatch.setattr(jobs.JOBS,'snapshot',lambda *a:None)
     import product_upload_sport
     selection=dict(id='id:football',sport='Football',path='/Team/product-images/Football')
     monkeypatch.setattr(product_upload_sport,'render_selector',lambda *a,**k:selection)
@@ -109,6 +109,8 @@ def test_generate_callback_uses_latest_form_values_without_doing_image_work(monk
     callbacks['generate']()
     assert submit.call_args.args[3]=='Current product title'
     assert submit.call_args.args[4]=='Football'
+    acknowledgement=st.session_state['product-upload-generation-ack-one']
+    assert acknowledgement['job']=='submitted-job' and acknowledgement['name']=='Current product title'
     focus=st.session_state['product-upload-generation-focus-one']
     assert focus
     submit.reset_mock()
