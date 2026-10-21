@@ -167,7 +167,7 @@ class RefreshPlanTests(unittest.TestCase):
             self.assertTrue(all(style[k] for k in ('family','architecture','wall_hue','wall_value','wall_material','furniture_materials','lighting','context','exclusions')))
         for i in range(50):
             self.assertNotIn('18', [s['id'] for s in plan.select_styles(i, category='Football')])
-        self.assertEqual(len(plan.select_styles('motor', category='Motorsport', eligible_ids=['18','01','02'])), 3)
+        self.assertEqual(len(plan.select_styles('motor', category='Motorsport', eligible_ids=['18','23','05'])), 3)
 
     def test_ie_three_distinct_styles_and_no_literal_room_lock(self):
         value = fixture('Instant Experience'); selected = value['creative_refresh_context']['refresh_plan']['styles']

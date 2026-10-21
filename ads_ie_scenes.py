@@ -14,27 +14,37 @@ SCENE_FIELDS = (
 )
 
 # Colour and construction are authored together, not independently randomised.
+ROOM_STYLE = (
+    "Sports Cave premium sports collector / man cave feel with subtle rugged character. "
+    "Automatic walls use only charcoal, graphite, smoky grey, deep navy, midnight blue, heritage green, "
+    "muted olive, earthy taupe or weathered stone, in compatible shades of matte painted brick, textured "
+    "plaster, concrete, natural stone or aged timber. Keep each scene's existing composition; give the "
+    "resolved homes different colour families and wall finishes, mixing dark, mid-tone and lighter earthy "
+    "shades. Rotate compatible combinations through the available history on fresh generations/refreshes; "
+    "never assign a colour permanently to an ad slot. Keep the edition clearly visible through tonal "
+    "separation and coherent light. No excessive props, artificial grunge or three identical dark rooms."
+)
 WALLS = (
-    ("warm ivory", "warm ivory and chalk", "light", "ivory", "smooth matte paint"),
-    ("chalk", "warm ivory and chalk", "light", "ivory", "restrained painted wall panelling"),
-    ("pale limestone", "pale limestone and sand", "light", "stone", "honed limestone"),
-    ("pale sand", "pale limestone and sand", "light", "stone", "fine microcement"),
-    ("mushroom", "mushroom and smoked taupe", "mid", "taupe", "fine mineral plaster"),
-    ("smoked taupe", "mushroom and smoked taupe", "mid", "taupe", "smooth matte paint"),
-    ("mineral grey", "mineral grey and slate", "mid", "grey", "fine microcement"),
-    ("slate", "mineral grey and slate", "mid", "grey", "smooth matte paint"),
-    ("graphite", "graphite and charcoal", "dark", "grey", "restrained painted wall panelling"),
-    ("charcoal", "graphite and charcoal", "dark", "grey", "smooth matte paint"),
-    ("muted olive", "muted olive and eucalyptus", "mid", "olive", "subtle limewash"),
-    ("pale eucalyptus", "muted olive and eucalyptus", "light", "olive", "smooth matte paint"),
-    ("desaturated navy", "desaturated navy and blue-grey", "dark", "blue", "restrained painted wall panelling"),
-    ("blue-grey", "desaturated navy and blue-grey", "mid", "blue", "fine mineral plaster"),
-    ("deep muted forest green", "deep muted forest green", "dark", "forest", "smooth matte paint"),
-    ("deep muted forest green", "deep muted forest green", "dark", "forest", "subtle limewash"),
-    ("warm ivory", "warm ivory and chalk", "light", "ivory", "subtle limewash"),
-    ("pale sand", "pale limestone and sand", "light", "stone", "smooth matte paint"),
-    ("mushroom", "mushroom and smoked taupe", "mid", "taupe", "restrained painted wall panelling"),
-    ("pale limestone", "pale limestone and sand", "light", "stone", "fine mineral plaster"),
+    ("weathered stone", "weathered stone", "light", "stone", "matte painted brick"),
+    ("light weathered stone", "weathered stone", "light", "stone", "natural stone"),
+    ("light earthy taupe", "earthy taupe", "light", "taupe", "textured plaster"),
+    ("pale weathered stone", "weathered stone", "light", "stone", "concrete"),
+    ("earthy taupe", "earthy taupe", "mid", "taupe", "textured plaster"),
+    ("smoked earthy taupe", "earthy taupe", "mid", "taupe", "aged timber"),
+    ("smoky grey", "smoky grey", "mid", "grey", "concrete"),
+    ("light smoky grey", "smoky grey", "light", "grey", "matte painted brick"),
+    ("graphite", "graphite and charcoal", "dark", "grey", "aged timber"),
+    ("charcoal", "graphite and charcoal", "dark", "grey", "matte painted brick"),
+    ("muted olive", "muted olive", "mid", "olive", "textured plaster"),
+    ("weathered stone", "weathered stone", "light", "stone", "aged timber"),
+    ("deep navy", "deep navy and midnight blue", "dark", "blue", "matte painted brick"),
+    ("midnight blue", "deep navy and midnight blue", "dark", "blue", "textured plaster"),
+    ("deep heritage green", "heritage green", "dark", "forest", "natural stone"),
+    ("muted heritage green", "heritage green", "mid", "forest", "textured plaster"),
+    ("weathered stone", "weathered stone", "light", "stone", "textured plaster"),
+    ("light earthy taupe", "earthy taupe", "light", "taupe", "matte painted brick"),
+    ("muted olive", "muted olive", "mid", "olive", "aged timber"),
+    ("pale weathered stone", "weathered stone", "light", "stone", "natural stone"),
 )
 
 # setting, architecture, depth, furniture/edge cue, compatible wall indices, light rig.
@@ -117,7 +127,7 @@ def signature(scene, *, near=False):
     if near:
         # Grey/graphite/charcoal and plaster-like treatments can look almost alike.
         values[1] = "any-grey-value" if values[0] == "grey" else values[1]
-        if values[2] in {"subtle limewash", "fine mineral plaster", "fine microcement"}:
+        if values[2] in {"subtle limewash", "fine mineral plaster", "fine microcement", "textured plaster", "concrete"}:
             values[2] = "quiet mineral texture"
     return json.dumps(values, ensure_ascii=False, separators=(",", ":"))
 
@@ -196,8 +206,8 @@ def _history_conflict(scene, old):
               "blue": ("navy", "blue"), "taupe": ("mushroom", "taupe"), "forest": ("forest",)}
     group = next((key for key, words in groups.items() if any(w in wall for w in words)), "")
     finish_matches = (scene["wall_finish"] in finish or
-                      (scene["wall_finish"] in {"subtle limewash", "fine mineral plaster", "fine microcement"}
-                       and any(w in finish for w in ("limewash", "plaster", "microcement"))))
+                      (scene["wall_finish"] in {"subtle limewash", "fine mineral plaster", "fine microcement", "textured plaster", "concrete"}
+                       and any(w in finish for w in ("limewash", "plaster", "microcement", "concrete"))))
     source_matches = scene["depth_family"].split()[0] in lighting and "window" in lighting
     if group == scene["wall_visual_group"] and finish_matches and source_matches:
         return True
@@ -277,7 +287,7 @@ def select(seed, context, recent=(), selections=()):
                 for b in eligible[1]:
                     if different(a, b):
                         c = next((c for c in eligible[2] if different(a, c) and different(b, c)
-                                  and any(s["wall_finish"] in {"smooth matte paint", "restrained painted wall panelling", "honed limestone"} for s in (a, b, c))), None)
+                                  and any(s["wall_finish"] in {"matte painted brick", "natural stone", "aged timber"} for s in (a, b, c))), None)
                         if c:
                             return [dict(s, history_exclusions_relaxed=len(history) - keep) for s in (a, b, c)]
     raise ValueError("Curated scene library needs three compatible differentiated homes.")

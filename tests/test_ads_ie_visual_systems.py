@@ -121,7 +121,7 @@ class ThreeVisualSystemsTests(unittest.TestCase):
 
     def test_expanded_rooms_are_reachable_and_route_appropriate(self):
         seen = [set(), set(), set()]
-        for token in map(str, range(80)):
+        for token in map(str, range(120)):
             for i, row in enumerate(self.visuals(token)):
                 self.assertIn(row["room_type"], ads_page.ie_visuals.ROOM_OPTIONS[i])
                 seen[i].add(row["room_type"])
