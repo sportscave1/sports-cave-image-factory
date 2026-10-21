@@ -34,9 +34,9 @@ The signed-off physical candidate is reused without recompilation.
 
 `recorder-releases/windows/SportsCaveTaskRecorder.zip` is the exact reviewed x64
 Windows archive, not a Linux-generated replacement. Archive SHA-256:
-`87e11e880bfe0c12d9659cb14f646f61072bcf617a237570467c00587fd6b442`.
+`c01313e53f6314de49818136e563c89ceb63f2a752fa3e7536d568b51e39bff3`.
 Manifest SHA-256:
-`cd1769d883cd3f7b28bda4b989bbe211f56ca0e8a27d7fb6e20a91104669c84d`.
+`b1b1cb2ec52a9ce0752a32bbf726d016a2804fe888d263e1035522826547868e`.
 The authenticated setup route validates the archive before serving it. An
 explicit configured package path retains precedence. No recordings, credentials,
 receipts, profiles or recovery archives are shipped.
@@ -49,7 +49,10 @@ and preserve the existing startup identity, triggers, settings and job stores.
 The first real legacy update exposed a Windows connection reset during shutdown
 confirmation. The installer now continues polling after that reset and switches
 only after connection refusal proves the listener has exited. A focused regression
-checks that reset alone cannot authorize activation; all six package checks pass.
+checks that reset alone cannot authorize activation. An exclusive recorder-lock
+check also proves that an old helper has fully exited when Windows times out on
+its stale connection. A held process lock prevents that offline path. All seven
+package checks pass, including the actual Windows lock behavior.
 
 ## Validation and remaining limits
 

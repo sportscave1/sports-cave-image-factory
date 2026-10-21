@@ -32,7 +32,22 @@ def state_at(site, key):
         return json.load(response)
 
 
+def recorder_inactive(data):
+    """The helper owns this lock for its full lifetime, including shutdown."""
+    lock = Path(data) / "recorder.lock"
+    if os.name != "nt" or not lock.is_file():
+        return False
+    from .server import instance_lock
+    try:
+        with instance_lock(lock):
+            return True
+    except (OSError, RuntimeError):
+        return False
+
+
 def stop_idle(data):
+    if recorder_inactive(data):
+        return
     current = connection(data)
     if not current:
         return
@@ -48,6 +63,8 @@ def stop_idle(data):
     with urlopen(Request(site + "/api/shutdown", data=b"{}", headers={"X-Recorder-Key":key,"Content-Type":"application/json"}), timeout=15):
         pass
     for _ in range(50):
+        if recorder_inactive(data):
+            return
         try:
             state_at(site, key)
         except ConnectionResetError:

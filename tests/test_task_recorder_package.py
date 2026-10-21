@@ -170,3 +170,19 @@ def test_update_shutdown_reset_waits_for_listener_refusal(monkeypatch,tmp_path):
     install.stop_idle(tmp_path)
     assert state.call_count==3  # A reset is not proof that the listener exited.
     assert shutdown.call_count==1
+
+
+@pytest.mark.skipif(__import__('os').name!='nt',reason='Windows recorder process lock')
+def test_offline_update_requires_exclusive_recorder_lock(tmp_path,monkeypatch):
+    from task_recorder import install
+    from task_recorder.server import instance_lock
+    from unittest.mock import Mock
+    lock=tmp_path/'recorder.lock';lock.write_bytes(b'0')
+    state=Mock(side_effect=AssertionError('Offline update must not use a stale connection'))
+    monkeypatch.setattr(install,'state_at',state)
+    with instance_lock(lock):
+        assert not install.recorder_inactive(tmp_path)
+    assert install.recorder_inactive(tmp_path)
+    install.stop_idle(tmp_path)
+    state.assert_not_called()
+    assert lock.read_bytes()==b'0'
