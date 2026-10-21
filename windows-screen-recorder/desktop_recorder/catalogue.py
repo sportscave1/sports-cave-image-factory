@@ -19,9 +19,7 @@ class Catalogue:
     def summaries(self):
         """Stat-sized cache; full definitions are read only when changed."""
         rows, live = [], set()
-        for path in self.repository.root.glob("*.json"):
-            if path.name == "draft.json":
-                continue
+        for path, metadata in self.repository.visible():
             live.add(path.stem)
             stat = path.stat()
             stamp = (stat.st_mtime_ns, stat.st_size)
@@ -35,7 +33,10 @@ class Catalogue:
                            revision=self.repository.revision(task), duration_ms=None,
                            updated_at=stat.st_mtime * 1000, result="Desktop · Prepared window" if playable else "Desktop · Playback unavailable")
                 self.cache[path.stem] = stamp, row
-            rows.append(deepcopy(self.cache[path.stem][1]))
+            row = deepcopy(self.cache[path.stem][1])
+            row["name"] = metadata.get("name", row["name"])
+            row["updated_at"] = metadata.get("updated_at", row["updated_at"])
+            rows.append(row)
         self.cache = {key: value for key, value in self.cache.items() if key in live}
         # Legacy rows retain their original schema and revision.
         return sorted(deepcopy(self.legacy.list()) + rows,
