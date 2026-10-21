@@ -91,8 +91,9 @@ class DesktopPlayback {
         if(e.Current.ProcessId!=pid)return false;
         if(productCopy)return ProductCopyResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
         if(ProductGenerationResult.Supports(target))return ProductGenerationResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
+        int ancestryLimit=ProductPickerResult.Supports(target)?ProductPickerResult.AncestryLimit:16;
         var parent=TreeWalker.ControlViewWalker.GetParent(e);
-        for(int depth=0;parent!=null&&depth<16;depth++){
+        for(int depth=0;parent!=null&&depth<ancestryLimit;depth++){
             if(parent.Current.ProcessId!=pid)return false;
             if(parent.Current.NativeWindowHandle==hwnd.ToInt32())
                 return index==expected.Count;
@@ -277,6 +278,17 @@ class DesktopPlayback {
         }
         return false;
     }
+    bool VerifyPicker(IntPtr hwnd,AutomationElement document) {
+        uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
+        var wait=Stopwatch.StartNew();
+        while(wait.ElapsedMilliseconds<2000) {
+            Check();
+            if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Focus changed while opening the PSD picker.");
+            if(ProductPickerResult.Open(document,hwnd,pid))return true;
+            if(cancelled.WaitOne(25))Check();
+        }
+        return false;
+    }
     ProductGenerationResult.Witness GenerationWitness(IntPtr hwnd,Dictionary<string,object> target,bool observing=false) {
         uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
         // The application scrolls to previews after generation. Only this
@@ -372,12 +384,18 @@ class DesktopPlayback {
                         if(productCopy&&e.Current.HelpText!=ProductCopyResult.Ready)
                             throw new Exception("Copy prompt readiness changed. No input sent.");
                         bool productGenerate=ProductGenerationResult.Supports(target);
+                        bool productPicker=ProductPickerResult.Supports(target);
+                        uint pickerPid;Native.GetWindowThreadProcessId(hwnd,out pickerPid);
+                        var pickerDocument=productPicker?ProductPickerResult.Document(e,hwnd,pickerPid):null;
+                        if(productPicker&&(pickerDocument==null||ProductPickerResult.Open(pickerDocument,hwnd,pickerPid)))
+                            throw new Exception("Close the PSD picker before Play. No input sent.");
                         var generationBefore=productGenerate?GenerationWitness(hwnd,target):null;
                         if(productGenerate&&generationBefore==null)
                             throw new Exception("Prepare Product Uploads generation before Play. No input sent.");
                         effectStarted=true;((InvokePattern)pattern).Invoke();
                         // Provider return is not application result verification.
                         if(productCopy)verified=VerifyResult(hwnd,target,kind,null);
+                        else if(productPicker){verified=VerifyPicker(hwnd,pickerDocument);if(!verified)reason="PSD picker did not open. Choose PSD was not repeated.";}
                         else if(productGenerate){verified=VerifyGeneration(hwnd,target,generationBefore);
                             if(!verified)reason="Generation acknowledgement was not observed within the action timeout. Generate was not repeated.";}
                         else reason="Button invoked; its application result needs verification before continuing.";

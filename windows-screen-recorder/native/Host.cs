@@ -115,6 +115,9 @@ class Capture {
         public ProductGenerationResult.Witness Before;
     }
     volatile GenerationAnchor preparedGeneration;
+    volatile GenerationAnchor preparedPicker;
+    GenerationAnchor pendingPicker;
+    bool expectedPickerDown;
     sealed class GenerationGesture { public long ReleasedAt; }
     GenerationGesture generationGesture;
     GenerationAnchor pendingGeneration;
@@ -140,6 +143,7 @@ class Capture {
         Broken=false;field=null;fieldTarget=null;dirty=false;editorAnchor=null;editorAnchorTarget=null;
         pendingEditorClick.Clear();
         pendingGeneration=null;expectedGenerationDown=false;
+        pendingPicker=null;expectedPickerDown=false;
         generation=epoch;lastWindow=IntPtr.Zero;lastTitle=null;
         mh=Native.SetWindowsHookEx(14,mouse,Native.GetModuleHandle(null),0);
         kh=Native.SetWindowsHookEx(13,key,Native.GetModuleHandle(null),0);
@@ -187,13 +191,13 @@ class Capture {
                 if(Mine(window)){if(w.ToInt32()==0x202)ownExclusions++;return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
                 if(w.ToInt32()==0x201){var point=m.point;int epoch=generation;long at=MonotonicMs();
                     var gesture=new GenerationGesture();generationGesture=gesture;
-                    Put(()=>SnapshotGeneration(point,window,epoch,at,gesture));}
+                    Put(()=>{SnapshotGeneration(point,window,epoch,at,gesture);SnapshotGeneration(point,window,epoch,at,gesture,true);});}
                 else if(w.ToInt32()==0x20A){QueueWheel(m.point,window,generation);}
                 else if(w.ToInt32()==0x202){CloseWheelBurst();var point=m.point;int epoch=generation;
                     var gesture=generationGesture;generationGesture=null;
                     if(gesture!=null)Interlocked.Exchange(ref gesture.ReleasedAt,MonotonicMs());
                     var foreground=Native.Root(Native.GetForegroundWindow());
-                    Put(()=>{TraceWindow("mouse",window,foreground,hit);Flush();if(!CompleteGeneration(point,window,epoch))Click(point,window,epoch);});}
+                    Put(()=>{TraceWindow("mouse",window,foreground,hit);Flush();if(!CompleteGeneration(point,window,epoch,true)&&!CompleteGeneration(point,window,epoch))Click(point,window,epoch);});}
                 else {CloseWheelBurst();Put(()=>{Flush();Interrupt("Secondary clicks are not yet supported. Draft preserved.");});}
             }
         }
@@ -201,6 +205,7 @@ class Capture {
     }
     void CloseWheelBurst(){lock(wheelGate){if(wheelBurst!=null)wheelBurst.Closed=true;}}
     void PrepareGeneration(IntPtr window) {
+        PreparePicker(window);
         preparedGeneration=null;
         var process=Native.ProcessFor(window);
         if(!String.Equals(Path.GetFileName(process.MainModule.FileName),"msedge.exe",StringComparison.OrdinalIgnoreCase))return;
@@ -222,11 +227,31 @@ class Capture {
         }
         send("diagnostic",new {kind="generation_capture_prepared",visible_generate_anchor=preparedGeneration!=null});
     }
-    void SnapshotGeneration(Native.Point point,IntPtr window,int epoch,long at,GenerationGesture gesture) {
-        pendingGeneration=null;expectedGenerationDown=false;
-        var prepared=preparedGeneration;
+    void PreparePicker(IntPtr window) {
+        preparedPicker=null;
+        var process=Native.ProcessFor(window);
+        if(!String.Equals(Path.GetFileName(process.MainModule.FileName),"msedge.exe",StringComparison.OrdinalIgnoreCase))return;
+        var root=AutomationElement.FromHandle(window);
+        var buttons=root.FindAll(TreeScope.Descendants,new AndCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Button),
+            new PropertyCondition(AutomationElement.AutomationIdProperty,"choose"),
+            new PropertyCondition(AutomationElement.NameProperty,"Choose PSD")));
+        foreach(AutomationElement button in buttons) {
+            if(button.Current.IsOffscreen||!button.Current.IsEnabled)continue;
+            var document=ProductPickerResult.Document(button,window,(uint)process.Id);
+            if(document==null)continue;
+            var target=Target(button,window);
+            if(!ProductPickerResult.Supports(target)||ProductPickerResult.Open(document,window,(uint)process.Id))continue;
+            if(preparedPicker!=null)throw new Exception("Prepare one Product Uploads PSD picker before Record.");
+            preparedPicker=new GenerationAnchor{Window=window,Pid=(uint)process.Id,Control=button,Target=target,Document=document,
+                Bounds=button.Current.BoundingRectangle,WindowBounds=root.Current.BoundingRectangle,Dpi=Native.GetDpiForWindow(window)};
+        }
+    }
+    void SnapshotGeneration(Native.Point point,IntPtr window,int epoch,long at,GenerationGesture gesture,bool picker=false) {
+        if(picker){pendingPicker=null;expectedPickerDown=false;}else{pendingGeneration=null;expectedGenerationDown=false;}
+        var prepared=picker?preparedPicker:preparedGeneration;
         if(prepared==null||window!=prepared.Window||!prepared.Bounds.Contains(new System.Windows.Point(point.X,point.Y)))return;
-        expectedGenerationDown=true;
+        if(picker)expectedPickerDown=true;else expectedGenerationDown=true;
         if(Interlocked.Read(ref gesture.ReleasedAt)!=0)
             throw new Exception("Generate click completed before its target could be confirmed. Draft preserved.");
         InputWindow(window);uint pid;Native.GetWindowThreadProcessId(window,out pid);
@@ -242,16 +267,18 @@ class Capture {
             prepared.Control.Current.AutomationId!=(string)target["automation_id"])
             throw new Exception("Generate control identity changed before the physical click. Draft preserved.");
         var before=prepared.Before;
-        if(before==null||prepared.Control.Current.ControlType!=ControlType.Button||
+        if((!picker&&before==null)||prepared.Control.Current.ControlType!=ControlType.Button||
             MonotonicMs()-at>250||Interlocked.Read(ref gesture.ReleasedAt)!=0)
             throw new Exception("Generate changed before its click target could be confirmed. Draft preserved.");
-        pendingGeneration=new GenerationAnchor{Window=window,Pid=pid,Dpi=prepared.Dpi,Bounds=bounds,
+        var pending=new GenerationAnchor{Window=window,Pid=pid,Dpi=prepared.Dpi,Bounds=bounds,
             WindowBounds=prepared.WindowBounds,Epoch=epoch,DownAt=at,Target=target,Before=before,
             Document=prepared.Document};
+        if(picker)pendingPicker=pending;else pendingGeneration=pending;
     }
-    bool CompleteGeneration(Native.Point point,IntPtr window,int epoch) {
-        if(!expectedGenerationDown)return false;
-        expectedGenerationDown=false;var anchor=pendingGeneration;pendingGeneration=null;
+    bool CompleteGeneration(Native.Point point,IntPtr window,int epoch,bool picker=false) {
+        if(!(picker?expectedPickerDown:expectedGenerationDown))return false;
+        var anchor=picker?pendingPicker:pendingGeneration;
+        if(picker){expectedPickerDown=false;pendingPicker=null;}else{expectedGenerationDown=false;pendingGeneration=null;}
         if(anchor==null)throw new Exception("Generate was not identified before its click. Draft preserved.");
         InputWindow(window);uint pid;Native.GetWindowThreadProcessId(window,out pid);
         if(anchor.Window!=window||anchor.Epoch!=epoch||generation!=epoch||pid!=anchor.Pid||Native.Root(Native.GetForegroundWindow())!=window||
@@ -262,6 +289,14 @@ class Capture {
         var wait=Stopwatch.StartNew();
         while(!Broken&&wait.ElapsedMilliseconds<1500) {
             InputWindow(window);
+            if(picker) {
+                if(ProductPickerResult.Open(anchor.Document,window,pid)) {
+                    WindowAction(window,epoch,(string)anchor.Target["window_key"]);Emit("invoke",anchor.Target,null,epoch);
+                    send("diagnostic",new {kind="psd_picker_click_acknowledged",pre_click_identity_verified=true,modal_verified=true});
+                    preparedPicker=null;return true;
+                }
+                Thread.Sleep(25);continue;
+            }
             var after=ProductGenerationResult.ReadForDocument(anchor.Document,window,pid);
             if(ProductGenerationResult.Acknowledged(anchor.Before,after)) {
                 WindowAction(window,epoch,(string)anchor.Target["window_key"]);Emit("invoke",anchor.Target,null,epoch);
@@ -400,13 +435,15 @@ class Capture {
         if(id.Length==0&&name.Length==0)throw new Exception("This control has no reliable identity. Draft preserved.");
         if(title.Length==0)throw new Exception("This window has no document identity.");
         var scope=new List<object>();
+        bool productPicker=ProductPickerResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name);
+        int ancestryLimit=productPicker?ProductPickerResult.AncestryLimit:16;
         bool productCopy=ProductCopyResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name),hostSkipped=false;
         bool generation=ProductGenerationResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),name)&&
             ProductGenerationResult.Read(e,h,(uint)proc.Id)!=null;
         bool generationLayoutSkipped=false;
         bool reachedRoot=e.Current.NativeWindowHandle==h.ToInt32();
         var parent=reachedRoot?null:TreeWalker.ControlViewWalker.GetParent(e);
-        for(int depth=0;parent!=null&&depth<16;depth++){
+        for(int depth=0;parent!=null&&depth<ancestryLimit;depth++){
             if(parent.Current.NativeWindowHandle==h.ToInt32()){reachedRoot=true;break;}
             if(parent.Current.ProcessId!=proc.Id)throw new Exception("Control ancestry left the intended application.");
             if(generation&&!generationLayoutSkipped&&ProductGenerationResult.LayoutBoundary(scope.Count,
@@ -425,12 +462,14 @@ class Capture {
                 {"control_type",parent.Current.ControlType.ProgrammaticName.Replace("ControlType.","")},
                 {"automation_id",parentId},{"name",parentName}});
             parent=TreeWalker.ControlViewWalker.GetParent(parent);
-            if(depth==15)throw new Exception("Control ancestry exceeds the supported bound.");
+            if(depth==ancestryLimit-1)throw new Exception("Control ancestry exceeds the supported bound.");
         }
         if(!reachedRoot)throw new Exception("Control ancestry does not reach the intended window. Draft preserved.");
         var target=new Dictionary<string,object>{{"app",proc.MainModule.FileName},{"window_key",title},{"scope",scope},
             {"control_type",e.Current.ControlType.ProgrammaticName.Replace("ControlType.","")},
             {"automation_id",id},{"name",name}};
+        if(ProductPickerResult.KnownButton(proc.MainModule.FileName,(string)target["control_type"],id,name)&&
+            ProductPickerResult.Document(e,h,(uint)proc.Id)!=null)target["postcondition"]=ProductPickerResult.Contract;
         if(generation) {
             if(!ProductGenerationResult.StableScope(scope))throw new Exception("Generation scope is not supported. Draft preserved.");
             target["postcondition"]=ProductGenerationResult.Contract;

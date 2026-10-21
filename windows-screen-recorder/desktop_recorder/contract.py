@@ -39,8 +39,11 @@ def identity(target):
     # No persistent HWND, process ID, UIA runtime ID or screen coordinates.
     fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope", "postcondition"))
     if "postcondition" in target:
-        if (target["postcondition"] != "sports-cave.product-generation.v1" or
-                target["control_type"] != "Button" or target["name"] != "Generate mockups" or
+        generation = target["postcondition"] == "sports-cave.product-generation.v1" and target["name"] == "Generate mockups"
+        picker = (target["postcondition"] == "sports-cave.product-psd-picker.v1" and target["name"] == "Choose PSD" and target["automation_id"] == "choose" and
+                  isinstance(target.get("scope"), list) and any(isinstance(a, dict) and a.get("control_type") == "Document" and a.get("automation_id") == "RootWebArea" and a.get("name") == "Product Uploads" for a in target["scope"]))
+        if (not (generation or picker) or
+                target["control_type"] != "Button" or
                 not isinstance(target["app"], str) or
                 re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe" or "scope" not in target):
             raise Invalid("Unsupported application result contract.")
