@@ -7,7 +7,7 @@ import uuid
 from .schema import Invalid, text
 from .state_updates import merge_tasks
 
-KINDS = {"record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
+KINDS = {"open-popup", "record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
          "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files", "delete", "repair-copy",
          "edit-copy", "edit-file", "record-replacement"}
 STARTS = {"record", "play", "record-replacement"}
@@ -123,6 +123,8 @@ class Relay:
                 return self.public_command(old)
             if self.clock()-device["last_seen"]>35:
                 raise Invalid("This PC is offline. Start Task Recorder on that PC, then try again.")
+            if kind == "open-popup" and not device["state"].get("desktop_capabilities", {}).get("popup_reopen"):
+                raise Invalid("Update the Windows helper to open the recorder popup.")
             if kind in {"edit-copy","edit-file","record-replacement"}:
                 if device["state"].get("protocol",1)<4:
                     raise Invalid("Update the PC helper before editing recordings (helper 4 required).")

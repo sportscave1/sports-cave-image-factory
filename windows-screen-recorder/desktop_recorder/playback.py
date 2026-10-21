@@ -125,7 +125,7 @@ class Playback:
             for path in sorted(self.root.glob("*.json"), key=lambda path:path.stat().st_mtime_ns):
                 run = json.loads(path.read_text(encoding="utf-8"))
                 if run["state"] == "uncertain" and run.get("result_received") and run["pending"] is not None:
-                    task = self.repository.get(run["task_id"])
+                    task = self.repository.get(run["task_id"], include_removed=True)
                     if (self.repository.revision(task) == run["revision"] and
                             task["actions"][run["pending"]]["kind"] == "focus_window"):
                         run["reconciliation"] = "Returned focus-only failure; no application action dispatched. Explicit Play required."

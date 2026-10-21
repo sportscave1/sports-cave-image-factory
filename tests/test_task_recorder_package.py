@@ -157,12 +157,14 @@ def test_generated_launchers_accept_prepared_and_previous_release_ids(tmp_path):
         assert not re.fullmatch(pattern, "a" * 19)
 
 
-def test_update_shutdown_reset_waits_for_listener_refusal(monkeypatch,tmp_path):
+@pytest.mark.parametrize('wrapped',[False,True])
+def test_update_shutdown_reset_waits_for_listener_refusal(monkeypatch,tmp_path,wrapped):
     from task_recorder import install
     from urllib.error import URLError
     from unittest.mock import Mock, MagicMock
     monkeypatch.setattr(install,"connection",lambda data:("http://127.0.0.1:18999","synthetic-key"))
-    state=Mock(side_effect=[{"mode":"stopped"},ConnectionResetError(),URLError(ConnectionRefusedError())])
+    reset=ConnectionResetError()
+    state=Mock(side_effect=[{"mode":"stopped"},URLError(reset) if wrapped else reset,URLError(ConnectionRefusedError())])
     monkeypatch.setattr(install,"state_at",state)
     shutdown=MagicMock()
     monkeypatch.setattr(install,"urlopen",shutdown)
@@ -170,6 +172,21 @@ def test_update_shutdown_reset_waits_for_listener_refusal(monkeypatch,tmp_path):
     install.stop_idle(tmp_path)
     assert state.call_count==3  # A reset is not proof that the listener exited.
     assert shutdown.call_count==1
+
+
+def test_wrapped_shutdown_resets_never_prove_exit(monkeypatch,tmp_path):
+    from task_recorder import install
+    from urllib.error import URLError
+    from unittest.mock import Mock,MagicMock
+    monkeypatch.setattr(install,'recorder_inactive',lambda data:False)
+    monkeypatch.setattr(install,'connection',lambda data:('http://127.0.0.1:18999','synthetic-key'))
+    state=Mock(side_effect=[{'mode':'stopped'}]+[URLError(ConnectionResetError())]*50)
+    monkeypatch.setattr(install,'state_at',state)
+    monkeypatch.setattr(install,'urlopen',MagicMock())
+    monkeypatch.setattr(install.time,'sleep',lambda seconds:None)
+    with pytest.raises(RuntimeError,match='did not shut down'):
+        install.stop_idle(tmp_path)
+    assert state.call_count==51
 
 
 @pytest.mark.skipif(__import__('os').name!='nt',reason='Windows recorder process lock')

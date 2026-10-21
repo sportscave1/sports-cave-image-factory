@@ -23,7 +23,7 @@ class Coordinator:
         self.recording = Recording(self.repository)
         self.recording.recover()
         self.receipts = Receipts(root)
-        self.message = "Local candidate ready. Choose a prepared window."
+        self.message = "Choose a window, then Record."
         self.last_saved = None
         self.diagnostics = []
         self.playback = Playback(self.repository)
@@ -54,15 +54,20 @@ class Coordinator:
              (run["state"] == "uncertain" and not run.get("result_received"))))
         rows = []
         if r.state == "idle" and not playing:
-            for path in self.repository.root.glob("*.json"):
-                if path.name == "draft.json":
-                    continue
+            for path, metadata in self.repository.visible():
                 task = self.repository.get(path.stem)
-                rows.append(dict(id=task["id"], name=task["name"], revision=self.repository.revision(task)))
+                rows.append(dict(id=task["id"], name=self.repository.display_name(task), revision=self.repository.revision(task)))
+        context = r.task
+        if self.pending_play:
+            context = self.repository.get(self.pending_play["task_id"])
+        elif playing:
+            context = self.play_task
         return dict(v=1, state=("playing" if playing else r.state), generation=r.generation,
                     elapsed_ms=r.elapsed_ms, message=r.problem or self.message,
                     last_saved=self.last_saved, tasks=rows,
-                    instruction=self.native_instruction, run=run)
+                    instruction=self.native_instruction, run=run,
+                    recording_name=self.repository.display_name(context) if context else "",
+                    suggested_name=r.task["name"] if r.task else "")
 
     def apply(self, command):
         if not isinstance(command, dict) or set(command) != {"v", "id", "kind", "payload"} or type(command["v"]) is not int or command["v"] != 1:

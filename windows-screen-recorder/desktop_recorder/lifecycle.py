@@ -4,6 +4,7 @@ Call on one coordinator thread. A native provider must marshal events here.
 No global hooks, screenshots, browser launch or task execution lives here.
 """
 from copy import deepcopy
+from datetime import datetime
 from time import monotonic
 from uuid import uuid4
 from .contract import FORMAT, Invalid, validate
@@ -37,7 +38,8 @@ class Recording:
         if self.state != "idle" or not indicator_visible:
             raise Invalid("Show recording controls and save/discard the existing draft first.")
         self.task = validate(dict(format=FORMAT, version=1, id=str(uuid4()),
-                                  name="Unsaved recording", starting_context=starting_context, actions=[]))
+                                  name="Recording " + datetime.now().strftime("%d %b %Y %H.%M"),
+                                  starting_context=starting_context, actions=[]))
         self.total, self.problem = 0.0, None
         self.state = "recording"
         self.started = self.clock()

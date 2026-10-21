@@ -18,6 +18,42 @@ def definition():
                 "value":"Synthetic value","timeout_ms":500}]}
 
 
+@pytest.mark.parametrize('ready',[False,True])
+def test_popup_open_receipt_requires_current_native_ready_frame(tmp_path,monkeypatch,ready):
+    async def trial():
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from task_recorder.schema import Invalid
+        runner=desktop.DesktopRunner(tmp_path)
+        binary=tmp_path/'SyntheticRecorder.exe';binary.write_bytes(b'test only')
+        reader=asyncio.StreamReader()
+        process=SimpleNamespace(stdout=reader,returncode=None,
+            stdin=SimpleNamespace(write=Mock(),drain=AsyncMock(),close=Mock(),wait_closed=AsyncMock()))
+        def terminate():
+            process.returncode=0;reader.feed_eof()
+        process.terminate=Mock(side_effect=terminate)
+        process.wait=AsyncMock(return_value=0)
+        if ready:
+            reader.feed_data((json.dumps(dict(v=1,id=str(uuid4()),kind='diagnostic',payload={'kind':'toolbar_ready'}))+'\n').encode())
+        else:
+            process.returncode=0;reader.feed_eof()
+        monkeypatch.setattr(desktop,'native_path',lambda:binary)
+        monkeypatch.setattr(desktop.asyncio,'create_subprocess_exec',AsyncMock(return_value=process))
+        try:
+            if ready:
+                await runner.desktop_command('open-popup',{},str(uuid4()))
+                assert runner.native_ready.done() and runner.native_ready.exception() is None
+            else:
+                with pytest.raises(Invalid,match='Close any other recorder popup'):
+                    await runner.desktop_command('open-popup',{},str(uuid4()))
+            assert not runner.desktop.pending_play
+            assert runner.desktop.recording.state=='idle'
+        finally:
+            await runner.close()
+    asyncio.run(trial())
+
+
 def test_shutdown_of_interrupted_capture_does_not_reopen_toolbar_even_if_pipe_is_broken(tmp_path):
     async def trial():
         from types import SimpleNamespace

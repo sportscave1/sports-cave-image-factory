@@ -2,6 +2,7 @@
 from copy import deepcopy
 from pathlib import Path
 import json
+import time
 from threading import Event
 from typing import Protocol
 from contextlib import contextmanager
@@ -32,6 +33,40 @@ class Repository:
         self.root = Path(root) / "desktop-v1"
         self.root.mkdir(parents=True, exist_ok=True)
         self.atomic, self.revision = atomic, revision
+        self.library_path = self.root.parent / "desktop-library.json"
+        self._library_stamp, self._library = None, {}
+
+    def library(self):
+        if not self.library_path.exists():
+            return {}
+        stat = self.library_path.stat()
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        if stamp != self._library_stamp:
+            self._library = json.loads(self.library_path.read_text(encoding="utf-8"))
+            self._library_stamp = stamp
+        return self._library
+
+    def visible(self):
+        metadata = self.library()
+        return [(path, metadata.get(path.stem, {})) for path in self.root.glob("*.json")
+                if path.name != "draft.json" and not metadata.get(path.stem, {}).get("deleted")]
+
+    def display_name(self, task):
+        return self.library().get(task["id"], {}).get("name", task["name"])
+
+    def manage(self, task_id, *, name=None, deleted=False):
+        task = self.get(task_id)
+        if name is not None:
+            name = validate({**task, "name": name})["name"]
+        metadata = deepcopy(self.library())
+        metadata[task_id] = {**metadata.get(task_id, {}), "deleted": deleted,
+                             "updated_at": time.time() * 1000}
+        if name is not None:
+            metadata[task_id]["name"] = name
+        # Library labels/removal never rewrite an immutable action definition,
+        # saved revision, draft, receipt or run journal. Delete retains recovery data.
+        self.atomic(self.library_path, metadata)
+        return {"id": task_id, "name": self.display_name(task)}
 
     def checkpoint(self, task, state, elapsed_ms):
         self.atomic(self.root / "draft.json", {"task": validate(task), "state": state, "elapsed_ms": elapsed_ms})
@@ -61,13 +96,15 @@ class Repository:
             self.atomic(path, task)
         return {"id": task["id"], "revision": self.revision(task)}
 
-    def get(self, task_id):
+    def get(self, task_id, *, include_removed=False):
         from uuid import UUID
         try:
             if str(UUID(task_id)) != task_id:
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
             raise Invalid("Invalid task ID.") from None
+        if not include_removed and self.library().get(task_id, {}).get("deleted"):
+            raise Invalid("This recording was removed from the library.")
         return validate(json.loads((self.root / (task_id + ".json")).read_text(encoding="utf-8")))
 
 
