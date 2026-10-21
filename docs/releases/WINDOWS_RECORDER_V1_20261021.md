@@ -34,9 +34,9 @@ The signed-off physical candidate is reused without recompilation.
 
 `recorder-releases/windows/SportsCaveTaskRecorder.zip` is the exact reviewed x64
 Windows archive, not a Linux-generated replacement. Archive SHA-256:
-`d55ccaf3c3aab5f36c168067c56fca187bcab5f620d5b7a48f6f21d28dbd224c`.
+`87e11e880bfe0c12d9659cb14f646f61072bcf617a237570467c00587fd6b442`.
 Manifest SHA-256:
-`9994a7efdd11ab4b7d14a2e10c4bd8a041ad6fa4f76761d5796a1dfdbf28fd4f`.
+`cd1769d883cd3f7b28bda4b989bbe211f56ca0e8a27d7fb6e20a91104669c84d`.
 The authenticated setup route validates the archive before serving it. An
 explicit configured package path retains precedence. No recordings, credentials,
 receipts, profiles or recovery archives are shipped.
@@ -46,6 +46,10 @@ switches code only when the current recorder is idle, and retains the previous
 release. Data remains in TaskRecorderV1. Recorder rollback selects previous code
 without replacing data. Broader companion updates use a new immutable Git export
 and preserve the existing startup identity, triggers, settings and job stores.
+The first real legacy update exposed a Windows connection reset during shutdown
+confirmation. The installer now continues polling after that reset and switches
+only after connection refusal proves the listener has exited. A focused regression
+checks that reset alone cannot authorize activation; all six package checks pass.
 
 ## Validation and remaining limits
 

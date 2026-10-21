@@ -50,6 +50,11 @@ def stop_idle(data):
     for _ in range(50):
         try:
             state_at(site, key)
+        except ConnectionResetError:
+            # Windows may reset a poll accepted just before our authenticated
+            # shutdown closes the listener. Keep checking until refusal proves
+            # it has exited; a reset alone never authorizes switching code.
+            pass
         except URLError as error:
             if isinstance(error.reason, ConnectionRefusedError) or getattr(error.reason, "winerror", None) == 10061:
                 return

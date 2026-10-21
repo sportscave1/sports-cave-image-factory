@@ -155,3 +155,18 @@ def test_generated_launchers_accept_prepared_and_previous_release_ids(tmp_path):
         assert re.fullmatch(pattern, "a" * 64)
         assert not re.fullmatch(pattern, "../other-release")
         assert not re.fullmatch(pattern, "a" * 19)
+
+
+def test_update_shutdown_reset_waits_for_listener_refusal(monkeypatch,tmp_path):
+    from task_recorder import install
+    from urllib.error import URLError
+    from unittest.mock import Mock, MagicMock
+    monkeypatch.setattr(install,"connection",lambda data:("http://127.0.0.1:18999","synthetic-key"))
+    state=Mock(side_effect=[{"mode":"stopped"},ConnectionResetError(),URLError(ConnectionRefusedError())])
+    monkeypatch.setattr(install,"state_at",state)
+    shutdown=MagicMock()
+    monkeypatch.setattr(install,"urlopen",shutdown)
+    monkeypatch.setattr(install.time,"sleep",lambda seconds:None)
+    install.stop_idle(tmp_path)
+    assert state.call_count==3  # A reset is not proof that the listener exited.
+    assert shutdown.call_count==1
