@@ -78,12 +78,19 @@ async def current(request):
 
 async def status(request):
     try:
-        _,_,row=await current(request)
+        job,_,row=await current(request)
         runtime.start_worker()
         return JSONResponse({'ok':True,'status':row['status'],'error_code':row['error_code'],
                              'filename':row['result']['filename'] if row['status']=='Ready' else None,
+                             'resolution_info':resolution_information(job,row),
                              'test_only':row.get('result',{}).get('test_only',True) if row.get('result') else True},headers=HEADERS)
     except Exception as error:return failure(error)
+
+
+def resolution_information(job,row):
+    # Read existing metadata only. Never affects renderer, download or readiness.
+    from auto_editions_resolution import for_job
+    return for_job(job,row.get('result') or {}) if row and row.get('status')=='Ready' else None
 
 
 def download_feedback(request,response,outcome):
@@ -223,7 +230,8 @@ async def state(request):
         return JSONResponse(dict(ok=True,job_id=job['id'],status=row['status'] if row else 'Not generated',
             timings={'state_ms':round((time.monotonic()-began)*1000,3)},
             ready_at=str(row.get('updated_at')) if row and row['status']=='Ready' else None,
-            error_code=row.get('error_code') if row else None,filename=(row.get('result') or {}).get('filename') if row else None),headers=HEADERS)
+            error_code=row.get('error_code') if row else None,filename=(row.get('result') or {}).get('filename') if row else None,
+            resolution_info=resolution_information(job,row)),headers=HEADERS)
     except Exception as error:return failure(error)
 
 
@@ -250,7 +258,7 @@ async def location(request):
         path=metadata.get('path_display') or metadata['path_lower']
         return JSONResponse(dict(ok=True,file_id=metadata['id'],revision=metadata['rev'],path=path,
             folder_path=path.rsplit('/',1)[0],filename=metadata.get('name') or path.rsplit('/',1)[-1],
-            test_only=True),headers=HEADERS)
+            test_only=True,resolution_info=resolution_information(job,row)),headers=HEADERS)
     except Exception as error:return failure(error)
 
 

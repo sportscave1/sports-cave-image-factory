@@ -255,7 +255,10 @@ async def fail(request):
 def product_context(pid, token):
     store=queue()
     with store.connect() as conn,conn.cursor() as cur:
-        cur.execute("""SELECT q.*,m.dropbox_file_id,p.edition_total AS current_total,p.product_title
+        cur.execute("""SELECT q.*,m.dropbox_file_id,p.edition_total AS current_total,p.product_title,
+            ARRAY(SELECT DISTINCT COALESCE(to_jsonb(l)->>'variant_title',to_jsonb(l)->'raw_json'->>'variant_title')
+                FROM shopify_order_lines l WHERE regexp_replace(l.shopify_product_id,'^gid://shopify/Product/','')=
+                regexp_replace(q.product_gid,'^gid://shopify/Product/','') ORDER BY 1 LIMIT 50) AS preparation_variants
             FROM auto_edition_onboarding q
             LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
             JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
@@ -297,6 +300,8 @@ def product_context(pid, token):
     if row['source'] and row['source']!=source:raise ValueError('Source revision changed. Retry preparation.')
     return dict(automatic=True,product_gid=pid,lease_token=str(token),source=source,
                 **({'reset_id':reset_id} if reset_id else {}),
+                **({'preparation_variants':sorted({v for v in row.get('preparation_variants',[]) if isinstance(v,str) and v})}
+                   if row.get('preparation_variants') else {}),
                 metadata={k:meta[k] for k in ('id','rev','content_hash','size','name')},
                 number=1,total=total,product_title=row['product_title'])
 

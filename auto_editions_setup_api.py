@@ -182,6 +182,9 @@ async def import_archive(archive,setup,revalidate,started,timings,expected=None)
     if not timings.get('resumable_protocol'):timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
     ctx=setup['context']
     manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
+    from auto_editions_preparation_geometry import for_context,matches
+    if for_context(manifest['source_dimensions'],ctx)['references'] and not matches(manifest,ctx):
+        raise ValueError('Preparation target or policy changed; prepare the current proportional master again.')
     if expected is not None and ae.fingerprint(manifest)!=expected:raise ValueError('Bound preparation fingerprint differs; publication refused.')
     if ctx.get('reset_id') and manifest.get('reset_request_id')!=ctx['reset_id']:
         raise ValueError('Reset requires an updated companion and a fresh Photoshop preparation.')
