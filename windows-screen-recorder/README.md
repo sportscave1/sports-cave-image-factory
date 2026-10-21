@@ -1,9 +1,9 @@
 # Windows Task Recorder V1
 
-Local development candidate. Native recording and playback are implemented;
-this revision has not been approved for installation or production release.
-Work belongs to Studio task `20261020-ff6cc91d`, owner
-`codex-windows-recorder-release-01a1589a`, in its assigned release worktree.
+Supported-workflow release authorized on 21 October 2026. See
+[release review and remaining work](RELEASE-REVIEW-20261021.txt) for current
+evidence and limitations. The existing-tab candidate is preserved under
+`experimental/` and is not installed by the stable package.
 
 The recorder uses the existing Task Recorder panel, DeviceAgent, relay and durable
 receipts. It captures supported interactions in prepared, already-open Windows

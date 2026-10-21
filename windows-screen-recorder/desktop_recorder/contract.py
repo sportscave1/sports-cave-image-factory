@@ -9,9 +9,11 @@ FORMAT = "sports-cave.desktop"
 CAPABILITIES = {
     "invoke": "uia.invoke.v1",
     "set_text": "uia.value.v1",
+    "copy_text": "clipboard.copy-text.v1",
     "select": "uia.selection.v1",
     "toggle": "uia.toggle.v1",
     "focus_window": "windows.focus.v1",
+    "window_state": "windows.state.v1",
     "wait_ready": "uia.readiness.v1",
     "expand": "uia.expand.v1",
     "scroll": "uia.scroll.v1",
@@ -37,15 +39,22 @@ def text(value, limit=180):
 
 def identity(target):
     # No persistent HWND, process ID, UIA runtime ID or screen coordinates.
-    fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope", "postcondition"))
+    fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope", "postcondition", "selector"))
+    scoped_scroll = "selector" in target
+    if scoped_scroll and (target["selector"] != "uia.unique-scoped-scroll.v1" or
+                          target["control_type"] not in {"Group", "Pane", "Custom"} or
+                          target["automation_id"] or target["name"] or not target.get("scope")):
+        raise Invalid("Anonymous scroll controls require a unique named ancestor scope.")
     if "postcondition" in target:
         generation = target["postcondition"] == "sports-cave.product-generation.v1" and target["name"] == "Generate mockups"
         picker = (target["postcondition"] == "sports-cave.product-psd-picker.v1" and target["name"] == "Choose PSD" and target["automation_id"] == "choose" and
                   isinstance(target.get("scope"), list) and any(isinstance(a, dict) and a.get("control_type") == "Document" and a.get("automation_id") == "RootWebArea" and a.get("name") == "Product Uploads" for a in target["scope"]))
-        if (not (generation or picker) or
+        dialog = (target["postcondition"] == "uia.dialog-dismissed.v1" and isinstance(target.get("scope"), list) and
+                  any(isinstance(a, dict) and a.get("control_type") == "Window" and (a.get("automation_id") or a.get("name")) for a in target["scope"]))
+        if (not (generation or picker or dialog) or
                 target["control_type"] != "Button" or
                 not isinstance(target["app"], str) or
-                re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe" or "scope" not in target):
+                (not dialog and re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe") or "scope" not in target):
             raise Invalid("Unsupported application result contract.")
     for key, value in target.items():
         if key == "scope":
@@ -67,7 +76,7 @@ def identity(target):
         text(value)
         if PRIVATE.search(value):
             raise Invalid("Sensitive control identity is excluded.")
-    if not target["automation_id"] and not target["name"]:
+    if not target["automation_id"] and not target["name"] and not scoped_scroll:
         raise Invalid("Control needs a stable identity; ambiguity must block execution.")
     return target
 
@@ -87,9 +96,11 @@ def validate(raw):
     fields(context, ("mode", "binding"), ("window",))
     if "window" in context:
         identity(context["window"])
-    if context["mode"] not in {"prepared", "specific_product", "per_run_product"}:
+        if "selector" in context["window"]:
+            raise Invalid("Starting window cannot use a scroll selector.")
+    if context["mode"] not in {"prepared", "desktop_session", "specific_product", "per_run_product"}:
         raise Invalid("Unknown starting context mode.")
-    if context["mode"] == "prepared":
+    if context["mode"] in {"prepared", "desktop_session"}:
         if context["binding"] is not None:
             raise Invalid("Prepared context has no product binding.")
     else:
@@ -112,13 +123,30 @@ def validate(raw):
         if action["requires"] != [expected]:
             raise Invalid("Action capability contract does not match.")
         identity(action["target"])
+        if "selector" in action["target"] and (kind != "scroll" or action["version"] != 2):
+            raise Invalid("Anonymous scroll identity is restricted to scoped scrolling.")
         if "postcondition" in action["target"] and (kind != "invoke" or action["version"] != 2):
             raise Invalid("Application result verification requires scoped invoke.")
         if action["version"] == 2 and "scope" not in action["target"]:
             raise Invalid("Scoped desktop actions require ancestor identity.")
         if type(action["timeout_ms"]) is not int or not 100 <= action["timeout_ms"] <= 30000:
             raise Invalid("Readiness timeout must be bounded.")
-        if kind in {"set_text", "select"}:
+        if kind == "window_state":
+            if (action["version"] != 2 or context["mode"] != "desktop_session" or
+                action["target"]["control_type"] != "Window" or action["target"]["scope"] != [] or
+                not isinstance(action.get("value"), str) or
+                action["value"] not in {"normal", "minimized", "maximized"}):
+                raise Invalid("Window transitions require a desktop session and explicit supported state.")
+        elif kind == "copy_text":
+            if (action["version"] != 2 or action["target"]["control_type"] not in {"Edit", "Document"}
+                    or action["target"]["automation_id"] == "RootWebArea"):
+                raise Invalid("Copy requires a scoped text editor.")
+            value = action.get("value")
+            fields(value, ("text", "source_sha256"))
+            text(value["text"], 2000)
+            if not isinstance(value["source_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["source_sha256"]):
+                raise Invalid("Copy requires an exact source fingerprint.")
+        elif kind in {"set_text", "select"}:
             if not (kind == "set_text" and action.get("value") == ""):
                 text(action.get("value"), 2000)
         elif kind in {"toggle", "expand"}:
@@ -128,12 +156,16 @@ def validate(raw):
             if action["version"] != 2:
                 raise Invalid("Scrolling requires a scoped version-2 action.")
             position = action.get("value")
-            fields(position, ("horizontal", "vertical"))
-            for percent in position.values():
+            fields(position, ("horizontal", "vertical"), ("horizontal_view_size", "vertical_view_size"))
+            for axis in ("horizontal", "vertical"):
+                percent = position[axis]
                 if (type(percent) not in {int, float} or not math.isfinite(percent) or
                     not (percent == -1 or 0 <= percent <= 100)):
                     raise Invalid("Scroll percentages must be finite, -1 or between 0 and 100.")
-            if all(percent == -1 for percent in position.values()):
+            for axis in ("horizontal_view_size", "vertical_view_size"):
+                if axis in position and (type(position[axis]) not in {int, float} or not math.isfinite(position[axis]) or not 0 < position[axis] <= 100):
+                    raise Invalid("Viewport sizes must be finite percentages greater than zero.")
+            if position["horizontal"] == position["vertical"] == -1:
                 raise Invalid("At least one axis must be scrollable.")
         elif "value" in action:
             raise Invalid("This action has no value.")
