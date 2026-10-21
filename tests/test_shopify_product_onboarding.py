@@ -87,11 +87,11 @@ def test_brock_targeted_import_duplicates_out_of_order_and_first_order(state):
 
 def test_late_metadata_and_retry_survive_worker_recreation(state):
     sql,p,history=state
-    p['tags']=p['tags'][:1]
+    p['tags'].append('sc-edition-limit-75')
     deliver()
     assert not rows(sql,'edition_products')
     assert rows(sql,'webhook_events')[0]['status']=='pending'
-    p['tags'].append('sc-edition-limit-100')
+    p['tags'].remove('sc-edition-limit-75')
     sql.execute("UPDATE webhook_events SET processed_at=now()-interval '2 hours'")
     history.side_effect=ConnectionError('simulated Shopify outage')
     onboarding.drain(db)
@@ -320,3 +320,29 @@ def test_cache_repair_preserves_predecessor_allocations_certificates_and_mapping
     # Existing handle-keyed edition history requires review, never rekey or merge.
     plan=db._plan_edition_product_incremental_sync([dict(new,_onboarding_verified=True)],before['edition_products'])
     assert plan[0]['action']=='error'
+
+
+def test_upload_without_psd_or_mapping_or_limit_imports_with_default(state):
+    sql,p,history=state
+    p['tags']=p['tags'][:1]
+    # A legacy hold exists but must never be consulted for product registration.
+    sql.execute('CREATE TABLE product_upload_mapping_holds(product_gid text,file_id text)')
+    sql.execute('INSERT INTO product_upload_mapping_holds VALUES(%s,%s)',(PID,'held-psd'))
+    assert not deliver()['duplicate']
+    before=rows(sql,'edition_products')
+    assert len(before)==1 and before[0]['edition_total']==100
+    assert deliver()['duplicate']
+    deliver('repeat-current-state')
+    after=rows(sql,'edition_products')
+    assert len(after)==1 and len(rows(sql,'edition_runs'))==1
+    for key in ('id','edition_total','next_edition_number','sold_count','active_edition_run_id'):
+        assert after[0][key]==before[0][key]
+
+
+@pytest.mark.parametrize('tags', [['sc-edition-limit-invalid'], ['sc-edition-limit-100','sc-edition-limit-50']])
+def test_invalid_or_conflicting_explicit_limit_never_falls_back(state,tags):
+    sql,p,history=state
+    p['tags']=tags
+    deliver()
+    assert not rows(sql,'edition_products')
+    assert rows(sql,'webhook_events')[0]['status']=='pending'

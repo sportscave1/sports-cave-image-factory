@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 
@@ -38,7 +39,7 @@ def now():
 
 
 def verify_new_product(product, config=None):
-    """Only new identities need a verified limit and complete order history.
+    """Only new identities need a safe limit and complete order history.
 
     Registration repeats local history/identity checks inside its transaction.
     A racing first order uses the existing allocator and database uniqueness.
@@ -61,11 +62,18 @@ def verify_new_product(product, config=None):
         except ValueError as exc:
             raise PendingRegistration(str(exc)) from exc
     try:
+        raw_tags = product.get('tags') or []
+        tags = raw_tags.split(',') if isinstance(raw_tags, str) else raw_tags
+        if any(str(t).strip().startswith('sc-edition-limit-') and
+               not re.fullmatch(r'sc-edition-limit-[1-9][0-9]*', str(t).strip()) for t in tags):
+            raise ValueError('Shopify edition limit tag is invalid; review Edition Ops.')
         total = edition_limit(product)
     except ValueError as exc:
         raise PendingRegistration(str(exc)) from exc
     if total is None:
-        raise PendingRegistration('Product registration pending: verified edition limit is missing.')
+        # Preserve the canonical new-product default used before upload mapping.
+        # Correlation tags and PSD workflow metadata do not own registration.
+        total = shopify.LIMITED_EDITION_DEFAULTS['edition_total']
     warning = shopify.edition_registration_history_warning(product, confirmed_total=total)
     if warning:
         raise PendingRegistration(warning)
