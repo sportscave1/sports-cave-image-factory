@@ -75,7 +75,8 @@ def stop_idle(data):
         except URLError as error:
             if isinstance(error.reason, ConnectionRefusedError) or getattr(error.reason, "winerror", None) == 10061:
                 return
-            raise
+            if not (isinstance(error.reason, ConnectionResetError) or getattr(error.reason, "winerror", None) == 10054):
+                raise
         time.sleep(.1)
     raise RuntimeError("The previous recorder did not shut down. Its selected release was retained.")
 
