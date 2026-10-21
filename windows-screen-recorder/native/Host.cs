@@ -330,6 +330,23 @@ class Capture {
         var e=AutomationElement.FromPoint(new System.Windows.Point(burst.Point.X,burst.Point.Y));
         var page=e.Current.ControlType==ControlType.Document&&e.Current.AutomationId=="RootWebArea"?e:null;
         uint pid;Native.GetWindowThreadProcessId(burst.Window,out pid);
+        var pickerScroll=ProductPickerResult.ScrollContainer(burst.Window,pid,new System.Windows.Point(burst.Point.X,burst.Point.Y));
+        if(pickerScroll!=null) {
+            if(Broken)return;
+            InputWindow(burst.Window);
+            var target=Target(pickerScroll,burst.Window);object pattern;
+            if(!pickerScroll.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern))
+                throw new Exception("The PSD picker scroll position changed. Draft preserved.");
+            var position=((ScrollPattern)pattern).Current;
+            if(!position.HorizontallyScrollable&&!position.VerticallyScrollable)
+                throw new Exception("The PSD picker is no longer scrollable. Draft preserved.");
+            WindowAction(burst.Window,burst.Epoch);
+            Emit("scroll",target,new Dictionary<string,object>{
+                {"horizontal",position.HorizontallyScrollable?position.HorizontalScrollPercent:ScrollPattern.NoScroll},
+                {"vertical",position.VerticallyScrollable?position.VerticalScrollPercent:ScrollPattern.NoScroll}},burst.Epoch);
+            send("diagnostic",new {kind="psd_picker_scroll_resolved",control_type=target["control_type"],automation_id=target["automation_id"]});
+            return;
+        }
         var inspected=new List<object>();
         // Scroll containers can be layout elements omitted from Control View.
         // Follow the provider's raw ancestry, still bounded to the selected app.
@@ -436,6 +453,8 @@ class Capture {
         if(title.Length==0)throw new Exception("This window has no document identity.");
         var scope=new List<object>();
         bool productPicker=ProductPickerResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name);
+        if(!productPicker&&ProductPickerResult.KnownScrollTarget(proc.MainModule.FileName,id,name))
+            productPicker=ProductPickerResult.Document(e,h,(uint)proc.Id)!=null;
         int ancestryLimit=productPicker?ProductPickerResult.AncestryLimit:16;
         bool productCopy=ProductCopyResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name),hostSkipped=false;
         bool generation=ProductGenerationResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),name)&&

@@ -91,7 +91,7 @@ class DesktopPlayback {
         if(e.Current.ProcessId!=pid)return false;
         if(productCopy)return ProductCopyResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
         if(ProductGenerationResult.Supports(target))return ProductGenerationResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
-        int ancestryLimit=ProductPickerResult.Supports(target)?ProductPickerResult.AncestryLimit:16;
+        int ancestryLimit=ProductPickerResult.Supports(target)||ProductPickerResult.SupportsScroll(target)?ProductPickerResult.AncestryLimit:16;
         var parent=TreeWalker.ControlViewWalker.GetParent(e);
         for(int depth=0;parent!=null&&depth<ancestryLimit;depth++){
             if(parent.Current.ProcessId!=pid)return false;
