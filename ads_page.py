@@ -8539,11 +8539,11 @@ def build_instant_experience_shared_template(physical_product=None):
         "home settings, colour families, lightness levels and compatible wall treatments; grey/graphite/charcoal "
         "with similar texture/light count as potential duplicates. Never solve variation by widening the camera "
         "or enlarging the product. Peripheral/deep furniture only; no excess empty wall, bright competing opening, "
-        "clutter, loud patterns, glossy feature walls or sports-bar staging. Quiet panelling or oak details stay "
+        "clutter, loud patterns, glossy feature walls or themed sports-bar clutter. Material joins and aged timber details stay "
         "at the perimeter. Use supplied artwork colours, era, mood and actual frame contrast; sport informs "
         "atmosphere, never invented memorabilia, stereotypes or compulsory team colours. Ensure local tonal "
-        "separation from the supplied frame through wall choice and physical light; never change its finish. Automatic walls exclude "
-        "red, pink, rose, salmon, peach and strong orange; explicit saved overrides remain authoritative. "
+        "separation from the supplied frame through wall choice and physical light; never change its finish. "
+        "Explicit saved overrides remain authoritative. "
         "Use the resolved choices as one coherent home per image; prompt differences are not proof of distinct pixels.",
         build_instant_experience_fixed_opaque_footer_rules(),
         build_instant_experience_on_image_copy_fit_rules(),

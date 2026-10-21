@@ -299,7 +299,8 @@ SCENE_REFERENCE_RULES = (
 )
 SCENE_VISIBILITY_RULES = (
     " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
-    "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "
+    "Keep backdrop calm and material joins/timber accents peripheral. "
+    + scene_library.ROOM_STYLE + " No competing framed art, trophies, helmets or decorative clusters. "
     "CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
 )
 
@@ -385,7 +386,7 @@ Resolve exactly ONE camera using only this assigned definition. Keep verticals s
 SCENE: {visual['scene_brief']}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and a modest calm margin above the footer. Keep furniture/architecture near the perimeter or deeper behind the artwork. Avoid wide room views, excessive empty wall, dominating furniture and distracting background brightness. Retain enough subtle context to read as a real home.
 VARIANT PRECEDENCE — MANDATORY
-Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Automatic wall palettes exclude red, pink, rose, salmon, peach and strongly orange; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
+Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Use the resolved Sports Cave brand wall palette; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
 Use only this image's exact selected headline and subline. Complete any pack-level fit substitution before generation; pass no sibling copy or alternative lists into the image call.
 Use neutral collector language only; never attach a sport name to collector labels.
 {SCARCITY_RULE}'''

@@ -166,8 +166,8 @@ class WordingRepairTests(unittest.TestCase):
                     self.assertNotIn(other["supporting_line"], prompt)
 
     def test_neutral_wall_contrast_and_partial_saved_choices_shape_automatic_scenes(self):
-        sand = next(s for s in scenes.SCENES[0] if s["wall_colour"] == "pale sand")
-        taupe = next(s for s in scenes.SCENES[1] if s["wall_colour"] == "smoked taupe")
+        sand = next(s for s in scenes.SCENES[0] if s["wall_colour"] == "pale weathered stone")
+        taupe = next(s for s in scenes.SCENES[1] if s["wall_colour"] == "smoked earthy taupe")
         self.assertFalse(scenes.different(sand, taupe))
         metadata = {**SAMPLE_METADATA, "instant_experience_scene_selections": [
             {"wall_colour": "warm ivory", "wall_finish": "smooth matte paint"}, {}, {}]}

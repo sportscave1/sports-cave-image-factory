@@ -221,7 +221,7 @@ Campaign Moment must never overwrite the reference creative logic. Use only expl
 
 REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
 {json.dumps(refresh_plan, ensure_ascii=False)}
-For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and same family+palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
+For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and retaining three different home settings, colour families, wall finishes and dark/mid/light earthy shades within the Sports Cave brand palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
 Curated eligible style library (IE/single-image only; never override carousel concepts):
 {json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (sport_family(category) + ' ' + category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
 

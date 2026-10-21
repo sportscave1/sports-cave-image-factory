@@ -7,6 +7,8 @@ import random
 import re
 from difflib import SequenceMatcher
 import ads_carousel_evolution as carousel_copy
+from itertools import combinations
+from ads_ie_scenes import ROOM_STYLE
 
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
 
@@ -26,39 +28,39 @@ CAROUSEL_AUTHORITY = ('CANONICAL_PRODUCT, when supplied as the original black-fr
     'If source details conflict or remain unreadable, stop and request the canonical black-frame photograph; Do not redraw or reconstruct the product; never invent or reconstruct details.')
 # Architecture, palette and materials are selection metadata, not inferred winner observations.
 _STYLES = (
- ('Heritage billiards room', 'games', 'burgundy', 'panelling', 'traditional timber', 'heritage enclosed room', 'warm practical light', 'pool table'),
- ('Contemporary home bar', 'bar', 'ink-blue', 'paint', 'walnut cabinetry', 'modern built-in bar', 'warm practical light', 'home bar'),
- ('Industrial loft lounge', 'loft', 'warm brick', 'brick', 'steel and leather', 'high-ceiling loft', 'side window light', 'collector lounge'),
- ('Modern sports-viewing den', 'den', 'olive', 'acoustic walls', 'low seating', 'modern enclosed den', 'soft practical light', 'viewing room'),
- ('Daylight oak study', 'study', 'limestone', 'stone', 'natural timber', 'daylight study', 'natural daylight', 'desk'),
- ('Traditional private library', 'library', 'oxblood', 'paint', 'bookshelves', 'traditional library', 'warm reading light', 'books'),
- ('Minimal gallery hallway', 'hallway', 'warm plaster', 'plaster', 'restrained furnishings', 'minimal gallery hallway', 'soft daylight', 'art display'),
- ('Mid-century conversation lounge', 'lounge', 'tobacco', 'paint', 'teak and mustard upholstery', 'mid-century lounge', 'warm lamp light', 'conversation seating'),
- ('Coastal collector lounge', 'lounge', 'muted blue', 'paint', 'whitewashed timber', 'coastal lounge', 'soft daylight', 'collector seating'),
- ('Scandinavian reading room', 'reading', 'sage', 'paint', 'ash furniture', 'Scandinavian reading room', 'diffuse daylight', 'reading chair'),
- ('Japandi living room', 'lounge', 'sand', 'limewash', 'dark timber', 'Japandi living room', 'soft daylight', 'restrained seating'),
- ('Sunken conversation room', 'lounge', 'deep taupe', 'plaster', 'built-in seating', 'sunken conversation room', 'warm practical light', 'conversation seating'),
- ('Contemporary penthouse lounge', 'lounge', 'slate', 'stone', 'clean glazing', 'penthouse lounge', 'side window light', 'collector seating'),
- ('Converted warehouse apartment', 'loft', 'pale concrete', 'concrete', 'warm furnishings', 'converted warehouse', 'diffuse daylight', 'apartment seating'),
- ('Vinyl listening room', 'listening', 'aubergine', 'acoustic surfaces', 'record storage', 'private listening room', 'warm practical light', 'records'),
- ('Home cinema foyer', 'foyer', 'midnight-blue', 'paint', 'restrained timber', 'cinema foyer', 'subtle practical lighting', 'foyer'),
- ('Collector display study', 'study', 'warm grey', 'plaster', 'restrained display niches', 'display study', 'soft practical light', 'display niches'),
- ('Motorsport garage lounge', 'garage', 'graphite', 'cabinetry', 'clean workshop furnishings', 'garage lounge', 'soft practical light', 'motorsport'),
- ('Private training lounge', 'training', 'warm grey', 'plaster', 'timber bench', 'private training lounge', 'natural daylight', 'training'),
- ('Heritage clubroom', 'clubroom', 'forest-green', 'paint', 'leather chairs', 'heritage clubroom', 'warm lamp light', 'club seating'),
- ('Converted barn living room', 'lounge', 'chalk', 'plaster', 'exposed timber beams', 'converted barn', 'soft daylight', 'collector seating'),
- ('Townhouse stair landing', 'hallway', 'mineral-blue', 'paint', 'stone stair details', 'townhouse stair landing', 'natural daylight', 'art display'),
- ('Converted attic study', 'study', 'muted olive', 'paint', 'timber desk', 'sloped attic ceiling', 'roof-window daylight', 'desk'),
- ('Contemporary games room', 'games', 'cream', 'paint', 'ochre accents', 'modern games room', 'soft practical light', 'pool table'),
- ('Chess and reading lounge', 'reading', 'tobacco', 'paint', 'pale timber', 'reading lounge', 'warm reading light', 'chess'),
- ('Restrained Art Deco lounge', 'lounge', 'plum', 'paint', 'fluted walnut', 'Art Deco lounge', 'warm practical light', 'collector seating'),
- ('Modern farmhouse sitting room', 'lounge', 'dove-grey', 'paint', 'limestone fireplace', 'farmhouse sitting room', 'soft daylight', 'collector seating'),
- ('Courtyard-facing lounge', 'lounge', 'terracotta', 'plaster', 'restrained timber', 'courtyard-facing lounge', 'soft natural light', 'collector seating'),
- ('Timber-lined collector retreat', 'retreat', 'cedar', 'timber', 'simple furnishings', 'timber-lined retreat', 'simple warm lighting', 'collector seating'),
- ('Modern apartment dining nook', 'dining', 'clay', 'paint', 'compact oak furnishings', 'apartment dining nook', 'natural daylight', 'dining'),
+ ('Heritage billiards room', 'games', 'charcoal', 'aged timber', 'traditional timber', 'heritage enclosed room', 'warm practical light', 'pool table'),
+ ('Contemporary home bar', 'bar', 'earthy taupe', 'matte painted brick', 'walnut cabinetry', 'modern built-in bar', 'warm practical light', 'home bar'),
+ ('Industrial loft lounge', 'loft', 'light weathered stone', 'concrete', 'steel and leather', 'high-ceiling loft', 'side window light', 'collector lounge'),
+ ('Modern sports-viewing den', 'den', 'muted olive', 'textured plaster', 'low seating', 'modern enclosed den', 'soft practical light', 'viewing room'),
+ ('Daylight oak study', 'study', 'weathered stone', 'natural stone', 'natural timber', 'daylight study', 'natural daylight', 'desk'),
+ ('Traditional private library', 'library', 'deep navy', 'matte painted brick', 'bookshelves', 'traditional library', 'warm reading light', 'books'),
+ ('Minimal gallery hallway', 'hallway', 'light smoky grey', 'concrete', 'restrained furnishings', 'minimal gallery hallway', 'soft daylight', 'art display'),
+ ('Mid-century conversation lounge', 'lounge', 'earthy taupe', 'aged timber', 'teak and mustard upholstery', 'mid-century lounge', 'warm lamp light', 'conversation seating'),
+ ('Window-side collector lounge', 'lounge', 'midnight blue', 'textured plaster', 'aged timber', 'window-side lounge', 'soft daylight', 'collector seating'),
+ ('Timber reading room', 'reading', 'muted olive', 'aged timber', 'ash furniture', 'timber reading room', 'diffuse daylight', 'reading chair'),
+ ('Restrained collector living room', 'lounge', 'weathered stone', 'natural stone', 'dark timber', 'restrained living room', 'soft daylight', 'restrained seating'),
+ ('Sunken conversation room', 'lounge', 'earthy taupe', 'textured plaster', 'built-in seating', 'sunken conversation room', 'warm practical light', 'conversation seating'),
+ ('Contemporary penthouse lounge', 'lounge', 'graphite', 'natural stone', 'clean glazing', 'penthouse lounge', 'side window light', 'collector seating'),
+ ('Converted warehouse apartment', 'loft', 'light smoky grey', 'concrete', 'warm furnishings', 'converted warehouse', 'diffuse daylight', 'apartment seating'),
+ ('Vinyl listening room', 'listening', 'heritage green', 'aged timber', 'record storage', 'private listening room', 'warm practical light', 'records'),
+ ('Home cinema foyer', 'foyer', 'midnight blue', 'matte painted brick', 'restrained timber', 'cinema foyer', 'subtle practical lighting', 'foyer'),
+ ('Collector display study', 'study', 'smoky grey', 'textured plaster', 'restrained display niches', 'display study', 'soft practical light', 'display niches'),
+ ('Motorsport garage lounge', 'garage', 'graphite', 'matte painted brick', 'clean workshop furnishings', 'garage lounge', 'soft practical light', 'motorsport'),
+ ('Private training lounge', 'training', 'smoky grey', 'concrete', 'timber bench', 'private training lounge', 'natural daylight', 'training'),
+ ('Heritage clubroom', 'clubroom', 'heritage green', 'textured plaster', 'leather chairs', 'heritage clubroom', 'warm lamp light', 'club seating'),
+ ('Converted barn living room', 'lounge', 'weathered stone', 'aged timber', 'exposed timber beams', 'converted barn', 'soft daylight', 'collector seating'),
+ ('Townhouse stair landing', 'hallway', 'smoky grey', 'matte painted brick', 'stone stair details', 'townhouse stair landing', 'natural daylight', 'art display'),
+ ('Converted attic study', 'study', 'muted olive', 'textured plaster', 'timber desk', 'sloped attic ceiling', 'roof-window daylight', 'desk'),
+ ('Contemporary games room', 'games', 'light earthy taupe', 'matte painted brick', 'ochre accents', 'modern games room', 'soft practical light', 'pool table'),
+ ('Chess and reading lounge', 'reading', 'earthy taupe', 'natural stone', 'pale timber', 'reading lounge', 'warm reading light', 'chess'),
+ ('Restrained Art Deco lounge', 'lounge', 'deep navy', 'aged timber', 'fluted walnut', 'Art Deco lounge', 'warm practical light', 'collector seating'),
+ ('Modern farmhouse sitting room', 'lounge', 'light weathered stone', 'natural stone', 'limestone fireplace', 'farmhouse sitting room', 'soft daylight', 'collector seating'),
+ ('Courtyard-facing lounge', 'lounge', 'earthy taupe', 'textured plaster', 'restrained timber', 'courtyard-facing lounge', 'soft natural light', 'collector seating'),
+ ('Timber-lined collector retreat', 'retreat', 'weathered stone', 'aged timber', 'simple furnishings', 'timber-lined retreat', 'simple warm lighting', 'collector seating'),
+ ('Modern apartment dining nook', 'dining', 'light earthy taupe', 'concrete', 'compact oak furnishings', 'apartment dining nook', 'natural daylight', 'dining'),
 )
 STYLES = tuple(dict(id=f'{i:02}', name=row[0], family=row[1], wall_hue=row[2],
-                    wall_value='dark' if row[2] in {'burgundy','ink-blue','oxblood','aubergine','midnight-blue','graphite','forest-green','plum','slate'} else 'mid/light',
+                    wall_value='dark' if row[2] in {'charcoal','graphite','deep navy','midnight blue','heritage green'} else 'light' if row[2].startswith('light ') or row[2] == 'weathered stone' else 'mid',
                     wall_material=row[3], furniture_materials=row[4], architecture=row[5],
                     lighting=row[6], context=row[7], compatibility='Candidate premium collector environment; confirm against actual winner pixels before use.',
                     exclusions='No invented sporting equipment, logos, memorabilia or demographic stereotypes.')
@@ -74,13 +76,17 @@ def select_styles(seed, *, product='', category='', history=(), eligible_ids=Non
     rng = random.Random(str(seed))
     rng.shuffle(pool)
     pool.sort(key=lambda s: (s['id'] in recent, max((i for i, v in enumerate(recent) if v == s['id']), default=-1)))
-    selected = []
-    for style in pool:
-        if any((style['family'], style['wall_hue']) == (old['family'], old['wall_hue']) for old in selected):
-            continue
-        selected.append(deepcopy(style))
-        if len(selected) == 3:
-            return selected
+    def colour_family(style):
+        hue = style['wall_hue']
+        return ('grey' if any(w in hue for w in ('grey', 'graphite', 'charcoal')) else
+                'blue' if any(w in hue for w in ('navy', 'blue')) else hue.removeprefix('light '))
+    # Fixed finite pool; preserve the seeded/LRU order without locking any ad slot.
+    for selected in combinations(pool, 3):
+        if (len({colour_family(s) for s in selected}) == 3
+                and len({s['wall_material'] for s in selected}) == 3
+                and len({s['architecture'] for s in selected}) == 3
+                and len({s['wall_value'] for s in selected}) == 3):
+            return [deepcopy(s) for s in selected]
     raise ValueError('Three compatible distinct styles are required; expand the eligible pool.')
 
 
@@ -197,6 +203,7 @@ Keep/Change/Improvement rationale: after inspecting {reference}, record observed
 Concept anchor: {scene or 'Determine from this winner attachment; do not substitute another reference'}.
 Advertising role: {role or 'Determine from this winner attachment'}.
 Candidate execution (subject to visual compatibility): {json.dumps(style, ensure_ascii=False)}
+{ROOM_STYLE}
 Redesign architecture and layout, wall palette/material and camera composition, plus at least two of furniture, lighting, flooring, background or product placement. Describe each concrete change in the final brief. Keep defining objects (including a pool table for a billiards concept). Never replace a bar with an office. For an intentional detail card preserve its detail function rather than force a room.
 Design a genuinely new photograph, not a recolour, crop or angle sibling. Product remains the mobile-readable hero, never a tiny object in a wide interior. Compare with the winner and every sibling; revise near-duplicate rooms, palettes, layouts and copy openings.
 Output: square {dimensions}; preserve production safe areas and deterministic branded overlays, do not alter printed artwork. Camera perspective transforms the whole rigid product only. Explicitly describe mounting depth, contact shadow, light direction and restrained glazing reflections in the final execution. {'Intentional detail crop is permitted only for this verified detail-card role; do not invent or redraw details.' if detail else 'Show the full outer black frame.'}
@@ -372,6 +379,7 @@ REFERENCE: {reference}; inspect this exact winner attachment AND all other cards
 CANONICAL_PRODUCT (when supplied) is a separate product-accuracy attachment, NOT another Carousel card or output slot. Never copy its external wall or lighting.
 After inspecting full-resolution winner cards, identify BEST_WINNER_CLOSEUP for a secondary check of frame thickness, bevel and printed detail; the original black-frame product always takes precedence. If none is sharp enough, report that instead of fabricating detail.
 Keep this card's broad scene family and role but use a genuinely fresh execution. Never copy either the stock room or old ad composition.
+{ROOM_STYLE}
 Collective reference attachments: {', '.join(references) or 'Explicitly list every supplied WINNER_CARD label in the final prompt'}.
 Concept anchor: {scene or 'Determine the broad room family from this exact winning card'}.
 Advertising role: {role or 'Determine this card role from the actual attachment'}.
