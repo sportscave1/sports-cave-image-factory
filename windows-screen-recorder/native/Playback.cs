@@ -20,6 +20,7 @@ class DesktopPlayback {
     long started;
     long pausedAt;
     int currentStep,timeout,resultSent;
+    int identityReportedStep=-1;
     NativeMetrics metrics;
     public bool Active {get;private set;}
     public const int Hotkey=0x5343;
@@ -89,6 +90,7 @@ class DesktopPlayback {
         uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
         if(e.Current.ProcessId!=pid)return false;
         if(productCopy)return ProductCopyResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
+        if(ProductGenerationResult.Supports(target))return ProductGenerationResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
         var parent=TreeWalker.ControlViewWalker.GetParent(e);
         for(int depth=0;parent!=null&&depth<16;depth++){
             if(parent.Current.ProcessId!=pid)return false;
@@ -156,16 +158,17 @@ class DesktopPlayback {
         },IntPtr.Zero);
         Check();
         if(matches.Count!=1)throw new Exception(matches.Count==0?"Prepare the recorded window before Play.":"More than one matching window is open. Close the ambiguity before Play.");
-        if(normalized.Contains(matches[0]))send("diagnostic",new {kind="playback_edge_document_identity",step=currentStep,
-            tab_count_changed=true,top_level_document_verified=true,dpi=Native.GetDpiForWindow(matches[0]),monitors=Native.GetSystemMetrics(80)});
+        if(normalized.Contains(matches[0])&&identityReportedStep!=currentStep){identityReportedStep=currentStep;
+            send("diagnostic",new {kind="playback_edge_document_identity",step=currentStep,
+                tab_count_changed=true,top_level_document_verified=true,dpi=Native.GetDpiForWindow(matches[0]),monitors=Native.GetSystemMetrics(80)});}
         return matches[0];
     }
-    static void Privacy(AutomationElement e,bool allowDisabled=false) {
+    static void Privacy(AutomationElement e,bool allowDisabled=false,bool allowOffscreen=false) {
         object value=e.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty,true);
         if(!(value is bool)||(bool)value)throw new Exception("Protected or unclassified target. Playback refused.");
-        if((!allowDisabled&&!e.Current.IsEnabled)||e.Current.IsOffscreen)throw new Exception("Target is not ready.");
+        if((!allowDisabled&&!e.Current.IsEnabled)||(!allowOffscreen&&e.Current.IsOffscreen))throw new Exception("Target is not ready.");
     }
-    AutomationElement Resolve(IntPtr hwnd,Dictionary<string,object> target,string kind,bool allowDisabled=false) {
+    AutomationElement Resolve(IntPtr hwnd,Dictionary<string,object> target,string kind,bool allowDisabled=false,bool allowOffscreen=false) {
         var root=AutomationElement.FromHandle(hwnd);
         if(kind=="focus_window")return root;
         var condition=new AndCondition(
@@ -175,7 +178,7 @@ class DesktopPlayback {
         AutomationElement found=null;int count=0;
         for(int i=0;i<matches.Count;i++)if(Match(matches[i],target)&&ScopeMatches(matches[i],hwnd,target)){found=matches[i];count++;}
         if(count!=1)throw new Exception(count==0?"Recorded control is not ready.":"Recorded control is ambiguous. No input sent.");
-        Privacy(found,allowDisabled);return found;
+        Privacy(found,allowDisabled,allowOffscreen);return found;
     }
     static string DiagnosticGroupName(AutomationElement parent) {
         if(parent.Current.Name.Length>180)return "[excluded]";
@@ -186,8 +189,15 @@ class DesktopPlayback {
         // for an unexpected Group; never retain field values, clipboard,
         // coordinates or runtime IDs from the current application.
         var root=AutomationElement.FromHandle(hwnd);
-        var matches=root.FindAll(TreeScope.Descendants,new PropertyCondition(
-            AutomationElement.AutomationIdProperty,(string)target["automation_id"]));
+        var matches=root.FindAll(TreeScope.Descendants,new AndCondition(
+            new PropertyCondition(AutomationElement.AutomationIdProperty,(string)target["automation_id"]),
+            new PropertyCondition(AutomationElement.NameProperty,(string)target["name"]),
+            new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Button)));
+        // Non-button diagnostics keep their actual type rather than sampling
+        // arbitrary controls that share an empty AutomationId.
+        if((string)target["control_type"]!="Button")matches=root.FindAll(TreeScope.Descendants,new AndCondition(
+            new PropertyCondition(AutomationElement.AutomationIdProperty,(string)target["automation_id"]),
+            new PropertyCondition(AutomationElement.NameProperty,(string)target["name"])));
         var candidates=new List<object>();
         var expected=(System.Collections.ArrayList)target["scope"];
         uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
@@ -267,6 +277,33 @@ class DesktopPlayback {
         }
         return false;
     }
+    ProductGenerationResult.Witness GenerationWitness(IntPtr hwnd,Dictionary<string,object> target,bool observing=false) {
+        uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
+        // The application scrolls to previews after generation. Only this
+        // observation may re-resolve an offscreen control; mutation still
+        // requires the normal visible/enabled target immediately beforehand.
+        return ProductGenerationResult.Read(Resolve(hwnd,target,"invoke",true,observing),hwnd,pid);
+    }
+    bool VerifyGeneration(IntPtr hwnd,Dictionary<string,object> target,ProductGenerationResult.Witness before) {
+        bool workingObserved=false;
+        while((Stopwatch.GetTimestamp()-Interlocked.Read(ref started))*1000.0/Stopwatch.Frequency<timeout) {
+            Check();
+            if(Native.Root(Native.GetForegroundWindow())!=hwnd)
+                throw new Exception("Focus changed while verifying generation. Generate was not repeated.");
+            ProductGenerationResult.Witness after=null;
+            try{after=GenerationWitness(hwnd,target,true);}
+            catch(ElementNotAvailableException){} // A normal Streamlit rerender can replace the button.
+            catch(Exception ex){if(ex.Message!="Recorded control is not ready.")throw;}
+            if(after!=null&&after.Receipt!=before.Receipt&&after.State=="working")workingObserved=true;
+            if(ProductGenerationResult.Completed(before,after)){
+                send("diagnostic",new {kind="generation_result_verified",fresh_working_state_observed=workingObserved,
+                    fresh_application_acknowledgement=true,applied_result_verified=true});return true;}
+            if(after!=null&&after.Receipt!=before.Receipt&&(after.State=="failed"||after.State=="changed"))
+                throw new Exception("Generation failed or its product context changed. Generate was not repeated.");
+            if(cancelled.WaitOne(100))Check();
+        }
+        return false;
+    }
     public void Execute(int step,Dictionary<string,object> action) {
         if(!Active||busy)throw new Exception("Executor unavailable.");
         ready.Set();
@@ -334,9 +371,15 @@ class DesktopPlayback {
                         bool productCopy=ProductCopyResult.Supports(target);
                         if(productCopy&&e.Current.HelpText!=ProductCopyResult.Ready)
                             throw new Exception("Copy prompt readiness changed. No input sent.");
+                        bool productGenerate=ProductGenerationResult.Supports(target);
+                        var generationBefore=productGenerate?GenerationWitness(hwnd,target):null;
+                        if(productGenerate&&generationBefore==null)
+                            throw new Exception("Prepare Product Uploads generation before Play. No input sent.");
                         effectStarted=true;((InvokePattern)pattern).Invoke();
                         // Provider return is not application result verification.
                         if(productCopy)verified=VerifyResult(hwnd,target,kind,null);
+                        else if(productGenerate){verified=VerifyGeneration(hwnd,target,generationBefore);
+                            if(!verified)reason="Generation acknowledgement was not observed within the action timeout. Generate was not repeated.";}
                         else reason="Button invoked; its application result needs verification before continuing.";
                         break;
                     default:throw new Exception("Unsupported desktop action.");

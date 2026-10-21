@@ -21,8 +21,10 @@ matched the expected prompt exactly. See [current evidence and limitations](V1-H
 
 Text, toggle, selection, expansion and scroll results require fresh semantic
 readback. General buttons are invoked once and then remain uncertain unless an
-application-specific result can be verified. Product Copy has that verification;
-general Generate button playback does not. Unsupported/ambiguous controls and
+application-specific result can be verified. Product Copy has that verification.
+A narrow Product Uploads Generate verifier passed physical 2/2 playback with a
+fresh working state and an applied result acknowledgement; general buttons retain uncertain results.
+Unsupported/ambiguous controls and
 unclassified or protected text fields interrupt rather than guessing.
 
 The native process uses UI Automation, explicit local Start playback confirmation,

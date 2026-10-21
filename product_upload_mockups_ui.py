@@ -175,6 +175,8 @@ def render_design(app,row,user):
     running=bool(pending and pending['state'] in ('Queued','Running'))
     saving=JOBS.snapshot(key,user['id'],'save')
     running=running or bool(saving and saving['state'] in ('Queued','Running'))
+    from product_upload_generation_status import attempt, status, markup
+    acknowledgement='product-upload-generation-ack-'+key
     def queue_generation():
         if spec.get('state')!='Ready' or running or st.session_state.get('_product_upload_active')!=key:return
         active_save=JOBS.snapshot(key,user['id'],'save')
@@ -195,6 +197,7 @@ def render_design(app,row,user):
         selected_sport=selection['sport'] if selection else ''
         if not selected_name or not selected_sport:return
         if result and result['product_name']==selected_name and result['sport_category']==selected_sport:
+            st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],reused=True)
             st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
             return
         if row['data'].get('product_gid'):
@@ -206,13 +209,19 @@ def render_design(app,row,user):
             def finalize(result):
                 result=app.ensure_lifestyle_prompts(result)
                 return app.rebuild_result_artifacts(result)
-            generate(connect,row,user['id'],selected_name,selected_sport,Dropbox,app.BASE_DIR,
+            queued=generate(connect,row,user['id'],selected_name,selected_sport,Dropbox,app.BASE_DIR,
                 app.MOCKUPS_GENERATION_SEMAPHORE,app.build_mockup_final_prompt_items,reset_exports=bool(result),finalize=finalize)
+            st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],job=queued['token'])
             st.session_state['product-upload-generation-focus-'+key]=uuid.uuid4().hex
             st.session_state.pop('product-upload-job-error-'+key,None)
-        except Exception as error:st.session_state['product-upload-job-error-'+key]=str(error)
+        except Exception as error:
+            st.session_state[acknowledgement]=attempt(key,selected_name,selected_sport,row['data']['source']['content_hash'],failed=True)
+            st.session_state['product-upload-job-error-'+key]=str(error)
     st.button('Generate mockups',type='primary',key='product-upload-generate-'+key,on_click=queue_generation,
         disabled=running or not name.strip() or not sport or spec.get('state')!='Ready')
+    if spec.get('state')=='Ready':
+        st.html(markup(*status(st.session_state.get(acknowledgement),pending,
+            st.session_state.get('product-upload-job-applied-'+key),result,key,name,sport,row['data']['source']['content_hash'])))
     if st.session_state.get('product-upload-job-error-'+key):st.error(st.session_state['product-upload-job-error-'+key])
     preparing=JOBS.snapshot(key,user['id'],'prepare')
     if spec.get('state')!='Ready':

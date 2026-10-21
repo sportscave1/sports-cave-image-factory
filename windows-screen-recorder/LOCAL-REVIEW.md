@@ -1,6 +1,11 @@
 # Windows Recorder V1 local review — 21 October 2026
 
 This is a reviewable local checkpoint, not a completed or authorized release.
+The checkpoint was committed locally as `148a1a4d3731167f7705cab2fc2b3d36f649f79a`.
+Exact-revision Studio Verify, 63 Python checks (plus six subtests) and both focused
+JavaScript checks passed on the clean committed worktree. Subsequent Generate
+and shutdown fixes are described below; Studio records their exact follow-up
+revision and verification independently of this historical checkpoint.
 Task `20261020-ff6cc91d`, owner `codex-windows-recorder-release-01a1589a`.
 The user authorized a recorder-only local commit and exact-revision Studio
 checks, followed by continued work. Push, merge, Render deployment and installed
@@ -74,7 +79,7 @@ exact reviewed Windows artifact configured on the existing primary service.
 Neither production change has been made.
 
 General invoke runs once and stops as uncertain without an application-specific
-postcondition. Product Copy has one; Generate replay does not. The pointer-based
+postcondition. Product Copy and Generate now have narrow result verifiers. The pointer-based
 semantic descendant fallback and actual Product Uploads scrolling lack physical
 acceptance. Mixed-DPI behavior, installed first setup/startup/update/rollback and
 the final integrated candidate still need acceptance. These gaps are not passes.
@@ -84,3 +89,112 @@ for review readiness. The user has now explicitly authorized the local recorder
 commit and exact-revision checks. Keep the task In Progress until the
 applicable gates are complete. Local preparation and an archive do not authorize
 deployment, installation or a claim that the recorder is fully released.
+
+## Continuation after the authorized local commit
+
+Product Uploads now emits a public generation acknowledgement for each accepted
+Generate request. Ready requires the current intake/name/sport/source, matching
+job and applied result; stale, failed and changed-context results cannot satisfy
+it. The opaque per-attempt identity is an HTML ID, not visible/spoken content or
+a value saved in recordings. A scoped optional native result contract requires a
+fresh acknowledgement before confirming Generate playback. It waits within the
+recorded 30-second action bound, never repeats Generate, and preserves unknown
+effects. Result-only observation tolerates the application's scroll to previews;
+the mutation still requires a visible, enabled target.
+
+The first physical Generate attempt on native `57e831f4...` interrupted with zero
+actions. The user confirmed clicking Generate directly. Diagnostics exposed only
+RootWebArea and no semantic control under the pointer. Evidence is retained in
+`generate-acceptance/failed-editor-click/`; no successful capture is claimed.
+
+The revised candidate prepares the unique visible Generate control and its
+document before arming. Its mouse-down worker must confirm the same enabled,
+nonprotected control, point, window, process, DPI and bounds before release.
+Mouse-up must stay in the same window/control bounds and within two seconds;
+capture emits Invoke only after a fresh working/ready application acknowledgement
+in that same top-level document. If any proof is unavailable it interrupts.
+These are physical input observations, not injected input or coordinate playback.
+The first pre-click native `51dbcdea0239f64697092277c5c79a7ae85786a8db8ff739da57c4da5440b2c3`
+compiled and passed 13 fresh-acknowledgement policy checks. Physical acceptance
+is pending. Seven previously saved definitions remained unchanged across restart.
+
+Focused Python checks passed for acknowledgement/context rejection and scoped
+contracts (18 tests plus six subtests), and the existing Generate callback/loading
+checks passed (six tests). Actual UI generation with synthetic providers showed
+working then ready, five generated core images and Save all disabled at 5/8.
+This browser-driven check is not physical native acceptance.
+
+The synthetic reset control was initially covered by the fixed page header.
+It has moved into the test sidebar. The refreshed fixture uses port 18976 and
+intake `b1d9c43d-d557-4367-8f21-b632a4ad48f3`; the previous fixture's files remain
+under `generate-acceptance/product-ui/`. No real workflow or source was reset.
+
+Independent shutdown review found base Runner.close could call DesktopRunner.stop
+and reopen the native toolbar when a draft was interrupted. Closing now blocks
+reopening, bounds native/pump cleanup and closes stdin even after a broken pipe.
+Readers retain their own process and cannot consume or interrupt a replacement
+toolbar. Ten desktop-adapter checks pass, including broken-pipe shutdown with
+draft retention and a stale reader not touching a replacement. The running helper
+now loads this cleanup fix after an idle restart. Installation/deployment remain forbidden.
+
+The preparation attempt on 51db rejected the acknowledgement's process/protection
+check before capture. The subsequent build distinguishes process mismatch,
+protected state and unavailable document classification. Unknown layout-container
+classification now follows capture's existing metadata-only rule; protected
+controls and unknown Document/Edit classification still block. Current native
+`fc05b2422df3c0c460d1ef4cf70d6b4818a14902a5f2ad53b985daee658eee8c`
+passed physical Generate capture on the corrected sidebar fixture. Generate 21
+contains exactly focus and scoped Invoke, with revision
+`7c218dbf40bf14258229b0cc0db584a46296527b2ef33196546637f6cfd64e6d`.
+The durable Save receipt reports 2.53 ms. All eight saved definitions retained
+their exact bytes across the subsequent development-helper restart.
+
+One physical playback completed 2/2 and the user confirmed reset had removed the
+previews beforehand. Fresh generation remains unresolved: the synthetic provider
+counter did not advance, including after an independent browser-driven Generate.
+The archive named `verified-reuse-playback` records the initial reuse inference;
+that name is not proof of result reuse. A subsequent fresh-tab physical playback
+stopped 1/2 before Invoke with "Recorded control is not ready." The user confirmed
+Generate was visible and enabled. Its run, diagnostics and unchanged definition
+are preserved under `generate-acceptance/fresh-tab-resolution-failure`.
+
+Failure diagnostics previously sampled unrelated controls with an empty
+AutomationId. The next diagnostic candidate filters by saved name and type,
+reports Edge document identity once per step, and records whether result
+verification observed a fresh working state. It changes no target matching or
+input guard. Native SHA-256:
+`113df98a6e8b3a7081a596ad8174e7d63bc30428e1d6573ff198373ee107bc17`.
+It compiles and is queued for a user-started diagnostic playback. Twelve focused
+acknowledgement and helper-lifecycle checks pass. Fresh Generate replay and final
+candidate acceptance remain open; no installation or deployment occurred.
+
+The diagnostic retry found exactly one visible, enabled, same-process Generate
+button. Its three saved ancestors matched, but Streamlit exposed an additional
+content-named Group inside root. Generate's application-specific scope now allows
+one anonymous, enabled, nonprotected layout Group at that boundary without reading
+its content-derived name. All three stable ancestors still compare exactly;
+the result acknowledgement must independently belong to the same top-level
+document. Other actions retain their existing scope policy. Capture canonicalizes
+this same boundary. Twenty-two native policy checks include wrong document/pane,
+identified or multiple named groups, unsafe host and missing ancestry rejection.
+
+Physical playback on native
+`c7399e7ff115cdf979d753814c14b46bb69fa958745830f1ab3e75e3b4ecfe8b`
+completed 2/2, confirmed by the user and durable run
+`eb2fc8ac-0eac-401e-88f3-4f9574534b04`. The verifier observed a fresh working state
+then a fresh applied ready acknowledgement; no pending step remains and Generate
+21's bytes are unchanged. Playback took 3047.98 ms / 781.25 ms CPU; private bytes
+96174080 to 100995072. A subsequent 10.04-second idle sample outside accessibility
+inspection observed zero CPU and stable private bytes 102395904. The provider
+counter still reports one call and is not used as an independent freshness oracle.
+Source remains unchanged; no exports or output-provider calls occurred.
+Evidence: `generate-acceptance/verified-fresh-playback` in the Studio runtime.
+
+The corresponding local package is
+`generate-acceptance/layout-scope-package/SportsCaveTaskRecorder.zip`, SHA-256
+`e1ba83c7dab9acfaceea262a90bd83b83e21ab072a3dbe2c41c2056101ea11f3`,
+manifest `ca10e118a485854ee77161ca297b0c273e2b5e02968d4f9ad5430761ae291d2e`.
+Deterministic rebuild, extracted integrity and health in the real disposable
+pinned environment pass. Six native provider/overflow checks, twelve focused
+acknowledgement/helper checks and twenty-seven job/contract/package checks
+(plus six subtests) pass. The package was not installed or published.

@@ -32,6 +32,7 @@ class DesktopRunner(Runner):
         self.native_lock = asyncio.Lock()
         self.last_engine = None
         self.capture_waiters = {}
+        self.closing = False
         self.message = "Windows recorder ready. Choose Record to select a prepared window."
 
     def desktop_busy(self):
@@ -121,8 +122,13 @@ class DesktopRunner(Runner):
         await self.publish_native(state)
 
     async def open_toolbar(self):
+        if self.closing:
+            raise Invalid("The helper is shutting down. Restart it before continuing.")
         if self.native and self.native.returncode is None:
             return
+        if self.native_pump and not self.native_pump.done():
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(self.native_pump, timeout=2)
         executable = native_path()
         if not executable.is_file():
             raise Invalid("Update required: native recorder package is missing.")
@@ -131,37 +137,45 @@ class DesktopRunner(Runner):
             str(executable), "--candidate", stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             limit=65538)
-        self.native_pump = asyncio.create_task(self.read_native())
+        self.native_pump = asyncio.create_task(self.read_native(self.native))
         await self.publish_native()
 
-    async def read_native(self):
+    async def read_native(self, process=None):
+        process = process or self.native
         try:
             while True:
-                line = await self.native.stdout.readline()
+                line = await process.stdout.readline()
                 if not line:
                     break
                 if len(line) > 65536 or not line.endswith(b"\n"):
                     raise Invalid("Native connection frame exceeded its bound.")
                 async with self.native_lock:
+                    if process is not self.native:
+                        return
                     command = json.loads(line)
                     if not isinstance(command, dict):
                         raise Invalid("Native command must be an object.")
                     await self.apply_native(command)
         except Exception as error:
-            self.desktop.message = "Native connection interrupted: " + type(error).__name__
+            if process is self.native:
+                self.desktop.message = "Native connection interrupted: " + type(error).__name__
         finally:
-            self.desktop.message = "Native toolbar disconnected. Review the preserved recording or run before continuing."
-            self.desktop.pending_play = None
-            self.desktop.playback.stop(reason=self.desktop.message)
-            if self.desktop.recording.state in {"recording", "paused"}:
-                try:
-                    self.desktop.recording.interrupt("Native toolbar disconnected. Review the draft.")
-                except OSError:
-                    self.desktop.recording.problem = "Disk write failed. Draft retained in memory; review after restoring disk access."
-            for _, future in self.capture_waiters.values():
-                if not future.done():
-                    future.set_exception(ConnectionError("Native toolbar disconnected before capture confirmation."))
-            self.notify_state()
+            if process is self.native:
+                self.native_disconnected()
+
+    def native_disconnected(self):
+        self.desktop.message = "Native toolbar disconnected. Review the preserved recording or run before continuing."
+        self.desktop.pending_play = None
+        self.desktop.playback.stop(reason=self.desktop.message)
+        if self.desktop.recording.state in {"recording", "paused"}:
+            try:
+                self.desktop.recording.interrupt("Native toolbar disconnected. Review the draft.")
+            except OSError:
+                self.desktop.recording.problem = "Disk write failed. Draft retained in memory; review after restoring disk access."
+        for _, future in self.capture_waiters.values():
+            if not future.done():
+                future.set_exception(ConnectionError("Native toolbar disconnected before capture confirmation."))
+        self.notify_state()
 
     async def desktop_command(self, kind, data, command_id):
         if kind != "inspect":
@@ -212,20 +226,36 @@ class DesktopRunner(Runner):
         return any(t["id"] == task_id and t.get("format") == FORMAT for t in self.catalogue.summaries())
 
     async def stop(self):
-        if self.desktop_busy():
+        if self.closing:
+            await super().stop()
+        elif self.desktop_busy():
             await self.desktop_command("stop", {}, str(uuid4()))
         else:
             await super().stop()
 
     async def close(self):
+        self.closing = True
         self.desktop.playback.stop()
+        self.desktop.pending_play = None
+        if self.desktop.recording.state in {"recording", "paused"}:
+            self.desktop.recording.interrupt("Helper stopped. Review the preserved draft before continuing.")
         if self.native and self.native.returncode is None:
             self.desktop.instruct("disarm")
             with contextlib.suppress(Exception):
                 await self.publish_native()
-            self.native.terminate()
-            await self.native.wait()
+            with contextlib.suppress(ProcessLookupError):
+                self.native.terminate()
+            try:
+                await asyncio.wait_for(self.native.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    self.native.kill()
+                await asyncio.wait_for(self.native.wait(), timeout=5)
+        if self.native and self.native.stdin:
+            self.native.stdin.close()
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(self.native.stdin.wait_closed(), timeout=1)
         if self.native_pump:
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.native_pump
+            with contextlib.suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(self.native_pump, timeout=2)
         await super().close()

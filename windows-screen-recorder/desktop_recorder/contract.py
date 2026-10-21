@@ -37,7 +37,13 @@ def text(value, limit=180):
 
 def identity(target):
     # No persistent HWND, process ID, UIA runtime ID or screen coordinates.
-    fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope",))
+    fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope", "postcondition"))
+    if "postcondition" in target:
+        if (target["postcondition"] != "sports-cave.product-generation.v1" or
+                target["control_type"] != "Button" or target["name"] != "Generate mockups" or
+                not isinstance(target["app"], str) or
+                re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe" or "scope" not in target):
+            raise Invalid("Unsupported application result contract.")
     for key, value in target.items():
         if key == "scope":
             if not isinstance(value, list) or len(value) > 16:
@@ -103,6 +109,8 @@ def validate(raw):
         if action["requires"] != [expected]:
             raise Invalid("Action capability contract does not match.")
         identity(action["target"])
+        if "postcondition" in action["target"] and (kind != "invoke" or action["version"] != 2):
+            raise Invalid("Application result verification requires scoped invoke.")
         if action["version"] == 2 and "scope" not in action["target"]:
             raise Invalid("Scoped desktop actions require ancestor identity.")
         if type(action["timeout_ms"]) is not int or not 100 <= action["timeout_ms"] <= 30000:

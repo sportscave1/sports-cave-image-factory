@@ -26,6 +26,19 @@ def action():
 
 
 class FoundationTests(unittest.TestCase):
+    def test_generation_result_contract_is_scoped_to_edge_invoke(self):
+        self.start()
+        a=action()
+        a.update(version=2, requires=["uia.invoke.v2"])
+        a["target"].update(app=r"C:\Apps\msedge.exe",name="Generate mockups",scope=[],
+                           postcondition="sports-cave.product-generation.v1")
+        self.assertTrue(self.accept(a))
+        for changes in ({"postcondition":"arbitrary"},{"app":"other.exe"},{"name":"Other"},{"app":None}):
+            invalid=copy.deepcopy(a);invalid["target"].update(changes)
+            with self.assertRaises(Invalid):validate({**self.rec.task,"actions":[invalid]})
+        invalid=copy.deepcopy(a);invalid.update(kind="wait_ready",requires=["uia.readiness.v2"])
+        with self.assertRaises(Invalid):validate({**self.rec.task,"actions":[invalid]})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

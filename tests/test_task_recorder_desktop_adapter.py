@@ -18,6 +18,53 @@ def definition():
                 "value":"Synthetic value","timeout_ms":500}]}
 
 
+def test_shutdown_of_interrupted_capture_does_not_reopen_toolbar_even_if_pipe_is_broken(tmp_path):
+    async def trial():
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        runner=desktop.DesktopRunner(tmp_path)
+        runner.desktop.recording.record({'mode':'prepared','binding':None},indicator_visible=True)
+        runner.desktop.recording.interrupt('synthetic interruption')
+        reader=asyncio.StreamReader()
+        process=SimpleNamespace(stdout=reader,returncode=None,
+                                stdin=SimpleNamespace(close=Mock(),wait_closed=AsyncMock()))
+        def terminate():
+            process.returncode=0
+            reader.feed_eof()
+        process.terminate=Mock(side_effect=terminate)
+        process.wait=AsyncMock(return_value=0)
+        runner.native=process
+        runner.native_pump=asyncio.create_task(runner.read_native(process))
+        runner.open_toolbar=AsyncMock(side_effect=AssertionError('Shutdown reopened toolbar'))
+        runner.publish_native=AsyncMock(side_effect=BrokenPipeError())
+        await runner.close()
+        process.terminate.assert_called_once()
+        process.stdin.close.assert_called_once()
+        assert runner.native_pump.done()
+        runner.open_toolbar.assert_not_called()
+        recovered=desktop.DesktopRunner(tmp_path)
+        assert recovered.desktop.recording.state=='interrupted'
+        assert recovered.desktop.recording.task['actions']==[]
+    asyncio.run(trial())
+
+
+def test_old_native_reader_cannot_stop_replacement_or_consume_its_frames(tmp_path):
+    async def trial():
+        from types import SimpleNamespace
+        old_reader=asyncio.StreamReader();old_reader.feed_eof()
+        old=SimpleNamespace(stdout=old_reader)
+        replacement=SimpleNamespace(stdout=SimpleNamespace(readline=AsyncMock()))
+        runner=desktop.DesktopRunner(tmp_path)
+        runner.native=replacement
+        runner.desktop.pending_play={'synthetic':'replacement awaiting local confirmation'}
+        runner.desktop.message='Replacement ready'
+        await runner.read_native(old)
+        assert runner.desktop.pending_play is not None
+        assert runner.desktop.message=='Replacement ready'
+        replacement.stdout.readline.assert_not_awaited()
+    asyncio.run(trial())
+
+
 def test_catalogue_and_capabilities_reuse_helper_snapshot(tmp_path):
     runner = desktop.DesktopRunner(tmp_path)
     task = definition()
