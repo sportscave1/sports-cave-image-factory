@@ -9834,10 +9834,11 @@ class LazyPromptLibrary:
 
 META_PROMPTS = LazyPromptLibrary(lambda: {
     "au_carousel": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave Australian Meta Ads copywriter.
 
 I will upload:
-- A screenshot of the product artwork
+- A screenshot of the product edition
 - The carousel images being used
 - The product/theme/fan base
 - Any context such as athlete, rivalry, team, moment, championship, location or historical meaning
@@ -9871,6 +9872,7 @@ Card 5: Scarcity/FOMO
 For each card, write 3 options, choose the strongest final version, then give final clean version only in a table.
 """,
     "au_primary": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave Australian Meta ads copywriter.
 
 Write 3 primary text variations for this product.
@@ -9902,6 +9904,7 @@ Also provide:
 - 5 description options, max 6 words
 """,
     "au_motorsport": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave Australian motorsport Meta ads copywriter.
 
 Write ad copy for a limited-edition motorsport wall art drop.
@@ -9931,9 +9934,10 @@ Write:
 4. Five carousel card headline/description pairs
 """,
     "usa_carousel": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave USA Meta Ads copywriter.
 
-I will upload product artwork, carousel images, the product name, sport, fan base, and any story/context.
+I will upload product edition, carousel images, the product name, sport, fan base, and any story/context.
 
 Write Meta carousel card copy for a USA audience.
 
@@ -9960,6 +9964,7 @@ Card 5: Scarcity or final chance
 For each card provide 3 options, then the strongest final version in a table.
 """,
     "usa_primary": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave USA Meta Ads copywriter.
 
 Write 3 primary text variations for this limited-edition sports wall art product.
@@ -9983,6 +9988,7 @@ Then provide:
 - 6 descriptions, max 6 words
 """,
     "usa_nba": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave USA NBA Meta Ads copywriter.
 
 Write ad copy for a limited-edition NBA wall art product built around rivalry, greatness, mentality, or legacy.
@@ -10013,13 +10019,14 @@ Write:
 4. Five carousel card headline/description pairs
 """,
     "usa_master": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 SPORTS CAVE USA - GENERIC MASTER PROMPT FOR ALL PRODUCTS
 
 Create a high-converting Meta Instant Experience concept for Sports Cave USA using the supplied product image as the core reference.
 
 This must work for any Sports Cave product - not just baseball, not just one athlete, and not just one sport.
 
-The final output must adapt to the specific artwork provided.
+The final output must adapt to the specific edition provided.
 
 Brand Context
 
@@ -10063,10 +10070,10 @@ Do not default to baseball, Babe Ruth, The Called Shot, NBA, or any other single
 
 Product Accuracy Rule
 
-The artwork in the generated concepts must stay as close as possible to the supplied product image.
+The edition in the generated concepts must stay as close as possible to the supplied product image.
 
 Preserve:
-- artwork title
+- edition title
 - layout
 - colours
 - frame style
@@ -10076,8 +10083,8 @@ Preserve:
 - central image
 - overall design identity
 
-Do not turn the artwork into a different product.
-Do not invent a new artwork.
+Do not turn the edition into a different product.
+Do not invent a new edition.
 Do not swap the sport.
 Do not add unrelated teams, athletes, leagues, or moments.
 
@@ -10101,7 +10108,7 @@ Avoid:
 - bright showroom feel
 - fake-looking CGI rooms
 - warped frames
-- distorted artwork
+- distorted edition
 - excessive text overlays
 - generic stock-style interiors
 
@@ -10185,11 +10192,11 @@ Purpose: stop the scroll and make the product feel premium.
 
 Requirements:
 - vertical 4:5
-- supplied artwork shown clearly
+- supplied edition shown clearly
 - black frame
 - dark premium room
 - warm lighting
-- artwork readable
+- edition readable
 - strong hero composition
 - collector atmosphere
 - optional small overlay text
@@ -10212,8 +10219,8 @@ Use the cleanest, most premium room mockup.
 
 Requirements:
 - dark fan cave / sports room / office / collector den
-- large black-framed artwork on wall
-- artwork must be readable
+- large black-framed edition on wall
+- edition must be readable
 - no CTA button
 - no heavy overlay text
 - let the image breathe
@@ -10238,10 +10245,10 @@ Use what fits the product best.
 
 Purpose: deepen emotional connection before a CTA.
 
-Use a second room angle or a more dramatic placement of the artwork.
+Use a second room angle or a more dramatic placement of the edition.
 
 Requirements:
-- same artwork
+- same edition
 - same black frame
 - similar premium environment
 - slightly different angle or room
@@ -10274,9 +10281,9 @@ Supporting copy:
 Only 100 Editions Made
 A numbered collector release for fans who know what this means.
 
-5. Emotional Artwork Detail Close-Up
+5. Emotional Edition Detail Close-Up
 
-Purpose: sell the story inside the artwork.
+Purpose: sell the story inside the edition.
 
 Zoom in on the most emotional or recognizable part of the design.
 
@@ -10350,7 +10357,7 @@ Purpose: close the sale.
 Use the strongest room mockup again, or a tighter, darker, more dramatic version of it.
 
 Requirements:
-- artwork large
+- edition large
 - black frame
 - dark premium room
 - cinematic lighting
@@ -10367,7 +10374,7 @@ Secure Yours
 
 GENERIC IMAGE ENVIRONMENT RULES BY SPORT
 
-Use the supplied artwork to choose the right room feel and props.
+Use the supplied edition to choose the right room feel and props.
 
 Only use props that naturally support the product.
 
@@ -10445,10 +10452,10 @@ HARD RULES
 - Every output must adapt to the supplied product image.
 - Do not default to Babe Ruth, baseball, The Called Shot, or any specific existing example unless that is the product provided.
 - Do not introduce unrelated athletes, teams, or sports.
-- Do not use official league or sponsor branding unless it already appears in the supplied artwork.
-- Keep the supplied artwork recognizable and faithful.
+- Do not use official league or sponsor branding unless it already appears in the supplied edition.
+- Keep the supplied edition recognizable and faithful.
 - Prioritize premium collector emotion over busy ad design.
-- The artwork is always the hero.
+- The edition is always the hero.
 
 The viewer should instantly feel:
 "This is not just wall art. This is a piece of sports history for my wall."
@@ -10502,10 +10509,11 @@ It should make a buyer think:
 "If I wait too long, I'll miss it."
 """,
     "full_meta": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are my Sports Cave Meta Ads strategist and copywriter.
 
 I will upload:
-- Product artwork
+- Product edition
 - Product name
 - Sport
 - Country target
@@ -10615,6 +10623,7 @@ Category | Keyword | Type | Priority | Notes
 Only include keywords that could realistically lead to purchase. Do not explain. Only return the table.
 """,
     "product_meta": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Rewrite the following product meta title and meta description for SEO.
 
 Requirements:
@@ -10631,6 +10640,7 @@ Current Meta Description:
 [PASTE]
 """,
     "product_description": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Take the product description below and subtly integrate the following keyword:
 
 Keyword: [PASTE KEYWORD]
@@ -10647,6 +10657,7 @@ Product Description:
 [PASTE]
 """,
     "collection_description": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Rewrite the following collection description to include this keyword:
 
 Keyword: [PASTE]
@@ -10662,6 +10673,7 @@ Current Collection Description:
 [PASTE]
 """,
     "blog_optimisation": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Rewrite the blog post below to naturally include the following keyword:
 
 Keyword: [PASTE]
@@ -10678,6 +10690,7 @@ Blog Post:
 [PASTE]
 """,
     "blog_topic": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are a senior SEO strategist for Sports Cave.
 
 Given this product or collection, suggest 10 blog topics that could attract sports fans and lead them naturally toward Sports Cave products.
@@ -10695,6 +10708,7 @@ Output:
 Topic | Primary keyword | Search intent | Why it fits Sports Cave
 """,
     "blog_writing": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 You are a senior sports journalist writing for Sports Cave.
 
 Write a premium SEO blog article that feels like Sports Illustrated, ESPN, or The Athletic - not generic AI content.
@@ -10718,6 +10732,7 @@ Requirements:
 - No keyword stuffing
 """,
     "blog_html": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Convert this blog post into Shopify-ready HTML.
 
 Rules:
@@ -10742,6 +10757,7 @@ Blog:
 [PASTE]
 """,
     "image_optimisation": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Create SEO image file names and alt text for this Sports Cave blog.
 
 Blog topic:
@@ -10760,6 +10776,7 @@ Rules:
 - No stuffing
 """,
     "blog_meta": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Create SEO meta tags for this Sports Cave blog.
 
 Blog title:
@@ -10781,6 +10798,7 @@ Meta description:
 URL handle:
 """,
     "blog_tags": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Generate Shopify blog tags for this Sports Cave article.
 
 Blog topic:
@@ -10794,12 +10812,13 @@ Rules:
 Output a comma-separated list only.
 """,
     "alt_text": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Create Shopify image alt text for this Sports Cave product.
 
 Product name:
 [PASTE]
 
-Artwork/image notes:
+Edition/image notes:
 [PASTE]
 
 Rules:
@@ -10812,6 +10831,7 @@ Rules:
 Output 5 alt text options.
 """,
     "internal_linking": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Suggest internal links for this Sports Cave product or blog.
 
 Page/product:
@@ -10834,6 +10854,7 @@ Anchor text | Destination | Where to place it | Reason
 
 SOCIAL_PROMPTS = LazyPromptLibrary(lambda: {
     "Instagram caption prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write Instagram captions for this Sports Cave product.
 
 Product:
@@ -10857,6 +10878,7 @@ Output:
 5. Final editions caption
 """,
     "Story prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Create a 5-frame Instagram Story sequence for this Sports Cave product.
 
 Product:
@@ -10876,6 +10898,7 @@ Frame 4 text:
 Frame 5 text:
 """,
     "Reel cover prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write Reel cover text options for a Sports Cave product video.
 
 Product:
@@ -10890,6 +10913,7 @@ Rules:
 Output 12 options.
 """,
     "Launch post prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Create a launch post for this new Sports Cave limited edition.
 
 Product:
@@ -10905,6 +10929,7 @@ Output:
 - CTA
 """,
     "Final editions post prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write a final editions social post.
 
 Product:
@@ -10926,6 +10951,7 @@ Output 3 variants.
 
 EMAIL_PROMPTS = LazyPromptLibrary(lambda: {
     "Product launch email prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write a product launch email for Sports Cave.
 
 Product:
@@ -10941,6 +10967,7 @@ Email body:
 CTA:
 """,
     "Abandoned cart email prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write an abandoned cart email for a Sports Cave shopper.
 
 Product/cart context:
@@ -10958,6 +10985,7 @@ Email body:
 CTA:
 """,
     "Browse abandonment prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write a browse abandonment email for someone who viewed Sports Cave wall art.
 
 Collection/product viewed:
@@ -10970,6 +10998,7 @@ Email body:
 CTA:
 """,
     "Collector drop email prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write a collector drop email announcing a numbered Sports Cave release.
 
 Drop:
@@ -10985,6 +11014,7 @@ Email body:
 CTA:
 """,
     "Father's Day/gift email prompt": """
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Write a Sports Cave gift email for Father's Day or gift season.
 
 Products/collection:

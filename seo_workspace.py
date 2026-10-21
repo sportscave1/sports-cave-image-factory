@@ -154,6 +154,7 @@ Select one option and label it BEST ARTICLE TO WRITE.
 Do not write the article yet."""
 
 ARTICLE_WRITING_TEMPLATE = """You are a senior sports journalist writing for the Sports Cave Journal.
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 Write a premium, human-sounding sports feature based on:
 

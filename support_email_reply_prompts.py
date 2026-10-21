@@ -3,6 +3,7 @@ import re
 from support_email_provider import html_to_text
 
 FIVE_STAR_TEMPLATE = """SPORTS CAVE — 5-STAR REVIEW RESPONSE
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 Write a short, warm customer reply on behalf of Sports Cave, a premium limited-edition sports wall art brand.
 
@@ -27,7 +28,7 @@ REQUIREMENTS
 - Acknowledge that they are happy with their purchase.
 - Mention the product naturally, but shorten a long product title if that sounds better. For example, "Six Laps Ahead Peter Brock Wall Art" can simply be called their "Peter Brock piece".
 - If their review contains a specific positive comment, acknowledge it naturally where appropriate.
-- Invite them to send Sports Cave a photo or short video of the artwork displayed in their home, office, sports room or wherever they have placed it.
+- Invite them to send Sports Cave a photo or short video of the edition displayed in their home, office, sports room or wherever they have placed it.
 - Explain that Sports Cave would love to feature it in the Sports Cave community, website or social media, with their permission.
 - As a thank-you specifically for sending the photo or video, offer them 15% off their next Sports Cave order.
 - Do not imply that the 15% discount was given in exchange for the positive review.

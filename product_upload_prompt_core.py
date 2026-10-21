@@ -857,6 +857,7 @@ PRODUCT_UPLOAD_SUBMISSION_LOG_SIGNATURE_KEY = "product-upload-submission-log-sig
 
 
 PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """Create unique commercial SEO image alt text for every Sports Cave Shopify product image supplied.
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 Inputs:
 - Product title/H1
@@ -897,6 +898,7 @@ Rules:
 
 
 PRODUCT_UPLOAD_META_PROMPT = """Write commercial Shopify SEO metadata for one Sports Cave product.
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 Inputs:
 - Product title

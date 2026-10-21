@@ -4,6 +4,7 @@ import re
 START = 'SPORTS CAVE COLLECTOR COPY — AUTHORITATIVE V1'
 END = 'END SPORTS CAVE COLLECTOR COPY'
 RULES = '''SPORTS CAVE COLLECTOR COPY — AUTHORITATIVE V1
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Scope: customer-facing Shopify product title/H1 and description only. These rules
 supersede conflicting visible-copy instructions anywhere in this SOP or saved
 templates. Preserve all response keys, completion tables and Shopify HTML contracts.
@@ -21,7 +22,7 @@ or remove the separator to form an awkward SEO phrase. No pipes, brackets, quote
 or unnecessary punctuation. Use verified name spelling and accents from supplied
 research. Do not repeat the subject inside the design name. Do not automatically
 insert Framed, Limited Edition, Premium, Collector, Poster, Print or Memorabilia.
-Preserve a strong approved artwork/design name. Improve a weak, generic or awkward
+Preserve a strong approved edition/design name. Improve a weak, generic or awkward
 name before constructing the title: normally 2–6 memorable words, grounded in the
 actual subject/moment, not clickbait. Do not invent an event to justify a title.
 An identification filename or existing SEO title is input evidence, not an order
@@ -42,7 +43,7 @@ narrate where players, cars or trophies sit in the image: the buyer can see it.
 No career summaries, room lists, stacked adjectives, fake hype or repeated ideas.
 
 Never use these stock phrases in generated product descriptions:
-"The artwork captures", "This artwork captures", "This piece captures",
+"The edition captures", "This edition captures", "This piece captures",
 "More than wall art", "Perfect for the cave, office, home bar", "Perfect for any",
 "A must-have for", "Elevate your space", "Transform your", "The ultimate",
 "Real fans do not just remember this moment — they own it."

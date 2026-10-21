@@ -158,6 +158,7 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
                      dimensions='1080 x 1080'))
     visual = ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country)
     return f"""SPORTS CAVE — CREATIVE REFRESH
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 {'INSTANT EXPERIENCE WINNER REFINEMENT — NEW ENVIRONMENTS' if ie else ''}
 {ads.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}
 
@@ -272,6 +273,7 @@ def build_carousel_refresh_prompt(ads, product, category, country, url, winner,
         scene=r.get('scene', ''), role=r.get('role', ''), detail='detail' in r.get('role', '').casefold(),
         references=[ref['label'] for ref in refs]) for r in refs)
     return f'''SPORTS CAVE — TRUE WINNER CAROUSEL REFRESH
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 {plan.VERSION} / {plan.CAROUSEL_CONTRACT}
 Product: {product}
 Category: {category}

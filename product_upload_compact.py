@@ -227,7 +227,7 @@ def build(selected, filename, source, metadata, additions=None):
             copy_rules = COPY[COPY.index('Description:'):COPY.index('SEO title:')] + copy_rules
     elif full:
         classification_rules = CLASSIFICATION[:CLASSIFICATION.index('Apply every selected collection')] + 'Apply only explicitly selected collection changes; otherwise preserve existing memberships.'
-    sections.append('4. PRODUCT COPY, SEO AND CLASSIFICATION\n' +
+    sections.append('4. PRODUCT COPY, SEO AND CLASSIFICATION\nAlways describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.\n' +
         ('Media-only update: preserve title, handle, description, product SEO, vendor/type/category, metafields and collections. Apply replacement-image alt text and additive sport/operation tags; apply an explicitly supplied customer title or selected description edit if listed below.\n'
          if is_update and not full else '') +
         ('Full standardisation: apply only the selected title/description edits listed below; preserve the handle unless explicitly changed (retain redirects). Preserve existing collections unless selected collection changes are requested.\n'

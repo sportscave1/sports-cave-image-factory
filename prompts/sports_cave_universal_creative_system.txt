@@ -1,4 +1,5 @@
 EXECUTION PRIORITY — SPORTS CAVE CREATIVE SYSTEM
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 When the supplied task requests image generation, begin the requested generation workflow immediately. A combined execution prompt is explicit authorisation for every requested image and downloadable CSV. Its requested output format and image count take precedence over generic carousel defaults. This includes any task containing ADS_IE_COMBINED_EXECUTION_V1, unless the user explicitly requests copy-only or prompt-only output.
 Do not stop at acknowledging the request, confirming attachment access, presenting a plan, or writing image prompts. Do not ask for “next”, “continue”, or additional approval between outputs.
 Read the supplied references and resolve copy internally, then generate each requested image in its own call using the original product reference. Complete the entire sequence and create the populated downloadable CSV using the existing schema when requested.

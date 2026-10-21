@@ -1,4 +1,5 @@
 SPORTS CAVE — EMAIL IMAGE BUILDER
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 I am attaching an image that I want to use inside a Sports Cave marketing email.
 
@@ -18,7 +19,7 @@ Preserve the original visual appearance and aspect ratio.
 Do not:
 - stretch the image
 - distort it
-- crop important artwork
+- crop important edition
 - unnecessarily reduce quality
 - add text
 - add borders
@@ -27,7 +28,7 @@ Do not:
 
 Choose the most appropriate email-compatible image format.
 
-For normal Sports Cave photography/artwork prefer a high-quality JPEG unless PNG is genuinely required.
+For normal Sports Cave photography/edition prefer a high-quality JPEG unless PNG is genuinely required.
 
 Do not use SVG.
 
@@ -47,7 +48,7 @@ Aim for a lightweight image suitable for email delivery.
 
 Ideally keep it around or below approximately 250 KB where visual quality allows.
 
-Do not destroy the quality of Sports Cave artwork purely to meet an arbitrary file-size target.
+Do not destroy the quality of Sports Cave edition purely to meet an arbitrary file-size target.
 
 Avoid multi-megabyte email images wherever practical.
 
@@ -74,7 +75,7 @@ Create professional image ALT text.
 The ALT text must:
 
 - accurately describe the image
-- identify the athlete, team, sport, moment or artwork where appropriate
+- identify the athlete, team, sport, moment or edition where appropriate
 - be concise
 - sound natural
 - prioritise accessibility
@@ -211,7 +212,7 @@ Do not add unnecessary:
 - borders
 - rounded containers
 
-Let the artwork remain the focus.
+Let the edition remain the focus.
 
 CLICKABLE IMAGE
 

@@ -46,6 +46,7 @@ Choose a Side:
 
 def build_description_style_rules():
     return f"""{VERSION}
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 RESTORED SPORTS CAVE INSTANT EXPERIENCE DESCRIPTION STYLE
 Choose the historical framework that best fits the winning ad and verified product. Use it for one finished description per ad. The three ads remain close siblings: do not force a different framework or emotional proposition onto each sibling. Keep the winner's hook and meaning; restore concise Sports Cave wording, not explanatory marketing prose.
 
@@ -141,13 +142,14 @@ def build_new_ad_style_rules(product, sport, context):
         body = template.format(sport=sport_word, identity=identity, comparison=comparison, limit=limit)
         blocks.append(f"AD {index} — {key}\nDescription framework:\n{body}\n\nHeadline: ONE short product-specific collector/ownership headline.\nCTA: {cta}")
     return f"""LOCKED SPORTS CAVE LEGACY COPY FRAMEWORKS — NEW ADS ONLY
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Product being personalised: {product}
 Use exactly one framework per creative in this permanent order: legacy_standard, framed_greatness, choose_a_side. These are the three copy styles, not three options for each image.
 
 {chr(10).join(chr(10) + block + chr(10) for block in blocks)}
 
 PRODUCT ADAPTATION
-Resolve bracketed writing cues using the supplied title, athlete/team, product identity, moment, sport, event, rivalry, era and market where available. Never print brackets or unresolved placeholders. Omit an unavailable factual line or replace it with a short product-identity line; never invent achievements, events, years, relationships or viewer memories. Empty ATHLETE_NAMES does not erase a name explicitly supplied in the title. Write naturally, not as mechanical placeholder substitution. For team artwork use club/fan identity where natural. For awkward categories use sporting identity or fan identity.
+Resolve bracketed writing cues using the supplied title, athlete/team, product identity, moment, sport, event, rivalry, era and market where available. Never print brackets or unresolved placeholders. Omit an unavailable factual line or replace it with a short product-identity line; never invent achievements, events, years, relationships or viewer memories. Empty ATHLETE_NAMES does not erase a name explicitly supplied in the title. Write naturally, not as mechanical placeholder substitution. For team edition use club/fan identity where natural. For awkward categories use sporting identity or fan identity.
 The defining hooks and short-line/blank-line structure are locked. legacy_standard preserves "This isn't wall art."; framed_greatness always opens "Greatness doesn't fade.\nIt gets framed." including motorsport; choose_a_side always uses the collector challenge, product-versus-forgettable-print choice, "You already know the answer.", and two-line ownership close. Choose-a-Side is valid for every product; athlete-versus-athlete rivalry requires verified rivalry/opposition and must never be invented. Do not substitute three random advertising concepts.
 
 DESCRIPTION SCARCITY ONLY

@@ -6,6 +6,7 @@ import re
 VERSION=1
 COPY_KEYS=('headline','intro','body','cta_label','closing','image_brief','alt')
 LOCKED='''Write premium collector-focused Sports Cave email copy. Use only supplied facts.
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Unknown facts must be omitted. Do not invent scarcity, urgency, edition numbers, prices,
 discounts, shipping claims, endorsements, reviews or offers. No fake RE:, FWD:, order
 alerts, personal messages, countdowns, excessive ALL CAPS or spammy punctuation.

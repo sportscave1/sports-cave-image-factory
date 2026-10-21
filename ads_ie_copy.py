@@ -102,7 +102,7 @@ def cues(product, sport, market, token, context, recent=()):
         fact = rng.choice(facts) if i == 2 and facts else None
         detail = (
             "collector significance and identity of the supplied subject/title",
-            f"fan emotion around the supplied moment: {moment}" if moment else "the supplied artwork's meaning to its fans, without inventing an event or viewer memory",
+            f"fan emotion around the supplied moment: {moment}" if moment else "the supplied edition's meaning to its fans, without inventing an event or viewer memory",
             fact["text"] if fact else "distinct fan connection or career significance grounded in the supplied title; no invented record",
         )[i]
         lenses = (

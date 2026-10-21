@@ -194,7 +194,7 @@ PREFERRED_SPORTS_CAVE_VOCABULARY = (
     "limited edition",
     "premium sports art",
     "framed sports art",
-    "sports artwork",
+    "sports edition",
     "collector series",
     "framed collector art",
     "athlete wall art",
@@ -900,6 +900,7 @@ def build_prompt_2(project, brief=None):
     realism = build_sports_cave_image_realism_rules(include_product_lock=True,
         physical_product=project.get('product_metadata') or project)
     return f"""SPORTS CAVE SEO BLOG ARTICLE AND IMAGE CREATION - PROMPT 2
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 Continue in the same conversation as Prompt 1 and use the completed research brief below.
 PROJECT ID: {project.get('project_id') or ''}
@@ -914,7 +915,7 @@ SPORTS CAVE CUSTOMER-FACING VOCABULARY LOCK - MANDATORY
   filenames, alt text or captions.
 - This rule still applies when the raw GSC query, competitors or source research use that terminology.
   Raw GSC evidence may remain unchanged in research context, but it is not final Sports Cave wording.
-- Use natural language such as wall art, framed wall art, limited-edition wall art, sports artwork,
+- Use natural language such as wall art, framed wall art, limited-edition wall art, sports edition,
   collector edition, numbered edition or premium sports art only where relevant. Do not keyword-stuff
   or mechanically repeat "limited edition".
 - Shared preferred vocabulary: {', '.join(PREFERRED_SPORTS_CAVE_VOCABULARY)}.
@@ -979,12 +980,13 @@ def build_publish_prompt(project=None):
     project_id = str(project.get("project_id") or "").strip()
     realism = build_sports_cave_image_realism_rules(include_product_lock=True)
     return f"""SPORTS CAVE SEO BLOG - FINAL SHOPIFY PUBLISH
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 ROLE
 You are completing the final publishing stage of the Sports Cave SEO Blog workflow in the SAME ChatGPT conversation
 that created the approved article and image package.
 
-Do not restart research, write a different article, redesign Sports Cave artwork or fall back to
+Do not restart research, write a different article, redesign Sports Cave edition or fall back to
 stale CSV values. The FINAL approved package produced earlier in this conversation is the source
 of truth. The Sports Cave OS application only generated this prompt; it has not uploaded images,
 called Shopify or published anything.
@@ -1014,7 +1016,7 @@ The user will upload exactly three final approved WebP assets with this prompt:
 
 Identify each asset from its filename, dimensions, visible content and the approved image plan from
 earlier in this conversation. Do not guess when roles are genuinely ambiguous. Stop before publishing
-if a mandatory asset is missing, duplicated, corrupt, distorted, the wrong artwork or not the approved file.
+if a mandatory asset is missing, duplicated, corrupt, distorted, the wrong edition or not the approved file.
 
 Use the actual supplied WebPs directly. Do not create or regenerate an image during publishing unless a
 strictly technical format conversion is required. Upload every approved file to Shopify and use only its
@@ -1063,7 +1065,7 @@ Before any Shopify mutation, scan all customer-facing content case-insensitively
 internal-link anchor text, image filenames, alt text and captions.
 
 Sports Cave is a premium limited-edition sports wall-art and collector brand. Use natural alternatives such
-as sports wall art, framed wall art, limited-edition wall art, premium sports art, sports artwork, collector
+as sports wall art, framed wall art, limited-edition wall art, premium sports art, sports edition, collector
 wall art, collector edition, numbered edition, collector series, athlete wall art or team wall art as the
 subject and search intent require. Do not mechanically use "limited edition" everywhere and do not keyword-stuff.
 Shared preferred vocabulary: {', '.join(PREFERRED_SPORTS_CAVE_VOCABULARY)}.

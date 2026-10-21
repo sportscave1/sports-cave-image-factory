@@ -1,4 +1,5 @@
 SPORTS CAVE — GOOGLE DEMAND GEN STANDARD WORKFLOW V1
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 IMAGE + PRODUCTS — NINE-ASSET SYSTEM
 
 PRODUCT
@@ -103,9 +104,9 @@ ON
 Default product strategy:
 SINGLE PRODUCT
 
-Use only the selected Sports Cave artwork and its legitimate Merchant Center size / frame variants.
+Use only the selected Sports Cave edition and its legitimate Merchant Center size / frame variants.
 
-Do not attach unrelated Sports Cave artworks unless the user explicitly requests a collection campaign.
+Do not attach unrelated Sports Cave editions unless the user explicitly requests a collection campaign.
 
 Final URL:
 {{PRODUCT_URL}}
@@ -448,9 +449,9 @@ Room:
 premium residential hallway / gallery corridor
 
 Camera:
-camera positioned to the RIGHT of the artwork looking diagonally toward it
+camera positioned to the RIGHT of the edition looking diagonally toward it
 
-Never mirror artwork.
+Never mirror edition.
 
 Product:
 large and dominant
@@ -482,9 +483,9 @@ Room:
 private home bar / lounge / entertaining corner
 
 Camera:
-camera positioned to the LEFT looking diagonally toward the artwork
+camera positioned to the LEFT looking diagonally toward the edition
 
-Never mirror artwork.
+Never mirror edition.
 
 Visual purpose:
 more atmospheric collector lifestyle scene
@@ -776,7 +777,7 @@ vehicle
 uniform
 equipment
 background
-artwork text
+edition text
 letters
 numbers
 logos

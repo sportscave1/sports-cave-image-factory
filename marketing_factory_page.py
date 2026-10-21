@@ -90,7 +90,7 @@ HARD_AVOID = [
     "Wall decor",
     "Home decor",
     "Stunning",
-    "Beautiful artwork",
+    "Beautiful edition",
     "Cheap discount language",
     "Fake urgency",
 ]
@@ -111,7 +111,7 @@ QUALITY_CHECKS = [
     "Does the ad lead with story for cold traffic and urgency for warm traffic?",
     "If exact edition number is used, is there a process to update the ad when numbers move?",
     "Is there no cheap discount language?",
-    "Is the artwork treated as collector history, not generic wall art?",
+    "Is the edition treated as collector history, not generic wall art?",
 ]
 
 
@@ -649,6 +649,7 @@ def _build_prompt(inputs):
     secondary = ", ".join(inputs["secondary_angles"]) if inputs["secondary_angles"] else "None"
     exact_rule = "Exact edition number is enabled. Only use it if the ad will be updated when numbers move." if inputs["include_exact"] else "Do not mention exact edition number unless I explicitly ask."
     prompt = f"""START PROMPT
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 You are my Sports Cave Meta Ads strategist and copywriter.
 
@@ -772,7 +773,7 @@ If the ad format includes Instant Experience, write:
 
 10. Mockup/image brief
 Write a clean brief for image generation or mockup selection.
-The artwork must stay unchanged.
+The edition must stay unchanged.
 Use sport/country-appropriate room direction.
 No clutter.
 No fake logos.
@@ -1465,7 +1466,7 @@ def _render_prompt_library_tab():
         "Retargeting": AD_FORMAT_RULES["Retargeting"],
         "Final Editions": AD_FORMAT_RULES["Final Scarcity"],
         "Gift Buyer": FUNNEL_RULES["Gift Buyers"],
-        "Mockup/Image Brief": "Create a clean mockup/image brief. Artwork unchanged. No fake logos. Country-appropriate room.",
+        "Mockup/Image Brief": "Create a clean mockup/image brief. Edition unchanged. No fake logos. Country-appropriate room.",
         "Meta Performance Analysis Prompt": "Analyze stored Meta winners and losers. Recommend scale, refresh, kill, and next creative.",
         "Creative Refresh Prompt": "Create new hooks for weak ads without copying winners word-for-word.",
         "Product Opportunity Prompt": "Use product, edition, and stored Meta opportunity signals to decide what to test next.",
@@ -1477,7 +1478,7 @@ def _render_prompt_library_tab():
         height=160,
         key="mf-template-vars",
     )
-    preview = f"{selected}\n\nPurpose:\n{templates[selected]}\n\nVariables:\n{variables}\n\nRules:\n- No OpenAI call from Sports Cave OS.\n- Paste this into ChatGPT with product artwork.\n- Avoid: {', '.join(HARD_AVOID)}"
+    preview = f"{selected}\n\nPurpose:\n{templates[selected]}\n\nVariables:\n{variables}\n\nRules:\nAlways describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.\n- No OpenAI call from Sports Cave OS.\n- Paste this into ChatGPT with product edition.\n- Avoid: {', '.join(HARD_AVOID)}"
     if selected == "Mockup/Image Brief":
         preview = append_sports_cave_image_realism_rules(
             preview,

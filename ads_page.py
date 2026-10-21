@@ -359,7 +359,7 @@ CATEGORY_WINNER_ANGLES = {
         "ie_setting": "premium garage, workshop, home bar or motorsport collector wall",
         "headline_examples": "Race Legacy; Only 100 Made; Still Roars; Claim Yours; Garage Wall",
         "description_examples": "Race Day Art; Engine Memory; Numbered Run; Cave Ready; No Second Run",
-        "country_note": "Use Bathurst, the Mountain, F1, V8 Supercars, MotoGP, NASCAR, track, driver, year or result only when supported by the product title or artwork.",
+        "country_note": "Use Bathurst, the Mountain, F1, V8 Supercars, MotoGP, NASCAR, track, driver, year or result only when supported by the product title or edition.",
     },
     "Cricket": {
         "audience": "cricket fans, cricket tragics, collectors, Test-match obsessives and summer-sport loyalists",
@@ -404,7 +404,7 @@ CATEGORY_WINNER_ANGLES = {
         "ie_setting": "dark premium gym, fight room, home bar or combat collector wall",
         "headline_examples": "Fight Night Art; Only 100 Made; Walkout Ready; Claim Yours; Legacy Framed",
         "description_examples": "For Fight Fans; Numbered Art; Fight Room; Wall Ready; No Second Run",
-        "country_note": "Use boxing, UFC, belts, opponent, result, title, record or sanctioning body only when supported by the product title or artwork.",
+        "country_note": "Use boxing, UFC, belts, opponent, result, title, record or sanctioning body only when supported by the product title or edition.",
     },
     "Ice Hockey": {
         "audience": "hockey fans, loyal supporters, playoff-night obsessives and cold-arena collectors",
@@ -449,7 +449,7 @@ CATEGORY_WINNER_ANGLES = {
         "ie_setting": "premium collector room, sports room, home bar, office, study or gallery wall",
         "headline_examples": "Moment Framed; Only 100 Made; Claim Yours; Fan Memory; Wall Ready",
         "description_examples": "Numbered Art; Collector Wall; Limited Run; Cave Ready; No Second Run",
-        "country_note": "Use only facts confirmed by the product title, artwork or supplied notes. Do not borrow terminology from another sport just to sound specific.",
+        "country_note": "Use only facts confirmed by the product title, edition or supplied notes. Do not borrow terminology from another sport just to sound specific.",
     },
 }
 
@@ -640,9 +640,9 @@ SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1 = """SPORTS_CAVE_ADS_FACTUAL_WORDING_GAT
 
 FACTUAL AND CONTEXTUAL WORDING CHECK — MANDATORY
 
-Before finalizing any customer-visible Primary Text, Headline, Description, CTA, copy variation, Carousel card, Instant Experience cover, Single Image / Video ad, setup wording, image-generation prompt or on-image wording, read the complete product title and all supplied artwork, sport/category, market, campaign, route, offer, scarcity and verified product variables. Identify what the artwork genuinely represents: an athlete, team, teammates, opponents, event, era, achievement, vehicle, record, emotional theme or collector subject.
+Before finalizing any customer-visible Primary Text, Headline, Description, CTA, copy variation, Carousel card, Instant Experience cover, Single Image / Video ad, setup wording, image-generation prompt or on-image wording, read the complete product title and all supplied edition, sport/category, market, campaign, route, offer, scarcity and verified product variables. Identify what the edition genuinely represents: an athlete, team, teammates, opponents, event, era, achievement, vehicle, record, emotional theme or collector subject.
 
-Validate every line against that exact context and against every other line. A sporting claim may be used only when supported by the complete product title, user-supplied verified facts, authoritative product or catalogue data, clearly readable artwork wording, or authoritative external verification when browsing is available. Never guess a fact from an image, and never treat an ambiguous title as proof.
+Validate every line against that exact context and against every other line. A sporting claim may be used only when supported by the complete product title, user-supplied verified facts, authoritative product or catalogue data, clearly readable edition wording, or authoritative external verification when browsing is available. Never guess a fact from an image, and never treat an ambiguous title as proof.
 
 Two named people or a title containing "vs" does not by itself prove rivalry, opposition, hostility or a historical head-to-head event. The subjects may be teammates, contemporaries, comparisons or opposing subjects. Rivalry, enemies, battle, duel, went head-to-head or equivalent relationship wording is permitted only when that relationship is explicitly supported by verified facts. Teammate context must never be contradicted by invented rivalry or hostility.
 
@@ -870,7 +870,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
     "BELONG": {
         "name": "BELONG",
         "angle": "Fan Identity / Ownership",
-        "psychological_job": "Make the fan feel that owning the artwork says something real about who they are and what the subject means to them.",
+        "psychological_job": "Make the fan feel that owning the edition says something real about who they are and what the subject means to them.",
         "funnel": "Cold, warm and retargeting audiences where identity, wall ownership and display desire matter.",
         "primary_text_structure": "Lead with belonging, recognition or shared fan identity, then show the product in the customer’s life.",
         "headline_style": "Identity-led, direct and human.",
@@ -927,7 +927,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "meta_description_role": "Exact offer or collection support when verified.",
         "proof_intensity": "No invented product count, discount or catalogue breadth.",
         "scarcity_intensity": "Offer-led only when exact offer is entered and verified.",
-        "on_image_message_type": "Collection or offer message, never fake multi-product artwork.",
+        "on_image_message_type": "Collection or offer message, never fake multi-product edition.",
         "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
         "cover_composition": "Collection-wall or collection-browsing cover only when exact reference assets are supplied.",
@@ -940,7 +940,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "lighting_family": "Controlled gallery or soft residential light.",
         "destination": "Curated collection page plus catalogue only.",
         "required_data": "Collection name, collection URL, exact product-set name, at least four eligible products, and exact offer for offer routes.",
-        "prohibited_language": "Broad collection URL, invented products, lookalike artwork or multi-product wall without references.",
+        "prohibited_language": "Broad collection URL, invented products, lookalike edition or multi-product wall without references.",
     },
 }
 
@@ -996,7 +996,7 @@ COUNTRY_LANGUAGE_PROFILES = {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — AUSTRALIA",
         "english_variant": "natural Australian English",
         "spellings": "colour, favourite, organise, personalised, centre, licence as a noun, licensed as a verb or adjective, travelled, travelling",
-        "terminology": "delivery, free delivery, add to cart, shop, order, collector, limited edition, framed artwork, race day, and footy only when the selected sport and context make it genuinely appropriate",
+        "terminology": "delivery, free delivery, add to cart, shop, order, collector, limited edition, framed edition, race day, and footy only when the selected sport and context make it genuinely appropriate",
         "sports": "For Australian motorsport, cricket, basketball, combat, golf, tennis, horse racing and other categories, use terminology Australian fans naturally expect. Motorsport may reference Bathurst, the Mountain, race day, touring-car heritage, Supercars, F1, MotoGP or NASCAR only when supported by the selected product. Cricket language should sound Australian rather than American. Association football should normally be called football or soccer according to the specific Australian audience and existing category naming.",
         "avoid": "Do not force words such as mate, Aussie, bloody, legend or reckon. Do not use American spelling such as color, favorite, center, personalize, organize or license as a noun when licence is required. Do not use American retail terminology where it would feel unnatural.",
         "quality": "Australian spelling throughout. No accidental American spelling.",
@@ -1005,7 +1005,7 @@ COUNTRY_LANGUAGE_PROFILES = {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — UNITED STATES",
         "english_variant": "natural American English",
         "spellings": "color, favorite, organize, personalized, center, license, traveled, traveling",
-        "terminology": "shipping, free shipping, add to cart, shop now, game day, home, fan, collector, limited edition, framed artwork, sports room, and man cave",
+        "terminology": "shipping, free shipping, add to cart, shop now, game day, home, fan, collector, limited edition, framed edition, sports room, and man cave",
         "sports": "Use the terminology American fans expect for each sport. Association football should normally be called soccer. American football should be called football or NFL when factually appropriate. Baseball copy should use natural American baseball terminology. Basketball copy should sound like copy written for an American NBA audience. Motorsport language should match the actual product and racing category.",
         "avoid": "Do not use British or Australian spellings such as colour, favourite, centre, personalised, organise or licence as the noun form. Do not use add to basket. Do not use Australian or British fan terminology where it would sound foreign to the intended US audience.",
         "quality": "American spelling throughout. No accidental British or Australian spelling.",
@@ -1014,7 +1014,7 @@ COUNTRY_LANGUAGE_PROFILES = {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — UNITED KINGDOM",
         "english_variant": "natural British English",
         "spellings": "colour, favourite, organise, personalised, centre, licence as a noun, licensed as a verb or adjective, travelled, travelling",
-        "terminology": "delivery, free delivery, add to basket, shop, order, supporter, fan, collector, limited edition, framed artwork, and matchday",
+        "terminology": "delivery, free delivery, add to basket, shop, order, supporter, fan, collector, limited edition, framed edition, and matchday",
         "sports": "Use the terminology UK sports fans naturally expect. Association football must normally be called football, not soccer. Use club, supporter, match, matchday, fixture, season and derby where natural and factually appropriate. Motorsport and cricket terminology should sound natural to UK audiences. Do not use American sports vocabulary where it conflicts with UK usage.",
         "avoid": "Do not use American spelling such as color, favorite, center, personalized or organize. Do not use add to cart when the intended UI or copy context should naturally use basket. Do not use soccer for UK football audiences. Avoid forced British slang such as mate, proper, brilliant or cheeky unless genuinely natural, commercially appropriate and aligned with Sports Cave's premium tone.",
         "quality": "British spelling throughout. Football terminology instead of soccer where association football is intended. No accidental American spelling.",
@@ -1023,7 +1023,7 @@ COUNTRY_LANGUAGE_PROFILES = {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — CANADA",
         "english_variant": "natural Canadian English",
         "spellings": "colour, favourite, centre, travelled and travelling, while using clear North American phrasing where it is natural",
-        "terminology": "shipping, delivery, add to cart, shop, order, fan, collector, limited edition, framed artwork, sports room, and man cave where appropriate",
+        "terminology": "shipping, delivery, add to cart, shop, order, fan, collector, limited edition, framed edition, sports room, and man cave where appropriate",
         "sports": "Use terminology Canadian fans naturally expect for the selected sport. Hockey language should sound Canadian when hockey is selected. Basketball, baseball, football, motorsport and other categories must stay tied to the supplied product rather than imported from another market.",
         "avoid": "Do not force American, British or Australian slang. Do not mix spelling systems within the same response. Do not invent Canadian local facts or shipping claims.",
         "quality": "Canadian English throughout. No mixed-market terminology.",
@@ -1032,7 +1032,7 @@ COUNTRY_LANGUAGE_PROFILES = {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — NEW ZEALAND",
         "english_variant": "natural New Zealand English",
         "spellings": "colour, favourite, organise, personalised, centre, licence as a noun, travelled and travelling",
-        "terminology": "delivery, shop, order, add to cart where natural, supporter, fan, collector, limited edition, and framed artwork",
+        "terminology": "delivery, shop, order, add to cart where natural, supporter, fan, collector, limited edition, and framed edition",
         "sports": "Use terminology New Zealand fans naturally expect for the selected sport. Rugby, cricket, motorsport and football language must fit the selected product and should not borrow Australian stereotypes.",
         "avoid": "Do not force Kiwi slang, Australian slang or stereotypes. Do not use American spelling unless it is part of a protected official name.",
         "quality": "New Zealand English throughout. No forced slang or mixed dialect.",
@@ -1052,7 +1052,7 @@ COUNTRY_LANGUAGE_FALLBACK = {
     "heading": "COUNTRY LANGUAGE AND LOCALISATION — NEUTRAL INTERNATIONAL ENGLISH",
     "english_variant": "neutral international English",
     "spellings": "consistent English spelling appropriate to the selected country when known, without mixing Australian, American and British forms",
-    "terminology": "clear international retail language such as shop, order, collector, limited edition and framed artwork",
+    "terminology": "clear international retail language such as shop, order, collector, limited edition and framed edition",
     "sports": "Use factual product terminology and the selected sport's natural vocabulary without importing unsupported local references.",
     "avoid": "Do not force slang, stereotypes or region-specific claims. Do not silently treat unknown countries as American English.",
     "quality": "Consistent neutral international English. No mixed dialects.",
@@ -2005,7 +2005,7 @@ Do not force the moment into every variation.
 Even when "Campaign-led" is selected:
 - Only one primary-text variation should be campaign-led.
 - At least two evergreen primary-text variations must remain available for testing.
-- The framed artwork, fan identity, nostalgia and limited-edition value must remain central.
+- The framed edition, fan identity, nostalgia and limited-edition value must remain central.
 
 Usage by strength:
 
@@ -2602,7 +2602,7 @@ Global localisation instruction:
 - Do not mix Australian, American and British English in the same response.
 - Do not force stereotypes, fake accents, excessive slang or caricatured local phrases.
 - Country localisation controls language and terminology only. It must not invent product facts, local facts, delivery claims, shipping claims, edition quantities or scarcity claims.
-- Treat product names, athlete names, official event names, artwork text, URLs, handles, brand names and official competition names as protected content. Do not rewrite protected content merely to localise spelling.
+- Treat product names, athlete names, official event names, edition text, URLs, handles, brand names and official competition names as protected content. Do not rewrite protected content merely to localise spelling.
 
 Before answering, proofread every customer-facing field for the selected country. Correct any spelling, terminology, sports vocabulary or retail language that belongs to a different market.
 
@@ -3757,7 +3757,7 @@ Preserve the approved three-group response structure, the current three descript
 Every copy option must:
 - sound written by a knowledgeable human sports fan
 - be product-specific and match the selected sport and market
-- use only verified facts from the product name, supplied facts, visible artwork or an approved claim path
+- use only verified facts from the product name, supplied facts, visible edition or an approved claim path
 - give a clear reason to own the selected Sports Cave product
 - use short, natural, mobile-readable lines with intentional blank-line breaks
 - keep the description ending required by its archetype
@@ -4055,10 +4055,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "route": "Premium Scarcity — Right Angle",
         "supporting_label": "Slight right-angle product photograph",
         "copy_row": "Premium Scarcity — Right Angle Copy Variation 1",
-        "purpose": "Create RIGHT-angle Room 1 in a warm premium collector lounge while preserving the supplied artwork.",
+        "purpose": "Create RIGHT-angle Room 1 in a warm premium collector lounge while preserving the supplied edition.",
         "camera_role": "right",
         "camera_side": "camera 4-6 degrees to the viewer's right of centre, looking back naturally toward the product",
-        "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's right of centre. Look back naturally toward the product. Show a restrained amount of the frame's right-hand timber return and mounting depth. Keep verticals straight. Preserve the product's proportions. No fisheye effect, dramatic perspective or noticeably larger artwork side. The angle must look like a genuine room photograph, not a stylised product render.",
+        "camera_instruction": "Position the camera approximately 4-6 degrees to the viewer's right of centre. Look back naturally toward the product. Show a restrained amount of the frame's right-hand timber return and mounting depth. Keep verticals straight. Preserve the product's proportions. No fisheye effect, dramatic perspective or noticeably larger edition side. The angle must look like a genuine room photograph, not a stylised product render.",
         "fomo_line": "Once they’re claimed, this edition retires forever.",
         "default_room_profile": "refined masculine collector lounge",
         "room_type": "refined masculine collector lounge",
@@ -4904,6 +4904,7 @@ def build_instant_experience_description_generation_prompt(description_context):
     )
     fallback_json = json.dumps(preview, ensure_ascii=False, indent=2)
     return f"""INSTANT EXPERIENCE DESCRIPTION COPY SYSTEM V1
+Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 
 Generate the long advertising description copy once for the selected product, then associate the same three ordered descriptions with all three Instant Experience image routes. These descriptions are not the short image FOMO line, image headline, image CTA, Meta headline field or Meta link-description field.
 
@@ -5874,7 +5875,7 @@ Psychological job: {route["psychological_job"]}
 
 Copy:
 - Lead with belonging, recognition or shared fan identity.
-- Help the customer picture the artwork in their home, office, sports room or collection.
+- Help the customer picture the edition in their home, office, sports room or collection.
 - Do not make the room the product.
 - Do not use a proof checklist.
 - Use no more than one verified proof or scarcity cue.
@@ -5905,7 +5906,7 @@ Copy:
 - Only use this route for a precise curated collection destination.
 - Lead with choosing more than one relevant edition and building a collection.
 - Use the exact entered multi-buy or collection offer only when supplied and verified: {exact_offer or "None supplied"}.
-- Do not generate invented or lookalike artworks to create a multi-product wall.
+- Do not generate invented or lookalike editions to create a multi-product wall.
 - A multi-product promise must not link to one unrelated PDP.
 - Use only an approved This Edition creative CTA. Keep collection or offer wording in the route copy, not in a replacement CTA.
 
@@ -7229,7 +7230,7 @@ It gets framed.
 - Write one compact product-specific paragraph using the supplied product name, supported people, team, vehicle, event or moment, selected sport, selected country, fan emotion and any verified era, rivalry, mentality or memory.
 - Follow with one short emotional paragraph about collector ownership or display appeal.
 - Close with: Limited to {{authentic edition limit}} worldwide. Secure your edition before it's gone.
-- Replace {{authentic edition limit}} with the confirmed edition quantity from the approved claim path, supplied product information or visible artwork. Never leave the placeholder in final copy.
+- Replace {{authentic edition limit}} with the confirmed edition quantity from the approved claim path, supplied product information or visible edition. Never leave the placeholder in final copy.
 - When the confirmed edition limit is 100, write exactly: Limited to 100 worldwide. Secure your edition before it's gone.
 - When no edition quantity is confirmed, use the strongest truthful scarcity already permitted by the campaign instead. Never fabricate 100, a numbered edition or a no-second-run claim.
 
@@ -7258,7 +7259,7 @@ UNIVERSAL PRIMARY-TEXT QUALITY
 - Write for a mobile Meta feed using short paragraphs and deliberate line breaks.
 - Connect the product to verified memory, identity, rivalry, legacy, mentality, pride or belonging.
 - Make the writing human, direct, premium and collector-driven.
-- Use the product title and supplied artwork as the factual source of truth.
+- Use the product title and supplied edition as the factual source of truth.
 - Localise terminology using the existing selected-country rules.
 - Keep scarcity premium, authentic and believable.
 - End with a natural action such as Secure yours or Claim your edition.
@@ -7600,7 +7601,7 @@ Use the supplied product name as the source of identity. Do not identify or gues
 
 Study every usable product detail, including:
 
-- visible artwork title
+- visible edition title
 - driver, team, car or rivalry supplied by the product name
 - race, circuit, era or moment that is safely confirmed
 - colours and visual mood
@@ -7673,7 +7674,7 @@ Write specifically for Australian motorsport fans who remember the people, machi
 
 The copy should feel written by someone who understands why Bathurst, the Mountain, the noise, the pressure, the rivalry and the old racing eras still matter.
 
-Only use those cues when supported by the supplied product name, artwork or visible text.
+Only use those cues when supported by the supplied product name, edition or visible text.
 
 Favour:
 
@@ -7687,7 +7688,7 @@ Favour:
 - pride in displaying that memory
 - the finality of a numbered edition
 
-Avoid generic sports language that could be pasted onto another artwork.
+Avoid generic sports language that could be pasted onto another edition.
 
 PRIMARY-TEXT FORMATTING
 
@@ -7722,7 +7723,7 @@ The first sentence or fragment of every variation must immediately use a product
 Suitable anchors include:
 
 - supplied driver name
-- artwork title
+- edition title
 - confirmed circuit
 - confirmed year
 - confirmed rivalry
@@ -7779,7 +7780,7 @@ Use different pieces of the supplied identity across the five versions.
 
 Every variation must fail this test:
 
-Could this copy be pasted unchanged onto unrelated football, cricket, basketball or boxing artwork?
+Could this copy be pasted unchanged onto unrelated football, cricket, basketball or boxing edition?
 
 If yes, rewrite it.
 
@@ -7789,7 +7790,7 @@ Variation 1 — Short Cinematic
 
 - Approximately 25 to 45 words.
 - Use two or three short text blocks.
-- Open with the artwork title, driver, circuit or defining moment.
+- Open with the edition title, driver, circuit or defining moment.
 - Recreate the memory in sharp cinematic fragments.
 - Focus on the instant emotional hit.
 - Finish with concise edition scarcity.
@@ -7802,7 +7803,7 @@ Variation 2 — Fan Recognition
 - Speak directly to the Australian fan who remembers the era.
 - Make the reader feel recognised rather than marketed to.
 - Use specific motorsport atmosphere and identity.
-- Connect the memory to the framed collector artwork.
+- Connect the memory to the framed collector edition.
 - End with a separate scarcity line.
 
 Variation 3 — Race Memory And Legacy
@@ -7822,8 +7823,8 @@ Variation 4 — Collector Pride And Display
 - Use three or four short text blocks.
 - Begin with the supplied driver, race, title or circuit rather than a generic statement about walls.
 - Sell identity and pride before mentioning the room.
-- Position the artwork as something that belongs in a serious collector’s office, garage, home bar, man cave or display wall.
-- Connect the artwork to the man cave, office, garage, home bar or collector wall.
+- Position the edition as something that belongs in a serious collector’s office, garage, home bar, man cave or display wall.
+- Connect the edition to the man cave, office, garage, home bar or collector wall.
 - A compact bullet block may be used only for verified product benefits.
 - Do not turn this into generic interior-decor copy.
 - Make the numbered plaque and edition limit part of the collector meaning.
@@ -7847,7 +7848,7 @@ Each variation must have:
 
 - a product-specific opening
 - an emotional motorsport memory
-- a reason the artwork matters to a genuine fan
+- a reason the edition matters to a genuine fan
 - premium collector positioning
 - real edition scarcity
 - a clear final action or sense of finality
@@ -7916,7 +7917,7 @@ The tone must be:
 - premium
 - collector-driven
 - emotionally controlled
-- specific to the artwork
+- specific to the edition
 
 Use short paragraphs and occasional fragments.
 
@@ -7990,7 +7991,7 @@ VERIFIED PRODUCT POSITIONING
 
 You may safely use these general concepts:
 
-- premium framed collector artwork
+- premium framed collector edition
 - individually numbered edition
 - limited to 100
 - designed to be displayed proudly
@@ -8094,8 +8095,8 @@ Use the supplied product name as the source of identity. Do not identify or gues
 
 Study every usable product detail, including:
 
-- visible artwork title
-- player or players supplied by the product name or visible artwork text
+- visible edition title
+- player or players supplied by the product name or visible edition text
 - milestone, rivalry, season, era, team, moment or legacy only when safely confirmed
 - colours and visual mood
 - framed presentation
@@ -8104,7 +8105,7 @@ Study every usable product detail, including:
 
 Do not invent statistics, dates, records, teams, achievements, quotes, nicknames, championships, rivalry details, production claims, review figures, delivery promises or edition information.
 
-When a specific fact cannot be confirmed from the product name, artwork or approved campaign inputs, avoid it rather than guessing.
+When a specific fact cannot be confirmed from the product name, edition or approved campaign inputs, avoid it rather than guessing.
 
 OBJECTIVE
 
@@ -8145,17 +8146,17 @@ Across the five options, create five genuinely different product-specific identi
 Analyse:
 
 - product name
-- visible artwork title
+- visible edition title
 - player or players supplied by the product information
 - milestone, rivalry, season, era, team, moment or legacy only when confirmed
 - emotional meaning to a real baseball fan
-- whether the artwork is about achievement, rivalry, nostalgia, greatness, pressure, legacy or history
+- whether the edition is about achievement, rivalry, nostalgia, greatness, pressure, legacy or history
 
 For a milestone product, use the strongest confirmed achievement language from the product.
 
 For a rivalry or dual-player product, use the strongest confirmed rivalry or dual-identity language from the product.
 
-For a heritage product, lean into the era, silence before the swing, pressure of the moment, baseball history, memories real fans recognise, and why the artwork belongs on the wall.
+For a heritage product, lean into the era, silence before the swing, pressure of the moment, baseball history, memories real fans recognise, and why the edition belongs on the wall.
 
 Do not copy examples blindly.
 
@@ -8179,9 +8180,9 @@ Make the reader feel:
 
 - this is for people who truly remember
 - this is for fans who understand the moment
-- this artwork represents part of their baseball identity
+- this edition represents part of their baseball identity
 - owning it proves what the era, player, rivalry or achievement meant to them
-- the framed artwork belongs in their home, office, sports room, man cave, garage or collection
+- the framed edition belongs in their home, office, sports room, man cave, garage or collection
 - waiting may mean losing their edition
 
 Create the emotional thought:
@@ -8202,7 +8203,7 @@ Use selective identity language where appropriate, such as:
 
 Do not force the same phrase into every product.
 
-Choose the strongest distinct angles or compatible blends for the actual artwork.
+Choose the strongest distinct angles or compatible blends for the actual edition.
 
 BASEBALL-SPECIFIC WRITING DIRECTION
 
@@ -8225,7 +8226,7 @@ Use authentic baseball emotion where supported:
 
 Authentic baseball terms must remain baseball-specific in every country, including home run, stolen base, at the plate, swing, inning, score, baseball fan, ballpark and postseason where appropriate.
 
-Country-language rules change spelling, phrasing, retail language and tone. They do not change player identity, baseball facts, official product title, artwork text or verified commercial claims.
+Country-language rules change spelling, phrasing, retail language and tone. They do not change player identity, baseball facts, official product title, edition text or verified commercial claims.
 
 FIVE OPTION QUALITY RULE
 
@@ -8248,7 +8249,7 @@ Do not show rejected alternatives or writing notes.
 
 Apply this test:
 
-If this copy could work for almost any baseball artwork, rewrite it with stronger product-specific identity.
+If this copy could work for almost any baseball edition, rewrite it with stronger product-specific identity.
 
 HEADLINE RULES
 
@@ -8260,7 +8261,7 @@ The headline must be:
 - emotionally strong
 - easy to read in Meta
 - suitable beneath an Instant Experience cover
-- connected to the artwork
+- connected to the edition
 - stronger than generic phrases such as Baseball History or Limited Edition
 
 Good headline directions include the product title, recognised milestone, rivalry identity, era identity, ownership or scarcity.
@@ -8770,8 +8771,8 @@ Creative rules:
 - Card 3: focus on emotional fan identity.
 - Card 4: show ownership on a wall, cave, home bar, office or sports room.
 - Card 5: make the limited edition feel final.
-- Always keep framed artwork unchanged in image prompts.
-- No fake logos, fake club marks, fake sponsors, extra text, clutter or competing artwork.
+- Always keep framed edition unchanged in image prompts.
+- No fake logos, fake club marks, fake sponsors, extra text, clutter or competing edition.
 
 CTA GUIDANCE
 
@@ -8912,12 +8913,12 @@ CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
 Create one creative prompt for the selected product.
 
 The prompt must instruct the image/video generator:
-- Use the uploaded image as the exact reference for the framed Sports Cave artwork.
-- Keep the exact artwork, colours, text, frame, badge, crop and layout unchanged.
+- Use the uploaded image as the exact reference for the framed Sports Cave edition.
+- Keep the exact edition, colours, text, frame, badge, crop and layout unchanged.
 - Make the selected framed product the hero.
 - Use this category-relevant setting: {category_setting}.
 - Style: cinematic, premium, masculine, collector-focused and believable.
-- No fake logos, fake team branding, clutter, extra artwork competing with the product or unsupported text overlays.
+- No fake logos, fake team branding, clutter, extra edition competing with the product or unsupported text overlays.
 
 CTA GUIDANCE
 
