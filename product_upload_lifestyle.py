@@ -330,11 +330,11 @@ If a room or angle has already been approved or explicitly locked, do not random
 
 Wall colour is one of the strongest tools for making every mockup feel like a different property.
 
-Always select wall colours that appear naturally believable inside a real premium residence.
+Give all three room types a premium Sports Cave sports collector / man cave feel, with subtle grungy character through authentic wall colours, textures and materials. Vary charcoal, graphite, smoky grey, deep navy, muted olive, heritage green, earthy taupe and weathered stone with textured plaster, painted brick, concrete, aged timber or restrained dark metal. These are options to combine selectively, not a fixed recipe. Carry this premium, lived-in, slightly rugged character into a believable working office and comfortable living room, with the edition as the hero.
 
-Do not make every room dark.
+Retain natural daylight and lighter weathered surfaces where appropriate; do not make every room dark, charcoal or identical.
 
-Do not make every room beige.
+Avoid generic gallery styling, excessive sports props and artificial grunge filters.
 
 Do not make every wall a flat, perfectly smooth AI surface.
 
@@ -471,8 +471,8 @@ Available directions include:
 8. Converted warehouse entertainment space.
 9. Contemporary basement lounge.
 10. Luxury listening lounge.
-11. Small collector gallery room.
-12. Premium collector hallway or private gallery entrance.
+11. Small collector retreat with weathered plaster.
+12. Premium collector hallway with aged timber and stone.
 13. Modern timber-lined entertainment room.
 14. Refined architectural games room.
 15. Traditional reading and collector lounge.
@@ -519,7 +519,7 @@ Available directions include:
 11. Compact premium townhouse office.
 12. Architect-designed garden office.
 13. Pale sandstone home workspace.
-14. Modern gallery-style office.
+14. Modern textured-plaster collector office.
 15. Minimal coastal home study.
 16. Sophisticated attic workspace.
 17. Modern loft office.
@@ -571,7 +571,7 @@ Available directions include:
 16. Light-filled urban loft living space.
 17. Small premium apartment living room.
 18. Sophisticated walnut-and-cream lounge.
-19. Gallery-like living room with a collector display wall.
+19. Lived-in collector living room with a textured display wall.
 20. Collector hallway or entrance gallery adjoining the main living area, when the saved room selection permits.
 
 ### Living Room requirements
