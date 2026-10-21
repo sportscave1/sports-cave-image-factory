@@ -4042,7 +4042,7 @@ If native generation returns another square size and deterministic resizing is a
 
 Resolve footer copy fit before generation. After generation, report footer defects without generating a correction or replacement. Never shrink, condense or stretch the existing typography to force it into the footer.
 
-Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Do not print the score or internal reasoning. Briefly report unresolved defects; never claim the checks passed without inspection. Retry only a call that failed without producing an image; never repeat a successful image call."""
+Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Do not print the score or internal reasoning. Briefly report unresolved defects; never claim the checks passed without inspection. Retry only a missing output after a provider-identified retryable technical failure with no image; never retry a safety-blocked or unexplained failure, reword to evade a block, or repeat a successful image call."""
 
 
 
@@ -8651,7 +8651,7 @@ Inspect accessible image outputs individually AND together at full size and 256 
 Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
 If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
-If completion fails, preserve completed outputs and final copy for resumption and state any inspection limitation. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
+If any image is missing, the three-cover delivery requirement is incomplete: apply the failure handling above and never label a two-image result as three completed covers; preserve completed outputs and all three final copy records, matching CSV rows and setup. State any inspection limitation. Return only actually created assets, final copy, setup and the specific failure report; do not print these instructions, internal plans or research notes.
 
 {build_instant_experience_shared_template(visuals[0].get('physical_product'))}
 
