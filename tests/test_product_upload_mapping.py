@@ -5,7 +5,7 @@ import json
 import time
 from unittest.mock import Mock
 import pytest
-from tests.test_product_upload_intake import database, env as intake_env, product, ADMIN, PID
+from tests.test_product_upload_intake import database, env, product, ADMIN, PID
 from tests.test_product_upload_dropbox import selected
 from tests.test_product_upload_package import saved_row
 from product_upload_mapping import Mapping, read_edition
@@ -22,13 +22,6 @@ def restore_provider_boundaries(monkeypatch):
     import shopify_sync, product_sport_tag_sync
     for module,name in ((shopify_sync,'fetch_product_by_shopify_id'),(shopify_sync,'graphql_request'),(product_sport_tag_sync,'sync_product_sport_tags')):
         monkeypatch.setattr(module,name,getattr(module,name))
-
-
-@pytest.fixture
-def env(intake_env, restore_provider_boundaries):
-    # UUID/takeover suites import this fixture too. Their setup() calls must
-    # restore provider functions before later canonical Shopify fetch tests.
-    return intake_env
 
 
 def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, production_grants=False, arrived=True):
@@ -90,7 +83,7 @@ def test_webhook_synced_product_direct_finalisation_idempotent_no_customer_alloc
     assert read_edition(env[0].connect,PID) is not None
     result=service.map(key,ADMIN)
     assert result['state']=='Mapped',result
-    assert result['reason']=='Success — PSD mapped' and not result['preparation_held']
+    assert result['reason']=='Success â€” PSD mapped' and not result['preparation_held']
     assert result['edition_id'] and result['run_id'] and len(result['completed'])==5
     assert result['psd'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/New Art.psd')
     saved=env[0].read(key,ADMIN['id'])
@@ -238,7 +231,7 @@ def test_double_click_during_lookup_uses_one_durable_attempt(env):
     service._local_candidates=lookup
     with ThreadPoolExecutor() as pool:
         first=pool.submit(service.map,key,ADMIN);assert entered.wait(8)
-        try:assert service.map(key,ADMIN)['state']=='Mapping…'
+        try:assert service.map(key,ADMIN)['state']=='Mappingâ€¦'
         finally:release.set()
         assert first.result()['state']=='Mapped'
     assert env[2].api.move_path.call_count==1
@@ -358,7 +351,7 @@ def test_expired_attempt_and_late_owner_are_fenced(env):
     from product_upload_mapping import now
     service,key,meta,p=setup(env)
     with env[0].locked(key,ADMIN['id']) as (row,cur):
-        row['data']['upload_operation']['sync_map']=dict(state='Mapping…',lease='expired',
+        row['data']['upload_operation']['sync_map']=dict(state='Mappingâ€¦',lease='expired',
             lease_until=(now()-timedelta(minutes=1)).isoformat(),source_version=current_source(row)['version'],mode='LIVE')
     assert service.status(key,ADMIN)['state']=='Mapping incomplete'
     assert service.map(key,ADMIN)['state']=='Mapped'
