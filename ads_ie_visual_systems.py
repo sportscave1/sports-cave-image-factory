@@ -1,19 +1,13 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
 import hashlib
 import re
-from ads_refresh_generation import IE_REFRESH_FOOTER_HEADLINES, IE_REFRESH_FOOTER_SUPPORT
 import ads_ie_scenes as scene_library
 import sports_cave_physical_realism as physical_realism
 
 
 
-VERSION = "IE PREMIUM SCARCITY DISTINCT FAN ROOMS V3 REFINED HEADLINE FIT"
+VERSION = "IE PREMIUM SCARCITY DISTINCT FAN ROOMS V4 ORIGINAL APPROVED FOOTER"
 FAMILIES = ("premium_scarcity",) * 3
-SUPPORT_LINES = (
-    "Once they’re claimed, this edition retires forever.",
-    "Made for serious collectors.",
-    "For collectors who know why it matters.",
-)
 # Approved copy remains separate from fit eligibility; never truncate a claim.
 HEADLINES = (
     "LIMITED TO 100 WORLDWIDE",
@@ -50,59 +44,32 @@ def stable_rank(seed, value):
     return hashlib.sha256(f"{seed}|{value}".encode("utf-8")).digest()
 
 
-SAFE_HEADLINES = ("SPORTS CAVE COLLECTOR", "FOR YOUR COLLECTION", "A COLLECTOR STATEMENT")
-# Recover the existing refresh banks without changing that workflow. LIMITED
-# EDITION is also approved explicitly in f96d8469's SCARCITY_RULE. The standalone
-# availability label is a requested short form of HEADLINES[5], not a newly
-# discovered historical standalone bank. The numbered subline is user-approved.
-RESTORED_HEADLINES = ("LIMITED EDITION", *IE_REFRESH_FOOTER_HEADLINES)
-AVAILABILITY_HEADLINE = "ONLY 100 AVAILABLE"
-NUMBERED_SUPPORT = "Limited to {limit} Editions"
-RESTORED_SUPPORT_LINES = tuple(dict.fromkeys((*SUPPORT_LINES[1:], *IE_REFRESH_FOOTER_SUPPORT)))
+# Original approved bank: git 16515128, HEADLINES / APPROVED_SUPPORT_LINES.
 FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_signature", "footer_emphasis", "eligible_headline_alternatives", "headline_fit_fallback")
 
 
 def eligible_headlines(context):
     """Reuse the approved bank, with independent evidence gates per claim."""
-    templates = list(SAFE_HEADLINES)
-    limit = context.get("edition_limit")
-    if limit or context.get("limited_edition_verified"):
-        templates.append(RESTORED_HEADLINES[0])
-    if limit:
-        templates += [HEADLINES[4], *[IE_REFRESH_FOOTER_HEADLINES[i] for i in (1, 3, 4, 7)]]
-        if context.get("worldwide_verified") is True:
-            templates += [HEADLINES[0], IE_REFRESH_FOOTER_HEADLINES[2]]
-        if context.get("no_second_run_verified") is True:
-            templates += list(HEADLINES[1:4]) + [IE_REFRESH_FOOTER_HEADLINES[i] for i in (0, 6)]
-            if context.get("worldwide_verified") is True:
-                templates.append(IE_REFRESH_FOOTER_HEADLINES[8])
-        if context.get("remaining_editions") == limit and str(context.get("editions_sold")) in {"None", "0"}:
-            templates += [HEADLINES[5], AVAILABILITY_HEADLINE, *[IE_REFRESH_FOOTER_HEADLINES[i] for i in (5, 9)]]
-    return list(dict.fromkeys(h.replace("100", str(limit)) if limit else h for h in templates))
+    # Exact wording only; do not substitute another quantity into the bank.
+    if context.get("edition_limit") != 100:
+        return []
+    templates = [HEADLINES[4]]
+    if context.get("worldwide_verified") is True:
+        templates.append(HEADLINES[0])
+    if context.get("no_second_run_verified") is True:
+        templates.extend(HEADLINES[1:4])
+    if context.get("remaining_editions") == 100 and str(context.get("editions_sold")) in {"None", "0"}:
+        templates.append(HEADLINES[5])
+    return templates
 
 
 def eligible_support_lines(context):
-    finality = context.get("no_second_run_verified") is True or context.get("retires_when_sold_out") is True
-    limited = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
-    lines = [line for i, line in enumerate(APPROVED_SUPPORT_LINES)
-             if (i not in (0, 3) or finality) and (i not in (2, 5, 6) or limited)]
-    lines += list(SUPPORT_LINES[1:])
-    if limited:
-        lines += ["Limited Edition", IE_REFRESH_FOOTER_SUPPORT[4], IE_REFRESH_FOOTER_SUPPORT[8]]
-    if context.get("edition_limit"):
-        lines.append(NUMBERED_SUPPORT.format(limit=context["edition_limit"]))
-    if context.get("no_second_run_verified") is True:
-        lines += [IE_REFRESH_FOOTER_SUPPORT[i] for i in (0, 1, 2, 5)]
-    if context.get("retires_when_sold_out") is True:
-        lines.append(IE_REFRESH_FOOTER_SUPPORT[6])
-    if finality:
-        lines += [IE_REFRESH_FOOTER_SUPPORT[i] for i in (3, 7, 9)]
-    return list(dict.fromkeys(lines))
+    # Original quantity/meaning pairings; other approved lines duplicate scarcity.
+    return [APPROVED_SUPPORT_LINES[i] for i in (1, 2, 4, 7, 8)]
 
 
 def footer_emphasis(headline):
-    return ("ownership" if headline == SAFE_HEADLINES[1] else
-            "collector_identity" if headline in SAFE_HEADLINES else "scarcity")
+    return "scarcity"
 
 
 def explicit_scarcity(text):
@@ -131,21 +98,21 @@ def coherent_pair(headline, support, *, require_scarcity=True):
     if meaningful_words(headline) & meaningful_words(support):
         return False
     # A scarcity headline needs a different idea, not a vague sellout paraphrase.
-    if head_scarcity and re.search(r"\brare\b|\bgone\b|\bopportunity\b|\bcloses\b|\bends\b|\bretires\b|\bsellout\b|\bmissed\b", support, re.I):
+    if head_scarcity and re.search(r"\bgone\b|\bcloses\b|\bends\b|\bretires\b|\bsellout\b|\bmissed\b", support, re.I):
         return False
     return True
 
 
 def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
     """Resolve one immutable pack, preferring unseen/least-recently-used approved copy."""
-    from itertools import combinations
+    from itertools import combinations, combinations_with_replacement
     eligible = [h for h in eligible_headlines(context) if headline_is_valid(h)]
     supports = eligible_support_lines(context)
     require_scarcity = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
     def compatible(h, sub):
         return coherent_pair(h, sub, require_scarcity=require_scarcity) and (pair_is_valid is None or pair_is_valid(h, sub))
-    if len(eligible) < 3 or len(supports) < 3:
-        raise ValueError("Three distinct factually eligible footer headlines and sublines are required.")
+    if not eligible or not supports:
+        raise ValueError("The original approved footer bank requires a verified 100-edition limit; no eligible exact wording is available.")
     seed = visuals[0]["resolved_seed"]
     product_key = context.get("copy_product_key")
     history = [r for r in list(recent_fingerprints)[:scene_library.HISTORY_LIMIT] if isinstance(r, dict)
@@ -161,8 +128,8 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
     if frozen:
         pairs = [(v["headline_text"], v["supporting_line"]) for v in selections]
     else:
-        sets = [c for c in combinations(eligible, 3)
-                if not context.get("edition_limit") or len({footer_emphasis(h) for h in c}) >= 2]
+        sets = list(combinations(eligible, 3) if len(eligible) >= 3 else combinations_with_replacement(eligible, 3))
+        sets = [c for c in sets if len(set(c)) == min(3, len(eligible))]
         sets.sort(key=lambda c: (sum(h in old_heads for h in c), -sum(age(h, old_heads) for h in c),
                                 -len({footer_emphasis(h) for h in c}), stable_rank(seed, str(c))))
         # Bounded finite compatible domains; skip a headline set only if it cannot
@@ -181,14 +148,15 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
             sum(p in old_pairs[:3] for p in ps), sum(p in old_pairs for p in ps),
             sum(sub in old_supports for _, sub in ps), -sum(age(sub, old_supports) for _, sub in ps),
             -sum(age(p, old_pairs) for p in ps), stable_rank(seed, str(ps))))
-    if len({h for h, _ in pairs}) != 3 or len({sub for _, sub in pairs}) != 3:
-        raise ValueError("Saved footer selections must have three unique headlines and sublines.")
+    if any(h not in eligible or sub not in supports or not compatible(h, sub) for h, sub in pairs):
+        raise ValueError("Saved footer copy is outside the eligible original approved bank or pairing rules.")
+    if len({h for h, _ in pairs}) != min(3, len(eligible)) or len({sub for _, sub in pairs}) != 3:
+        raise ValueError("Saved footer selections must maximise eligible headline variety and use distinct sublines.")
     assigned = {h for h, _ in pairs}
     for index, (visual, (headline, support)) in enumerate(zip(visuals, pairs)):
         alternatives = sorted([h for h in eligible if h not in assigned and compatible(h, support)],
                               key=lambda h: text_rank(h, old_heads))
-        if frozen and "eligible_headline_alternatives" in selections[index]:
-            alternatives = list(selections[index]["eligible_headline_alternatives"])
+        alternatives = []  # Final selection; generation/export must not reselect.
         visual.update(headline_text=headline, supporting_line=support, fomo_line=support,
             cta_text="CLAIM YOUR EDITION", footer_emphasis=footer_emphasis(headline),
             footer_pair_signature=hashlib.sha256(f"{headline}|{support}".encode()).hexdigest()[:20],
@@ -253,7 +221,7 @@ SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headlin
                  'the other adds collector or emotional meaning. Never echo meaningful words, stems, numbers '
                  'or scarcity claims between the two lines; connecting words and the fixed CTA are exempt. '
                  'Vague rarity or scarcity inside the artwork does not satisfy footer scarcity. '
-                 'If scarcity evidence is missing, retain the safe selected copy and report the missing verification; '
+                 'If scarcity evidence is missing, stop before generation and report the missing verification; '
                  'never fabricate a claim or replace selected copy with arbitrary wording. The approved '
                  'geographic wording is allowed only when explicitly included in the resolved verified headline. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '
@@ -271,9 +239,7 @@ def resolve_visual_system(visual, index, context, variation_token):
     candidates = list(options) + preferred
     # These labels affect the established supporting-line choice, never the scene.
     copy_room = candidates[int.from_bytes(stable_rank(seed, f"room:{index}")[:4], "big") % len(candidates)]
-    support = SUPPORT_LINES[index]
-    if index == 0 and not context.get("edition_limit"):
-        support = "A statement for your collection."
+    support = APPROVED_SUPPORT_LINES[7]
     camera = CAMERAS[index]
     visual.update(
         visual_family=FAMILIES[index], camera_role=("RIGHT", "FRONT", "LEFT")[index],
@@ -361,9 +327,9 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}); spatial structure: {visual.get('spatial_family', 'as saved')}. "
             f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
             f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
-                "Premium collector hallway: close artwork, subtle visible passage depth, peripheral console, warm picture light balanced with daylight.",
+                "Premium collector hallway: close edition-led photography, premium textured wall, believable passage depth, restrained dark timber console/joinery, natural directional light and realistic glazing reflections. Supplied hallway references guide atmosphere only; never copy their product, footer wording or typography.",
                 "Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence.",
-                "Refined collector sitting-room setting: follow this resolved spatial arrangement with one peripheral seating anchor. Neither a hallway nor a nearly empty wall; never substitute a default side-opening composition.",
+                "Premium residential man cave: show only the resolved leather media lounge, pool-table corner or restrained home-bar joinery glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s architectural product wall; retain close edition prominence.",
             )[index] +
             SCENE_VISIBILITY_RULES
         )

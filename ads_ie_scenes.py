@@ -101,6 +101,7 @@ INTERIOR_DEPTH_POSITIONS = (
 
 def cue_family(text, fallback):
     text = str(text).lower()
+    if any(w in text for w in ("media-lounge", "pool-table", "home-bar")): return "man cave furnishing"
     if "console" in text: return "console"
     if "bench" in text or "banquette" in text: return "built-in seating"
     if any(w in text for w in ("chair", "settee", "sofa", "seating edge")): return "upholstered seating"
@@ -141,6 +142,11 @@ def candidates(slot):
                 light = f"{softness} from the {source} on the {direction}"
                 if slot == 0:
                     light += "; gentle warm picture-light fill balanced with daylight"
+                if slot == 0:
+                    furniture = ("slim dark oak console at outer left", "restrained smoked walnut console/joinery at outer left", "narrow ebonised timber console at outer left")[h % 3]
+                elif slot == 2:
+                    architecture = architecture.removesuffix(" residential man cave") + " residential man cave"
+                    furniture = ("one leather media-lounge edge at the outer perimeter", "one pool-table corner deep in the room", "one restrained home-bar joinery edge deep in the recess")[h % 3]
                 scene = dict(scene_selection_version=VERSION, scene_id=f"{slot}:{h}:{w}:{l}", scene_slot=slot,
                     home_setting=setting, architecture_style=architecture,
                     room_type=(f"{architecture} collector hallway" if slot == 0 else

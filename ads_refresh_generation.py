@@ -5,32 +5,6 @@ import json
 import ads_refresh_plan as plan
 
 
-IE_REFRESH_FOOTER_HEADLINES = (
-    'ONLY 100 WILL EVER EXIST',
-    'LIMITED TO 100 EDITIONS',
-    'JUST 100 EDITIONS WORLDWIDE',
-    'ONE OF ONLY 100',
-    'STRICTLY 100 EDITIONS',
-    'ONLY 100 CAN BE CLAIMED',
-    'WHEN 100 GO, IT ENDS',
-    'A 100 EDITION RELEASE',
-    '100 WORLDWIDE. NO MORE',
-    'CLAIM BEFORE 100 ARE GONE',
-)
-IE_REFRESH_FOOTER_SUPPORT = (
-    'Once they’re gone, they’re gone for good.',
-    'A collector release that won’t be repeated.',
-    'No second run after sellout.',
-    'Secure yours before the edition closes.',
-    'A short-run release made for collectors.',
-    'Miss this release and it stays missed.',
-    'The edition retires once the run is gone.',
-    'Own it before the collector window closes.',
-    'Built as a limited run, not a mass release.',
-    'When this release is claimed out, it’s finished.',
-)
-
-
 def ie_refresh_image_rules():
     """Prompt-only refinement; no change to New Ads, carousel or generation flow."""
     return '''IE WINNER REFINEMENT — PREMIUM PRODUCT / REAL CUSTOMER WALL / FOMO FOOTER
@@ -46,18 +20,9 @@ The final result must feel like a genuine premium lifestyle photograph taken in 
 Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
 
 IE REFRESH ON-IMAGE FOOTER COPY — apply to ALL THREE covers, not just the first:
-The main/top footer headline must ALWAYS be scarcity/FOMO-led, selected from the approved headline patterns below. Never use Legends On The Wall, Two Names One Standard, Framed Greatness, For Real Fans or a similar generic/conceptual brand headline as the main footer headline. The second footer line must add restrained collector urgency or a distinct scarcity/finality layer; the supporting line must not repeat the headline. CTA remains collector-led within the existing approved CTA bank.
-All 3 outputs must use distinct scarcity/support pairings: three different headlines AND three different supporting lines, with no duplicate footer copy. Do not treat synonym swaps as meaningful variation. If the headline states only 100/100 editions, do not repeat the quantity or worldwide edition statement in its support line. If the headline already expresses sellout finality, support it with collector ownership/limited-run urgency rather than another gone-for-good statement. Avoid pairing two versions of the same finality claim. Preserve the winner's winning scarcity logic across all three while refreshing the rooms substantially.
-Premium, restrained, concise collector tone; no cheap hype, pressure countdowns or invented demand. Keep the established opaque footer, gold separator, safe margins, hierarchy and typography unchanged. Headline: exactly one line, at most 6 words/28 characters. Support: exactly one line, at most 12 words/70 characters. CTA: exactly one line, at most 4 words/24 characters. Shorten copy within the scarcity strategy instead of shrinking fonts or wrapping.
-Evidence gate: 100 in this bank is a pattern example, NOT a product fact. Use 100 only when the canonical artwork or supplied verified product facts confirm that limit; substitute another verified limit and recheck fit. Never infer edition size, remaining stock, exclusivity, no reprint, retirement or a closing deadline from the winner alone. Use no-second-run/finality/support patterns only when that policy is verified. If necessary edition facts are missing, request them before generating final footer copy; do not fall back to a generic non-FOMO headline or fabricate scarcity.
+Use the exact headline and supporting line resolved by the shared original approved footer bank in ads_ie_visual_systems. No separate refresh bank, paraphrasing, added product names or extra text. Validate bank membership and pairing before generation; reuse the selection verbatim in image prompts and corresponding exported footer fields. Maximise variety within eligible options without requiring more unique lines than exist. CTA: CLAIM YOUR EDITION.
+Keep the existing typography, footer geometry and fine gold underline beneath the measured 100 glyphs. General Meta copy instructions and character limits apply only to their named Meta fields, never to the selected on-image footer. No additional advertising text in the edition or room photograph; the established footer is required.'''
 
-APPROVED IE CREATIVE REFRESH FOOTER HEADLINE BANK
-''' + '\n'.join('- '+line for line in IE_REFRESH_FOOTER_HEADLINES) + '''
-
-APPROVED IE CREATIVE REFRESH SUPPORTING-LINE BANK
-''' + '\n'.join('- '+line for line in IE_REFRESH_FOOTER_SUPPORT) + '''
-
-Before returning each standalone image prompt, include the complete winner/canonical authority roles, exact frame-thickness/depth instruction, premium glass and wall-mount realism, real-room lifestyle-photography requirement, FOMO-only headline rule, non-repeating support rule and three-output distinct-pair rule. Resolve the exact permitted headline/support/CTA text for that cover in its own prompt; do not leave a choice bank or an instruction to consult another brief. Check all three selected pairs together for duplicate ideas and copy before returning them.'''
 
 
 def source_context(source=None):
@@ -149,13 +114,26 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
     refs = refresh_plan['references']
     attachment_rules = ("ATTACH TO CHATGPT: " + ", ".join(f"ATTACHMENT {i} — WINNER_CARD_{i}" for i in range(1, n+1)) + f" in original order. ATTACHMENT {n+1} — CANONICAL_PRODUCT."
                         if carousel else "ATTACHMENT 1 — WINNER_IE (or WINNER_AD for single-image). ATTACHMENT 2 — CANONICAL_PRODUCT — CANONICAL BLACK-FRAME WEBSITE PRODUCT IMAGE (canonical Sports Cave product image).")
+    resolved = ads.resolve_standard_instant_experience_visuals(
+        product_name=product, category=category, country=country,
+        product_metadata=product_metadata, campaign_moment=campaign_moment) if ie else []
     briefs = []
     for i in range(n if carousel else 3):
         reference = refs[i] if carousel else refs[0]
         style = {} if carousel else refresh_plan['styles'][i]
-        briefs.append(ie_refresh_standalone_brief(ads, product, style=style) if ie else plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
+        briefs.append("\n\n".join((plan.AUTHORITY, IE_CRITICAL_PRODUCT_REALISM,
+            ads.build_standard_instant_experience_image_prompt(i + 1, resolved[i],
+                product_name=product, category=category, country=country),
+            ie_refresh_image_rules(), IE_FINAL_PRODUCT_REALISM_GATE)) if ie else plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
                      role=reference.get('role', ''), style=style, detail=carousel and 'detail' in reference.get('role', '').casefold(),
                      dimensions='1080 x 1080'))
+    legacy_style_plan = f"""REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
+{json.dumps(refresh_plan, ensure_ascii=False)}
+For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and retaining three different home settings, colour families, wall finishes and dark/mid/light earthy shades within the Sports Cave brand palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
+Curated eligible style library (IE/single-image only; never override carousel concepts):
+{json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (sport_family(category) + ' ' + category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
+
+""" if not ie else ""
     visual = ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country)
     return f"""SPORTS CAVE — CREATIVE REFRESH
 Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
@@ -194,7 +172,7 @@ Preserve the winning creative DNA. Evolve it rather than discard it. Create NEW 
 prevent creative fatigue, recognisably related to the reference but not duplicates or unrelated styles.
 Preserve concept and advertising principles, not literal room/composition/wall/crop. Redesign architecture/layout, wall palette/material, camera composition plus at least two other scene dimensions. Never only recolour or move the camera.
 Carousel: original card N maps refreshed card N. Keep all {n} scene categories, roles, defining objects and sequence; do not apply the IE style library to carousel. Preserve a supported detail-card function.
-IE: three genuinely different environments, styles, palettes, layouts, camera compositions and materials; compare against WINNER_IE and each sibling. Permanent right/centre/left CSV identities are compatibility IDs, not three camera angles in one room. Do not force unrelated Winner Evolution / Emotional Expansion / Pattern Interrupt strategies.
+IE: three genuinely different environments, styles, palettes, layouts, camera compositions and materials; compare against WINNER_IE and each sibling. Permanent right/centre/left identities retain their assigned camera roles in three different homes. Do not force unrelated Winner Evolution / Emotional Expansion / Pattern Interrupt strategies.
 Do not describe inconclusive signals or mixed components as a statistically proven winner.
 Only use actual supplied evidence; no invented performance claims, offers, scarcity or endorsements.
 
@@ -219,11 +197,10 @@ VISUAL CAMPAIGN MOMENT RULE
 {visual or 'Do not inject the Campaign Moment, event, seasonal props or promotion into visual instructions.'}
 Campaign Moment must never overwrite the reference creative logic. Use only explicitly entered promotions.
 
-REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
-{json.dumps(refresh_plan, ensure_ascii=False)}
-For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and retaining three different home settings, colour families, wall finishes and dark/mid/light earthy shades within the Sports Cave brand palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
-Curated eligible style library (IE/single-image only; never override carousel concepts):
-{json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (sport_family(category) + ' ' + category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
+REFRESH RUN / RESOLVED STYLE PLAN (OS has not analysed winner pixels)
+{json.dumps({"references": refs, "resolved_scenes": resolved} if ie else refresh_plan, ensure_ascii=False)}
+{legacy_style_plan}
+{'Use the resolved hallway / architectural wall / residential man-cave settings and right/front/left cameras verbatim. Inspect WINNER_IE for atmosphere only; never reselect rooms or footer copy. No additional text outside the established footer and immutable edition.' if ie else ''}
 
 STANDALONE EXECUTION CONTRACTS — complete each after actual attachment analysis
 {chr(10).join(briefs)}
