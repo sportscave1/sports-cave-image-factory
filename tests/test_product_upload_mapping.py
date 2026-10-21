@@ -5,7 +5,7 @@ import json
 import time
 from unittest.mock import Mock
 import pytest
-from tests.test_product_upload_intake import database, env, product, ADMIN, PID
+from tests.test_product_upload_intake import database, env as intake_env, product, ADMIN, PID
 from tests.test_product_upload_dropbox import selected
 from tests.test_product_upload_package import saved_row
 from product_upload_mapping import Mapping, read_edition
@@ -22,6 +22,13 @@ def restore_provider_boundaries(monkeypatch):
     import shopify_sync, product_sport_tag_sync
     for module,name in ((shopify_sync,'fetch_product_by_shopify_id'),(shopify_sync,'graphql_request'),(product_sport_tag_sync,'sync_product_sport_tags')):
         monkeypatch.setattr(module,name,getattr(module,name))
+
+
+@pytest.fixture
+def env(intake_env, restore_provider_boundaries):
+    # UUID/takeover suites import this fixture too. Their setup() calls must
+    # restore provider functions before later canonical Shopify fetch tests.
+    return intake_env
 
 
 def setup(env, *, correlated=True, limit=200, mode='LIVE', live_source=False, production_grants=False, arrived=True):
