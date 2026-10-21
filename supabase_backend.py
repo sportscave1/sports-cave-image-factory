@@ -7571,13 +7571,6 @@ def _plan_edition_product_incremental_sync(products, existing_rows, *, include_i
             if existing:
                 break
         match_type = "shopify_product_id" if existing else ""
-        product_tags = product.get('tags') or []
-        if isinstance(product_tags, str): product_tags = product_tags.split(',')
-        if not existing and not upload_mapping and not product.get("_onboarding_verified") and any(re.fullmatch(r'sc-upload-[a-f0-9]{32}', t.strip()) for t in product_tags):
-            # MAP owns new correlated runs and their confirmed edition limit.
-            # Catalogue/webhook sync must not race it with the legacy default.
-            actions.append({'action':'skip','product':product,'reason':'awaiting_upload_mapping'})
-            continue
         if not existing and handle:
             handle_key = handle.casefold()
             if handle_key in indexes["ambiguous_legacy_handles"]:

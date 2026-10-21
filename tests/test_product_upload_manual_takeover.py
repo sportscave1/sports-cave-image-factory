@@ -7,7 +7,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
-from tests.test_product_upload_mapping import database, env, setup, ADMIN, PID, count
+from tests.test_product_upload_mapping import database, env, setup, ADMIN, PID, count, restore_provider_boundaries
 from product_upload_mapping import read_edition
 from product_upload_mapping_hold import acquire
 from psd_mapping_store import MappingConflict, PostgresMappings
@@ -147,7 +147,7 @@ def test_retire_sibling_attempts_and_database_fence_old_code_retries(env):
         # Simulate an older deployed process that doesn't know the new app check.
         with pytest.raises(Exception,match='retired'):
             with env[0].locked(attempt,ADMIN['id']) as (row,cur):
-                row['data']['upload_operation']['sync_map'].update(state='Mapping…',lease='late-worker')
+                row['data']['upload_operation']['sync_map'].update(state='Mappingâ€¦',lease='late-worker')
         with pytest.raises(Exception,match='retired'):
             with service.connect() as conn,conn.cursor() as cur:
                 cur.execute('DELETE FROM product_upload_intakes WHERE id=%s',(attempt,))

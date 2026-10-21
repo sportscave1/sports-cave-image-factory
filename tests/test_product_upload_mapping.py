@@ -83,7 +83,7 @@ def test_webhook_synced_product_direct_finalisation_idempotent_no_customer_alloc
     assert read_edition(env[0].connect,PID) is not None
     result=service.map(key,ADMIN)
     assert result['state']=='Mapped',result
-    assert result['reason']=='Success — PSD mapped' and not result['preparation_held']
+    assert result['reason']=='Success â€” PSD mapped' and not result['preparation_held']
     assert result['edition_id'] and result['run_id'] and len(result['completed'])==5
     assert result['psd'].endswith('/03_DESIGNS-LIVE-ONLINE-UPLOADED/New Art.psd')
     saved=env[0].read(key,ADMIN['id'])
@@ -231,7 +231,7 @@ def test_double_click_during_lookup_uses_one_durable_attempt(env):
     service._local_candidates=lookup
     with ThreadPoolExecutor() as pool:
         first=pool.submit(service.map,key,ADMIN);assert entered.wait(8)
-        try:assert service.map(key,ADMIN)['state']=='Mapping…'
+        try:assert service.map(key,ADMIN)['state']=='Mappingâ€¦'
         finally:release.set()
         assert first.result()['state']=='Mapped'
     assert env[2].api.move_path.call_count==1
@@ -295,54 +295,42 @@ def test_prompt_identity_and_catalogue_registration_policy_preserved():
     row=saved_row();text=correlation_prompt(row)
     assert text.count(tag(row['id']))==1 and 'initial create call' in text
     p=product(status='ACTIVE',online_store_url='https://fixture/art',tags=[tag(uuid.uuid4())])
-    assert db._plan_edition_product_incremental_sync([p],[])[0]['reason']=='awaiting_upload_mapping'
+    assert db._plan_edition_product_incremental_sync([p],[])[0]['action']=='insert'
     assert db._plan_edition_product_incremental_sync([p],[],upload_mapping=True)[0]['action']=='insert'
 
 
-def test_api_starts_background_once_and_status_is_metadata_only(env,monkeypatch):
-    import threading
+def test_api_mapping_only_navigates_and_never_starts_worker(env,monkeypatch):
     from starlette.applications import Starlette
     from starlette.routing import Route
     from starlette.testclient import TestClient
-    import product_upload_api as api, product_upload_mapping as module, files_upload_api as files
+    import product_upload_api as api, files_upload_api as files
     from product_upload_jobs import JOBS
     service,key,meta,p=setup(env)
     monkeypatch.setattr(api,'connect',env[0].connect)
-    factory=Mock(return_value=env[2]);monkeypatch.setattr(api,'Dropbox',factory)
-    monkeypatch.setattr(module,'Mapping',lambda *a,**kw:service)
+    factory=Mock(side_effect=AssertionError('Mapping must not access Dropbox'))
+    monkeypatch.setattr(api,'Dropbox',factory)
     monkeypatch.setattr(files,'_request_user',lambda *a,**kw:ADMIN)
-    entered,release=threading.Event(),threading.Event()
-    original=service._local_candidates
-    def lookup(marker):
-        entered.set();assert release.wait(10);return original(marker)
-    service._local_candidates=lookup
-    version=current_source(env[0].read(key,ADMIN['id']))['version']
+    submit=Mock(side_effect=AssertionError('Mapping must not start a worker'))
+    monkeypatch.setattr(JOBS,'submit',submit)
+    # setup() simulates an imported product and saved correlation tag.
     with TestClient(Starlette(routes=[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES])) as client:
         url='/api/product-uploads/';headers={'Origin':'http://testserver'}
-        assert client.get(url+'state?id='+key).status_code==200
-        assert client.get(url+'mapping-status?id='+key).json()['mapping']['state']=='Unmapped'
-        factory.assert_not_called();assert not service.shopify.method_calls
-        assert client.post(url+'map',json={'id':key,'source_version':version}).status_code==403
-        assert client.post(url+'map',json={'id':key},headers=headers).status_code==409
-        payload={'id':key,'source_version':version}
-        try:
-            start=time.monotonic()
-            assert client.post(url+'map',json=payload,headers=headers).status_code==200
-            assert time.monotonic()-start<2 and entered.wait(5)
-            assert client.post(url+'map',json=payload,headers=headers).status_code==200
-            assert factory.call_count==1
-            assert client.get(url+'mapping-status?id='+key).json()['mapping']['state']=='Mapping…'
-            # Starting another upload must not cancel an already admitted mapping.
-            JOBS.cancel(key,ADMIN['id'])
-        finally:release.set()
-        deadline=time.monotonic()+10
-        while time.monotonic()<deadline:
-            result=client.get(url+'mapping-status?id='+key).json()['mapping']
-            if result['state']!='Mapping…':break
-            time.sleep(.02)
-        assert result['state']=='Mapped',result
-        assert env[2].api.move_path.call_count==1
-        no_jobs(env)
+        before=read_edition(service.connect,PID)
+        assert client.post(url+'map',json={'id':key}).status_code==403
+        for response in (client.get(url+'mapping-status?id='+key),
+                         client.post(url+'map',json={'id':key},headers=headers)):
+            assert response.status_code==200,response.text
+            result=response.json()['mapping']
+            assert 'page=edition_ops' in result['url']
+            assert result['state']=='Available in Edition Ops'
+        assert read_edition(service.connect,PID)==before
+        factory.assert_not_called();submit.assert_not_called()
+        assert count(env[1],'product_upload_mapping_holds')==0
+        assert count(env[1],'product_psd_mappings')==0
+        env[1].execute('DELETE FROM edition_products')
+        result=client.get(url+'mapping-status?id='+key).json()['mapping']
+        assert result['state']=='Pending / not found in Edition Ops'
+        assert 'No PSD was attached' in result['reason']
 
 
 def test_other_operation_cannot_take_hold_and_changed_run_cannot_reuse_success(env):
@@ -363,7 +351,7 @@ def test_expired_attempt_and_late_owner_are_fenced(env):
     from product_upload_mapping import now
     service,key,meta,p=setup(env)
     with env[0].locked(key,ADMIN['id']) as (row,cur):
-        row['data']['upload_operation']['sync_map']=dict(state='Mapping…',lease='expired',
+        row['data']['upload_operation']['sync_map']=dict(state='Mappingâ€¦',lease='expired',
             lease_until=(now()-timedelta(minutes=1)).isoformat(),source_version=current_source(row)['version'],mode='LIVE')
     assert service.status(key,ADMIN)['state']=='Mapping incomplete'
     assert service.map(key,ADMIN)['state']=='Mapped'

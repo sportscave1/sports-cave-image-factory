@@ -315,9 +315,9 @@ class DeviceAgent:
         r=self.runner
         if hasattr(r,"desktop_command"):
             desktop_target=data.get("id") and r.is_desktop(data["id"])
-            if desktop_target and kind not in {"inspect","play"}:
+            if desktop_target and kind not in {"inspect","play","rename","delete"}:
                 raise Invalid("This desktop task is immutable. Use the native recorder to create another recording.")
-            if kind=="record" or desktop_target or (kind in {"pause","resume"} and r.desktop_busy()):
+            if kind in {"record","open-popup"} or desktop_target or (kind in {"pause","resume"} and r.desktop_busy()):
                 if kind in {"record","play"}:
                     self.operation_id=key
                     atomic(self.root/"device-session.json",{"boot_id":self.boot_id,"epoch":self.epoch,"operation_id":key})

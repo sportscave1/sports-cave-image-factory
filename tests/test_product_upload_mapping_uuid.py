@@ -2,7 +2,7 @@
 from copy import deepcopy
 import uuid
 import pytest
-from tests.test_product_upload_mapping import database, env, setup, ADMIN, PID, count
+from tests.test_product_upload_mapping import database, env, setup, ADMIN, PID, count, restore_provider_boundaries
 from product_upload_mapping import read_edition
 
 

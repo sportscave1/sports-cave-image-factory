@@ -35,7 +35,7 @@ Before creating or retrying, search Shopify for this exact tag (including drafts
 The Shopify creation connector supports tags. Include this tag in the initial create call, not a later optional step. In Update Existing mode attach it only to the explicitly confirmed existing product.
 Also add sc-edition-limit-N, replacing N with the edition limit confirmed from the supplied product/artwork or user. Do not guess a limit. Do not change existing edition counters or history.
 Read the product back and verify the correlation tag. Report its stable ID and handle. Preserve the selected Draft/Live/Update publication instructions.
-After completion, return to Product Uploads and click MAP. No product-name paste is required. If the connector cannot persist the tag, report that limitation and the stable product ID for the exceptional product selector.
+After completion, return to Product Uploads and click Mapping to open Edition Ops and use Add / Attach PSD. Products sync automatically, independently of PSD attachment. If the connector cannot persist the tag, report that limitation and the stable product ID for the exceptional product selector.
 END UPLOAD OPERATION CORRELATION
 
 '''

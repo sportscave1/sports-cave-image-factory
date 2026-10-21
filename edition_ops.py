@@ -2033,6 +2033,27 @@ def _editor_visible_rows(rows):
         label=lambda value: labels.get(value, value),
         first=(labels[ALL_PRODUCTS_SELECTION],),
     )
+    # Product Uploads uses the existing workspace and picker, never a second UI.
+    params = getattr(st, 'query_params', {})
+    product_hint = params.get('edition_product', '')
+    title_hint = params.get('edition_search', '')
+    hint = (product_hint, title_hint)
+    if any(hint) and st.session_state.get('edition-upload-navigation') != hint:
+        from product_upload_edition_navigation import selection
+        matches = selection(rows, product_hint, title_hint)
+        if len(matches) == 1:
+            st.session_state[EDITOR_PRODUCT_SELECTION_KEY] = _stable_row_key(matches[0])
+            st.session_state['edition-status-filter'] = 'All'
+            st.session_state['edition-auto-filter'] = 'All'
+            st.session_state['edition-upload-navigation'] = hint
+        elif not matches:
+            st.info('Product pending / not found in Edition Ops. Automatic sync may still be pending. '
+                    'Refresh to check again, or use Find product and Add / Attach PSD when it appears. '
+                    'No PSD has been attached by Mapping.')
+        else:
+            st.info('More than one product matches the upload title. Use Find product to select the correct product, then Add / Attach PSD.')
+    elif params.get('edition_upload') and not any(hint):
+        st.info('No product identity is available for this upload yet. Use Find product after automatic sync completes. No PSD has been attached by Mapping.')
     selected = st.session_state.get(EDITOR_PRODUCT_SELECTION_KEY, ALL_PRODUCTS_SELECTION)
     if selected not in options:
         st.session_state[EDITOR_PRODUCT_SELECTION_KEY] = ALL_PRODUCTS_SELECTION

@@ -128,7 +128,7 @@ async def action(request):
     try:
         import files_upload_api as files
         op = request.path_params['action']
-        manual = op in ('prompt', 'mockups')
+        manual = op in ('prompt', 'mockups', 'map')
         user = await actor(request, write=True, automatic=not manual)
         timings['auth'] = (perf_counter() - started) * 1000
         body = await files._json_body(request)
@@ -170,17 +170,6 @@ async def action(request):
             prompt = await run_in_threadpool(prepare, store, key, uid, body.get('mode'), body.get('source_version', ''))
             return JSONResponse(dict(prompt=prompt), headers=HEADERS)
         elif op == 'map':
-            from product_upload_mapping import Mapping
-            from product_upload_jobs import JOBS
-            from product_upload_source import current_source
-            if not isinstance(body.get('source_version'), str) or not body['source_version']:
-                raise ValueError('Save All first, then use Sync & Map for the current saved images.')
-            row = await run_in_threadpool(store.read, key, uid)
-            source = await run_in_threadpool(current_source, row, body.get('source_version'))
-            def work(progress):
-                return Mapping(connect, Dropbox()).map(key, user, source_version=source['version'],
-                    product_id=body.get('product_id'), confirmed_limit=body.get('edition_limit'), confirm_product=body.get('confirm_product') is True)
-            JOBS.submit(key, uid, 'sync-map', [source['version'], body.get('edition_limit'), body.get('product_id'), body.get('confirm_product')], work)
             return JSONResponse(dict(mapping=await run_in_threadpool(mapping_snapshot, key, user)), headers=HEADERS)
         elif op == 'mockups':
             import os_accounts
@@ -230,7 +219,7 @@ async def chunk(request):
 
 async def mapping_status(request):
     try:
-        user = await actor(request)
+        user = await actor(request, automatic=False)
         result = await run_in_threadpool(mapping_snapshot, request.query_params.get('id'), user)
         return JSONResponse(dict(mapping=result), headers=HEADERS)
     except Exception as error:
@@ -238,15 +227,14 @@ async def mapping_status(request):
 
 
 def mapping_snapshot(key, user):
-    from product_upload_mapping import Mapping
-    from product_upload_jobs import JOBS
-    result = Mapping(connect, None).status(key, user)
-    job = JOBS.snapshot(key, user['id'], 'sync-map')
-    if job and job['state'] in ('Queued','Running'):
-        result.update(state='Mapping…', running=True)
-    elif job and job['state']=='Failed':
-        result.update(state='Mapping failed', reason=job.get('error','Sync & Map failed. Retry.'))
-    return result
+    import os_accounts
+    from product_upload_edition_navigation import destination
+    if not os_accounts.can_access_page(user, 'Edition Ops'):
+        raise PermissionError('Edition Ops access is required.')
+    row = Intakes(connect).read(key, user['id'])
+    if not row:
+        raise ValueError('The saved upload was not found.')
+    return destination(row, connect)
 
 
 async def preview(request):

@@ -252,3 +252,25 @@ def test_completion_notifies_publisher_without_faster_progress_polling(tmp_path)
         assert runner.mode=='completed' and agent.publish_wake.is_set()
         await agent.close();assert runner.state_changed is None
     asyncio.run(check())
+
+
+def test_open_popup_retains_active_run_and_review_fence(transport):
+    relay,_,owner,device,key,boot,state=transport
+    operation=str(uuid.uuid4())
+    relay.enqueue(owner,device,operation,'record',{})
+    state.update(mode='recording', desktop_capabilities={'popup_reopen':True})
+    relay.exchange(device,key,{'boot_id':boot,'epoch':1,'state':state,'state_version':2})
+    before=relay.devices(owner)[0]
+    assert before['active_run']==operation
+    receipt=relay.enqueue(owner,device,str(uuid.uuid4()),'open-popup',{})
+    after=relay.devices(owner)[0]
+    assert receipt['kind']=='open-popup'
+    assert after['active_run']==before['active_run']
+    assert after['needs_review']==before['needs_review']
+    state.update(mode='interrupted')
+    relay.exchange(device,key,{'boot_id':boot,'epoch':1,'state':state,'state_version':3})
+    before=relay.devices(owner)[0]
+    relay.enqueue(owner,device,str(uuid.uuid4()),'open-popup',{})
+    after=relay.devices(owner)[0]
+    assert after['active_run']==before['active_run']
+    assert after['needs_review']==before['needs_review']
