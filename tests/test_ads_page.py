@@ -5893,8 +5893,8 @@ PRIMARY TEXT VARIATIONS
             1,
         )
         for marker in image_markers:
-            shared = marker in (ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1, ads_page.SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2, ads_page.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0])
-            self.assertEqual(contract.count(marker), 1 if shared else 3, marker)
+            shared = marker in (ads_page.SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1, ads_page.SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2, SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER)
+            self.assertEqual(contract.count(marker), 1 if shared else 0, marker)
         restored_effects = (
             "source-matched moulding",
             "narrow contact shadows and soft directional secondary shadows",
@@ -5903,9 +5903,9 @@ PRIMARY TEXT VARIATIONS
             "One coherent interior photograph",
         )
         for expected in restored_effects:
-            self.assertEqual(contract.count(expected), 3, expected)
+            self.assertEqual(contract.count(expected), 1, expected)
         self.assertEqual(contract.count("\nAD COPY\n"), 3)
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V10 THREE PREMIUM ROOMS", contract)
+        self.assertIn(ads_page.ADS_IE_COMBINED_EXECUTION_VERSION, contract)
 
     def test_instant_experience_route_wording_and_typography_are_route_specific(self):
         prompt = ads_page.build_ads_prompt(
@@ -5934,7 +5934,7 @@ PRIMARY TEXT VARIATIONS
             self.assertTrue(any("HEADLINE: " + h in section for h in ads_page.ie_visuals.eligible_headlines({})))
             self.assertIn("CTA: CLAIM YOUR EDITION", section)
             self.assertIn("place the gold underline directly beneath the measured glyph bounds", contract)
-            self.assertIn("Never place the long description or Meta headline inside the image.", section)
+            self.assertIn("Never place the long description or Meta headline inside the image.", ads_page.build_instant_experience_shared_template())
             self.assertNotIn("LIMITED TO 100 WORLDWIDE", section)
 
     def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):

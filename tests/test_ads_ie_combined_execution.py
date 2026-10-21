@@ -29,7 +29,7 @@ class CombinedExecutionTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(prompt.count("\nIMAGE GENERATION PROMPT\n"), 3)
         self.assertEqual(prompt.count("\nAD COPY\n"), 3)
-        for expected in ("ORIGINAL product reference", "without asking for \"next\"", "no collage or triptych",
+        for expected in ("ORIGINAL product reference", "Do not ask for “next”", "No collage or triptych",
                          "exactly three successful image-generation calls", "preserve completed outputs", "Never claim pixel fidelity"):
             self.assertIn(expected, prompt)
         for obsolete in ("Do not generate images", "do not generate images", "first text-only response",
@@ -150,7 +150,10 @@ class CombinedExecutionTests(unittest.TestCase):
             recent_fingerprints=first["instant_experience_fingerprints"])
         for row, fp in zip(rows, next_pack["instant_experience_fingerprints"]):
             self.assertEqual(row["room_type"], fp["room_type"])
-            self.assertIn(row["scene_brief"], next_pack["master_prompt"])
+            unique = row["scene_brief"].removeprefix(ads.ie_visuals.SCENE_REFERENCE_RULES).removesuffix(ads.ie_visuals.SCENE_VISIBILITY_RULES)
+            self.assertIn(unique, next_pack["master_prompt"])
+            for shared in (ads.ie_visuals.SCENE_REFERENCE_RULES, ads.ie_visuals.SCENE_VISIBILITY_RULES):
+                self.assertIn(shared.strip(), next_pack["master_prompt"])
 
     def test_previous_complete_prompts_and_approved_copy_are_not_migrated(self):
         current = self.record()

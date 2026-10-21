@@ -293,6 +293,15 @@ SCENES = scene_library.SCENES
 ROOM_OPTIONS = tuple(tuple(dict.fromkeys(s["room_type"] for s in slot)) for slot in SCENES)
 SCENE_VERSION = "IE COLLECTOR SCENES V2 ARTWORK FIRST"  # Saved prompt recognition stays stable.
 COMBAT_PALETTES = tuple(tuple(dict.fromkeys(s["wall_colour"] for s in slot)) for slot in SCENES)
+SCENE_REFERENCE_RULES = (
+    "Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. "
+    "Never use a previously generated mockup as the artwork source. "
+)
+SCENE_VISIBILITY_RULES = (
+    " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
+    "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "
+    "CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
+)
 
 
 def is_combat(context):
@@ -347,8 +356,7 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             physical_product=context.get("physical_product", {}))
         visual["purpose"] = f"Image {index + 1}: {visual['room_type']}; {visual['camera_side']}"
         visual["scene_brief"] = (
-            "Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. "
-            "Never use a previously generated mockup as the artwork source. "
+            SCENE_REFERENCE_RULES +
             f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}); spatial structure: {visual.get('spatial_family', 'as saved')}. "
             f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
             f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
@@ -356,9 +364,7 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
                 "Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence.",
                 "Refined collector sitting-room setting: follow this resolved spatial arrangement with one peripheral seating anchor. Neither a hallway nor a nearly empty wall; never substitute a default side-opening composition.",
             )[index] +
-            " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
-            "Keep backdrop calm and panel joins/oak accents peripheral. No competing framed art, trophies, helmets or decorative clusters. "
-            "CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
+            SCENE_VISIBILITY_RULES
         )
 
 
@@ -366,7 +372,6 @@ def camera_wall_rules(visual, *, compact=False):
     if compact:
         return f"""LOCKED CAMERA / ROOM / WALL RESOLUTION
 {SCENE_VERSION}
-CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']} (internal only).
 Selected camera: {visual['camera_side']}. Keep verticals straight; never mirror the artwork.
 SCENE: {visual['scene_brief']}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Camera distance determines prominence; never enlarge the physical product.
@@ -375,7 +380,6 @@ Use only the exact selected headline and subline below. Pack-level fit selection
 {SCARCITY_RULE}"""
     return f'''LOCKED CAMERA / ROOM / WALL RESOLUTION
 {SCENE_VERSION}
-CREATIVE_VARIATION_TOKEN: {visual['creative_variation_token']} (internal only; never display).
 Selected camera: {visual['camera_side']}.
 Resolve exactly ONE camera using only this assigned definition. Keep verticals straight and Never mirror artwork.
 SCENE: {visual['scene_brief']}

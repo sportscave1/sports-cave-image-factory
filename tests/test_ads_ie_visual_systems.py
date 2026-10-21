@@ -63,11 +63,13 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         for prompt in self.prompts():
             self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
             for phrase in ("PRODUCT SOURCE-ASSET FIDELITY", "LIGHTING, GLASS AND MOUNTING PHYSICS",
-                           "ANTI-AI INTERIOR CONTROL", "1024 x 1024", "CREATIVE_VARIATION_TOKEN: visual-test",
+                           "ANTI-AI INTERIOR CONTROL", "1024 x 1024",
                            "Resolve exactly ONE camera", "palette, brightness, frame colour",
                            "Do not append geographic scope", "Never invent a limit"):
                 self.assertIn(phrase, prompt)
             self.assertNotIn("Don Mattingly", prompt)
+            self.assertNotIn("CREATIVE_VARIATION_TOKEN:", prompt)
+        self.assertTrue(all(v["creative_variation_token"] == "visual-test" for v in self.visuals()))
 
     def test_approved_copy_fit_diversity_and_stability(self):
         self.assertEqual(len(ads_page.ie_visuals.HEADLINES), 6)

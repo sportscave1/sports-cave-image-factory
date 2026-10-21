@@ -159,8 +159,8 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
             grouped.count("\nAD COPY\n"),
             3,
         )
-        self.assertEqual(prompt.count("PRODUCT SOURCE-ASSET FIDELITY"), 3)
-        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
+        self.assertEqual(prompt.count("PRODUCT SOURCE-ASSET FIDELITY"), 1)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
 
     def test_non_instant_experience_prompts_do_not_receive_footer_contract(self):
         marker = ads_page.SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1.splitlines()[0]

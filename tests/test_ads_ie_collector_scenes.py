@@ -81,8 +81,9 @@ class CollectorSceneTests(unittest.TestCase):
             for marker in (ads.SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0],
                            ads.SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2,
                            ads.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]):
-                expected = 1 if marker == ads.SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0] else 3
-                self.assertEqual(prompt.count(marker), expected)
+                self.assertNotIn(marker, prompt)  # Obsolete display-only version banners.
+            self.assertEqual(prompt.count("PRODUCT SOURCE-ASSET FIDELITY"), 1)
+            self.assertIn("explicit user selections remain authoritative", prompt)
 
     def test_one_compact_realism_block_survives_metadata_and_shared_enrichment(self):
         metadata = {"frame_specs": {"verified": True, "source": "fixture", "outer_width_cm": 62,

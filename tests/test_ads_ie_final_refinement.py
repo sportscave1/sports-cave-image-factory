@@ -70,11 +70,11 @@ class FinalRefinementTests(unittest.TestCase):
     def test_exactly_three_successes_retry_and_stable_asset_delivery(self):
         result = self.record()
         prompt = result["master_prompt"]
-        for phrase in ("Make exactly three successful image-generation calls in order: Ad 1, Ad 2, Ad 3",
-                       "One image per call, one call per ad", "Ad 1 is always the collector hallway, RIGHT angle",
-                       "retry only that missing output", "Never repeat a successful call or restart the set",
-                       "recover or redisplay that existing asset; do not generate another image",
-                       "Retain three distinct assets/output identifiers", "Then stop."):
+        for phrase in ("make exactly three successful image-generation calls, one image per ad, in order",
+                       "generate each requested image in its own call", "Keep Ad 1 as the collector hallway",
+                       "Retry only a missing output when its call failed without producing an image", "never repeat a successful call",
+                       "Recover or redisplay an existing asset if display fails", "Never restart the set",
+                       "Keep three distinct assets associated with their own ad labels, copy and CSV routes", "Then stop."):
             self.assertIn(phrase, prompt)
         for forbidden in ("at most one correction call", "existing correction allowance", "Replacement for Image",
                           "Reject and regenerate", "regenerate or correct", "Revise every hard failure"):

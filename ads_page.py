@@ -3865,7 +3865,7 @@ INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
 These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
 
 HEADLINE
-- Assess rendered glyph width, not character or word count: all six approved headline templates are recognised, including the longer options.
+- Assess rendered glyph width, not character or word count: all eligible approved headline options are recognised, including the longer options.
 - Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
 - Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
@@ -8510,15 +8510,29 @@ IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPH
 Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 
-def build_instant_experience_shared_template():
+IE_EXECUTION_CHECKLIST = """EXECUTION CHECKLIST
+- Read the entire brief and ORIGINAL product reference before starting.
+- Generate exactly three separate images, one per ad, in order.
+- Use the original product image for every call.
+- Preserve the product, plausible physical scale and assigned camera angles.
+- Follow the three resolved, visibly different home settings.
+- Apply the specified opaque footer, subtle collector typography and exact selected wording.
+- Keep CLAIM YOUR EDITION unchanged.
+- Complete matching copy, the populated CSV and supplied setup.
+- Review the outputs and report unresolved defects.
+
+Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification."""
+
+
+def build_instant_experience_shared_template(physical_product=None):
     """Deduplicate unchanged rendering rules in the master; expand for each tool call."""
     return "\n\n".join((
-        "SHARED AD TEMPLATE — include in every image-generation call\n"
-        "1024 x 1024, 1:1, sRGB; upper photograph 72–76%, opaque footer 24–28%; "
-        "64–72 px safe margins; readable at 256 x 256. Near-black charcoal #101112/#121314, "
-        "subtle paper grain and one 1-pixel muted-gold top separator. Artwork first; "
-        "the complete frame stays above the footer. No fake button, price or extra CTA.",
-        "PACK COMPOSITION: resolve three different homes before the calls. Each pair must differ in architectural "
+        "SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call\n"
+        f"{ie_visuals.SCENE_VERSION}\n"  # Required saved-prompt recognition, not a variation token.
+        "1024 x 1024, 1:1, sRGB; upper photograph 72–76%. Near-black charcoal #101112/#121314 "
+        "footer with subtle paper grain. Keep architectural verticals straight. "
+        "Never place the long description or Meta headline inside the image.",
+        "PACK COMPOSITION: each pair must differ in architectural "
         "structure AND visible depth arrangement, wall family AND treatment, lighting character/direction, and "
         "peripheral residential cue. Colour, angle or accessory changes alone are insufficient. Use three different "
         "home settings, colour families, lightness levels and compatible wall treatments; grey/graphite/charcoal "
@@ -8534,24 +8548,29 @@ def build_instant_experience_shared_template():
         build_instant_experience_on_image_copy_fit_rules(),
         build_instant_experience_creative_cta_rules("premium_scarcity_right"),
         build_instant_experience_typography_quality_rules(shared=True),
+        ie_visuals.SCARCITY_RULE,
+        ie_visuals.SCENE_REFERENCE_RULES.strip(),
+        ie_visuals.SCENE_VISIBILITY_RULES.strip(),
+        physical_realism.build(physical_product, compact=True),
     ))
 
 
 def build_instant_experience_execution_image_brief(index, visual):
+    # The unchanged resolved brief is also used by standalone exports. Remove
+    # only its exact shared prefix/suffix here, never rebuild/reroll scene fields.
+    scene = visual['scene_brief'].removeprefix(ie_visuals.SCENE_REFERENCE_RULES).removesuffix(ie_visuals.SCENE_VISIBILITY_RULES)
     return f"""{visual['group_heading']}
 
 IMAGE GENERATION PROMPT
 Image {index}; Route key: {visual['route_key']}; camera role: {visual['camera_role']}.
 Output label: Ad {index} — {'Collector Hallway' if index == 1 else visual['room_type']}
-{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
-{ie_visuals.camera_wall_rules(visual, compact=True)}
-{SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2.splitlines()[0]}
-{physical_realism.build(visual.get('physical_product'), compact=True)}
+Camera: {visual['camera_side']}.
+SCENE: {scene}
+Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}.
 Resolved on-image copy — use exactly:
 HEADLINE: {visual['headline_text']}
 SUPPORTING LINE: {visual['supporting_line']}
 CTA: {visual['cta_text']}
-Never place the long description or Meta headline inside the image.
 
 {ie_copy.ad_copy(visual['route'])}"""
 
@@ -8606,12 +8625,12 @@ def build_standard_instant_experience_prompt(
     fit_candidates = json.dumps({v["route_key"]: v["eligible_headline_alternatives"] for v in visuals}, ensure_ascii=False)
     groups = "\n\n".join(build_instant_experience_execution_image_brief(i, v) for i, v in enumerate(visuals, 1))
     return f"""{ADS_IE_COMBINED_EXECUTION_VERSION}
-{ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION}
-{ie_visuals.VERSION}
 SPORTS CAVE INSTANT EXPERIENCE — THREE IMAGES AND COMPLETED CSV
+{IE_EXECUTION_CHECKLIST}
+
+{ie_visuals.VERSION}
 Product: {product_name}
 Sport: {category}; selected market: {country}.
-Original framed product reference: the original supplied product image, for EVERY image call.
 Use the supplied title/metadata for identity and verified facts. Do not guess an unknown athlete, team, achievement or year from the market or a style image; never invent availability, certificates, shipping or provenance claims.
 
 {IE_CREATIVE_VARIETY_AND_TYPOGRAPHY}
@@ -8619,22 +8638,22 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy internally before any image call. Ad 1 is always the collector hallway, RIGHT angle, with dominant artwork and subtle residential passage depth. Keep compatible saved scenes for Ads 2 and 3, STRAIGHT ON and LEFT respectively. Check architecture, depth arrangement, wall finishes and lighting together as three visibly different properties, not angle/accessory changes. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; every CTA field is Claim Your Edition. Retain the final records for display and CSV. Confirm three unique footer headlines and three unique sublines; the fixed CTA intentionally repeats. Complete any headline fit selection from this pack-only data before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three unique footer headlines and three unique sublines. Complete any headline fit selection from this pack-only data before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 5. Create and attach the completed downloadable ad_copy.csv from the final copy records.
 6. Display the three matching copy groups and provide the existing shared Instant Experience setup below. Then stop.
-Make exactly three successful image-generation calls in order: Ad 1, Ad 2, Ad 3. One image per call, one call per ad. Continue automatically without asking for "next" or approval between images. Three independent 1024 x 1024 outputs; no collage or triptych. No variants, additional options, replacement images, correction generations or contact sheets. Do not stop after writing prompts or the first image. These instructions authorise generation in the receiving conversation; they do not add an OS image backend or publish ads.
-For each image call, use the ORIGINAL product reference and combine only the shared applicable ad template, that image's resolved scene/realism, and its exact selected headline, subline and CLAIM YOUR EDITION. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
-{SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2.splitlines()[0]}
+No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
+For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
+OUTPUT REVIEW AND DELIVERY
 Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
-Label each output immediately using its exact Output label below: “Ad 1 — Collector Hallway”, “Ad 2 — [Resolved Room Name]”, “Ad 3 — [Resolved Room Name]”. Keep each image associated with its matching copy and CSV route throughout. Retain three distinct assets/output identifiers where supported; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image. Present all three via the environment’s supported display/download mechanism; promise persistence or download links only when actually available. If display fails after an image was created, recover or redisplay that existing asset; do not generate another image.
-If a call fails without producing an image, retry only that missing output. Never repeat a successful call or restart the set. If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation.
+Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
+If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
-If a genuine tool failure prevents completion, identify the unfinished image/file, preserve completed outputs and final copy for resumption, and state any inspection limitation. Do not replace requested images with a text-only plan or claim a nonexistent download. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
+If completion fails, preserve completed outputs and final copy for resumption and state any inspection limitation. Return completed assets, final copy and setup only; do not print these instructions, internal plans or research notes.
 
-{build_instant_experience_shared_template()}
+{build_instant_experience_shared_template(visuals[0].get('physical_product'))}
 
 {ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
 Exact Promotion or Offer entered: {_standard_instant_experience_exact_offer(campaign_moment) or 'None supplied'}. Preserve a supported supplied offer in ad copy only; never invent one or replace edition scarcity.
