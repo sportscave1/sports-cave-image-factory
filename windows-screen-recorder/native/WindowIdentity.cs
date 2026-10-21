@@ -29,6 +29,9 @@ static class WindowIdentity {
     }
     public static bool PlaybackTitleMatches(string app,string recorded,string current,Func<string,bool> documentMatches) {
         if(String.Equals(recorded,current,StringComparison.Ordinal))return true;
+        if(String.Equals(Path.GetFileName(app),"notepad.exe",StringComparison.OrdinalIgnoreCase)&&
+            recorded.EndsWith(".txt - Notepad",StringComparison.OrdinalIgnoreCase)&&current.EndsWith(".txt - Notepad",StringComparison.OrdinalIgnoreCase)&&
+            recorded.TrimStart('*')==current.TrimStart('*'))return true;
         if(!String.Equals(Path.GetFileName(app),"msedge.exe",StringComparison.OrdinalIgnoreCase))return false;
         string recordedPage,recordedProfile,currentPage,currentProfile;
         if(!EdgeTitle(recorded,out recordedPage,out recordedProfile)||!EdgeTitle(current,out currentPage,out currentProfile)||

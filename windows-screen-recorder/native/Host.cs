@@ -73,7 +73,7 @@ static class Native {
     }
 }
 
-class Capture {
+partial class Capture {
     readonly Action<string,object> send;
     readonly Action<string> fail;
     readonly BlockingCollection<Action> queue=new BlockingCollection<Action>(128);
@@ -103,7 +103,7 @@ class Capture {
     int traceCount,ownExclusions;
     class WheelBurst {
         public Native.Point Point;public IntPtr Window;public int Epoch;
-        public long LastAt;public bool Closed;
+        public long LastAt;public bool Closed;public int Delta;
     }
     readonly object wheelGate=new object();
     WheelBurst wheelBurst;
@@ -118,19 +118,96 @@ class Capture {
     volatile GenerationAnchor preparedPicker;
     GenerationAnchor pendingPicker;
     bool expectedPickerDown;
-    sealed class GenerationGesture { public long ReleasedAt; }
+    sealed class GenerationGesture { public long ReleasedAt;public SemanticClick Hover; }
     GenerationGesture generationGesture;
     GenerationAnchor pendingGeneration;
     bool expectedGenerationDown;
+    sealed class DropdownCapture {
+        public AutomationElement Owner;
+        public Dictionary<string,object> Target;
+        public IntPtr Window;public uint Pid,Dpi;public int Epoch;
+        public System.Windows.Rect WindowBounds;
+        public System.Windows.Rect PopupBounds;
+        public string Before,Candidate,View;
+        public double? ScrollY;
+        public bool Gesture;
+    }
+    DropdownCapture dropdown;
+    sealed class SemanticClick {
+        public AutomationElement Control;
+        public Dictionary<string,object> Target;
+        public IntPtr Window;public uint Pid,Dpi;public int Epoch;
+        public System.Windows.Rect ControlBounds,WindowBounds;
+        public long At;
+        public string RuntimeId;
+        public bool NeedsInvocation;
+    }
+    sealed class InvocationWitness { public string RuntimeId;public long At;public int Epoch; }
+    readonly ConcurrentQueue<InvocationWitness> invocations=new ConcurrentQueue<InvocationWitness>();
+    int invocationReceived,invocationRejected,invocationCacheFailures;
+    string invocationCacheError;
+    AutomationElement invocationRoot;
+    IntPtr invocationWindow;
+    AutomationEventHandler invocationHandler;
+    static string RuntimeIdentity(int[] ids) { return ids==null?null:String.Join(",",ids.Select(id=>id.ToString()).ToArray()); }
+    void ObserveInvocations(IntPtr window) {
+        if(invocationWindow==window)return;
+        if(invocationRoot!=null&&invocationHandler!=null) {
+            try{Automation.RemoveAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,invocationHandler);}catch(ElementNotAvailableException){}
+        }
+        invocationRoot=AutomationElement.FromHandle(window);
+        invocationHandler=(sender,args)=>{
+            if(!Armed||Broken)return;
+            Interlocked.Increment(ref invocationReceived);
+            try {
+                var source=(AutomationElement)sender;
+                // Event-time cached metadata remains readable after a modal's
+                // invoked button has been removed. Never read field values.
+                if(source.Cached.ControlType!=ControlType.Button||source.Cached.IsPassword){Interlocked.Increment(ref invocationRejected);return;}
+                var witness=new InvocationWitness{RuntimeId=RuntimeIdentity((int[])source.GetCachedPropertyValue(AutomationElement.RuntimeIdProperty)),At=MonotonicMs(),Epoch=generation};
+                if(witness.RuntimeId==null)return;
+                invocations.Enqueue(witness);InvocationWitness old;
+                while(invocations.Count>32)invocations.TryDequeue(out old);
+            }catch(ElementNotAvailableException ex){invocationCacheError=ex.GetType().Name;Interlocked.Increment(ref invocationCacheFailures);}
+            catch(InvalidOperationException ex){invocationCacheError=ex.GetType().Name;Interlocked.Increment(ref invocationCacheFailures);}
+        };
+        var cache=new CacheRequest();cache.TreeScope=TreeScope.Element;
+        cache.Add(AutomationElement.RuntimeIdProperty);cache.Add(AutomationElement.ControlTypeProperty);cache.Add(AutomationElement.IsPasswordProperty);
+        try {
+            using(cache.Activate())Automation.AddAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,TreeScope.Descendants,invocationHandler);
+            invocationWindow=window;
+        }catch{invocationRoot=null;invocationHandler=null;invocationWindow=IntPtr.Zero;throw;}
+    }
+    SemanticClick semanticClick;
+    volatile SemanticClick hoverClick;
+    sealed class HoverProbe {
+        public Native.Point Point;public IntPtr Window;public int Epoch;
+        public long Started,Completed;public bool Found;public string Error;
+    }
+    volatile HoverProbe activeHover,lastHover;
+    readonly object hoverGate=new object();
+    HoverProbe pendingHover;
+    volatile HoverProbe physicalPointer;
+    int hoverBusyUpdates;
+    int hoverQueued;
+    const int HoverFreshnessMs=1000;
+    System.Threading.Timer hoverRefresh;
+    string captureOperation="idle";
+    IntPtr observedWindow;
     public Capture(IntPtr own,Action<string,object> send,Action<string> fail,bool injected) {
         this.own=own;this.send=send;this.fail=fail;this.injected=injected;
         mouse=OnMouse;key=OnKey;
         var worker=new Thread(()=>{foreach(var work in queue.GetConsumingEnumerable()){
             if(Broken)continue; // Never inspect queued targets after an interruption.
             Interlocked.Exchange(ref BusySince,Stopwatch.GetTimestamp());
-            try { work(); } catch(Exception e){Interrupt(e is ElementNotAvailableException?"The target window disappeared.":e.Message);}
+            try { work(); } catch(Exception e){
+                bool exists=observedWindow!=IntPtr.Zero&&Native.IsWindow(observedWindow);
+                send("diagnostic",new {kind="capture_operation_failed",operation=captureOperation,error_type=e.GetType().Name,window_exists=exists,
+                    methods=new StackTrace(e,false).GetFrames().Select(frame=>frame.GetMethod().Name).Take(8).ToArray()});
+                Interrupt(e is ElementNotAvailableException?(exists?"The clicked control changed before its action could be identified. Draft preserved.":"The target window disappeared."):e.Message);
+            }
             finally{Interlocked.Exchange(ref BusySince,0);}
-        }}){IsBackground=true};worker.SetApartmentState(ApartmentState.MTA);worker.Start();
+        }}){IsBackground=true,Name="recorder-capture"};worker.SetApartmentState(ApartmentState.MTA);worker.Start();
     }
     void Put(Action a) { if(!Broken&&!queue.TryAdd(a)) Interrupt("Capture queue is full. Stop and save the preserved draft."); }
     public void Interrupt(string reason) { if(Broken)return; Broken=true; Armed=false; fail(reason); }
@@ -144,28 +221,52 @@ class Capture {
         pendingEditorClick.Clear();
         pendingGeneration=null;expectedGenerationDown=false;
         pendingPicker=null;expectedPickerDown=false;
+        dropdown=null;
+        semanticClick=null;
+        hoverClick=null;
+        physicalPointer=null;
+        lock(hoverGate)pendingHover=null;
+        activeHover=lastHover=null;hoverBusyUpdates=0;
+        var eventWindow=preparedWindow!=IntPtr.Zero?preparedWindow:lastWindow;
         generation=epoch;lastWindow=IntPtr.Zero;lastTitle=null;
+        InvocationWitness prior;while(invocations.TryDequeue(out prior)){}
+        invocationReceived=invocationRejected=invocationCacheFailures=0;invocationCacheError=null;
+        if(eventWindow!=IntPtr.Zero)ObserveInvocations(eventWindow);
         mh=Native.SetWindowsHookEx(14,mouse,Native.GetModuleHandle(null),0);
         kh=Native.SetWindowsHookEx(13,key,Native.GetModuleHandle(null),0);
         if(mh==IntPtr.Zero||kh==IntPtr.Zero) {Detach();throw new Exception("Windows capture hooks could not be armed.");}
         Armed=true;
+        try{ArmSession();}catch{Detach();throw;}
+        // A stationary physical pointer still needs fresh metadata: waiting to
+        // renew it until mouse-down races controls that disappear on release.
+        // Renew halfway through the existing freshness budget, never extend it.
+        hoverRefresh=new System.Threading.Timer(_=>RefreshStationaryHover(),null,HoverFreshnessMs/2,HoverFreshnessMs/2);
         metrics=NativeMetrics.Begin("recording");
         clock.Start();
     }
-    public void PrepareRecord(IntPtr selected) {
+    public void PrepareRecord(IntPtr selected,bool desktopSession=false) {
         if(Interlocked.Read(ref BusySince)!=0||queue.Count!=0)throw new Exception("Wait for the accessibility check to finish.");
         Broken=false;
-        Put(()=>{selected=Native.Root(selected);var target=Target(AutomationElement.FromHandle(selected),selected);
+        DesktopSession=desktopSession;
+        Put(()=>{if(selected!=IntPtr.Zero)selected=Native.Root(selected);
+            var target=selected==IntPtr.Zero?null:Target(AutomationElement.FromHandle(selected),selected);
             preparedWindows.Clear();
             Native.EnumWindows((h,l)=>{
                 if(preparedWindows.Count>=512)return false;
                 if(Native.IsWindowVisible(h)){uint pid;Native.GetWindowThreadProcessId(h,out pid);preparedWindows[Native.Root(h)]=pid;}
                 return true;
             },IntPtr.Zero);
-            preparedWindow=selected;PrepareGeneration(selected);clock.Reset();traceCount=0;ownExclusions=0;send("record",new {window=target});});
+            preparedWindow=selected;if(selected!=IntPtr.Zero)PrepareGeneration(selected);clock.Reset();traceCount=0;ownExclusions=0;
+            send("record",new {window=target,mode=DesktopSession?"desktop_session":"prepared"});});
     }
     public void Detach(bool finishMetrics=true) {
         Armed=false;
+        DisarmSession();
+        var refresh=Interlocked.Exchange(ref hoverRefresh,null);if(refresh!=null)refresh.Dispose();
+        if(invocationRoot!=null&&invocationHandler!=null) {
+            try{Automation.RemoveAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,invocationHandler);}catch(ElementNotAvailableException){}
+            invocationRoot=null;invocationHandler=null;invocationWindow=IntPtr.Zero;
+        }
         clock.Stop();
         if(mh!=IntPtr.Zero)Native.UnhookWindowsHookEx(mh);
         if(kh!=IntPtr.Zero)Native.UnhookWindowsHookEx(kh);
@@ -180,24 +281,44 @@ class Capture {
         CloseWheelBurst();
         Detach(false);
         if(Broken){FinishMetrics();send(command,new {request_id=requestId});return;}
-        Put(()=>{Flush();FinishMetrics();send("diagnostic",new {kind="capture_barrier",toolbar_inputs_excluded=ownExclusions});send(command,new {request_id=requestId});});
+        Put(()=>{Flush();PollDropdown(true);FinishMetrics();send("diagnostic",new {kind="capture_barrier",toolbar_inputs_excluded=ownExclusions});send(command,new {request_id=requestId});});
     }
     bool Mine(IntPtr h) { uint id;Native.GetWindowThreadProcessId(h,out id);return WindowIdentity.IsToolbar(id,(uint)Process.GetCurrentProcess().Id); }
     IntPtr OnMouse(int c,IntPtr w,IntPtr l) {
-        if(c>=0&&Armed&&(w.ToInt32()==0x201||w.ToInt32()==0x202||w.ToInt32()==0x20A||w.ToInt32()==0x205)){
+        if(c>=0&&Armed&&(w.ToInt32()==0x200||w.ToInt32()==0x201||w.ToInt32()==0x202||w.ToInt32()==0x20A||w.ToInt32()==0x205)){
             var m=(Native.Mouse)Marshal.PtrToStructure(l,typeof(Native.Mouse));
             if(injected||(m.flags&1)==0){
                 var hit=Native.WindowFromPoint(m.point);var window=Native.Root(hit);
+                physicalPointer=new HoverProbe{Point=m.point,Window=window,Epoch=generation};
                 if(Mine(window)){if(w.ToInt32()==0x202)ownExclusions++;return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
+                if(w.ToInt32()==0x200){QueueHover(m.point,window);return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
                 if(w.ToInt32()==0x201){var point=m.point;int epoch=generation;long at=MonotonicMs();
-                    var gesture=new GenerationGesture();generationGesture=gesture;
-                    Put(()=>{SnapshotGeneration(point,window,epoch,at,gesture);SnapshotGeneration(point,window,epoch,at,gesture,true);});}
-                else if(w.ToInt32()==0x20A){QueueWheel(m.point,window,generation);}
+                    PhysicalTransition(m.time);mouseDownWindow=window;mouseDownState=DesktopWindowState.Read(window);string beforeState=mouseDownState;
+                    var gesture=new GenerationGesture{Hover=hoverClick};generationGesture=gesture;
+                    Put(()=>{observedWindow=window;
+                        if(DesktopSession&&DesktopWindowState.Read(window)!=beforeState)return;
+                        try {
+                        if(DesktopSession&&!Native.IsTaskbar(window)){Native.CheckProcess(window);ObserveInvocations(window);}
+                        captureOperation="mouse-down generation";SnapshotGeneration(point,window,epoch,at,gesture);SnapshotGeneration(point,window,epoch,at,gesture,true);
+                        captureOperation="mouse-down button";SnapshotSemanticClick(point,window,epoch,at,gesture);
+                        // One physical gesture has one owner. The verified
+                        // button may already have replaced the page; probing
+                        // dropdowns then would inspect an unrelated old tree.
+                        if(semanticClick==null&&!expectedGenerationDown&&!expectedPickerDown){captureOperation="mouse-down dropdown";SnapshotDropdown(point,window,epoch);}
+                        }catch {if(!DesktopSession||DesktopWindowState.Read(window)==beforeState)throw;}
+                    });}
+                else if(w.ToInt32()==0x20A){QueueWheel(m.point,window,generation,unchecked((short)(m.data>>16)));}
                 else if(w.ToInt32()==0x202){CloseWheelBurst();var point=m.point;int epoch=generation;
+                    var transitionWindow=mouseDownWindow;var transitionBefore=mouseDownState;
+                    if(CompleteWindowGesture(epoch))return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
                     var gesture=generationGesture;generationGesture=null;
                     if(gesture!=null)Interlocked.Exchange(ref gesture.ReleasedAt,MonotonicMs());
                     var foreground=Native.Root(Native.GetForegroundWindow());
-                    Put(()=>{TraceWindow("mouse",window,foreground,hit);Flush();if(!CompleteGeneration(point,window,epoch,true)&&!CompleteGeneration(point,window,epoch))Click(point,window,epoch);});}
+                    Put(()=>{observedWindow=window;captureOperation="mouse-up";TraceWindow("mouse",window,foreground,hit);
+                        if(CompleteObservedWindowGesture(transitionWindow,transitionBefore,epoch))return;
+                        try {Flush();if(!CompleteGeneration(point,window,epoch,true)&&!CompleteGeneration(point,window,epoch)&&!FinishDropdownClick()&&!CompleteSemanticClick(point,window,epoch))Click(point,window,epoch);}
+                        catch {if(!CompleteObservedWindowGesture(transitionWindow,transitionBefore,epoch))throw;}
+                    });}
                 else {CloseWheelBurst();Put(()=>{Flush();Interrupt("Secondary clicks are not yet supported. Draft preserved.");});}
             }
         }
@@ -309,15 +430,19 @@ class Capture {
         }
         throw new Exception("Generate click was not acknowledged by the prepared product page. Draft preserved.");
     }
-    void QueueWheel(Native.Point point,IntPtr window,int epoch) {
+    void QueueWheel(Native.Point point,IntPtr window,int epoch,int delta) {
         WheelBurst burst;
         lock(wheelGate){
             if(wheelBurst!=null&&!wheelBurst.Closed&&wheelBurst.Window==window&&wheelBurst.Epoch==epoch&&
-               wheelBurst.Point.X==point.X&&wheelBurst.Point.Y==point.Y){wheelBurst.LastAt=MonotonicMs();return;}
+               wheelBurst.Point.X==point.X&&wheelBurst.Point.Y==point.Y){wheelBurst.LastAt=MonotonicMs();wheelBurst.Delta+=delta;return;}
             if(wheelBurst!=null)wheelBurst.Closed=true;
-            burst=new WheelBurst(){Point=point,Window=window,Epoch=epoch,LastAt=MonotonicMs()};wheelBurst=burst;
+            burst=new WheelBurst(){Point=point,Window=window,Epoch=epoch,LastAt=MonotonicMs(),Delta=delta};wheelBurst=burst;
         }
-        Put(()=>{Flush();CaptureScroll(burst);});
+        Put(()=>{Flush();CaptureScroll(burst);
+            // Refresh metadata for a stationary pointer without delaying the
+            // ordered action queue behind provider hover inspection.
+            if(!Broken&&dropdown==null)QueueHover(burst.Point,burst.Window,true);
+        });
     }
     void CaptureScroll(WheelBurst burst) {
         var wait=Stopwatch.StartNew();
@@ -326,6 +451,22 @@ class Capture {
             Thread.Sleep(10);
         }
         if(Broken)return;
+        if(dropdown!=null&&DropdownSelection.ContainsPopup(dropdown.Owner,dropdown.Pid,new System.Windows.Point(burst.Point.X,burst.Point.Y))) {
+            ValidateDropdown();
+            string view=DropdownSelection.View(dropdown.Owner,dropdown.Pid);
+            if(view.Length==0)throw new Exception("Dropdown scrolling exposed no verifiable option view. Draft preserved.");
+            var position=DropdownSelection.ScrollPosition(dropdown.Owner,dropdown.Pid);
+            bool moved=dropdown.View!=null&&dropdown.View!=view||position.HasValue&&dropdown.ScrollY.HasValue&&Math.Abs(position.Value-dropdown.ScrollY.Value)>0.01;
+            bool boundary=position.HasValue&&(burst.Delta<0&&position.Value>=99.99||burst.Delta>0&&position.Value<=0.01);
+            if(!moved&&!boundary)throw new Exception("Dropdown scrolling could not confirm movement or a boundary. Draft preserved.");
+            // Traversing a choice list belongs to its selection transaction.
+            // Replay resolves that option in this owning control, including
+            // ScrollItem/ScrollPattern navigation, rather than transient IDs.
+            send("diagnostic",new {kind="dropdown_list_navigation",recorded_as="owning control selection",owned_popup=true,
+                movement_verified=moved,boundary_verified=boundary});
+            dropdown.View=view;dropdown.ScrollY=position;
+            return;
+        }
         InputWindow(burst.Window);
         var e=AutomationElement.FromPoint(new System.Windows.Point(burst.Point.X,burst.Point.Y));
         var page=e.Current.ControlType==ControlType.Document&&e.Current.AutomationId=="RootWebArea"?e:null;
@@ -341,9 +482,7 @@ class Capture {
             if(!position.HorizontallyScrollable&&!position.VerticallyScrollable)
                 throw new Exception("The PSD picker is no longer scrollable. Draft preserved.");
             WindowAction(burst.Window,burst.Epoch);
-            Emit("scroll",target,new Dictionary<string,object>{
-                {"horizontal",position.HorizontallyScrollable?position.HorizontalScrollPercent:ScrollPattern.NoScroll},
-                {"vertical",position.VerticallyScrollable?position.VerticalScrollPercent:ScrollPattern.NoScroll}},burst.Epoch);
+            Emit("scroll",target,RecordedScroll(position),burst.Epoch);
             send("diagnostic",new {kind="psd_picker_scroll_resolved",control_type=target["control_type"],automation_id=target["automation_id"]});
             return;
         }
@@ -362,10 +501,8 @@ class Capture {
             if(supported){
                 var scroll=((ScrollPattern)pattern).Current;
                 if(!scroll.HorizontallyScrollable&&!scroll.VerticallyScrollable)continue;
-                var target=Target(e,burst.Window);WindowAction(burst.Window,burst.Epoch);
-                Emit("scroll",target,new Dictionary<string,object>{
-                    {"horizontal",scroll.HorizontallyScrollable?scroll.HorizontalScrollPercent:ScrollPattern.NoScroll},
-                    {"vertical",scroll.VerticallyScrollable?scroll.VerticalScrollPercent:ScrollPattern.NoScroll}},burst.Epoch);
+                var target=Target(e,burst.Window,true);WindowAction(burst.Window,burst.Epoch);
+                Emit("scroll",target,RecordedScroll(scroll),burst.Epoch);
                 return;
             }
             if(e.Current.NativeWindowHandle==burst.Window.ToInt32())break;
@@ -379,22 +516,20 @@ class Capture {
                 node=>node.Current.ProcessId==pid&&!node.Current.IsOffscreen&&node.Current.BoundingRectangle.Contains(point),
                 node=>{object candidate;if(!node.TryGetCurrentPattern(ScrollPattern.Pattern,out candidate))return false;
                     var position=((ScrollPattern)candidate).Current;return position.HorizontallyScrollable||position.VerticallyScrollable;},
-                RawChildren);
+                RawChildren,transparent:node=>TransparentLayout(node,pid));
             var container=search.Find(page);
             if(container!=null) {
                 if(Broken)return;
                 if(Native.Root(Native.GetForegroundWindow())!=burst.Window)
                     throw new Exception("Focus changed while identifying the scroll container. Draft preserved.");
-                var target=Target(container,burst.Window);object pattern;
+                var target=Target(container,burst.Window,true);object pattern;
                 if(!container.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern))
                     throw new Exception("The scroll container changed before its position was read. Draft preserved.");
                 var position=((ScrollPattern)pattern).Current;
                 if(!position.HorizontallyScrollable&&!position.VerticallyScrollable)
                     throw new Exception("The scroll container is no longer scrollable. Draft preserved.");
                 WindowAction(burst.Window,burst.Epoch);
-                Emit("scroll",target,new Dictionary<string,object>{
-                    {"horizontal",position.HorizontallyScrollable?position.HorizontalScrollPercent:ScrollPattern.NoScroll},
-                    {"vertical",position.VerticallyScrollable?position.VerticalScrollPercent:ScrollPattern.NoScroll}},burst.Epoch);
+                Emit("scroll",target,RecordedScroll(position),burst.Epoch);
                 send("diagnostic",new {kind="scroll_descendant_resolved",control_type=target["control_type"],automation_id=target["automation_id"]});
                 return;
             }
@@ -407,10 +542,24 @@ class Capture {
         for(var child=TreeWalker.RawViewWalker.GetFirstChild(parent);child!=null;child=TreeWalker.RawViewWalker.GetNextSibling(child))
             yield return child;
     }
+    static bool TransparentLayout(AutomationElement node,uint pid) {
+        var current=node.Current;
+        return current.ProcessId==pid&&!current.IsOffscreen&&current.BoundingRectangle.IsEmpty&&
+            (current.ControlType==ControlType.Group||current.ControlType==ControlType.Pane||current.ControlType==ControlType.Custom);
+    }
+    static Dictionary<string,object> RecordedScroll(ScrollPattern.ScrollPatternInformation position) {
+        return new Dictionary<string,object>{
+            {"horizontal",position.HorizontallyScrollable?position.HorizontalScrollPercent:ScrollPattern.NoScroll},
+            {"vertical",position.VerticallyScrollable?position.VerticalScrollPercent:ScrollPattern.NoScroll},
+            {"horizontal_view_size",position.HorizontalViewSize},{"vertical_view_size",position.VerticalViewSize}};
+    }
     IntPtr OnKey(int c,IntPtr w,IntPtr l) {
-        if(c>=0&&Armed&&!Mine(Native.Root(Native.GetForegroundWindow()))&&(w.ToInt32()==0x101||w.ToInt32()==0x105)){
+        if(c>=0&&Armed&&!Mine(Native.Root(Native.GetForegroundWindow()))&&(w.ToInt32()==0x100||w.ToInt32()==0x104||w.ToInt32()==0x101||w.ToInt32()==0x105)){
             var k=(Native.Key)Marshal.PtrToStructure(l,typeof(Native.Key));
             if(injected||(k.flags&16)==0){
+                bool transitionKey=DesktopSession&&k.vk==9&&(Native.GetAsyncKeyState(18)&0x8000)!=0;
+                if(w.ToInt32()==0x100||w.ToInt32()==0x104){if(transitionKey)PhysicalTransition(k.time);return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
+                if(transitionKey)return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
                 if(k.vk==16||k.vk==17||k.vk==18||k.vk==91||k.vk==92||(k.vk>=160&&k.vk<=165))return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
                 CloseWheelBurst();
                 var window=Native.Root(Native.GetForegroundWindow());int epoch=generation;
@@ -419,9 +568,10 @@ class Capture {
                 bool alt=(Native.GetAsyncKeyState(18)&0x8000)!=0;
                 bool shortcut=ctrl||alt;
                 bool editShortcut=ctrl&&!alt&&(k.vk==86||k.vk==88);
+                bool copyShortcut=ctrl&&!alt&&k.vk==67;
                 bool selectAll=ctrl&&!alt&&k.vk==65;
-                bool tab=k.vk==9;
-                Put(()=>{if(tab){Flush();AnchorFocusedEditor(window);return;}if(selectAll)return;if(shortcut&&!editShortcut){Flush();Interrupt("This keyboard shortcut is not yet supported. Draft preserved.");return;}
+                bool tab=k.vk==9&&!shortcut;
+                Put(()=>{if(DropdownKey(window,shortcut))return;if(tab){Flush();AnchorFocusedEditor(window);return;}if(selectAll)return;if(copyShortcut){if((Stopwatch.GetTimestamp()-observed)/(double)Stopwatch.Frequency>0.25)throw new Exception("Copy observation was delayed. Draft preserved.");Flush();CopyIntent(window,epoch);return;}if(shortcut&&!editShortcut){Flush();Interrupt("This keyboard shortcut is not yet supported. Draft preserved.");return;}
                     if((Stopwatch.GetTimestamp()-observed)/(double)Stopwatch.Frequency>0.25)throw new Exception("Text observation was delayed. Capture stopped rather than reading a later value.");
                     TraceWindow("text",window,window);TextIntent(window,epoch);});
             }
@@ -444,18 +594,23 @@ class Capture {
         object password=e.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty,true);
         return !(password is bool&&(bool)password)&&e.Current.IsEnabled;
     }
-    Dictionary<string,object> Target(AutomationElement e,IntPtr h) {
+    Dictionary<string,object> Target(AutomationElement e,IntPtr h,bool allowAnonymousScroll=false) {
         Native.CheckProcess(h);Privacy(e);
         var proc=Native.ProcessFor(h);
         string title=Safe(Native.Title(h));
         string id=Safe(e.Current.AutomationId),name=Safe(e.Current.Name);
-        if(id.Length==0&&name.Length==0)throw new Exception("This control has no reliable identity. Draft preserved.");
+        bool anonymous=id.Length==0&&name.Length==0;
+        if(anonymous&&(!allowAnonymousScroll||!ScrollAccess.IsLayout(e)))throw new Exception("This control has no reliable identity. Draft preserved.");
         if(title.Length==0)throw new Exception("This window has no document identity.");
         var scope=new List<object>();
         bool productPicker=ProductPickerResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name);
         if(!productPicker&&ProductPickerResult.KnownScrollTarget(proc.MainModule.FileName,id,name))
             productPicker=ProductPickerResult.Document(e,h,(uint)proc.Id)!=null;
-        int ancestryLimit=productPicker?ProductPickerResult.AncestryLimit:16;
+        bool combo=e.Current.ControlType==ControlType.ComboBox;
+        int ancestryLimit=DropdownSelection.AncestryLimit;
+        // Named owning controls survive generated option/input IDs changing
+        // after a browser rerender. Exact ancestor scope and uniqueness remain.
+        if(combo&&name.Length>0)id="";
         bool productCopy=ProductCopyResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),id,name),hostSkipped=false;
         bool generation=ProductGenerationResult.KnownButton(proc.MainModule.FileName,e.Current.ControlType.ProgrammaticName.Replace("ControlType.",""),name)&&
             ProductGenerationResult.Read(e,h,(uint)proc.Id)!=null;
@@ -487,6 +642,12 @@ class Capture {
         var target=new Dictionary<string,object>{{"app",proc.MainModule.FileName},{"window_key",title},{"scope",scope},
             {"control_type",e.Current.ControlType.ProgrammaticName.Replace("ControlType.","")},
             {"automation_id",id},{"name",name}};
+        if(anonymous) {
+            if(scope.Count==0)throw new Exception("Anonymous scroll container has no stable owning scope. Draft preserved.");
+            target["selector"]=ScrollAccess.ScopedSelector;
+            var unique=ScrollAccess.ResolveScoped(h,target);
+            if(!Automation.Compare(e,unique))throw new Exception("Anonymous scroll container identity changed. Draft preserved.");
+        }
         if(ProductPickerResult.KnownButton(proc.MainModule.FileName,(string)target["control_type"],id,name)&&
             ProductPickerResult.Document(e,h,(uint)proc.Id)!=null)target["postcondition"]=ProductPickerResult.Contract;
         if(generation) {
@@ -496,7 +657,7 @@ class Capture {
         return target;
     }
     void WindowAction(IntPtr h,int epoch,string anchoredTitle=null) {
-        if(lastWindow==IntPtr.Zero&&preparedWindow!=IntPtr.Zero&&h!=preparedWindow)
+        if(!DesktopSession&&lastWindow==IntPtr.Zero&&preparedWindow!=IntPtr.Zero&&h!=preparedWindow)
             throw new Exception("Start in the selected prepared window. Stop and save, then select the intended window.");
         string title=anchoredTitle??Native.Title(h);
         if(lastWindow==h&&lastTitle==title)return;
@@ -504,9 +665,10 @@ class Capture {
         var root=AutomationElement.FromHandle(h);
         var target=Target(root,h);target["automation_id"]="window";target["window_key"]=title;target["name"]=title;
         Emit("focus_window",target,null,epoch);lastWindow=h;lastTitle=title;preparedWindow=IntPtr.Zero;
+        if(DesktopSession){ObserveInvocations(h);sessionStates[h]=DesktopWindowState.Read(h);}
     }
     void InputWindow(IntPtr h) {
-        if(!WindowIdentity.InitialMatches(preparedWindow,h))
+        if(!DesktopSession&&!WindowIdentity.InitialMatches(preparedWindow,h))
             throw new Exception("Input reached a different window from the selected prepared window. Draft preserved; window details recorded.");
         Native.CheckProcess(h);
     }
@@ -523,7 +685,7 @@ class Capture {
     }
     void Emit(string kind,Dictionary<string,object> target,object value,int epoch) {
         if(Broken)return;
-        var caps=new Dictionary<string,string>{{"invoke","uia.invoke.v1"},{"set_text","uia.value.v1"},{"select","uia.selection.v1"},{"toggle","uia.toggle.v1"},{"focus_window","windows.focus.v1"},{"expand","uia.expand.v1"},{"scroll","uia.scroll.v1"}};
+        var caps=new Dictionary<string,string>{{"invoke","uia.invoke.v1"},{"set_text","uia.value.v1"},{"copy_text","clipboard.copy-text.v1"},{"select","uia.selection.v1"},{"toggle","uia.toggle.v1"},{"focus_window","windows.focus.v1"},{"window_state","windows.state.v1"},{"expand","uia.expand.v1"},{"scroll","uia.scroll.v1"}};
         var a=new Dictionary<string,object>{{"version",2},{"kind",kind},{"requires",new[]{caps[kind].Replace(".v1",".v2")}},{"target",target},{"timeout_ms",8000},{"observed_ms",clock.ElapsedMilliseconds}};
         if(kind=="invoke"&&ProductGenerationResult.Supports(target))a["timeout_ms"]=30000;
         if(value!=null)a["value"]=value;
@@ -608,6 +770,290 @@ class Capture {
             foreground_title=Native.Title(Native.Root(Native.GetForegroundWindow()))});
         Interrupt("This clicked control is not supported ("+String.Join(", ",seen.ToArray())+"). Draft preserved.");
     }
+    void ValidateDropdown(bool foreground=true) {
+        var active=dropdown;
+        if(active==null)return;
+        uint pid;Native.GetWindowThreadProcessId(active.Window,out pid);
+        if(active.Epoch!=generation||pid!=active.Pid||foreground&&Native.Root(Native.GetForegroundWindow())!=active.Window||
+            Native.GetDpiForWindow(active.Window)!=active.Dpi||
+            AutomationElement.FromHandle(active.Window).Current.BoundingRectangle!=active.WindowBounds)
+            throw new Exception("The dropdown's owning window moved or changed. Draft preserved.");
+        try{DropdownSelection.Safe(active.Owner,pid);}
+        catch(ElementNotAvailableException){RebindDropdown();}
+    }
+    void RebindDropdown() {
+        var active=dropdown;var wait=Stopwatch.StartNew();var json=new JavaScriptSerializer();
+        string expected=json.Serialize(active.Target);
+        do {
+            var root=AutomationElement.FromHandle(active.Window);
+            var matches=root.FindAll(TreeScope.Descendants,new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.ComboBox),
+                new PropertyCondition(AutomationElement.NameProperty,active.Target["name"])));
+            if(matches.Count>64)throw new Exception("The dropdown's replacement is ambiguous.");
+            AutomationElement found=null;
+            foreach(AutomationElement item in matches) {
+                if(item.Current.IsOffscreen)continue;
+                DropdownSelection.Safe(item,active.Pid);
+                if(json.Serialize(Target(item,active.Window))!=expected)continue;
+                if(found!=null)throw new Exception("The dropdown's replacement is not unique.");
+                found=item;
+            }
+            if(found!=null){active.Owner=found;return;}
+            if(wait.ElapsedMilliseconds>=500)break;
+            Thread.Sleep(25);
+        }while(!Broken);
+        throw new Exception("The owning dropdown did not return after its document updated. Draft preserved.");
+    }
+    void SnapshotSemanticClick(Native.Point point,IntPtr window,int epoch,long at,GenerationGesture gesture) {
+        semanticClick=null;
+        if(Broken||Native.IsTaskbar(window)||expectedGenerationDown||expectedPickerDown||dropdown!=null)return;
+        var cached=gesture.Hover;
+        if(cached!=null&&invocationWindow==window&&cached.Window==window&&cached.Epoch==epoch&&at>=cached.At&&at-cached.At<=HoverFreshnessMs&&
+            cached.ControlBounds.Contains(new System.Windows.Point(point.X,point.Y))) {
+            uint actualPid;Native.GetWindowThreadProcessId(window,out actualPid);
+            if(actualPid!=cached.Pid||Native.GetDpiForWindow(window)!=cached.Dpi||
+                AutomationElement.FromHandle(window).Current.BoundingRectangle!=cached.WindowBounds)
+                throw new Exception("The hovered control changed before the click. Draft preserved.");
+            semanticClick=new SemanticClick{Control=cached.Control,Target=cached.Target,Window=window,Pid=cached.Pid,Dpi=cached.Dpi,
+                Epoch=epoch,At=at,ControlBounds=cached.ControlBounds,WindowBounds=cached.WindowBounds,RuntimeId=cached.RuntimeId,NeedsInvocation=true};
+            send("diagnostic",new {kind="semantic_button_before_click",control_type=cached.Target["control_type"],scope_validated=true,
+                pre_click_age_ms=at-cached.At,confirmation=DialogResult.Supports(cached.Target)?"containing modal dismissal":"invocation event"});
+            return;
+        }
+        var active=activeHover;var completed=lastHover;
+        send("diagnostic",new {kind="button_preflight_missing",released_before_discovery=Interlocked.Read(ref gesture.ReleasedAt)!=0,
+            queue_delay_ms=MonotonicMs()-at,cached_present=cached!=null,
+            cached_contains_click=cached!=null&&cached.ControlBounds.Contains(new System.Windows.Point(point.X,point.Y)),
+            cached_age_ms=cached==null?(long?)null:at-cached.At,hover_updates_coalesced=hoverBusyUpdates,
+            active_hover_ms=active==null?(long?)null:MonotonicMs()-active.Started,
+            active_point_matches=active!=null&&active.Window==window&&active.Point.X==point.X&&active.Point.Y==point.Y,
+            completed_hover_ms=completed==null?(long?)null:completed.Completed-completed.Started,
+            completed_found=completed!=null&&completed.Found,completed_error=completed==null?null:completed.Error,
+            completed_point_matches=completed!=null&&completed.Window==window&&completed.Point.X==point.X&&completed.Point.Y==point.Y});
+        if(Interlocked.Read(ref gesture.ReleasedAt)!=0)return; // Never discover a target after its action.
+        captureOperation="mouse-down button discovery";
+        semanticClick=ReadButton(point,window,epoch,at);
+        if(Interlocked.Read(ref gesture.ReleasedAt)!=0||MonotonicMs()-at>250)semanticClick=null;
+        if(semanticClick!=null)send("diagnostic",new {kind="semantic_button_before_click",control_type=semanticClick.Target["control_type"],scope_validated=true});
+    }
+    void QueueHover(Native.Point point,IntPtr window,bool force=false) {
+        // Metadata preflight only while armed; never read field values. A
+        // physical mouse-down takes a completed, fresh pre-action snapshot.
+        long now=MonotonicMs();
+        if(Native.IsTaskbar(window))return;
+        // A completed wheel observation must not replace a newer physical
+        // pointer location with the old location of that wheel burst.
+        var pointer=physicalPointer;
+        if(force&&(pointer==null||pointer.Window!=window||pointer.Point.X!=point.X||pointer.Point.Y!=point.Y))return;
+        var old=hoverClick;
+        if(!force&&old!=null&&old.Window==window&&now-old.At<HoverFreshnessMs/2&&old.ControlBounds.Contains(new System.Windows.Point(point.X,point.Y)))return;
+        lock(hoverGate) {
+            pendingHover=new HoverProbe{Point=point,Window=window,Epoch=generation};
+            if(hoverQueued!=0){Interlocked.Increment(ref hoverBusyUpdates);return;}
+            hoverQueued=1;
+        }
+        // Provider calls for hover must never sit ahead of a mouse-down in the
+        // action queue. Only one metadata preflight may be outstanding.
+        ThreadPool.QueueUserWorkItem(_=>{
+          while(true) {
+            HoverProbe probe;
+            lock(hoverGate){probe=pendingHover;pendingHover=null;if(probe==null){hoverQueued=0;return;}}
+            int epoch=probe.Epoch;probe.Started=MonotonicMs();activeHover=probe;
+            try {
+                if(Broken||!Armed||epoch!=generation||dropdown!=null)continue;
+                Native.CheckProcess(probe.Window);
+                var anchor=ReadButton(probe.Point,probe.Window,epoch,MonotonicMs());
+                probe.Found=anchor!=null;
+                if(anchor!=null)anchor.At=MonotonicMs(); // Completed preflight must precede mouse-down.
+                if(!Broken&&Armed&&epoch==generation)hoverClick=anchor;
+            }catch(Exception ex){probe.Error=ex.GetType().Name;if(epoch==generation)hoverClick=null;} // Never read values for a hover.
+            finally{probe.Completed=MonotonicMs();if(epoch==generation){lastHover=probe;activeHover=null;}}
+          }
+        });
+    }
+    void RefreshStationaryHover() {
+        if(!Armed||Broken||dropdown!=null)return;
+        var pointer=physicalPointer;var anchor=hoverClick;
+        // Renew a known button only; do not scan arbitrary stationary content.
+        if(pointer==null||anchor==null||pointer.Epoch!=generation||anchor.Epoch!=generation||
+            pointer.Window!=anchor.Window||Mine(pointer.Window)||Native.Root(Native.GetForegroundWindow())!=pointer.Window||
+            !anchor.ControlBounds.Contains(new System.Windows.Point(pointer.Point.X,pointer.Point.Y)))return;
+        QueueHover(pointer.Point,pointer.Window,true);
+    }
+    SemanticClick ReadButton(Native.Point point,IntPtr window,int epoch,long at) {
+        if(Broken||!Armed||epoch!=generation)return null;
+        Native.CheckProcess(window);
+        var root=AutomationElement.FromHandle(window);
+        uint pid;Native.GetWindowThreadProcessId(window,out pid);
+        AutomationElement found=null;var location=new System.Windows.Point(point.X,point.Y);
+        if(Thread.CurrentThread.Name=="recorder-capture")captureOperation="button point lookup";
+        var hit=AutomationElement.FromPoint(location);
+        for(int depth=0;hit!=null&&depth<8;depth++,hit=TreeWalker.ControlViewWalker.GetParent(hit)) {
+            if(hit.Current.ProcessId!=pid||hit.Current.NativeWindowHandle==window.ToInt32())break;
+            if(hit.Current.ControlType==ControlType.Button){found=hit;break;}
+            if(hit.Current.ControlType==ControlType.Document)break;
+        }
+        if(found==null) {
+          if(Thread.CurrentThread.Name=="recorder-capture")captureOperation="button bounded search";
+          // One provider round trip for each bounded candidate set, without
+          // reading text values or making four calls per unrelated button.
+          var cache=new CacheRequest();cache.TreeScope=TreeScope.Element;
+          cache.Add(AutomationElement.ProcessIdProperty);cache.Add(AutomationElement.IsOffscreenProperty);
+          cache.Add(AutomationElement.BoundingRectangleProperty);cache.Add(AutomationElement.IsInvokePatternAvailableProperty);
+          AutomationElementCollection buttons;
+          using(cache.Activate())buttons=root.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Button));
+          if(buttons.Count>256)throw new Exception("Clicked button search exceeded its bounded budget.");
+          foreach(AutomationElement button in buttons) {
+            if(Broken||!Armed||epoch!=generation)return null;
+            try {
+                if(button.Cached.ProcessId!=pid||button.Cached.IsOffscreen||!button.Cached.BoundingRectangle.Contains(location))continue;
+            }catch(ElementNotAvailableException){continue;} // No identity was selected from this obsolete entry.
+            if(!Equals(button.GetCachedPropertyValue(AutomationElement.IsInvokePatternAvailableProperty),true))continue;
+            Privacy(button);
+            if(found!=null)throw new Exception("More than one semantic button contains the click. Draft preserved.");
+            found=button;
+          }
+        }
+        if(found==null)return null;
+        if(Broken||!Armed||epoch!=generation)return null;
+        if(Thread.CurrentThread.Name=="recorder-capture")captureOperation="button classification";
+        object invoke;
+        if(!found.TryGetCurrentPattern(InvokePattern.Pattern,out invoke))return null;
+        Privacy(found);
+        var parent=TreeWalker.ControlViewWalker.GetParent(found);
+        if(parent!=null&&parent.Current.ControlType==ControlType.Group) {
+            var combos=parent.FindAll(TreeScope.Children,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.ComboBox));
+            var peers=parent.FindAll(TreeScope.Children,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Button));
+            if(combos.Count==1&&peers.Count==1)return null; // Classify the owning dropdown, not its disclosure button.
+        }
+        if(Thread.CurrentThread.Name=="recorder-capture")captureOperation="button target ancestry";
+        var target=Target(found,window);
+        if(!target.ContainsKey("postcondition")&&DialogResult.CaptureModal(found,window,pid)&&DialogResult.Target(target)!=null)
+            target["postcondition"]=DialogResult.Contract;
+        return new SemanticClick{Control=found,Window=window,Pid=pid,Dpi=Native.GetDpiForWindow(window),Epoch=epoch,At=at,
+            Target=target,ControlBounds=found.Current.BoundingRectangle,WindowBounds=root.Current.BoundingRectangle,RuntimeId=RuntimeIdentity(found.GetRuntimeId())};
+    }
+    bool CompleteSemanticClick(Native.Point point,IntPtr window,int epoch) {
+        var click=semanticClick;semanticClick=null;if(click==null)return false;
+        uint pid;Native.GetWindowThreadProcessId(window,out pid);
+        if(click.Window!=window||click.Pid!=pid||click.Epoch!=epoch||generation!=epoch||
+            Native.Root(Native.GetForegroundWindow())!=window||Native.GetDpiForWindow(window)!=click.Dpi||
+            Native.Title(window)!=(string)click.Target["window_key"]||AutomationElement.FromHandle(window).Current.BoundingRectangle!=click.WindowBounds||
+            !click.ControlBounds.Contains(new System.Windows.Point(point.X,point.Y))||MonotonicMs()-click.At>2000)
+            throw new Exception("The clicked button's window, identity or gesture changed. Draft preserved.");
+        // Edge's HTML modal buttons do not reliably publish InvokedEvent for
+        // physical clicks. This strategy has its own pre-click modal witness
+        // and an observed, scoped result; absence of an event is not failure.
+        bool modalDismissed=false;
+        if(DialogResult.Supports(click.Target)) {
+            var dialog=DialogResult.Target(click.Target);
+            var root=AutomationElement.FromHandle(window);
+            var matches=root.FindAll(TreeScope.Descendants,new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Window),
+                new PropertyCondition(AutomationElement.AutomationIdProperty,dialog["automation_id"]),
+                new PropertyCondition(AutomationElement.NameProperty,dialog["name"])));
+            int visible=0;
+            foreach(AutomationElement item in matches)
+                if(!item.Current.IsOffscreen&&DesktopPlayback.ScopeMatches(item,window,dialog))visible++;
+            if(visible>1)throw new Exception("The containing modal is ambiguous. Draft preserved.");
+            modalDismissed=visible==0;
+            send("diagnostic",new {kind="modal_button_result",dialog_dismissed=modalDismissed,scope_verified=true});
+            if(!modalDismissed)throw new Exception("The button's containing modal did not close. Its result is unsupported. Draft preserved.");
+        }
+        if(click.NeedsInvocation&&!modalDismissed) {
+            var wait=Stopwatch.StartNew();bool matched=false;
+            do {
+                foreach(var witness in invocations.ToArray())if(witness.Epoch==epoch&&witness.RuntimeId==click.RuntimeId&&witness.At>=click.At&&witness.At-click.At<=2000){matched=true;break;}
+                if(matched||wait.ElapsedMilliseconds>=500||Broken)break;
+                Thread.Sleep(10);
+            }while(true);
+            if(!matched){
+                send("diagnostic",new {kind="button_invocation_missing",received=invocationReceived,rejected=invocationRejected,
+                    cache_failures=invocationCacheFailures,cache_error=invocationCacheError,subscription_matches=invocationWindow==window,
+                    cached_age_ms=MonotonicMs()-click.At,witnesses=invocations.ToArray().Select(witness=>new {
+                        runtime_matches=witness.RuntimeId==click.RuntimeId,epoch_matches=witness.Epoch==epoch,relative_ms=witness.At-click.At}).ToArray()});
+                throw new Exception("Windows did not identify the invoked button for this click. Draft preserved; no action guessed.");
+            }
+            send("diagnostic",new {kind="semantic_button_invocation_matched",runtime_identity_verified=true});
+        }
+        WindowAction(window,epoch);Emit("invoke",click.Target,null,epoch);
+        return true;
+    }
+    void SnapshotDropdown(Native.Point point,IntPtr window,int epoch) {
+        if(Broken)return;
+        if(Native.IsTaskbar(window))return;
+        Native.CheckProcess(window);
+        var location=new System.Windows.Point(point.X,point.Y);
+        if(dropdown!=null) {
+            ValidateDropdown();
+            if(!DropdownSelection.Open(dropdown.Owner,dropdown.Pid)&&dropdown.PopupBounds.Contains(location)) {
+                // The option click can close a portal before this worker sees
+                // it. Its verified owner and pre-click popup bounds remain;
+                // use the owner's actual selection, never the page underneath.
+                dropdown.Candidate=DropdownSelection.Selected(dropdown.Owner,dropdown.Pid);
+                if(dropdown.Candidate.Length==0)throw new Exception("Closed dropdown did not expose a selected option. Draft preserved.");
+                dropdown.Gesture=true;return;
+            }
+            var option=DropdownSelection.OptionAt(dropdown.Owner,dropdown.Pid,location);
+            if(option!=null){dropdown.Candidate=Safe(option.Current.Name);dropdown.Gesture=true;return;}
+            if(dropdown.Owner.Current.BoundingRectangle.Contains(location)){dropdown.Gesture=true;return;}
+            PollDropdown(true);
+        }
+        uint pid;Native.GetWindowThreadProcessId(window,out pid);
+        var owner=DropdownSelection.AtPoint(window,pid,location);
+        if(owner==null)return;
+        InputWindow(window);
+        var target=Target(owner,window);
+        dropdown=new DropdownCapture{Owner=owner,Target=target,Window=window,Pid=pid,Epoch=epoch,
+            Dpi=Native.GetDpiForWindow(window),WindowBounds=AutomationElement.FromHandle(window).Current.BoundingRectangle,
+            Before=DropdownSelection.Selected(owner,pid),Gesture=true};
+        send("diagnostic",new {kind="dropdown_owner_anchored",control_type=target["control_type"],
+            generated_id_omitted=(string)target["automation_id"]=="",controller_for_available=DropdownSelection.Lists(owner,pid).Count>0});
+    }
+    bool FinishDropdownClick() {
+        if(dropdown==null||!dropdown.Gesture)return false;
+        dropdown.Gesture=false;
+        var wait=Stopwatch.StartNew();
+        do {
+            ValidateDropdown();
+            if(DropdownSelection.Open(dropdown.Owner,dropdown.Pid)){
+                var lists=DropdownSelection.Lists(dropdown.Owner,dropdown.Pid);
+                if(lists.Count>1)throw new Exception("Dropdown popup ownership is ambiguous.");
+                dropdown.PopupBounds=lists.Count==1?lists[0].Current.BoundingRectangle:System.Windows.Rect.Empty;
+                dropdown.View=DropdownSelection.View(dropdown.Owner,dropdown.Pid);dropdown.ScrollY=DropdownSelection.ScrollPosition(dropdown.Owner,dropdown.Pid);return true;
+            }
+            if(dropdown.Candidate!=null||DropdownSelection.Selected(dropdown.Owner,dropdown.Pid)!=dropdown.Before){PollDropdown(true);return true;}
+            if(wait.ElapsedMilliseconds>=250)break;
+            Thread.Sleep(15);
+        }while(!Broken);
+        return true; // The identified control may publish its owned popup late.
+    }
+    bool DropdownKey(IntPtr window,bool shortcut) {
+        if(dropdown==null)return false;
+        ValidateDropdown();
+        if(window!=dropdown.Window||shortcut)throw new Exception("Unsupported input while choosing a dropdown option. Draft preserved.");
+        PollDropdown(false);return true;
+    }
+    void PollDropdown(bool final,bool transition=false) {
+        if(dropdown==null||dropdown.Gesture)return;
+        ValidateDropdown(!transition);
+        if(DropdownSelection.Open(dropdown.Owner,dropdown.Pid)) {
+            if(final)throw new Exception("Finish or cancel the open dropdown before continuing or saving. Draft preserved.");
+            return;
+        }
+        string selected;
+        try{selected=DropdownSelection.Selected(dropdown.Owner,dropdown.Pid);}
+        catch(ElementNotAvailableException){RebindDropdown();selected=DropdownSelection.Selected(dropdown.Owner,dropdown.Pid);}
+        if(dropdown.Candidate!=null&&selected!=dropdown.Candidate)
+            throw new Exception("Dropdown did not expose the chosen option against its owning control. Draft preserved.");
+        if(dropdown.Candidate!=null||selected!=dropdown.Before) {
+            if(selected.Length==0)throw new Exception("Dropdown selection has no verifiable identity.");
+            WindowAction(dropdown.Window,dropdown.Epoch);
+            Emit("select",dropdown.Target,selected,dropdown.Epoch);
+            send("diagnostic",new {kind="dropdown_selection_committed",owning_control=true,selected_value_verified=true});
+        }else send("diagnostic",new {kind="dropdown_cancelled",selected_value_unchanged=true});
+        dropdown=null;
+    }
     AutomationElement PointedSemanticControl(AutomationElement page,Native.Point point,IntPtr h,uint expectedPid,int epoch) {
         var location=new System.Windows.Point(point.X,point.Y);
         var bounds=AutomationElement.FromHandle(h).Current.BoundingRectangle;uint dpi=Native.GetDpiForWindow(h);
@@ -617,7 +1063,7 @@ class Capture {
                 node.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)||
                 node.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern)||
                 (node.Current.ControlType==ControlType.Button&&node.TryGetCurrentPattern(InvokePattern.Pattern,out pattern));},
-            RawChildren,256,16,"Clicked control",500);
+            RawChildren,256,16,"Clicked control",500,node=>TransparentLayout(node,expectedPid));
         var control=search.Find(page);
         if(control==null) {
             send("diagnostic",new {kind="pointer_semantic_absent",resolution="No supported semantic control uniquely exposed under the physical click"});
@@ -673,14 +1119,14 @@ class Capture {
         string shell=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows),"explorer.exe");
         if(!String.Equals(Native.ProcessFor(taskbar).MainModule.FileName,shell,StringComparison.OrdinalIgnoreCase))
             throw new Exception("The taskbar identity could not be validated. Draft preserved.");
-        if(lastWindow==IntPtr.Zero)
+        if(!DesktopSession&&lastWindow==IntPtr.Zero)
             throw new Exception("Start with an action in the selected prepared window before switching applications.");
         var wait=Stopwatch.StartNew();
         while(!Broken&&wait.ElapsedMilliseconds<500){
             var destination=Native.Root(Native.GetForegroundWindow());
             uint pid,originalPid;Native.GetWindowThreadProcessId(destination,out pid);
-            if(destination!=IntPtr.Zero&&destination!=lastWindow&&destination!=taskbar&&!Mine(destination)){
-                if(!preparedWindows.TryGetValue(destination,out originalPid)||originalPid!=pid)
+            if(destination!=IntPtr.Zero&&(DesktopSession||destination!=lastWindow)&&destination!=taskbar&&!Mine(destination)){
+                if(!DesktopSession&&(!preparedWindows.TryGetValue(destination,out originalPid)||originalPid!=pid))
                     throw new Exception("Taskbar switched to a window that was not open when recording began. Draft preserved.");
                 Native.CheckProcess(destination);
                 // Capture the resulting validated window identity, never the taskbar
@@ -779,6 +1225,23 @@ class Capture {
         if(editor.Current.ProcessId!=pid)return;
         AnchorEditor(editor,h);
     }
+    void CopyIntent(IntPtr h,int epoch) {
+        if(Broken)return;
+        InputWindow(h);ResolvePendingEditorClick();
+        var editor=AutomationElement.FocusedElement;
+        uint pid;Native.GetWindowThreadProcessId(h,out pid);
+        if(editor==null||editor.Current.ProcessId!=pid||!editor.Current.HasKeyboardFocus||
+            Native.Root(Native.GetForegroundWindow())!=h)
+            throw new Exception("Copy focus changed. Draft preserved.");
+        var target=Target(editor,h);
+        if(editorAnchor==null||!Automation.Compare(editorAnchor,editor))
+            throw new Exception("Click the copy source editor before copying. Draft preserved.");
+        var value=CopyText.Observe(editor);
+        // The source was focused when observation began. Observe verifies its
+        // unchanged contents and exact clipboard result; a subsequent app
+        // switch does not invalidate that already identified copy operation.
+        WindowAction(h,epoch);Emit("copy_text",target,value,epoch);
+    }
     void TextIntent(IntPtr h,int epoch) {
         if(Broken)return;
         InputWindow(h);
@@ -818,6 +1281,7 @@ class Capture {
         return Safe(value);
     }
     void Flush() {
+        if(!Broken)PollDropdown(false);
         if(!Broken)ResolvePendingEditorClick();
         if(!dirty||Broken)return;
         if(ReadText(field)!=fieldValue)throw new Exception("Text changed after the observed input. Draft preserved; the later value was not recorded.");
@@ -842,13 +1306,39 @@ class Capture {
                 selected_title=Native.Title(h),selected_is_normalized_root=h==normalized,
                 selected_window=Native.WindowMetadata(h),selected_owner=Native.WindowMetadata(Native.GetAncestor(h,3))});
         }
+        // Read-only provider evidence: no field names or values, and no input.
+        // Inspect the whole window so a failed point hit can be compared with
+        // containers omitted from that hit's raw ancestry.
+        var scrollNodes=e.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.IsScrollPatternAvailableProperty,true));
+        var scrollRows=new List<object>();
+        for(int i=0;i<Math.Min(16,scrollNodes.Count);i++) {
+            var node=scrollNodes[i];object pattern;
+            if(!node.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern))continue;
+            var position=((ScrollPattern)pattern).Current;
+            var ancestry=new List<object>();
+            for(var parent=TreeWalker.RawViewWalker.GetParent(node);parent!=null&&ancestry.Count<16;parent=TreeWalker.RawViewWalker.GetParent(parent)) {
+                ancestry.Add(ScrollMetadata(parent));
+                if(parent.Current.NativeWindowHandle==h.ToInt32())break;
+            }
+            scrollRows.Add(new {element=ScrollMetadata(node),position=RecordedScroll(position),
+                horizontal_scrollable=position.HorizontallyScrollable,vertical_scrollable=position.VerticallyScrollable,ancestry=ancestry});
+        }
+        send("diagnostic",new {kind="scroll_provider_inspection",candidate_count=scrollNodes.Count,truncated=scrollNodes.Count>16,containers=scrollRows});
+        send("diagnostic",new {kind="dropdown_provider_inspection",controls=DropdownSelection.Inspect(h)});
     });}
+    static object ScrollMetadata(AutomationElement e) {
+        var current=e.Current;var bounds=current.BoundingRectangle;
+        return new {control_type=current.ControlType.ProgrammaticName,automation_id=Safe(current.AutomationId),
+            name_empty=current.Name.Length==0,is_control=current.IsControlElement,offscreen=current.IsOffscreen,
+            bounds=bounds.IsEmpty?null:new double[]{bounds.X,bounds.Y,bounds.Width,bounds.Height}};
+    }
 }
 
 class Host : Window {
     static readonly JavaScriptSerializer json=new JavaScriptSerializer(){MaxJsonLength=65536};
     readonly BlockingCollection<string> outbound=new BlockingCollection<string>(128);
     readonly ComboBox windows=new ComboBox(){Margin=new Thickness(0,4,0,6),MinHeight=30};
+    readonly CheckBox desktopSession=new CheckBox(){Content="Desktop session · supported apps",IsChecked=true,Margin=new Thickness(0,4,0,6)};
     readonly ComboBox tasks=new ComboBox(){Margin=new Thickness(0,4,0,6),MinHeight=30};
     readonly StackPanel windowPanel=new StackPanel();
     readonly TextBlock heading=new TextBlock(){FontSize=18,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,5,0,2)};
@@ -860,6 +1350,15 @@ class Host : Window {
     readonly StackPanel savePanel=new StackPanel();
     readonly TextBox name=new TextBox(){Margin=new Thickness(0,4,0,6),MaxLength=100,MinHeight=30};
     Button saveButton,discardButton;
+    readonly StackPanel recoveryPanel=new StackPanel(){Margin=new Thickness(0,8,0,0)};
+    readonly ComboBox reviewRuns=new ComboBox(){MinHeight=30};
+    readonly TextBlock reviewSummary=new TextBlock(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,6,0,6)};
+    readonly TextBox reviewEvidence=new TextBox(){MaxLength=500,MinHeight=52,AcceptsReturn=true,TextWrapping=TextWrapping.Wrap};
+    readonly CheckBox reviewChecked=new CheckBox(){Content="I checked the result and prepared the app",Margin=new Thickness(0,6,0,6)};
+    Button reviewButton;string reviewIdentity;
+    readonly TextBlock actionLog=new TextBlock(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,6,0,6)};
+    string liveActionLog="";
+    readonly StackPanel detailTools=new StackPanel(){Orientation=Orientation.Horizontal};
     Capture capture;IntPtr hwnd;string state="idle";string playbackProgress;int generation;long elapsed;Stopwatch segment=new Stopwatch();
     bool closeAllowed;bool pending;bool testInput;
     volatile string pendingId;
@@ -881,19 +1380,45 @@ class Host : Window {
         var title=new TextBlock(){Text="SPORTS CAVE  /  TASK RECORDER",FontSize=10,Foreground=Brushes.DimGray};
         title.MouseLeftButtonDown+=(s,e)=>DragMove();layout.Children.Add(title);
         layout.Children.Add(heading);layout.Children.Add(contextName);
-        windowPanel.Children.Add(new TextBlock(){Text="Window to record",Foreground=Brushes.DimGray});windowPanel.Children.Add(windows);layout.Children.Add(windowPanel);
+        windowPanel.Children.Add(desktopSession);
+        windowPanel.Children.Add(new TextBlock(){Text="Starting window (optional for desktop session)",Foreground=Brushes.DimGray});windowPanel.Children.Add(windows);layout.Children.Add(windowPanel);
         layout.Children.Add(controls);layout.Children.Add(timer);layout.Children.Add(status);
+        recoveryPanel.Children.Add(new TextBlock(){Text="Review an interrupted replay",FontWeight=FontWeights.SemiBold});
+        recoveryPanel.Children.Add(reviewRuns);recoveryPanel.Children.Add(reviewSummary);
+        recoveryPanel.Children.Add(new TextBlock(){Text="What happened in the application?",Margin=new Thickness(0,4,0,4)});
+        recoveryPanel.Children.Add(reviewEvidence);recoveryPanel.Children.Add(reviewChecked);
+        reviewButton=Button("Save review · keep run stopped",()=>{
+            var item=reviewRuns.SelectedItem as ComboBoxItem;
+            if(item==null||reviewChecked.IsChecked!=true||String.IsNullOrWhiteSpace(reviewEvidence.Text))return;
+            var reviewedRun=(Dictionary<string,object>)item.Tag;
+            Command("reconcile",new {run_id=reviewedRun["id"],revision=reviewedRun["revision"],step=reviewedRun["step"],evidence=reviewEvidence.Text.Trim(),reviewed=true});
+        });
+        recoveryPanel.Children.Add(reviewButton);
+        recoveryPanel.Children.Add(new TextBlock(){Text="This keeps the failed run in history. Nothing resumes or repeats. A new Play starts from the beginning.",TextWrapping=TextWrapping.Wrap});
+        layout.Children.Add(recoveryPanel);
+        reviewRuns.SelectionChanged+=(s,e)=>UpdateReview();
+        reviewEvidence.TextChanged+=(s,e)=>UpdateReviewEnabled();
+        reviewChecked.Checked+=(s,e)=>UpdateReviewEnabled();reviewChecked.Unchecked+=(s,e)=>UpdateReviewEnabled();
         savePanel.Children.Add(new TextBlock(){Text="Recording name"});
         savePanel.Children.Add(name);var row=new StackPanel(){Orientation=Orientation.Horizontal};
         saveButton=Button("Save recording",()=>Command("save",new {name=name.Text.Trim()}));
         discardButton=Button("Discard draft",()=>{if(MessageBox.Show(this,"Discard this unsaved recording?","Discard recording",MessageBoxButton.YesNo,MessageBoxImage.Question)==MessageBoxResult.Yes)Command("discard",new {});});
         row.Children.Add(saveButton);row.Children.Add(discardButton);savePanel.Children.Add(row);layout.Children.Add(savePanel);
         var details=new StackPanel();details.Children.Add(new TextBlock(){Text="Saved recording",Margin=new Thickness(0,6,0,0)});details.Children.Add(tasks);
-        var tools=new StackPanel(){Orientation=Orientation.Horizontal};tools.Children.Add(Button("Refresh windows",RefreshWindows));
-        tools.Children.Add(Button("Inspect window",()=>{if(windows.SelectedItem!=null)capture.Diagnostic((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);}));
-        details.Children.Add(tools);details.Children.Add(new TextBlock(){Text="Ctrl+Alt+F12 stops playback immediately.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,0)});
+        details.Children.Add(new TextBlock(){Text="Action log",FontWeight=FontWeights.SemiBold});details.Children.Add(actionLog);
+        detailTools.Children.Add(Button("Refresh windows",RefreshWindows));
+        detailTools.Children.Add(Button("Inspect window",()=>{if(windows.SelectedItem!=null)capture.Diagnostic((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);}));
+        details.Children.Add(detailTools);details.Children.Add(new TextBlock(){Text="Ctrl+Alt+F12 stops playback immediately.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,0)});
+        details.Children.Add(new TextBlock(){Text="Desktop session follows supported applications. Unsupported controls interrupt capture and preserve the draft. Prepare the recorded windows before replay.",TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,0)});
         advanced.Content=details;layout.Children.Add(advanced);
-        windows.SelectionChanged+=(s,e)=>Render();tasks.DropDownClosed+=(s,e)=>Render();
+        windows.SelectionChanged+=(s,e)=>Render();tasks.DropDownClosed+=(s,e)=>{
+            if(state=="idle"&&tasks.SelectedItem!=null&&!pending){
+                var selectedTask=(Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag;
+                if(!selectedTask.ContainsKey("action_log"))Command("inspect_task",new {id=selectedTask["id"],revision=selectedTask["revision"]});
+            }
+            Render();
+        };
+        desktopSession.Checked+=(s,e)=>Render();desktopSession.Unchecked+=(s,e)=>Render();
         SourceInitialized+=(s,e)=>{
             hwnd=new WindowInteropHelper(this).Handle;
             playback=new DesktopPlayback(hwnd,Send);
@@ -963,15 +1488,28 @@ class Host : Window {
     void Render(){
         // Interrupted recordings require explicit review before Save is accepted.
         heading.Text=ToolbarPresentation.Label(state,awaitingPlayback,playbackPaused,pendingKind,connected);
+        if(state=="recording"&&capture!=null&&capture.DesktopSession)heading.Text="● Recording desktop session";
+        Title=state=="recording"?"● Recording · Sports Cave Task Recorder":"Sports Cave · Task Recorder";
         if(state=="idle"&&tasks.SelectedItem!=null)contextName.Text="Selected recording: "+((Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag)["name"];
         controls.Children.Clear();savePanel.Visibility=state=="draft"?Visibility.Visible:Visibility.Collapsed;
         windowPanel.Visibility=state=="idle"?Visibility.Visible:Visibility.Collapsed;
         windows.IsEnabled=ToolbarPresentation.CanStart(state,pending||stopRequested,connected);
-        advanced.IsEnabled=state=="idle"&&!pending&&!stopRequested&&connected;
+        desktopSession.IsEnabled=windows.IsEnabled;
+        detailTools.IsEnabled=state=="idle"&&!pending&&!stopRequested&&connected;
+        // The action log remains readable while capture/playback is running.
+        advanced.IsEnabled=connected;
+        tasks.IsEnabled=state=="idle"&&!pending&&!stopRequested&&connected;
+        actionLog.Text=liveActionLog;
+        if(state=="idle"&&tasks.SelectedItem!=null){
+            var logTask=(Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag;
+            actionLog.Text=logTask.ContainsKey("action_log")?FormatLog((System.Collections.ArrayList)logTask["action_log"]):"Loading selected recording…";
+        }
+        if(actionLog.Text.Length==0)actionLog.Text="No actions captured yet.";
+        recoveryPanel.IsEnabled=state=="idle"&&!pending&&!stopRequested&&connected;
         saveButton.IsEnabled=discardButton.IsEnabled=name.IsEnabled=connected&&!pending&&!stopRequested;
         contextName.Visibility=contextName.Text.Length==0?Visibility.Collapsed:Visibility.Visible;
         if(state=="idle"){
-            controls.Children.Add(Button("Record",()=>{if(pending||stopRequested)return;if(windows.SelectedItem==null)throw new Exception("Choose the window you want to record.");pending=true;pendingKind="record";status.Text="Checking window…";capture.PrepareRecord((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);Render();}));
+            controls.Children.Add(Button("Record",()=>{if(pending||stopRequested)return;if(windows.SelectedItem==null&&desktopSession.IsChecked!=true)throw new Exception("Choose the window you want to record.");pending=true;pendingKind="record";status.Text="Checking recording scope…";capture.PrepareRecord(windows.SelectedItem==null?IntPtr.Zero:(IntPtr)((ComboBoxItem)windows.SelectedItem).Tag,desktopSession.IsChecked==true);Render();}));
             if(tasks.SelectedItem!=null)controls.Children.Add(Button("Play",()=>{
                 if(tasks.SelectedItem==null)throw new Exception("Choose a saved task.");
                 var selected=(Dictionary<string,object>)((ComboBoxItem)tasks.SelectedItem).Tag;
@@ -990,11 +1528,23 @@ class Host : Window {
         }else if(state=="interrupted")controls.Children.Add(Button("Review preserved draft",()=>Command("review",new {})));
         foreach(Button control in controls.Children){
             control.IsEnabled=ToolbarPresentation.CanControl(state,(string)control.Content,pending||stopRequested,connected);
-            if((string)control.Content=="Record"&&windows.SelectedItem==null)control.IsEnabled=false;
+            if((string)control.Content=="Record"&&windows.SelectedItem==null&&desktopSession.IsChecked!=true)control.IsEnabled=false;
             if((string)control.Content=="Record"||(string)control.Content=="Play"){
                 control.Background=new SolidColorBrush(Color.FromRgb(184,154,66));control.Foreground=Brushes.White;
             }
         }
+    }
+    static string FormatLog(System.Collections.ArrayList rows) {return String.Join("\n",rows.Cast<object>().Select(x=>Convert.ToString(x)).ToArray());}
+    void UpdateReviewEnabled() {
+        if(reviewButton!=null)reviewButton.IsEnabled=state=="idle"&&connected&&!pending&&!stopRequested&&reviewRuns.SelectedItem!=null&&reviewChecked.IsChecked==true&&!String.IsNullOrWhiteSpace(reviewEvidence.Text);
+    }
+    void UpdateReview() {
+        var item=reviewRuns.SelectedItem as ComboBoxItem;
+        var row=item==null?null:(Dictionary<string,object>)item.Tag;
+        string key=row==null?null:(string)row["id"]+":"+row["revision"]+":"+row["step"];
+        if(key!=reviewIdentity){reviewIdentity=key;reviewEvidence.Text="";reviewChecked.IsChecked=false;}
+        reviewSummary.Text=row==null?"":(string)row["summary"]+"\n"+(string)row["message"];
+        UpdateReviewEnabled();
     }
     void Apply(Dictionary<string,object> d){
         if(!d.ContainsKey("v")||Convert.ToInt32(d["v"])!=1)return;
@@ -1009,6 +1559,7 @@ class Host : Window {
             try{capture.Start(epoch);}catch(Exception e){Send("interrupt",new {reason=e.Message});return;}
         } else if(next!="recording"&&capture!=null)capture.Detach();
         state=next;generation=epoch;elapsed=Convert.ToInt64(d["elapsed_ms"]);segment.Reset();if(state=="recording")segment.Start();
+        if(d.ContainsKey("action_log"))liveActionLog=FormatLog((System.Collections.ArrayList)d["action_log"]);
         if(state=="idle"&&d.ContainsKey("tasks")){
             string previousRun=d.ContainsKey("run")&&d["run"]!=null?(string)((Dictionary<string,object>)d["run"])["task_id"]:null;
             TaskList.Update(tasks,(System.Collections.ArrayList)d["tasks"],previousRun);
@@ -1017,6 +1568,9 @@ class Host : Window {
                 if(saved!=lastSavedId){lastSavedId=saved;foreach(ComboBoxItem item in tasks.Items)if((string)((Dictionary<string,object>)item.Tag)["id"]==saved)tasks.SelectedItem=item;}
             }
         }
+        if(d.ContainsKey("reviews"))TaskList.Update(reviewRuns,(System.Collections.ArrayList)d["reviews"],null);
+        recoveryPanel.Visibility=state=="idle"&&reviewRuns.Items.Count>0?Visibility.Visible:Visibility.Collapsed;
+        UpdateReview();
         playbackPaused=d.ContainsKey("run")&&d["run"]!=null&&(bool)((Dictionary<string,object>)d["run"])["pause_requested"];
         playbackProgress=null;
         if((state=="idle"||state=="playing")&&d.ContainsKey("run")&&d["run"]!=null){

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Sports Cave recorder accessibility adapter (local)",
+  "version": "0.1.0",
+  "description": "Exposes supported Streamlit dropdown ownership and selected values to the local Windows recorder. No network or input capture.",
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "js": [
+        "accessibility.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

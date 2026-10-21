@@ -12,7 +12,12 @@ static class TaskList {
             foreach(string key in new[]{"id","name","revision"})if(!Object.Equals(old[key],row[key]))same=false;
         }
         // Do not close/rebuild the dropdown while the user is choosing a task.
-        if(same)return;
+        if(same){
+            // Metadata such as an on-demand preview can change without a
+            // saved-definition revision. Keep selection and popup intact.
+            for(int i=0;i<rows.Count;i++)((ComboBoxItem)list.Items[i]).Tag=rows[i];
+            return;
+        }
         string selected=list.SelectedItem==null?null:(string)((Dictionary<string,object>)((ComboBoxItem)list.SelectedItem).Tag)["id"];
         list.Items.Clear();
         ComboBoxItem fallback=null;
