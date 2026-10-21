@@ -34,9 +34,9 @@ The signed-off physical candidate is reused without recompilation.
 
 `recorder-releases/windows/SportsCaveTaskRecorder.zip` is the exact reviewed x64
 Windows archive, not a Linux-generated replacement. Archive SHA-256:
-`c01313e53f6314de49818136e563c89ceb63f2a752fa3e7536d568b51e39bff3`.
+`800de2f825316eceeb07df064025e6b6d2be12b34ec45cefead7d46fe3e2f688`.
 Manifest SHA-256:
-`b1b1cb2ec52a9ce0752a32bbf726d016a2804fe888d263e1035522826547868e`.
+`94b4b255cdb7ec02e3b4c2d214603c07156d6e288415da8dd48c68caec6aaf2e`.
 The authenticated setup route validates the archive before serving it. An
 explicit configured package path retains precedence. No recordings, credentials,
 receipts, profiles or recovery archives are shipped.
@@ -51,8 +51,11 @@ confirmation. The installer now continues polling after that reset and switches
 only after connection refusal proves the listener has exited. A focused regression
 checks that reset alone cannot authorize activation. An exclusive recorder-lock
 check also proves that an old helper has fully exited when Windows times out on
-its stale connection. A held process lock prevents that offline path. All seven
-package checks pass, including the actual Windows lock behavior.
+its stale connection. A held process lock prevents that offline path. The actual
+startup check also found VBScript Trim retains the newline in active.txt; the
+launcher now reads that single line before validating the release ID. Actual
+Windows Script Host checks cover compact, legacy and older long release IDs.
+All eight package checks pass, including the actual Windows lock behavior.
 
 ## Validation and remaining limits
 

@@ -89,7 +89,7 @@ sh.Environment("Process").Remove "PYTHONPATH"
 sh.Environment("Process").Remove "PYTHONHOME"
 base = fs.GetParentFolderName(WScript.ScriptFullName)
 selected = "legacy"
-If fs.FileExists(base & "\\active.txt") Then selected = Trim(fs.OpenTextFile(base & "\\active.txt", 1).ReadAll)
+If fs.FileExists(base & "\\active.txt") Then selected = Trim(fs.OpenTextFile(base & "\\active.txt", 1).ReadLine)
 folder = base
 If selected <> "legacy" Then
  Set pattern = New RegExp

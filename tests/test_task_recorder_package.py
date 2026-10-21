@@ -186,3 +186,24 @@ def test_offline_update_requires_exclusive_recorder_lock(tmp_path,monkeypatch):
     install.stop_idle(tmp_path)
     state.assert_not_called()
     assert lock.read_bytes()==b'0'
+
+
+@pytest.mark.skipif(__import__('os').name!='nt',reason='Actual Windows Script Host')
+def test_actual_start_launcher_reads_newline_terminated_release_pointer(tmp_path):
+    from task_recorder.install import write_launchers
+    import subprocess
+    for selected,ending in [('a'*20,'\n'),('b'*64,'\r\n'),('legacy','\n')]:
+        write_launchers(tmp_path)
+        (tmp_path/'active.txt').write_bytes((selected+ending).encode())
+        app=(tmp_path if selected=='legacy' else tmp_path/'releases'/selected)/'app'
+        app.mkdir(parents=True,exist_ok=True)
+        script=tmp_path/'Start.vbs'
+        lines=script.read_text().splitlines()
+        # Execute the real generated selection/validation code. Intercept only
+        # its final helper launch, so this check never starts a server or UI.
+        assert lines[-1].startswith('sh.Run ')
+        script.write_text('\r\n'.join(lines[:-1]+['WScript.Echo selected'])+'\r\n')
+        result=subprocess.run(['cscript.exe','//nologo',str(script)],capture_output=True,text=True,
+                              timeout=5,creationflags=subprocess.CREATE_NO_WINDOW)
+        assert result.returncode==0,result.stderr
+        assert result.stdout.strip()==selected
