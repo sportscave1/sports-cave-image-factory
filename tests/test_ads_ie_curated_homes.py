@@ -25,7 +25,7 @@ class CuratedHomeTests(unittest.TestCase):
             self.assertEqual(len({s["wall_colour_family"] for s in scenes}), 3)
             self.assertEqual(len({s["wall_finish"] for s in scenes}), 3)
             self.assertEqual(len({s["light_family"] for s in scenes}), 3)
-            self.assertTrue(any(s["wall_finish"] in {"smooth matte paint", "restrained painted wall panelling", "honed limestone"} for s in scenes))
+            self.assertTrue(any(s["wall_finish"] in {"matte painted brick", "natural stone", "aged timber"} for s in scenes))
             for a, b in ((0, 1), (0, 2), (1, 2)):
                 self.assertTrue(library.different(scenes[a], scenes[b]))
             for i, s in enumerate(scenes):
@@ -35,8 +35,8 @@ class CuratedHomeTests(unittest.TestCase):
                 for key in library.SCENE_FIELDS:
                     self.assertIn(key, s)
         self.assertTrue(all(len(s) > 40 for s in seen))
-        self.assertEqual(len(families), 8)
-        self.assertEqual(len(treatments), 6)  # Oak is a small architectural accent, not a whole wall.
+        self.assertEqual(families, {wall[1] for wall in library.WALLS})
+        self.assertEqual(treatments, {wall[4] for wall in library.WALLS})
 
     def test_history_rejects_actual_combinations_and_near_duplicates_across_products(self):
         history = []
@@ -115,7 +115,7 @@ class CuratedHomeTests(unittest.TestCase):
         self.assertGreaterEqual(changed, 4)
 
     def test_legacy_history_uses_saved_appearance_even_without_a_scene_id(self):
-        scene = next(s for s in library.SCENES[0] if s["wall_colour"] == "mineral grey" and s["light_source"] == "courtyard window")
+        scene = next(s for s in library.SCENES[0] if s["wall_colour"] == "smoky grey" and s["light_source"] == "courtyard window")
         legacy = {"room_type": "old room name", "wall_colour_family": "graphite plaster", "wall_material": "fine plaster",
                   "lighting_direction": "soft courtyard-window daylight"}
         self.assertTrue(library._history_conflict(scene, legacy))

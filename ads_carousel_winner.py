@@ -4,6 +4,7 @@ No storage, API calls or independent product/edition lookup. Creative Refresh
 continues using its existing contracts in ads_page.
 """
 from sports_categories import sport_family
+from ads_ie_scenes import ROOM_STYLE
 import hashlib
 import json
 import random
@@ -50,12 +51,12 @@ SPORT_ROOMS = {
     "australian rules": ("clubroom", "pavilion"),
 }
 SPECIALIST_ROOMS = {"garage_lounge", "workshop_office", "clubroom", "pavilion", "locker_room", "home_gym"}
-LIGHT_WALLS = ("warm stone mineral plaster", "soft taupe plaster", "warm greige render",
-               "warm off-white plaster", "soft concrete grey", "clean cream gallery wall",
-               "soft sand-coloured mineral finish")
-DARK_WALLS = ("charcoal mineral plaster", "graphite limewash", "muted heritage green",
-              "dark olive charcoal", "muted bronze brown", "deep navy-grey",
-              "restrained clay/tobacco", "walnut architectural wall section")
+LIGHT_WALLS = ("light weathered stone textured plaster", "light earthy taupe natural stone", "weathered stone concrete",
+               "light smoky grey matte painted brick", "weathered stone aged timber", "light earthy taupe textured plaster",
+               "light weathered stone natural stone")
+DARK_WALLS = ("charcoal textured plaster", "graphite aged timber", "heritage green natural stone",
+              "muted olive matte painted brick", "earthy taupe textured plaster", "deep navy concrete",
+              "midnight blue matte painted brick", "graphite natural stone")
 CAMERAS = ("straight-on with 1° natural offset", "slight left 6°", "slight right 6°",
            "left three-quarter 9°", "right three-quarter 9°",
            "slightly above centre with 4° downward view", "slightly below centre with 3° upward view")
@@ -145,6 +146,7 @@ CREATIVE_VARIATION_TOKEN: {token or 'standard'} (creative cue only; never visibl
 Room: {scene['room']}
 Architecture: {scene['architecture']}
 Wall: {scene['wall_family']}
+{ROOM_STYLE}
 Camera: {scene['camera_family']}
 Light: {scene['lighting_family']}
 Time of day: {scene['time_of_day']}
