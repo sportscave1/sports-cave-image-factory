@@ -415,7 +415,7 @@ async def claim(request):
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
         if host:record.v6_setup['host_token_hash']=hashlib.sha256(host.encode()).hexdigest()
-        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,transfer_settings=transfer_settings,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),upload_max_bytes=__import__('companion_package_api').upload_max_bytes(),package_transport=1,transfer_settings=transfer_settings,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
             ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:
         if row:
@@ -482,7 +482,7 @@ async def reconnect(request):
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
             host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())
-        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),upload_max_bytes=__import__('companion_package_api').upload_max_bytes(),package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

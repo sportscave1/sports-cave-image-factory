@@ -169,6 +169,7 @@ def journal(row):
     except OSError:pass
     atomic_json(row['folder']/'job-state.json',dict(schema=1,context=row['context'],
         package_transport=row.get('package_transport',0),upload_protocol=row.get('upload_protocol',0),
+        upload_max_bytes=row.get('upload_max_bytes'),
         generation=row.get('generation'),
         phase=row.get('phase','Preparing'),status=row['status'],error=row.get('error',''),
         cancellation_confirmed=bool(row.get('cancellation_confirmed')),
@@ -250,7 +251,7 @@ def recover_retained(config):
         if data.get('checkpoint_pending'):
             row=dict(data,grant=result['grant'],folder=file.parent)
             report_failure(row);return True
-        start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0),upload_protocol=data.get('upload_protocol',0))
+        start(result['grant'],resume_folder=file.parent,package_transport=result.get('package_transport',0),upload_protocol=max(data.get('upload_protocol',0),result.get('upload_protocol',0)),upload_max_bytes=result.get('upload_max_bytes'))
         return True
     return False
 
@@ -297,7 +298,7 @@ def host_loop():
                 claim_started=time.monotonic()
                 data=host_request(config,'/api/auto-editions/onboarding/claim',{})
                 if data.get('grant'):
-                    started=start(data['grant'],initial_context=data.get('context'),package_transport=data.get('package_transport',0),upload_protocol=data.get('upload_protocol',0))
+                    started=start(data['grant'],initial_context=data.get('context'),package_transport=data.get('package_transport',0),upload_protocol=data.get('upload_protocol',0),upload_max_bytes=data.get('upload_max_bytes'))
                     timings=JOBS[started['job_id']].setdefault('timings',{})
                     timings['claim_seconds']=round(time.monotonic()-claim_started,6)
                     if HOST_LAST_COMPLETED_AT is not None:timings['completed_to_claim_request_seconds']=round(claim_started-HOST_LAST_COMPLETED_AT,6)
@@ -341,7 +342,7 @@ def context(grant):
     return transfer.get(grant,'/api/auto-editions/context?'+urlencode({'ticket':grant['ticket']}))
 
 
-def start(grant,resume_folder=None,initial_context=None,package_transport=0,upload_protocol=0):
+def start(grant,resume_folder=None,initial_context=None,package_transport=0,upload_protocol=0,upload_max_bytes=None):
     verified=initial_context or context(grant)
     with LOCK:
         for key,row in list(JOBS.items()):
@@ -361,16 +362,24 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0,uplo
         else:folder.mkdir(parents=True,exist_ok=False)
         JOBS[key]=dict(grant=grant,context=verified,folder=folder,created=time.monotonic(),status='Working',
                        package_transport=1 if type(package_transport) is int and package_transport==1 else 0,
-                       upload_protocol=1 if type(upload_protocol) is int and upload_protocol==1 else 0)
+                       upload_protocol=1 if type(upload_protocol) is int and upload_protocol==1 else 0,
+                       upload_max_bytes=upload_max_bytes)
         if (folder/'upload-session.json').exists():JOBS[key]['upload_protocol']=1 # Never downgrade a partial session.
         JOBS[key]['generation']=json.loads((folder/'job-state.json').read_text()).get('generation') if resume_folder else __import__('companion_package_identity').generation()
         if resume_folder:JOBS[key]['recovery_failures']=json.loads((folder/'job-state.json').read_text()).get('recovery_failures',0)
         journal(JOBS[key])
-        package=find_reusable_package(verified,generation=__import__('companion_package_identity').generation() if JOBS[key]['upload_protocol']==1 else None)
+        package=find_reusable_package(verified,generation=__import__('companion_package_identity').generation() if JOBS[key]['upload_protocol']==1 else None,max_bytes=package_budget(JOBS[key]))
         if (folder/'upload-session.json').exists():
             package=folder/'prepared.zip'
             if not package.is_file() or package.is_symlink():raise ValueError('Retained resumable package missing; automatic regeneration refused.')
-        if not package and resume_folder:package=package_finished(row=JOBS[key],ctx=verified)
+        if not package:
+            from auto_editions_package_limits import PackageBudgetError
+            try:package=package_finished(row=JOBS[key],ctx=verified)
+            except PackageBudgetError as error:
+                detail=failure_detail(JOBS[key],'Preparation',error)
+                JOBS[key].update(status='Blocked',error=detail)
+                journal(JOBS[key]);report_failure(JOBS[key])
+                raise
         if package:
             JOBS[key]['reused_package']=str(package)
             timing_file=package.parent/'preparation-timing.json'
@@ -385,13 +394,30 @@ def start(grant,resume_folder=None,initial_context=None,package_transport=0,uplo
         return dict(job_id=key,status='Working')
 
 
+def package_budget(row):
+    from auto_editions_package_limits import negotiated
+    return negotiated(row.get('upload_protocol'),row.get('upload_max_bytes'))
+
+
 def package_finished(row,ctx):
     """A crash after Photoshop/validation must not rerender a verified finished set."""
     import auto_editions as ae
     from auto_editions_preparation_geometry import matches
-    from auto_editions_package import MAX_PACKAGE_BYTES
+    from auto_editions_package_limits import PackageBudgetError
     if row.get('upload_protocol')==1 and row.get('generation')!=__import__('companion_package_identity').generation():return None
-    for folder in row['folder'].glob('prepared*'):
+    parents=[row['folder']]
+    # A normal retry owns a fresh server lease and local job. Read the failed
+    # job's completed exports without changing its journal, PSD or mapping.
+    for state in HOST_FILE.parent.glob('*/job-state.json'):
+        if state.parent==row['folder'] or state.is_symlink() or state.parent.is_symlink():continue
+        try:
+            if state.stat().st_size>65536:continue
+            old=json.loads(state.read_text())
+            if ((old.get('context') or {}).get('source')==ctx['source'] and old.get('generation')==row.get('generation')
+                    and old.get('status')=='Blocked'):
+                parents.append(state.parent)
+        except (OSError,ValueError):continue
+    for folder in (folder for parent in parents for folder in parent.glob('prepared*')):
         if not folder.is_dir() or folder.is_symlink():continue
         try:
             manifest=json.loads((folder/'manifest.json').read_text())
@@ -410,27 +436,33 @@ def package_finished(row,ctx):
             archive=row['folder']/'prepared.zip'
             if archive.exists():return None
             from auto_editions_transport import build_package
-            build_package(folder,names,archive,compact=row.get('package_transport')==1)
+            build_package(folder,names,archive,compact=row.get('package_transport')==1,max_bytes=package_budget(row))
+            from companion_atomic import atomic_json
+            atomic_json(archive.parent/'package-identity.json',dict(generation=row.get('generation'),
+                preparation_hash=ae.fingerprint(manifest),sha256=ae.file_hash(archive)))
             return archive
+        except PackageBudgetError:raise
         except (OSError,ValueError,KeyError):continue
     return None
 
 
-def find_reusable_package(ctx,generation=None):
+def find_reusable_package(ctx,generation=None,*,max_bytes=None):
     """Only reuse exact source/edition identities. The server revalidates pixels."""
     if not ctx.get('automatic'):return None
     from auto_editions_package import MAX_PACKAGE_BYTES
+    from auto_editions_package_limits import EXPANDED_BYTES
+    if max_bytes is None:max_bytes=MAX_PACKAGE_BYTES
     root=HOST_FILE.parent.resolve()
     for package in sorted(root.glob('*/prepared.zip'),key=lambda p:p.stat().st_mtime,reverse=True):
         if package.is_symlink() or package.parent.is_symlink():continue
         try:
-            if package.stat().st_size>MAX_PACKAGE_BYTES:continue
+            if package.stat().st_size>max_bytes:continue
             if generation is not None:
                 provenance=json.loads((package.parent/'package-identity.json').read_text(encoding='utf-8'))
                 if provenance.get('generation')!=generation or provenance.get('sha256')!=__import__('auto_editions').file_hash(package):continue
             with zipfile.ZipFile(package) as archive:
                 if archive.getinfo('manifest.json').file_size>4*1024*1024:continue
-                if sum(info.file_size for info in archive.infolist())>MAX_PACKAGE_BYTES:continue
+                if sum(info.file_size for info in archive.infolist())>EXPANDED_BYTES:continue
                 manifest=json.loads(archive.read('manifest.json'))
             if generation is not None and provenance.get('preparation_hash')!=__import__('auto_editions').fingerprint(manifest):continue
             colour=manifest.get('colour_evidence') or {}
@@ -461,6 +493,7 @@ def reconnect(row):
     row['grant']=data['grant']
     if row.get('upload_protocol')==1 and data.get('upload_protocol')!=1:raise ValueError('Resumable backend compatibility is required; legacy replay refused.')
     row['upload_protocol']=data.get('upload_protocol',row.get('upload_protocol',0))
+    row['upload_max_bytes']=data.get('upload_max_bytes')
     if context(row['grant'])!=ctx:raise ValueError('Preparation identity changed.')
 
 
@@ -502,6 +535,8 @@ def upload_prepared(key,archive):
         for attempt in range(3):
             try:
                 boundary(row)
+                from auto_editions_package_limits import transfer_error
+                if archive.stat().st_size>package_budget(row):raise transfer_error(archive.stat().st_size,package_budget(row))
                 grant=row['grant']
                 row['timings']['upload_attempts']+=1
                 if row.get('upload_protocol')==1 or (row['folder']/'upload-session.json').exists():
@@ -810,7 +845,6 @@ def prepare_worker(key,roles,scale=1):
     lease=None;output=None
     try:
         from scripts.prepare_auto_editions import prepare as build
-        from auto_editions_package import MAX_PACKAGE_BYTES
         row=JOBS[key];ctx=context(row['grant'])
         row['phase']='Preparing';journal(row)
         if ctx!=row['context']:raise ValueError('Preparation identity changed.')
@@ -839,7 +873,7 @@ def prepare_worker(key,roles,scale=1):
         from auto_editions_transport import build_package,digest
         from auto_editions_performance import stage as measured
         with measured(row['timings'],'package_build',path=output):
-            packet=build_package(output,names,archive,compact=row.get('package_transport')==1)
+            packet=build_package(output,names,archive,compact=row.get('package_transport')==1,max_bytes=package_budget(row))
         row['timings'].update(packet)
         with measured(row['timings'],'package_checksum'):
             packet_hash=digest(archive)
@@ -853,7 +887,7 @@ def prepare_worker(key,roles,scale=1):
     except Cancelled:raise
     except Exception as error:
         detail=failure_detail(JOBS[key],'Preparation',error)
-        JOBS[key].update(status='Blocked',error='Preparation failed: '+detail+'. Existing PSD and mapping are preserved.')
+        JOBS[key].update(status='Blocked',error='Preparation failed: '+detail.rstrip('.')+'. Existing PSD and mapping are preserved.')
     finally:
         if lease:
             from scripts.prepare_auto_editions import native_cleanup_uncertain

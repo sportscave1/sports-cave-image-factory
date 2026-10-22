@@ -83,8 +83,8 @@ def test_legacy_oversized_or_unprofiled_package_is_preserved_but_never_reuploade
         assert archive.read_bytes()==before
         manifest['colour_evidence']={'icc_sha256':'a'*64,'pixels_converted':False};write()
         assert local.find_reusable_package(ctx)==archive
-        with patch.object(package_limits,'MAX_PACKAGE_BYTES',1024):
-            assert archive.stat().st_size<1024 # compressed bytes fit, expanded bytes do not
+        with patch('auto_editions_package_limits.EXPANDED_BYTES',1024):
+            assert archive.stat().st_size<1024 # separate expanded disk budget
             assert local.find_reusable_package(ctx) is None
         with patch.object(package_limits,'MAX_PACKAGE_BYTES',100):
             assert local.find_reusable_package(ctx) is None
