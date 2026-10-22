@@ -11,10 +11,10 @@ def ie_refresh_image_rules():
 WINNER_IE supplies the winning creative DNA, collector/scarcity persuasion, product prominence and established footer hierarchy. Evolve that principle into three substantially fresh rooms; never merely recolour or change camera angle. The winner is a creative reference, not the product/frame authority.
 CANONICAL_PRODUCT — the uploaded canonical black-framed website product image — is the absolute authority for exact artwork, black frame thickness, frame depth, outer proportions, bevel profile, frame geometry and glazing relationship. The winning ad must NOT override canonical frame proportions. Preserve the same frame thickness consistently across all three outputs, allowing only physically correct perspective of the whole rigid frame.
 Match the canonical black frame thickness and depth exactly. Do not visually thin, thicken, simplify, flatten or reinterpret the frame.
-The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. If depth/glazing cannot be established from the supplied source, request an additional canonical reference rather than invent construction details.
+The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. Establish glazing from known verified product/variant information, even when reflections are not visible in the canonical photograph. If depth or glazing construction remains unknown, request confirmation rather than invent construction details.
 
 PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM — include these requirements explicitly in EACH final image prompt:
-Premium clear glass reflection look on the existing transparent front surface, preserving verified source construction, with clearly visible room-based reflections, physically believable highlight falloff on the glazing, realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glass. Keep reflections restrained and consistent with actual windows/lamps and camera angle; printed artwork text/details remain clear. If the canonical product is explicitly verified as unglazed, preserve that construction instead of adding glass.
+Apply the shared thumbnail-visible protective-glazing requirement for confirmed glazed framed editions, preserving the actual material, with realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glazing. Preserve verified unframed or unglazed construction; never relabel acrylic as glass.
 Use real interior photography, believable wall texture/materials and room proportions, tasteful premium furniture, physically credible lighting sources and high-end but lived-in interior credibility. Product remains the dominant mobile-readable hero on a real customer's wall.
 The final result must feel like a genuine premium lifestyle photograph taken in a real home, not a rendered showroom, not an AI room, and not a flat composited mockup.
 Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
@@ -36,7 +36,7 @@ The image FAILS and must be regenerated if any of these are missing:
 1. EXACT CANONICAL FRAME
 Match CANONICAL_PRODUCT frame thickness, bevel profile, depth and outer proportions exactly. Never thin, thicken, flatten, simplify or reinterpret the frame. The winning advertisement must never override canonical frame construction.
 2. CLEAR REAL GLASS OR ACRYLIC GLAZING
-The artwork must visibly sit behind genuine transparent glazing. Show restrained but clearly visible room-based reflections across part of the glass, following the flat glass plane and actual room windows/lights with realistic highlight falloff. Keep reflections subtle without obscuring artwork details. Never a matte, frameless, digitally pasted or flat poster look.
+For confirmed glazed framed editions, apply the shared thumbnail-visible protective-glazing requirement; missing or imperceptible surface reflections fail visual review, and frame-edge highlights alone do not count. Preserve actual glass or acrylic material and the exclusion for verified unframed or unglazed products. Prompt wording alone cannot pass this visual check.
 3. PREMIUM FRAME BEVEL LIGHTING
 Room light must naturally interact with the physical black frame. At least one front bevel and, where perspective permits, one frame side/depth edge must visibly catch realistic light. The frame must read as a three-dimensional premium physical object.
 4. WALL SEPARATION
@@ -44,11 +44,11 @@ The frame sits physically in front of the wall: believable mounting depth, subtl
 5. CONTACT SHADOW
 Show a soft but clearly visible contact shadow behind/below the frame. Direction, softness and intensity must match the room's primary light source.
 6. PRODUCT FIRST
-Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, visible real glass, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
+Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, thumbnail-visible protective glazing on confirmed glazed editions, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
 
 IE_FINAL_PRODUCT_REALISM_GATE = '''FINAL PRODUCT REALISM REJECTION GATE
 Before returning the generated image, reject and regenerate it if ANY of these are true:
-- glass cannot be visually identified
+- a confirmed glazed framed edition has missing or imperceptible surface reflections at 256 × 256; frame-edge highlights alone do not count (exclude verified unframed or unglazed products)
 - artwork looks like a flat matte print
 - frame looks like a flat black border
 - canonical frame thickness has changed
@@ -57,8 +57,8 @@ Before returning the generated image, reject and regenerate it if ANY of these a
 - mounting separation from the wall is not believable
 - contact shadow is missing
 - ambient occlusion behind the frame is missing
-- glass reflection conflicts with room lighting
-- glass reflection washes out artwork details
+- glazing reflection conflicts with room lighting
+- glazing reflection washes out artwork details
 - frame geometry is distorted
 - product appears digitally pasted onto the wall
 - product appears to float
@@ -157,7 +157,7 @@ Source evidence (factual context, not customer copy):
 Verified product context: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
 
 REFERENCE AUTHORITIES AND ATTACHMENT CHECKLIST
-{attachment_rules}
+{('GLAZING CHECK: Every confirmed glazed framed edition must show believable surface reflections clearly visible at thumbnail size.' + chr(10)) if ie else ''}{attachment_rules}
 CSV TEMPLATE — separate non-image attachment (legacy ATTACHMENT 3 for single-image workflow).
 {plan.AUTHORITY}
 The PRINTED internal artwork background is immutable. Ignore the canonical image's external wall, room, furniture, camera and shadows. Never reconstruct artwork from a winner.

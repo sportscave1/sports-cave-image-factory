@@ -110,9 +110,9 @@ def cue_family(text, fallback):
 
 
 LIGHTS = (
-    ("left", "soft directional morning daylight", "morning-side", "soft upper-left peripheral window shape"),
-    ("right", "broad diffused overcast daylight", "overcast-side", "broad faint upper-right peripheral tonal sheen"),
-    ("left", "soft raking late-afternoon daylight", "afternoon-raking", "restrained lower-left peripheral window sheen"),
+    ("left", "soft directional morning daylight", "morning-side", "recognisable upper-left peripheral window reflection"),
+    ("right", "broad diffused overcast daylight", "overcast-side", "recognisable broad upper-right peripheral window reflection"),
+    ("left", "soft raking late-afternoon daylight", "afternoon-raking", "recognisable lower-left peripheral window reflection"),
 )
 
 

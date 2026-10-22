@@ -9,8 +9,8 @@ import ads_page as ads
 import ads_ie_copy as writing
 import ads_ie_legacy_description as legacy
 
-# Snapshots include the subsequently approved six-headline rotation.
-BASELINE = {'images': '50c7aa52c772115ae36c18135934070acbb58289a7065d81c8bd1381c253ffb5', 'refresh': 'b7eea848c8a09f5ade7f9fe64f4bd6ee4ce3557e3d938a62e98a31802c68c4b8'}
+# Snapshots include the subsequently approved headline rotation and glazing-only refinement.
+BASELINE = {'images': 'd08d39f963005ede381ef189e64254b3b8f6822958b0792d47accabe0c79170e', 'refresh': 'b41f1edfb68036676ee8c6ef7d1bc2f4d974d24ac38d64fa6f9f587df485b7d1'}
 
 class RestoredDescriptionStylesTests(unittest.TestCase):
     def args(self):

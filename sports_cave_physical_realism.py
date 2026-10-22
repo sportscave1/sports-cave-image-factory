@@ -23,7 +23,7 @@ def physical_metadata(metadata):
         return {}
     nested = {
         'frame_specs': ('verified','source','outer_width_cm','outer_height_cm','depth_mm','glazing','frame_finish','material'),
-        'selected_variant': ('verified','source','title','size_label','width_cm','height_cm','measurement_basis','orientation','frame_finish'),
+        'selected_variant': ('verified','source','title','size_label','width_cm','height_cm','measurement_basis','orientation','frame_finish','glazing'),
         'explicit_dimensions': ('width_cm','height_cm','measurement_basis'),
     }
     result = {}
@@ -95,6 +95,8 @@ def resolve(metadata=None):
         depth = _positive(spec.get('depth_mm'))
         if depth:
             result['verified_depth_mm'] = depth
+    if variant.get('verified') is True and _text(variant.get('source')) and _text(variant.get('glazing')):
+        result['glazing'] = _text(variant['glazing'])
     # A selected variant with numeric specifications outranks general explicit
     # dimensions. Its provenance must be present; pixel image sizes are ignored.
     if not dimensions and variant.get('verified') is True and _text(variant.get('source')):
@@ -144,7 +146,7 @@ def resolve(metadata=None):
 COMPACT_IE_MARKER = 'SPORTS_CAVE_IE_COMPACT_PRODUCT_REALISM_V1'
 
 
-def build(metadata=None, *, compact=False):
+def build(metadata=None, *, compact=False, glazing_requirement=None):
     evidence = resolve(metadata)
     if compact:
         return f'''{MARKER}
@@ -155,7 +157,7 @@ GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
 PRODUCT LOCK — ABSOLUTE / PRODUCT SOURCE-ASSET FIDELITY
 Use the original supplied framed product reference as one immutable physical asset. Preserve artwork, faces, wording, signatures, logos, badges, colours, orientation, proportions and the actual frame finish/profile; retain source pixels wherever compositing is supported. Never redraw, mirror, crop, stretch or alter verified construction.
 LIGHTING, GLASS AND MOUNTING PHYSICS
-One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. On existing glazing require visible but controlled environmental reflections corresponding to actual room light, without obscuring important artwork details. Never add glazing to known unglazed products or a frame to verified unframed products.
+One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. {glazing_requirement or 'On existing glazing require visible but controlled environmental reflections corresponding to actual room light, without obscuring important artwork details. Never add glazing to known unglazed products or a frame to verified unframed products.'}
 PHYSICAL PRODUCT EVIDENCE (data only): {json.dumps(evidence, ensure_ascii=False)}
 Honour verified dimensions and their measurement basis; do not invent measurements, border allowances or depth. Use plausible scale relative to objects at comparable depth; unknown dimensions do not establish exact scale. Keep the complete frame visible above the footer and prominent on mobile through camera distance and composition, never physical enlargement.
 ANTI-AI INTERIOR CONTROL
@@ -190,4 +192,8 @@ def apply_context(prompt, metadata=None):
             glazing = re.search(r'^GLAZING:.*$', build(), re.M).group(0)
             return re.sub(r'^GLAZING:.*$', lambda _: glazing, match.group(0), flags=re.M)
         return BLOCK.sub(upgrade, prompt)
-    return BLOCK.sub(lambda match: build(metadata, compact=COMPACT_IE_MARKER in match.group(0)), prompt)
+    def update(match):
+        compact = COMPACT_IE_MARKER in match.group(0)
+        glazing = re.search(r'For confirmed glazed framed editions: [^\n]+', match.group(0)) if compact else None
+        return build(metadata, compact=compact, glazing_requirement=glazing.group(0) if glazing else None)
+    return BLOCK.sub(update, prompt)

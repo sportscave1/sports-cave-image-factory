@@ -274,11 +274,20 @@ SCENE_REFERENCE_RULES = (
     "Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. "
     "Never use a previously generated mockup as the artwork source. "
 )
+GLAZING_REQUIREMENT = (
+    "For confirmed glazed framed editions: Show clearly perceptible protective glazing over the edition, "
+    "with a recognisable natural window reflection and restrained surface highlight visible at a 256 × 256 preview. "
+    "Match reflections to the room’s light source and camera angle, keeping the subject, title and plaque readable. "
+    "Frame-edge highlights alone do not satisfy this requirement. Preserve the actual glazing material. "
+    "Establish glazing from known verified product/variant information, not whether reflections are visible in "
+    "the reference photograph. Preserve unframed or genuinely unglazed construction; never add a pane to it "
+    "or relabel acrylic as glass. If construction is unknown, request product/variant confirmation; do not invent glazing."
+)
 SCENE_VISIBILITY_RULES = (
     " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
     "Keep backdrop calm and material joins/timber accents peripheral. "
     + scene_library.ROOM_STYLE + " No competing framed art, trophies, helmets or decorative clusters. "
-    "CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
+    "CHECK: complete frame, true scale/source details, assigned camera, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256; frame-edge highlights alone do not count, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
 )
 
 
@@ -315,13 +324,13 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
                          wall_lightness=saved.get("wall_lightness") or (match[2] if match else "user override; lightness not classified"))
         scene["scene_signature"] = scene_library.signature(scene)
         scene["scene_near_signature"] = scene_library.signature(scene, near=True)
-        if "unglazed" in glazing or "no glazing" in glazing or glazing == "none":
-            reflection = "Verified unglazed: no glazing, pane or glazing reflection. Preserve surface texture and natural frame-edge highlights."
+        if physical_realism.is_unframed(context.get("physical_product")) or "unglazed" in glazing or "no glazing" in glazing or glazing == "none":
+            reflection = "Verified unframed or unglazed: no added glazing, pane or glazing reflection. Preserve surface texture and natural frame-edge highlights."
         else:
-            material = construction.get("glazing") or "existing glazing, only if present in the original product"
-            reflection = (f"On {material}, a subtle but perceptible reflection from {scene['reflection_source']}: "
+            material = construction.get("glazing") or "glazing established from verified product/variant information; confirm if unknown"
+            reflection = (f"Preserve {material}. Apply the shared thumbnail-visible glazing requirement using {scene['reflection_source']}: "
                 f"{scene['reflection_placement']}, consistent with camera/light even straight-on. "
-                "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane or call acrylic glass.")
+                "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unglazed products or call acrylic glass.")
         scene["glazing_treatment"] = saved.get("glazing_treatment") or reflection
         visual.update(scene)
         visual["assigned_camera_angle"] = visual["camera_side"]
