@@ -11,6 +11,7 @@ SCENE_FIELDS = (
     "light_direction", "light_softness", "light_family", "reflection_source", "reflection_placement",
     "glazing_treatment", "assigned_camera_angle", "scene_signature", "scene_near_signature", "history_exclusions_relaxed",
     "depth_position", "light_source_position", "spatial_family", "residential_cue_family", "scene_slot",
+    "collector_detail", "collector_detail_family",
 )
 
 # Colour and construction are authored together, not independently randomised.
@@ -297,3 +298,87 @@ def select(seed, context, recent=(), selections=()):
                         if c:
                             return [dict(s, history_exclusions_relaxed=len(history) - keep) for s in (a, b, c)]
     raise ValueError("Curated scene library needs three compatible differentiated homes.")
+
+
+# Detail choices are independent of the home/layout draw and saved with the scene.
+# Families prevent similar accessories in sibling images.
+COLLECTOR_DETAILS = (
+    (
+        ("dark timber console with a leather catchall resting on it", "console"),
+        ("slim leather bench", "seating"),
+        ("small stack of sports books resting on a console", "books"),
+        ("discreet brass lamp resting on a narrow side table", "lamp"),
+        ("aged timber ledge with one book resting on it", "books"),
+        ("dark built-in cabinet", "cabinet"),
+        ("distant leather study chair", "seating"),
+        ("clean architectural setting with no accessory", "none"),
+    ),
+    (
+        ("leather armchair edge", "seating"),
+        ("dark media cabinet", "cabinet"),
+        ("timber study-desk corner", "desk"),
+        ("recessed sports-book shelf", "books"),
+        ("side table with one whisky tumbler resting on it", "drinks"),
+        ("record cabinet", "music"),
+        ("understated home-bar cabinetry", "cabinet"),
+        ("dark fabric sofa edge", "seating"),
+    ),
+    (
+        ("pool-table corner", "games"),
+        ("distant dartboard mounted on a background wall", "games"),
+        ("whisky tumbler resting on a side table", "drinks"),
+        ("small decanter-and-glasses arrangement resting on a side table", "drinks"),
+        ("leather recliner edge", "seating"),
+        ("restrained drinks cabinet", "cabinet"),
+        ("turntable resting on timber cabinetry", "music"),
+        ("peripheral cue rack secured to a background wall", "games"),
+        ("chessboard corner resting on a table", "games"),
+        ("leather sofa edge with a wool throw", "seating"),
+    ),
+)
+COLLECTOR_DETAIL_RULES = (
+    " Use only the resolved collector-home detail or small coherent arrangement, replacing the previous peripheral cue, "
+    "never adding to it. Keep it small, secondary and partially visible at the perimeter or softly in the background; "
+    "Image 2 confines it to the existing tiny residential glimpse. Never widen the shot, shrink the edition or clutter "
+    "the room to fit it; the edition remains the clear focal point at realistic physical scale. "
+    "Use believable construction and placement on a real supporting surface where applicable, realistic proportions, "
+    "materials, perspective, lighting and contact shadows. No decorative plants, flowers or vases; incidental natural "
+    "outdoor greenery through a window is allowed. No warped, floating, duplicated or fake-looking objects, invented "
+    "memorabilia, prominent alcohol branding, neon signs or competing wall displays."
+)
+
+
+def resolve_collector_details(chosen, seed, recent=(), selections=()):
+    """Resolve once before export; existing saved peripheral cues are never replaced."""
+    history = [r for r in list(recent)[:HISTORY_LIMIT] if isinstance(r, dict)]
+    used = {s.get("collector_detail_family") for s in selections if isinstance(s, dict)}
+    for slot, scene in enumerate(chosen):
+        saved = selections[slot] if slot < len(selections) and isinstance(selections[slot], dict) else {}
+        if saved.get("primary_cue") or saved.get("collector_detail"):
+            continue
+        options = [(text, family) for text, family in COLLECTOR_DETAILS[slot] if family not in used]
+        def rank(option):
+            text, _ = option
+            uses = [i for i, old in enumerate(history) if old.get("collector_detail") == text]
+            return (bool(uses), -min(uses) if uses else 0, len(uses), _rank(seed, text))
+        detail, family = min(options, key=rank)
+        used.add(family)
+        # Retain the architectural opening/volume, replacing embedded old furnishings.
+        depth = scene["architectural_cue"]
+        for old, new in (
+            ("a distant furniture silhouette", "a tiny residential glimpse"),
+            ("a partial distant furniture silhouette", "a tiny residential glimpse"),
+            ("a distant seating silhouette", "a tiny residential glimpse"),
+            ("a softly lit recessed window seat", "a softly lit residential glimpse"),
+            ("a softly lit recessed bench edge", "a softly lit residential glimpse"),
+            ("bay-window seating recess", "bay-window recess"),
+            ("around a shallow reading bench", "around a shallow alcove"),
+            ("low residential seating corner", "low residential corner"),
+        ):
+            depth = depth.replace(old, new)
+        placement = ("small and peripheral at the outer edge or distant passage",
+                     "only inside the existing tiny residential glimpse",
+                     "only a subtle peripheral or background portion")[slot]
+        scene.update(collector_detail=detail, collector_detail_family=family,
+                     primary_cue=f"{detail}; {placement}", furniture_cue=detail,
+                     residential_cue_family=family, architectural_cue=depth)

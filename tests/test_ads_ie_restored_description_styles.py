@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import unittest
+from unittest.mock import patch
 import ads_page as ads
 import ads_ie_copy as writing
 import ads_ie_legacy_description as legacy
@@ -32,7 +33,8 @@ class RestoredDescriptionStylesTests(unittest.TestCase):
         self.assertEqual([v[3] for v in writing.ROUTES.values()], ["Claim Your Edition"] * 3)
         self.assertIn("reuse the same final records verbatim", prompt)
 
-    def test_existing_image_and_refresh_prompts_are_byte_identical(self):
+    @patch("ads_ie_scenes.resolve_collector_details")  # Freeze pre-detail scenes for this historical copy regression.
+    def test_existing_image_and_refresh_prompts_are_byte_identical(self, _details):
         args = self.args()
         record = ads.build_ads_result_record(**args)
         visuals = ads.resolve_standard_instant_experience_visuals(

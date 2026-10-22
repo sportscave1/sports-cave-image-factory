@@ -294,6 +294,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
         ("scene_signature", "room_type", "wall_colour", "wall_finish", "lighting")) for s in selections)
     construction = physical_realism.resolve(context.get("physical_product"))
     chosen = [dict(s) for s in selections] if fully_saved else scene_library.select(seed, {**context, "frame_finish": construction.get("frame_finish", "")}, recent_fingerprints, selections)
+    if not fully_saved:
+        scene_library.resolve_collector_details(chosen, seed, recent_fingerprints, selections)
     glazing = str(construction.get("glazing", "")).casefold()
     for index, (visual, scene) in enumerate(zip(visuals, chosen)):
         saved = selections[index] if index < len(selections) and isinstance(selections[index], dict) else {}
@@ -333,15 +335,20 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             shot_distance=("close product view with a subtle receding passage", "close straight-on product wall with one resolved architectural glimpse", "close product view with the resolved residential depth arrangement")[index],
             physical_product=context.get("physical_product", {}))
         visual["purpose"] = f"Image {index + 1}: {visual['room_type']}; {visual['camera_side']}"
+        collector_detail = bool(visual.get("collector_detail"))
+        hallway_joinery = "" if collector_detail else "restrained dark timber console/joinery, "
+        man_cave_detail = ("collector-home detail" if collector_detail else
+                           "leather media lounge, pool-table corner or restrained home-bar joinery")
         visual["scene_brief"] = (
             SCENE_REFERENCE_RULES +
             f"Room {index + 1} — HOME: {visual['room_type']} ({visual['home_setting']}); spatial structure: {visual.get('spatial_family', 'as saved')}. "
             f"WALL: {wall}. DEPTH: {visual['architectural_cue']}, positioned {visual.get('depth_position', 'as saved')}. PERIPHERAL CUE: {visual['primary_cue']}. "
             f"LIGHT: {visual['lighting']}; source position {visual.get('light_source_position', 'as saved')}. GLAZING: {visual['glazing_treatment']} " + (
-                "Premium collector hallway: close edition-led photography, premium textured wall, believable passage depth, restrained dark timber console/joinery, natural directional light and realistic glazing reflections. Supplied hallway references guide atmosphere only; never copy their product, footer wording or typography.",
+                f"Premium collector hallway: close edition-led photography, premium textured wall, believable passage depth, {hallway_joinery}natural directional light and realistic glazing reflections. Supplied hallway references guide atmosphere only; never copy their product, footer wording or typography.",
                 "Artwork-first architectural product wall: complete frame straight on, one tiny but recognisable softly lit home-context glimpse at the resolved perimeter. A timber strip, ceiling step or wall texture alone is insufficient. No full-room arrangement or foreground furniture; preserve close product prominence.",
-                "Premium residential man cave: show only the resolved leather media lounge, pool-table corner or restrained home-bar joinery glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s architectural product wall; retain close edition prominence.",
+                f"Premium residential man cave: show only the resolved {man_cave_detail} glimpse, one coherent setting. Keep it secondary, realistic and uncluttered; no trophies, helmets or invented memorabilia. Clearly different from Image 2’s architectural product wall; retain close edition prominence.",
             )[index] +
+            (scene_library.COLLECTOR_DETAIL_RULES if collector_detail else "") +
             SCENE_VISIBILITY_RULES
         )
 
