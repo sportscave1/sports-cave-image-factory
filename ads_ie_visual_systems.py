@@ -9,7 +9,17 @@ import sports_cave_physical_realism as physical_realism
 VERSION = "IE PREMIUM SCARCITY DISTINCT FAN ROOMS V4 ORIGINAL APPROVED FOOTER"
 FAMILIES = ("premium_scarcity",) * 3
 # Approved copy remains separate from fit eligibility; never truncate a claim.
+# New packs use exactly the six user-approved on-image headlines.
 HEADLINES = (
+    "STRICTLY LIMITED TO 100 EDITIONS",
+    "ONLY 100 EDITIONS AVAILABLE",
+    "LIMITED EDITION — 100 ONLY",
+    "ONLY 100 AVAILABLE",
+    "LIMITED TO 100 EDITIONS",
+    "100 EDITIONS ONLY",
+)
+# Read-only compatibility for existing saved packs; never fresh candidates.
+SAVED_LEGACY_HEADLINES = (
     "LIMITED TO 100 WORLDWIDE",
     "STRICTLY 100 EDITIONS. NO SECOND RUN.",
     "JUST 100 EDITIONS. EVER.",
@@ -53,14 +63,8 @@ def eligible_headlines(context):
     # Exact wording only; do not substitute another quantity into the bank.
     if context.get("edition_limit") != 100:
         return []
-    templates = [HEADLINES[4]]
-    if context.get("worldwide_verified") is True:
-        templates.append(HEADLINES[0])
-    if context.get("no_second_run_verified") is True:
-        templates.extend(HEADLINES[1:4])
-    if context.get("remaining_editions") == 100 and str(context.get("editions_sold")) in {"None", "0"}:
-        templates.append(HEADLINES[5])
-    return templates
+    return list(HEADLINES)
+
 
 
 def eligible_support_lines(context):
@@ -105,7 +109,7 @@ def coherent_pair(headline, support, *, require_scarcity=True):
 
 def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
     """Resolve one immutable pack, preferring unseen/least-recently-used approved copy."""
-    from itertools import combinations, combinations_with_replacement
+    from itertools import combinations
     eligible = [h for h in eligible_headlines(context) if headline_is_valid(h)]
     supports = eligible_support_lines(context)
     require_scarcity = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
@@ -126,10 +130,17 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
         return (value in values, -age(value, values), stable_rank(seed, value))
     frozen = len(selections) == 3 and all(isinstance(v, dict) and v.get("headline_text") and v.get("supporting_line") for v in selections)
     if frozen:
-        pairs = [(v["headline_text"], v["supporting_line"]) for v in selections]
+        # Preserve old repeated headlines and historical options on saved packs.
+        # Fresh-pack uniqueness must never rewrite an already resolved pack.
+        for visual, saved in zip(visuals, selections):
+            h, sub = saved["headline_text"], saved["supporting_line"]
+            if h not in (*HEADLINES, *SAVED_LEGACY_HEADLINES) or sub not in supports or not compatible(h, sub):
+                raise ValueError("Saved footer copy is outside the approved banks or pairing rules.")
+            visual.update({key: saved[key] for key in FOOTER_FIELDS if key in saved})
+            visual["fomo_line"] = sub
+        return
     else:
-        sets = list(combinations(eligible, 3) if len(eligible) >= 3 else combinations_with_replacement(eligible, 3))
-        sets = [c for c in sets if len(set(c)) == min(3, len(eligible))]
+        sets = list(combinations(eligible, 3))
         sets.sort(key=lambda c: (sum(h in old_heads for h in c), -sum(age(h, old_heads) for h in c),
                                 -len({footer_emphasis(h) for h in c}), stable_rank(seed, str(c))))
         # Bounded finite compatible domains; skip a headline set only if it cannot
@@ -150,8 +161,8 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
             -sum(age(p, old_pairs) for p in ps), stable_rank(seed, str(ps))))
     if any(h not in eligible or sub not in supports or not compatible(h, sub) for h, sub in pairs):
         raise ValueError("Saved footer copy is outside the eligible original approved bank or pairing rules.")
-    if len({h for h, _ in pairs}) != min(3, len(eligible)) or len({sub for _, sub in pairs}) != 3:
-        raise ValueError("Saved footer selections must maximise eligible headline variety and use distinct sublines.")
+    if len({h for h, _ in pairs}) != 3 or len({sub for _, sub in pairs}) != 3:
+        raise ValueError("Fresh footer selections require three different headlines and distinct sublines.")
     assigned = {h for h, _ in pairs}
     for index, (visual, (headline, support)) in enumerate(zip(visuals, pairs)):
         alternatives = sorted([h for h in eligible if h not in assigned and compatible(h, support)],

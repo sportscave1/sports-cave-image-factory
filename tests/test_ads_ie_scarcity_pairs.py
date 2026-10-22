@@ -20,16 +20,16 @@ class ScarcityPairTests(unittest.TestCase):
         for node in ast.parse(original).body:
             if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in ("HEADLINES", "APPROVED_SUPPORT_LINES"):
                 recovered[node.targets[0].id] = ast.literal_eval(node.value)
-        self.assertEqual(wording.HEADLINES, recovered["HEADLINES"])
+        self.assertEqual(wording.SAVED_LEGACY_HEADLINES, recovered["HEADLINES"])
         self.assertEqual(wording.APPROVED_SUPPORT_LINES, recovered["APPROVED_SUPPORT_LINES"])
 
-    def test_exact_pairs_rotate_and_allow_small_eligible_bank(self):
+    def test_exact_pairs_rotate_with_three_distinct_headlines(self):
         pairs = set()
         for seed in range(12):
             result = self.record(str(seed))
             rows = result["instant_experience_fingerprints"]
             self.assertEqual(len(rows), 3)
-            self.assertEqual(len({r["headline_text"] for r in rows}), 1)
+            self.assertEqual(len({r["headline_text"] for r in rows}), 3)
             self.assertEqual(len({r["supporting_line"] for r in rows}), 3)
             for row in rows:
                 head, sub = row["headline_text"], row["supporting_line"]
@@ -45,11 +45,11 @@ class ScarcityPairTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "verified 100"):
                 self.record(metadata={"edition_limit": limit})
         base = {"edition_limit": 100}
-        self.assertEqual(wording.eligible_headlines(base), [wording.HEADLINES[4]])
+        self.assertEqual(wording.eligible_headlines(base), list(wording.HEADLINES))
         full = {**base, "worldwide_verified": True, "no_second_run_verified": True,
                 "remaining_editions": 100, "editions_sold": 0}
         self.assertEqual(set(wording.eligible_headlines(full)), set(wording.HEADLINES))
-        self.assertNotIn(wording.HEADLINES[5], wording.eligible_headlines({**full, "editions_sold": 1}))
+        self.assertEqual(wording.eligible_headlines({**full, "editions_sold": 1}), list(wording.HEADLINES))
 
     def test_saved_unapproved_copy_is_rejected(self):
         result = self.record()
