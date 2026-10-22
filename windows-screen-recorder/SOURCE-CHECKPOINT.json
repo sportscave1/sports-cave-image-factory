@@ -1,0 +1,441 @@
+{
+  "purpose": "Development source backup only; not accepted or deployed",
+  "files": [
+    {
+      "path": "integrated-20261022/desktop_recorder/__init__.py",
+      "sha256": "5d27217dfaeb388faa08c75f6580cfe9b4077d0d282e5181815d86b118f054dc"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/catalogue.py",
+      "sha256": "e1ad4bf0e252d36ae8bc3a70888c652ac4b577ee0883eea73141a5e6bead376f"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/contract.py",
+      "sha256": "e29702de6eb7df40c1becef9485b00c6f035dea64eb7d81211d497f036d13b53"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/coordinator.py",
+      "sha256": "95489e9e26e1fba2a712dd5f12b76b43d7fdcba15f1eeaf0cc0255c2300090a4"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/dependencies.py",
+      "sha256": "19f81e333565a9935e643c2d2f75644504177744245e6d39096d605f3177d4f6"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/download_bridge.py",
+      "sha256": "1e27deb7ff4ccaed1264cf9aaa626b2cf219f98f0893705e2c9fcd984f7e71cc"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/downloads.py",
+      "sha256": "065577d9fb28cb1b6313cc20345420257db60068b3a2f109b64163ed4f69d396"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/helper.py",
+      "sha256": "3092b05ac9cf64b7511dab912664ae309ae416a14c16f103bbe9077df2a84108"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/integration.py",
+      "sha256": "46d1f90e635b9f0223122868d51b062ea17d9996819ec5c639226b93184bf583"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/lifecycle.py",
+      "sha256": "ea21a216c7c889e8ea7d52f7b2b549040037d3ad93e6040f5376ffbbbc1a99b8"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/playback.py",
+      "sha256": "4b9fb41285a83eb2dee45d754197f2ab794f73ba2c00331b9b7f1e09468fe32a"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/receipts.py",
+      "sha256": "30b550346e4658a068cd1c4f37dbc8562724a4dadd3a10cf780dded8a13daed5"
+    },
+    {
+      "path": "integrated-20261022/desktop_recorder/session_protocol.py",
+      "sha256": "418cf6a8e6af85c5a5baaafc683f36758642250b7964b0ed435206d8e359db51"
+    },
+    {
+      "path": "integrated-20261022/edge-adapter/accessibility.js",
+      "sha256": "45c70543fd2d7b722a698547343e24b6ca82d375d5e40c6458b798eec69f042d"
+    },
+    {
+      "path": "integrated-20261022/edge-adapter/browser-identity.js",
+      "sha256": "18bb48421c73659e0accc7f932d24bc50dc2273d8f464e84dc4f728ce32e831d"
+    },
+    {
+      "path": "integrated-20261022/edge-adapter/downloads.js",
+      "sha256": "e1b30613e6c44cbb118ff73394c6580a6edc8699cc882b7614f80bba6aa0dc85"
+    },
+    {
+      "path": "integrated-20261022/edge-adapter/manifest.json",
+      "sha256": "534f5d628011cfc993f73f66b33a14d9559e0a3d36c2151a217be518e81a145b"
+    },
+    {
+      "path": "integrated-20261022/native/BrowserDownload.cs",
+      "sha256": "68468bfd149c7176791b23763e1af4e314fe14eb96c5bd081bcd9ad07bce4df9"
+    },
+    {
+      "path": "integrated-20261022/native/BrowserIdentity.cs",
+      "sha256": "5426a382ae687f7b6118704c9ea6f82e3d2607c633cef9d05ee67cf8bd8910d1"
+    },
+    {
+      "path": "integrated-20261022/native/BrowserTabs.cs",
+      "sha256": "199c1849c1e522088a1817e2ff358355dfe5abd45b37ec340e0d9abfde90e01d"
+    },
+    {
+      "path": "integrated-20261022/native/build.ps1",
+      "sha256": "c51373a4f7931bfa582d2704e46a270599792fa8b0c63a480cfc9b7dcf15e729"
+    },
+    {
+      "path": "integrated-20261022/native/CopyText.cs",
+      "sha256": "c18838a96d9082f618fae4d7b192175fcb5e77e34f53421ce94aa7bd9c1006aa"
+    },
+    {
+      "path": "integrated-20261022/native/DesktopSession.cs",
+      "sha256": "4ad5d75964edb25248de861297f02d06c9171029b78faa905bb9ab1aed920c45"
+    },
+    {
+      "path": "integrated-20261022/native/DialogResult.cs",
+      "sha256": "6cf57c8f8946aa61276382a81471a4634484fccfbe5857b8c500ffc631cdf260"
+    },
+    {
+      "path": "integrated-20261022/native/DownloadReceiptHost.cs",
+      "sha256": "27c519d2d5083f54a8a83b490ce6e61c866d54bc240fafd8c023e32585a7e366"
+    },
+    {
+      "path": "integrated-20261022/native/DropdownSelection.cs",
+      "sha256": "81d5163bf646b6b54a53bb266201ded6fb3eff44451ccf8926b40a6ee2040092"
+    },
+    {
+      "path": "integrated-20261022/native/EdgeDropdownAdapter.cs",
+      "sha256": "44d304f7b4f52066aa95eb111c6bf4ee74701edd42653267414c4a683982a5d1"
+    },
+    {
+      "path": "integrated-20261022/native/Host.cs",
+      "sha256": "3fcac9d26f0bfa186163e1757644f08fe237bdf4c176572b9a87448dfd2212ca"
+    },
+    {
+      "path": "integrated-20261022/native/KeyboardIntent.cs",
+      "sha256": "47ff8615c2210ce71663d75a0eb39e2ba67542fb4595ddc21d9d3a0adee7a207"
+    },
+    {
+      "path": "integrated-20261022/native/NativeMetrics.cs",
+      "sha256": "ee4421f0d82f623f3e72f42aa1706d7e839d294e341a8ef749eb1b7b26a7a853"
+    },
+    {
+      "path": "integrated-20261022/native/PendingEditorClick.cs",
+      "sha256": "e40144d438c4b6ee9110ef1498e66445e0fb64140c28f8d58b6518aa543c2c1b"
+    },
+    {
+      "path": "integrated-20261022/native/Playback.cs",
+      "sha256": "0f5474523126a916451cb95730a47f203516ff9b9c4b68ed7b00685e2ce3bdb3"
+    },
+    {
+      "path": "integrated-20261022/native/ProductCopyResult.cs",
+      "sha256": "2020a203e6591b15ff07db4b7023cda5e0aa10a6ca73cebd580545706f899dcb"
+    },
+    {
+      "path": "integrated-20261022/native/ProductGenerationResult.cs",
+      "sha256": "2db65c07fd3dab7fa582177cd62b36adcb88e4f3179a2a8bdffcde249caf7f69"
+    },
+    {
+      "path": "integrated-20261022/native/ProductPickerResult.cs",
+      "sha256": "e972014b4ccaf9330d24f33d71866ca50f50c39d49b889dfd2e4517fa30bfc1e"
+    },
+    {
+      "path": "integrated-20261022/native/ProductPromptProof.cs",
+      "sha256": "95843a53dc9b348e619403926d6b10048be5cbf1bd65fe3a0a8d34c3e28cd514"
+    },
+    {
+      "path": "integrated-20261022/native/RecordingIndicator.cs",
+      "sha256": "0291532a577eb0b20f1de7e228c716d0840b15ea5f0d375ce155bad909947953"
+    },
+    {
+      "path": "integrated-20261022/native/RunTransfer.cs",
+      "sha256": "c1d790adbe6e1b80e6803e73ec93c9928be64feb62fc7266bf5076d97a93f17f"
+    },
+    {
+      "path": "integrated-20261022/native/ScrollAccess.cs",
+      "sha256": "ff96e0119be99e74bac51b659dec2dc0ec65d9177105fc04ad8cb8c22a1a6805"
+    },
+    {
+      "path": "integrated-20261022/native/ScrollTargetSearch.cs",
+      "sha256": "845dbba00cae0a78b05e9c30a3acab6ffadf7ea2f7bc6ce6afdef09734ee0bfd"
+    },
+    {
+      "path": "integrated-20261022/native/TaskList.cs",
+      "sha256": "d498a322d0ad8633342a750daa2cc447dee59296525794007d61a83468f04448"
+    },
+    {
+      "path": "integrated-20261022/native/ToolbarPresentation.cs",
+      "sha256": "7661bd56b483dba4979e75d3f2b186a80bd8b2a5f64754be2c4c9acc8808f03d"
+    },
+    {
+      "path": "integrated-20261022/native/WindowIdentity.cs",
+      "sha256": "b35aa0e086965e6955899f274e846415851d5b913dbf76be407f16b9307e01f0"
+    },
+    {
+      "path": "integrated-20261022/run_local.py",
+      "sha256": "5b7ae4146bc24773ffc0dc2c1e1db87d60dc4f74cc19fe282ad49db469dfb77e"
+    },
+    {
+      "path": "integrated-20261022/Start-LocalCandidate.ps1",
+      "sha256": "10ef4f927988e81b33f546131ca88ca694c14fbaa9ec9c3fd0d8fed29b363d3d"
+    },
+    {
+      "path": "integrated-20261022/stop_local.py",
+      "sha256": "696e03b924238b0b905eea2ed66dca07002371f4aefc15e7042c74662bbeeaec"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/__init__.py",
+      "sha256": "6471f87f864b3f770ba4fb9a26940bcc1c893568b6a65fa15a586c0724ec1a59"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/attention.py",
+      "sha256": "d6329b5fdea5d88672ff75127920a9ffb60998284ffb4f04767fd590e15a3104"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/demo.html",
+      "sha256": "9aa268683d77773aace526d1f392a214ab4b35a8056260fb905e9843c0eda537"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/demo.js",
+      "sha256": "582523902721d491d37ab66dc2553501f5997563763efbc464c8508d87305937"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/desktop_capabilities.py",
+      "sha256": "e417d06f4335ec1d1f700b20fdc5eb59c83c1595300abce51e86711ab7d25063"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/device.py",
+      "sha256": "2e6edd640a72896b7e19b717a189051e50bccc2001bbc4066f9226cbfc833dd1"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/editing.py",
+      "sha256": "5c1433e6f19f481c1d6c5721d524c8be216cccb60000178326fa751035638368"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/editor.js",
+      "sha256": "49923721819548dc35026ddb61e283f36e9064505ad2f04c8291fecb0c53b713"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/hosted_api.py",
+      "sha256": "b3bbc615dd1b8cdb4038a6730c13e81eeef95583f649771d077db4b89a491e30"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/install.py",
+      "sha256": "29e6b3acf29415bbab5f54474a889fc85dff431eee96884e7344065291960d6d"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/pair.html",
+      "sha256": "fde5de49cb51ba94001fa7b8c4e1a5b6f5ace5065cc37c94bd17dc0b8119f546"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/pair.js",
+      "sha256": "2c04daecdf19239db04e45f0ec1268809bb54601f7c8ea43402fc6969b764a03"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/panel.css",
+      "sha256": "1b6a33c9873931dc167242febe1ce7984e0d79dcaad7e380d2d6cea4d2472c41"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/panel.html",
+      "sha256": "cc89fdddd396827fbf822494de2789a0acec5ef67fdd444e19181e88ce62840d"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/panel.js",
+      "sha256": "4c7fe7fc922e02216e179c3c856f004270c85ad84d27c851a6368c1ffc0806cb"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/record.js",
+      "sha256": "ee9d0de864d2fc3eeeb86591ef249db954c96199c31cb715681730672da9fcf7"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/relay_store.py",
+      "sha256": "5d91ce03d212289ade288992818e572cafd87def7a92aa2a67dac4ec01e6b44d"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/release.py",
+      "sha256": "13901ae2da0f4d0a1376290686e1403f74eca45e7a05389323dcf02a455f7efe"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/release_health.py",
+      "sha256": "6ebd893f2afeb230425e9b7f1d37b3c206f60ae5a32ee4c2dfd0873809af34fa"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/requirements-windows.txt",
+      "sha256": "0c1d3a9e52a5f667a4dc2f7ab5ab755587fe019278ea50c4d72b34d3cfc3bc7f"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/requirements.txt",
+      "sha256": "f8e9328947d7a88faec055b8049561191238c2b378f635533888b6a018117c71"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/runner.py",
+      "sha256": "73998340ab06e1c28623e39ce6dc082ae69cfbafb1e8098f745f93dc8234b333"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/schema.py",
+      "sha256": "a729f2117b52a3a8db48da6db6863ae554007e69c4a5b73fad97c4030a98ab4b"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/server.py",
+      "sha256": "ceab1c07170235e8d32ae9a9d9900ba578c2db6bd31e44e4692e6a8c16b6075d"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/state_updates.py",
+      "sha256": "653fb6024b6deb7b3dfbc47f68214142635b520c6bbc571181bead5fb53b04ca"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/store.py",
+      "sha256": "5a3a96d5256620afded4de711fe4ef41c8ceb3472439075809b759e886817afe"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/ui.css",
+      "sha256": "4441634fd7ac6e600e41d3553d172802235c4287386cace4f3fc6fcb2d1832ed"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/ui.html",
+      "sha256": "1c0ae9798382dbe47dc8187f6c9ac47c573e0fec8130077cf9a41bd486e2be8c"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/ui.js",
+      "sha256": "1184aa9d3cc3a732cc20ba50f87882beadc58d35d844d2de13751a42e4b782ff"
+    },
+    {
+      "path": "integrated-20261022/task_recorder/windows.py",
+      "sha256": "512d9cb72d4ed2b812174fc74cdc3df5a07be143918bd19ce0564c79f1b269b7"
+    },
+    {
+      "path": "integrated-20261022/tests/adapter_fixture.py",
+      "sha256": "35b4fb87ddbe4124ba79771dec0e2aeeb9007efc3a889fba8f7618b22ce932fc"
+    },
+    {
+      "path": "integrated-20261022/tests/capture-fixture.html",
+      "sha256": "797ba0302800b9360c0dbc483c09adf4bd28969035b929b8f4c6225e15592421"
+    },
+    {
+      "path": "integrated-20261022/tests/CaptureFixture.cs",
+      "sha256": "78b3e02d936eabcaad267bb1f55bce7d9fcc3f55c6813264847bd95ffa384a51"
+    },
+    {
+      "path": "integrated-20261022/tests/controls-fixture.html",
+      "sha256": "31b55d24263f394b4aac54eebfb140167fd9c4c2079f1902f601bff986ad8ec3"
+    },
+    {
+      "path": "integrated-20261022/tests/CopyTextChecks.cs",
+      "sha256": "99c0a5244e7da245a00153ce98f0b1f4fb6e57f152bbeddfd30380dc074f4f28"
+    },
+    {
+      "path": "integrated-20261022/tests/diagnostics.test.mjs",
+      "sha256": "7fdefae1042802e5dda30ab20e45752ce082273c5240b3ff08263ede87b851ae"
+    },
+    {
+      "path": "integrated-20261022/tests/NativeFailureChecks.cs",
+      "sha256": "1831ba4b7b6bb289429419fee437c41669712f3b72a11ac7d29dd6677282fc64"
+    },
+    {
+      "path": "integrated-20261022/tests/NativeTransferAcceptance.cs",
+      "sha256": "0e528fdf3221c7aab89f90a7e1ae8b20a0ab9e75c02d51722596830811a15ec1"
+    },
+    {
+      "path": "integrated-20261022/tests/PendingEditorClickChecks.cs",
+      "sha256": "d0e7e1888563126f7f1526785c5eab97bebf8b25de132a3a7e5fbe3e58b95e2e"
+    },
+    {
+      "path": "integrated-20261022/tests/ProductCopyResultChecks.cs",
+      "sha256": "f7272cb91df35f88d9dbb4ceda32cad6c881f703774ec58be3e1a3c4d2039d68"
+    },
+    {
+      "path": "integrated-20261022/tests/ProductGenerationResultChecks.cs",
+      "sha256": "145212cc24313a9ec248bbb05abba060397884dbaad1573f7d40eb2e8a68e998"
+    },
+    {
+      "path": "integrated-20261022/tests/ProductPromptProofChecks.cs",
+      "sha256": "9713600fac6c8cfca499b62ec3c927dbba668153f44a7d2112ecb083ad56617c"
+    },
+    {
+      "path": "integrated-20261022/tests/RecordingIndicatorChecks.cs",
+      "sha256": "f334638139bd20b2eaaf1f0dd648b97459dd034857b0a3ddea2d3e6bd2ebec8d"
+    },
+    {
+      "path": "integrated-20261022/tests/ScrollTargetSearchChecks.cs",
+      "sha256": "678921ce811494e99a21ca4fdbd5f02bffe46ec99fa1dd3ca2518d77afae0a41"
+    },
+    {
+      "path": "integrated-20261022/tests/SharedScrollChecks.cs",
+      "sha256": "419e71a438831ec1fe4b1044fe57f93a136ad4eda01637ee89f2b3d0ac34e7f6"
+    },
+    {
+      "path": "integrated-20261022/tests/TaskListChecks.cs",
+      "sha256": "4972340ad445b2062de8ef27e8395d75f165632612055631c73a5e340dbe78f9"
+    },
+    {
+      "path": "integrated-20261022/tests/test_browser_navigation.py",
+      "sha256": "66fad3dc53b908952cdd7fdbb95fcd3212f72077a5814a1fa2d0119de31761e7"
+    },
+    {
+      "path": "integrated-20261022/tests/test_browser_tabs.py",
+      "sha256": "607343d6d96d9aba558d69a71ea1de3a7d84b2b926a722c789d8f92de4204cd5"
+    },
+    {
+      "path": "integrated-20261022/tests/test_copy_text.py",
+      "sha256": "3807ff21f1ae3226c5e5a6c13e9cc83279930d3689c88a8e8556d7025cdda538"
+    },
+    {
+      "path": "integrated-20261022/tests/test_download_receipt_host.py",
+      "sha256": "6f8d88ca953589ce5ef1de8e8573337d5abc5a2bb3312318d6614b88fd01c2cf"
+    },
+    {
+      "path": "integrated-20261022/tests/test_downloads.py",
+      "sha256": "7a2d5ba6416e152d6508eeee6d137a762a29dd0871f2644bfcdbbae7d678a6b2"
+    },
+    {
+      "path": "integrated-20261022/tests/test_foundation.py",
+      "sha256": "66974bbd90e7f14d117467f896ca2184a08e5b4c8e583f20d1e896df73ea5e37"
+    },
+    {
+      "path": "integrated-20261022/tests/test_phase2.py",
+      "sha256": "76fc497bb73d2224207273f10ece75e033e37dfcaa57e8b949cdbb97d3864abd"
+    },
+    {
+      "path": "integrated-20261022/tests/test_playback.py",
+      "sha256": "302a36593562a62208f5f2b6d6592b9960cee0e777e6ddcdcf3b19af5b527b4b"
+    },
+    {
+      "path": "integrated-20261022/tests/test_product_prompt.py",
+      "sha256": "af56a8ee4e860ebd90a8abb9c3c7053e23bb5368d455ea4afd19ffc733855023"
+    },
+    {
+      "path": "integrated-20261022/tests/test_receipts.py",
+      "sha256": "0194729c099b233bcbaec7b021dc74cbc9527c3660da797b5d4c80bf181a0d5e"
+    },
+    {
+      "path": "integrated-20261022/tests/test_recovery_ui.py",
+      "sha256": "e91972379b5d9904f690cbf44a428028786813639fe7e3c3759814bcdcbda3e8"
+    },
+    {
+      "path": "integrated-20261022/tests/test_session_protocol.py",
+      "sha256": "b57dec2ba9d38428e9956c395ac99f85b3fcc4c2d3265989048692f9fee3b504"
+    },
+    {
+      "path": "integrated-20261022/tests/test_transfers.py",
+      "sha256": "eca1b786ca5af5912f49e26d06a41f36b5b1af72a983a48a121cdb37ed91b252"
+    },
+    {
+      "path": "integrated-20261022/tests/ToolbarPresentationChecks.cs",
+      "sha256": "5bcc14bcbe14c50e747b371993b07e5e0341e430c2c9868b356e0ed39af5d7a0"
+    },
+    {
+      "path": "integrated-20261022/tests/TransferCaptureFixture.cs",
+      "sha256": "b1e4ca0bc40d9ef7ac2a8b6a9002ac3dbbb51c9e9d22aa35b33b59c1d21cbc07"
+    },
+    {
+      "path": "integrated-20261022/tests/WindowIdentityChecks.cs",
+      "sha256": "f6181d3b830e92471d3b8d677d1a80c5cbed6b9d194fa1a47182a51c99aaba20"
+    },
+    {
+      "path": "integrated-20261022/verify_restart.py",
+      "sha256": "95a5e3a368571ea0e0106c419b9c742a1b355f86c382685ab50e78ac807d832c"
+    }
+  ]
+}

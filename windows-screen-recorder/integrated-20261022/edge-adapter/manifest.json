@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Sports Cave recorder accessibility adapter (local)",
+  "version": "0.3.1",
+  "permissions": ["downloads", "nativeMessaging"],
+  "background": {"service_worker": "downloads.js"},
+  "description": "Local preview browser identity, dropdown accessibility and trusted button metadata. No field-content capture.",
+  "content_scripts": [
+    {
+      "matches": [
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "accessibility.js",
+        "browser-identity.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+.local-data/
+**/bin/
+*.zip
+*.psd
+*.psb
