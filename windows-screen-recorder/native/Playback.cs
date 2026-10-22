@@ -81,17 +81,18 @@ class DesktopPlayback {
     }
     static bool Match(AutomationElement e,Dictionary<string,object> target) {
         return e.Current.ControlType.ProgrammaticName=="ControlType."+(string)target["control_type"]&&
-            e.Current.AutomationId==(string)target["automation_id"]&&e.Current.Name==(string)target["name"];
+            (e.Current.AutomationId==(string)target["automation_id"]||
+                (string)target["control_type"]=="ComboBox"&&(string)target["automation_id"]==""&&((string)target["name"]).Length>0)&&e.Current.Name==(string)target["name"];
     }
-    static bool ScopeMatches(AutomationElement e,IntPtr hwnd,Dictionary<string,object> target) {
+    internal static bool ScopeMatches(AutomationElement e,IntPtr hwnd,Dictionary<string,object> target) {
         if(!target.ContainsKey("scope"))return false;
-        var expected=(System.Collections.ArrayList)target["scope"];int index=0;
+        var expected=(System.Collections.IList)target["scope"];int index=0;
         bool productCopy=ProductCopyResult.Supports(target);
         uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
         if(e.Current.ProcessId!=pid)return false;
         if(productCopy)return ProductCopyResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
         if(ProductGenerationResult.Supports(target))return ProductGenerationResult.ScopeMatches(expected,ProductAncestors(e,hwnd,pid));
-        int ancestryLimit=ProductPickerResult.Supports(target)?ProductPickerResult.AncestryLimit:16;
+        int ancestryLimit=DropdownSelection.AncestryLimit;
         var parent=TreeWalker.ControlViewWalker.GetParent(e);
         for(int depth=0;parent!=null&&depth<ancestryLimit;depth++){
             if(parent.Current.ProcessId!=pid)return false;
@@ -160,8 +161,10 @@ class DesktopPlayback {
         Check();
         if(matches.Count!=1)throw new Exception(matches.Count==0?"Prepare the recorded window before Play.":"More than one matching window is open. Close the ambiguity before Play.");
         if(normalized.Contains(matches[0])&&identityReportedStep!=currentStep){identityReportedStep=currentStep;
-            send("diagnostic",new {kind="playback_edge_document_identity",step=currentStep,
-                tab_count_changed=true,top_level_document_verified=true,dpi=Native.GetDpiForWindow(matches[0]),monitors=Native.GetSystemMetrics(80)});}
+            if(String.Equals(System.IO.Path.GetFileName((string)target["app"]),"msedge.exe",StringComparison.OrdinalIgnoreCase))
+                send("diagnostic",new {kind="playback_edge_document_identity",step=currentStep,
+                    tab_count_changed=true,top_level_document_verified=true,dpi=Native.GetDpiForWindow(matches[0]),monitors=Native.GetSystemMetrics(80)});
+            else send("diagnostic",new {kind="playback_named_document_identity",step=currentStep,dirty_marker_changed=true});}
         return matches[0];
     }
     static void Privacy(AutomationElement e,bool allowDisabled=false,bool allowOffscreen=false) {
@@ -169,16 +172,28 @@ class DesktopPlayback {
         if(!(value is bool)||(bool)value)throw new Exception("Protected or unclassified target. Playback refused.");
         if((!allowDisabled&&!e.Current.IsEnabled)||(!allowOffscreen&&e.Current.IsOffscreen))throw new Exception("Target is not ready.");
     }
+    internal sealed class ControlNotReadyException : Exception {
+        public ControlNotReadyException(string message):base(message){}
+    }
     AutomationElement Resolve(IntPtr hwnd,Dictionary<string,object> target,string kind,bool allowDisabled=false,bool allowOffscreen=false) {
         var root=AutomationElement.FromHandle(hwnd);
-        if(kind=="focus_window")return root;
-        var condition=new AndCondition(
+        if(kind=="focus_window"||kind=="window_state")return root;
+        if(target.ContainsKey("selector")) {
+            if(kind!="scroll"||(string)target["selector"]!=ScrollAccess.ScopedSelector)
+                throw new Exception("Unsupported scoped control selector.");
+            var scroll=ScrollAccess.ResolveScoped(hwnd,target);Privacy(scroll,allowDisabled,allowOffscreen);return scroll;
+        }
+        Condition condition=new AndCondition(
             new PropertyCondition(AutomationElement.AutomationIdProperty,(string)target["automation_id"]),
+            new PropertyCondition(AutomationElement.NameProperty,(string)target["name"]));
+        if((string)target["control_type"]=="ComboBox"&&(string)target["automation_id"]=="")condition=new AndCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.ComboBox),
             new PropertyCondition(AutomationElement.NameProperty,(string)target["name"]));
         var matches=root.FindAll(TreeScope.Descendants,condition);
         AutomationElement found=null;int count=0;
         for(int i=0;i<matches.Count;i++)if(Match(matches[i],target)&&ScopeMatches(matches[i],hwnd,target)){found=matches[i];count++;}
-        if(count!=1)throw new Exception(count==0?"Recorded control is not ready.":"Recorded control is ambiguous. No input sent.");
+        if(count==0)throw new ControlNotReadyException("Recorded control is not ready.");
+        if(count!=1)throw new Exception("Recorded control is ambiguous. No input sent.");
         Privacy(found,allowDisabled,allowOffscreen);return found;
     }
     static string DiagnosticGroupName(AutomationElement parent) {
@@ -200,7 +215,7 @@ class DesktopPlayback {
             new PropertyCondition(AutomationElement.AutomationIdProperty,(string)target["automation_id"]),
             new PropertyCondition(AutomationElement.NameProperty,(string)target["name"])));
         var candidates=new List<object>();
-        var expected=(System.Collections.ArrayList)target["scope"];
+        var expected=(System.Collections.IList)target["scope"];
         uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
         for(int i=0;i<matches.Count&&i<3;i++) {
             var candidate=matches[i];var ancestry=new List<object>();
@@ -233,6 +248,7 @@ class DesktopPlayback {
             id_candidate_count=matches.Count,expected_ancestor_count=expected.Count,candidates=candidates});
     }
     void Focus(IntPtr hwnd) {
+        DesktopWindowState.Restore(hwnd,Check);
         IntPtr initial=Native.Root(Native.GetForegroundWindow());
         if(initial==hwnd)return;
         if(!SetForegroundWindow(hwnd))throw new Exception("Could not safely focus the intended window. No input sent.");
@@ -249,15 +265,30 @@ class DesktopPlayback {
         }
         throw new Exception("The intended window did not become active. No input sent.");
     }
-    bool VerifyResult(IntPtr hwnd,Dictionary<string,object> target,string kind,object expected) {
+    bool VerifyResult(IntPtr hwnd,Dictionary<string,object> target,string kind,object expected,AutomationElement appliedScroll=null) {
         // Provider mutations can return before the browser publishes its new
         // accessibility value. Re-resolve and observe; never repeat the effect.
-        var wait=Stopwatch.StartNew();
-        while(wait.ElapsedMilliseconds<2000) {
+        double verificationBegan=ActionElapsedMs();
+        double? lastHorizontal=null,lastVertical=null,lastVerticalView=null;string lastScrollMethod=null;
+        while(ActionElapsedMs()-verificationBegan<2000) {
             Check();
             if(Native.Root(Native.GetForegroundWindow())!=hwnd)
                 throw new Exception("Focus changed while verifying the result. Action was not repeated.");
-            var current=Resolve(hwnd,target,kind,kind=="invoke");object pattern;
+            try {
+            // Scrolling can give an anonymous Chromium layout container a
+            // generated accessible name. Observe the exact provider we used,
+            // with its scope/protection rechecked; do not widen the selector.
+            // This reference lives only for this action's result verification.
+            var current=appliedScroll??Resolve(hwnd,target,kind,kind=="invoke");object pattern;
+            if(appliedScroll!=null) {
+                Privacy(current);
+                if(kind!="scroll"||!target.ContainsKey("selector")||
+                    (string)target["selector"]!=ScrollAccess.ScopedSelector||
+                    current.Current.ControlType.ProgrammaticName!="ControlType."+(string)target["control_type"]||
+                    current.Current.AutomationId!=(string)target["automation_id"]||
+                    !ScopeMatches(current,hwnd,target))
+                    throw new Exception("The applied scroll container identity changed. Action was not repeated.");
+            }
             if(kind=="invoke"&&ProductCopyResult.Supports(target)&&current.Current.IsEnabled&&
                 current.Current.HelpText==ProductCopyResult.Success)return true;
             if(kind=="set_text"&&current.TryGetCurrentPattern(ValuePattern.Pattern,out pattern)
@@ -266,18 +297,39 @@ class DesktopPlayback {
                 &&((TogglePattern)pattern).Current.ToggleState==((bool)expected?ToggleState.On:ToggleState.Off))return true;
             if(kind=="select"&&current.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)
                 &&((SelectionItemPattern)pattern).Current.IsSelected)return true;
+            if(kind=="select"&&current.Current.ControlType==ControlType.ComboBox) {
+                uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
+                if(DropdownSelection.Selected(current,pid)==(string)expected)return true;
+            }
             if(kind=="expand"&&current.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern)
                 &&((ExpandCollapsePattern)pattern).Current.ExpandCollapseState==((bool)expected?ExpandCollapseState.Expanded:ExpandCollapseState.Collapsed))return true;
-            if(kind=="scroll"&&current.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern)){
-                var desired=(Dictionary<string,object>)expected;var actual=((ScrollPattern)pattern).Current;
+            if(kind=="scroll"){
+                var desired=(Dictionary<string,object>)expected;
                 double horizontal=Convert.ToDouble(desired["horizontal"]),vertical=Convert.ToDouble(desired["vertical"]);
-                if((horizontal==ScrollPattern.NoScroll||Math.Abs(actual.HorizontalScrollPercent-horizontal)<=0.5)&&
-                   (vertical==ScrollPattern.NoScroll||Math.Abs(actual.VerticalScrollPercent-vertical)<=0.5))return true;
+                uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
+                var binding=ScrollAccess.Bind(current,pid,horizontal!=-1,vertical!=-1);
+                if(binding!=null){lastHorizontal=binding.Horizontal;lastVertical=binding.Vertical;lastVerticalView=binding.VerticalView;lastScrollMethod=binding.Method;}
+                if(binding!=null&&binding.MatchesViewport(desired)&&binding.At(horizontal,vertical)) {
+                    if(appliedScroll!=null)send("diagnostic",new {kind="scroll_result_same_container",step=currentStep,
+                        name_became_nonempty=current.Current.Name.Length!=0,scope_verified=true,
+                        observed_horizontal=lastHorizontal,observed_vertical=lastVertical,observed_vertical_view=lastVerticalView});
+                    return true;
+                }
+            }
+            }catch(ElementNotAvailableException) {
+                // Only observe a fresh, exactly scoped replacement after a
+                // rerender. The effect has already been sent; never repeat it.
+                appliedScroll=null;
+            }catch(ControlNotReadyException) {
+                // Ambiguity, protection failures and focus changes still stop.
             }
             if(cancelled.WaitOne(50))Check();
         }
+        if(kind=="scroll")send("diagnostic",new {kind="scroll_result_unverified",step=currentStep,expected=expected,
+            observed_horizontal=lastHorizontal,observed_vertical=lastVertical,observed_vertical_view=lastVerticalView,method=lastScrollMethod});
         return false;
     }
+    double ActionElapsedMs(){return (Stopwatch.GetTimestamp()-Interlocked.Read(ref started))*1000.0/Stopwatch.Frequency;}
     bool VerifyPicker(IntPtr hwnd,AutomationElement document) {
         uint pid;Native.GetWindowThreadProcessId(hwnd,out pid);
         var wait=Stopwatch.StartNew();
@@ -285,6 +337,22 @@ class DesktopPlayback {
             Check();
             if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Focus changed while opening the PSD picker.");
             if(ProductPickerResult.Open(document,hwnd,pid))return true;
+            if(cancelled.WaitOne(25))Check();
+        }
+        return false;
+    }
+    bool VerifyDialogClosed(IntPtr hwnd,Dictionary<string,object> button) {
+        var target=DialogResult.Target(button);var wait=Stopwatch.StartNew();
+        while(wait.ElapsedMilliseconds<2000) {
+            Check();if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Focus left the containing dialog's window.");
+            var root=AutomationElement.FromHandle(hwnd);
+            var dialogs=root.FindAll(TreeScope.Descendants,new AndCondition(
+                new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Window),
+                new PropertyCondition(AutomationElement.AutomationIdProperty,target["automation_id"]),
+                new PropertyCondition(AutomationElement.NameProperty,target["name"])));
+            int visible=0;foreach(AutomationElement dialog in dialogs)if(!dialog.Current.IsOffscreen&&ScopeMatches(dialog,hwnd,target))visible++;
+            if(visible==0)return true;
+            if(visible>1)throw new Exception("Dialog result is ambiguous. Action was not repeated.");
             if(cancelled.WaitOne(25))Check();
         }
         return false;
@@ -344,15 +412,30 @@ class DesktopPlayback {
                     if(cancelled.WaitOne(150))Check();
                 }
                 Check();
-                Focus(hwnd);
+                if(kind!="window_state")Focus(hwnd);
                 Check();
-                if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Window focus changed. No input sent.");
+                if(kind!="window_state"&&Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Window focus changed. No input sent.");
                 e=Resolve(hwnd,target,kind);object pattern;
                 Check();
-                if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Window focus changed during target validation. No input sent.");
+                if(kind!="window_state"&&Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Window focus changed during target validation. No input sent.");
                 switch(kind){
                     case "focus_window": verified=true;break;
+                    case "window_state":
+                        effectStarted=DesktopWindowState.Read(hwnd)!=(string)action["value"];
+                        DesktopWindowState.Apply(hwnd,(string)action["value"],Check);
+                        verified=DesktopWindowState.Read(hwnd)==(string)action["value"];break;
                     case "wait_ready":verified=true;break;
+                    case "copy_text":
+                        var copied=(Dictionary<string,object>)action["value"];
+                        CopyText.ValidateSource(e,copied);
+                        Check();
+                        if(Native.Root(Native.GetForegroundWindow())!=hwnd)
+                            throw new Exception("Focus changed before Copy. Clipboard was not replaced.");
+                        effectStarted=true;verified=CopyText.Apply(copied,()=>{
+                            // Never wait for Resume while occupying the UI dispatcher.
+                            if(cancelled.WaitOne(0)||!ready.WaitOne(0))throw new OperationCanceledException("Copy paused or stopped before clipboard replacement.");
+                            if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Copy window lost focus.");
+                        });break;
                     case "set_text":
                         if(!e.TryGetCurrentPattern(ValuePattern.Pattern,out pattern)||((ValuePattern)pattern).Current.IsReadOnly)
                             throw new Exception("This editor does not support safe semantic text replacement.");
@@ -365,6 +448,44 @@ class DesktopPlayback {
                         if(toggle.Current.ToggleState!=desired){effectStarted=true;toggle.Toggle();}
                         verified=VerifyResult(hwnd,target,kind,action["value"]);break;
                     case "select":
+                        if(e.Current.ControlType==ControlType.ComboBox) {
+                            uint selectedPid;Native.GetWindowThreadProcessId(hwnd,out selectedPid);
+                            string value=(string)action["value"];
+                            if(DropdownSelection.Selected(e,selectedPid)==value){verified=true;break;}
+                            if(!e.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern))throw new Exception("Dropdown does not expose supported semantic opening. No input sent.");
+                            effectStarted=true;((ExpandCollapsePattern)pattern).Expand();
+                            AutomationElement option=null;var search=Stopwatch.StartNew();int traversals=0;
+                            while(search.ElapsedMilliseconds<Math.Min(timeout,4000)) {
+                                Check();if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Focus left the dropdown's owning window.");
+                                e=Resolve(hwnd,target,kind);option=DropdownSelection.FindOption(e,selectedPid,value);
+                                if(option!=null&&!option.Current.IsOffscreen)break;
+                                if(option!=null&&option.TryGetCurrentPattern(ScrollItemPattern.Pattern,out pattern)) {
+                                    ((ScrollItemPattern)pattern).ScrollIntoView();Check();
+                                }else {
+                                    var lists=DropdownSelection.Lists(e,selectedPid);
+                                    if(lists.Count>1)throw new Exception("Dropdown scrolling has more than one owned list. No target guessed.");
+                                    if(lists.Count==1&&lists[0].TryGetCurrentPattern(ScrollPattern.Pattern,out pattern)) {
+                                        var listScroll=(ScrollPattern)pattern;
+                                        if(!listScroll.Current.VerticallyScrollable)throw new Exception("Chosen option is unavailable in the bounded dropdown list.");
+                                        if(++traversals>32)throw new Exception("Dropdown traversal reached its bounded limit.");
+                                        double before=listScroll.Current.VerticalScrollPercent;
+                                        listScroll.Scroll(ScrollAmount.NoAmount,ScrollAmount.LargeIncrement);
+                                        Check();
+                                        if(cancelled.WaitOne(50))Check();
+                                        if(Math.Abs(listScroll.Current.VerticalScrollPercent-before)<0.01)
+                                            throw new Exception("Dropdown reached its scroll boundary without exposing the chosen option.");
+                                    }
+                                }
+                                if(cancelled.WaitOne(50))Check();
+                            }
+                            if(option==null||option.Current.IsOffscreen)throw new Exception("Chosen option is not exposed by the owning dropdown. Selection was not guessed.");
+                            if(option.Current.IsOffscreen) {
+                                if(!option.TryGetCurrentPattern(ScrollItemPattern.Pattern,out pattern))throw new Exception("Dropdown option cannot be brought into view safely.");
+                                ((ScrollItemPattern)pattern).ScrollIntoView();Check();
+                            }
+                            if(!option.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern))throw new Exception("Owned dropdown option is no longer selectable.");
+                            ((SelectionItemPattern)pattern).Select();verified=VerifyResult(hwnd,target,kind,value);break;
+                        }
                         if(!e.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern))throw new Exception("Selection pattern unavailable.");
                         effectStarted=true;((SelectionItemPattern)pattern).Select();verified=VerifyResult(hwnd,target,kind,null);break;
                     case "expand":
@@ -374,10 +495,33 @@ class DesktopPlayback {
                         if(expandable.Current.ExpandCollapseState!=expansion){effectStarted=true;if((bool)action["value"])expandable.Expand();else expandable.Collapse();}
                         verified=VerifyResult(hwnd,target,kind,action["value"]);break;
                     case "scroll":
-                        if(!e.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern))throw new Exception("Scroll pattern unavailable.");
                         var position=(Dictionary<string,object>)action["value"];
-                        effectStarted=true;((ScrollPattern)pattern).SetScrollPercent(Convert.ToDouble(position["horizontal"]),Convert.ToDouble(position["vertical"]));
-                        verified=VerifyResult(hwnd,target,kind,position);break;
+                        double horizontal=Convert.ToDouble(position["horizontal"]),vertical=Convert.ToDouble(position["vertical"]);
+                        uint scrollPid;Native.GetWindowThreadProcessId(hwnd,out scrollPid);
+                        ScrollAccess scroll=null;var capabilityWait=Stopwatch.StartNew();bool reportedCapabilities=false;
+                        while(true) {
+                            Check();if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Focus left the verified scroll window. No scrolling sent.");
+                            e=Resolve(hwnd,target,kind);scroll=ScrollAccess.Bind(e,scrollPid,horizontal!=-1,vertical!=-1);
+                            if(scroll!=null&&scroll.MatchesViewport(position))break;
+                            if(!reportedCapabilities) {
+                                reportedCapabilities=true;
+                                var supported=new List<string>();foreach(var available in e.GetSupportedPatterns())supported.Add(available.ProgrammaticName);
+                                send("diagnostic",new {kind="scroll_replay_waiting_for_capability",step=step,
+                                    control_type=e.Current.ControlType.ProgrammaticName,automation_id=e.Current.AutomationId,
+                                    target_scope_verified=true,process_matches=e.Current.ProcessId==scrollPid,supported_patterns=supported,
+                                    viewport_matches=scroll!=null&&scroll.MatchesViewport(position),
+                                    observed_vertical_view=scroll==null?null:scroll.VerticalView,
+                                    expected_vertical_view=position.ContainsKey("vertical_view_size")?position["vertical_view_size"]:null});
+                            }
+                            if((Stopwatch.GetTimestamp()-Interlocked.Read(ref started))*1000.0/Stopwatch.Frequency>=timeout)throw new Exception("The recorded scroll container or viewport is not ready. No scrolling sent.");
+                            if(cancelled.WaitOne(75))Check();
+                        }
+                        send("diagnostic",new {kind="scroll_replay_binding",step=step,method=scroll.Method,
+                            readiness_wait_ms=capabilityWait.ElapsedMilliseconds,already_at_position=scroll.At(horizontal,vertical),
+                            before_horizontal=scroll.Horizontal,before_vertical=scroll.Vertical,before_vertical_view=scroll.VerticalView,
+                            desired_horizontal=horizontal,desired_vertical=vertical});
+                        if(!scroll.At(horizontal,vertical)){Check();effectStarted=true;scroll.Set(horizontal,vertical);}
+                        verified=VerifyResult(hwnd,target,kind,position,target.ContainsKey("selector")?e:null);break;
                     case "invoke":
                         if(!e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern))throw new Exception("Invoke pattern unavailable.");
                         bool productCopy=ProductCopyResult.Supports(target);
@@ -385,6 +529,9 @@ class DesktopPlayback {
                             throw new Exception("Copy prompt readiness changed. No input sent.");
                         bool productGenerate=ProductGenerationResult.Supports(target);
                         bool productPicker=ProductPickerResult.Supports(target);
+                        bool modalButton=DialogResult.Supports(target);
+                        if(modalButton&&!DialogResult.IsModal(Resolve(hwnd,DialogResult.Target(target),"wait_ready")))
+                            throw new Exception("The recorded modal dialog is not ready. No input sent.");
                         uint pickerPid;Native.GetWindowThreadProcessId(hwnd,out pickerPid);
                         var pickerDocument=productPicker?ProductPickerResult.Document(e,hwnd,pickerPid):null;
                         if(productPicker&&(pickerDocument==null||ProductPickerResult.Open(pickerDocument,hwnd,pickerPid)))
@@ -396,6 +543,7 @@ class DesktopPlayback {
                         // Provider return is not application result verification.
                         if(productCopy)verified=VerifyResult(hwnd,target,kind,null);
                         else if(productPicker){verified=VerifyPicker(hwnd,pickerDocument);if(!verified)reason="PSD picker did not open. Choose PSD was not repeated.";}
+                        else if(modalButton){verified=VerifyDialogClosed(hwnd,target);if(!verified)reason="The containing dialog did not close. Action was not repeated.";}
                         else if(productGenerate){verified=VerifyGeneration(hwnd,target,generationBefore);
                             if(!verified)reason="Generation acknowledgement was not observed within the action timeout. Generate was not repeated.";}
                         else reason="Button invoked; its application result needs verification before continuing.";

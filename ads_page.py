@@ -3869,10 +3869,10 @@ HEADLINE
 - Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
 - Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
-- Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
+- Use only the exact selected approved headline and subline; never add a product name or short product reference.
 - Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.
 - Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
-- Check readability at 256 x 256. Resolve any fit substitution at pack level before image calls, choosing another unused eligible approved option and retaining three unique headlines. Never repeat a sibling headline. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
+- Check readability at 256 x 256. Resolve any fit substitution at pack level before image calls, validating the already resolved approved option. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
 
 SUPPORTING LINE
 - Use no more than 12 words and no more than 70 characters including spaces and punctuation.
@@ -3931,13 +3931,13 @@ def instant_experience_on_image_headline_is_valid(headline):
 def shorten_instant_experience_on_image_headline(
     headline,
     *,
-    fallback="COLLECTOR EDITION",
+    fallback=None,
 ):
     clean = _normalise_instant_experience_on_image_line(headline)
     if instant_experience_on_image_headline_is_valid(clean):
         return clean
     clean_fallback = _normalise_instant_experience_on_image_line(fallback)
-    if instant_experience_on_image_headline_is_valid(clean_fallback):
+    if clean_fallback in ie_visuals.HEADLINES and instant_experience_on_image_headline_is_valid(clean_fallback):
         return clean_fallback
     raise ValueError("A concise Instant Experience on-image headline could not be resolved.")
 
@@ -5045,33 +5045,10 @@ def _wall_palette_key(context):
 
 
 def _resolved_overlay_copy(context, route):
-    edition_limit = context.get("edition_limit")
-    if edition_limit:
-        resolved = {
-            "headline_text": f"ONLY {edition_limit} WILL EVER EXIST",
-            "supporting_line": route["fomo_line"],
-            "cta_text": "CLAIM YOUR EDITION",
-            "edition_limit_used": str(edition_limit),
+    # Copy is resolved once for the complete pack by resolve_set_copy below.
+    return {"edition_limit_used": str(context.get("edition_limit") or "not verified"),
             "edition_limit_source": context.get("edition_limit_source") or "verified product metadata",
-            "scarcity_verified": True,
-        }
-    else:
-        resolved = {
-            "headline_text": "SPORTS CAVE COLLECTOR",
-            "supporting_line": "Premium collector-home presentation for the selected product.",
-            "cta_text": "CLAIM YOUR EDITION",
-            "edition_limit_used": "not verified",
-            "edition_limit_source": "safe evidence-gated fallback",
-            "scarcity_verified": False,
-        }
-    resolved.update(
-        resolve_instant_experience_on_image_copy(
-            resolved["headline_text"],
-            resolved["supporting_line"],
-            resolved["cta_text"],
-        )
-    )
-    return resolved
+            "scarcity_verified": bool(context.get("edition_limit"))}
 
 
 def resolve_standard_instant_experience_visuals(
@@ -5267,7 +5244,7 @@ MEANINGFUL SPORTS CAVE GOLD UNDERLINE
 - Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately {targets['underline_px']} px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
 - Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
 - The underline must move automatically when the edition limit changes.
-- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; for a safe non-scarcity fallback underline COLLECTOR when present, otherwise COLLECTION, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
+- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; underline only the approved important scarcity word, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
 - No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text."""
 
 
@@ -5470,7 +5447,7 @@ def build_instant_experience_canonical_prompt_v4(
     category = _normalise_option_label(category) or "selected sport category"
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
-    shared_realism_rules = physical_realism.build(visual.get("physical_product"), compact=True)
+    shared_realism_rules = physical_realism.build(visual.get("physical_product"), compact=True, glazing_requirement=ie_visuals.GLAZING_REQUIREMENT)
     ie_quality_contract = "\n\n".join((
         build_instant_experience_fixed_opaque_footer_rules(),
         build_instant_experience_on_image_copy_fit_rules(),
@@ -7186,7 +7163,7 @@ Before returning the campaign, privately compare several product-specific candid
 
 def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_settings=None):
     if campaign_type == "Instant Experience":
-        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in order legacy/identity, moment/emotion, insider/verified fact with a grounded fallback; one final AD COPY block per group. Preserve product truth, existing headline behaviour, setup and approved route CTAs."
+        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in order Legacy Standard, Framed Greatness, Choose a Side; one final AD COPY block per group. Preserve product truth, existing headline behaviour, setup and approved route CTAs."
     single_primary_rule = (
         "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
@@ -8507,7 +8484,7 @@ def get_instant_experience_setting(category):
 
 
 ADS_IE_COMBINED_EXECUTION_VERSION = "ADS_IE_COMBINED_EXECUTION_V1"
-IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as the straight-on architectural product wall with a small residential glimpse, and Ad 3 as the collector sitting-room setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
+IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPHY: Preserve the established Sports Cave composition, realism and premium collector presentation. Each fresh three-ad pack must depict three distinct homes and must vary from recent packs for OTHER products too. Keep Ad 1 as the collector hallway, Ad 2 as the straight-on architectural product wall with a small residential glimpse, and Ad 3 as the premium residential man cave setting. Vary the architecture, wall colour family, shade, finish, residential detail and lighting within those roles. Do not reuse the same room formula with different artwork. Apply the approved restrained collector typography consistently; never revert to large, heavy block text. Resolve these choices before generating exactly one image per ad.
 Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 
@@ -8521,6 +8498,7 @@ IE_EXECUTION_CHECKLIST = """EXECUTION CHECKLIST
 - Keep CLAIM YOUR EDITION unchanged.
 - Complete matching copy, the populated CSV and supplied setup.
 - Review the outputs and report unresolved defects.
+GLAZING CHECK: Every confirmed glazed framed edition must show believable surface reflections clearly visible at thumbnail size.
 
 Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification."""
 
@@ -8552,7 +8530,7 @@ def build_instant_experience_shared_template(physical_product=None):
         ie_visuals.SCARCITY_RULE,
         ie_visuals.SCENE_REFERENCE_RULES.strip(),
         ie_visuals.SCENE_VISIBILITY_RULES.strip(),
-        physical_realism.build(physical_product, compact=True),
+        physical_realism.build(physical_product, compact=True, glazing_requirement=ie_visuals.GLAZING_REQUIREMENT),
     ))
 
 
@@ -8639,7 +8617,7 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three unique footer headlines and three unique sublines. Complete any headline fit selection from this pack-only data before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and distinct sublines for a fresh pack; preserve saved selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
@@ -8648,7 +8626,7 @@ AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
 For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 OUTPUT REVIEW AND DELIVERY
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, perceptible source-consistent glazing when present, rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and three unique selected headlines/subline wording; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline/subline wording and maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
 Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
 If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
@@ -9325,7 +9303,7 @@ def build_ads_result_record(
             recent_fingerprints=recent_instant_experience_fingerprints,
             country=country,
         )
-        if campaign_type == "Instant Experience" and not clean_creative_refresh_context
+        if campaign_type == "Instant Experience"
         else []
     )
     if instant_experience_fingerprints:
@@ -9429,6 +9407,8 @@ def ads_prompt_contract_version_for_campaign(
             version += f"; WINNER LED THREE ENVIRONMENTS V3"
         elif campaign_type == 'Carousel':
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
+    if campaign_type == "Instant Experience":
+        version += '; ' + ie_visuals.VERSION
     return version + '; PHYSICAL FRAME REALISM V2'
 
 
@@ -11151,6 +11131,7 @@ def parse_instant_experience_copy_csv(data, result):
             [parsed[key][0]["primary_text"] for key in ie_copy.ROUTES],
             product=result.get("product_name"), recent=result.get("recent_instant_experience_fingerprints") or (),
             require_identity=ie_copy.IDENTITY_CONTRACT in str(result.get("master_prompt") or "") and all(len(rows) == 1 for rows in parsed.values()),
+            restored_styles=ie_copy.RESTORED_STYLES_CONTRACT in str(result.get("master_prompt") or ""),
         )
         if errors:
             raise InstantExperienceCopyCSVError(" ".join(errors) + " Revise only the conflicting descriptions; use at most four writing passes.")

@@ -26,6 +26,11 @@ class WindowIdentityChecks {
         Require(!WindowIdentity.PlaybackTitleMatches(app,recorded,"Recorder controls acceptance and 03 more pages"+suffix,page=>true),"leading-zero decorations are not guessed");
         Require(!WindowIdentity.PlaybackTitleMatches(app,recorded,"Recorder controls acceptance and 3 more pages - Personal - Microsoft Edge",page=>true),"other title decorations remain exact");
         Require(!WindowIdentity.PlaybackTitleMatches(app,recorded,"Recorder controls acceptance and 3 more pages"+suffix+"\n",page=>true),"unclassified titles remain rejected");
+        string notepad=@"C:\Windows\notepad.exe";
+        Require(WindowIdentity.PlaybackTitleMatches(notepad,"Recorder test.txt - Notepad","*Recorder test.txt - Notepad",page=>false),"named Notepad document survives its dirty marker");
+        Require(WindowIdentity.PlaybackTitleMatches(notepad,"*Recorder test.txt - Notepad","Recorder test.txt - Notepad",page=>false),"reset named document retains identity for replay");
+        Require(!WindowIdentity.PlaybackTitleMatches(notepad,"Recorder test.txt - Notepad","*Other.txt - Notepad",page=>false),"another named document remains rejected");
+        Require(!WindowIdentity.PlaybackTitleMatches(notepad,"Untitled - Notepad","*Untitled - Notepad",page=>false),"anonymous documents do not gain relaxed matching");
         Console.WriteLine("PASS "+checks+" native window-identity policy checks (no desktop input)");
     }
 }

@@ -133,24 +133,47 @@ class Playback:
                         run["state"] = "stopped"
                         self.repository.atomic(path, run)
                 if run["state"] in {"playing", "paused", "uncertain"}:
+                    run["interrupted_by_restart"] = True
                     run["state"] = "uncertain" if run["pending"] is not None else "stopped"
                     run["message"] = "Helper restarted. No action was repeated."
                     self.repository.atomic(path, run)
                 recovered.append(deepcopy(run))
         return recovered
 
+    def reviews(self):
+        """Only settled failures or journals recovered without a live executor."""
+        import json
+        rows = []
+        with self.lock:
+            for path in sorted(self.root.glob("*.json")):
+                run = json.loads(path.read_text(encoding="utf-8"))
+                if (run["state"] != "uncertain" or run.get("pending") is None or
+                    not (run.get("result_received") or run.get("interrupted_by_restart"))):
+                    continue
+                task = self.repository.get(run["task_id"], include_removed=True)
+                if self.repository.revision(task) != run["revision"]:
+                    continue
+                action = task["actions"][run["pending"]]
+                target = action["target"]
+                rows.append(dict(id=run["id"], revision=run["revision"], step=run["pending"],
+                                 name=self.repository.display_name(task),
+                                 summary=f"Step {run['pending'] + 1}: {action['kind']} — {target['name']}\nWindow: {target['window_key']}",
+                                 message=run.get("message", "Result was not confirmed.")))
+        return rows
+
     def reconcile_observed_result(self, run_id, revision, step, evidence):
         """Explicit operator observation closes uncertainty without replay or pass."""
         import json
-        if str(UUID(run_id)) != run_id or not isinstance(evidence, str) or not evidence.strip():
+        if (str(UUID(run_id)) != run_id or type(step) is not int or not isinstance(evidence, str)
+                or not evidence.strip() or len(evidence) > 500):
             raise Invalid("A specific run and operator observation are required.")
         with self.lock:
             path = self.root / (run_id + ".json")
             run = json.loads(path.read_text(encoding="utf-8"))
-            if (run["state"] != "uncertain" or not run.get("result_received") or
+            if (run["state"] != "uncertain" or not (run.get("result_received") or run.get("interrupted_by_restart")) or
                     run["revision"] != revision or run["pending"] != step):
                 raise Invalid("This result is not available for reconciliation.")
-            task = self.repository.get(run["task_id"])
+            task = self.repository.get(run["task_id"], include_removed=True)
             if self.repository.revision(task) != revision:
                 raise Invalid("The saved task revision changed.")
             run["reconciliation"] = dict(step=step, evidence=evidence[:500],

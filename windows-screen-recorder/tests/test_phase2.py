@@ -120,9 +120,41 @@ class Phase2Tests(unittest.TestCase):
                     {**command("stop"), "payload": []}):
             with self.assertRaises(Invalid):
                 self.c.apply(cmd)
-        with self.assertRaises(KeyError):
+        with self.assertRaisesRegex(Invalid, "Choose a starting window"):
             self.c.apply(command("record"))
         self.assertEqual(self.c.recording.state, "idle")
+
+    def test_desktop_transitions_survive_pause_save_and_restart_in_order(self):
+        self.c.apply(command("record", {"mode": "desktop_session"}))
+        window = {**self.window, "control_type": "Window", "scope": [], "name": "Test.txt - Notepad"}
+        def transition(value):
+            return dict(version=2, kind="window_state", requires=["windows.state.v2"],
+                        target=window, value=value, timeout_ms=2000)
+        self.event(transition("minimized"))
+        self.c.apply(command("pause"))
+        self.event(transition("maximized"))
+        self.c.apply(command("resume"))
+        self.event(transition("normal"))
+        self.c.apply(command("stop"))
+        self.c.apply(command("save", {"name": "Desktop transition check"}))
+        restarted = Coordinator(Path(self.tmp.name))
+        task = restarted.repository.get(self.c.last_saved["id"])
+        self.assertEqual(task["starting_context"], {"mode": "desktop_session", "binding": None})
+        self.assertEqual([a["value"] for a in task["actions"]], ["minimized", "normal"])
+
+    def test_window_transition_rejects_old_mode_and_invalid_states(self):
+        from desktop_recorder.contract import validate
+        self.start()
+        transition = dict(version=2, kind="window_state", requires=["windows.state.v2"],
+                          target={**self.window, "control_type": "Window", "scope": []},
+                          value="minimized", timeout_ms=2000)
+        task = {**self.c.recording.task, "actions": [transition]}
+        with self.assertRaisesRegex(Invalid, "desktop session"):
+            validate(task)
+        task["starting_context"] = {"mode": "desktop_session", "binding": None}
+        for value in (None, [], {}, True, "close", ""):
+            with self.subTest(value=value), self.assertRaises(Invalid):
+                validate({**task, "actions": [{**transition, "value": value}]})
 
 
 if __name__ == "__main__":

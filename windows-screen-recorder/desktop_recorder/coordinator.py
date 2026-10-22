@@ -15,6 +15,32 @@ from .playback import Playback
 from .receipts import Receipts
 
 
+def action_log(task, run=None):
+    """Bounded human-readable plan; never include captured field/clipboard text."""
+    if not task:
+        return []
+    labels = {"focus_window":"Switch window", "window_state":"Change window state",
+              "set_text":"Set text", "copy_text":"Copy text", "select":"Choose option",
+              "invoke":"Activate control", "toggle":"Change checkbox", "scroll":"Scroll",
+              "expand":"Expand or collapse", "wait_ready":"Wait for control"}
+    actions = task["actions"]
+    rows = []
+    for index in range(max(0, len(actions)-12), len(actions)):
+        action = actions[index]
+        target = action["target"]
+        name = target["name"] or target["automation_id"] or target["control_type"]
+        suffix = ""
+        if run:
+            if any(r["step"] == index and r.get("verified") for r in run["results"]):
+                suffix = " — verified"
+            elif run.get("pending") == index:
+                suffix = " — awaiting confirmation"
+        rows.append(f"{index+1}. {labels.get(action['kind'], action['kind'])}: {name}{suffix}")
+    if len(actions) > 12:
+        rows.insert(0, f"Latest 12 of {len(actions)} actions")
+    return rows
+
+
 class Coordinator:
     def __init__(self, root):
         load(root)
@@ -32,6 +58,7 @@ class Coordinator:
         self.pending_play = None
         self.native_instruction = None
         self.instruction_serial = 0
+        self.preview_task_id = None
 
     def instruct(self, kind, **data):
         self.instruction_serial += 1
@@ -56,7 +83,11 @@ class Coordinator:
         if r.state == "idle" and not playing:
             for path, metadata in self.repository.visible():
                 task = self.repository.get(path.stem)
-                rows.append(dict(id=task["id"], name=self.repository.display_name(task), revision=self.repository.revision(task)))
+                row = dict(id=task["id"], name=self.repository.display_name(task), revision=self.repository.revision(task),
+                           action_count=len(task["actions"]))
+                if task['id'] == self.preview_task_id or (self.preview_task_id is None and not rows):
+                    row['action_log'] = action_log(task)
+                rows.append(row)
         context = r.task
         if self.pending_play:
             context = self.repository.get(self.pending_play["task_id"])
@@ -66,6 +97,8 @@ class Coordinator:
                     elapsed_ms=r.elapsed_ms, message=r.problem or self.message,
                     last_saved=self.last_saved, tasks=rows,
                     instruction=self.native_instruction, run=run,
+                    reviews=self.playback.reviews() if r.state == "idle" and not playing else [],
+                    action_log=action_log(context, run if playing else None),
                     recording_name=self.repository.display_name(context) if context else "",
                     suggested_name=r.task["name"] if r.task else "")
 
@@ -85,7 +118,29 @@ class Coordinator:
             return {**self.state(), "ack": command["id"]}
         self.receipts.begin(command["id"], fingerprint)
         r, data, kind = self.recording, command["payload"], command["kind"]
-        if kind == "play":
+        if kind == "inspect_task":
+            if (r.state != "idle" or self.pending_play or (self.playback.run and
+                (self.playback.run['state'] in {'playing','paused'} or
+                 (self.playback.run['state'] == 'uncertain' and not self.playback.run.get('result_received')
+                  and not self.playback.run.get('interrupted_by_restart'))))):
+                raise Invalid("Inspect saved recordings when playback is stopped.")
+            task = self.repository.get(data['id'])
+            if self.repository.revision(task) != data['revision']:
+                raise Invalid("Select the current saved revision.")
+            self.preview_task_id = task['id']
+        elif kind == "reconcile":
+            if (r.state != "idle" or self.pending_play or
+                (self.playback.run and self.playback.run["state"] in {"playing", "paused"}) or
+                (self.playback.run and self.playback.run["state"] == "uncertain" and
+                 not self.playback.run.get("result_received") and not self.playback.run.get("interrupted_by_restart"))):
+                raise Invalid("Wait until recording and playback have stopped before reviewing a result.")
+            if set(data) != {"run_id", "revision", "step", "evidence", "reviewed"} or data["reviewed"] is not True:
+                raise Invalid("Review the application result and enter an observation first.")
+            reviewed = self.playback.reconcile_observed_result(data["run_id"], data["revision"], data["step"], data["evidence"])
+            self.recovered_runs = [reviewed if old["id"] == reviewed["id"] else old for old in self.recovered_runs]
+            self.message = "Review saved. Failed run preserved; no action repeated. Prepare the windows before a new Play."
+            self.instruct("disarm")
+        elif kind == "play":
             if r.state != "idle" or self.pending_play or (self.playback.run and self.playback.run["state"] in {"playing", "paused", "uncertain"}):
                 raise Invalid("Finish the current recording or run first.")
             task = self.repository.get(data["id"])
@@ -96,6 +151,7 @@ class Coordinator:
             if any(a["version"] != 2 for a in task["actions"]):
                 raise Invalid("This early desktop draft lacks scoped targets. Record a new task; the original is unchanged.")
             self.pending_play = dict(run_id=command["id"], task_id=data["id"], revision=data["revision"])
+            self.preview_task_id = task['id']
             self.instruct("arm", require_local_confirmation=data.get("confirm_on_toolbar") is True)
             self.message = "Starting. Confirm Start playback on the Windows toolbar if requested."
         elif kind == "play_ready":
@@ -142,10 +198,17 @@ class Coordinator:
             if self.pending_play or (self.playback.run and self.playback.run["state"] in {"playing", "paused", "uncertain"}):
                 raise Invalid("Finish or reconcile playback before recording.")
             from .contract import identity
-            selected = identity(data["window"])
-            r.record({"mode": "prepared", "binding": None, "window": selected}, indicator_visible=True)
+            mode = data.get("mode", "prepared")
+            if mode not in {"prepared", "desktop_session"}:
+                raise Invalid("Unknown recording scope.")
+            context = {"mode": mode, "binding": None}
+            if data.get("window") is not None:
+                context["window"] = identity(data["window"])
+            elif mode != "desktop_session":
+                raise Invalid("Choose a starting window.")
+            r.record(context, indicator_visible=True)
             self.playback.run = None  # Historical run remains in its durable journal.
-            self.message = "Recording supported actions. Prepared windows remain unchanged."
+            self.message = "Recording desktop session across supported applications." if mode == "desktop_session" else "Recording supported actions in prepared windows."
         elif kind == "event":
             r.accept(data["action"], generation=data["generation"], privacy=data["privacy"])
             self.message = str(len(r.task["actions"]) if r.task else 0) + " actions captured"
@@ -177,6 +240,7 @@ class Coordinator:
                 return {**self.state(), "ack": command["id"]}
             before = time.perf_counter()
             self.last_saved = r.save(data["name"])
+            self.preview_task_id = self.last_saved['id']
             self.last_saved["save_ms"] = round((time.perf_counter() - before) * 1000, 2)
             self.message = "Saved. Nothing has been executed."
         elif kind == "discard":
@@ -205,6 +269,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--accept-injected-test-input", action="store_true")
+    parser.add_argument("--native", type=Path, help="Exact local development executable to run")
     args = parser.parse_args()
     root = args.data.resolve()
     protected = Path(os.environ["LOCALAPPDATA"]) / "SportsCaveOS"
@@ -216,14 +281,22 @@ def main():
     from task_recorder.server import instance_lock
     with instance_lock(root / "candidate.lock"):
         coordinator = Coordinator(root)
-        native = Path(__file__).resolve().parents[1] / "native/bin/DesktopRecorder.exe"
+        native = (args.native or Path(__file__).resolve().parents[1] / "native/bin/DesktopRecorder.exe").resolve()
+        native_sha256 = hashlib.sha256(native.read_bytes()).hexdigest()
+        manifest_path = native.parent / "build-manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+            if manifest["executable_sha256"] != native_sha256:
+                raise SystemExit("Native executable does not match its build manifest.")
         command = [str(native), "--candidate"]
         if args.accept_injected_test_input:
             command.append("--accept-injected-test-input")
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True, encoding="utf-8",
                                  creationflags=subprocess.CREATE_NO_WINDOW)
-        (root / "candidate-process.json").write_text(json.dumps({"coordinator": os.getpid(), "native": child.pid}))
+        (root / "candidate-process.json").write_text(json.dumps({"coordinator": os.getpid(), "native": child.pid,
+            "native_path": str(native), "native_sha256": native_sha256,
+            "injected_test_input": args.accept_injected_test_input}))
         def publish(state):
             child.stdin.write(json.dumps(state, ensure_ascii=True) + "\n")
             child.stdin.flush()
