@@ -1,9 +1,14 @@
 # Auto Editions package transfer investigation — 22 October 2026
 
+This is the historical pre-release investigation. The subsequently authorized
+deployment and actual recovery are recorded in the
+[release report](AUTO_EDITIONS_PACKAGE_TRANSFER_RELEASE_20261022.md).
+
 Studio task `20261022-5aaf04e9`, owner `codex-autoeditions-20261022-transfer`.
-Isolated branch starts at approved base `6e2805d0`. Changes are local and
-uncommitted. No deployment, production settings, source PSD, mapping, allocation,
-customer automation, Meta Ads workflow or production queue row was changed.
+The isolated branch started at approved base `6e2805d0`. At the investigation
+checkpoint, changes were local and uncommitted; no deployment, production
+settings, source PSD, mapping, allocation, customer automation, Meta Ads workflow
+or production queue row had been changed.
 
 ## Exact failure and preserved evidence
 
@@ -178,7 +183,7 @@ and topology validation passed. Final acceptance/diagnostic checks: 7 passed;
 normal-retry helper-built actual packet HTTP verification: 1 passed. Additional
 final checks are recorded in Studio.
 
-**Live recovery is not complete.** The production row remains Blocked with its
+**At the pre-release checkpoint, live recovery was not complete.** The production row remained Blocked with its
 original PSD, mapping and allocation preserved. No artifacts need deleting: there
 is no finalized failed ZIP, and completed exports are compatible. After an
 explicitly authorized coordinated release and required provider/native-Postgres/
@@ -186,7 +191,7 @@ retention/resource acceptance, retry this same design through normal onboarding.
 Require actual receipt/publication and technical/production readiness results;
 do not reset allocation, force approval, broaden the image budget or mark it Ready.
 
-Repository AGENTS.md requires explicit commit/push/deploy authorization. The task
-also explicitly prohibits production settings changes. Neither rule is overridden
-by this local investigation; production acceptance activation needs separate
-authorization before live recovery can proceed.
+Repository AGENTS.md required explicit commit/push/deploy authorization, and the
+initial task prohibited production settings changes. The owner subsequently
+authorized the release, Companion update, required resumable acceptance
+configuration and normal Tempted retry; see the release report for those results.
