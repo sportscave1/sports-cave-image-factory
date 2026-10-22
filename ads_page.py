@@ -7163,7 +7163,7 @@ Before returning the campaign, privately compare several product-specific candid
 
 def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_settings=None):
     if campaign_type == "Instant Experience":
-        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in order legacy/identity, moment/emotion, insider/verified fact with a grounded fallback; one final AD COPY block per group. Preserve product truth, existing headline behaviour, setup and approved route CTAs."
+        return f"{META_WINNER_COPY_BLOCK_VERSION}\n{ie_copy.VERSION}: exactly three copy sets in order Legacy Standard, Framed Greatness, Choose a Side; one final AD COPY block per group. Preserve product truth, existing headline behaviour, setup and approved route CTAs."
     single_primary_rule = (
         "Instant Experience must always preserve exactly three route groups with three Description Copy, "
         "three Headline and three CTA options inside each group."
@@ -11130,6 +11130,7 @@ def parse_instant_experience_copy_csv(data, result):
             [parsed[key][0]["primary_text"] for key in ie_copy.ROUTES],
             product=result.get("product_name"), recent=result.get("recent_instant_experience_fingerprints") or (),
             require_identity=ie_copy.IDENTITY_CONTRACT in str(result.get("master_prompt") or "") and all(len(rows) == 1 for rows in parsed.values()),
+            restored_styles=ie_copy.RESTORED_STYLES_CONTRACT in str(result.get("master_prompt") or ""),
         )
         if errors:
             raise InstantExperienceCopyCSVError(" ".join(errors) + " Revise only the conflicting descriptions; use at most four writing passes.")
