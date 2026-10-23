@@ -180,6 +180,50 @@ def test_interrupted_photoshop_releases_only_its_lease_and_preserves_source(tmp_
     assert not (folder/'prepared.zip').exists()
 
 
+def test_failure_reconnect_honours_verified_completion_without_failure_or_reupload(tmp_path):
+    folder=tmp_path/'job';folder.mkdir()
+    (folder/'prepared.zip').write_bytes(b'retained until verified')
+    row=dict(folder=folder,grant={'base_url':'https://sports-cave-image-factory.onrender.com','ticket':'a','secret':'b'},
+             context={'automatic':True,'source':{'file_id':'id:fixture'}},status='Blocked',
+             error='HTTP 409 after server completed',checkpoint_pending=True)
+    completed=dict(preparation_hash='c'*64,status='Cloud Ready',source=row['context']['source'])
+    with patch.object(local,'reconnect',return_value=completed) as reconnect,\
+         patch('requests.post') as fail_request,patch.object(local,'release_verified_temporary_files') as cleanup:
+        local.report_failure(row)
+        local.report_failure(row)  # Repeated error callbacks cannot report or upload again.
+    reconnect.assert_called_once_with(row);fail_request.assert_not_called();cleanup.assert_called_once_with(row)
+    saved=json.loads((folder/'job-state.json').read_text())
+    assert row['status']=='Prepared' and row['error']=='' and not row['checkpoint_pending']
+    assert saved['status']=='Prepared' and saved['error']=='' and not saved['checkpoint_pending']
+
+
+def test_failure_reconnect_conflict_retains_package_and_does_not_invent_completion(tmp_path):
+    folder=tmp_path/'job';folder.mkdir();archive=folder/'prepared.zip';archive.write_bytes(b'recovery')
+    row=dict(folder=folder,grant={},context={'automatic':True},status='Blocked',error='source conflict')
+    with patch.object(local,'reconnect',side_effect=ValueError('Completed source changed.')),\
+         patch('requests.post') as fail_request,patch.object(local,'finish_upload') as finish:
+        local.report_failure(row)
+    fail_request.assert_not_called();finish.assert_not_called()
+    assert row['status']=='Blocked' and row['checkpoint_pending'] and archive.read_bytes()==b'recovery'
+
+
+def test_retained_completion_reconciles_live_row_without_reclaim_or_upload(tmp_path,monkeypatch):
+    folder=tmp_path/('a'*48);folder.mkdir()
+    ctx=dict(automatic=True,source={'file_id':'id:fixture','revision':'rev1'},product_gid='gid://shopify/Product/1',lease_token='original')
+    row=dict(folder=folder,context=ctx,status='Blocked',error='lost acknowledgement',checkpoint_pending=True)
+    local.journal(row)
+    completed=dict(preparation_hash='c'*64,status='Cloud Ready',source=ctx['source'])
+    monkeypatch.setattr(local,'RECOVERY_CURSOR',0)
+    with patch.object(local,'HOST_FILE',tmp_path/'host.dpapi'),patch.object(local,'JOBS',{folder.name:row}),\
+         patch.object(local,'host_request',return_value={'completed':completed}) as request,\
+         patch.object(local,'start') as start,patch.object(local,'report_failure') as fail,\
+         patch.object(local,'release_verified_temporary_files') as cleanup:
+        assert local.recover_retained({}) is True
+        assert local.recover_retained({}) is False
+    request.assert_called_once();start.assert_not_called();fail.assert_not_called();cleanup.assert_called_once_with(row)
+    assert row['status']=='Prepared' and row['error']=='' and not row['checkpoint_pending']
+
+
 def test_existing_shared_photoshop_lock_is_never_stolen(tmp_path):
     lock=tmp_path/'Documents'/'SportsCavePrintJobs'/'processor.lock'
     lock.parent.mkdir(parents=True);lock.write_bytes(b'unknown existing operation')

@@ -246,7 +246,9 @@ def recover_retained(config):
             raise
         if result.get('completed'):
             if result['completed']['source']!=ctx['source']:raise ValueError('Completed source changed.')
-            row=dict(context=ctx,folder=file.parent,status='Prepared',created=time.monotonic())
+            row=JOBS.get(file.parent.name)
+            if row is None:row=dict(context=ctx,folder=file.parent,status='Prepared',created=time.monotonic())
+            elif row['context']!=ctx or row['folder']!=file.parent:raise ValueError('Retained preparation identity changed.')
             finish_upload(row,result['completed'],time.monotonic());journal(row);return True
         if data.get('checkpoint_pending'):
             row=dict(data,grant=result['grant'],folder=file.parent)
@@ -605,7 +607,7 @@ def upload_prepared(key,archive):
 
 def finish_upload(row,result,started):
     global HOST_LAST_COMPLETED_AT
-    row.update(status='Prepared',preparation_hash=result['preparation_hash'])
+    row.update(status='Prepared',error='',preparation_hash=result['preparation_hash'])
     row.setdefault('timings',{})['upload_validate_seconds']=round(time.monotonic()-started,3)
     from auto_editions_performance import throughput,resources
     throughput(row['timings'],'package_bytes','upload_validate_seconds','upload_end_to_end')
@@ -649,7 +651,10 @@ def report_failure(row):
     row['checkpoint_pending']=True; journal(row)
     try:
         import requests
-        reconnect(row)
+        completed=reconnect(row)
+        if completed:
+            finish_upload(row,completed,time.monotonic())
+            return
         grant=row['grant']
         response=requests.post(grant['base_url']+'/api/auto-editions/onboarding/fail?'+urlencode({'ticket':grant['ticket']}),
             json=dict(reason=row['error'][:500],repair=bool(row.get('repair')),diagnostic=row.get('diagnostic') or safe_diagnostic(row['error'],row.get('phase','Unknown'))),
