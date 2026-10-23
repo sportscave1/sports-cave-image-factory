@@ -23,6 +23,13 @@ class ProductCopyResultChecks {
     static void Main(string[] args) {
         string path=args[0];var target=Target(path);
         Require(ProductCopyResult.Supports(target),"actual captured Product Copy target is supported");
+        ((Dictionary<string,object>)((ArrayList)target["scope"])[2])["automation_id"]="sc-product-upload-copy";
+        Require(ProductCopyResult.Supports(target),"explicit application Copy frame is supported");
+        var identified=(ArrayList)target["scope"];
+        Require(ProductCopyResult.ScopeMatches(identified,Actual(identified)),"identified frame matches exactly");
+        ((Dictionary<string,object>)identified[2])["automation_id"]="another-frame";
+        Require(!ProductCopyResult.Supports(target),"unrecognized frame identity remains blocked");
+        target=Target(path);
         target["name"]="Copied";Require(!ProductCopyResult.Supports(target),"transient labels cannot identify the command");
         target=Target(path);target["automation_id"]="copyImage";Require(!ProductCopyResult.Supports(target),"image copy requires its own result contract");
         target=Target(path);target["app"]=@"C:\Other\other.exe";Require(!ProductCopyResult.Supports(target),"other applications cannot inherit verification");
@@ -50,6 +57,6 @@ class ProductCopyResultChecks {
         Require(ProductCopyResult.ScopeMatches(withHost,Actual(expected)),"older saved host metadata can disappear without changing the recording");
         actual=Actual(expected);for(int i=0;i<17;i++)actual.Insert(0,new ProductCopyResult.ScopeAnchor("Pane","",()=>""));
         Require(!ProductCopyResult.ScopeMatches(expected,actual),"actual scope traversal is bounded");
-        Console.WriteLine("PASS 17 Product Copy identity/privacy checks against actual saved target (no desktop input)");
+        Console.WriteLine("PASS 20 Product Copy identity/privacy checks against actual saved target (no desktop input)");
     }
 }

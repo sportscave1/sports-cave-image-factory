@@ -93,6 +93,25 @@ class Phase2Tests(unittest.TestCase):
         self.c.apply(command("save", {"name": "Retry"}))
         self.assertEqual(self.c.last_saved["id"], original)
 
+    def test_stop_after_provider_interrupt_keeps_review_reachable(self):
+        self.start()
+        self.event()
+        original = self.c.recording.task["id"]
+        self.c.apply(command("interrupt", {"reason": "Accessibility provider timed out"}))
+        stop = command("stop")
+        self.c.apply(stop)
+        self.c.apply(stop)
+        self.assertEqual(self.c.recording.state, "interrupted")
+        self.assertEqual(self.c.repository.load_draft()["state"], "interrupted")
+        self.assertIsNone(self.c.playback.run)
+        with self.assertRaisesRegex(Invalid, "Stop before Save"):
+            self.c.apply(command("save", {"name": "Unreviewed"}))
+        self.c.apply(command("review"))
+        self.c.apply(command("save", {"name": "Reviewed incomplete draft"}))
+        self.assertEqual(self.c.last_saved["id"], original)
+        self.assertEqual(len(self.c.repository.get(original)["actions"]), 1)
+        self.assertIsNone(self.c.playback.run)
+
     def test_catalogue_cache_legacy_passthrough_and_play_guard(self):
         self.start()
         self.event()

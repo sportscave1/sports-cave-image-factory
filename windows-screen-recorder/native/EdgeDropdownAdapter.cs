@@ -6,6 +6,8 @@ using System.Windows.Automation;
 // Read the local Edge extension's bounded accessibility projection. Native
 // physical-input hooks remain the only source of capture intent.
 static class EdgeDropdownAdapter {
+    public static Action Observed;
+    static int reported;
     const string Prefix="Sports Cave Edge select v1: ";
     const string OwnerMarker="Sports Cave Edge select owner v1";
     public static AutomationElement OwnedList(AutomationElement combo,uint pid) {
@@ -43,12 +45,13 @@ static class EdgeDropdownAdapter {
         selected=null;
         var description=combo.Current.HelpText;
         int start=description.LastIndexOf(Prefix,StringComparison.Ordinal);
-        if(start<0)return false;
+        if(start<0){if(description.Contains("Sports Cave Edge select v"))throw new Exception("Incompatible browser adapter protocol. Load the local candidate adapter.");return false;}
         if(!String.Equals(Path.GetFileName(System.Diagnostics.Process.GetProcessById((int)pid).MainModule.FileName),"msedge.exe",StringComparison.OrdinalIgnoreCase))
             throw new Exception("Edge adapter identity appeared outside Edge.");
         if(description.Length>2000)throw new Exception("Edge selected-value projection exceeded its bound.");
         selected=Capture.Safe(Uri.UnescapeDataString(description.Substring(start+Prefix.Length)));
         if(selected.Length>180)throw new Exception("Edge selected value exceeded its bound.");
+        if(Observed!=null&&System.Threading.Interlocked.Exchange(ref reported,1)==0)Observed();
         return true;
     }
     public static bool Contains(AutomationElement combo,uint pid,Point point) {

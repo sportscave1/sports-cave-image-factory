@@ -5,6 +5,7 @@
  */
 (() => {
   'use strict';
+  try { if (!['http://127.0.0.1:18962','http://127.0.0.1:18963', 'https://sports-cave-image-factory.onrender.com'].includes(top.location.origin)) return; } catch { return; }
   const prefix = 'Sports Cave Edge select v1: ';
   const groupMarker = 'Sports Cave Edge select owner v1';
   const privateName = /password|passwd|credential|secret|token|authorization|one.?time|otp|api.?key/i;

@@ -17,6 +17,9 @@ REQUIRED = {"task_recorder/server.py", "task_recorder/install.py", "task_recorde
             "task_recorder/requirements-windows.txt", "native-source/build.ps1",
             "desktop_recorder/helper.py", "desktop_recorder/bin/DesktopRecorder.exe", "Install.ps1", "Install.cmd"}
 LIMIT = 128 * 1024 * 1024
+REQUIRED_V2 = {"desktop_recorder/download_install.py", "desktop_recorder/bin/build-manifest.json",
+               "edge-adapter/manifest.json", "edge-adapter/accessibility.js", "edge-adapter/browser-identity.js",
+               "edge-adapter/downloads.js", "download-host/DownloadReceiptHost.exe"}
 
 
 def canonical(value):
@@ -44,11 +47,13 @@ def windows_x64(data):
 
 
 def verify_files(manifest, read):
-    if set(manifest) != {"format", "version", "protocol", "files"} or manifest["format"] != FORMAT or manifest["version"] != 1 or manifest["protocol"] != 4:
+    if set(manifest) != {"format", "version", "protocol", "files"} or manifest["format"] != FORMAT or manifest["version"] not in {1,2} or manifest["protocol"] != 4:
         raise ValueError("Unsupported Windows recorder package.")
     files = manifest["files"]
     if not isinstance(files, dict) or not REQUIRED <= files.keys() or len(files) > 300:
         raise ValueError("Windows recorder package is incomplete.")
+    if manifest['version']==2 and not REQUIRED_V2 <= files.keys():
+        raise ValueError('Windows recorder download integration is incomplete.')
     total = 0
     for name, record in files.items():
         safe_name(name)
@@ -61,6 +66,13 @@ def verify_files(manifest, read):
         if len(data) != record["size"] or digest(data) != record["sha256"]:
             raise ValueError("Package integrity check failed: " + name)
     windows_x64(read("desktop_recorder/bin/DesktopRecorder.exe"))
+    if manifest['version']==2:
+        windows_x64(read('download-host/DownloadReceiptHost.exe'))
+        native=json.loads(read('desktop_recorder/bin/build-manifest.json').decode('utf-8-sig'))
+        if native['executable_sha256']!=digest(read('desktop_recorder/bin/DesktopRecorder.exe')):
+            raise ValueError('Native build identity does not match the packaged executable.')
+        if json.loads(read('edge-adapter/manifest.json'))['version']!='0.3.4':
+            raise ValueError('Package requires scoped adapter 0.3.4.')
     return digest(canonical(manifest))
 
 

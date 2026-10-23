@@ -13,16 +13,19 @@ from .lifecycle import Recording
 from .contract import Invalid
 from .playback import Playback
 from .receipts import Receipts
+from .session_protocol import identity, page
 
 
 def action_log(task, run=None):
     """Bounded human-readable plan; never include captured field/clipboard text."""
     if not task:
         return []
-    labels = {"focus_window":"Switch window", "window_state":"Change window state",
+    labels = {"focus_window":"Switch window", "browser_tab":"Switch browser tab", "browser_navigation":"Navigate", "window_state":"Change window state",
               "set_text":"Set text", "copy_text":"Copy text", "select":"Choose option",
               "invoke":"Activate control", "toggle":"Change checkbox", "scroll":"Scroll",
-              "expand":"Expand or collapse", "wait_ready":"Wait for control"}
+              "expand":"Expand or collapse", "wait_ready":"Wait for control",
+              "transfer_copy":"Copy current text", "transfer_copy_button":"Copy current prompt",
+              "transfer_paste":"Paste this run's copied text", "browser_download":"Download completed file"}
     actions = task["actions"]
     rows = []
     for index in range(max(0, len(actions)-12), len(actions)):
@@ -59,6 +62,10 @@ class Coordinator:
         self.native_instruction = None
         self.instruction_serial = 0
         self.preview_task_id = None
+        self.library_offset = 0
+        self.review_offset = 0
+        self.start_deadline = None
+        self.adapter = {"status":"not_observed", "protocol":1, "explanation":"Browser adapter has not been observed in this session. Supported browser controls must expose adapter protocol 1."}
 
     def instruct(self, kind, **data):
         self.instruction_serial += 1
@@ -88,21 +95,35 @@ class Coordinator:
                 if task['id'] == self.preview_task_id or (self.preview_task_id is None and not rows):
                     row['action_log'] = action_log(task)
                 rows.append(row)
+        # Keep the explicitly saved/played task available to the toolbar even
+        # when it lies outside the current bounded library page.
+        selected_task = next((row for row in rows if row['id'] == self.preview_task_id), None)
+        rows, library_page = page(rows, self.library_offset)
+        reviews, review_page = page(self.playback.reviews() if r.state == "idle" and not playing else [], self.review_offset, budget=10000)
         context = r.task
         if self.pending_play:
             context = self.repository.get(self.pending_play["task_id"])
         elif playing:
             context = self.play_task
-        return dict(v=1, state=("playing" if playing else r.state), generation=r.generation,
+        return dict(v=1, runtime={**identity(), **getattr(self,"native_identity",{}), "adapter":self.adapter}, library_page=library_page, review_page=review_page, state=("playing" if playing else r.state), generation=r.generation,
                     elapsed_ms=r.elapsed_ms, message=r.problem or self.message,
-                    last_saved=self.last_saved, tasks=rows,
-                    instruction=self.native_instruction, run=run,
-                    reviews=self.playback.reviews() if r.state == "idle" and not playing else [],
+                    last_saved=self.last_saved, tasks=rows, selected_task=selected_task,
+                    instruction=self.native_instruction, run=({**run, "results": run["results"][-12:]} if run else None),
+                    reviews=reviews,
                     action_log=action_log(context, run if playing else None),
                     recording_name=self.repository.display_name(context) if context else "",
                     suggested_name=r.task["name"] if r.task else "")
 
+    def expire_start(self, now=None):
+        if self.pending_play and (time.monotonic() if now is None else now) >= self.start_deadline:
+            self.pending_play = None
+            self.instruct("disarm")
+            self.message = "Playback did not start within 20 seconds. Nothing was dispatched. Prepare the windows and explicitly press Play again."
+            return True
+        return False
+
     def apply(self, command):
+        self.expire_start()
         if not isinstance(command, dict) or set(command) != {"v", "id", "kind", "payload"} or type(command["v"]) is not int or command["v"] != 1:
             raise Invalid("Unknown IPC contract.")
         if not isinstance(command["payload"], dict):
@@ -118,7 +139,12 @@ class Coordinator:
             return {**self.state(), "ack": command["id"]}
         self.receipts.begin(command["id"], fingerprint)
         r, data, kind = self.recording, command["payload"], command["kind"]
-        if kind == "inspect_task":
+        if kind in {"library_page", "review_page"}:
+            offset = data.get("offset")
+            page([], offset)
+            if kind == "library_page": self.library_offset = offset
+            else: self.review_offset = offset
+        elif kind == "inspect_task":
             if (r.state != "idle" or self.pending_play or (self.playback.run and
                 (self.playback.run['state'] in {'playing','paused'} or
                  (self.playback.run['state'] == 'uncertain' and not self.playback.run.get('result_received')
@@ -148,8 +174,9 @@ class Coordinator:
                 raise Invalid("Select the current saved revision.")
             if not task["actions"]:
                 raise Invalid("This preserved draft has no actions to play.")
-            if any(a["version"] != 2 for a in task["actions"]):
+            if any(a["version"] not in {2,3} for a in task["actions"]):
                 raise Invalid("This early desktop draft lacks scoped targets. Record a new task; the original is unchanged.")
+            self.start_deadline = time.monotonic() + 20
             self.pending_play = dict(run_id=command["id"], task_id=data["id"], revision=data["revision"])
             self.preview_task_id = task['id']
             self.instruct("arm", require_local_confirmation=data.get("confirm_on_toolbar") is True)
@@ -171,6 +198,9 @@ class Coordinator:
         elif kind == "play_result":
             self.playback.acknowledge(data["step"], verified=data["verified"] is True,
                                       message=data.get("message", ""), no_effect=data.get("no_effect") is True)
+            if data["verified"] is True and self.play_task["actions"][data["step"]]["target"].get("browser"):
+                self.adapter = {"status": "observed", "protocol": 1,
+                    "explanation": "Compatible browser identity verified during playback. Download receipt connection is checked separately."}
             run = self.playback.run
             self.message = run.get("message") or ("Completed" if run["state"] == "completed" else
                                                  f"Verified {run['next_step']} of {run['total']} actions.")
@@ -211,6 +241,9 @@ class Coordinator:
             self.message = "Recording desktop session across supported applications." if mode == "desktop_session" else "Recording supported actions in prepared windows."
         elif kind == "event":
             r.accept(data["action"], generation=data["generation"], privacy=data["privacy"])
+            if data["action"]["target"].get("browser"):
+                self.adapter = {"status": "observed", "protocol": 1,
+                    "explanation": "Validated browser identity observed in captured input. Download receipt connection is checked separately; each target is revalidated before use."}
             self.message = str(len(r.task["actions"]) if r.task else 0) + " actions captured"
         elif kind == "pause":
             if r.state == "recording":
@@ -221,8 +254,16 @@ class Coordinator:
             self.message = "Recording"
         elif kind == "stop":
             if r.state != "idle":
-                r.stop()
-            self.message = "Name and save your recording."
+                # Stop may arrive after the native provider has interrupted.
+                # Keep explicit partial-draft review reachable; putting a
+                # failed draft into the normal Save screen leaves save()
+                # rejecting the retained problem with no Review control.
+                if r.problem:
+                    r.interrupt(r.problem)
+                else:
+                    r.stop()
+            self.message = ("Review the preserved interrupted draft before saving."
+                            if r.problem else "Name and save your recording.")
         elif kind == "interrupt":
             self.message = str(data.get("reason", "Capture interrupted"))[:240]
             if r.task is not None:
@@ -248,6 +289,10 @@ class Coordinator:
                 r.discard()
             self.message = "Draft discarded."
         elif kind == "diagnostic":
+            if data.get("kind") == "adapter_seen":
+                if data.get("protocol") != 1:
+                    raise Invalid("Incompatible browser adapter. Load the candidate protocol 1 adapter.")
+                self.adapter = {"status":"observed", "protocol":1, "explanation":"Compatible adapter observed on a supported control; each target is revalidated before use."}
             self.diagnostics.append(data)
             self.diagnostics = self.diagnostics[-30:]
             self.repository.atomic(self.repository.root.parent / "native-diagnostics.json", self.diagnostics)
@@ -270,6 +315,8 @@ def main():
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--accept-injected-test-input", action="store_true")
     parser.add_argument("--native", type=Path, help="Exact local development executable to run")
+    parser.add_argument("--download-bridge", type=Path, help="Registered local preview receipt host directory")
+    parser.add_argument("--download-directory", type=Path, help="Isolated additional download/Save As directory")
     args = parser.parse_args()
     root = args.data.resolve()
     protected = Path(os.environ["LOCALAPPDATA"]) / "SportsCaveOS"
@@ -283,6 +330,7 @@ def main():
         coordinator = Coordinator(root)
         native = (args.native or Path(__file__).resolve().parents[1] / "native/bin/DesktopRecorder.exe").resolve()
         native_sha256 = hashlib.sha256(native.read_bytes()).hexdigest()
+        coordinator.native_identity={"native_sha256":native_sha256}
         manifest_path = native.parent / "build-manifest.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
@@ -291,9 +339,16 @@ def main():
         command = [str(native), "--candidate"]
         if args.accept_injected_test_input:
             command.append("--accept-injected-test-input")
+        child_env=os.environ.copy()
+        if args.download_directory:
+            args.download_directory.mkdir(parents=True,exist_ok=True)
+            child_env['SC_RECORDER_DOWNLOAD_DIRECTORY']=str(args.download_directory.resolve())
+        if args.download_bridge:
+            from .download_bridge import configure
+            child_env.update(configure(root,args.download_bridge))
         child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE, text=True, encoding="utf-8",
-                                 creationflags=subprocess.CREATE_NO_WINDOW)
+                                 creationflags=subprocess.CREATE_NO_WINDOW,env=child_env)
         (root / "candidate-process.json").write_text(json.dumps({"coordinator": os.getpid(), "native": child.pid,
             "native_path": str(native), "native_sha256": native_sha256,
             "injected_test_input": args.accept_injected_test_input}))

@@ -248,6 +248,8 @@ def main():
     if args.shutdown: return
     # Independent lock: never touch editions companion locks or process IDs.
     with instance_lock(root / "recorder.lock"):
+        from desktop_recorder.download_install import configure_installed
+        os.environ.update(configure_installed(root))
         server = Bridge(root, args.port, preview=args.preview)
         atomic(root / "connection.json", {"origin": server.origin, "protected": protect(server.token.encode()).hex()})
         if args.open: webbrowser.open(server.origin + "/#key=" + server.token)

@@ -21,7 +21,14 @@ static class DropdownSelection {
             var controlled=combo.GetCurrentPropertyValue(AutomationElementIdentifiers.ControllerForProperty,true) as AutomationElement[];
             var links=new List<object>();if(controlled!=null)for(int j=0;j<Math.Min(8,controlled.Length);j++)links.Add(Metadata(controlled[j]));
             var label=combo.GetCurrentPropertyValue(AutomationElement.LabeledByProperty,true) as AutomationElement;
-            rows.Add(new {element=Metadata(combo),label=label==null?null:Metadata(label),controller_for=links,parents=parents});
+            var directOptions=combo.FindAll(TreeScope.Children,System.Windows.Automation.Condition.TrueCondition);
+            var directRows=new List<object>();
+            for(int j=0;j<Math.Min(8,directOptions.Count);j++) {
+                var item=directOptions[j];object selection;AutomationElement container=null;
+                if(item.TryGetCurrentPattern(SelectionItemPattern.Pattern,out selection))container=((SelectionItemPattern)selection).Current.SelectionContainer;
+                directRows.Add(new {element=Metadata(item),container=container==null?null:Metadata(container),container_is_owner=container!=null&&Automation.Compare(container,combo)});
+            }
+            rows.Add(new {element=Metadata(combo),label=label==null?null:Metadata(label),controller_for=links,parents=parents,direct_children=directRows});
         }
         var lists=root.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.List));
         var listRows=new List<object>();
@@ -67,6 +74,18 @@ static class DropdownSelection {
     public static List<AutomationElement> Lists(AutomationElement owner,uint pid) {
         Safe(owner,pid);
         var result=new List<AutomationElement>();
+        // Native HTML selects can expose options directly under the combobox,
+        // without an intervening List. Their explicit SelectionContainer may
+        // be a provider-only List omitted from descendant searches. Follow
+        // that link from the owner's direct child, never a nearby popup.
+        var direct=owner.FindAll(TreeScope.Children,new PropertyCondition(AutomationElement.IsSelectionItemPatternAvailableProperty,true));
+        if(direct.Count>256)throw new Exception("Dropdown option search exceeded its bound.");
+        foreach(AutomationElement item in direct) {
+            Safe(item,pid);object selection;
+            if(!item.TryGetCurrentPattern(SelectionItemPattern.Pattern,out selection))continue;
+            var container=((SelectionItemPattern)selection).Current.SelectionContainer;
+            if(container!=null&&(Automation.Compare(container,owner)||container.Current.ControlType==ControlType.List))AddList(result,container,pid);
+        }
         var nested=owner.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.List));
         if(nested.Count>16)throw new Exception("Dropdown has too many selection containers.");
         foreach(AutomationElement list in nested)AddList(result,list,pid);
@@ -138,10 +157,7 @@ static class DropdownSelection {
     public static AutomationElement OptionAt(AutomationElement owner,uint pid,Point point) {
         AutomationElement found=null;
         foreach(var list in Lists(owner,pid)) {
-            if(!list.Current.BoundingRectangle.Contains(point))continue;
-            var items=list.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.IsSelectionItemPatternAvailableProperty,true));
-            if(items.Count>256)throw new Exception("Dropdown option search exceeded its bound.");
-            foreach(AutomationElement item in items) {
+            foreach(AutomationElement item in Items(owner,list,pid)) {
                 if(item.Current.IsOffscreen||!item.Current.BoundingRectangle.Contains(point))continue;
                 Safe(item,pid);object pattern;
                 if(!item.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern))continue;
@@ -153,6 +169,33 @@ static class DropdownSelection {
         }
         return found;
     }
+    // Chromium can expose options as direct children of the combobox while
+    // their SelectionContainer is a provider-only List with no descendants.
+    // Follow both explicit relations and deduplicate by UIA identity.
+    static List<AutomationElement> Items(AutomationElement owner,AutomationElement list,uint pid) {
+        var result=new List<AutomationElement>();
+        var condition=new PropertyCondition(AutomationElement.IsSelectionItemPatternAvailableProperty,true);
+        var sources=new[]{list.FindAll(TreeScope.Descendants,condition),owner.FindAll(TreeScope.Children,condition)};
+        foreach(var source in sources) {
+            if(source.Count>256)throw new Exception("Dropdown option search exceeded its bound.");
+            foreach(AutomationElement item in source) {
+                Safe(item,pid);object pattern;
+                if(!item.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern))continue;
+                var container=((SelectionItemPattern)pattern).Current.SelectionContainer;
+                if(container==null||!Automation.Compare(container,list))continue;
+                bool duplicate=false;foreach(var previous in result)if(Automation.Compare(previous,item)){duplicate=true;break;}
+                if(!duplicate)result.Add(item);
+                if(result.Count>256)throw new Exception("Dropdown option search exceeded its bound.");
+            }
+        }
+        return result;
+    }
+    public static Rect PopupBounds(AutomationElement owner,uint pid) {
+        var result=Rect.Empty;
+        foreach(var list in Lists(owner,pid))foreach(var item in Items(owner,list,pid))
+            if(!item.Current.IsOffscreen&&!item.Current.BoundingRectangle.IsEmpty)result.Union(item.Current.BoundingRectangle);
+        return result;
+    }
     public static bool ContainsPopup(AutomationElement owner,uint pid,Point point) {
         foreach(var list in Lists(owner,pid))if(list.Current.BoundingRectangle.Contains(point))return true;
         return false;
@@ -160,11 +203,8 @@ static class DropdownSelection {
     public static AutomationElement FindOption(AutomationElement owner,uint pid,string value) {
         AutomationElement found=null;
         foreach(var list in Lists(owner,pid)) {
-            var items=list.FindAll(TreeScope.Descendants,new AndCondition(
-                new PropertyCondition(AutomationElement.NameProperty,value),
-                new PropertyCondition(AutomationElement.IsSelectionItemPatternAvailableProperty,true)));
-            if(items.Count>16)throw new Exception("Dropdown option identity is ambiguous.");
-            foreach(AutomationElement item in items) {
+            foreach(AutomationElement item in Items(owner,list,pid)) {
+                if(item.Current.Name!=value)continue;
                 Safe(item,pid);object pattern;item.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern);
                 var container=((SelectionItemPattern)pattern).Current.SelectionContainer;
                 if(container==null||!Automation.Compare(container,list))continue;
@@ -177,9 +217,7 @@ static class DropdownSelection {
     public static string View(AutomationElement owner,uint pid) {
         var marks=new List<string>();
         foreach(var list in Lists(owner,pid)) {
-            var items=list.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.IsSelectionItemPatternAvailableProperty,true));
-            if(items.Count>256)throw new Exception("Dropdown view exceeded its bounded option budget.");
-            foreach(AutomationElement item in items)if(!item.Current.IsOffscreen&&item.Current.BoundingRectangle.IntersectsWith(list.Current.BoundingRectangle)) {
+            foreach(AutomationElement item in Items(owner,list,pid))if(!item.Current.IsOffscreen) {
                 Safe(item,pid);marks.Add(Capture.Safe(item.Current.Name));
             }
         }

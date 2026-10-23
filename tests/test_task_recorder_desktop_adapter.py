@@ -27,6 +27,8 @@ def test_popup_open_receipt_requires_current_native_ready_frame(tmp_path,monkeyp
         from task_recorder.schema import Invalid
         runner=desktop.DesktopRunner(tmp_path)
         binary=tmp_path/'SyntheticRecorder.exe';binary.write_bytes(b'test only')
+        import hashlib
+        (tmp_path/'build-manifest.json').write_text(json.dumps({'executable_sha256':hashlib.sha256(binary.read_bytes()).hexdigest()}))
         reader=asyncio.StreamReader()
         process=SimpleNamespace(stdout=reader,returncode=None,
             stdin=SimpleNamespace(write=Mock(),drain=AsyncMock(),close=Mock(),wait_closed=AsyncMock()))
@@ -35,7 +37,7 @@ def test_popup_open_receipt_requires_current_native_ready_frame(tmp_path,monkeyp
         process.terminate=Mock(side_effect=terminate)
         process.wait=AsyncMock(return_value=0)
         if ready:
-            reader.feed_data((json.dumps(dict(v=1,id=str(uuid4()),kind='diagnostic',payload={'kind':'toolbar_ready'}))+'\n').encode())
+            reader.feed_data((json.dumps(dict(v=1,id=str(uuid4()),kind='diagnostic',payload={'kind':'toolbar_ready','protocol':2,'build':desktop.identity()['build']}))+'\n').encode())
         else:
             process.returncode=0;reader.feed_eof()
         monkeypatch.setattr(desktop,'native_path',lambda:binary)
@@ -110,7 +112,7 @@ def test_catalogue_and_capabilities_reuse_helper_snapshot(tmp_path):
         snapshot = agent.snapshot()
         row = next(r for r in snapshot["tasks"] if r["id"] == saved["id"])
         assert row["playback_available"] is True
-        assert snapshot["desktop_capabilities"]["action_versions"] == [2]
+        assert snapshot["desktop_capabilities"]["action_versions"] == [2, 3]
         assert snapshot["protocol"] == 4  # Numeric browser protocol is not desktop support.
     finally:
         agent.db.close()
@@ -248,7 +250,7 @@ def test_disconnect_rejects_unconfirmed_stop_receipt_and_preserves_draft(tmp_pat
             assert not pending.done()
             reader = asyncio.StreamReader()
             reader.feed_eof()
-            runner.native = SimpleNamespace(stdout=reader)
+            runner.native = SimpleNamespace(stdout=reader, returncode=0)
             await runner.read_native()
             await pending
             assert agent.acks[key]["status"] == "uncertain"
@@ -280,7 +282,7 @@ def test_disconnect_during_dispatched_action_is_interrupted_and_never_replayed(t
         playback.dispatch(0)
         reader = asyncio.StreamReader()
         reader.feed_eof()
-        runner.native = SimpleNamespace(stdout=reader)
+        runner.native = SimpleNamespace(stdout=reader, returncode=0)
         await runner.read_native()
         state = runner.state()
         assert state['mode'] == 'interrupted'

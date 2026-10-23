@@ -66,9 +66,7 @@ static class Native {
         try { if(!GetTokenInformation(token,20,out elevated,4,out length)||elevated!=0) throw new Exception("Elevated applications are not supported."); }
         finally { CloseHandle(token); }
         string n=p.ProcessName.ToLowerInvariant();
-        if(Title(h).IndexOf("ChatGPT",StringComparison.OrdinalIgnoreCase)>=0)
-            throw new Exception("ChatGPT windows are outside the supported capture scope.");
-        if(n.Contains("codex")||n.Contains("computer-use")||new[]{"chatgpt","powershell","pwsh","cmd","windowsterminal","lockapp","credentialuibroker"}.Contains(n))
+        if(n.Contains("computer-use")||new[]{"powershell","pwsh","cmd","windowsterminal","lockapp","credentialuibroker"}.Contains(n))
             throw new Exception("This application is outside the supported capture scope.");
     }
 }
@@ -76,7 +74,9 @@ static class Native {
 partial class Capture {
     readonly Action<string,object> send;
     readonly Action<string> fail;
-    readonly BlockingCollection<Action> queue=new BlockingCollection<Action>(128);
+    sealed class Work { public Action Run; public Func<bool> Redundant; public bool Control; public long Queued; public object Input; }
+    readonly BlockingCollection<Work> queue=new BlockingCollection<Work>(128);
+    readonly uint ownPid=(uint)Process.GetCurrentProcess().Id;
     readonly Stopwatch clock=Stopwatch.StartNew();
     readonly Native.Hook mouse,key;
     IntPtr mh,kh;
@@ -86,6 +86,12 @@ partial class Capture {
     NativeMetrics metrics;
     int generation;
     IntPtr own,lastWindow;
+    Dictionary<string,object> lastBrowser;
+    sealed class BrowserWindowContext { public uint Pid;public string Title;public Dictionary<string,object> Browser; }
+    readonly Dictionary<IntPtr,BrowserWindowContext> browserWindowContexts=new Dictionary<IntPtr,BrowserWindowContext>();
+    readonly RunTransfer capturedTransfer=new RunTransfer();
+    int transferSerial,latestTransfer=-1;
+    AutomationElement pastedEditor;
     IntPtr preparedWindow;
     readonly Dictionary<IntPtr,uint> preparedWindows=new Dictionary<IntPtr,uint>();
     string lastTitle;
@@ -108,17 +114,19 @@ partial class Capture {
     readonly object wheelGate=new object();
     WheelBurst wheelBurst;
     sealed class GenerationAnchor {
-        public IntPtr Window;public uint Pid,Dpi;public int Epoch;public long DownAt;
+        public IntPtr Window;public uint Pid,Dpi;public int Epoch;public long DownAt,PreparedAt;
         public System.Windows.Rect Bounds,WindowBounds;
         public AutomationElement Control,Document;
         public Dictionary<string,object> Target;
         public ProductGenerationResult.Witness Before;
     }
     volatile GenerationAnchor preparedGeneration;
+    readonly ConcurrentDictionary<IntPtr,GenerationAnchor> generationAnchors=new ConcurrentDictionary<IntPtr,GenerationAnchor>();
+    IntPtr[] generationWindows=new IntPtr[0];
     volatile GenerationAnchor preparedPicker;
     GenerationAnchor pendingPicker;
     bool expectedPickerDown;
-    sealed class GenerationGesture { public long ReleasedAt;public SemanticClick Hover; }
+    sealed class GenerationGesture { public long StartedAt,ReleasedAt,UtcMilliseconds;public SemanticClick Hover;public GenerationAnchor Generation; }
     GenerationGesture generationGesture;
     GenerationAnchor pendingGeneration;
     bool expectedGenerationDown;
@@ -142,22 +150,22 @@ partial class Capture {
         public string RuntimeId;
         public bool NeedsInvocation;
     }
-    sealed class InvocationWitness { public string RuntimeId;public long At;public int Epoch; }
+    sealed class InvocationWitness { public string RuntimeId;public long At;public int Epoch,Pid;public string Name,Id;public System.Windows.Rect Bounds;public Dictionary<string,object> Browser; }
     readonly ConcurrentQueue<InvocationWitness> invocations=new ConcurrentQueue<InvocationWitness>();
     int invocationReceived,invocationRejected,invocationCacheFailures;
     string invocationCacheError;
-    AutomationElement invocationRoot;
+    readonly InvocationSubscriptions invocationSubscriptions=new InvocationSubscriptions();
     IntPtr invocationWindow;
-    AutomationEventHandler invocationHandler;
+    int invocationEpoch;
     static string RuntimeIdentity(int[] ids) { return ids==null?null:String.Join(",",ids.Select(id=>id.ToString()).ToArray()); }
     void ObserveInvocations(IntPtr window) {
         if(invocationWindow==window)return;
-        if(invocationRoot!=null&&invocationHandler!=null) {
-            try{Automation.RemoveAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,invocationHandler);}catch(ElementNotAvailableException){}
-        }
-        invocationRoot=AutomationElement.FromHandle(window);
-        invocationHandler=(sender,args)=>{
-            if(!Armed||Broken)return;
+        captureOperation="ensure invocation observer";
+        int observerEpoch=Volatile.Read(ref invocationEpoch);
+        invocationSubscriptions.Ensure(window,()=>{
+        var invocationRoot=AutomationElement.FromHandle(window);
+        AutomationEventHandler invocationHandler=(sender,args)=>{
+            if(!Armed||Broken||observerEpoch!=Volatile.Read(ref invocationEpoch))return;
             Interlocked.Increment(ref invocationReceived);
             try {
                 var source=(AutomationElement)sender;
@@ -165,6 +173,9 @@ partial class Capture {
                 // invoked button has been removed. Never read field values.
                 if(source.Cached.ControlType!=ControlType.Button||source.Cached.IsPassword){Interlocked.Increment(ref invocationRejected);return;}
                 var witness=new InvocationWitness{RuntimeId=RuntimeIdentity((int[])source.GetCachedPropertyValue(AutomationElement.RuntimeIdProperty)),At=MonotonicMs(),Epoch=generation};
+                witness.Pid=source.Cached.ProcessId;witness.Bounds=source.Cached.BoundingRectangle;
+                witness.Name=Safe(source.Cached.Name);witness.Id=Safe(source.Cached.AutomationId);
+                witness.Browser=BrowserIdentity.ReadHelp(source.Cached.HelpText);
                 if(witness.RuntimeId==null)return;
                 invocations.Enqueue(witness);InvocationWitness old;
                 while(invocations.Count>32)invocations.TryDequeue(out old);
@@ -173,10 +184,12 @@ partial class Capture {
         };
         var cache=new CacheRequest();cache.TreeScope=TreeScope.Element;
         cache.Add(AutomationElement.RuntimeIdProperty);cache.Add(AutomationElement.ControlTypeProperty);cache.Add(AutomationElement.IsPasswordProperty);
-        try {
-            using(cache.Activate())Automation.AddAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,TreeScope.Descendants,invocationHandler);
-            invocationWindow=window;
-        }catch{invocationRoot=null;invocationHandler=null;invocationWindow=IntPtr.Zero;throw;}
+        cache.Add(AutomationElement.ProcessIdProperty);cache.Add(AutomationElement.BoundingRectangleProperty);
+        cache.Add(AutomationElement.NameProperty);cache.Add(AutomationElement.AutomationIdProperty);cache.Add(AutomationElement.HelpTextProperty);
+        using(cache.Activate())Automation.AddAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,TreeScope.Descendants,invocationHandler);
+        return ()=>Automation.RemoveAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,invocationHandler);
+        });
+        invocationWindow=window;
     }
     SemanticClick semanticClick;
     volatile SemanticClick hoverClick;
@@ -192,46 +205,81 @@ partial class Capture {
     int hoverQueued;
     const int HoverFreshnessMs=1000;
     System.Threading.Timer hoverRefresh;
-    string captureOperation="idle";
+    System.Threading.Timer generationRefresh;
+    int generationRefreshing;
+    BrowserDownload.Session downloadSession;
+    DateTime downloadClickAt;
+    IntPtr downloadSaveOwner;
+    volatile string captureOperation="idle";
     IntPtr observedWindow;
     public Capture(IntPtr own,Action<string,object> send,Action<string> fail,bool injected) {
         this.own=own;this.send=send;this.fail=fail;this.injected=injected;
         mouse=OnMouse;key=OnKey;
         var worker=new Thread(()=>{foreach(var work in queue.GetConsumingEnumerable()){
-            if(Broken)continue; // Never inspect queued targets after an interruption.
+            if(Broken&&!work.Control)continue; // Cleanup still runs after an interruption.
+            if(work.Redundant!=null&&work.Redundant())continue; // Metadata-only duplicate notifications; never input.
             Interlocked.Exchange(ref BusySince,Stopwatch.GetTimestamp());
-            try { work(); } catch(Exception e){
+            try {
+                double queuedMs=(Stopwatch.GetTimestamp()-work.Queued)*1000.0/Stopwatch.Frequency;
+                if(!work.Control&&queuedMs>500){send("diagnostic",new {kind="capture_queue_stale",queued_ms=queuedMs,callback=work.Run.Method.Name,metadata_notification=work.Redundant!=null,input=work.Input});throw new Exception("Capture fell behind input. Draft preserved; no delayed target was read.");}
+                work.Run();
+            } catch(Exception e){
                 bool exists=observedWindow!=IntPtr.Zero&&Native.IsWindow(observedWindow);
-                send("diagnostic",new {kind="capture_operation_failed",operation=captureOperation,error_type=e.GetType().Name,window_exists=exists,
+                send("diagnostic",new {kind="capture_operation_failed",operation=captureOperation,error_type=e.GetType().Name,hresult=e.HResult,window_exists=exists,
                     methods=new StackTrace(e,false).GetFrames().Select(frame=>frame.GetMethod().Name).Take(8).ToArray()});
-                Interrupt(e is ElementNotAvailableException?(exists?"The clicked control changed before its action could be identified. Draft preserved.":"The target window disappeared."):e.Message);
+                Interrupt(e is ElementNotAvailableException?(exists?"The clicked control changed before its action could be identified. Draft preserved.":"The target window disappeared."):
+                    e is COMException?"Windows accessibility failed during "+captureOperation+" (0x"+e.HResult.ToString("X8")+"). Draft preserved; no action was inferred.":
+                    String.IsNullOrWhiteSpace(e.Message)?"Capture failed during "+captureOperation+". Draft preserved.":e.Message);
             }
             finally{Interlocked.Exchange(ref BusySince,0);}
         }}){IsBackground=true,Name="recorder-capture"};worker.SetApartmentState(ApartmentState.MTA);worker.Start();
     }
-    void Put(Action a) { if(!Broken&&!queue.TryAdd(a)) Interrupt("Capture queue is full. Stop and save the preserved draft."); }
+    void Put(Action a,Func<bool> redundant=null) { Enqueue(a,false,redundant); }
+    void Enqueue(Action a,bool control,Func<bool> redundant=null) { EnqueueWork(new Work{Run=a,Redundant=redundant,Control=control,Queued=Stopwatch.GetTimestamp()}); }
+    void PutObserved(Action a,object input) { EnqueueWork(new Work{Run=a,Input=input,Queued=Stopwatch.GetTimestamp()}); }
+    void EnqueueWork(Work work) { if((!Broken||work.Control)&&!queue.TryAdd(work)) Interrupt("Capture queue is full. Stop and save the preserved draft."); }
+    object MouseEvidence(string kind,IntPtr window,uint flags) {
+        // Capture only bounded Win32 identity facts at input time. Never read
+        // accessibility, titles, URLs, field values or clipboard contents here.
+        // A stale queue reports these facts without inspecting a changed target.
+        var owner=downloadSaveOwner;uint pid,ownerPid=0;
+        Native.GetWindowThreadProcessId(window,out pid);
+        if(owner!=IntPtr.Zero)Native.GetWindowThreadProcessId(owner,out ownerPid);
+        return new {kind=kind,process_id=pid,download_owner_process_id=ownerPid,
+            download_waiting=owner!=IntPtr.Zero,input_is_download_owner=owner!=IntPtr.Zero&&window==owner,
+            foreground_matches_input=Native.Root(Native.GetForegroundWindow())==window,
+            injected=(flags&1)!=0};
+    }
     public void Interrupt(string reason) { if(Broken)return; Broken=true; Armed=false; fail(reason); }
     public void Watchdog() {
         long since=Interlocked.Read(ref BusySince);
-        if(since!=0 && (Stopwatch.GetTimestamp()-since)/(double)Stopwatch.Frequency>3) Interrupt("Accessibility provider did not respond. Stop to preserve the draft, then restart the candidate.");
+        if(!Broken&&since!=0 && (Stopwatch.GetTimestamp()-since)/(double)Stopwatch.Frequency>3) {
+            // Metadata only: never query the stalled accessibility provider from
+            // the UI/watchdog thread, or include text/clipboard contents.
+            send("diagnostic",new {kind="capture_provider_timeout",operation=captureOperation,
+                elapsed_ms=(Stopwatch.GetTimestamp()-since)*1000.0/Stopwatch.Frequency,queued_work=queue.Count});
+            Interrupt("Accessibility provider did not respond. Stop to preserve the draft, then restart the candidate.");
+        }
     }
-    public void Start(int epoch) {
+    public void Start(int epoch,bool resume=false) {
         if(Broken&&(Interlocked.Read(ref BusySince)!=0||queue.Count!=0))throw new Exception("Restart the candidate after an accessibility interruption.");
         Broken=false;field=null;fieldTarget=null;dirty=false;editorAnchor=null;editorAnchorTarget=null;
+        capturedTransfer.BeginCapture(resume);if(!resume)latestTransfer=-1;pastedEditor=null;
         pendingEditorClick.Clear();
         pendingGeneration=null;expectedGenerationDown=false;
         pendingPicker=null;expectedPickerDown=false;
         dropdown=null;
+        downloadDialogNotifications.Clear();
         semanticClick=null;
         hoverClick=null;
         physicalPointer=null;
         lock(hoverGate)pendingHover=null;
         activeHover=lastHover=null;hoverBusyUpdates=0;
         var eventWindow=preparedWindow!=IntPtr.Zero?preparedWindow:lastWindow;
-        generation=epoch;lastWindow=IntPtr.Zero;lastTitle=null;
+        generation=epoch;lastWindow=IntPtr.Zero;lastTitle=null;lastBrowser=null;browserWindowContexts.Clear();
         InvocationWitness prior;while(invocations.TryDequeue(out prior)){}
         invocationReceived=invocationRejected=invocationCacheFailures=0;invocationCacheError=null;
-        if(eventWindow!=IntPtr.Zero)ObserveInvocations(eventWindow);
+        if(eventWindow!=IntPtr.Zero)Put(()=>ObserveInvocations(eventWindow));
         mh=Native.SetWindowsHookEx(14,mouse,Native.GetModuleHandle(null),0);
         kh=Native.SetWindowsHookEx(13,key,Native.GetModuleHandle(null),0);
         if(mh==IntPtr.Zero||kh==IntPtr.Zero) {Detach();throw new Exception("Windows capture hooks could not be armed.");}
@@ -241,6 +289,7 @@ partial class Capture {
         // renew it until mouse-down races controls that disappear on release.
         // Renew halfway through the existing freshness budget, never extend it.
         hoverRefresh=new System.Threading.Timer(_=>RefreshStationaryHover(),null,HoverFreshnessMs/2,HoverFreshnessMs/2);
+        generationRefresh=new System.Threading.Timer(_=>RefreshGeneration(),null,0,250);
         metrics=NativeMetrics.Begin("recording");
         clock.Start();
     }
@@ -249,6 +298,7 @@ partial class Capture {
         Broken=false;
         DesktopSession=desktopSession;
         Put(()=>{if(selected!=IntPtr.Zero)selected=Native.Root(selected);
+            downloadSession=new BrowserDownload.Session();
             var target=selected==IntPtr.Zero?null:Target(AutomationElement.FromHandle(selected),selected);
             preparedWindows.Clear();
             Native.EnumWindows((h,l)=>{
@@ -256,17 +306,24 @@ partial class Capture {
                 if(Native.IsWindowVisible(h)){uint pid;Native.GetWindowThreadProcessId(h,out pid);preparedWindows[Native.Root(h)]=pid;}
                 return true;
             },IntPtr.Zero);
-            preparedWindow=selected;if(selected!=IntPtr.Zero)PrepareGeneration(selected);clock.Reset();traceCount=0;ownExclusions=0;
+            generationAnchors.Clear();
+            var browserWindows=new List<IntPtr>();
+            foreach(var h in preparedWindows.Keys) {
+                try {if(!Mine(h)&&BrowserTabs.Edge(h)&&BrowserIdentity.Current(h)!=null)browserWindows.Add(h);}catch{}
+            }
+            if(browserWindows.Count>8)throw new Exception("Too many compatible preview windows. Prepare at most eight before Record.");
+            generationWindows=browserWindows.ToArray();
+            preparedWindow=selected;if(selected!=IntPtr.Zero){PreparePicker(selected);PrepareGeneration(selected);}clock.Reset();traceCount=0;ownExclusions=0;
             send("record",new {window=target,mode=DesktopSession?"desktop_session":"prepared"});});
     }
     public void Detach(bool finishMetrics=true) {
         Armed=false;
         DisarmSession();
         var refresh=Interlocked.Exchange(ref hoverRefresh,null);if(refresh!=null)refresh.Dispose();
-        if(invocationRoot!=null&&invocationHandler!=null) {
-            try{Automation.RemoveAutomationEventHandler(InvokePattern.InvokedEvent,invocationRoot,invocationHandler);}catch(ElementNotAvailableException){}
-            invocationRoot=null;invocationHandler=null;invocationWindow=IntPtr.Zero;
-        }
+        var generationTimer=Interlocked.Exchange(ref generationRefresh,null);if(generationTimer!=null)generationTimer.Dispose();
+        Interlocked.Increment(ref invocationEpoch);
+        invocationWindow=IntPtr.Zero;
+        invocationSubscriptions.Reset();
         clock.Stop();
         if(mh!=IntPtr.Zero)Native.UnhookWindowsHookEx(mh);
         if(kh!=IntPtr.Zero)Native.UnhookWindowsHookEx(kh);
@@ -281,21 +338,30 @@ partial class Capture {
         CloseWheelBurst();
         Detach(false);
         if(Broken){FinishMetrics();send(command,new {request_id=requestId});return;}
-        Put(()=>{Flush();PollDropdown(true);FinishMetrics();send("diagnostic",new {kind="capture_barrier",toolbar_inputs_excluded=ownExclusions});send(command,new {request_id=requestId});});
+        // A pending download can observe Detach and interrupt on this worker.
+        // Its Stop/Pause acknowledgement must survive that interruption and
+        // must not be treated as a stale input observation.
+        Enqueue(()=>{if(!Broken){Flush();PollDropdown(true);}FinishMetrics();send("diagnostic",new {kind="capture_barrier",toolbar_inputs_excluded=ownExclusions});send(command,new {request_id=requestId});},true);
     }
-    bool Mine(IntPtr h) { uint id;Native.GetWindowThreadProcessId(h,out id);return WindowIdentity.IsToolbar(id,(uint)Process.GetCurrentProcess().Id); }
+    bool Mine(IntPtr h) { uint id;Native.GetWindowThreadProcessId(h,out id);return WindowIdentity.IsToolbar(id,ownPid); }
     IntPtr OnMouse(int c,IntPtr w,IntPtr l) {
         if(c>=0&&Armed&&(w.ToInt32()==0x200||w.ToInt32()==0x201||w.ToInt32()==0x202||w.ToInt32()==0x20A||w.ToInt32()==0x205)){
             var m=(Native.Mouse)Marshal.PtrToStructure(l,typeof(Native.Mouse));
             if(injected||(m.flags&1)==0){
                 var hit=Native.WindowFromPoint(m.point);var window=Native.Root(hit);
+                if(BrowserDownload.OwnedSaveDialog(hit,downloadSaveOwner))return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
                 physicalPointer=new HoverProbe{Point=m.point,Window=window,Epoch=generation};
                 if(Mine(window)){if(w.ToInt32()==0x202)ownExclusions++;return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
                 if(w.ToInt32()==0x200){QueueHover(m.point,window);return Native.CallNextHookEx(IntPtr.Zero,c,w,l);}
                 if(w.ToInt32()==0x201){var point=m.point;int epoch=generation;long at=MonotonicMs();
+                    var input=MouseEvidence("mouse_down",window,m.flags);
+                    moveGesture.Begin(window,epoch,m.time);
+                    downloadClickAt=DateTime.UtcNow;
                     PhysicalTransition(m.time);mouseDownWindow=window;mouseDownState=DesktopWindowState.Read(window);string beforeState=mouseDownState;
-                    var gesture=new GenerationGesture{Hover=hoverClick};generationGesture=gesture;
-                    Put(()=>{observedWindow=window;
+                    GenerationAnchor generationAnchor;generationAnchors.TryGetValue(window,out generationAnchor);
+                    var gesture=new GenerationGesture{StartedAt=at,UtcMilliseconds=(DateTime.UtcNow.Ticks-621355968000000000)/10000,Hover=hoverClick,Generation=generationAnchor};generationGesture=gesture;
+                    PutObserved(()=>{observedWindow=window;
+                        if(DesktopSession&&moveGesture.Matches(window,epoch))return;
                         if(DesktopSession&&DesktopWindowState.Read(window)!=beforeState)return;
                         try {
                         if(DesktopSession&&!Native.IsTaskbar(window)){Native.CheckProcess(window);ObserveInvocations(window);}
@@ -304,34 +370,59 @@ partial class Capture {
                         // One physical gesture has one owner. The verified
                         // button may already have replaced the page; probing
                         // dropdowns then would inspect an unrelated old tree.
-                        if(semanticClick==null&&!expectedGenerationDown&&!expectedPickerDown){captureOperation="mouse-down dropdown";SnapshotDropdown(point,window,epoch);}
+                        // A released click cannot establish a new pre-click dropdown
+                        // owner. Preserve already anchored dropdown selection handling,
+                        // but leave unanchored gestures to the validated mouse-up path.
+                        if(semanticClick==null&&!expectedGenerationDown&&!expectedPickerDown&&
+                           (dropdown!=null||Interlocked.Read(ref gesture.ReleasedAt)==0)) {
+                            captureOperation="mouse-down dropdown";SnapshotDropdown(point,window,epoch);
+                        }
                         }catch {if(!DesktopSession||DesktopWindowState.Read(window)==beforeState)throw;}
-                    });}
+                    },input);}
                 else if(w.ToInt32()==0x20A){QueueWheel(m.point,window,generation,unchecked((short)(m.data>>16)));}
                 else if(w.ToInt32()==0x202){CloseWheelBurst();var point=m.point;int epoch=generation;
+                    var input=MouseEvidence("mouse_up",window,m.flags);
                     var transitionWindow=mouseDownWindow;var transitionBefore=mouseDownState;
                     if(CompleteWindowGesture(epoch))return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
                     var gesture=generationGesture;generationGesture=null;
                     if(gesture!=null)Interlocked.Exchange(ref gesture.ReleasedAt,MonotonicMs());
                     var foreground=Native.Root(Native.GetForegroundWindow());
-                    Put(()=>{observedWindow=window;captureOperation="mouse-up";TraceWindow("mouse",window,foreground,hit);
+                    PutObserved(()=>{observedWindow=window;captureOperation="mouse-up";TraceWindow("mouse",window,foreground,hit);
                         if(CompleteObservedWindowGesture(transitionWindow,transitionBefore,epoch))return;
-                        try {Flush();if(!CompleteGeneration(point,window,epoch,true)&&!CompleteGeneration(point,window,epoch)&&!FinishDropdownClick()&&!CompleteSemanticClick(point,window,epoch))Click(point,window,epoch);}
+                        try {Flush();if(!CompleteGeneration(point,window,epoch,true)&&!CompleteGeneration(point,window,epoch)&&!FinishDropdownClick()&&!CompleteBrowserNavigation(point,window,epoch,gesture)&&!CompleteSemanticClick(point,window,epoch))Click(point,window,epoch);}
                         catch {if(!CompleteObservedWindowGesture(transitionWindow,transitionBefore,epoch))throw;}
-                    });}
+                    },input);}
                 else {CloseWheelBurst();Put(()=>{Flush();Interrupt("Secondary clicks are not yet supported. Draft preserved.");});}
             }
         }
         return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
     }
     void CloseWheelBurst(){lock(wheelGate){if(wheelBurst!=null)wheelBurst.Closed=true;}}
+    void RefreshGeneration() {
+        if(!Armed||Broken||Interlocked.CompareExchange(ref generationRefreshing,1,0)!=0)return;
+        int epoch=generation;
+        try {
+            var window=Native.Root(Native.GetForegroundWindow());
+            if(window==IntPtr.Zero)return;
+            // The toolbar owns focus at Record. Keep only already identified
+            // local-preview windows prepared without activating or navigating.
+            var candidates=Mine(window)?generationWindows:new[]{window};
+            foreach(var candidate in candidates) {
+                if(!Armed||Broken||epoch!=generation)break;
+                try {if(BrowserTabs.Edge(candidate))PrepareGeneration(candidate);}
+                catch {GenerationAnchor discarded;generationAnchors.TryRemove(candidate,out discarded);}
+            }
+            if(epoch!=generation||!Armed){preparedGeneration=null;generationAnchors.Clear();}
+        }catch{preparedGeneration=null;generationAnchors.Clear();} // No action inferred from failed preflight.
+        finally{Interlocked.Exchange(ref generationRefreshing,0);}
+    }
     void PrepareGeneration(IntPtr window) {
-        PreparePicker(window);
-        preparedGeneration=null;
+        GenerationAnchor found=null;
+        GenerationAnchor discarded;
         var process=Native.ProcessFor(window);
-        if(!String.Equals(Path.GetFileName(process.MainModule.FileName),"msedge.exe",StringComparison.OrdinalIgnoreCase))return;
+        if(!String.Equals(Path.GetFileName(process.MainModule.FileName),"msedge.exe",StringComparison.OrdinalIgnoreCase)){generationAnchors.TryRemove(window,out discarded);return;}
         var root=AutomationElement.FromHandle(window);
-        if(root.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,ProductGenerationResult.Container)).Count==0)return;
+        if(root.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,ProductGenerationResult.Container)).Count==0){generationAnchors.TryRemove(window,out discarded);return;}
         var buttons=root.FindAll(TreeScope.Descendants,new AndCondition(
             new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Button),
             new PropertyCondition(AutomationElement.NameProperty,"Generate mockups")));
@@ -340,13 +431,15 @@ partial class Capture {
             if(!button.Current.IsEnabled||button.Current.IsOffscreen)continue;
             var target=Target(button,window);
             if(!ProductGenerationResult.Supports(target))continue;
-            if(preparedGeneration!=null)throw new Exception("Generate is ambiguous. Prepare one product page before Record.");
-            preparedGeneration=new GenerationAnchor{Window=window,Pid=(uint)process.Id,Control=button,Target=target,
+            if(found!=null)throw new Exception("Generate is ambiguous. Prepare one product page before Record.");
+            found=new GenerationAnchor{Window=window,Pid=(uint)process.Id,Control=button,Target=target,
                 Document=ProductGenerationResult.Document(button,window,(uint)process.Id),
                 Before=ProductGenerationResult.Read(button,window,(uint)process.Id),
-                Bounds=button.Current.BoundingRectangle,WindowBounds=root.Current.BoundingRectangle,Dpi=Native.GetDpiForWindow(window)};
+                Bounds=button.Current.BoundingRectangle,WindowBounds=root.Current.BoundingRectangle,Dpi=Native.GetDpiForWindow(window),Epoch=generation,PreparedAt=MonotonicMs()};
         }
-        send("diagnostic",new {kind="generation_capture_prepared",visible_generate_anchor=preparedGeneration!=null});
+        preparedGeneration=found;
+        if(found!=null)generationAnchors[window]=found;
+        else generationAnchors.TryRemove(window,out discarded);
     }
     void PreparePicker(IntPtr window) {
         preparedPicker=null;
@@ -370,9 +463,24 @@ partial class Capture {
     }
     void SnapshotGeneration(Native.Point point,IntPtr window,int epoch,long at,GenerationGesture gesture,bool picker=false) {
         if(picker){pendingPicker=null;expectedPickerDown=false;}else{pendingGeneration=null;expectedGenerationDown=false;}
-        var prepared=picker?preparedPicker:preparedGeneration;
+        var prepared=picker?preparedPicker:gesture.Generation;
         if(prepared==null||window!=prepared.Window||!prepared.Bounds.Contains(new System.Windows.Point(point.X,point.Y)))return;
         if(picker)expectedPickerDown=true;else expectedGenerationDown=true;
+        if(!picker) {
+            // Snapshot was completed before physical mouse-down, off the hook
+            // thread. A fast release may replace the UIA node before this queue
+            // runs; never inspect that obsolete control to reconstruct intent.
+            uint actualPid;Native.GetWindowThreadProcessId(window,out actualPid);
+            if(prepared.Epoch!=epoch||prepared.PreparedAt>at||at-prepared.PreparedAt>HoverFreshnessMs||
+                prepared.Before==null||prepared.Before.State!="idle"||actualPid!=prepared.Pid||
+                Native.GetDpiForWindow(window)!=prepared.Dpi||
+                AutomationElement.FromHandle(window).Current.BoundingRectangle!=prepared.WindowBounds)
+                throw new Exception("Generate preflight is stale or changed. Draft preserved; no action guessed.");
+            pendingGeneration=new GenerationAnchor{Window=window,Pid=prepared.Pid,Dpi=prepared.Dpi,
+                Bounds=prepared.Bounds,WindowBounds=prepared.WindowBounds,Epoch=epoch,DownAt=at,
+                Target=prepared.Target,Before=prepared.Before,Document=prepared.Document};
+            return;
+        }
         if(Interlocked.Read(ref gesture.ReleasedAt)!=0)
             throw new Exception("Generate click completed before its target could be confirmed. Draft preserved.");
         InputWindow(window);uint pid;Native.GetWindowThreadProcessId(window,out pid);
@@ -418,7 +526,18 @@ partial class Capture {
                 }
                 Thread.Sleep(25);continue;
             }
-            var after=ProductGenerationResult.ReadForDocument(anchor.Document,window,pid);
+            try {
+            var document=anchor.Document;
+            if(anchor.Target.ContainsKey("browser")) {
+                var expected=(Dictionary<string,object>)anchor.Target["browser"];
+                if(!BrowserIdentity.SamePage(BrowserIdentity.Current(window),expected))
+                    throw new Exception("Generate product or browser identity changed. Draft preserved.");
+                var containers=AutomationElement.FromHandle(window).FindAll(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.AutomationIdProperty,ProductGenerationResult.Container));
+                if(containers.Count!=1)throw new Exception("Generate acknowledgement is missing or ambiguous. Draft preserved.");
+                document=ProductGenerationResult.Document(containers[0],window,pid);
+            }
+            var after=ProductGenerationResult.ReadForDocument(document,window,pid);
             if(ProductGenerationResult.Acknowledged(anchor.Before,after)) {
                 WindowAction(window,epoch,(string)anchor.Target["window_key"]);Emit("invoke",anchor.Target,null,epoch);
                 send("diagnostic",new {kind="generation_click_acknowledged",pre_click_identity_verified=true,fresh_application_acknowledgement=true});
@@ -426,6 +545,11 @@ partial class Capture {
             }
             if(after!=null&&after.Receipt!=anchor.Before.Receipt&&(after.State=="failed"||after.State=="changed"))
                 throw new Exception("Generate failed or its product details changed. Draft preserved.");
+            }catch(ElementNotAvailableException) {
+                // The acknowledgement subtree is replaced during a normal
+                // Streamlit rerender. Reacquire it within this same deadline;
+                // never repeat the physical click or accept the old receipt.
+            }
             Thread.Sleep(25);
         }
         throw new Exception("Generate click was not acknowledged by the prepared product page. Draft preserved.");
@@ -554,6 +678,7 @@ partial class Capture {
             {"horizontal_view_size",position.HorizontalViewSize},{"vertical_view_size",position.VerticalViewSize}};
     }
     IntPtr OnKey(int c,IntPtr w,IntPtr l) {
+        if(BrowserDownload.OwnedSaveDialog(Native.GetForegroundWindow(),downloadSaveOwner))return Native.CallNextHookEx(IntPtr.Zero,c,w,l);
         if(c>=0&&Armed&&!Mine(Native.Root(Native.GetForegroundWindow()))&&(w.ToInt32()==0x100||w.ToInt32()==0x104||w.ToInt32()==0x101||w.ToInt32()==0x105)){
             var k=(Native.Key)Marshal.PtrToStructure(l,typeof(Native.Key));
             if(injected||(k.flags&16)==0){
@@ -570,8 +695,9 @@ partial class Capture {
                 bool editShortcut=ctrl&&!alt&&(k.vk==86||k.vk==88);
                 bool copyShortcut=ctrl&&!alt&&k.vk==67;
                 bool selectAll=ctrl&&!alt&&k.vk==65;
-                bool tab=k.vk==9&&!shortcut;
-                Put(()=>{if(DropdownKey(window,shortcut))return;if(tab){Flush();AnchorFocusedEditor(window);return;}if(selectAll)return;if(copyShortcut){if((Stopwatch.GetTimestamp()-observed)/(double)Stopwatch.Frequency>0.25)throw new Exception("Copy observation was delayed. Draft preserved.");Flush();CopyIntent(window,epoch);return;}if(shortcut&&!editShortcut){Flush();Interrupt("This keyboard shortcut is not yet supported. Draft preserved.");return;}
+                bool tab=KeyboardIntent.EditorTab(k.vk,ctrl,alt);
+                bool browserTab=KeyboardIntent.BrowserTab(k.vk,ctrl,alt);
+                Put(()=>{if(browserTab){Flush();RecordBrowserTab(window,epoch);return;}if(DropdownKey(window,shortcut))return;if(tab){Flush();AnchorFocusedEditor(window);return;}if(selectAll)return;if(copyShortcut){if((Stopwatch.GetTimestamp()-observed)/(double)Stopwatch.Frequency>0.25)throw new Exception("Copy observation was delayed. Draft preserved.");Flush();CopyIntent(window,epoch);return;}if(ctrl&&!alt&&k.vk==86){PasteIntent(window,epoch);return;}if(shortcut&&!editShortcut){Flush();Interrupt("This keyboard shortcut is not yet supported. Draft preserved.");return;}
                     if((Stopwatch.GetTimestamp()-observed)/(double)Stopwatch.Frequency>0.25)throw new Exception("Text observation was delayed. Capture stopped rather than reading a later value.");
                     TraceWindow("text",window,window);TextIntent(window,epoch);});
             }
@@ -654,16 +780,48 @@ partial class Capture {
             if(!ProductGenerationResult.StableScope(scope))throw new Exception("Generation scope is not supported. Draft preserved.");
             target["postcondition"]=ProductGenerationResult.Contract;
         }
+        var browser=e.Current.NativeWindowHandle==h.ToInt32()?BrowserIdentity.Current(h):BrowserIdentity.Read(e);
+        if(browser!=null)target["browser"]=browser;
+        var download=BrowserDownload.Read(e);
+        if(download!=null){if(browser==null)throw new Exception("Download requires the verified preview adapter.");target["download"]=download;}
+        if((generation||productCopy&&name=="Copy Black Frame Prompt")&&(browser==null||!browser.ContainsKey("product")))
+            throw new Exception("The preview adapter has not verified the prepared product, category and PSD revision. Draft preserved.");
+        if(productCopy&&name=="Copy Black Frame Prompt") {
+            var proof=ProductPromptProof.Parse(e.Current.HelpText);
+            if(proof==null)throw new Exception("The complete prompt is not ready for verification. Draft preserved.");
+            target["prompt_proof"]=proof;
+        }
         return target;
     }
-    void WindowAction(IntPtr h,int epoch,string anchoredTitle=null) {
+    void WindowAction(IntPtr h,int epoch,string anchoredTitle=null,Dictionary<string,object> anchoredBrowser=null) {
         if(!DesktopSession&&lastWindow==IntPtr.Zero&&preparedWindow!=IntPtr.Zero&&h!=preparedWindow)
             throw new Exception("Start in the selected prepared window. Stop and save, then select the intended window.");
         string title=anchoredTitle??Native.Title(h);
         if(lastWindow==h&&lastTitle==title)return;
         Native.CheckProcess(h);
         var root=AutomationElement.FromHandle(h);
-        var target=Target(root,h);target["automation_id"]="window";target["window_key"]=title;target["name"]=title;
+        Dictionary<string,object> target;
+        if(anchoredBrowser!=null&&BrowserDownload.OwnedSaveDialog(Native.GetForegroundWindow(),h)) {
+            // Windows disables the owner during Save As. This is metadata for
+            // the witnessed browser window switch, not an action on a disabled
+            // control. The actual source button was independently identified.
+            BrowserDownload.ValidateSaveDialogProcess(Native.GetForegroundWindow(),h);
+            target=new Dictionary<string,object>{{"app",Native.ProcessFor(h).MainModule.FileName},
+                {"control_type","Window"},{"scope",new object[0]}};
+            Safe(title);
+        } else target=Target(root,h);
+        target["automation_id"]="window";target["window_key"]=title;target["name"]=title;
+        if(anchoredBrowser!=null) {
+            var browser=new Dictionary<string,object>(anchoredBrowser);
+            browser["control"]="document";browser["frame"]="top";
+            target["browser"]=browser;
+        }
+        // Retain the witnessed source page when leaving a browser for a native
+        // app. A later tab transition must still validate that source on replay.
+        if(lastWindow!=h&&lastWindow!=IntPtr.Zero&&lastBrowser!=null&&BrowserTabs.Edge(lastWindow)) {
+            uint previousPid;Native.GetWindowThreadProcessId(lastWindow,out previousPid);
+            browserWindowContexts[lastWindow]=new BrowserWindowContext{Pid=previousPid,Title=lastTitle,Browser=new Dictionary<string,object>(lastBrowser)};
+        }
         Emit("focus_window",target,null,epoch);lastWindow=h;lastTitle=title;preparedWindow=IntPtr.Zero;
         if(DesktopSession){ObserveInvocations(h);sessionStates[h]=DesktopWindowState.Read(h);}
     }
@@ -685,11 +843,184 @@ partial class Capture {
     }
     void Emit(string kind,Dictionary<string,object> target,object value,int epoch) {
         if(Broken)return;
+        if(kind=="invoke"&&target.ContainsKey("download")) {
+            Dictionary<string,object> result;
+            var source=(Dictionary<string,object>)target["download"];
+            // Dialog gestures belong to this download, not separate replayable
+            // text/click actions. Only a completed receipt retains the chosen folder.
+            if((bool)source["save_as"])downloadSaveOwner=lastWindow;
+            Func<bool> ownedDialog=()=>{
+                var modal=Native.GetForegroundWindow();
+                if(!BrowserDownload.OwnedSaveDialog(modal,downloadSaveOwner))return false;
+                if(!downloadDialogNotifications.IsObserved(modal,downloadSaveOwner,epoch)) {
+                    BrowserDownload.ValidateSaveDialogProcess(modal,downloadSaveOwner);
+                    downloadDialogNotifications.Observe(modal,downloadSaveOwner,epoch,MonotonicMs());
+                    send("diagnostic",new {kind="download_capture_dialog_observed",owned_save_dialog=true});
+                }
+                return true;
+            };
+            try {
+                ownedDialog();
+                result=downloadSession.Wait(source,downloadClickAt,()=>{
+                    if(Broken||!Armed||generation!=epoch)throw new Exception("Download capture stopped. Draft preserved; check the pending file before another download.");
+                },()=>Interlocked.Exchange(ref BusySince,Stopwatch.GetTimestamp()),
+                  ownedDialog);
+            } finally {downloadDialogNotifications.Complete(MonotonicMs());downloadSaveOwner=IntPtr.Zero;}
+            BrowserDownload.Persist(result);
+            kind="browser_download";value=new Dictionary<string,object>{{"directory",System.IO.Path.GetDirectoryName((string)result["path"])}};
+        }
+        if(kind=="invoke"&&target.ContainsKey("prompt_proof")) {
+            capturedTransfer.Clear();latestTransfer=-1;
+            var proof=(Dictionary<string,object>)target["prompt_proof"];
+            var wait=Stopwatch.StartNew();
+            while(!ProductPromptProof.ClipboardMatches(proof)&&wait.ElapsedMilliseconds<1500&&!Broken)Thread.Sleep(20);
+            if(Broken||!ProductPromptProof.ClipboardMatches(proof))throw new Exception("Copy prompt result was not verified. No transfer retained; draft preserved.");
+            string copiedPrompt=RunTransfer.ClipboardText();
+            if(!ProductPromptProof.Matches(copiedPrompt,proof))throw new Exception("Clipboard changed during Copy validation. No transfer retained.");
+            latestTransfer=transferSerial++;capturedTransfer.Observe(latestTransfer,copiedPrompt);
+            target=new Dictionary<string,object>(target);target.Remove("prompt_proof");
+            kind="transfer_copy_button";value=new Dictionary<string,object>{{"slot",latestTransfer},{"mode","application_prompt"}};
+        }
+        if(target.ContainsKey("browser"))lastBrowser=(Dictionary<string,object>)target["browser"];
         var caps=new Dictionary<string,string>{{"invoke","uia.invoke.v1"},{"set_text","uia.value.v1"},{"copy_text","clipboard.copy-text.v1"},{"select","uia.selection.v1"},{"toggle","uia.toggle.v1"},{"focus_window","windows.focus.v1"},{"window_state","windows.state.v1"},{"expand","uia.expand.v1"},{"scroll","uia.scroll.v1"}};
-        var a=new Dictionary<string,object>{{"version",2},{"kind",kind},{"requires",new[]{caps[kind].Replace(".v1",".v2")}},{"target",target},{"timeout_ms",8000},{"observed_ms",clock.ElapsedMilliseconds}};
+        caps["browser_tab"]="edge.tab.v1";
+        caps["browser_navigation"]="edge.navigation.v3";
+        caps["browser_download"]="edge.download.v3";
+        caps["transfer_copy"]="transfer.editor-copy.v3";caps["transfer_copy_button"]="transfer.prompt-copy.v3";caps["transfer_paste"]="transfer.paste.v3";
+        var a=new Dictionary<string,object>{{"version",kind.StartsWith("transfer_")||kind=="browser_download"||kind=="browser_navigation"?3:2},{"kind",kind},{"requires",new[]{caps[kind].Replace(".v1",".v2")}},{"target",target},{"timeout_ms",kind=="browser_download"?30000:8000},{"observed_ms",clock.ElapsedMilliseconds}};
         if(kind=="invoke"&&ProductGenerationResult.Supports(target))a["timeout_ms"]=30000;
         if(value!=null)a["value"]=value;
         send("event",new {generation=epoch,privacy="safe",action=a});
+    }
+    bool CompleteBrowserNavigation(Native.Point point,IntPtr window,int epoch,GenerationGesture gesture) {
+        if(gesture==null||!BrowserTabs.Edge(window))return false;
+        // An anchored download has its own completion contract. In particular,
+        // Save As transfers focus to an owned modal without navigating the page.
+        if(semanticClick!=null&&semanticClick.Target.ContainsKey("download"))return false;
+        // Prefer the pre-click control identity. A navigation may be the
+        // first action, so a previous recorded page is not required when
+        // the trusted gesture itself supplies its source identity.
+        var source=semanticClick!=null&&semanticClick.Target.ContainsKey("browser")?
+            (Dictionary<string,object>)semanticClick.Target["browser"]:lastBrowser;
+        uint pid;Native.GetWindowThreadProcessId(window,out pid);
+        InvocationWitness found=null;var wait=Stopwatch.StartNew();
+        do {
+            foreach(var witness in invocations.ToArray()) {
+                if(witness.Epoch!=epoch||witness.Pid!=pid||witness.At<gesture.StartedAt||witness.At-gesture.StartedAt>1500||
+                    !witness.Bounds.Contains(new System.Windows.Point(point.X,point.Y))||witness.Browser==null||
+                    (source!=null&&!BrowserIdentity.SamePage(witness.Browser,source)))continue;
+                if(found!=null&&found.RuntimeId!=witness.RuntimeId)throw new Exception("Browser invocation identity is ambiguous. Draft preserved.");
+                found=witness;
+            }
+            if(found!=null||wait.ElapsedMilliseconds>=300||Broken)break;
+            Thread.Sleep(10);
+        }while(true);
+        bool browserWitness=false;Dictionary<string,object> witnessedDownload=null;
+        if(found==null||BrowserDownload.OwnedSaveDialog(Native.GetForegroundWindow(),window)) {
+            send("diagnostic",new {kind="navigation_capture_stage",stage="gesture-marker-lookup"});
+            var marker=AutomationElement.FromHandle(window).FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,"sc-recorder-button-gesture"));
+            send("diagnostic",new {kind="navigation_witness_lookup",marker_count=marker.Count,gesture_age_ms=MonotonicMs()-gesture.StartedAt,source=source});
+            if(marker.Count==1) {
+                string help=marker[0].Current.HelpText;
+                string prefix=help.StartsWith("Sports Cave button gesture v2: ",StringComparison.Ordinal)?"Sports Cave button gesture v2: ":"Sports Cave button gesture v1: ";
+                if(help.StartsWith(prefix,StringComparison.Ordinal)&&help.Length<=7000) {
+                    var raw=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(Uri.UnescapeDataString(help.Substring(prefix.Length)));
+                    if((raw.Count==3||prefix.Contains("v2")&&raw.Count==5)&&raw.ContainsKey("identity")&&raw.ContainsKey("time")&&raw.ContainsKey("name")) {
+                        long timestamp=Convert.ToInt64(raw["time"]);
+                        var identity=BrowserIdentity.ReadHelp("Sports Cave browser v2: "+Uri.EscapeDataString(new JavaScriptSerializer().Serialize(raw["identity"])));
+                        send("diagnostic",new {kind="navigation_witness_check",control=Safe((string)raw["name"]),identity=identity,source_matches=source==null||BrowserIdentity.SamePage(identity,source),pointer_delta_ms=timestamp-gesture.UtcMilliseconds,witness_age_ms=(DateTime.UtcNow.Ticks-621355968000000000)/10000-timestamp});
+                        if(timestamp>=gesture.UtcMilliseconds-20&&timestamp<=gesture.UtcMilliseconds+300&&
+                            (DateTime.UtcNow.Ticks-621355968000000000)/10000-timestamp<=2000&&identity!=null&&
+                            (source==null||BrowserIdentity.SamePage(identity,source))) {
+                            if(found!=null&&!BrowserIdentity.SameControl(found.Browser,identity))throw new Exception("Browser click witnesses disagree. Draft preserved.");
+                            witnessedDownload=BrowserDownload.WitnessDownload(raw,identity,point,AutomationElement.FromHandle(window).Current.BoundingRectangle,Native.GetDpiForWindow(window));
+                            found=new InvocationWitness{Browser=identity,Name=Safe((string)raw["name"]),Id=""};browserWitness=true;
+                        }
+                    }
+                }
+            }
+        }
+        if(found==null){send("diagnostic",new {kind="navigation_invocation_unavailable",received=invocationReceived,cache_failures=invocationCacheFailures});return false;}
+        Dictionary<string,object> destination=null;
+        do {
+        if(BrowserDownload.OwnedSaveDialog(Native.GetForegroundWindow(),window)) {
+            BrowserDownload.ValidateSaveDialogProcess(Native.GetForegroundWindow(),window);
+            // The trusted pointer-down witness retains only bounded source
+            // metadata, after browser-level unique-control validation. Do not
+            // query a disabled webpage behind its owned modal: even an exact
+            // AutomationId lookup can stall in the accessibility provider.
+            if(witnessedDownload==null)throw new Exception("Save As capture requires browser adapter 0.3.4. Reload the prepared development adapter; draft preserved. Check the pending download before trying again.");
+            string control=(string)found.Browser["control"];
+            var downloadTarget=new Dictionary<string,object>{{"app",Native.ProcessFor(window).MainModule.FileName},{"window_key",Safe(Native.Title(window))},
+                {"control_type","Button"},{"automation_id",control.StartsWith("id:",StringComparison.Ordinal)?control.Substring(3):""},
+                {"name",found.Name},{"scope",new object[0]},{"browser",found.Browser},{"download",witnessedDownload}};
+            send("diagnostic",new {kind="save_as_source_witness",browser_identity=true,unique_control=true,physical_point_and_scale=true});
+            if(Broken||epoch!=generation||!BrowserDownload.OwnedSaveDialog(Native.GetForegroundWindow(),window))
+                throw new Exception("Save As ownership changed during capture. Draft preserved.");
+            send("diagnostic",new {kind="navigation_capture_stage",stage="save-as-window-action"});
+            RecordInvocation(window,epoch,downloadTarget);
+            return true;
+        }
+            if(Broken||epoch!=generation||Native.Root(Native.GetForegroundWindow())!=window) {
+                var foreground=Native.GetForegroundWindow();
+                send("diagnostic",new {kind="navigation_focus_lost",foreground=Native.WindowMetadata(foreground),
+                    foreground_root=Native.WindowMetadata(Native.GetAncestor(foreground,2)),
+                    foreground_owner=Native.WindowMetadata(Native.GetAncestor(foreground,3)),
+                    owned_save_as=BrowserDownload.OwnedSaveDialog(foreground,window)});
+                throw new Exception("Navigation capture lost its owning window. Draft preserved.");
+            }
+            destination=BrowserIdentity.Current(window);
+            if(destination!=null&&Equals(destination["profile"],found.Browser["profile"])&&!Equals(destination["page"],found.Browser["page"]))break;
+            if(wait.ElapsedMilliseconds>=1500)return false;
+            Thread.Sleep(25);
+        }while(true);
+        WindowAction(window,epoch,null,found.Browser);
+        var target=new Dictionary<string,object>{{"app",Native.ProcessFor(window).MainModule.FileName},{"window_key",Safe(lastTitle)},
+            {"control_type","Button"},{"automation_id",found.Id},{"name",found.Name},{"scope",new object[0]},{"browser",found.Browser}};
+        semanticClick=null; // The same physical gesture cannot also emit Invoke.
+        Emit("browser_navigation",target,destination,epoch);lastBrowser=destination;
+        send("diagnostic",new {kind="browser_navigation_captured",invocation_witness=!browserWitness,trusted_browser_witness=browserWitness,source_and_destination_verified=true});
+        return true;
+    }
+    void RecordBrowserTab(IntPtr h,int epoch) {
+        captureOperation="browser tab: validate input window";
+        InputWindow(h);
+        if(lastWindow!=h) {
+            BrowserWindowContext previous;uint currentPid;Native.GetWindowThreadProcessId(h,out currentPid);
+            if(!DesktopSession||!browserWindowContexts.TryGetValue(h,out previous)||previous.Pid!=currentPid||String.IsNullOrEmpty(previous.Title))
+                throw new Exception("Record an action on the starting page before switching tabs. Draft preserved.");
+            WindowAction(h,epoch,previous.Title,previous.Browser);
+        }
+        if(String.IsNullOrEmpty(lastTitle))throw new Exception("The starting browser page was not identified. Draft preserved.");
+        string page=null,profile;
+        var tabReady=Stopwatch.StartNew();
+        while(true) {
+            if(Broken)return;
+            InputWindow(h);
+            if(Native.Root(Native.GetForegroundWindow())!=h)throw new Exception("Browser focus changed during tab capture. Draft preserved.");
+            // Edge publishes selected-tab, caption and document updates in
+            // separate UIA notifications. Retry only these reads; never click
+            // again or suppress an ambiguous selected-tab result.
+            captureOperation="browser tab: selected chrome tab lookup";
+            var tab=BrowserTabs.Find(h,null,true);
+            captureOperation="browser tab: document agreement";
+            if(WindowIdentity.EdgeTitle(Native.Title(h),out page,out profile)&&
+               WindowIdentity.EdgeTabNameMatches(page,tab.Current.Name)&&BrowserTabs.Document(h,page))break;
+            if(tabReady.ElapsedMilliseconds>=750)
+                throw new Exception("The selected browser tab, window title and document did not agree within the readiness deadline. Draft preserved.");
+            Thread.Sleep(25);
+        }
+        Safe(page);
+        if(Native.Root(Native.GetForegroundWindow())!=h)throw new Exception("Browser focus changed during tab capture. Draft preserved.");
+        var target=new Dictionary<string,object>{{"app",Native.ProcessFor(h).MainModule.FileName},
+            {"window_key",Safe(lastTitle)},{"control_type","TabItem"},{"automation_id",""},{"name",page},{"scope",new object[0]}};
+        captureOperation="browser tab: destination identity";
+        var destination=BrowserIdentity.Current(h);
+        if(lastBrowser==null||destination==null)throw new Exception("Both tabs need the compatible preview browser adapter. Draft preserved.");
+        if(!Equals(lastBrowser["profile"],destination["profile"]))throw new Exception("Browser profile changed during tab capture. Draft preserved.");
+        target["source_browser"]=lastBrowser;target["browser"]=destination;
+        Emit("browser_tab",target,null,epoch);
+        lastTitle=Native.Title(h);editorAnchor=null;editorAnchorTarget=null;pendingEditorClick.Clear();
     }
     void Click(Native.Point p,IntPtr h,int epoch) {
         if(Broken)return;
@@ -717,6 +1048,7 @@ partial class Capture {
             if(e.Current.ProcessId!=expectedPid)throw new Exception("Clicked control ancestry left the intended application. Draft preserved.");
             seen.Add(e.Current.ControlType.ProgrammaticName);
             Privacy(e);object pattern;
+            if(e.Current.ControlType==ControlType.TabItem&&BrowserTabs.Edge(h)&&BrowserTabs.ChromeTab(e,h)){RecordBrowserTab(h,epoch);return;}
             if(e.Current.ControlType==ControlType.Edit||e.Current.ControlType==ControlType.Document){
                 if(e.Current.AutomationId=="RootWebArea")
                 {
@@ -760,10 +1092,18 @@ partial class Capture {
                 var expanded=((ExpandCollapsePattern)pattern).Current.ExpandCollapseState;
                 if(expanded!=ExpandCollapseState.Expanded&&expanded!=ExpandCollapseState.Collapsed)
                     throw new Exception("This menu has no definite open/closed state. Draft preserved.");
+                if(e.Current.ControlType==ControlType.ComboBox&&expanded==ExpandCollapseState.Expanded) {
+                    // A fast opening click may finish before the mouse-down worker
+                    // can inspect it. The mouse-up path has identified this exact
+                    // combobox at the physical point; anchor its current owned
+                    // popup now, before a later option click can close it. Never
+                    // infer an option from the page exposed after that later click.
+                    AnchorReleasedDropdown(e,p,h,epoch);return;
+                }
                 var t=Target(e,h);WindowAction(h,epoch);Emit("expand",t,expanded==ExpandCollapseState.Expanded,epoch);return;
             }
             if(e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern)){
-                var t=Target(e,h);WindowAction(h,epoch);Emit("invoke",t,null,epoch);return;
+                var t=Target(e,h);RecordInvocation(h,epoch,t);return;
             }
         }
         send("diagnostic",new {kind="unsupported_click",control_types=seen,window_title=Native.Title(h),
@@ -880,6 +1220,13 @@ partial class Capture {
             !anchor.ControlBounds.Contains(new System.Windows.Point(pointer.Point.X,pointer.Point.Y)))return;
         QueueHover(pointer.Point,pointer.Window,true);
     }
+    internal static bool HasNonButtonOwner(ControlType type) {
+        // These controls own their gesture. Scanning every button in the
+        // browser after finding one can hit stale entries from the old tab,
+        // and cannot turn a tab/field/toggle into an invocation.
+        return type==ControlType.TabItem||type==ControlType.CheckBox||
+            type==ControlType.RadioButton||type==ControlType.Edit||type==ControlType.ComboBox;
+    }
     SemanticClick ReadButton(Native.Point point,IntPtr window,int epoch,long at) {
         if(Broken||!Armed||epoch!=generation)return null;
         Native.CheckProcess(window);
@@ -890,8 +1237,10 @@ partial class Capture {
         var hit=AutomationElement.FromPoint(location);
         for(int depth=0;hit!=null&&depth<8;depth++,hit=TreeWalker.ControlViewWalker.GetParent(hit)) {
             if(hit.Current.ProcessId!=pid||hit.Current.NativeWindowHandle==window.ToInt32())break;
-            if(hit.Current.ControlType==ControlType.Button){found=hit;break;}
-            if(hit.Current.ControlType==ControlType.Document)break;
+            var hitType=hit.Current.ControlType;
+            if(hitType==ControlType.Button){found=hit;break;}
+            if(HasNonButtonOwner(hitType))return null;
+            if(hitType==ControlType.Document)break;
         }
         if(found==null) {
           if(Thread.CurrentThread.Name=="recorder-capture")captureOperation="button bounded search";
@@ -937,7 +1286,7 @@ partial class Capture {
         var click=semanticClick;semanticClick=null;if(click==null)return false;
         uint pid;Native.GetWindowThreadProcessId(window,out pid);
         if(click.Window!=window||click.Pid!=pid||click.Epoch!=epoch||generation!=epoch||
-            Native.Root(Native.GetForegroundWindow())!=window||Native.GetDpiForWindow(window)!=click.Dpi||
+            (!click.Target.ContainsKey("download")&&Native.Root(Native.GetForegroundWindow())!=window)||Native.GetDpiForWindow(window)!=click.Dpi||
             Native.Title(window)!=(string)click.Target["window_key"]||AutomationElement.FromHandle(window).Current.BoundingRectangle!=click.WindowBounds||
             !click.ControlBounds.Contains(new System.Windows.Point(point.X,point.Y))||MonotonicMs()-click.At>2000)
             throw new Exception("The clicked button's window, identity or gesture changed. Draft preserved.");
@@ -960,7 +1309,7 @@ partial class Capture {
             send("diagnostic",new {kind="modal_button_result",dialog_dismissed=modalDismissed,scope_verified=true});
             if(!modalDismissed)throw new Exception("The button's containing modal did not close. Its result is unsupported. Draft preserved.");
         }
-        if(click.NeedsInvocation&&!modalDismissed) {
+        if(click.NeedsInvocation&&!modalDismissed&&!click.Target.ContainsKey("download")) {
             var wait=Stopwatch.StartNew();bool matched=false;
             do {
                 foreach(var witness in invocations.ToArray())if(witness.Epoch==epoch&&witness.RuntimeId==click.RuntimeId&&witness.At>=click.At&&witness.At-click.At<=2000){matched=true;break;}
@@ -976,8 +1325,29 @@ partial class Capture {
             }
             send("diagnostic",new {kind="semantic_button_invocation_matched",runtime_identity_verified=true});
         }
-        WindowAction(window,epoch);Emit("invoke",click.Target,null,epoch);
+        RecordInvocation(window,epoch,click.Target);
         return true;
+    }
+    void RecordInvocation(IntPtr window,int epoch,Dictionary<string,object> target) {
+        var browser=BrowserDownload.CaptureWindowAnchor(target);
+        if(browser!=null)send("diagnostic",new {kind="download_window_context",browser_anchor=true,
+            owned_save_as=BrowserDownload.OwnedSaveDialog(Native.GetForegroundWindow(),window)});
+        WindowAction(window,epoch,null,browser);
+        Emit("invoke",target,null,epoch);
+    }
+    void AnchorReleasedDropdown(AutomationElement identified,Native.Point point,IntPtr window,int epoch) {
+        InputWindow(window);uint pid;Native.GetWindowThreadProcessId(window,out pid);
+        if(Broken||epoch!=generation||dropdown!=null)
+            throw new Exception("Dropdown capture changed before its opening click was verified. Draft preserved.");
+        var owner=DropdownSelection.AtPoint(window,pid,new System.Windows.Point(point.X,point.Y));
+        if(owner==null||!Automation.Compare(owner,identified)||!DropdownSelection.Open(owner,pid))
+            throw new Exception("The opened dropdown does not uniquely match the clicked control. Draft preserved.");
+        // Reuse the same owner, selection, DPI and popup validation as a
+        // pre-release capture. Subsequent input keeps its ordinary deadline.
+        SnapshotDropdown(point,window,epoch);
+        if(dropdown==null||!Automation.Compare(dropdown.Owner,identified)||!FinishDropdownClick())
+            throw new Exception("The opened dropdown could not retain its owner. Draft preserved.");
+        send("diagnostic",new {kind="dropdown_owner_after_release",physical_point_and_owner_verified=true});
     }
     void SnapshotDropdown(Native.Point point,IntPtr window,int epoch) {
         if(Broken)return;
@@ -1019,7 +1389,7 @@ partial class Capture {
             if(DropdownSelection.Open(dropdown.Owner,dropdown.Pid)){
                 var lists=DropdownSelection.Lists(dropdown.Owner,dropdown.Pid);
                 if(lists.Count>1)throw new Exception("Dropdown popup ownership is ambiguous.");
-                dropdown.PopupBounds=lists.Count==1?lists[0].Current.BoundingRectangle:System.Windows.Rect.Empty;
+                dropdown.PopupBounds=DropdownSelection.PopupBounds(dropdown.Owner,dropdown.Pid);
                 dropdown.View=DropdownSelection.View(dropdown.Owner,dropdown.Pid);dropdown.ScrollY=DropdownSelection.ScrollPosition(dropdown.Owner,dropdown.Pid);return true;
             }
             if(dropdown.Candidate!=null||DropdownSelection.Selected(dropdown.Owner,dropdown.Pid)!=dropdown.Before){PollDropdown(true);return true;}
@@ -1094,8 +1464,20 @@ partial class Capture {
             control.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)||
             control.TryGetCurrentPattern(ExpandCollapsePattern.Pattern,out pattern);
         bool button=control.Current.ControlType==ControlType.Button&&control.TryGetCurrentPattern(InvokePattern.Pattern,out pattern);
+        // BaseWeb's editable input can be much narrower than its selection
+        // surface. The adapter explicitly projects that owning group; reuse
+        // its same-process, unique-combobox and physical-point validation.
+        // A nearby arbitrary parent or matching text is never sufficient.
+        if(stateful&&control.Current.ControlType==ControlType.ComboBox&&
+           EdgeDropdownAdapter.Contains(control,expectedPid,new System.Windows.Point(point.X,point.Y))) {
+            Target(control,h);
+            send("diagnostic",new {kind="focused_dropdown_owner_click",control_name=Safe(control.Current.Name),
+                resolution="physical click inside adapter-identified unique dropdown owner; ancestry validated"});
+            return control;
+        }
         if((stateful||button)&&
            EditorClickTarget.Matches(new System.Windows.Point(point.X,point.Y),control.Current.BoundingRectangle,System.Windows.Rect.Empty,false)) {
+            send("diagnostic",new {kind="focused_semantic_candidate",control_type=control.Current.ControlType.ProgrammaticName,automation_id=Safe(control.Current.AutomationId),control_name=Safe(control.Current.Name),runtime_id=RuntimeIdentity(control.GetRuntimeId())});
             Target(control,h);
             send("diagnostic",new {kind="focused_semantic_click",control_type=control.Current.ControlType.ProgrammaticName,
                 automation_id=Safe(control.Current.AutomationId),control_name=Safe(control.Current.Name),
@@ -1236,17 +1618,38 @@ partial class Capture {
         var target=Target(editor,h);
         if(editorAnchor==null||!Automation.Compare(editorAnchor,editor))
             throw new Exception("Click the copy source editor before copying. Draft preserved.");
-        var value=CopyText.Observe(editor);
+        capturedTransfer.Clear();latestTransfer=-1;
+        string observed=RunTransfer.ReadEditor(editor,true,RunTransfer.NativeDocument(target));
+        latestTransfer=transferSerial++;capturedTransfer.ObserveEditor(latestTransfer,observed);
+        var value=new Dictionary<string,object>{{"slot",latestTransfer},{"mode","whole_text"}};
         // The source was focused when observation began. Observe verifies its
         // unchanged contents and exact clipboard result; a subsequent app
         // switch does not invalidate that already identified copy operation.
-        WindowAction(h,epoch);Emit("copy_text",target,value,epoch);
+        WindowAction(h,epoch);Emit("transfer_copy",target,value,epoch);
+    }
+    void PasteIntent(IntPtr h,int epoch) {
+        if(Broken)return;
+        InputWindow(h);ResolvePendingEditorClick();
+        var editor=AutomationElement.FocusedElement;uint pid;Native.GetWindowThreadProcessId(h,out pid);
+        if(editor==null||editor.Current.ProcessId!=pid||!editor.Current.HasKeyboardFocus||editorAnchor==null||
+            !Automation.Compare(editorAnchor,editor))throw new Exception("Paste destination changed. Draft preserved.");
+        string expected=capturedTransfer.Get(latestTransfer);
+        var target=Target(editor,h);
+        string pasteObserved=RunTransfer.ReadEditor(editor,false,RunTransfer.NativeDocument(target));
+        if(!RunTransfer.SameEditorText(pasteObserved,expected))
+            throw new Exception("Automatic Paste requires an empty or fully selected destination field. Mixed edits are not guessed.");
+        // A pending typed value was replaced by this explicit whole-field Paste.
+        if(dirty)throw new Exception("Finish pending typing before a transfer Paste. Draft preserved.");
+        WindowAction(h,epoch);Emit("transfer_paste",target,new Dictionary<string,object>{{"slot",latestTransfer},{"mode","replace_all"}},epoch);
+        pastedEditor=editor;
     }
     void TextIntent(IntPtr h,int epoch) {
         if(Broken)return;
         InputWindow(h);
         ResolvePendingEditorClick();
         var e=AutomationElement.FocusedElement;
+        if(pastedEditor!=null&&Automation.Compare(pastedEditor,e))
+            throw new Exception("Editing transferred text in the same field is not yet supported. Stop preserves the dynamic Paste.");
         uint expectedPid;Native.GetWindowThreadProcessId(h,out expectedPid);
         if(e.Current.ProcessId!=expectedPid)throw new Exception("Focus moved to a different application. Capture stopped.");
         var t=Target(e,h);
@@ -1361,6 +1764,9 @@ class Host : Window {
     readonly StackPanel detailTools=new StackPanel(){Orientation=Orientation.Horizontal};
     Capture capture;IntPtr hwnd;string state="idle";string playbackProgress;int generation;long elapsed;Stopwatch segment=new Stopwatch();
     bool closeAllowed;bool pending;bool testInput;
+    readonly RecordingIndicator indicator=new RecordingIndicator();
+    long pendingSince;int libraryOffset,reviewOffset;int? libraryNext,reviewNext;
+    readonly TextBlock buildLabel=new TextBlock(){Text="local-phase5-20261022 / IPC 2",FontSize=10,Foreground=Brushes.DimGray};
     volatile string pendingId;
     DesktopPlayback playback;
     int instructionSerial;
@@ -1369,6 +1775,8 @@ class Host : Window {
     bool connected=true,stopRequested;
     string pendingKind="";
     string lastSavedId;
+    string lastSelectedRunId;
+    string lastPresentedTaskId;
     public Host(bool testInput) {
         this.testInput=testInput;
         Title="Sports Cave · Task Recorder";Width=390;SizeToContent=SizeToContent.Height;Topmost=true;
@@ -1376,7 +1784,7 @@ class Host : Window {
         ResizeMode=ResizeMode.CanMinimize;WindowStartupLocation=WindowStartupLocation.Manual;
         Left=Math.Max(SystemParameters.WorkArea.Left,SystemParameters.WorkArea.Right-Width-20);Top=SystemParameters.WorkArea.Top+70;
         Background=new SolidColorBrush(Color.FromRgb(255,253,248));Foreground=new SolidColorBrush(Color.FromRgb(36,39,32));
-        var layout=new StackPanel(){Margin=new Thickness(14)};Content=new ScrollViewer(){Content=layout,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
+        var layout=new StackPanel(){Margin=new Thickness(14)};Content=new ScrollViewer(){Content=layout,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};layout.Children.Add(buildLabel);
         var title=new TextBlock(){Text="SPORTS CAVE  /  TASK RECORDER",FontSize=10,Foreground=Brushes.DimGray};
         title.MouseLeftButtonDown+=(s,e)=>DragMove();layout.Children.Add(title);
         layout.Children.Add(heading);layout.Children.Add(contextName);
@@ -1395,7 +1803,6 @@ class Host : Window {
         });
         recoveryPanel.Children.Add(reviewButton);
         recoveryPanel.Children.Add(new TextBlock(){Text="This keeps the failed run in history. Nothing resumes or repeats. A new Play starts from the beginning.",TextWrapping=TextWrapping.Wrap});
-        layout.Children.Add(recoveryPanel);
         reviewRuns.SelectionChanged+=(s,e)=>UpdateReview();
         reviewEvidence.TextChanged+=(s,e)=>UpdateReviewEnabled();
         reviewChecked.Checked+=(s,e)=>UpdateReviewEnabled();reviewChecked.Unchecked+=(s,e)=>UpdateReviewEnabled();
@@ -1404,7 +1811,12 @@ class Host : Window {
         saveButton=Button("Save recording",()=>Command("save",new {name=name.Text.Trim()}));
         discardButton=Button("Discard draft",()=>{if(MessageBox.Show(this,"Discard this unsaved recording?","Discard recording",MessageBoxButton.YesNo,MessageBoxImage.Question)==MessageBoxResult.Yes)Command("discard",new {});});
         row.Children.Add(saveButton);row.Children.Add(discardButton);savePanel.Children.Add(row);layout.Children.Add(savePanel);
-        var details=new StackPanel();details.Children.Add(new TextBlock(){Text="Saved recording",Margin=new Thickness(0,6,0,0)});details.Children.Add(tasks);
+        var details=new StackPanel();details.Children.Add(recoveryPanel);details.Children.Add(new TextBlock(){Text="Saved recording",Margin=new Thickness(0,6,0,0)});details.Children.Add(tasks);
+        var pages=new StackPanel(){Orientation=Orientation.Horizontal};
+        pages.Children.Add(Button("Previous recordings",()=>Command("library_page",new {offset=Math.Max(0,libraryOffset-20)})));
+        pages.Children.Add(Button("Next recordings",()=>{if(libraryNext.HasValue)Command("library_page",new {offset=libraryNext.Value});}));details.Children.Add(pages);
+        details.Children.Add(Button("Previous reviews",()=>Command("review_page",new {offset=Math.Max(0,reviewOffset-20)})));
+        details.Children.Add(Button("Next reviews",()=>{if(reviewNext.HasValue)Command("review_page",new {offset=reviewNext.Value});}));
         details.Children.Add(new TextBlock(){Text="Action log",FontWeight=FontWeights.SemiBold});details.Children.Add(actionLog);
         detailTools.Children.Add(Button("Refresh windows",RefreshWindows));
         detailTools.Children.Add(Button("Inspect window",()=>{if(windows.SelectedItem!=null)capture.Diagnostic((IntPtr)((ComboBoxItem)windows.SelectedItem).Tag);}));
@@ -1425,16 +1837,18 @@ class Host : Window {
             HwndSource.FromHwnd(hwnd).AddHook((IntPtr h,int msg,IntPtr w,IntPtr l,ref bool handled)=>{
                 if(msg==0x312&&w.ToInt32()==DesktopPlayback.Hotkey){playback.Stop();Send("diagnostic",new {kind="emergency_stop",source="registered_windows_hotkey"});Send("play_stop",new {reason="Emergency Stop requested."});handled=true;}return IntPtr.Zero;
             });
+            EdgeDropdownAdapter.Observed=()=>Send("diagnostic",new {kind="adapter_seen",protocol=1});
             capture=new Capture(hwnd,Send,reason=>Dispatcher.BeginInvoke(new Action(()=>{capture.Detach();Send("interrupt",new {reason});status.Text=reason;})),testInput);
-            RefreshWindows();Render();Send("diagnostic",new {kind="toolbar_ready"});
+            RefreshWindows();Render();Send("diagnostic",new {kind="toolbar_ready",protocol=2,build="local-phase5-20261022"});
         };
+        Closed+=(s,e)=>indicator.Dispose();
         Closing+=(s,e)=>{
             if(state=="playing"){playback.Disarm();Send("play_stop",new {reason="Toolbar closed. Pending effects remain uncertain."});closeAllowed=true;}
             if(!closeAllowed&&state!="idle"){e.Cancel=true;status.Text="Stop, then Save or Discard before closing.";if(state=="recording"||state=="paused")Stop();}
             else {if(capture!=null)capture.Detach();if(playback!=null)playback.Disarm();Send("close",new {});}
         };
         var tick=new DispatcherTimer(){Interval=TimeSpan.FromMilliseconds(250)};
-        tick.Tick+=(s,e)=>{string display=playbackProgress??((state=="recording"?"● Recording  ":state=="paused"?"Paused  ":"")+TimeSpan.FromMilliseconds(elapsed+segment.ElapsedMilliseconds).ToString(@"hh\:mm\:ss"));if(timer.Text!=display)timer.Text=display;if(capture!=null)capture.Watchdog();if(playback!=null)playback.Watchdog();};tick.Start();
+        tick.Tick+=(s,e)=>{UpdateIndicator();if(pending){if(pendingSince==0)pendingSince=Stopwatch.GetTimestamp();else if((Stopwatch.GetTimestamp()-pendingSince)/(double)Stopwatch.Frequency>8){if(capture!=null)capture.Detach();if(playback!=null)playback.Disarm();connected=false;pending=false;status.Text="Helper acknowledgement timed out. Actions stopped; review preserved state. Reopen the popup.";Render();Environment.Exit(79);}}else pendingSince=0;string display=playbackProgress??((state=="recording"?"● Recording  ":state=="paused"?"Paused  ":"")+TimeSpan.FromMilliseconds(elapsed+segment.ElapsedMilliseconds).ToString(@"hh\:mm\:ss"));if(timer.Text!=display)timer.Text=display;if(capture!=null)capture.Watchdog();if(playback!=null)playback.Watchdog();};tick.Start();
         Task.Run(()=>{foreach(string line in outbound.GetConsumingEnumerable()){Console.Out.WriteLine(line);Console.Out.Flush();}});
         Task.Run(()=>{try{string line;while((line=ReadFrame())!=null){var d=json.Deserialize<Dictionary<string,object>>(line);Dispatcher.Invoke(new Action(()=>Apply(d)));}}
             catch{} Dispatcher.BeginInvoke(new Action(()=>{if(capture!=null)capture.Detach();if(playback!=null)playback.Disarm();connected=false;pending=false;status.Text="Connection lost. Your draft is retained. Reopen the Windows popup from Sports Cave OS.";closeAllowed=true;Render();}));});
@@ -1450,7 +1864,7 @@ class Host : Window {
         if(buffer.Length!=0)throw new Exception("Incomplete IPC frame.");
         return null;
     }
-    Button Button(string text,Action action){var b=new Button(){Content=text,Padding=new Thickness(12,6,12,6),Margin=new Thickness(0,0,6,0),MinWidth=64,Background=Brushes.White,BorderBrush=new SolidColorBrush(Color.FromRgb(211,207,195))};b.Click+=(s,e)=>{try{action();}catch(Exception ex){status.Text=ex.Message;pending=false;pendingKind="";Render();}};return b;}
+    Button Button(string text,Action action){var b=new Button(){Content=text,Padding=new Thickness(12,6,12,6),Margin=new Thickness(0,0,6,0),MinWidth=64,Background=Brushes.White,BorderBrush=new SolidColorBrush(Color.FromRgb(211,207,195))};System.Windows.Automation.AutomationProperties.SetName(b,text);b.Click+=(s,e)=>{try{action();}catch(Exception ex){status.Text=ex.Message;pending=false;pendingKind="";Render();}};return b;}
     void Send(string kind,object payload) {
         string id=Guid.NewGuid().ToString();
         if(pending&&kind!="event"&&kind!="diagnostic")pendingId=id;
@@ -1468,7 +1882,8 @@ class Host : Window {
     void RefreshWindows() {
         var old=windows.SelectedItem as ComboBoxItem;
         windows.Items.Clear();
-        Native.EnumWindows((h,l)=>{if(h!=hwnd&&Native.IsWindowVisible(h)){string title=Native.Title(h);if(title.Length>0){try{Native.CheckProcess(h);windows.Items.Add(new ComboBoxItem(){Content=title,Tag=h});}catch{}}}return true;},IntPtr.Zero);
+        uint ownProcess=(uint)Process.GetCurrentProcess().Id;
+        Native.EnumWindows((h,l)=>{uint pid;Native.GetWindowThreadProcessId(h,out pid);if(h!=hwnd&&Native.IsWindowVisible(h)&&pid!=ownProcess){string title=Native.Title(h);if(title.Length>0){try{Native.CheckProcess(h);windows.Items.Add(new ComboBoxItem(){Content=title,Tag=h});}catch{}}}return true;},IntPtr.Zero);
         if(old!=null)foreach(ComboBoxItem item in windows.Items)if(Equals(item.Tag,old.Tag)&&Equals(item.Content,old.Content))windows.SelectedItem=item;
         status.Text="Choose a window, then Record.";
     }
@@ -1485,7 +1900,15 @@ class Host : Window {
             awaitingPlayback=false;playback.Disarm();Send("play_stop",new {reason=ex.Message});
         }
     }
+    string indicatorMode="";
+    void UpdateIndicator(){
+        string label=RecordingIndicator.Mode(state,awaitingPlayback,playbackPaused,connected,stopRequested);
+        if(capture!=null&&capture.Broken&&state=="recording")label="";
+        indicator.Update(label,state=="playing"?(playbackProgress??"Preparing") : TimeSpan.FromMilliseconds(elapsed+segment.ElapsedMilliseconds).ToString(@"hh\:mm\:ss"));
+        if(label!=indicatorMode){indicatorMode=label;Send("diagnostic",new {kind="recording_indicator",mode=label,displays=indicator.Snapshot()});}
+    }
     void Render(){
+        UpdateIndicator();
         // Interrupted recordings require explicit review before Save is accepted.
         heading.Text=ToolbarPresentation.Label(state,awaitingPlayback,playbackPaused,pendingKind,connected);
         if(state=="recording"&&capture!=null&&capture.DesktopSession)heading.Text="● Recording desktop session";
@@ -1548,25 +1971,37 @@ class Host : Window {
     }
     void Apply(Dictionary<string,object> d){
         if(!d.ContainsKey("v")||Convert.ToInt32(d["v"])!=1)return;
+        if(!d.ContainsKey("runtime")||Convert.ToInt32(((Dictionary<string,object>)d["runtime"])["ipc"])!=2)throw new Exception("Incompatible helper protocol.");
+        var runtime=(Dictionary<string,object>)d["runtime"];if(runtime.ContainsKey("native_sha256"))buildLabel.Text="local-phase5-20261022 / IPC 2 / "+Convert.ToString(runtime["native_sha256"]).Substring(0,8);
         if(d.ContainsKey("ack")&&(string)d["ack"]==pendingId){pending=false;pendingKind="";pendingId=null;}
         if((string)d["state"]=="interrupted"){pending=false;pendingKind="";pendingId=null;}
         string next=(string)d["state"];int epoch=Convert.ToInt32(d["generation"]);
+        var lp=(Dictionary<string,object>)d["library_page"];libraryOffset=Convert.ToInt32(lp["offset"]);libraryNext=lp["next"]==null?(int?)null:Convert.ToInt32(lp["next"]);
+        var rp=(Dictionary<string,object>)d["review_page"];reviewOffset=Convert.ToInt32(rp["offset"]);reviewNext=rp["next"]==null?(int?)null:Convert.ToInt32(rp["next"]);
         bool showSave=next=="draft"&&state!="draft";
         if(next=="idle"||next=="draft"||next=="interrupted")stopRequested=false;
         if(showSave&&d.ContainsKey("suggested_name"))name.Text=(string)d["suggested_name"];
         if(d.ContainsKey("recording_name"))contextName.Text=(string)d["recording_name"];
         if(next=="recording"&&(state!="recording"||epoch!=generation)){
-            try{capture.Start(epoch);}catch(Exception e){Send("interrupt",new {reason=e.Message});return;}
+            try{capture.Start(epoch,state=="paused");}catch(Exception e){Send("interrupt",new {reason=e.Message});return;}
         } else if(next!="recording"&&capture!=null)capture.Detach();
         state=next;generation=epoch;elapsed=Convert.ToInt64(d["elapsed_ms"]);segment.Reset();if(state=="recording")segment.Start();
         if(d.ContainsKey("action_log"))liveActionLog=FormatLog((System.Collections.ArrayList)d["action_log"]);
         if(state=="idle"&&d.ContainsKey("tasks")){
-            string previousRun=d.ContainsKey("run")&&d["run"]!=null?(string)((Dictionary<string,object>)d["run"])["task_id"]:null;
-            TaskList.Update(tasks,(System.Collections.ArrayList)d["tasks"],previousRun);
+            var finished=d.ContainsKey("run")?d["run"] as Dictionary<string,object>:null;
+            string previousRun=finished==null?null:(string)finished["task_id"],prefer=null;
+            // Select a newly finished OS-started run once. Later snapshots must
+            // preserve an explicit library choice made by the user.
+            if(finished!=null&&(string)finished["id"]!=lastSelectedRunId){lastSelectedRunId=(string)finished["id"];prefer=previousRun;}
             if(d.ContainsKey("last_saved")&&d["last_saved"]!=null){
                 string saved=(string)((Dictionary<string,object>)d["last_saved"])["id"];
-                if(saved!=lastSavedId){lastSavedId=saved;foreach(ComboBoxItem item in tasks.Items)if((string)((Dictionary<string,object>)item.Tag)["id"]==saved)tasks.SelectedItem=item;}
+                if(saved!=lastSavedId){lastSavedId=saved;prefer=saved;}
             }
+            var recent=d.ContainsKey("selected_task")?d["selected_task"] as Dictionary<string,object>:null;
+            // A Play request may expire before it creates a run. Keep that
+            // requested task selected too, without reselecting it on every poll.
+            if(recent!=null&&(string)recent["id"]!=lastPresentedTaskId){lastPresentedTaskId=(string)recent["id"];prefer=lastPresentedTaskId;}
+            TaskList.Update(tasks,(System.Collections.ArrayList)d["tasks"],previousRun,recent,prefer);
         }
         if(d.ContainsKey("reviews"))TaskList.Update(reviewRuns,(System.Collections.ArrayList)d["reviews"],null);
         recoveryPanel.Visibility=state=="idle"&&reviewRuns.Items.Count>0?Visibility.Visible:Visibility.Collapsed;
@@ -1577,6 +2012,8 @@ class Host : Window {
             var run=(Dictionary<string,object>)d["run"];
             playbackProgress=((string)run["state"]=="completed"?"Completed":state=="playing"?(playbackPaused?"Paused":"Playing"):"Stopped")
                 +" · "+run["next_step"]+"/"+run["total"]+" steps";
+            if(state=="playing"&&run.ContainsKey("pending")&&run["pending"]!=null)
+                playbackProgress="Step "+(Convert.ToInt32(run["pending"])+1)+" of "+run["total"]+" · "+(playbackPaused?"Pausing":"Playing");
         }
         status.Text=(string)d["message"];Render();
         if(showSave){name.Focus();name.SelectAll();}

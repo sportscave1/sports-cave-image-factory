@@ -23,7 +23,18 @@ class Playback:
         self.run = None
 
     def _write(self):
-        self.repository.atomic(self.root / (self.run["id"] + ".json"), self.run)
+        try:
+            self.repository.atomic(self.root / (self.run["id"] + ".json"), self.run)
+        except OSError:
+            # A tentative in-memory transition is not permission to send input
+            # after its durable journal failed. Keep the last disk journal for
+            # recovery; do not retry the write or repeat an application action.
+            self.stop_event.set()
+            self.ready.clear()
+            self.run['pause_requested'] = False
+            self.run['state'] = 'uncertain' if self.run['pending'] is not None else 'stopped'
+            self.run['message'] = 'Playback stopped because its journal could not be saved. Restore disk access and review the preserved run.'
+            raise
 
     def begin(self, run_id, task_id, revision, capabilities, *,
               controls_visible, emergency_stop_ready):
@@ -88,6 +99,10 @@ class Playback:
 
     def pause(self):
         with self.lock:
+            if (not self.run or self.stop_event.is_set() or
+                    self.run['state'] not in {'playing', 'paused', 'uncertain'} or
+                    (self.run['state'] == 'uncertain' and self.run.get('result_received'))):
+                raise Invalid('Only active playback can pause.')
             self.ready.clear()
             if self.run:
                 self.run["pause_requested"] = True
@@ -98,7 +113,8 @@ class Playback:
 
     def resume(self):
         with self.lock:
-            if not self.run or not self.run["pause_requested"]:
+            if (not self.run or not self.run["pause_requested"] or self.stop_event.is_set()
+                    or self.run['state'] not in {'paused', 'uncertain'}):
                 raise Invalid("Only a paused, confirmed run can resume.")
             self.run["pause_requested"] = False
             self.run["state"] = "playing" if self.run["pending"] is None else "uncertain"
@@ -110,6 +126,7 @@ class Playback:
         self.ready.set()
         with self.lock:
             if self.run and self.run["state"] not in {"completed", "stopped"}:
+                self.run["pause_requested"] = False
                 if reason:
                     self.run["stop_reason"] = str(reason)[:240]
                     self.run["message"] = self.run["stop_reason"]

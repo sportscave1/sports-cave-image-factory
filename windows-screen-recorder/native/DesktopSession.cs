@@ -34,13 +34,34 @@ static class DesktopWindowState {
     }
 }
 
+// Foreground notifications can be queued before the Save As window has its
+// final title. Retain the later, independently verified owned-dialog identity
+// until its receipt wait ends. This applies only to metadata notifications;
+// physical mouse/key work never uses this exemption.
+sealed class DownloadDialogNotifications {
+    IntPtr dialog,owner;int epoch;long observed,completed;bool active;
+    public void Clear(){dialog=owner=IntPtr.Zero;active=false;}
+    public void Observe(IntPtr modal,IntPtr browser,int generation,long at) {
+        if(modal==IntPtr.Zero||browser==IntPtr.Zero||modal==browser)throw new ArgumentException("Invalid owned dialog observation.");
+        dialog=modal;owner=browser;epoch=generation;observed=at;completed=0;active=true;
+    }
+    public bool IsObserved(IntPtr modal,IntPtr browser,int generation){return active&&dialog==modal&&owner==browser&&epoch==generation;}
+    public void Complete(long at){if(active){completed=at;active=false;}}
+    public bool Matches(IntPtr modal,IntPtr browser,int generation,long queuedAt) {
+        return dialog!=IntPtr.Zero&&dialog==modal&&owner==browser&&epoch==generation&&
+            queuedAt>=observed-1500&&(active||queuedAt<=completed);
+    }
+}
+
 partial class Capture {
+    readonly DownloadDialogNotifications downloadDialogNotifications=new DownloadDialogNotifications();
     public bool DesktopSession {get;private set;}
     DesktopWindowState.EventCallback sessionCallback;
     IntPtr sessionHook;
     long physicalTransitionTick=-1;
     IntPtr mouseDownWindow;
     string mouseDownState;
+    readonly WindowMoveGesture moveGesture=new WindowMoveGesture();
     readonly Dictionary<IntPtr,string> sessionStates=new Dictionary<IntPtr,string>();
     void ArmSession() {
         if(!DesktopSession)return;
@@ -57,13 +78,20 @@ partial class Capture {
     }
     void PhysicalTransition(uint tick) {if(DesktopSession)Interlocked.Exchange(ref physicalTransitionTick,tick);}
     void SessionEvent(IntPtr hook,uint kind,IntPtr window,int objectId,int childId,uint thread,uint time) {
-        if(!Armed||Broken||!DesktopSession||window==IntPtr.Zero||objectId!=0||childId!=0||(kind!=3&&kind!=0x16&&kind!=0x17))return;
+        if(!Armed||Broken||!DesktopSession||window==IntPtr.Zero||objectId!=0||childId!=0||(kind!=3&&kind!=0xA&&kind!=0x16&&kind!=0x17))return;
         long physical=Interlocked.Read(ref physicalTransitionTick);
         // OS foreground events alone cannot establish physical input. Injected
         // input never grants this ticket. No input values are read here.
         if(physical<0||!DesktopWindowState.InGesture(time,(uint)physical))return;
+        var eventWindow=window;var eventOwner=Native.GetAncestor(window,3);long queuedAt=MonotonicMs();
         window=Native.Root(window);
         if(Mine(window)||Native.IsTaskbar(window)||!Native.IsWindow(window))return;
+        if(kind==0xA){moveGesture.Observe(window,generation,time);return;}
+        // Preserve the event-time owned-modal relationship before the dialog closes.
+        // Only a foreground notification for the already captured browser or its
+        // verified Save As modal can be redundant after the receipt wait.
+        var owner=Native.GetAncestor(window,3);
+        bool saveDialog=kind==3&&BrowserDownload.OwnedSaveDialog(window,owner);
         string state=kind==0x16?"minimized":DesktopWindowState.Read(window);int epoch=generation;
         Put(()=>{
             if(Broken||epoch!=generation)return;
@@ -79,7 +107,8 @@ partial class Capture {
                     RecordWindowState(lastWindow,"minimized",epoch);
                 WindowAction(window,epoch);AnchorFocusedEditor(window);
             }
-        });
+        },()=>epoch==generation&&kind==3&&(window==lastWindow||(saveDialog&&owner==lastWindow)||
+            downloadDialogNotifications.Matches(eventWindow,eventOwner,epoch,queuedAt)));
     }
     void FlushForTransition() {
         if(dropdown!=null)PollDropdown(true,true);
@@ -88,9 +117,29 @@ partial class Capture {
     Dictionary<string,object> WindowTarget(IntPtr window) {
         Native.CheckProcess(window);
         string title=Safe(Native.Title(window));
+        Dictionary<string,object> browser=null;
+        if(BrowserTabs.Edge(window)) {
+            // Caption updates (including Streamlit's temporary title) are not
+            // a page identity. Reuse only a page witnessed in this capture and
+            // this exact window/process; replay validates it independently.
+            if(window==lastWindow&&lastBrowser!=null) {
+                browser=lastBrowser;title=lastTitle;
+            } else {
+                BrowserWindowContext previous;uint pid;Native.GetWindowThreadProcessId(window,out pid);
+                if(browserWindowContexts.TryGetValue(window,out previous)&&previous.Pid==pid) {
+                    browser=previous.Browser;title=previous.Title;
+                }
+            }
+            if(browser==null)throw new Exception("Record an action on the browser page before changing its window state. Draft preserved.");
+        }
         if(title.Length==0)throw new Exception("Desktop transition has no durable window identity.");
-        return new Dictionary<string,object>{{"app",Native.ProcessFor(window).MainModule.FileName},{"window_key",title},
+        var target=new Dictionary<string,object>{{"app",Native.ProcessFor(window).MainModule.FileName},{"window_key",title},
             {"control_type","Window"},{"automation_id","window"},{"name",title},{"scope",new List<object>()}};
+        if(browser!=null) {
+            var identity=new Dictionary<string,object>(browser);identity["control"]="document";identity["frame"]="top";
+            target["browser"]=identity;
+        }
+        return target;
     }
     void RecordWindowState(IntPtr window,string state,int epoch) {
         string previous;if(sessionStates.TryGetValue(window,out previous)&&previous==state)return;
@@ -111,6 +160,13 @@ partial class Capture {
     bool CompleteObservedWindowGesture(IntPtr down,string before,int epoch) {
         if(!DesktopSession||Broken||epoch!=generation||down==IntPtr.Zero||before==null||!Native.IsWindow(down)||Native.IsTaskbar(down))return false;
         string after=DesktopWindowState.Read(down);
+        if(after==before&&moveGesture.Matches(down,epoch)) {
+            if(Native.Root(Native.GetForegroundWindow())!=down)
+                throw new Exception("Window focus changed during move or resize. Draft preserved.");
+            Native.CheckProcess(down);FlushForTransition();WindowAction(down,epoch);
+            send("diagnostic",new {kind="window_move_resize",physical_transition=true,resolution="Windows move/resize-start matched the input window and recording generation"});
+            return true;
+        }
         if(after==before)return false;
         FlushForTransition();RecordWindowState(down,after,epoch);return true;
     }

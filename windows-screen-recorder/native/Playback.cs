@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Automation;
@@ -22,11 +23,13 @@ class DesktopPlayback {
     int currentStep,timeout,resultSent;
     int identityReportedStep=-1;
     NativeMetrics metrics;
+    readonly RunTransfer transfer=new RunTransfer();
     public bool Active {get;private set;}
     public const int Hotkey=0x5343;
     public DesktopPlayback(IntPtr owner,Action<string,object> send){this.owner=owner;this.send=send;}
     public void Arm() {
         if(Active||busy)throw new Exception("Playback is already active.");
+        transfer.Clear();
         if(!RegisterHotKey(owner,Hotkey,0x4003,0x7B)) // Ctrl+Alt+F12, MOD_NOREPEAT.
             throw new Exception("Emergency Stop shortcut is unavailable. Playback refused.");
         cancelled.Reset();
@@ -56,7 +59,7 @@ class DesktopPlayback {
         }
         return Native.CallNextHookEx(IntPtr.Zero,code,message,data);
     }
-    public void Stop(){cancelled.Set();}
+    public void Stop(){cancelled.Set();transfer.Clear();}
     public void Pause(){Interlocked.CompareExchange(ref pausedAt,Stopwatch.GetTimestamp(),0);ready.Reset();}
     public void Resume(){long began=Interlocked.Exchange(ref pausedAt,0);if(began!=0)Interlocked.Add(ref started,Stopwatch.GetTimestamp()-began);ready.Set();}
     public void Watchdog(){
@@ -142,6 +145,11 @@ class DesktopPlayback {
     }
     IntPtr Window(Dictionary<string,object> target) {
         var matches=new List<IntPtr>();
+        if(target.ContainsKey("browser")){
+            var expected=(Dictionary<string,object>)target[target.ContainsKey("source_browser")?"source_browser":"browser"];
+            Native.EnumWindows((h,l)=>{if(Native.IsWindowVisible(h)){try{if(String.Equals(Native.ProcessFor(h).MainModule.FileName,(string)target["app"],StringComparison.OrdinalIgnoreCase)&&BrowserIdentity.SamePage(BrowserIdentity.Current(h),expected))matches.Add(h);}catch{}}return true;},IntPtr.Zero);
+            Check();if(matches.Count!=1)throw new Exception("Prepare exactly one matching browser profile and page. No window guessed.");return matches[0];
+        }
         var normalized=new HashSet<IntPtr>();
         Native.EnumWindows((h,l)=>{
             string title=Native.Title(h);
@@ -177,7 +185,9 @@ class DesktopPlayback {
     }
     AutomationElement Resolve(IntPtr hwnd,Dictionary<string,object> target,string kind,bool allowDisabled=false,bool allowOffscreen=false) {
         var root=AutomationElement.FromHandle(hwnd);
+        if(kind=="browser_tab")return BrowserTabs.Find(hwnd,(string)target["name"],false);
         if(kind=="focus_window"||kind=="window_state")return root;
+        if(target.ContainsKey("browser")){var foundBrowser=BrowserIdentity.Resolve(hwnd,target);Privacy(foundBrowser,allowDisabled,allowOffscreen);return foundBrowser;}
         if(target.ContainsKey("selector")) {
             if(kind!="scroll"||(string)target["selector"]!=ScrollAccess.ScopedSelector)
                 throw new Exception("Unsupported scoped control selector.");
@@ -289,10 +299,17 @@ class DesktopPlayback {
                     !ScopeMatches(current,hwnd,target))
                     throw new Exception("The applied scroll container identity changed. Action was not repeated.");
             }
-            if(kind=="invoke"&&ProductCopyResult.Supports(target)&&current.Current.IsEnabled&&
-                current.Current.HelpText==ProductCopyResult.Success)return true;
+            if(kind=="invoke"&&ProductCopyResult.Supports(target)&&current.Current.IsEnabled) {
+                if(target.ContainsKey("prompt_proof")) {
+                    var proof=(Dictionary<string,object>)target["prompt_proof"];
+                    if(!ProductPromptProof.Same(proof,ProductPromptProof.Parse(current.Current.HelpText)))
+                        throw new Exception("The complete prompt changed during Copy. Result is unverified.");
+                    if(current.Current.HelpText.Split('\n').Contains(ProductCopyResult.Success)&&ProductPromptProof.ClipboardMatches(proof))return true;
+                } else if(current.Current.HelpText==ProductCopyResult.Success)return true;
+            }
             if(kind=="set_text"&&current.TryGetCurrentPattern(ValuePattern.Pattern,out pattern)
                 &&((ValuePattern)pattern).Current.Value==(string)expected)return true;
+              if(kind=="transfer_paste"&&RunTransfer.SameEditorText(RunTransfer.ReadEditor(current,false,RunTransfer.NativeDocument(target),true),(string)expected))return true;
             if(kind=="toggle"&&current.TryGetCurrentPattern(TogglePattern.Pattern,out pattern)
                 &&((TogglePattern)pattern).Current.ToggleState==((bool)expected?ToggleState.On:ToggleState.Off))return true;
             if(kind=="select"&&current.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern)
@@ -419,12 +436,91 @@ class DesktopPlayback {
                 Check();
                 if(kind!="window_state"&&Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Window focus changed during target validation. No input sent.");
                 switch(kind){
+                    case "browser_tab":
+                        string sourcePage,sourceProfile;
+                        if(target.ContainsKey("source_browser")) {
+                            if(!BrowserIdentity.SamePage(BrowserIdentity.Current(hwnd),(Dictionary<string,object>)target["source_browser"]))
+                                throw new Exception("The starting browser profile or page changed. No tab selected.");
+                        } else if(!WindowIdentity.EdgeTitle((string)target["window_key"],out sourcePage,out sourceProfile)||
+                            !BrowserTabs.Document(hwnd,sourcePage))throw new Exception("The starting browser page could not be verified. No tab selected.");
+                        if(!e.TryGetCurrentPattern(SelectionItemPattern.Pattern,out pattern))throw new Exception("Browser tab selection is unavailable.");
+                        effectStarted=true;((SelectionItemPattern)pattern).Select();
+                        while(true) {
+                            Check();
+                            if((Stopwatch.GetTimestamp()-Interlocked.Read(ref started))*1000.0/Stopwatch.Frequency>=timeout)
+                                throw new Exception("Browser tab document did not become ready. Selection was not repeated.");
+                            if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Browser focus changed while verifying its tab.");
+                            var selectedTab=BrowserTabs.Find(hwnd,(string)target["name"],true,true);
+                            if(selectedTab!=null&&BrowserTabs.Document(hwnd,(string)target["name"])&&(!target.ContainsKey("browser")||
+                                BrowserIdentity.SamePage(BrowserIdentity.Current(hwnd),(Dictionary<string,object>)target["browser"]))){verified=true;break;}
+                            if(cancelled.WaitOne(100))Check();
+                        }
+                        break;
+                    case "browser_navigation":
+                        if(!e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern))throw new Exception("Navigation button cannot be invoked.");
+                        var destination=(Dictionary<string,object>)action["value"];
+                        effectStarted=true;((InvokePattern)pattern).Invoke();
+                        var navigationWait=Stopwatch.StartNew();
+                        while(navigationWait.ElapsedMilliseconds<timeout) {
+                            Check();if(Native.Root(Native.GetForegroundWindow())!=hwnd)throw new Exception("Navigation lost its owning browser window.");
+                            if(BrowserIdentity.SamePage(BrowserIdentity.Current(hwnd),destination)){verified=true;break;}
+                            if(cancelled.WaitOne(50))Check();
+                        }
+                        if(!verified)reason="Expected browser destination was not observed. Navigation was not repeated.";
+                        break;
                     case "focus_window": verified=true;break;
                     case "window_state":
                         effectStarted=DesktopWindowState.Read(hwnd)!=(string)action["value"];
                         DesktopWindowState.Apply(hwnd,(string)action["value"],Check);
                         verified=DesktopWindowState.Read(hwnd)==(string)action["value"];break;
                     case "wait_ready":verified=true;break;
+                    case "browser_download":
+                        var downloadSource=BrowserDownload.Read(e);
+                        if(downloadSource==null||!BrowserDownload.SameSource((Dictionary<string,object>)target["download"],downloadSource))
+                            throw new Exception("Download source changed. No input sent.");
+                        var downloadSession=new BrowserDownload.Session();
+                        var saveAs=(bool)downloadSource["save_as"]?new BrowserDownload.SaveAs(hwnd,(string)((Dictionary<string,object>)action["value"])["directory"],(string)downloadSource["filename"]):null;
+                        if(!e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern))throw new Exception("Download control cannot be invoked.");
+                        var downloadStarted=DateTime.UtcNow;
+                        Check();effectStarted=true;((InvokePattern)pattern).Invoke();
+                        var downloadResult=downloadSession.Wait(downloadSource,downloadStarted,Check,()=>{if(saveAs!=null)saveAs.Poll(Check);});
+                        send("diagnostic",new {kind="download_destination_observed",save_as_requested=saveAs!=null,
+                            dialog_prepared=saveAs!=null&&saveAs.Prepared,dialog_invoked=saveAs!=null&&saveAs.Invoked,
+                            requested_destination=saveAs==null?null:saveAs.Destination,observed_destination=downloadResult["path"],download_id=downloadResult["download_id"]});
+                        if(saveAs!=null&&!saveAs.MatchesVerifiedResult((string)downloadResult["path"]))
+                            throw new Exception("Save As receipt did not match this run's selected destination.");
+                        send("diagnostic",new {kind="download_destination_verified",save_as_requested=saveAs!=null,dialog_destination_applied=saveAs!=null&&saveAs.Invoked});
+                        BrowserDownload.Persist(downloadResult);verified=true;break;
+                    case "transfer_copy":
+                        transfer.Clear();
+                        string sourceText=RunTransfer.ReadEditor(e,false,RunTransfer.NativeDocument(target));
+                        Check();effectStarted=true;
+                        transfer.Copy(Convert.ToInt32(((Dictionary<string,object>)action["value"])["slot"]),sourceText,()=>{
+                            if(cancelled.WaitOne(0)||!ready.WaitOne(0)||Native.Root(Native.GetForegroundWindow())!=hwnd)
+                                throw new OperationCanceledException("Copy stopped before clipboard replacement.");
+                        });
+                        if(RunTransfer.ReadEditor(Resolve(hwnd,target,kind),false,RunTransfer.NativeDocument(target))!=sourceText){transfer.Clear();throw new Exception("Copy source changed during verification.");}
+                        verified=true;break;
+                    case "transfer_copy_button":
+                        transfer.Clear();
+                        if(!ProductCopyResult.Supports(target)||!e.Current.HelpText.Split('\n').Contains(ProductCopyResult.Ready))
+                            throw new Exception("Application Copy source is not ready. No transfer retained.");
+                        var dynamicProof=ProductPromptProof.Parse(e.Current.HelpText);
+                        if(dynamicProof==null||!e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern))
+                            throw new Exception("Application Copy proof or invoke pattern is unavailable.");
+                        Check();effectStarted=true;((InvokePattern)pattern).Invoke();
+                        var dynamicTarget=new Dictionary<string,object>(target);dynamicTarget["prompt_proof"]=dynamicProof;
+                        if(!VerifyResult(hwnd,dynamicTarget,"invoke",null))throw new Exception("Application Copy result was not confirmed. No transfer retained.");
+                        string dynamicText=RunTransfer.ClipboardText();
+                        if(!ProductPromptProof.Matches(dynamicText,dynamicProof))throw new Exception("Clipboard changed during Copy verification.");
+                        transfer.Observe(Convert.ToInt32(((Dictionary<string,object>)action["value"])["slot"]),dynamicText);
+                        verified=true;break;
+                    case "transfer_paste":
+                        string pasteText=transfer.Get(Convert.ToInt32(((Dictionary<string,object>)action["value"])["slot"]));
+                        if(!e.TryGetCurrentPattern(ValuePattern.Pattern,out pattern)||((ValuePattern)pattern).Current.IsReadOnly)
+                            throw new Exception("Paste destination does not support verified whole-field replacement.");
+                        Check();effectStarted=true;((ValuePattern)pattern).SetValue(pasteText);
+                        verified=VerifyResult(hwnd,target,kind,pasteText);break;
                     case "copy_text":
                         var copied=(Dictionary<string,object>)action["value"];
                         CopyText.ValidateSource(e,copied);
@@ -478,7 +574,10 @@ class DesktopPlayback {
                                 }
                                 if(cancelled.WaitOne(50))Check();
                             }
-                            if(option==null||option.Current.IsOffscreen)throw new Exception("Chosen option is not exposed by the owning dropdown. Selection was not guessed.");
+                            if(option==null||option.Current.IsOffscreen) {
+                                try{send("diagnostic",new {kind="dropdown_replay_unavailable",step=step,option_found=option!=null,controls=DropdownSelection.Inspect(hwnd)});}catch{}
+                                throw new Exception("Chosen option is not exposed by the owning dropdown. Selection was not guessed.");
+                            }
                             if(option.Current.IsOffscreen) {
                                 if(!option.TryGetCurrentPattern(ScrollItemPattern.Pattern,out pattern))throw new Exception("Dropdown option cannot be brought into view safely.");
                                 ((ScrollItemPattern)pattern).ScrollIntoView();Check();
@@ -525,7 +624,10 @@ class DesktopPlayback {
                     case "invoke":
                         if(!e.TryGetCurrentPattern(InvokePattern.Pattern,out pattern))throw new Exception("Invoke pattern unavailable.");
                         bool productCopy=ProductCopyResult.Supports(target);
-                        if(productCopy&&e.Current.HelpText!=ProductCopyResult.Ready)
+                        if(productCopy&&target.ContainsKey("prompt_proof")&&
+                            !ProductPromptProof.Same((Dictionary<string,object>)target["prompt_proof"],ProductPromptProof.Parse(e.Current.HelpText)))
+                            throw new Exception("The complete prompt differs from the saved workflow. No input sent.");
+                        if(productCopy&&!e.Current.HelpText.Split('\n').Contains(ProductCopyResult.Ready))
                             throw new Exception("Copy prompt readiness changed. No input sent.");
                         bool productGenerate=ProductGenerationResult.Supports(target);
                         bool productPicker=ProductPickerResult.Supports(target);
@@ -539,6 +641,8 @@ class DesktopPlayback {
                         var generationBefore=productGenerate?GenerationWitness(hwnd,target):null;
                         if(productGenerate&&generationBefore==null)
                             throw new Exception("Prepare Product Uploads generation before Play. No input sent.");
+                        if(productGenerate&&generationBefore.State!="idle")
+                            throw new Exception("Generation is already "+generationBefore.State+". Inspect or restore the supported starting state; Generate was not invoked.");
                         effectStarted=true;((InvokePattern)pattern).Invoke();
                         // Provider return is not application result verification.
                         if(productCopy)verified=VerifyResult(hwnd,target,kind,null);

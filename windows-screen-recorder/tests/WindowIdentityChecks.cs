@@ -3,6 +3,34 @@ class WindowIdentityChecks {
     static int checks;
     static void Require(bool condition,string name){checks++;if(!condition)throw new Exception(name);}
     static void Main(){
+        var move=new WindowMoveGesture();var moving=new IntPtr(17);
+        move.Begin(moving,4,100);
+        Require(!move.Matches(moving,4),"drag without Windows move event is not excluded");
+        Require(!move.Observe(new IntPtr(18),4,110),"other window move event rejected");
+        Require(!move.Observe(moving,3,110),"other generation move event rejected");
+        Require(!move.Observe(moving,4,99),"event before input rejected");
+        Require(!move.Observe(moving,4,1601),"stale move event rejected");
+        Require(move.Observe(moving,4,120)&&move.Matches(moving,4),"matching Windows move event accepted");
+        move.Begin(moving,4,200);
+        Require(!move.Matches(moving,4),"next click cannot reuse previous move evidence");
+        move.Begin(moving,5,UInt32.MaxValue-10);
+        Require(move.Observe(moving,5,10),"Windows event tick wrap handled");
+        Require(KeyboardIntent.EditorTab(9,false,false),"ordinary Tab anchors editor");
+        Require(!KeyboardIntent.EditorTab(9,true,false),"Ctrl Tab must not disappear as an editor Tab");
+        Require(KeyboardIntent.BrowserTab(9,true,false),"Ctrl Tab is browser transition");
+        Require(KeyboardIntent.BrowserTab(33,true,false)&&KeyboardIntent.BrowserTab(34,true,false),"Ctrl Page Up Down are browser transitions");
+        Require(!KeyboardIntent.BrowserTab(9,false,true),"Alt Tab remains a desktop transition");
+        Require(!KeyboardIntent.BrowserTab(84,true,false),"new tabs are not existing-tab selection");
+        Require(WindowIdentity.EdgeTabNameMatches("Local page","Local page"),"exact page name");
+        Require(WindowIdentity.EdgeTabNameMatches("Local page","Local page - Memory usage - 27.4 MB"),"changing memory decoration");
+        Require(WindowIdentity.EdgeTabNameMatches("Recorder acceptance A","Recorder acceptance A - Part of tab group \uD83E\uDDEA Recorder successor"),"observed Unicode Edge tab-group decoration");
+        Require(!WindowIdentity.EdgeTabNameMatches("Local page","Local page other - Part of tab group Test"),"tab group cannot make a prefix match");
+        Require(!WindowIdentity.EdgeTabNameMatches("Local page","Local page - Part of tab group "),"empty group decoration rejected");
+        Require(!WindowIdentity.EdgeTabNameMatches("Local page","Local page - Part of tab group Test\nOther"),"multiline group decoration rejected");
+        Require(!WindowIdentity.EdgeTabNameMatches("Local page","Local page - Part of tab group "+new string('x',181)),"unbounded group decoration rejected");
+        Require(!WindowIdentity.EdgeTabNameMatches("Local page","Local page other - Memory usage - 27.4 MB"),"prefix is not identity");
+        Require(!WindowIdentity.EdgeTabNameMatches("Local page","Local page - Memory usage - unknown"),"unknown decoration rejected");
+        Require(!WindowIdentity.EdgeTabNameMatches(""," - Memory usage - 27.4 MB"),"empty page rejected");
         var edge=new IntPtr(100);var childRoot=new IntPtr(200);var otherApp=new IntPtr(300);
         Require(WindowIdentity.InitialMatches(edge,WindowIdentity.Root(childRoot,edge,7,7)),"same-process owned popup must resolve to selected root");
         Require(!WindowIdentity.InitialMatches(edge,WindowIdentity.Root(childRoot,edge,8,7)),"different-process owner must not defeat window validation");

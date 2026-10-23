@@ -4,9 +4,16 @@ import json
 import math
 import re
 import uuid
+from urllib.parse import urlsplit, parse_qsl
 
 FORMAT = "sports-cave.desktop"
 CAPABILITIES = {
+    "browser_download": "edge.download.v3",
+    "transfer_copy": "transfer.editor-copy.v3",
+    "transfer_copy_button": "transfer.prompt-copy.v3",
+    "transfer_paste": "transfer.paste.v3",
+    "browser_tab": "edge.tab.v1",
+    "browser_navigation": "edge.navigation.v3",
     "invoke": "uia.invoke.v1",
     "set_text": "uia.value.v1",
     "copy_text": "clipboard.copy-text.v1",
@@ -37,9 +44,66 @@ def text(value, limit=180):
     return value
 
 
+def permitted_origin(uri, *, chatgpt=False):
+    try:
+        return ((uri.scheme == 'http' and uri.hostname == '127.0.0.1' and uri.port in {18962,18963}) or
+                (uri.scheme == 'https' and (uri.hostname == 'sports-cave-image-factory.onrender.com' or chatgpt and uri.hostname == 'chatgpt.com') and uri.port in {None,443}))
+    except ValueError:
+        return False
+
+
+def browser_identity(value):
+    fields(value, ("profile", "page", "frame", "control"), ("product",))
+    if "product" in value and (not isinstance(value["product"], str) or not re.fullmatch(r"[a-f0-9]{64}",value["product"])):
+        raise Invalid("Invalid prepared product identity.")
+    try:
+        if str(uuid.UUID(value["profile"])) != value["profile"]:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        raise Invalid("Invalid preview browser profile.") from None
+    page = text(value["page"], 500)
+    parsed = urlsplit(page)
+    if (not permitted_origin(parsed,chatgpt=True) or parsed.username or parsed.password or parsed.fragment or
+            any(key not in {"page", "upload", "sync_map"} for key, _ in parse_qsl(parsed.query))):
+        raise Invalid("Browser page is outside the configured recorder origins or identity fields.")
+    for key in ("frame", "control"):
+        text(value[key])
+        if PRIVATE.search(value[key]):
+            raise Invalid("Protected browser identity excluded.")
+    return value
+
+
 def identity(target):
     # No persistent HWND, process ID, UIA runtime ID or screen coordinates.
-    fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope", "postcondition", "selector"))
+    fields(target, ("app", "window_key", "control_type", "automation_id", "name"), ("scope", "postcondition", "selector", "browser", "source_browser", "prompt_proof", "download"))
+    if 'download' in target:
+        value=target['download']
+        fields(value,('url','filename','save_as'))
+        uri=urlsplit(text(value['url'],1000))
+        query=dict(parse_qsl(uri.query))
+        try: nonce=str(uuid.UUID(query.get('sc_download','')))
+        except (ValueError,TypeError,AttributeError): raise Invalid('Missing download correlation nonce.') from None
+        if (not permitted_origin(uri) or
+            uri.username or uri.password or uri.fragment or nonce!=query['sc_download'] or
+            type(value['save_as']) is not bool or not target.get('browser') or target['control_type'] not in {'Button','Hyperlink'}):
+            raise Invalid('Download requires a supported preview source and browser control.')
+        if any(c in text(value['filename']) for c in '\\/:*?"<>|') or PRIVATE.search(value['filename']):
+            raise Invalid('Unsupported download filename.')
+    if "prompt_proof" in target:
+        proof = target["prompt_proof"]
+        fields(proof, ("sha256", "utf16_length", "utf8_length"))
+        if (not isinstance(proof["sha256"], str) or not re.fullmatch(r"[a-f0-9]{64}", proof["sha256"]) or
+                any(type(proof[k]) is not int or not 1 <= proof[k] <= 1024*1024 for k in ("utf16_length", "utf8_length")) or
+                target["control_type"] != "Button" or target["automation_id"] != "copyPrompt" or
+                target["name"] != "Copy Black Frame Prompt" or re.split(r"[\\/]",target["app"])[-1].lower() != "msedge.exe"):
+            raise Invalid("Invalid complete product prompt proof.")
+    for key in ("browser", "source_browser"):
+        if key in target:
+            browser_identity(target[key])
+            if re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe":
+                raise Invalid("Browser identity requires Edge.")
+    if "source_browser" in target and ("browser" not in target or target["control_type"] != "TabItem"):
+        raise Invalid("Source browser identity is restricted to tab transitions.")
     scoped_scroll = "selector" in target
     if scoped_scroll and (target["selector"] != "uia.unique-scoped-scroll.v1" or
                           target["control_type"] not in {"Group", "Pane", "Custom"} or
@@ -57,6 +121,8 @@ def identity(target):
                 (not dialog and re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe") or "scope" not in target):
             raise Invalid("Unsupported application result contract.")
     for key, value in target.items():
+        if key in {"browser", "source_browser", "prompt_proof", "download"}:
+            continue
         if key == "scope":
             if not isinstance(value, list) or len(value) > 16:
                 raise Invalid("Invalid ancestor scope.")
@@ -112,26 +178,76 @@ def validate(raw):
             raise Invalid("Context requires an opaque local binding.") from None
     if not isinstance(task["actions"], list) or len(task["actions"]) > 500:
         raise Invalid("At most 500 actions.")
+    transfer_slots = set()
+    last_transfer = None
     for action in task["actions"]:
         fields(action, ("version", "kind", "requires", "target", "timeout_ms"), ("value", "observed_ms"))
         if "observed_ms" in action and (type(action["observed_ms"]) is not int or action["observed_ms"] < 0):
             raise Invalid("Invalid observation time.")
         kind = action["kind"]
-        if type(action["version"]) is not int or action["version"] not in {1, 2} or kind not in CAPABILITIES:
+        if type(action["version"]) is not int or action["version"] not in {1, 2, 3} or kind not in CAPABILITIES:
             raise Invalid("Unsupported desktop action.")
+        transfer = kind.startswith("transfer_")
+        if (transfer or kind in {'browser_download','browser_navigation'}) != (action["version"] == 3):
+            raise Invalid("Run-local transfers require version 3; old actions retain their semantics.")
         expected = CAPABILITIES[kind] if action["version"] == 1 else CAPABILITIES[kind].replace(".v1", ".v2")
         if action["requires"] != [expected]:
             raise Invalid("Action capability contract does not match.")
         identity(action["target"])
+        if ('download' in action['target']) != (kind=='browser_download'):
+            raise Invalid('Download metadata is restricted to versioned download actions.')
         if "selector" in action["target"] and (kind != "scroll" or action["version"] != 2):
             raise Invalid("Anonymous scroll identity is restricted to scoped scrolling.")
         if "postcondition" in action["target"] and (kind != "invoke" or action["version"] != 2):
             raise Invalid("Application result verification requires scoped invoke.")
-        if action["version"] == 2 and "scope" not in action["target"]:
+        if "prompt_proof" in action["target"] and (kind != "invoke" or action["version"] != 2):
+            raise Invalid("Complete prompt verification requires scoped invoke.")
+        if action["version"] >= 2 and "scope" not in action["target"]:
             raise Invalid("Scoped desktop actions require ancestor identity.")
         if type(action["timeout_ms"]) is not int or not 100 <= action["timeout_ms"] <= 30000:
             raise Invalid("Readiness timeout must be bounded.")
-        if kind == "window_state":
+        if kind=='browser_download':
+            fields(action.get('value'),('directory',))
+            directory=text(action['value']['directory'],500)
+            if not re.match(r'^[A-Za-z]:[\\/]',directory) or '..' in re.split(r'[\\/]',directory):
+                raise Invalid('Download destination must be an absolute local folder.')
+        elif transfer:
+            target=action["target"]
+            value=action.get("value")
+            fields(value,("slot","mode"))
+            if type(value["slot"]) is not int or not 0 <= value["slot"] <= 1000000:
+                raise Invalid("Invalid automatic transfer reference.")
+            if "prompt_proof" in target or "postcondition" in target:
+                raise Invalid("Dynamic transfers cannot carry fixed content expectations.")
+            if kind == "transfer_copy_button":
+                if (value["mode"]!="application_prompt" or target["control_type"]!="Button" or
+                    target["automation_id"]!="copyPrompt" or target["name"]!="Copy Black Frame Prompt" or
+                    not target.get("browser",{}).get("product")):
+                    raise Invalid("Copy button needs the verified application prompt source.")
+            elif (target["control_type"] not in {"Edit","Document"} or target["automation_id"]=="RootWebArea" or
+                  value["mode"] != ("whole_text" if kind=="transfer_copy" else "replace_all")):
+                raise Invalid("Transfer requires an explicit supported text field.")
+            if kind=="transfer_paste":
+                if value["slot"] != last_transfer:
+                    raise Invalid("Paste must consume this recording's latest verified Copy.")
+            else:
+                if value["slot"] in transfer_slots:raise Invalid("Transfer source reference reused.")
+                transfer_slots.add(value["slot"]);last_transfer=value["slot"]
+        elif kind == "browser_navigation":
+            target = action["target"]
+            destination = browser_identity(action.get("value"))
+            source = target.get("browser", {})
+            if (target["control_type"] != "Button" or not source or
+                    destination["profile"] != source["profile"] or destination["page"] == source["page"] or
+                    destination["frame"] != "top" or destination["control"] != "document"):
+                raise Invalid("Navigation requires an identified button and a different verified destination in the same browser profile.")
+        elif kind == "browser_tab":
+            target = action["target"]
+            if (action["version"] != 2 or target["control_type"] != "TabItem" or
+                    target["scope"] != [] or target["automation_id"] or not target["name"] or
+                    re.split(r"[\\/]", target["app"])[-1].lower() != "msedge.exe" or "value" in action):
+                raise Invalid("Browser switching requires an explicitly named existing Edge tab.")
+        elif kind == "window_state":
             if (action["version"] != 2 or context["mode"] != "desktop_session" or
                 action["target"]["control_type"] != "Window" or action["target"]["scope"] != [] or
                 not isinstance(action.get("value"), str) or
