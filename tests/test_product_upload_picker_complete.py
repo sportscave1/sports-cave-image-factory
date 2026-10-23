@@ -66,6 +66,8 @@ def test_complete_global_order_search_selection_scopes_and_errors(tmp_path):
         expect(page.locator('#picker')).not_to_be_visible();expect(page.locator('#stage')).to_have_text('Ready')
         selected=[b for op,b in calls if op=='select'];assert len(selected)==1 and selected[0]['file_id']=='id:2' and selected[0]['revision']=='a1'
         assert len([1 for op,_ in calls if op=='prepare'])==1
+        page.get_by_role('button',name='Start another upload',exact=True).click()
+        expect(page.locator('#summary')).not_to_be_visible()
         page.locator('#choose').click();page.locator('#picker-search').fill('')
         expect(page.locator('#picker-items button')).to_have_count(7)
         page.get_by_role('button',name='▸ Folder',exact=True).click()
