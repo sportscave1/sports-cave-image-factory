@@ -29,6 +29,12 @@ class ProductGenerationResultChecks {
         var layout=new ProductCopyResult.ScopeAnchor("Group","",()=>{throw new Exception("Layout content name must not be read");},()=>true);
         Require(ProductGenerationResult.ScopeMatches(scope,new[]{root,document,pane}));
         Require(ProductGenerationResult.ScopeMatches(scope,new[]{layout,root,document,pane}));
+        var main=actual("Group","stMain","");
+        Require(ProductGenerationResult.ScopeMatches(scope,new[]{main,root,document,pane}));
+        Require(!ProductGenerationResult.ScopeMatches(scope,new[]{main,main,root,document,pane}));
+        Require(!ProductGenerationResult.ScopeMatches(scope,new[]{actual("Group","otherMain",""),root,document,pane}));
+        Require(!ProductGenerationResult.ScopeMatches(scope,new[]{actual("Pane","stMain",""),root,document,pane}));
+        Require(!ProductGenerationResult.ScopeMatches(scope,new[]{new ProductCopyResult.ScopeAnchor("Group","stMain",()=>"",()=>false),root,document,pane}));
         Require(!ProductGenerationResult.ScopeMatches(scope,new[]{layout,actual("Group","","Another named group"),root,document,pane}));
         Require(!ProductGenerationResult.ScopeMatches(scope,new[]{root,actual("Document","RootWebArea","Other page"),pane}));
         Require(!ProductGenerationResult.ScopeMatches(scope,new[]{root,document,actual("Pane","","Other window")}));
