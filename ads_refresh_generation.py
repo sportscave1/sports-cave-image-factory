@@ -136,7 +136,7 @@ Curated eligible style library (IE/single-image only; never override carousel co
 """ if not ie else ""
     visual = ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country)
     return f"""SPORTS CAVE — CREATIVE REFRESH
-Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
+{(ads.IE_FOOTER_TEXT_CLARIFICATION + chr(10)) if ie else ""}Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 {'INSTANT EXPERIENCE WINNER REFINEMENT — NEW ENVIRONMENTS' if ie else ''}
 {ads.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}
 

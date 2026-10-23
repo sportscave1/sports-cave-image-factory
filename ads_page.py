@@ -3872,7 +3872,7 @@ HEADLINE
 - Use only the exact selected approved headline and subline; never add a product name or short product reference.
 - Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.
 - Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
-- Check readability at 256 x 256. Resolve any fit substitution at pack level before image calls, validating the already resolved approved option. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
+- Check readability at 256 x 256. Validate the already resolved approved option before image calls; never substitute its wording for fit. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
 
 SUPPORTING LINE
 - Use no more than 12 words and no more than 70 characters including spaces and punctuation.
@@ -3884,7 +3884,7 @@ CTA
 - Keep the CTA on exactly one line: CLAIM YOUR EDITION. This fixed CTA is exempt from repetition checks.
 - Do not use a longer explanatory CTA.
 
-The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned."""
+Before resolution, the three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned."""
 
 
 def _normalise_instant_experience_on_image_line(value):
@@ -5259,7 +5259,7 @@ Permitted on-image words for this cover:
 - Supporting line: {visual.get("supporting_line")}
 - CTA: {visual.get("cta_text")}
 
-These are the only permitted advertising words for this cover. Resolve any fit substitution at pack level before the call; never pass alternatives or sibling copy to an individual image call. Never place Primary Text on the image.
+These are the only permitted advertising words for this cover. Never change already-resolved wording for fit; never pass alternatives or sibling copy to an individual image call. Never place Primary Text on the image.
 
 Use the resolved supporting line exactly; its claims were checked against metadata. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
 
@@ -5473,6 +5473,8 @@ def build_instant_experience_canonical_prompt_v4(
         )
     )
     return f"""{visual["prompt_heading"]}
+
+{IE_FOOTER_TEXT_CLARIFICATION}
 
 Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
 
@@ -8488,6 +8490,9 @@ IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPH
 Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 
+IE_FOOTER_TEXT_CLARIFICATION = 'Read the entire prompt before generating. For each image, reproduce ONLY that ad’s exact resolved footer headline, supporting line and CLAIM YOUR EDITION. Never add, omit, rewrite or substitute wording, or use Meta copy in the footer. Apply every existing footer layout and typography rule unchanged, then check the generated footer against the supplied text.'
+
+
 IE_EXECUTION_CHECKLIST = """EXECUTION CHECKLIST
 - Read the entire brief and ORIGINAL product reference before starting.
 - Generate exactly three separate images, one per ad, in order.
@@ -8605,6 +8610,8 @@ def build_standard_instant_experience_prompt(
     groups = "\n\n".join(build_instant_experience_execution_image_brief(i, v) for i, v in enumerate(visuals, 1))
     return f"""{ADS_IE_COMBINED_EXECUTION_VERSION}
 SPORTS CAVE INSTANT EXPERIENCE — THREE IMAGES AND COMPLETED CSV
+{IE_FOOTER_TEXT_CLARIFICATION}
+
 {IE_EXECUTION_CHECKLIST}
 
 {ie_visuals.VERSION}
