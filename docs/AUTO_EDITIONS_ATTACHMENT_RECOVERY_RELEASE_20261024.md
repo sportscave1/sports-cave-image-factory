@@ -59,6 +59,8 @@ Authoritative Tony status became `Blocked` at 21:50:43.961176 UTC; the live stat
 
 **Neither product is cloud synced.** Both still have no preparation hash, zero stored preparations and zero matching transfer sessions. The isolated acceptance receipts are not product receipts. No print/visual/supplier approval was created.
 
+After confirming zero active preparations, the normal Worker Health Pause control was used to stop new preparation claims while Photoshop's file-open path is unavailable. Valid attachments continue to save into the durable queue; this avoids sending future products into the same known runtime failure. This is an audited operational preparation pause, not a readiness override or an unrelated service/configuration change. The original state was unpaused. Resume the same control only after the saved/restarted Photoshop passes the file-open check.
+
 ## Preservation and checks
 
 Fresh Dropbox metadata confirmed both original revisions and file sizes. Comparison against the captured pre-retry baseline matched both mappings/timestamps, source identities, edition totals, active run IDs, next numbers, last-assigned values and sold counts exactly. Jaxon remains next edition 50 on run `34d693e6-0aa9-43bb-8657-c6cf5010786c`; Tony remains next edition 2 on run `d34c4b26-d4ba-461a-86ab-0a6f18d19244`. PSDs, old journals and completed unrelated work were retained.
@@ -69,7 +71,7 @@ Runtime evidence includes `recovery-baseline.json`, `recovery-current-evidence.j
 
 ## Safe continuation after Photoshop is usable
 
-1. Confirm Photoshop was saved/restarted safely; test that the synthetic PNG and a disposable staged source can open/close without touching existing documents. Do not kill unsaved work or turn off source/colour/readiness validation.
+1. Confirm Photoshop was saved/restarted safely; test that the synthetic PNG and a disposable staged source can open/close without touching existing documents. Do not kill unsaved work or turn off source/colour/readiness validation. Resume the existing audited preparation pause after this check passes.
 2. Re-read each exact source revision/mapping and current queue/lease/hold/review state. Use the existing guarded Worker Health repair-confirmed retry on Tony's existing Blocked checkpoint with a new normal request UUID after correction. Retain the failed attempt; do not replay its expired grant.
 3. Require actual Photoshop export, bounded package transfer, verified master plus 100 patches, cloud receipts and authoritative final technical state. Then submit the same normal workflow for Jaxon's existing checkpoint.
 4. Recheck mapping/run/allocation preservation, receipt identities and all required proofs. Report the actual outcome. Cloud Ready remains separate from supplier/physical production readiness; no approval or success flag may be forced.
