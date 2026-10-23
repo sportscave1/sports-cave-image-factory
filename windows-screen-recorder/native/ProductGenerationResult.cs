@@ -43,7 +43,10 @@ static class ProductGenerationResult {
             Anchor(scope[1],"Document","RootWebArea")&&Anchor(scope[2],"Pane","");
     }
     public static bool LayoutBoundary(int index,string type,string id) {
-        return index==0&&type=="Group"&&id=="";
+        // Current Streamlit exposes its main layout with the stable stMain ID.
+        // Accept only this one immediate layout boundary; root/document/window
+        // anchors and the independent generation witness remain mandatory.
+        return index==0&&type=="Group"&&(id==""||id=="stMain");
     }
     public static bool ScopeMatches(IList expected,IEnumerable<ProductCopyResult.ScopeAnchor> actual) {
         if(!StableScope(expected))return false;

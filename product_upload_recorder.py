@@ -1,5 +1,6 @@
 """Non-secret recorder context for the existing account-scoped upload recovery."""
 import html
+import hashlib
 import json
 import streamlit as st
 
@@ -30,5 +31,6 @@ def publish(row, name, choice):
                    source_id=source.get('id',''), revision=source.get('rev',''))
     ready = bool(context['name'] and context['category'] and context['source']
                  and row['data'].get('server_artwork',{}).get('state') == 'Ready')
-    st.html('<span id="sc-recorder-context" hidden data-ready="'+str(ready).lower()+
+    digest = hashlib.sha256(json.dumps(context, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')).hexdigest()
+    st.html('<span id="sc-recorder-context" hidden data-product-sha256="'+digest+'" data-ready="'+str(ready).lower()+
             '" data-context="'+html.escape(json.dumps(context), quote=True)+'"></span>')
