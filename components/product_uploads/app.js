@@ -57,25 +57,76 @@
   function resize(){if(parent!==window){const height=Math.ceil(Math.max(document.body.getBoundingClientRect().height,$('picker').open?Math.min(720,($('picker').scrollHeight||480)+64):0));if(height===lastHeight)return;lastHeight=height;parent.postMessage({type:'sports-cave-product-upload-height',height},location.origin);if(component)parent.postMessage({isStreamlitMessage:true,type:'streamlit:setFrameHeight',height},'*');}}
   window.addEventListener('message',event=>{if(event.origin===location.origin&&event.source===parent&&event.data?.type==='sports-cave-product-upload-measure')resize();});
   async function refresh(){const current=epoch,requested=row?.id;try{const data=await request('state'+(row?.id?'?id='+encodeURIComponent(row.id):''));if(current!==epoch||requested!==row?.id)return;const previousManual=manual,previousState=row?.state;if(row?.saved_source_version!==data.upload?.saved_source_version){clearCopyFeedback();}enabled=data.enabled;row=data.upload;manual=!enabled||manual;if(previousManual!==manual||previousState!==row?.state)notify();if(row)$('mode').value=row.mode;render();}catch(e){if(current===epoch&&e.name!=='AbortError')fail(e);clearTimeout(timer);}}
-  let pickerRoot='review',pickerPath='',pickerPage='',pickerEpoch=0,pickerBusy=false,pickerController=new AbortController();
+  let pickerRoot='review',pickerPath='',pickerEpoch=0,pickerBusy=false,pickerController=new AbortController(),pickerItems=[];
+  const filenameOrder=new Intl.Collator('en',{numeric:true,sensitivity:'accent'});
+  let pickerVisible=[],pickerHeights=[],pickerOffsets=[0],pickerFrame=0,pickerWindow='';
+  function pickerButton(item,index){const b=document.createElement('button');b.type='button';b.dataset.pickerIndex=index;b.textContent=(item['.tag']==='folder'?'▸ ':'')+item.name;b.onclick=()=>item['.tag']==='folder'?browse(item.path_display):selectPSD(item);return b;}
+  function measureOffsets(){pickerOffsets=[0];for(const height of pickerHeights)pickerOffsets.push(pickerOffsets.at(-1)+height);}
+  function offsetIndex(position){let lo=0,hi=pickerVisible.length;while(lo<hi){const mid=(lo+hi)>>1;if(pickerOffsets[mid+1]<position)lo=mid+1;else hi=mid;}return lo;}
+  function renderPickerWindow(focusIndex=null){
+    if(!pickerVisible.length)return;
+    const list=$('picker-items'),scroller=$('picker'),virtual=pickerVisible.length>200;list.classList.toggle('picker-virtual',virtual);
+    const top=Math.max(0,scroller.getBoundingClientRect().top-list.getBoundingClientRect().top);
+    const start=virtual?Math.max(0,(focusIndex??offsetIndex(top))-8):0;
+    const end=virtual?Math.min(pickerVisible.length,focusIndex===null?Math.max(start+24,offsetIndex(top+scroller.clientHeight)+8):start+32):pickerVisible.length;
+    const key=start+':'+end;if(key===pickerWindow)return;pickerWindow=key;
+    const active=list.contains(document.activeElement)?document.activeElement.dataset.pickerIndex:null,fragment=document.createDocumentFragment();
+    const spacer=height=>{const div=document.createElement('div');div.style.height=height+'px';div.setAttribute('aria-hidden','true');return div;};
+    if(virtual)fragment.append(spacer(pickerOffsets[start]));
+    for(let i=start;i<end;i++)fragment.append(pickerButton(pickerVisible[i],i));
+    if(virtual)fragment.append(spacer(pickerOffsets.at(-1)-pickerOffsets[end]));
+    list.replaceChildren(fragment);
+    let changed=false;for(const b of list.querySelectorAll('button')){const i=Number(b.dataset.pickerIndex),height=b.getBoundingClientRect().height+6;if(pickerHeights[i]!==height){pickerHeights[i]=height;changed=true;}}
+    if(changed&&virtual){measureOffsets();list.firstChild.style.height=pickerOffsets[start]+'px';list.lastChild.style.height=(pickerOffsets.at(-1)-pickerOffsets[end])+'px';}
+    if(active!==null)list.querySelector('[data-picker-index="'+active+'"]')?.focus({preventScroll:true});
+  }
+  $('picker').addEventListener('scroll',()=>{if(!pickerFrame)pickerFrame=requestAnimationFrame(()=>{pickerFrame=0;renderPickerWindow();});},{passive:true});
+  window.addEventListener('resize',()=>{if($('picker').open&&!pickerBusy){pickerWindow='';renderPickerWindow();}});
+  $('picker-items').addEventListener('keydown',event=>{
+    const b=event.target.closest('button[data-picker-index]');if(!b)return;const i=Number(b.dataset.pickerIndex);
+    let next=event.key==='ArrowDown'?i+1:event.key==='ArrowUp'?i-1:event.key==='Home'?0:event.key==='End'?pickerVisible.length-1:event.key==='Tab'?i+(event.shiftKey?-1:1):null;
+    if(next===null||next<0||next>=pickerVisible.length)return;event.preventDefault();pickerWindow='';renderPickerWindow(next);
+    const target=$('picker-items').querySelector('[data-picker-index="'+next+'"]');target.focus({preventScroll:true});target.scrollIntoView({block:'nearest'});
+  });
   function closePicker(){pickerEpoch++;pickerController.abort();pickerBusy=false;clearTimeout($('picker-search').timer);if($('picker').open)$('picker').close();$('choose').focus({preventScroll:true});resize();}
   function breadcrumbs(data){
     const nav=$('picker-path'),base=data.roots[pickerRoot].path;nav.replaceChildren();nav.title=data.path;
     const parts=[pickerRoot==='review'?'Review':'Designs Live',...data.path.slice(base.length).split('/').filter(Boolean)];let target=base;
     parts.forEach((part,index)=>{if(index)target+='/'+part;const path=target,b=document.createElement('button');b.type='button';b.textContent=part;b.disabled=index===parts.length-1;b.onclick=()=>browse(path);nav.append(b);});
   }
-  async function browse(path='',page=''){
-    pickerController.abort();pickerController=new AbortController();const sequence=++pickerEpoch;pickerBusy=true;if(!page)$('picker-items').replaceChildren();$('picker-more').disabled=true;$('picker-status').textContent='Loading Dropbox metadata…';
+  async function renderPicker(){
+    const query=$('picker-search').value.toLocaleLowerCase('en');
+    pickerVisible=pickerItems.filter(item=>item.name.toLocaleLowerCase('en').includes(query));pickerHeights=pickerVisible.map(()=>44);measureOffsets();pickerWindow='';
+    $('picker-items').replaceChildren();$('picker').scrollTop=0;renderPickerWindow();
+    $('picker-status').textContent=pickerVisible.length+' of '+pickerItems.length+' PSDs and folders · Complete folder metadata loaded.';
+    resize();
+  }
+  async function browse(path=''){
+    pickerController.abort();pickerController=new AbortController();const sequence=++pickerEpoch,root=pickerRoot;
+    pickerBusy=true;pickerPath=path;pickerItems=[];pickerVisible=[];$('picker-items').replaceChildren();$('picker-retry').hidden=true;$('picker-items').setAttribute('aria-busy','true');$('picker-status').textContent='Loading Dropbox metadata…';
+    const items=new Map(),pages=new Set();let page='',resolvedPath='';
     try{
-      const data=await action('browse',{root:pickerRoot,path,page,search:$('picker-search').value},pickerController.signal);
-      if(sequence!==pickerEpoch)return;pickerPath=data.path;pickerPage=data.next_page;
-      breadcrumbs(data);$('picker-more').hidden=!data.has_more;
-      if(!page)$('picker-items').replaceChildren();
-      for(const item of data.items){const b=document.createElement('button');b.textContent=(item['.tag']==='folder'?'▸ ':'')+item.name;
-        b.onclick=()=>item['.tag']==='folder'?browse(item.path_display):selectPSD(item);$('picker-items').append(b);}
-      $('picker-status').textContent=data.has_more?'More metadata available. Load more to continue this folder search.':'Folder metadata loaded.';
-    }catch(e){if(sequence===pickerEpoch&&e.name!=='AbortError')$('picker-status').textContent=e.message;}
-    finally{if(sequence===pickerEpoch){pickerBusy=false;$('picker-more').disabled=false;}resize();}
+      do{
+        const data=await action('browse',{root,path:resolvedPath||path,page,search:''},pickerController.signal);
+        if(sequence!==pickerEpoch)return;
+        if(!Array.isArray(data.items)||typeof data.has_more!=='boolean'||(resolvedPath&&data.path!==resolvedPath))throw Error('Folder listing changed. Retry the complete listing.');
+        resolvedPath=data.path;pickerPath=data.path;breadcrumbs(data);
+        for(const item of data.items){
+          const key=item.id||item.path_display?.toLowerCase();
+          if(!key||typeof item.name!=='string')throw Error('Folder metadata is incomplete. Retry the complete listing.');
+          const previous=items.get(key);
+          if(previous&&(previous.rev!==item.rev||previous.path_display!==item.path_display))throw Error('Folder changed while loading. Retry the complete listing.');
+          items.set(key,item);
+        }
+        $('picker-status').textContent='Loading Dropbox metadata… '+items.size+' PSDs and folders found; listing incomplete.';
+        page=data.has_more?data.next_page:'';
+        if(data.has_more&&(!page||pages.has(page)))throw Error('Folder pagination did not finish. Retry the complete listing.');
+        pages.add(page);
+      }while(page);
+      pickerItems=[...items.values()].sort((a,b)=>filenameOrder.compare(a.name,b.name)||filenameOrder.compare(a.path_display||'',b.path_display||'')||String(a.id||'').localeCompare(String(b.id||'')));
+      pickerBusy=false;await renderPicker();
+    }catch(e){if(sequence===pickerEpoch&&e.name!=='AbortError'){pickerItems=[];$('picker-items').replaceChildren();$('picker-status').textContent='Could not load the complete folder listing. '+e.message;$('picker-retry').hidden=false;}}
+    finally{if(sequence===pickerEpoch){pickerBusy=false;$('picker-items').setAttribute('aria-busy','false');}resize();}
   }
   async function selectPSD(item){
     closePicker();reset();selectedAt=Date.now();const current=epoch;busy=true;row={name:item.name,source:item,size:item.size,state:'Checking selection',basic_validated:false};render();
@@ -87,8 +138,8 @@
   $('picker').addEventListener('cancel',event=>{event.preventDefault();closePicker();});
   $('artwork-retry').onclick=async()=>{if(busy||!row)return;const current=epoch;busy=true;clear();row.state='Preparing';row.reason='';render();try{const result=await action('prepare');if(current!==epoch)return;row=result.upload;notify();}catch(e){if(current===epoch){if(e.upload)row=e.upload;else await refresh();notify();fail(e);}}finally{if(current===epoch){busy=false;render();}}};
   $('picker-root').onchange=()=>{pickerRoot=$('picker-root').value;$('picker-search').value='';browse();};
-  $('picker-search').oninput=()=>{clearTimeout($('picker-search').timer);$('picker-search').timer=setTimeout(()=>browse(pickerPath),250);};
-  $('picker-more').onclick=()=>{if(!pickerBusy)browse(pickerPath,pickerPage);};
+  $('picker-search').oninput=()=>{clearTimeout($('picker-search').timer);$('picker-search').timer=setTimeout(()=>{if(!pickerBusy)renderPicker();},150);};
+  $('picker-retry').onclick=()=>browse(pickerPath);
   async function copied(version,id='copy'){
     const current=epoch;
     if(copyMode!==$('mode').value||copyID!==(manual?'':row?.id))throw new Error('The selected action changed. Copy the current prompt again.');
