@@ -3919,13 +3919,10 @@ def shorten_instant_experience_on_image_headline(
     *,
     fallback=None,
 ):
-    clean = _normalise_instant_experience_on_image_line(headline)
-    if instant_experience_on_image_headline_is_valid(clean):
-        return clean
-    clean_fallback = _normalise_instant_experience_on_image_line(fallback)
-    if clean_fallback in ie_visuals.HEADLINES and instant_experience_on_image_headline_is_valid(clean_fallback):
-        return clean_fallback
-    raise ValueError("A concise Instant Experience on-image headline could not be resolved.")
+    # Compatibility entry point: never shorten, normalise or fall back to other copy.
+    if headline in ie_visuals.HEADLINES and instant_experience_on_image_headline_is_valid(headline):
+        return headline
+    raise ValueError("Instant Experience on-image headline must exactly match the approved five-headline bank.")
 
 
 def validate_instant_experience_on_image_copy(headline, supporting_line, cta):
@@ -4009,7 +4006,7 @@ Inspect the composed image before returning it and briefly report unresolved def
 - any essential wording sits within 64 pixels of a canvas edge or touches the product, furniture or an architectural line
 - scarcity quantity, numbering, certificate inclusion or another proof claim is not verified by supplied product data or a visible immutable source detail
 - a secondary prop competes with the product
-- the gold underline floats away from the edition number or becomes an arbitrary decorative dash
+- the gold underline is missing, fails to highlight the full 100 (or key word), floats away from its glyph bounds or becomes an arbitrary decorative dash
 - the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands
 - the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it
 - the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold separator
@@ -5228,7 +5225,7 @@ MEANINGFUL SPORTS CAVE GOLD UNDERLINE
 - If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
 - Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately {targets['underline_px']} px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
 - Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
-- The underline must move automatically when the edition limit changes.
+- Always highlight all three digits of 100 in antique gold and underline their measured glyph bounds. This emphasis is mandatory for every approved headline, wherever 100 occurs in the line.
 - Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; underline only the approved important scarcity word, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
 - No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text."""
 
@@ -8605,7 +8602,7 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and no subheadlines for a fresh pack; preserve saved selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and no subheadlines in every set; preserve the assigned selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.

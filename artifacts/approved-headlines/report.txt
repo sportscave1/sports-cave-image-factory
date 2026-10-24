@@ -1,0 +1,12 @@
+Approved five-headline release
+Task 20261024-d6c27b60; owner codex-headlines-20261025-session1.
+Base: exact live 862beff38f232e5ccf012a2548c42dea92a5570e.
+
+Only the five exact user-approved headlines are eligible. Draw three without replacement from the per-set random seed, before generation/export. Valid saved selections remain fixed; outdated/unapproved/duplicate sets are upgraded once. No alternate headline or shortening fallback is allowed. Existing presentation casing, CTA, compact two-element footer, type sizes, scene and physical product rules are preserved. Every headline explicitly requires muted gold on 100 and a fine underline aligned beneath all three digits; missing emphasis is a final inspection failure.
+
+No metadata fabrication or database changes: the existing shared catalog already selects ep.edition_total as edition_limit from the Edition Ops ledger. Missing or non-100 evidence blocks the approved bank, including the legacy Baseball category default. Synthetic tests verify these paths. No live customer data used in testing.
+
+53 focused tests passed. Suites: five_headlines, compact_footer, ie_glazing, ie_scarcity_pairs, ie_refresh_realism_priority, refresh_generation, ie_context_typography. New and refresh master prompts and all three standalone exports preserve distinct exact selections. Cache upgrade and copy wrapper verified. Render topology validator and git diff --check passed.
+Broader export suites: 23 tests, one failure and 12 errors across 11 test methods. Reproduced all on unchanged live-base modules (11 methods, same one failure and 12 errors); missing verification fixtures and a pre-existing length assertion. No unrelated test or product behavior changed.
+
+Sample prompt artifacts use synthetic metadata, not product verification. No sample image generation or pixel-level visual validation is claimed. Current footer stays 18-20% with no subheadline and CLAIM YOUR EDITION unchanged. Original historical internal subline fields remain for record compatibility but never enter the image prompts or influence the headline draw.

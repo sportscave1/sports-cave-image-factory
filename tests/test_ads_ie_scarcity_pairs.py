@@ -13,16 +13,6 @@ class ScarcityPairTests(unittest.TestCase):
             product_metadata=metadata if metadata is not None else {"edition_limit": 100},
             variation_token=token, recent_instant_experience_fingerprints=history)
 
-    def test_bank_matches_original_git_revision(self):
-        import ast
-        original = subprocess.check_output(["git", "show", "16515128:ads_ie_visual_systems.py"]).decode("utf-8")
-        recovered = {}
-        for node in ast.parse(original).body:
-            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") in ("HEADLINES", "APPROVED_SUPPORT_LINES"):
-                recovered[node.targets[0].id] = ast.literal_eval(node.value)
-        self.assertEqual(wording.SAVED_LEGACY_HEADLINES, recovered["HEADLINES"])
-        self.assertEqual(wording.APPROVED_SUPPORT_LINES, recovered["APPROVED_SUPPORT_LINES"])
-
     def test_exact_pairs_rotate_with_three_distinct_headlines(self):
         pairs = set()
         for seed in range(12):
@@ -51,14 +41,6 @@ class ScarcityPairTests(unittest.TestCase):
         self.assertEqual(set(wording.eligible_headlines(full)), set(wording.HEADLINES))
         self.assertEqual(wording.eligible_headlines({**full, "editions_sold": 1}), list(wording.HEADLINES))
 
-    def test_saved_unapproved_copy_is_rejected(self):
-        result = self.record()
-        for bad in ("SPORTS CAVE COLLECTOR", "FOR YOUR COLLECTION", "ONLY 100 WILL EVER EXIST"):
-            metadata = copy.deepcopy(result["product_metadata"])
-            metadata["instant_experience_footer_selections"][0]["headline_text"] = bad
-            with self.assertRaisesRegex(ValueError, "outside"):
-                self.record(metadata=metadata)
-
     def test_refresh_uses_same_bank_and_scene_contract(self):
         result = ads.build_ads_result_record("Volkanovski", "MMA", "Australia", "Instant Experience",
             product_metadata={"edition_limit": 100},
@@ -82,7 +64,7 @@ class ScarcityPairTests(unittest.TestCase):
             self.assertNotIn("SUPPORTING LINE:", result["master_prompt"])
             self.assertEqual(row["eligible_headline_alternatives"], [])
         self.assertNotIn("28 characters", refresh.ie_refresh_image_rules())
-        self.assertIn("shared original approved footer bank", refresh.ie_refresh_image_rules())
+        self.assertIn("shared approved five-headline bank", refresh.ie_refresh_image_rules())
 
 
 if __name__ == "__main__":

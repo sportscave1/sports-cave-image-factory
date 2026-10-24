@@ -19,7 +19,7 @@ class IERefreshRealismPriorityTests(unittest.TestCase):
             self.assertIn("HEADLINE: ", prompt)
             self.assertNotIn("SUPPORTING LINE:", prompt)
             self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
-            self.assertIn("shared original approved footer bank", prompt)
+            self.assertIn("shared approved five-headline bank", prompt)
             self.assertIn(generation.IE_FINAL_PRODUCT_REALISM_GATE, prompt)
         self.assertIn("Premium residential man cave", contracts)
         self.assertIn("Premium collector hallway", contracts)
