@@ -78,5 +78,3 @@ Studio static/secret/whitespace/identity verification passed. Task remains uncom
 4. Because preparation generation changes, run the required isolated matching-generation resumable acceptance, including boundary/interruption/integrity checks. Do not reuse the old d5e8adaf generation acceptance.
 5. Perform a native corrected-source/reference preparation comparison and resource check within 95 MP; retain readiness holds pending required visual/supplier proof approval.
 6. Existing For Brock assets/orders stay intact. A deliberate targeted re-preparation of its current source requires approval and normal replacement/acceptance controls; do not regenerate customer editions or advance allocations.
-
-
