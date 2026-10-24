@@ -64,7 +64,7 @@ class ContextTypographyTests(unittest.TestCase):
                 self.assertIn(phrase, prompt)
             shared = ads.build_instant_experience_typography_quality_rules(shared=True)
             self.assertEqual(prompt.count(shared), 1)
-            for text in ("headline 42–48 px", "supporting line 24–26 px, Montserrat Regular", "CTA 26–28 px, Montserrat Medium",
+            for text in ("headline 42–48 px", "CTA 26–28 px, Montserrat Medium",
                          "Uppercase wording is casing only", "Never enlarge text to fill empty panel space"):
                 self.assertIn(text, prompt)
             for obsolete in ("Relative guidance", "recent oversized reference", "Montserrat SemiBold", "Montserrat Bold",

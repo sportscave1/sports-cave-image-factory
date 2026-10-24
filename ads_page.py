@@ -29,6 +29,7 @@ import ads_standard_workflow
 import ads_package_paths
 from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
+from ads_footer import COMPACT_FOOTER_RULES, FOOTER_VERSION, apply_footer_contract
 import ads_carousel_winner as carousel_winner
 import ads_google_demand_gen as google_ads
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
@@ -473,7 +474,6 @@ BASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME = "Baseball Wall Art"
 BASEBALL_INSTANT_EXPERIENCE_CTA = "Claim Your Edition"
 BASEBALL_INSTANT_EXPERIENCE_COVER_LINES = (
     "LIMITED TO 100 WORLDWIDE",
-    "Once it sells out, it’s gone.",
     "CLAIM YOUR EDITION",
 )
 COLLECTOR_PROOF_COVER_LINES = (
@@ -902,10 +902,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "meta_description_role": "Supporting scarcity or proof line.",
         "proof_intensity": "Approved proof checklist only.",
         "scarcity_intensity": "Strong verified scarcity.",
-        "on_image_message_type": "Exact three-line bottom scarcity strip.",
+        "on_image_message_type": "Exact two-element bottom collector strip.",
         "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
-        "cover_composition": "Full-width upper lifestyle/product image region approximately 72-76% of the square canvas, with a fixed opaque matte-black footer across the bottom approximately 24-28%.",
+        "cover_composition": "Full-width upper lifestyle/product image region approximately 80-82% of the square canvas, with a fixed opaque matte-black footer across the bottom approximately 18-20%.",
         "panel_treatment": "Deep matte-black bottom strip with a thin restrained metallic-gold divider across its top edge.",
         "product_prominence": "Frame occupies approximately 74-82% of usable canvas width inside the upper image region.",
         "room_family": "Current premium collector-room control.",
@@ -3342,8 +3342,8 @@ APPROVED COMPOSITION
 
 Use a stacked full-width square composition with two precisely separated sections:
 
-Upper lifestyle/product image region: approximately 72-76% of the square canvas.
-Fixed black footer: approximately 24-28% of the square canvas.
+Upper lifestyle/product image region: approximately 80-82% of the square canvas.
+Fixed black footer: approximately 18-20% of the square canvas.
 
 Do not create a left/right split, right sidebar, vertical scarcity panel or any copy beside the product image.
 Do not allow the bottom strip to overpower the product.
@@ -3518,7 +3518,7 @@ Avoid:
 
 FIXED BLACK FOOTER
 
-Add an integrated collector-grade full-width matte-black footer across the bottom 24-28% of the square canvas.
+Add an integrated collector-grade full-width matte-black footer across the bottom 18-20% of the square canvas.
 
 The strip must feel like part of a premium Sports Cave campaign--not a separate cheap promotional banner.
 
@@ -3540,11 +3540,9 @@ Do not use a large artificial lens flare.
 
 SCARCITY COPY
 
-Use only these three lines:
+Use only these two elements:
 
 LIMITED TO 100 WORLDWIDE
-
-Once it sells out, it’s gone.
 
 CLAIM YOUR EDITION
 
@@ -3578,16 +3576,6 @@ Line one:
 * Fully readable on mobile.
 
 Line two:
-
-“Once it sells out, it’s gone.”
-
-* Smaller.
-* Clean and understated.
-* White or warm ivory.
-* Use the apostrophes exactly as written.
-* Give the line breathing room.
-
-Line three:
 
 “CLAIM YOUR EDITION”
 
@@ -3820,8 +3808,8 @@ INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
         route_rules = """COPY-SET APPLICATION
 
 - Generate only Premium Scarcity Right Angle, Premium Scarcity — Straight On and Premium Scarcity — Left Angle.
-- Preserve the copy-table CTA contract; the three images share the same bottom-banner layout with a different assigned support line per image.
-- Description 1 uses Claim Your Edition; each image retains its assigned supporting wording.
+- Preserve the copy-table CTA contract; the three images share the same bottom-banner layout with a different assigned headline per image and no supporting sentence.
+- Description 1 uses Claim Your Edition; each image retains its assigned headline, with no supporting wording.
 - Validate all completed rows before returning them. If a CTA is non-compliant, correct that route and description option only."""
     return f"{shared_rules}\n\n{route_rules}"
 
@@ -3833,14 +3821,14 @@ Create one solid rectangular black footer panel anchored flush to the bottom edg
 
 The panel must:
 - span the complete image width from the left edge to the right edge
-- occupy approximately the bottom 24–28% of the canvas
+- occupy approximately the bottom 18–20% of the canvas
 - begin at one precise horizontal boundary
 - have a perfectly straight, hard top edge
 - be fully opaque
 - use solid premium near-black or matte black
 - completely conceal the room photograph behind it
 - include the existing thin restrained gold separator along its top boundary
-- retain the existing Sports Cave Instant Experience headline, supporting-line and CTA hierarchy
+- retain the existing Sports Cave Instant Experience headline and CTA hierarchy
 
 The footer must never:
 - fade upward or blend into the room
@@ -3869,15 +3857,13 @@ HEADLINE
 - Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
 - Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
 - Never let the headline touch or approach the side edges; it must remain readable at mobile size.
-- Use only the exact selected approved headline and subline; never add a product name or short product reference.
-- Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the three-line hierarchy.
+- Use only the exact selected approved headline and CTA; never add a product name or short product reference.
+- Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the two-element hierarchy.
 - Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
 - Check readability at 256 x 256. Validate the already resolved approved option before image calls; never substitute its wording for fit. Select three different approved headlines for a fresh pack; no within-pack repeats. Preserve already saved selections verbatim. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
 
-SUPPORTING LINE
-- Use no more than 12 words and no more than 70 characters including spaces and punctuation.
-- Express one clean supporting thought on exactly one line at the shared secondary supporting-copy target below.
-- Never wrap or compress the supporting typography.
+NO SUBHEADLINE
+- Do not render a supporting line, secondary sentence or replacement text.
 
 CTA
 - Use no more than four words and no more than 24 characters including spaces and punctuation.
@@ -3983,7 +3969,7 @@ def resolve_instant_experience_on_image_copy(headline, supporting_line, cta):
 
 
 def build_instant_experience_fixed_opaque_footer_rules():
-    return SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+    return SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1 + "\n\n" + COMPACT_FOOTER_RULES
 
 
 def build_instant_experience_on_image_copy_fit_rules():
@@ -4016,7 +4002,7 @@ Inspect the composed image before returning it and briefly report unresolved def
 - on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
 - the on-image CTA is not exactly CLAIM YOUR EDITION
 - a CTA field is outside the approved direct edition-acquisition family
-- a sibling headline or supporting line is repeated; only the CLAIM YOUR EDITION CTA and banner styling are shared
+- a sibling headline is repeated; only the CLAIM YOUR EDITION CTA and banner styling are shared
 - typography is generated inside the room, painted, engraved, embossed, glowing or physically attached to the wall instead of added as a deterministic flat post-production layer inside the fixed footer
 - mobile readability, safe margins, visual hierarchy or product dominance is weak
 - essential wording is not immediately readable in an approximately 256 x 256 preview
@@ -4027,9 +4013,9 @@ Inspect the composed image before returning it and briefly report unresolved def
 - the wall has horizontal lines, vertical lines, tile seams, panel joins, grooves, moulding, bricks, slab divisions, wallpaper stripes or unexplained shadow bands
 - the fixed black footer fades into the room, is translucent, uses a gradient, has a soft or feathered edge, or reveals any room detail through it
 - the fixed black footer is not full width, is not anchored flush to the bottom, lacks a clean horizontal top boundary, becomes irregular, or lacks the required thin restrained gold separator
-- the fixed black footer falls outside approximately 24–28% of the canvas height
+- the fixed black footer falls outside approximately 18–20% of the canvas height
 - the on-image headline exceeds the measured safe width, fails mobile readability, wraps, is squeezed, is stretched or is abnormally reduced
-- the supporting line exceeds 12 words or 70 characters, wraps or becomes too small
+- any subheadline, supporting sentence or replacement text appears in the footer
 - the on-image CTA exceeds four words or 24 characters, wraps or leaves the approved collector-led action family
 - any footer wording approaches or crosses the 64–72 px safe margins
 - Australia or another country changes the established country-invariant Instant Experience footer template
@@ -4071,10 +4057,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft side daylight from camera-left with restrained ambient fill",
         "time_of_day": "quiet late morning",
-        "overlay_position": "fixed opaque footer across the bottom 24–28% only",
-        "product_position": "dominant and centred in the upper 72–76% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 18–20% only",
+        "product_position": "dominant and centred in the upper 80–82% room scene",
         "architectural_cue": "architectural doorway near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 72–76%, fixed opaque black footer approximately 24–28%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 80–82%, fixed opaque black footer approximately 18–20%",
         "typography_mode": "premium_room_panel",
     },
     {
@@ -4101,10 +4087,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "75mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with slightly brighter room falloff",
         "time_of_day": "clean midday daylight",
-        "overlay_position": "fixed opaque footer across the bottom 24–28% only",
-        "product_position": "dominant and centred in the upper 72–76% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 18–20% only",
+        "product_position": "dominant and centred in the upper 80–82% room scene",
         "architectural_cue": "partial bookcase near one outer edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 72–76%, fixed opaque black footer approximately 24–28%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 80–82%, fixed opaque black footer approximately 18–20%",
         "typography_mode": "premium_room_panel",
     },
     {
@@ -4131,10 +4117,10 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS_V4 = (
         "lens": "70mm natural interior-photography character",
         "lighting": "soft daylight from camera-right with quieter peripheral furniture",
         "time_of_day": "soft afternoon daylight",
-        "overlay_position": "fixed opaque footer across the bottom 24–28% only",
-        "product_position": "dominant and centred in the upper 72–76% room scene",
+        "overlay_position": "fixed opaque footer across the bottom 18–20% only",
+        "product_position": "dominant and centred in the upper 80–82% room scene",
         "architectural_cue": "window edge with natural curtains near the outer scene edge",
-        "composition": "1024 x 1024 square, upper photographed room scene approximately 72–76%, fixed opaque black footer approximately 24–28%",
+        "composition": "1024 x 1024 square, upper photographed room scene approximately 80–82%, fixed opaque black footer approximately 18–20%",
         "typography_mode": "premium_room_panel",
     },
 )
@@ -5217,10 +5203,9 @@ def build_instant_experience_typography_quality_rules(visual=None, *, shared=Fal
     visual = visual or {}
     targets = IE_COLLECTOR_FOOTER_TYPE_TARGETS
     resolved_wording = (
-        "- Use the active image brief's exact HEADLINE, SUPPORTING LINE and CTA fields."
+        "- Use the active image brief's exact HEADLINE and CTA fields only."
         if shared else (
             f"- Exact resolved headline: {visual.get('headline_text')}.\n"
-            f"- Exact resolved supporting line: {visual.get('supporting_line')}.\n"
             f"- Exact resolved CTA: {visual.get('cta_text')}."
         )
     )
@@ -5229,13 +5214,13 @@ INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 
 - Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
 - Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
-- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined editorial serif Regular/Medium; supporting line {targets['support_px']} px, Montserrat Regular; CTA {targets['cta_px']} px, Montserrat Medium. Design targets, not measured-rendering claims.
+- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined editorial serif Regular/Medium; CTA {targets['cta_px']} px, Montserrat Medium. Design targets, not measured-rendering claims.
 - These fixed targets are the sole typography specification for every image and pack; never reduce a previous generation again. Do not compound percentage reductions or rescale from a reference. Uppercase wording is casing only, never permission for oversized heavy block capitals or bold promotional-banner styling. Never enlarge text to fill empty panel space.
-- Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. Supporting text is clearly secondary in softer warm off-white. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
-- Preserve the full 24–28% opaque panel and existing safe margins. Use the extra space for calm breathing room, with about 22–30 px clear vertical separation between the three text lines; do not shrink the panel or fill the space with larger type. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
-- Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. Supporting text is warm off-white. CTA is muted antique gold.
+- Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
+- Use a compact 18–20% opaque panel with existing safe margins and about 22–30 px clear vertical separation between headline and CTA. Centre and balance the two elements; remove the former supporting-line space rather than leaving an empty row. Never enlarge type to fill the panel. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
+- Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. CTA is muted antique gold.
 {resolved_wording}
-- Keep the headline, supporting line and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
+- Keep the headline and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
 - Ensure all essential wording is clearly readable in a 256 x 256 preview.
 
 MEANINGFUL SPORTS CAVE GOLD UNDERLINE
@@ -5256,12 +5241,11 @@ Route key: {visual["route_key"]}
 
 Permitted on-image words for this cover:
 - Headline: {visual.get("headline_text")}
-- Supporting line: {visual.get("supporting_line")}
 - CTA: {visual.get("cta_text")}
 
 These are the only permitted advertising words for this cover. Never change already-resolved wording for fit; never pass alternatives or sibling copy to an individual image call. Never place Primary Text on the image.
 
-Use the resolved supporting line exactly; its claims were checked against metadata. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
+Render no supporting line; preserve the exact resolved headline. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim."""
 
 
 def build_three_environment_diversity_rules():
@@ -5294,7 +5278,7 @@ def build_instant_experience_set_differentiation_rules(visual):
     for sibling in visual.get("sibling_summaries", ()):
         sibling_lines.append(
             "- {route}: camera={camera}; room={room}; wall={wall}; finish={finish}; "
-            "primary cue={primary}; secondary cue={secondary}; light={light}; FOMO={fomo}.".format(
+            "primary cue={primary}; secondary cue={secondary}; light={light}.".format(
                 route=sibling["route"],
                 camera=sibling["camera_side"],
                 room=sibling["room_profile"],
@@ -5303,7 +5287,6 @@ def build_instant_experience_set_differentiation_rules(visual):
                 primary=sibling["primary_cue"],
                 secondary=sibling["secondary_cue"],
                 light=sibling["lighting"],
-                fomo=sibling["supporting_line"],
             )
         )
     return f"""{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
@@ -5316,11 +5299,11 @@ Resolved sibling fingerprints supplied for comparison:
 
 Within one three-image package:
 - Preserve the same immutable product and shared realism in three distinct premium rooms.
-- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 24–28% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 24–28% black/gold banner.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 18–20% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 18–20% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 18–20% black/gold banner.
 - Avoid identical wall/camera combinations where suitable; product matching wins. Never mirror artwork.
-- Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned supporting line.
+- Use each room's assigned furniture and restrained styling cluster. Never reuse the same wall, console and chair. Each banner has its own assigned headline and the fixed CTA only.
 
 {_instant_experience_route_wording_rules(visual)}"""
 
@@ -5465,11 +5448,11 @@ def build_instant_experience_canonical_prompt_v4(
         else ""
     )
     scarcity_note = (
-        "The edition limit is verified. Use the resolved headline and route FOMO line exactly."
+        "The edition limit is verified. Use the resolved headline exactly; omit the route FOMO line."
         if visual.get("scarcity_verified")
         else (
             "No verified edition limit is available in the supplied metadata. Use the resolved safe fallback headline "
-            "and supporting line exactly. Do not use the route FOMO line or invent a number."
+            "exactly. Do not use the route FOMO line or invent a number."
         )
     )
     return f"""{visual["prompt_heading"]}
@@ -5513,8 +5496,8 @@ The final image must be:
 - clear and readable at a 256 x 256 preview
 
 Composition is locked:
-- Upper photographed residential room scene: approximately 72–76% of the canvas.
-- Fixed opaque black footer: approximately the bottom 24–28% of the canvas.
+- Upper photographed residential room scene: approximately 80–82% of the canvas.
+- Fixed opaque black footer: approximately the bottom 18–20% of the canvas.
 - Framed product width: approximately {visual["product_width"]} of the canvas.
 - Complete frame visible with no cropped outer frame edges.
 - Safe margins: 64-72 pixels.
@@ -5535,10 +5518,9 @@ Keep all collector typography flat inside the footer, never inside the photograp
 
 Resolved on-image copy:
 HEADLINE: {visual.get("headline_text")}
-SUPPORTING LINE: {visual.get("supporting_line")}
 CTA: {visual.get("cta_text")}
 
-Use this image’s assigned supporting line exactly. The other two images must use their own different supporting lines. Keep the exact selected headline per route. Never repeat a headline or subline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
+Keep the exact selected headline per route. Never repeat a headline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
 
 INSTANT EXPERIENCE CORE QUALITY CONTRACTS
 
@@ -5554,7 +5536,7 @@ FINAL ROUTE CHECK
 - Wall colour and cues differ from the other routes.
 - Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.
 - The room never becomes a themed sports bar.
-- The fixed black footer remains within approximately 24–28% of the canvas height.
+- The fixed black footer remains within approximately 18–20% of the canvas height.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
 
@@ -5922,8 +5904,8 @@ Use these exact cover lines:
 {overlay_lines}
 
 Cover:
-- Full-width upper lifestyle/product image region across approximately 72-76% of the square canvas.
-- Fixed full-width opaque matte-black footer across the bottom approximately 24-28% of the square canvas.
+- Full-width upper lifestyle/product image region across approximately 80-82% of the square canvas.
+- Fixed full-width opaque matte-black footer across the bottom approximately 18-20% of the square canvas.
 - Thin restrained metallic-gold divider across the top edge of the black strip.
 - No left/right split, no right sidebar and no vertical scarcity panel.
 - Current black-and-gold visual treatment.
@@ -6224,10 +6206,10 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one AD COPY block containing one Description, one Headline and one CTA.
-- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 24–28% black/gold banner.
-- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 24–28% black/gold banner.
-- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 24–28% black/gold banner.
-- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glazing realism, physical mounting, realistically textured quiet walls, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 24–28% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
+- Image 1 uses RIGHT-angle Room 1 hallway / gallery with the fixed bottom 18–20% black/gold banner.
+- Image 2 uses CENTRE / straight-on Room 2 minimal artwork-first residential wall with the same fixed bottom 18–20% black/gold banner.
+- Image 3 uses LEFT-angle Room 3 distinctive restrained collector interior with the same fixed bottom 18–20% black/gold banner.
+- Each prompt includes exact product identity, selected sport, selected country, resolved route variables, product/artwork lock, frame and glazing realism, physical mounting, realistically textured quiet walls, square 1024 x 1024 composition, its format-specific layout (country-invariant fixed 18–20% opaque footer for all three images), deterministic on-image wording and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -8490,7 +8472,7 @@ IE_CREATIVE_VARIETY_AND_TYPOGRAPHY = """MANDATORY CREATIVE VARIETY AND TYPOGRAPH
 Fresh variation applies to automatic choices only. Resolved saved/approved packs and explicit user selections remain authoritative; never reroll them on copy, reopen or export. Available history is bounded session/draft evidence, not guaranteed cross-session memory or proof of visual uniqueness."""
 
 
-IE_FOOTER_TEXT_CLARIFICATION = 'Read the entire prompt before generating. For each image, reproduce ONLY that ad’s exact resolved footer headline, supporting line and CLAIM YOUR EDITION. Never add, omit, rewrite or substitute wording, or use Meta copy in the footer. Apply every existing footer layout and typography rule unchanged, then check the generated footer against the supplied text.'
+IE_FOOTER_TEXT_CLARIFICATION = 'Read the entire prompt before generating. For each image, reproduce ONLY that ad’s exact resolved footer headline and CLAIM YOUR EDITION. Never add, omit, rewrite or substitute wording, or use Meta copy in the footer. Remove the supporting sentence and its empty space; apply the compact footer layout and unchanged headline/CTA typography, then check the generated footer against the supplied text.'
 
 
 IE_EXECUTION_CHECKLIST = """EXECUTION CHECKLIST
@@ -8513,7 +8495,7 @@ def build_instant_experience_shared_template(physical_product=None):
     return "\n\n".join((
         "SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call\n"
         f"{ie_visuals.SCENE_VERSION}\n"  # Required saved-prompt recognition, not a variation token.
-        "1024 x 1024, 1:1, sRGB; upper photograph 72–76%. Near-black charcoal #101112/#121314 "
+        "1024 x 1024, 1:1, sRGB; upper photograph 80–82%. Near-black charcoal #101112/#121314 "
         "footer with subtle paper grain. Keep architectural verticals straight. "
         "Never place the long description or Meta headline inside the image.",
         "PACK COMPOSITION: each pair must differ in architectural "
@@ -8553,7 +8535,6 @@ SCENE: {scene}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}.
 Resolved on-image copy — use exactly:
 HEADLINE: {visual['headline_text']}
-SUPPORTING LINE: {visual['supporting_line']}
 CTA: {visual['cta_text']}
 
 {ie_copy.ad_copy(visual['route'])}"""
@@ -8624,7 +8605,7 @@ Use the supplied title/metadata for identity and verified facts. Do not guess an
 AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 {build_ads_execution_priority()}
 
-1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and distinct sublines for a fresh pack; preserve saved selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
+1. Resolve all three scenes and final copy internally before any image call. Choose one strongest composition per ad; do not generate candidate images or alternative rooms. Resolve one Description and one Meta Headline per route once; retain these final records for display and CSV. Confirm three different approved footer headlines and no subheadlines for a fresh pack; preserve saved selections verbatim. Footer selections are final and must be reused verbatim; Meta copy rules must never rewrite them. Validate fit before the calls; never pass this data or sibling wording into an individual image call:\n{fit_candidates}
 2. Generate Image 1 (RIGHT angle) in its own image-generation call, attaching the ORIGINAL product reference.
 3. Immediately generate Image 2 (STRAIGHT ON) in its own separate image-generation call, attaching that same ORIGINAL product reference.
 4. Immediately generate Image 3 (LEFT angle) in its own separate image-generation call, attaching that same ORIGINAL product reference.
@@ -8633,7 +8614,7 @@ AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
 For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 OUTPUT REVIEW AND DELIVERY
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline/subline wording and maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline wording, with no supporting sentence and maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
 Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
 If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
@@ -8976,13 +8957,13 @@ def build_ads_prompt(
         prompt = ads_refresh_generation.build_prompt(
             sys.modules[__name__], product_name, category, country, campaign_type, product_url,
             creative_refresh_context, campaign_moment=campaign_moment, product_metadata=product_metadata)
-        return physical_realism.apply_context(prompt, product_metadata)
+        return apply_footer_contract(physical_realism.apply_context(prompt, product_metadata))
     if campaign_type == "Instant Experience" and creative_refresh_context:
         prompt = build_instant_experience_winner_refinement_prompt(
             product_name, category, country, product_url, creative_refresh_context,
             product_metadata=product_metadata, campaign_moment=campaign_moment,
         )
-        return physical_realism.apply_context(prompt, product_metadata)
+        return apply_footer_contract(physical_realism.apply_context(prompt, product_metadata))
     template_key = get_template_key(category, campaign_type)
     settings = None
     if campaign_type == "Instant Experience":
@@ -9032,8 +9013,8 @@ def build_ads_prompt(
             compose_final_ads_prompt(prompt, **prompt_kwargs),
             creative_refresh_context,
         )
-    return physical_realism.apply_context(
-        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata)
+    return apply_footer_contract(physical_realism.apply_context(
+        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata))
 
 
 def render_insufficient_winner_data():
@@ -9416,7 +9397,7 @@ def ads_prompt_contract_version_for_campaign(
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
     if campaign_type == "Instant Experience":
         version += '; ' + ie_visuals.VERSION
-    return version + '; PHYSICAL FRAME REALISM V2'
+    return version + '; PHYSICAL FRAME REALISM V2; ' + FOOTER_VERSION
 
 
 def _instant_experience_visual_contract_is_current(prompt):
@@ -9442,7 +9423,7 @@ def ensure_current_ads_result_prompt(result):
         workflow_mode=workflow_mode,
     )
     is_standard_ie = result.get("campaign_type") == "Instant Experience" and workflow_mode == ADS_WORKFLOW_MODE_NEW
-    content_current = not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"]))
+    content_current = COMPACT_FOOTER_RULES in str(result["master_prompt"]) and (not is_standard_ie or _instant_experience_visual_contract_is_current(str(result["master_prompt"])))
     if is_standard_ie and content_current and ADS_IE_COMBINED_EXECUTION_VERSION not in str(result["master_prompt"]):
         return result  # New description defaults apply only to a fresh pack, never saved copy.
     if result.get("prompt_contract_version") == expected_version and content_current:
