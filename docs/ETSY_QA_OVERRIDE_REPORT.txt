@@ -53,3 +53,46 @@ Local, uncommitted changes only. No push, merge, deploy, live order override,
 Shopify call, certificate generation or production database mutation performed.
 Production SC3351 completion and live PostgreSQL/UI verification remain untested.
 Retain this task worktree for review; commit/deployment need separate authorization.
+
+Production release — 25 October 2026 (Australia/Sydney)
+User explicitly authorised commit, deployment and read-only SC3351 verification.
+Canonical service: sports-cave-os / srv-d8kl4on7f7vs73dvavv0
+Workspace confirmed by user: Nathan's workspace / tea-cut91gtsvqrc73e5acs0
+Previous live: 700c2adb828b0243fa0821be16dec966420bfd06
+Deployed release: 862beff38f232e5ccf012a2548c42dea92a5570e
+Integration into main: c1083798434f7097e870af0f3c6f91345b7e6a7c [skip render]
+Render deploy: dep-dbeims8m7kps73e172ag
+Live at: 2026-10-24T22:07:12.612746Z (25 October, Sydney)
+
+Release was based on the exact previous live version, excluding unrelated
+pending recorder changes on main. Main preserves those changes plus this fix.
+Only os_pages.py, the Etsy QA test and this report differ from the previous live
+revision. No render.yaml change, Blueprint sync, new service or migration added.
+The dashboard's exact-commit deployment temporarily disabled auto-deploy;
+the original On Commit setting was restored and verified through Render MCP.
+
+All 55 focused tests passed on both the exact release and integration revision.
+AST comparisons confirm the existing dispatch/completion blockers, mapping
+eligibility, save/upsert, legacy override, certificate generation and fulfilment
+blockers are unchanged from the previous live revision. Static Studio and Render
+topology validation passed. Prior broad-suite limitations above still apply.
+
+Live verification:
+- Render reports this exact deploy and SHA as live.
+- /_stcore/health returned HTTP 200 and ok.
+- Post-live application error log query returned no errors in the checked window.
+- Reloaded the authenticated production Fulfilment page and searched #SC3351.
+- Verified Carol Cranwell / Taylor Walker Crows Art / #002 / 100 /
+  Unframed / 45 x 62 cm, still Needs Review.
+- Etsy manual QA panel, reason input, confirmation checkbox and exact action
+  Manual Override & Complete QA are visible for this order.
+- Action is disabled until reason and confirmation are provided, as intended.
+- Did not enter a reason, check confirmation, complete QA, generate certificates,
+  modify shipping or trigger any Shopify workflow. Dispatch save count and last
+  tracker save remained unchanged during verification.
+- Screenshot retained locally outside Git in the Studio task runtime evidence
+  directory: evidence/sc3351-manual-qa-live.png.
+
+The earlier local-only release limits above describe the initial implementation.
+This release is now committed, pushed and live. Actual manual completion of
+SC3351 remains for an authorised staff member after their physical/manual review.
