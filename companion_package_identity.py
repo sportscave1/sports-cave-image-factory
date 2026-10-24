@@ -13,7 +13,8 @@ def generation():
     root=Path(__file__).parent
     names=('data/auto_editions_template.json','scripts/photoshop/prepare_auto_editions.jsx',
            'scripts/photoshop/inspect_psd_editions.jsx','auto_editions_onboarding.py',
-           'scripts/prepare_auto_editions.py','auto_editions.py','auto_editions_colour.py')
+           'scripts/prepare_auto_editions.py','auto_editions.py','auto_editions_colour.py',
+           'auto_editions_preparation_geometry.py','data/auto_editions_preparation_quality.json')
     return ae.fingerprint(dict(contract=1,files={name:hashlib.sha256((root/name).read_text(encoding='utf-8-sig').replace('\r\n','\n').encode()).hexdigest() for name in names}))
 
 
