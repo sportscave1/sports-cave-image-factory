@@ -101,7 +101,7 @@ End If
 flag = ""
 If WScript.Arguments.Count > 0 Then flag = WScript.Arguments(0)
 Select Case flag
- Case "", "--shutdown", "--open", "--pair"
+ Case "", "--shutdown", "--open", "--pair", "--toolbar"
  Case Else: WScript.Quit 2
 End Select
 sh.CurrentDirectory = folder & "\\app"
