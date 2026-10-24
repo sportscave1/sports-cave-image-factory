@@ -1,31 +1,21 @@
 """Visual-only composition for standard IE; persisted slot identities stay unchanged."""
 import hashlib
 import re
+import random
 import ads_ie_scenes as scene_library
 import sports_cave_physical_realism as physical_realism
 
 
 
-VERSION = "IE PREMIUM SCARCITY DISTINCT FAN ROOMS V4 ORIGINAL APPROVED FOOTER"
+VERSION = "IE PREMIUM SCARCITY DISTINCT FAN ROOMS V5 FIVE APPROVED HEADLINES"
 FAMILIES = ("premium_scarcity",) * 3
-# Approved copy remains separate from fit eligibility; never truncate a claim.
-# New packs use exactly the six user-approved on-image headlines.
+# Exact approved wording; presentation casing remains a typography instruction.
 HEADLINES = (
-    "STRICTLY LIMITED TO 100 EDITIONS",
-    "ONLY 100 EDITIONS AVAILABLE",
-    "LIMITED EDITION — 100 ONLY",
-    "ONLY 100 AVAILABLE",
-    "LIMITED TO 100 EDITIONS",
-    "100 EDITIONS ONLY",
-)
-# Read-only compatibility for existing saved packs; never fresh candidates.
-SAVED_LEGACY_HEADLINES = (
-    "LIMITED TO 100 WORLDWIDE",
-    "STRICTLY 100 EDITIONS. NO SECOND RUN.",
-    "JUST 100 EDITIONS. EVER.",
-    "ONLY 100 EDITIONS WILL EVER EXIST",
-    "STRICTLY LIMITED TO 100 EDITIONS",
-    "LIMITED EDITION. ONLY 100 AVAILABLE",
+    "Limited to 100 Editions",
+    "Only 100 Will Ever Exist",
+    "Only 100 Editions Available",
+    "Limited to 100 Worldwide",
+    "100 Edition Collector Run",
 )
 APPROVED_SUPPORT_LINES = (
     "Once they’re gone, they’re gone.",
@@ -54,7 +44,7 @@ def stable_rank(seed, value):
     return hashlib.sha256(f"{seed}|{value}".encode("utf-8")).digest()
 
 
-# Original approved bank: git 16515128, HEADLINES / APPROVED_SUPPORT_LINES.
+# Legacy fields are retained for stored-record compatibility, never alternative wording.
 FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_signature", "footer_emphasis", "eligible_headline_alternatives", "headline_fit_fallback")
 
 
@@ -108,74 +98,33 @@ def coherent_pair(headline, support, *, require_scarcity=True):
 
 
 def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
-    """Resolve one immutable pack, preferring unseen/least-recently-used approved copy.
+    """Draw once without replacement, then reuse the three persisted assignments.
 
-    Legacy supports remain selection/history data to preserve exact dynamic headline
-    choices and saved packs. They are never emitted as image-generation copy.
+    Old or duplicate selections are upgraded as a complete set. Historical support
+    fields remain internal compatibility data and never affect headline selection.
     """
-    from itertools import combinations
-    eligible = [h for h in eligible_headlines(context) if headline_is_valid(h)]
+    eligible = eligible_headlines(context)
+    if len(eligible) != 5 or not all(headline_is_valid(h) for h in eligible):
+        raise ValueError("The approved headline bank requires a verified 100-edition limit and exact copy fit; no substitute headline is allowed.")
+    if len(visuals) != 3:
+        raise ValueError("An Instant Experience set requires exactly three images.")
+    frozen = (len(selections) == 3
+              and all(isinstance(v, dict) and v.get("headline_text") in eligible for v in selections)
+              and len({v["headline_text"] for v in selections}) == 3)
+    headlines = ([v["headline_text"] for v in selections] if frozen else
+                 random.Random(str(visuals[0]["resolved_seed"]) + "|approved-five-headlines").sample(eligible, 3))
     supports = eligible_support_lines(context)
-    require_scarcity = bool(context.get("edition_limit") or context.get("limited_edition_verified"))
-    def compatible(h, sub):
-        return coherent_pair(h, sub, require_scarcity=require_scarcity) and (pair_is_valid is None or pair_is_valid(h, sub))
-    if not eligible or not supports:
-        raise ValueError("The original approved footer bank requires a verified 100-edition limit; no eligible exact wording is available.")
-    seed = visuals[0]["resolved_seed"]
-    product_key = context.get("copy_product_key")
-    history = [r for r in list(recent_fingerprints)[:scene_library.HISTORY_LIMIT] if isinstance(r, dict)
-               and (not product_key or r.get("copy_product_key") == product_key)]
-    old_heads = [r.get("on_image_headline") or r.get("campaign_line") for r in history]
-    old_supports = [r.get("on_image_subline") or r.get("fomo_line") for r in history]
-    old_pairs = list(zip(old_heads, old_supports))
-    def age(value, values):
-        return values.index(value) if value in values else len(history) + 1
-    def text_rank(value, values):
-        return (value in values, -age(value, values), stable_rank(seed, value))
-    frozen = len(selections) == 3 and all(isinstance(v, dict) and v.get("headline_text") and v.get("supporting_line") for v in selections)
-    if frozen:
-        # Preserve old repeated headlines and historical options on saved packs.
-        # Fresh-pack uniqueness must never rewrite an already resolved pack.
-        for visual, saved in zip(visuals, selections):
-            h, sub = saved["headline_text"], saved["supporting_line"]
-            if h not in (*HEADLINES, *SAVED_LEGACY_HEADLINES) or sub not in supports or not compatible(h, sub):
-                raise ValueError("Saved footer copy is outside the approved banks or pairing rules.")
-            visual.update({key: saved[key] for key in FOOTER_FIELDS if key in saved})
-            visual["fomo_line"] = sub
-        return
-    else:
-        sets = list(combinations(eligible, 3))
-        sets.sort(key=lambda c: (sum(h in old_heads for h in c), -sum(age(h, old_heads) for h in c),
-                                -len({footer_emphasis(h) for h in c}), stable_rank(seed, str(c))))
-        # Bounded finite compatible domains; skip a headline set only if it cannot
-        # supply three distinct supports. No invented wording or unbounded retries.
-        from itertools import product
-        pairings = []
-        for option in sets:
-            chosen = sorted(option, key=lambda h: stable_rank(seed, h))
-            domains = [[s for s in supports if compatible(h, s)] for h in chosen]
-            pairings = [list(zip(chosen, c)) for c in product(*domains) if len(set(c)) == 3]
-            if pairings:
-                break
-        if not pairings:
-            raise ValueError("Three complementary approved footer pairs need verified scarcity and copy-fit evidence.")
-        pairs = min(pairings, key=lambda ps: (
-            sum(p in old_pairs[:3] for p in ps), sum(p in old_pairs for p in ps),
-            sum(sub in old_supports for _, sub in ps), -sum(age(sub, old_supports) for _, sub in ps),
-            -sum(age(p, old_pairs) for p in ps), stable_rank(seed, str(ps))))
-    if any(h not in eligible or sub not in supports or not compatible(h, sub) for h, sub in pairs):
-        raise ValueError("Saved footer copy is outside the eligible original approved bank or pairing rules.")
-    if len({h for h, _ in pairs}) != 3 or len({sub for _, sub in pairs}) != 3:
-        raise ValueError("Fresh footer selections require three different headlines and distinct sublines.")
-    assigned = {h for h, _ in pairs}
-    for index, (visual, (headline, support)) in enumerate(zip(visuals, pairs)):
-        alternatives = sorted([h for h in eligible if h not in assigned and compatible(h, support)],
-                              key=lambda h: text_rank(h, old_heads))
-        alternatives = []  # Final selection; generation/export must not reselect.
+    used_supports = set()
+    for index, (visual, headline) in enumerate(zip(visuals, headlines)):
+        saved = selections[index] if frozen else {}
+        support = saved.get("supporting_line")
+        if support not in supports:
+            support = next(s for s in supports if s not in used_supports and coherent_pair(headline, s))
+        used_supports.add(support)
         visual.update(headline_text=headline, supporting_line=support, fomo_line=support,
             cta_text="CLAIM YOUR EDITION", footer_emphasis=footer_emphasis(headline),
             footer_pair_signature=hashlib.sha256(f"{headline}|{support}".encode()).hexdigest()[:20],
-            eligible_headline_alternatives=alternatives, headline_fit_fallback=headline)
+            eligible_headline_alternatives=[], headline_fit_fallback=headline)
 
 
 # Aesthetic directions supplied by the campaign brief, not demographic facts.
