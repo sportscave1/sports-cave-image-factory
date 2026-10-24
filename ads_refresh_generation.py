@@ -20,8 +20,8 @@ The final result must feel like a genuine premium lifestyle photograph taken in 
 Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
 
 IE REFRESH ON-IMAGE FOOTER COPY — apply to ALL THREE covers, not just the first:
-Use the exact headline and supporting line resolved by the shared original approved footer bank in ads_ie_visual_systems. No separate refresh bank, paraphrasing, added product names or extra text. Validate bank membership and pairing before generation; reuse the selection verbatim in image prompts and corresponding exported footer fields. Select three different approved headlines per fresh pack with no repeats; preserve saved headline selections verbatim. CTA: CLAIM YOUR EDITION.
-Keep the existing typography, footer geometry and fine gold underline beneath the measured 100 glyphs. General Meta copy instructions and character limits apply only to their named Meta fields, never to the selected on-image footer. No additional advertising text in the edition or room photograph; the established footer is required.'''
+Use the exact headline resolved by the shared original approved footer bank in ads_ie_visual_systems. No separate refresh bank, paraphrasing, added product names or extra text. Validate bank membership and pairing before generation; reuse the selection verbatim in image prompts and corresponding exported footer fields. Select three different approved headlines per fresh pack with no repeats; preserve saved headline selections verbatim. CTA: CLAIM YOUR EDITION.
+Remove the supporting sentence entirely, with no replacement or empty row. Reduce the opaque footer to 18–20% of the square canvas with balanced spacing between headline and CTA. Keep the existing typography and fine gold underline beneath the measured 100 glyphs. General Meta copy instructions and character limits apply only to their named Meta fields, never to the selected on-image footer. No additional advertising text in the edition or room photograph; the established footer is required.'''
 
 
 
@@ -198,7 +198,7 @@ VISUAL CAMPAIGN MOMENT RULE
 Campaign Moment must never overwrite the reference creative logic. Use only explicitly entered promotions.
 
 REFRESH RUN / RESOLVED STYLE PLAN (OS has not analysed winner pixels)
-{json.dumps({"references": refs, "resolved_scenes": resolved} if ie else refresh_plan, ensure_ascii=False)}
+{json.dumps({"references": refs, "resolved_scenes": [{k: v for k, v in row.items() if k not in {"supporting_line", "fomo_line", "sibling_summaries"}} for row in resolved]} if ie else refresh_plan, ensure_ascii=False)}
 {legacy_style_plan}
 {'Use the resolved hallway / architectural wall / residential man-cave settings and right/front/left cameras verbatim. Inspect WINNER_IE for atmosphere only; never reselect rooms or footer copy. No additional text outside the established footer and immutable edition.' if ie else ''}
 

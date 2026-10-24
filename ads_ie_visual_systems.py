@@ -108,7 +108,11 @@ def coherent_pair(headline, support, *, require_scarcity=True):
 
 
 def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
-    """Resolve one immutable pack, preferring unseen/least-recently-used approved copy."""
+    """Resolve one immutable pack, preferring unseen/least-recently-used approved copy.
+
+    Legacy supports remain selection/history data to preserve exact dynamic headline
+    choices and saved packs. They are never emitted as image-generation copy.
+    """
     from itertools import combinations
     eligible = [h for h in eligible_headlines(context) if headline_is_valid(h)]
     supports = eligible_support_lines(context)
@@ -227,11 +231,8 @@ def resolved_camera_variation(visual, index, context, variation_token):
     return CAMERA_VARIATIONS[0]
 
 
-SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and supporting line. '
-                 'With verified scarcity, exactly one line supplies the limited-edition/edition-size claim; '
-                 'the other adds collector or emotional meaning. Never echo meaningful words, stems, numbers '
-                 'or scarcity claims between the two lines; connecting words and the fixed CTA are exempt. '
-                 'Vague rarity or scarcity inside the artwork does not satisfy footer scarcity. '
+SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and fixed CTA. '
+                 'Do not render the legacy supporting line or move its claim into the headline. '
                  'If scarcity evidence is missing, stop before generation and report the missing verification; '
                  'never fabricate a claim or replace selected copy with arbitrary wording. The approved '
                  'geographic wording is allowed only when explicitly included in the resolved verified headline. '
@@ -259,9 +260,9 @@ def resolve_visual_system(visual, index, context, variation_token):
         creative_variation_token=variation_token or "standard", room_type=copy_room,
         fan_archetype=fan_style(context)[0], supporting_line=support, fomo_line=support,
         product_width=("79-86%", "84-87%", "77-84%")[index],
-        overlay_position="fixed opaque full-width black/gold footer across bottom 24–28%",
+        overlay_position="fixed opaque full-width black/gold footer across bottom 18–20%",
         product_position=("slightly left-of-centre", "central hero", "slightly right-of-centre")[index],
-        composition="1024 x 1024 square; upper 72–76% lifestyle room; bottom 24–28% opaque collector footer",
+        composition="1024 x 1024 square; upper 80–82% lifestyle room; bottom 18–20% opaque collector footer",
     )
 
 
@@ -370,7 +371,7 @@ Selected camera: {visual['camera_side']}. Keep verticals straight; never mirror 
 SCENE: {visual['scene_brief']}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Camera distance determines prominence; never enlarge the physical product.
 VARIANT PRECEDENCE — MANDATORY: use this one scene and camera; saved selections take precedence. Never mirror artwork.
-Use only the exact selected headline and subline below. Pack-level fit selection is completed before this image call; do not pass alternatives or sibling copy into the call.
+Use only the exact selected headline and CTA below. Pack-level fit selection is completed before this image call; do not pass alternatives or sibling copy into the call.
 {SCARCITY_RULE}"""
     return f'''LOCKED CAMERA / ROOM / WALL RESOLUTION
 {SCENE_VERSION}
@@ -380,6 +381,6 @@ SCENE: {visual['scene_brief']}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and a modest calm margin above the footer. Keep furniture/architecture near the perimeter or deeper behind the artwork. Avoid wide room views, excessive empty wall, dominating furniture and distracting background brightness. Retain enough subtle context to read as a real home.
 VARIANT PRECEDENCE — MANDATORY
 Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Use the resolved Sports Cave brand wall palette; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
-Use only this image's exact selected headline and subline. Never change already-resolved wording for fit; pass no sibling copy or alternative lists into the image call.
+Use only this image's exact selected headline and CTA. Never change already-resolved wording for fit; pass no sibling copy or alternative lists into the image call.
 Use neutral collector language only; never attach a sport name to collector labels.
 {SCARCITY_RULE}'''

@@ -1,0 +1,229 @@
+IMAGE GENERATION PROMPT
+
+Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
+
+Generate this one ad image using the ORIGINAL supplied framed product reference.
+
+IE PREMIUM SCARCITY DISTINCT FAN ROOMS V3 REFINED HEADLINE FIT
+
+SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2
+LOCKED CAMERA / ROOM / WALL RESOLUTION
+IE COLLECTOR SCENES V2 ARTWORK FIRST
+Selected camera: RIGHT: camera physically to the right of the artwork, looking left towards it.
+Resolve exactly ONE camera using only this assigned definition. Keep verticals straight and Never mirror artwork.
+SCENE: Use only the supplied framed product as the product reference. Its surrounding wall, lighting and room are not scene references and must not be copied. Rebuild the environment from this image’s resolved scene specification. Never use a previously generated mockup as the artwork source. Room 1 — HOME: low contemporary courtyard house collector hallway (Contemporary courtyard home); spatial structure: circulation axis. WALL: smoky grey (smoky grey, mid); concrete. DEPTH: broad low passage receding toward a courtyard opening, positioned far left background. PERIPHERAL CUE: slender pale ash console at outer left. LIGHT: soft directional morning daylight from the courtyard window on the left; gentle warm picture-light fill balanced with daylight; source position left side outside the composition. GLAZING: On existing glazing, only if present in the original product, a subtle but perceptible reflection from the actual courtyard window on the left: soft upper-left peripheral window shape, consistent with camera/light even straight-on. Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane or call acrylic glass. Premium collector hallway: close artwork, subtle visible passage depth, peripheral console, warm picture light balanced with daylight. Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. Keep backdrop calm and material joins/timber accents peripheral. Sports Cave premium sports collector / man cave feel with subtle rugged character. Automatic walls use only charcoal, graphite, smoky grey, deep navy, midnight blue, heritage green, muted olive, earthy taupe or weathered stone, in compatible shades of matte painted brick, textured plaster, concrete, natural stone or aged timber. Keep each scene's existing composition; give the resolved homes different colour families and wall finishes, mixing dark, mid-tone and lighter earthy shades. Rotate compatible combinations through the available history on fresh generations/refreshes; never assign a colour permanently to an ad slot. Keep the edition clearly visible through tonal separation and coherent light. No excessive props, artificial grunge or three identical dark rooms. No competing framed art, trophies, helmets or decorative clusters. CHECK: complete frame, true scale/source details, assigned camera, perceptible glazing only if present, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size.
+Framing: close product view with a subtle receding passage; target width 79-86%; slightly left-of-centre. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and a modest calm margin above the footer. Keep furniture/architecture near the perimeter or deeper behind the artwork. Avoid wide room views, excessive empty wall, dominating furniture and distracting background brightness. Retain enough subtle context to read as a real home.
+VARIANT PRECEDENCE — MANDATORY
+Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Use the resolved Sports Cave brand wall palette; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
+Use only this image's exact selected headline and CTA. Complete any pack-level fit substitution before generation; pass no sibling copy or alternative lists into the image call.
+Use neutral collector language only; never attach a sport name to collector labels.
+ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and fixed CTA. Do not render the legacy supporting line or move its claim into the headline. Preserve the selected headline verbatim even when the removed supporting line carried scarcity. If scarcity evidence is missing, retain the safe selected copy and report the missing verification; never fabricate a claim or replace selected copy with arbitrary wording. The approved geographic wording is allowed only when explicitly included in the resolved verified headline. Do not append geographic scope to any other claim. Never invent a limit. Immutable wording already inside the source artwork stays untouched.
+
+PRODUCT AND VERIFIED METADATA
+
+- Product name: Synthetic Collector Edition
+- Sport/category: Cricket
+- Country/market: Australia
+- Destination URL for ad setup only: [exact product-page URL from the Ads form]
+- Route key: premium_scarcity_right
+- Route name: Premium Scarcity — Right Angle
+- Camera role: RIGHT
+- Product sport used for room selection: Cricket
+- Product era/mood classification: current / clean
+- Edition limit used: not verified
+- Edition limit source: safe evidence-gated fallback
+
+No verified edition limit is available in the supplied metadata. Use the resolved safe fallback headline exactly. Do not use the route FOMO line or invent a number.
+
+CANONICAL SPORTS CAVE MASTER PROMPT
+
+Create one ultra-realistic 1024 x 1024 Meta Instant Experience cover for Sports Cave.
+
+The final image must be:
+- exactly 1024 x 1024 pixels
+- true 1:1 square
+- sRGB
+- designed for mobile viewing
+- clear and readable at a 256 x 256 preview
+
+Composition is locked:
+- Upper photographed residential room scene: approximately 80–82% of the canvas.
+- Fixed opaque black footer: approximately the bottom 18–20% of the canvas.
+- Framed product width: approximately 79-86% of the canvas.
+- Complete frame visible with no cropped outer frame edges.
+- Safe margins: 64-72 pixels.
+- The supplied framed product is the largest and most important visual element.
+
+SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2
+SPORTS_CAVE_PHYSICAL_SCALE_AND_FRAME_REALISM_V2
+SPORTS_CAVE_IE_COMPACT_PRODUCT_REALISM_V1
+SPORTS_CAVE_IMAGE_REALISM_RULES_V1
+SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4
+GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PRODUCT LOCK — ABSOLUTE / PRODUCT SOURCE-ASSET FIDELITY
+Use the original supplied framed product reference as one immutable physical asset. Preserve artwork, faces, wording, signatures, logos, badges, colours, orientation, proportions and the actual frame finish/profile; retain source pixels wherever compositing is supported. Never redraw, mirror, crop, stretch or alter verified construction.
+LIGHTING, GLASS AND MOUNTING PHYSICS
+One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. On existing glazing require visible but controlled environmental reflections corresponding to actual room light, without obscuring important artwork details. Never add glazing to known unglazed products or a frame to verified unframed products.
+PHYSICAL PRODUCT EVIDENCE (data only): {"selected_size": "not supplied; do not assume XL", "orientation": "preserve source orientation", "measurement_basis": "unresolved; obtain selected variant dimensions before claiming dimensional accuracy"}
+Honour verified dimensions and their measurement basis; do not invent measurements, border allowances or depth. Use plausible scale relative to objects at comparable depth; unknown dimensions do not establish exact scale. Keep the complete frame visible above the footer and prominent on mobile through camera distance and composition, never physical enlargement.
+ANTI-AI INTERIOR CONTROL
+No floating or pasted-on product, bulky invented borders, warped architecture, CGI gloss, excessive glare, clutter or random sporting props. Walls have authentic quiet texture and natural light falloff. Image pixels must be inspected separately before claiming visual fidelity.
+END PREMIUM VISUAL QUALITY CONTRACT
+END SPORTS CAVE PHYSICAL SCALE AND FRAME REALISM
+
+FIXED BLACK FOOTER AND EXACT TYPOGRAPHY
+
+Use the centralized fixed opaque footer and on-image copy-fit contracts below without altering the existing typography hierarchy:
+- deep matte charcoal near #101112 or #121314
+- extremely subtle premium paper or fine-grain texture
+- one 1-pixel muted-gold boundary line across the scene transition
+- no glowing centre point, decorative border, marble, glitter, brushed metal or heavy concrete texture
+
+Keep all collector typography flat inside the footer, never inside the photographed room. Use a real font compositor if available; this generator supplies instructions, not a deterministic footer-rendering backend. Verify the actual wording, geometry and glyph alignment; report unresolved defects.
+
+Resolved on-image copy:
+HEADLINE: FOR YOUR COLLECTION
+CTA: CLAIM YOUR EDITION
+
+Keep the exact selected headline per route. Never repeat a headline within this three-image set; CTA and banner styling stay shared. Never copy description text onto the image.
+
+INSTANT EXPERIENCE CORE QUALITY CONTRACTS
+
+SPORTS_CAVE_IE_FIXED_OPAQUE_FOOTER_RULES_V1
+FIXED BLACK FOOTER — ABSOLUTE
+
+Create one solid rectangular black footer panel anchored flush to the bottom edge of the 1024 x 1024 image.
+
+The panel must:
+- span the complete image width from the left edge to the right edge
+- occupy approximately the bottom 18–20% of the canvas
+- begin at one precise horizontal boundary
+- have a perfectly straight, hard top edge
+- be fully opaque
+- use solid premium near-black or matte black
+- completely conceal the room photograph behind it
+- include the existing thin restrained gold separator along its top boundary
+- retain the existing Sports Cave Instant Experience headline and CTA hierarchy
+
+The footer must never:
+- fade upward or blend into the room
+- use a black gradient, transparency, feathering, vignette or soft edge
+- reveal furniture, flooring, walls or any part of the room through the panel
+- become a floating text overlay
+- become a curved, angled or irregular shape
+- extend inconsistently behind only part of the wording
+
+A very subtle premium black material texture is permitted only when it remains visually opaque and does not weaken the clean rectangular panel. The room photograph occupies only the upper image area. The footer is a separate graphic panel with a clearly visible hard boundary and must match the established successful Sports Cave USA Instant Experience template.
+
+COUNTRY-INVARIANT INSTANT EXPERIENCE TEMPLATE
+
+Country selection may localise spelling, terminology, fan language and subtle room relevance only. Country must never change footer geometry, footer opacity, footer height, the gold separator, text hierarchy, typography scale, copy-length limits, safe margins, CTA style or the overall Instant Experience template. Australia, USA, UK, Canada, New Zealand and every other market use this identical professional footer system. Never create separate Australian layout behaviour.
+
+Do not describe or render the footer as an overlay, fade, gradient, vignette or blended text area.
+
+SPORTS CAVE COMPACT TWO-ELEMENT FOOTER V1
+Apply to every Sports Cave black footer in every ad format and staff account.
+Keep existing layouts that have no black footer; do not add a footer to them.
+Render exactly two elements: the existing dynamically selected HEADLINE and CLAIM YOUR EDITION.
+Preserve the headline wording, font, size, colours, gold highlights, underline, alignment and styling exactly. Do not rewrite, shorten or standardise headline variations, or move the removed sentence into the headline.
+Remove the subheadline/supporting sentence entirely. Do not replace it with any text, blank row or spacer. Legacy reference-ad supporting text is not an instruction to render it.
+Keep CLAIM YOUR EDITION exactly unchanged, including its existing gold colour, typography, tracking and styling.
+Keep the full-width opaque matte-black panel flush to the bottom, with its existing thin gold separator along the top. No fade, gradient, transparency or floating overlay.
+For a square canvas, use approximately 18–20% footer height and 80–82% photograph. At 1024 px retain the existing 42–48 px headline and 26–28 px CTA, 64–72 px horizontal safe margins and at least 64 px bottom text clearance. Use about 22–30 px clear separation between headline and CTA; balance the pair within the compact panel. Scale existing format typography and safe areas proportionally for other output sizes, fitting only these two elements without excess black space.
+The framed edition remains the dominant visual. Preserve all artwork, frame, room, brand-colour, realism and generation-workflow instructions. Removing the supporting sentence must not add a scarcity claim or alter any product detail.
+Inspect the final image: exact headline and CTA, no secondary sentence, visibly shorter balanced footer, preserved separator and branding, dominant complete framed edition. Report unresolved defects honestly.
+
+SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
+INSTANT EXPERIENCE ON-IMAGE COPY FIT — ABSOLUTE
+
+These limits apply only to wording rendered inside the Instant Experience cover image. They do not apply to Meta Primary Text, Meta headlines or Meta descriptions.
+
+HEADLINE
+- Assess rendered glyph width, not character or word count: all eligible approved headline options are recognised, including the longer options.
+- Keep the headline on exactly one line, centred inside the existing 64–72 px safe margins and at the shared refined collector typography target below.
+- Never wrap, squeeze, condense, stretch or reduce the headline to an unusually small font.
+- Never let the headline touch or approach the side edges; it must remain readable at mobile size.
+- Do not force the complete product name into the on-image headline. Use a short product reference only when it fits naturally.
+- Before generation, check the selected premium serif headline within the existing 64–72 px safe margins (880–896 px usable width). Use real font/glyph measurement only if supported by an available font tool; syntax, character counts and estimates are not measured glyph fitting. Preserve headline prominence and the two-element hierarchy.
+- Keep size and weight within the shared collector typography targets; adjust letter spacing only modestly. Never enlarge text for prominence, use cramped tracking, stretching, distortion or an excessively small font.
+- Check readability at 256 x 256. Resolve any fit substitution at pack level before image calls, choosing another unused eligible approved option and retaining three unique headlines. Never repeat a sibling headline. Never silently omit words, wrap, squeeze, invent copy or swap wording inside an individual tool call. Report any unresolved fit limitation.
+
+NO SUBHEADLINE
+- Do not render a supporting line, secondary sentence or replacement text.
+
+CTA
+- Use no more than four words and no more than 24 characters including spaces and punctuation.
+- Keep the CTA on exactly one line: CLAIM YOUR EDITION. This fixed CTA is exempt from repetition checks.
+- Do not use a longer explanatory CTA.
+
+The three existing covers may vary their wording only within their existing route contracts. Every on-image variation must satisfy these same one-line limits before an image-generation prompt is returned.
+
+SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1
+INSTANT EXPERIENCE CREATIVE CTA CONTRACT - MANDATORY
+
+- Every customer-facing Instant Experience creative CTA must be exactly one of: Claim Your Edition.
+- The rule applies to every copy-table CTA, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
+- Every displayed creative CTA and CSV CTA field uses Claim Your Edition. All three images and future packs intentionally repeat CLAIM YOUR EDITION; exclude the CTA from repetition checks.
+- The long description text does not have to end with the CTA field; it must end according to its description archetype.
+- Preserve CTA capitalisation by location: title case in the CTA field; render the on-image CTA exactly as CLAIM YOUR EDITION.
+- The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
+- Headlines remain route-specific and emotional; do not force CTA wording into every Headline.
+- Silently correct any CTA outside this contract before returning the response. Do not expose rejected wording or reasoning.
+
+PREMIUM SCARCITY ROOM CTA APPLICATION
+
+- All three images use the on-image CTA CLAIM YOUR EDITION.
+- Every route uses Claim Your Edition in copy/CSV and CLAIM YOUR EDITION on the image.
+- Use verified edition limits and retirement/finality only when supplied by product metadata, explicit product title wording or approved claim path.
+- Never invent remaining quantity, edition number, certificate, restock, delivery, discount, offer, athlete fact, rivalry fact or availability claim.
+
+SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
+INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
+
+- Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
+- Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
+- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline 42–48 px, refined editorial serif Regular/Medium; CTA 26–28 px, Montserrat Medium. Design targets, not measured-rendering claims.
+- These fixed targets are the sole typography specification for every image and pack; never reduce a previous generation again. Do not compound percentage reductions or rescale from a reference. Uppercase wording is casing only, never permission for oversized heavy block capitals or bold promotional-banner styling. Never enlarge text to fill empty panel space.
+- Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. CTA is a discreet collector inscription, medium weight with restrained 0.04–0.06 em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
+- Use a compact 18–20% opaque panel with existing safe margins and about 22–30 px clear vertical separation between headline and CTA. Centre and balance the two elements; remove the former supporting-line space rather than leaving an empty row. Never enlarge type to fill the panel. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
+- Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. CTA is muted antique gold.
+- Exact resolved headline: FOR YOUR COLLECTION.
+- Exact resolved CTA: CLAIM YOUR EDITION.
+- Keep the headline and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
+- Ensure all essential wording is clearly readable in a 256 x 256 preview.
+
+MEANINGFUL SPORTS CAVE GOLD UNDERLINE
+
+- If the resolved headline contains an edition number, render that number in restrained antique gold and place the gold underline directly beneath the measured glyph bounds of the number only.
+- Use the actual rendered position and width of the edition number. Width is visible number width plus approximately 4-8 px. Gap beneath the number is approximately 3–5 px. Thickness is approximately 1 px at 1024 px output. Colour is subdued antique gold close to #C7A15A. Keep it fine and restrained, never a thick gold bar.
+- Use clean or subtly tapered underline ends. No bright yellow or orange. No glitter, metallic gradient or strong glow.
+- The underline must move automatically when the edition limit changes.
+- Underline the full measured glyph width of the key number (for example all of 100), centred directly under that number, never a short dash. If no number exists, use the most important scarcity term; for a safe non-scarcity fallback underline COLLECTOR when present, otherwise COLLECTION, without adding a claim. Measure and align the chosen term before final output; never substitute a floating dash or whole-headline underline.
+- No fake button, price, discount, arrow, second CTA, paragraph or extra promotional text.
+
+ROUTE WORDING LOCK - RESOLVE BEFORE RETURNING
+
+Route identity: Premium Scarcity — Right Angle
+Route key: premium_scarcity_right
+
+Permitted on-image words for this cover:
+- Headline: FOR YOUR COLLECTION
+- CTA: CLAIM YOUR EDITION
+
+These are the only permitted advertising words for this cover. Resolve any fit substitution at pack level before the call; never pass alternatives or sibling copy to an individual image call. Never place Primary Text on the image.
+
+Render no supporting line; preserve the exact resolved headline. Never invent an edition limit, remaining quantity, certificate, restock, availability, discount, offer or delivery claim.
+
+
+
+SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2
+FINAL ROUTE CHECK
+
+- The three rooms are distinct at thumbnail size; each uses its assigned right / centre / left camera.
+- This route uses its exact camera role and is not a mirrored duplicate of another route.
+- Wall colour and cues differ from the other routes.
+- Room type, architecture, furniture layout, lighting and atmosphere must visibly differ; decorative styling stays restrained and product-led.
+- The room never becomes a themed sports bar.
+- The fixed black footer remains within approximately 18–20% of the canvas height.
+- No unresolved placeholders remain.
+- No unverified quantity or scarcity fact is introduced.
