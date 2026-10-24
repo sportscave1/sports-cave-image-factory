@@ -802,7 +802,9 @@ def prodigi_submission_blockers(row):
     if (
         _prodigi_clean(row.get("date_sent_to_prodigi"))
         or _prodigi_clean(row.get("prodigi_order_id"))
-        or row.get("prodigi_status") in {"Submitted", "Complete", "Submitted to Prodigi", "In Production", "Shipped", "Fulfilled in Shopify"}
+        or (row.get("prodigi_status") in {"Submitted", "Complete", "Submitted to Prodigi", "In Production", "Shipped", "Fulfilled in Shopify"}
+            and not (row.get("prodigi_status") == "Complete"
+                     and row.get("fulfilment_validation_status") == "etsy_qa_override"))
     ):
         blockers.append("Already submitted")
     return blockers
@@ -833,7 +835,9 @@ def _prodigi_certificate_uploaded(row):
 
 def _prodigi_submitted(row):
     return bool(
-        row.get("prodigi_status") in {"Submitted", "Complete", "Submitted to Prodigi", "In Production", "Awaiting Tracking", "Shipped", "Fulfilled in Shopify"}
+        (row.get("prodigi_status") in {"Submitted", "Complete", "Submitted to Prodigi", "In Production", "Awaiting Tracking", "Shipped", "Fulfilled in Shopify"}
+         and not (row.get("prodigi_status") == "Complete"
+                     and row.get("fulfilment_validation_status") == "etsy_qa_override"))
         or _prodigi_clean(row.get("date_sent_to_prodigi"))
         or _prodigi_clean(row.get("prodigi_order_id"))
     )
@@ -963,6 +967,7 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "fulfilment_validation_status": stored.get("fulfilment_validation_status") or order_row.get("fulfilment_validation_status") or "automatic",
         "fulfilment_override": _prodigi_bool(stored.get("fulfilment_override") or order_row.get("fulfilment_override")),
         "fulfilment_override_reason": stored.get("fulfilment_override_reason") or order_row.get("fulfilment_override_reason") or "",
+        "fulfilment_override_actor_id": stored.get("fulfilment_override_actor_id") or order_row.get("fulfilment_override_actor_id") or "",
         "fulfilment_override_by": stored.get("fulfilment_override_by") or order_row.get("fulfilment_override_by") or "",
         "fulfilment_override_at": stored.get("fulfilment_override_at") or order_row.get("fulfilment_override_at") or "",
         "fulfilment_override_original_errors": stored.get("fulfilment_override_original_errors") or order_row.get("fulfilment_override_original_errors") or [],
@@ -3769,7 +3774,9 @@ def _prodigi_parse_date(value):
 
 
 def _prodigi_dispatch_date(row):
-    return _prodigi_parse_date(row.get("date_sent_to_prodigi") or row.get("created_at") or row.get("date"))
+    return _prodigi_parse_date(
+        (row.get("qa_completed_at") if row.get("fulfilment_validation_status") == "etsy_qa_override" else "")
+        or row.get("date_sent_to_prodigi") or row.get("created_at") or row.get("date"))
 
 
 def _prodigi_display_date(value):
@@ -4302,6 +4309,74 @@ def prodigi_save_dispatch_row(
     return saved
 
 
+def prodigi_is_etsy_qa_order(row):
+    """Require an explicit marketplace channel; never infer from missing IDs."""
+    return str(row.get("channel") or row.get("source_name") or "").strip().casefold() == "etsy"
+
+
+def prodigi_etsy_qa_authorized():
+    user = st.session_state.get("sports_cave_current_user") or {}
+    return bool(user.get("id") and os_accounts.can_access_page(user, "Prodigi"))
+
+
+def prodigi_complete_etsy_qa(base_row, *, qa_answers, confirmed, reason, notes=""):
+    """Persist QA alone, retaining all actual production/certificate evidence."""
+    import order_refunds
+    if not prodigi_etsy_qa_authorized():
+        raise PermissionError("An active account with Fulfilment access is required.")
+    if not prodigi_is_etsy_qa_order(base_row):
+        raise ValueError("Manual QA override requires an explicitly identified Etsy order.")
+    if not base_row.get("row_id"):
+        raise ValueError("A stable order-line reference is required.")
+    if order_refunds.blocked(base_row):
+        raise ValueError("Shopify refund pending or completed")
+    if _prodigi_dispatch_status(base_row) in {"Submitted", "Complete"}:
+        raise ValueError("This QA row is already complete.")
+    reason = str(reason or "").strip()
+    if not confirmed or not reason:
+        raise ValueError("Confirm the manual review and provide a brief reason.")
+    if len(reason) > 1000:
+        raise ValueError("Keep the override reason within 1000 characters.")
+    user = st.session_state["sports_cave_current_user"]
+    qa_answers = dict(qa_answers or {})
+    # The legacy UI pre-fills this answer before certificate generation.
+    qa_answers["certificate"] = ("Yes" if _prodigi_certificate_uploaded(base_row)
+                                 else "No" if _prodigi_is_limited_edition(base_row) else "Not Required")
+    blockers = prodigi_completion_blockers(base_row, qa_answers)
+    blockers.extend(error for error in prodigi_submission_blockers(base_row) if error != "Already submitted")
+    if _prodigi_is_limited_edition(base_row) and not _prodigi_certificate_uploaded(base_row):
+        blockers.append("Certificate not uploaded")
+    now = _prodigi_now_iso()
+    saved = dict(base_row)
+    saved.update({
+        "prodigi_status": "Complete", "qa_completed": True, "qa_completed_at": now,
+        "qa_answers": dict(qa_answers or {}), "qa_notes": notes, "notes": notes,
+        "fulfilment_validation_status": "etsy_qa_override", "fulfilment_override": True,
+        "fulfilment_override_reason": reason,
+        "fulfilment_override_by": os_accounts.safe_account_identifier(user),
+        "fulfilment_override_actor_id": str(user["id"]), "fulfilment_override_at": now,
+        "fulfilment_override_original_errors": list(dict.fromkeys(blockers)),
+        "issue_reason": "", "source": "prodigi_dispatch_log", "updated_at": now,
+    })
+    if not supabase_backend.is_configured():
+        raise RuntimeError("Supabase dispatch storage is not configured.")
+    result = supabase_backend.upsert_prodigi_dispatch_row(saved, ensure_schema_first=False)
+    if result.get("upserted") != 1:
+        raise RuntimeError("QA override was not saved.")
+    bump_supabase_cache_version("orders", "order-summary")
+    st.session_state["orders_allocation_snapshot_loaded"] = False
+    st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
+    record_activity_log(
+        "etsy_manual_qa_override", "Fulfilment", "Etsy manual QA completed",
+        actor=os_accounts.safe_account_identifier(user),
+        entity_type="order", entity_id=saved["row_id"],
+        metadata={"order": _prodigi_activity_order_ref(saved), "reason": reason,
+                  "bypassed_validations": saved["fulfilment_override_original_errors"],
+                  "actor_id": str(user["id"]), "qa_completed_at": now},
+    )
+    return saved
+
+
 def prodigi_complete_with_manual_override(
     base_row,
     *,
@@ -4452,7 +4527,7 @@ def prodigi_dispatch_table_records(rows):
         qa_status = "Complete" if status in {"Submitted", "Complete"} else status or "Not Started"
         records.append(
             {
-                "Completed At": row.get("submitted_at") or _prodigi_display_date(row.get("date_sent_to_prodigi")) or row.get("updated_at") or "",
+                "Completed At": row.get("qa_completed_at") or row.get("submitted_at") or _prodigi_display_date(row.get("date_sent_to_prodigi")) or row.get("updated_at") or "",
                 "Order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
                 "Customer": row.get("customer_name") or "",
                 "Product": row.get("product_title") or "",
@@ -4844,6 +4919,30 @@ def _prodigi_prepare_entry_state(*, state=None, finder=None):
     return query
 
 
+def _render_etsy_qa_override(row, answers, notes, row_key, query):
+    if not prodigi_etsy_qa_authorized():
+        return
+    with st.container(border=True):
+        st.markdown("**Etsy manual QA**")
+        st.caption("Complete QA after manual review. This does not submit, ship, generate a certificate or verify print assets.")
+        reason = st.text_input("Manual QA override reason", max_chars=1000,
+                               key=f"etsy-qa-reason-{row_key}")
+        confirmed = st.checkbox("I have manually reviewed this Etsy order and confirm QA completion.",
+                                key=f"etsy-qa-confirm-{row_key}")
+        if st.button("Manual Override & Complete QA", type="primary", use_container_width=True,
+                     key=f"etsy-qa-complete-{row_key}",
+                     disabled=not confirmed or not reason.strip() or _prodigi_dispatch_status(row) in {"Submitted", "Complete"}):
+            try:
+                prodigi_complete_etsy_qa(row, qa_answers=answers, confirmed=confirmed, reason=reason, notes=notes)
+            except Exception as error:
+                st.error(f"Manual QA override failed: {error}")
+                return
+            st.session_state["prodigi_dispatch_existing_rows"] = prodigi_load_dispatch_rows("Search", search_text=query, limit=100)
+            st.session_state["prodigi_dispatch_log_view"] = "Last 7 Days"
+            st.success("Etsy QA marked Complete.")
+            st.rerun()
+
+
 def render_prodigi_page():
     page_started = time.perf_counter()
     _prodigi_log_timing("page start", page_started)
@@ -4891,7 +4990,9 @@ def render_prodigi_page():
     if selected_row:
         existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row)
         already_submitted = existing and _prodigi_dispatch_status(existing) in {"Submitted", "Complete"}
-        if already_submitted:
+        if existing and existing.get("fulfilment_validation_status") == "etsy_qa_override":
+            st.info(f"QA completed on {existing.get('qa_completed_at') or ''}. Submission and shipping remain separate.")
+        elif already_submitted:
             st.info(f"Already submitted on {_prodigi_display_date(existing.get('date_sent_to_prodigi'))}.")
         if existing and _prodigi_bool(existing.get("fulfilment_override")):
             override_actor = existing.get("fulfilment_override_by") or "a signed-in user"
@@ -5004,7 +5105,9 @@ def render_prodigi_page():
                 st.warning(blocker)
 
         manual_override_clicked = False
-        if manual_override_eligibility["available"]:
+        if prodigi_is_etsy_qa_order(selected_row):
+            _render_etsy_qa_override({**selected_row, **(existing or {})}, qa_answers, notes, row_key, last_query)
+        elif manual_override_eligibility["available"]:
             with st.container(border=True):
                 st.markdown("⚠️ **Variant not found in standard fulfilment mapping**")
                 st.write(

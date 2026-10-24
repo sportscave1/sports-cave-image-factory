@@ -1,0 +1,55 @@
+Etsy Fulfilment QA override — local implementation report
+Date: 25 October 2026 (Australia/Sydney)
+Studio task: 20261024-f7aeaee3
+Owner: codex-etsy-qa-20261025-session1
+Base: 6e2805d058713cc64cfa70e7a85ee23ea66db7e1
+
+Root cause reproduced offline
+The supplied SC3351 details (Taylor Walker Crows Art, edition 002/100,
+Unframed / 45 x 62 cm) do not resolve to the standard supplier mapping.
+The existing mapping override still requires other automated/checklist checks,
+and its UI generates/uploads a certificate before completing. Normal completion
+also writes supplier submission dates. No live SC3351 database row was inspected.
+
+Change
+A separate Etsy-only Manual Override & Complete QA action requires an active
+signed-in account with existing Fulfilment page permission, confirmation and a
+nonblank reason. Unknown/manual-only sources and Shopify cannot use this action.
+Refund protection and stable row identity remain mandatory. The saved dispatch
+row contains reviewer ID/identifier, timestamp, reason and validation warnings.
+The existing row_json stores the audit in the same write as QA completion;
+no migration is required. A separate activity event records QA, not shipment.
+Certificate answers are derived from actual evidence rather than the legacy UI
+pre-fill. Edition, certificate, asset, supplier submission and shipping records
+are retained. Shopify completion/validation functions are unchanged; only the
+explicit Etsy QA marker excludes QA-only completion from submission inference.
+Dashboard status and recent completion date survive reload.
+
+Validation
+55 focused tests passed: 9 new Etsy tests, 8 fulfilment handoff tests and 38
+existing tests selected from EditionOpsUiTests whose names contain prodigi,
+manual_override or etsy, excluding the two pre-existing failing UI tests below.
+New tests: python -m unittest tests.test_etsy_qa_override -q
+Handoff tests: python -m unittest tests.test_fulfilment_handoff -q
+The new tests exercise the UI action, authorization, explicit source guard,
+confirmation/reason, refund rejection, audit, no false certificate/submission
+records, failure handling, and persistence/reload/dashboard display.
+The persistence test runs the existing backend INSERT against a temporary SQLite
+adapter, then reads the saved JSON through the existing DB payload and tracker
+normalizers. This is an offline contract check, not live PostgreSQL verification.
+
+The broader tests.test_orders_loading_ui suite has 12 failures and one error.
+Re-executing HEAD:os_pages.py in memory reproduces the exact same 12 failures
+and one error. They concern existing table/prompt/UI assertions and a fake
+Streamlit.columns lacking vertical_alignment. The excluded focused UI tests are:
+- test_prodigi_page_load_is_lazy_and_does_not_sync_or_load_all_orders
+- test_orders_inline_prodigi_action_preserves_table_layout
+The separate test_manual_certificate_controls module cannot import because this
+Python environment lacks psycopg. No claim is made that this module passed.
+Studio static/infrastructure verification and git diff --check pass.
+
+Release limits
+Local, uncommitted changes only. No push, merge, deploy, live order override,
+Shopify call, certificate generation or production database mutation performed.
+Production SC3351 completion and live PostgreSQL/UI verification remain untested.
+Retain this task worktree for review; commit/deployment need separate authorization.
