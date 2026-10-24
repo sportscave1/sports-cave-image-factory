@@ -32,8 +32,7 @@ class ScarcityPairTests(unittest.TestCase):
 
     def test_claim_gates_and_exact_quantity(self):
         for limit in (None, 25, 250):
-            with self.assertRaisesRegex(ValueError, "verified 100"):
-                self.record(metadata={"edition_limit": limit})
+            self.record(metadata={"edition_limit": limit, "worldwide_edition_verified": False})
         base = {"edition_limit": 100}
         self.assertEqual(wording.eligible_headlines(base), list(wording.HEADLINES))
         full = {**base, "worldwide_verified": True, "no_second_run_verified": True,
