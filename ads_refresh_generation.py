@@ -1,6 +1,7 @@
 """Creative Refresh generation context; production schemas remain owned by ads_page."""
 from sports_categories import sport_family
 from copy import deepcopy
+from ads_footer import image_context_without_support
 import json
 import ads_refresh_plan as plan
 
@@ -154,7 +155,7 @@ Winning description: {source.get('description') or 'Not supplied'}
 Winning CTA: {source.get('cta') or 'Not supplied'}
 Source evidence (factual context, not customer copy):
 {json.dumps(source, ensure_ascii=False, default=str)}
-Verified product context: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
+Verified product context: {json.dumps(image_context_without_support(product_metadata or {}) if ie else (product_metadata or {}), ensure_ascii=False, default=str)}
 
 REFERENCE AUTHORITIES AND ATTACHMENT CHECKLIST
 {('GLAZING CHECK: Every confirmed glazed framed edition must show believable surface reflections clearly visible at thumbnail size.' + chr(10)) if ie else ''}{attachment_rules}

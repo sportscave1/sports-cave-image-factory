@@ -1,0 +1,19 @@
+2026-10-25 08:56:28.087 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.249 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:56:28.250 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.254 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.255 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.255 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.256 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.380 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.380 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.380 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.381 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.381 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:56:28.437 No runtime found, using MemoryCacheStorageManager
+................2026-10-25 08:56:28.828 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+...............................
+----------------------------------------------------------------------
+Ran 47 tests in 2.191s
+
+OK

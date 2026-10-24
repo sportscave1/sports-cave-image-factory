@@ -70,7 +70,7 @@ class ScarcityPairTests(unittest.TestCase):
         for row in result["instant_experience_fingerprints"]:
             self.assertIn(row["headline_text"], wording.HEADLINES)
             self.assertIn("HEADLINE: " + row["headline_text"], prompt)
-            self.assertIn("SUPPORTING LINE: " + row["supporting_line"], prompt)
+            self.assertNotIn("SUPPORTING LINE:", prompt)
 
     def test_prompt_and_saved_fields_reuse_exact_selections(self):
         result = self.record()

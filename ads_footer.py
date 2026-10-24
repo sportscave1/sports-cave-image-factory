@@ -19,3 +19,13 @@ def apply_footer_contract(prompt):
     if COMPACT_FOOTER_RULES in prompt:
         return prompt
     return COMPACT_FOOTER_RULES + "\n\n" + prompt
+
+
+def image_context_without_support(value):
+    """Omit retired footer copy from image context without mutating saved data."""
+    if isinstance(value, dict):
+        return {k: image_context_without_support(v) for k, v in value.items()
+                if k not in {"supporting_line", "on_image_subline", "fomo_line"}}
+    if isinstance(value, list):
+        return [image_context_without_support(v) for v in value]
+    return value
