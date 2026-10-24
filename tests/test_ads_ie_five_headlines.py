@@ -86,16 +86,12 @@ class FiveHeadlinesTests(unittest.TestCase):
         for text in APPROVED:
             self.assertEqual(ads.shorten_instant_experience_on_image_headline(text), text)
 
-    def test_metadata_uses_selected_ledger_limit_without_category_invention(self):
+    def test_owner_policy_overrides_missing_or_legacy_edition_metadata(self):
         for limit in (100, 25, None):
             metadata = ads.instant_experience_product_metadata_from_selection(
-                {"row": {"edition_limit": limit, "edition_limit_source": "Edition Ops product ledger"}}, category="Baseball")
-            self.assertEqual(metadata["edition_limit"], limit)
-            if limit == 100:
-                self.record(metadata=metadata)
-            else:
-                with self.assertRaisesRegex(ValueError, "verified 100"):
-                    self.record(metadata=metadata)
+                {"row": {"edition_limit": limit}}, category="Baseball")
+            self.assertEqual(metadata["edition_limit"], 100)
+            self.record(metadata=metadata)
 
     def test_stale_prompt_upgrade_removes_legacy_bank_and_preserves_rooms(self):
         record = self.record()

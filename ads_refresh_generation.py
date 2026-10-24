@@ -1,3 +1,4 @@
+import sports_cave_physical_realism as physical_realism
 """Creative Refresh generation context; production schemas remain owned by ads_page."""
 from sports_categories import sport_family
 from copy import deepcopy
@@ -12,10 +13,10 @@ def ie_refresh_image_rules():
 WINNER_IE supplies the winning creative DNA, collector/scarcity persuasion, product prominence and established footer hierarchy. Evolve that principle into three substantially fresh rooms; never merely recolour or change camera angle. The winner is a creative reference, not the product/frame authority.
 CANONICAL_PRODUCT — the uploaded canonical black-framed website product image — is the absolute authority for exact artwork, black frame thickness, frame depth, outer proportions, bevel profile, frame geometry and glazing relationship. The winning ad must NOT override canonical frame proportions. Preserve the same frame thickness consistently across all three outputs, allowing only physically correct perspective of the whole rigid frame.
 Match the canonical black frame thickness and depth exactly. Do not visually thin, thicken, simplify, flatten or reinterpret the frame.
-The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. Establish glazing from known verified product/variant information, even when reflections are not visible in the canonical photograph. If depth or glazing construction remains unknown, request confirmation rather than invent construction details.
+The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. Every framed mockup represents the owner-confirmed large 87 × 62 cm landscape edition (62 × 87 cm portrait) with premium glass, not acrylic, even when reflections are absent in the canonical photograph. Never ask for size or glazing confirmation. Preserve source frame depth without inventing measurements.
 
 PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM — include these requirements explicitly in EACH final image prompt:
-Apply the shared thumbnail-visible protective-glazing requirement for confirmed glazed framed editions, preserving the actual material, with realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glazing. Preserve verified unframed or unglazed construction; never relabel acrylic as glass.
+Apply the shared thumbnail-visible protective-glazing requirement for every framed edition with owner-confirmed premium glass, with realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glazing. Preserve unframed construction; every framed edition uses premium glass, never acrylic.
 Use real interior photography, believable wall texture/materials and room proportions, tasteful premium furniture, physically credible lighting sources and high-end but lived-in interior credibility. Product remains the dominant mobile-readable hero on a real customer's wall.
 The final result must feel like a genuine premium lifestyle photograph taken in a real home, not a rendered showroom, not an AI room, and not a flat composited mockup.
 Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
@@ -37,7 +38,7 @@ The image FAILS and must be regenerated if any of these are missing:
 1. EXACT CANONICAL FRAME
 Match CANONICAL_PRODUCT frame thickness, bevel profile, depth and outer proportions exactly. Never thin, thicken, flatten, simplify or reinterpret the frame. The winning advertisement must never override canonical frame construction.
 2. CLEAR REAL GLASS OR ACRYLIC GLAZING
-For confirmed glazed framed editions, apply the shared thumbnail-visible protective-glazing requirement; missing or imperceptible surface reflections fail visual review, and frame-edge highlights alone do not count. Preserve actual glass or acrylic material and the exclusion for verified unframed or unglazed products. Prompt wording alone cannot pass this visual check.
+For every framed edition, apply the shared thumbnail-visible protective-glazing requirement; missing or imperceptible surface reflections fail visual review, and frame-edge highlights alone do not count. Use owner-confirmed premium glass, not acrylic; preserve the exclusion for unframed products. Prompt wording alone cannot pass this visual check.
 3. PREMIUM FRAME BEVEL LIGHTING
 Room light must naturally interact with the physical black frame. At least one front bevel and, where perspective permits, one frame side/depth edge must visibly catch realistic light. The frame must read as a three-dimensional premium physical object.
 4. WALL SEPARATION
@@ -45,11 +46,11 @@ The frame sits physically in front of the wall: believable mounting depth, subtl
 5. CONTACT SHADOW
 Show a soft but clearly visible contact shadow behind/below the frame. Direction, softness and intensity must match the room's primary light source.
 6. PRODUCT FIRST
-Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, thumbnail-visible protective glazing on confirmed glazed editions, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
+Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, thumbnail-visible protective glazing on every framed edition, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
 
 IE_FINAL_PRODUCT_REALISM_GATE = '''FINAL PRODUCT REALISM REJECTION GATE
 Before returning the generated image, reject and regenerate it if ANY of these are true:
-- a confirmed glazed framed edition has missing or imperceptible surface reflections at 256 × 256; frame-edge highlights alone do not count (exclude verified unframed or unglazed products)
+- a framed edition has missing or imperceptible surface reflections at 256 × 256; frame-edge highlights alone do not count (exclude unframed products)
 - artwork looks like a flat matte print
 - frame looks like a flat black border
 - canonical frame thickness has changed
@@ -155,10 +156,10 @@ Winning description: {source.get('description') or 'Not supplied'}
 Winning CTA: {source.get('cta') or 'Not supplied'}
 Source evidence (factual context, not customer copy):
 {json.dumps(source, ensure_ascii=False, default=str)}
-Verified product context: {json.dumps(image_context_without_support(product_metadata or {}) if ie else (product_metadata or {}), ensure_ascii=False, default=str)}
+Verified product context: {json.dumps(image_context_without_support(physical_realism.prompt_metadata(product_metadata)) if ie else physical_realism.prompt_metadata(product_metadata), ensure_ascii=False, default=str)}
 
 REFERENCE AUTHORITIES AND ATTACHMENT CHECKLIST
-{('GLAZING CHECK: Every confirmed glazed framed edition must show believable surface reflections clearly visible at thumbnail size.' + chr(10)) if ie else ''}{attachment_rules}
+{('GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.' + chr(10)) if ie else ''}{attachment_rules}
 CSV TEMPLATE — separate non-image attachment (legacy ATTACHMENT 3 for single-image workflow).
 {plan.AUTHORITY}
 The PRINTED internal artwork background is immutable. Ignore the canonical image's external wall, room, furniture, camera and shadows. Never reconstruct artwork from a winner.
@@ -260,7 +261,7 @@ Campaign format: Carousel
 Product page URL: {url}
 LIVE BLACK-FRAME VERIFICATION: open the supplied live product URL, select the Black frame variant and compare the visible original product gallery, text, border and construction. Use the verified Black variant link supplied by Sports Cave OS if available. A URL is not proof pixels were inspected; disclose when direct visual verification is unavailable.
 Verified Black variant source data (when explicitly checked): {json.dumps((product_metadata or {}).get('verified_black_variant') or {}, ensure_ascii=False, default=str)}
-Verified product facts: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
+Verified product facts: {json.dumps(physical_realism.prompt_metadata(product_metadata), ensure_ascii=False, default=str)}
 
 {plan.carousel_copy.instruction(winner, refs)}
 

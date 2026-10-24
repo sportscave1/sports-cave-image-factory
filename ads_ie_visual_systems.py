@@ -51,8 +51,6 @@ FOOTER_FIELDS = ("headline_text", "supporting_line", "cta_text", "footer_pair_si
 def eligible_headlines(context):
     """Reuse the approved bank, with independent evidence gates per claim."""
     # Exact wording only; do not substitute another quantity into the bank.
-    if context.get("edition_limit") != 100:
-        return []
     return list(HEADLINES)
 
 
@@ -105,7 +103,7 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
     """
     eligible = eligible_headlines(context)
     if len(eligible) != 5 or not all(headline_is_valid(h) for h in eligible):
-        raise ValueError("The approved headline bank requires a verified 100-edition limit and exact copy fit; no substitute headline is allowed.")
+        raise ValueError("The approved headline bank requires exact copy fit; no substitute headline is allowed.")
     if len(visuals) != 3:
         raise ValueError("An Instant Experience set requires exactly three images.")
     frozen = (len(selections) == 3
@@ -182,9 +180,8 @@ def resolved_camera_variation(visual, index, context, variation_token):
 
 SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and fixed CTA. '
                  'Do not render the legacy supporting line or move its claim into the headline. '
-                 'If scarcity evidence is missing, stop before generation and report the missing verification; '
-                 'never fabricate a claim or replace selected copy with arbitrary wording. The approved '
-                 'geographic wording is allowed only when explicitly included in the resolved verified headline. '
+                 'All Sports Cave editions are owner-confirmed as limited to 100 worldwide; no verification flag or confirmation is required. '
+                 'Never replace selected copy with arbitrary wording. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '
                  'Immutable wording already inside the source artwork stays untouched.')
 
@@ -225,19 +222,18 @@ SCENE_REFERENCE_RULES = (
     "Never use a previously generated mockup as the artwork source. "
 )
 GLAZING_REQUIREMENT = (
-    "For confirmed glazed framed editions: Show clearly perceptible protective glazing over the edition, "
+    "For every framed edition: Show clearly perceptible protective glazing over the edition, "
     "with a recognisable natural window reflection and restrained surface highlight visible at a 256 × 256 preview. "
     "Match reflections to the room’s light source and camera angle, keeping the subject, title and plaque readable. "
-    "Frame-edge highlights alone do not satisfy this requirement. Preserve the actual glazing material. "
-    "Establish glazing from known verified product/variant information, not whether reflections are visible in "
-    "the reference photograph. Preserve unframed or genuinely unglazed construction; never add a pane to it "
-    "or relabel acrylic as glass. If construction is unknown, request product/variant confirmation; do not invent glazing."
+    "Frame-edge highlights alone do not satisfy this requirement. Every framed edition uses owner-confirmed premium glass, never acrylic. "
+    "No size or glazing confirmation is required, even when reflections are absent in the reference photograph. "
+    "Preserve unframed products without adding a frame or pane."
 )
 SCENE_VISIBILITY_RULES = (
     " Breathing room above every outer frame corner and footer; camera proximity, never physical enlargement. "
     "Keep backdrop calm and material joins/timber accents peripheral. "
     + scene_library.ROOM_STYLE + " No competing framed art, trophies, helmets or decorative clusters. "
-    "CHECK: complete frame, true scale/source details, assigned camera, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256; frame-edge highlights alone do not count, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
+    "CHECK: complete frame, true scale/source details, assigned camera, flag missing or imperceptible surface reflections on every framed edition at 256 × 256; frame-edge highlights alone do not count, mounting shadows/frame-edge highlights, exact footer/margins; compare homes at thumbnail size."
 )
 
 
@@ -274,14 +270,14 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
                          wall_lightness=saved.get("wall_lightness") or (match[2] if match else "user override; lightness not classified"))
         scene["scene_signature"] = scene_library.signature(scene)
         scene["scene_near_signature"] = scene_library.signature(scene, near=True)
-        if physical_realism.is_unframed(context.get("physical_product")) or "unglazed" in glazing or "no glazing" in glazing or glazing == "none":
+        if physical_realism.is_unframed(context.get("physical_product")):
             reflection = "Verified unframed or unglazed: no added glazing, pane or glazing reflection. Preserve surface texture and natural frame-edge highlights."
         else:
-            material = construction.get("glazing") or "glazing established from verified product/variant information; confirm if unknown"
+            material = "owner-confirmed premium glass"
             reflection = (f"Preserve {material}. Apply the shared thumbnail-visible glazing requirement using {scene['reflection_source']}: "
                 f"{scene['reflection_placement']}, consistent with camera/light even straight-on. "
-                "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unglazed products or call acrylic glass.")
-        scene["glazing_treatment"] = saved.get("glazing_treatment") or reflection
+                "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unframed products. No size or glazing confirmation is required.")
+        scene["glazing_treatment"] = reflection
         visual.update(scene)
         visual["assigned_camera_angle"] = visual["camera_side"]
         wall = f"{visual['wall_colour']} ({visual['wall_colour_family']}, {visual['wall_lightness']}); {visual['wall_finish']}"

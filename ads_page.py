@@ -1215,17 +1215,8 @@ def _edition_ops_product_collections_from_row(row):
 
 def instant_experience_product_metadata_from_selection(selection, *, category=""):
     row = dict(selection.get("row") or {}) if isinstance(selection, dict) else {}
-    edition_limit = _positive_int_or_none(
-        row.get("edition_limit")
-        or row.get("edition_total")
-        or row.get("Edition limit")
-        or row.get("Edition total")
-    )
-    edition_limit_source = _normalise_option_label(
-        row.get("edition_limit_source")
-        or row.get("edition_total_source")
-        or ("Edition Ops product ledger" if edition_limit else "")
-    )
+    edition_limit = 100
+    edition_limit_source = "Sports Cave owner-confirmed worldwide edition policy"
     physical = physical_realism.physical_metadata(row)
     return {
         **({'physical_product': physical} if physical else {}),
@@ -4320,15 +4311,8 @@ def resolve_instant_experience_product_context(
     if _contains_any_word(combined + " " + context_hint, ("gift", "gifting", "father", "mother", "christmas")):
         context_hint = "gifting"
 
-    edition_limit = _positive_int_or_none(metadata.get("edition_limit"))
-    edition_limit_source = _normalise_option_label(metadata.get("edition_limit_source"))
-    if edition_limit is None:
-        edition_limit = _verified_edition_limit_from_text(product_name)
-        if edition_limit:
-            edition_limit_source = "explicit product title"
-    if edition_limit is None and product_sport == "Baseball":
-        edition_limit = 100
-        edition_limit_source = "approved Baseball Instant Experience claim path"
+    edition_limit = 100
+    edition_limit_source = "Sports Cave owner-confirmed worldwide edition policy"
 
     return {
         "product_sport": product_sport,
@@ -4593,7 +4577,6 @@ def resolve_instant_experience_description_context(
         "NO_REPRINT_VERIFIED": bool(no_reprint_verified),
         "CAMPAIGN_MARKET": _normalise_option_label(country),
         "SCARCITY_VERIFIED": bool(base_context.get("edition_limit")),
-        "WORLDWIDE_VERIFIED": _metadata_bool(metadata, "worldwide_edition_verified", "worldwide_policy_approved"),
         "EDITION_LIMIT_SOURCE": base_context.get("edition_limit_source") or "",
         "VERIFIED_FACTS": ie_copy.verified_facts(metadata),
     }
@@ -4905,7 +4888,7 @@ Use this response schema:
 Shared rules:
 - Product data, supplied creative brief and structured metadata are the source of truth.
 - Do not invent edition limits, remaining quantities, numbering, certificates, no-reprint policies, no-second-run policies, availability, achievements, rivalries, relationships, team affiliations, nicknames, dates, scores or championships.
-- If the verified edition limit is 100, use either "Limited to 100 worldwide." or "Only 100 exist."
+- Use the owner-confirmed edition limit of 100: either "Limited to 100 worldwide." or "Only 100 exist."
 - If the exact edition limit is unavailable, use "A limited collector release."
 - Use "A numbered collector drop." only when IS_NUMBERED is true.
 - Use "No reprint." and "No second run." only when NO_REPRINT_VERIFIED is true.
@@ -5050,9 +5033,6 @@ def resolve_standard_instant_experience_visuals(
         product_metadata=product_metadata,
         campaign_moment=campaign_moment,
     )
-    # Image scarcity requires product evidence, not the legacy category default.
-    if context.get("edition_limit_source") == "approved Baseball Instant Experience claim path":
-        context = {**context, "edition_limit": None, "edition_limit_source": ""}
     seed = _instant_experience_seed(
         product_name,
         category,
@@ -5108,7 +5088,6 @@ def resolve_standard_instant_experience_visuals(
     ie_visuals.resolve_set_copy(resolved, {
         **context,
         "copy_product_key": ie_copy.product_key(product_name),
-        "worldwide_verified": _metadata_bool(product_metadata or {}, "worldwide_edition_verified", "worldwide_policy_approved"),
         "no_second_run_verified": _metadata_bool(product_metadata or {}, "no_second_run_verified", "no_reprint_verified", "no_second_run", "no_reprint"),
         "retires_when_sold_out": _metadata_bool(product_metadata or {}, "retires_when_sold_out", "retirement_verified"),
         "limited_edition_verified": (_metadata_bool(product_metadata or {}, "is_limited_edition", "limited_edition") is True
@@ -7189,7 +7168,7 @@ It gets framed.
 - Follow with one short emotional paragraph about collector ownership or display appeal.
 - Close with: Limited to {{authentic edition limit}} worldwide. Secure your edition before it's gone.
 - Replace {{authentic edition limit}} with the confirmed edition quantity from the approved claim path, supplied product information or visible edition. Never leave the placeholder in final copy.
-- When the confirmed edition limit is 100, write exactly: Limited to 100 worldwide. Secure your edition before it's gone.
+- The owner confirms all editions are limited to 100 worldwide; write exactly: Limited to 100 worldwide. Secure your edition before it's gone.
 - When no edition quantity is confirmed, use the strongest truthful scarcity already permitted by the campaign instead. Never fabricate 100, a numbered edition or a no-second-run claim.
 
 Variation 3 - Nostalgia And Remembered Moment
@@ -7441,7 +7420,7 @@ def apply_creative_refresh_winner_context(prompt, context=None):
 def apply_carousel_winner_copy(prompt, product_name, category, product_metadata=None):
     """Replace the reusable legacy copy fragments only for new Carousel campaigns."""
     metadata = dict(product_metadata or {})
-    limit = _positive_int_or_none(metadata.get("edition_limit")) or _verified_edition_limit_from_text(product_name)
+    limit = 100  # Owner-confirmed worldwide edition policy.
     limited = bool(limit) or _metadata_bool(metadata, "is_limited_edition", "limited_edition") is True or bool(re.search(r"\blimited edition\b", product_name, re.I))
     numbered = _metadata_bool(metadata, "is_numbered", "numbered", "numbered_edition") is True
     replacements = {
@@ -7469,7 +7448,7 @@ def apply_carousel_winner_copy(prompt, product_name, category, product_metadata=
     prompt = prompt.replace("- Card 2 uses a desirable ownership setting.", "- Card 2 uses a distinct fan environment supporting recognition or memory.")
     prompt = prompt.replace("- Card 4 uses an emotional lifestyle, memory or legacy presentation.", "- Card 4 uses the mandatory Premium Man Cave / Sports Cave ownership presentation.")
     preferred = carousel_winner.preferred_copy(product_name, metadata, limit, limited, numbered)
-    return prompt + "\n\nVERIFIED CAROUSEL COPY PREFERENCES\n" + json.dumps(preferred, ensure_ascii=False) + "\nThese are supported preferred card fields, not a replacement output schema. Resolve null fields from supplied facts or a safe non-claiming alternative. Keep the existing visible five-card format and five Primary Text variations. Verify every field against the 17-character limit before returning it. Numbering verified: " + str(numbered) + ". Never add worldwide or world wide to an edition-limit label."
+    return prompt + "\n\nVERIFIED CAROUSEL COPY PREFERENCES\n" + json.dumps(preferred, ensure_ascii=False) + "\nThese are supported preferred card fields, not a replacement output schema. Resolve null fields from supplied facts or a safe non-claiming alternative. Keep the existing visible five-card format and five Primary Text variations. Verify every field against the 17-character limit before returning it. Numbering verified: " + str(numbered) + ". The owner-confirmed 100 worldwide edition limit needs no verification or confirmation; preserve the assigned card wording and character limits."
 
 
 def compose_final_ads_prompt(
@@ -8482,7 +8461,7 @@ IE_EXECUTION_CHECKLIST = """EXECUTION CHECKLIST
 - Keep CLAIM YOUR EDITION unchanged.
 - Complete matching copy, the populated CSV and supplied setup.
 - Review the outputs and report unresolved defects.
-GLAZING CHECK: Every confirmed glazed framed edition must show believable surface reflections clearly visible at thumbnail size.
+GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.
 
 Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification."""
 
@@ -8611,7 +8590,7 @@ AUTOMATIC EXECUTION IN THIS RECEIVING CONVERSATION
 No collage or triptych, contact sheets or extra candidate images. This executes in the receiving conversation, without adding an OS image backend or publishing ads.
 For each image call, combine the ORIGINAL product reference, the entire SHARED IMAGE REQUIREMENTS section and only that ad's resolved specification and exact selected footer copy. No sibling scene descriptions, sibling copy, alternative rooms, description plans or contradictory legacy text in an image call. Never use a previous generated cover as the next cover’s product or scene reference. Generate the complete room, framed product, glazing, reflections, shadows and lighting together in that one coherent image call; never generate an empty room and paste the product in afterwards.
 OUTPUT REVIEW AND DELIVERY
-Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on confirmed glazed framed editions at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline wording, with no supporting sentence and maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
+Inspect accessible image outputs individually AND together at full size and 256 x 256: three visibly different homes/walls/light, intact product details, breathing room at every frame corner and above the footer, assigned cameras, flag missing or imperceptible surface reflections on every framed edition at 256 × 256 (frame-edge highlights alone do not count), rigid geometry and exact footer wording/margins. Ask: “Do these look like three different properties, or the same wall-and-opening composition restyled?” Prompt/schema checks do not establish visual distinction; neither do different prompt strings or variation tokens. Check actual 1024 x 1024 output dimensions and approved selected headline wording, with no supporting sentence and maximum eligible variety; fixed CLAIM YOUR EDITION must repeat. Inspection must not trigger another image generation; report unresolved defects briefly. Return exactly three final covers, one per ad. Never claim pixel fidelity or inspection without evidence.
 Label each output immediately using its exact Output label below. Keep each image associated with its matching copy and CSV route throughout. Use the environment’s supported image display/download mechanism with distinct output identifiers; never replace earlier displayed images, reuse one identifier for multiple ads or return only the last image.
 If it is unclear whether an image was created, first recover the existing call result/asset rather than risk a duplicate successful generation. Never restart the set.
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
@@ -9394,7 +9373,7 @@ def ads_prompt_contract_version_for_campaign(
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
     if campaign_type == "Instant Experience":
         version += '; ' + ie_visuals.VERSION + '; ' + SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
-    return version + '; PHYSICAL FRAME REALISM V2; ' + FOOTER_VERSION
+    return version + '; OWNER CONFIRMED PHYSICAL AND WORLDWIDE DEFAULTS V1; ' + FOOTER_VERSION
 
 
 def _instant_experience_visual_contract_is_current(prompt):
@@ -14296,7 +14275,7 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
             if _ads_image_valid_slots(result, workflow):
                 with st.expander("Final visual verification — required before POST NOW",
                                  expanded=bool(_creative_refresh_visual_review_issues(result, workflow))):
-                    st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, clear acrylic/glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
+                    st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
                     review_key = _creative_refresh_visual_review_key(result, workflow)
                     reviewed = st.checkbox(
                         "I checked every refreshed image against its product and winner references",

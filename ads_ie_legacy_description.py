@@ -60,7 +60,7 @@ For verified connected legends the original contrast was "Wrong question." rathe
 APPLICATION TO THE EXISTING SINGLE-COPY CONTRACT
 Return only the selected finished wording. Never print these three templates as three options under one ad. Each ad has exactly one primary text, one headline and one Instant Experience description: Primary Text / Description is the existing shared copy field, stored once in primary_text, not two alternative versions or a new CSV column. Exactly three complete ad combinations total.
 Use short, strong, collector-led lines and intentional blank lines; approximately 35–65 words only when useful, never pad. Preserve "This isn't wall art.", "Greatness doesn't fade. It gets framed." and "Secure yours." where the selected historical framework calls for them. No generic ecommerce explanation, bloated sentences or AI luxury language. The description's closing words do not replace the existing CTA field.
-Keep current factual safeguards: supplied identity only, rivalry only when verified, exact verified edition limit, no invented remaining stock, no reprint, no second run or retirement. Never append worldwide or world wide to scarcity. Do not change the winning urgency, scarcity style, headline count, image briefs, CSV identities or output row count.
+Keep current factual safeguards: supplied identity only, rivalry only when verified, owner-confirmed 100 worldwide edition limit, no invented remaining stock, no reprint, no second run or retirement. The 100 worldwide edition limit is owner-confirmed and needs no additional verification or confirmation. Do not change the winning urgency, scarcity style, headline count, image briefs, CSV identities or output row count.
 """
 
 
@@ -132,11 +132,8 @@ def new_ad_sport_language(sport, context):
 
 def build_new_ad_style_rules(product, sport, context):
     sport_word, identity, comparison = new_ad_sport_language(sport, context)
-    limit = context.get("EDITION_LIMIT") if context.get("SCARCITY_VERIFIED") else None
-    if context.get("EDITION_LIMIT_SOURCE") == "approved Baseball Instant Experience claim path":
-        limit = None
-    scarcity = (f"Limited to {limit} worldwide." if context.get("WORLDWIDE_VERIFIED")
-                else f"Limited to {limit} editions.") if limit else ""
+    limit = 100  # Owner-confirmed worldwide edition policy.
+    scarcity = "Limited to 100 worldwide."
 
     blocks = []
     for index, (key, template, cta) in enumerate(zip(
@@ -160,7 +157,7 @@ Resolve bracketed writing cues using the supplied title, athlete/team, product i
 The defining hooks and short-line/blank-line structure are locked. legacy_standard preserves "This isn't wall art."; framed_greatness always opens "Greatness doesn't fade.\nIt gets framed." including motorsport; choose_a_side always uses the collector challenge, product-versus-forgettable-print choice, "You already know the answer.", and two-line ownership close. Choose-a-Side is valid for every product; athlete-versus-athlete rivalry requires verified rivalry/opposition and must never be invented. Do not substitute three random advertising concepts.
 
 DESCRIPTION SCARCITY ONLY
-Use only the supplied verified edition limit; omit quantity if it is not verified. Worldwide is permitted only when WORLDWIDE_VERIFIED is true. Do not invent remaining stock, near-sellout claims, countdowns, discounts, percentages, numbered status, no reprint or retirement. Description wording must not alter the selected image footer.
+All Sports Cave editions are owner-confirmed as limited to 100 worldwide. Use this approved claim without verification flags, blocking or confirmation questions. Do not invent remaining stock, near-sellout claims, countdowns, discounts, percentages, numbered status, no reprint or retirement. Description wording must not alter the selected image footer.
 
 FINAL COPY CONTRACT
 Return exactly THREE active ad-copy combinations total. Each group contains AD COPY with one Description, one Headline and one CTA. No extra options or tables. Preserve intentional short lines and blank lines; concise, collector-first, confident, premium, emotional without filler. Nostalgia only where product truth supports it. No perfect for, elevate your space, transform your room, generic home-decor language, corporate explanation, emojis or excessive exclamation marks. Keep each headline product-specific and at most six words. One approved CTA per ad, no alternatives. Native Meta Instant Experience button remains Shop Now.
