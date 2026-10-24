@@ -84,11 +84,21 @@ class Bridge(ThreadingHTTPServer):
         asyncio.run_coroutine_threadsafe(start(),self.loop).result(timeout=5)
 
     def invoke(self, command, data=None):
-        future = asyncio.run_coroutine_threadsafe(self.runner.command(command, data or {}), self.loop)
+        operation = self.show_toolbar() if command == "show-toolbar" else self.runner.command(command, data or {})
+        future = asyncio.run_coroutine_threadsafe(operation, self.loop)
         try: return future.result(timeout=45)
         except concurrent.futures.TimeoutError:
             future.cancel()
             raise Invalid("Command timed out. Inspect the browser; use Stop before trying again.")
+
+    async def show_toolbar(self):
+        if not hasattr(self.runner, "open_toolbar"):
+            raise Invalid("This installed helper does not include the Windows toolbar.")
+        # Reveal the current session without starting capture, resetting a draft,
+        # selecting a recording, or changing playback state.
+        await self.runner.open_toolbar()
+        await self.runner.publish_native({**self.runner.desktop.state(), "show_toolbar": True})
+        return {"message": "Windows recorder toolbar opened."}
 
     def close(self):
         try:
@@ -225,6 +235,7 @@ def main():
     parser.add_argument("--data-dir", type=Path, default=default_root())
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--open", action="store_true")
+    parser.add_argument("--toolbar", action="store_true")
     parser.add_argument("--shutdown", action="store_true")
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--pair", action="store_true")
@@ -241,6 +252,10 @@ def main():
             with urlopen(Request(origin + "/api/shutdown", data=b"{}", headers={
                 "X-Recorder-Key": key, "Content-Type": "application/json"}), timeout=15):
                 pass
+        elif args.toolbar:
+            with urlopen(Request(origin + "/api/show-toolbar", data=b"{}", headers={
+                    "X-Recorder-Key": key, "Content-Type": "application/json"}), timeout=45):
+                pass
         elif args.pair: webbrowser.open(origin + "/pair")
         elif args.open: webbrowser.open(origin + "/#key=" + key)
         else: print("Task Recorder is already running.")
@@ -252,6 +267,7 @@ def main():
         os.environ.update(configure_installed(root))
         server = Bridge(root, args.port, preview=args.preview)
         atomic(root / "connection.json", {"origin": server.origin, "protected": protect(server.token.encode()).hex()})
+        if args.toolbar: server.invoke("show-toolbar")
         if args.open: webbrowser.open(server.origin + "/#key=" + server.token)
         elif args.pair or not server.agent.credentials(): webbrowser.open(server.origin+"/pair")
         print("Task Recorder ready at " + server.origin + " (authenticated local control).", flush=True)
