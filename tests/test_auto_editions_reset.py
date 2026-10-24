@@ -24,6 +24,9 @@ ROOT=Path(__file__).parents[1]
 @pytest.fixture
 def design(store,tmp_path):
     d,sql=store
+    # Preparation context reads lightweight commerce metadata in production.
+    sql.execute('CREATE TABLE IF NOT EXISTS shopify_order_lines(shopify_product_id text,raw_json jsonb)')
+    sql.execute('CREATE TABLE IF NOT EXISTS shopify_products(shopify_product_id text,raw_json jsonb)')
     sql.execute((ROOT/'supabase/migrations/20261015024929_auto_editions_reset_design.sql').read_text())
     sql.execute((ROOT/'supabase/migrations/20261016210905_auto_editions_reset_cancellation.sql').read_text())
     register(store);tick(store,[asset()])
