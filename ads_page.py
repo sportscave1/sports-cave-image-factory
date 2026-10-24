@@ -3973,7 +3973,7 @@ def build_instant_experience_on_image_copy_fit_rules():
     return SPORTS_CAVE_IE_ON_IMAGE_COPY_FIT_RULES_V1
 
 
-SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2"
+SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V3_REGULAR_SERIF"
 IE_COLLECTOR_FOOTER_TYPE_TARGETS = {
     "headline_px": "42–48", "support_px": "24–26", "cta_px": "26–28",
     "cta_tracking_em": "0.04–0.06", "underline_px": 1,
@@ -5211,10 +5211,10 @@ INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - PREMIUM ROOM SYSTEM V4
 
 - Set flat typography only inside the opaque footer. Use a real font compositor for measurement/export if available; this generator has no deterministic Ads footer renderer. Instructions alone cannot guarantee glyph fit. Inspect actual wording/alignment and report unresolved defects.
 - Keep the fixed footer geometry/opacity and its thin 1-pixel muted-gold separator; no decorative flourishes, borders, glow, marble, glitter or heavy texture.
-- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined editorial serif Regular/Medium; CTA {targets['cta_px']} px, Montserrat Medium. Design targets, not measured-rendering claims.
+- STABLE 1024 PX COLLECTOR TYPOGRAPHY TARGETS: headline {targets['headline_px']} px, refined vintage collector serif in Regular weight; CTA {targets['cta_px']} px, clean Montserrat sans serif in Medium weight. Design targets, not measured-rendering claims.
 - These fixed targets are the sole typography specification for every image and pack; never reduce a previous generation again. Do not compound percentage reductions or rescale from a reference. Uppercase wording is casing only, never permission for oversized heavy block capitals or bold promotional-banner styling. Never enlarge text to fill empty panel space.
-- Keep the headline elegant and comfortably within the margins; no heavy slab-like forms, excessively bold strokes or edge-to-edge wording. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
-- Use a compact 18–20% opaque panel with existing safe margins and about 22–30 px clear vertical separation between headline and CTA. Centre and balance the two elements; remove the former supporting-line space rather than leaving an empty row. Never enlarge type to fill the panel. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
+- Keep the headline elegant and comfortably within the margins; never use heavy, bold, blocky or condensed promotional lettering, heavy slab-like forms or edge-to-edge wording. CTA is a discreet collector inscription, medium weight with restrained {targets['cta_tracking_em']} em letter spacing, subdued matte antique gold; never heavy bold, bright yellow, shiny metallic, a button, capsule, arrow, glow or added punctuation.
+- Use a compact 18–20% opaque panel with existing safe margins and about 22–30 px clear vertical separation between headline and CTA. Centre and balance the two elements; remove the former supporting-line space rather than leaving an empty row. A style reference controls typography only, never the selected headline or footer geometry: do not copy excess black space, add blank rows or unnecessary padding, enlarge the footer or enlarge type to fill the panel. Readability at 256 x 256 still takes precedence over merely hitting a nominal pixel target.
 - Headline colour is warm ivory. The verified edition number, if present, is muted antique gold. CTA is muted antique gold.
 {resolved_wording}
 - Keep the headline and CTA on one line each and maintain 64-72 px safe margins. Apply the centralized on-image copy-fit limits before returning this prompt.
@@ -9393,12 +9393,12 @@ def ads_prompt_contract_version_for_campaign(
         elif campaign_type == 'Carousel':
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
     if campaign_type == "Instant Experience":
-        version += '; ' + ie_visuals.VERSION
+        version += '; ' + ie_visuals.VERSION + '; ' + SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
     return version + '; PHYSICAL FRAME REALISM V2; ' + FOOTER_VERSION
 
 
 def _instant_experience_visual_contract_is_current(prompt):
-    required = (ie_visuals.VERSION,
+    required = (ie_visuals.VERSION, SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2,
                 "GROUP 1 — PREMIUM SCARCITY — RIGHT ANGLE",
                 "GROUP 2 — PREMIUM SCARCITY — STRAIGHT ON",
                 "GROUP 3 — PREMIUM SCARCITY — LEFT ANGLE")
