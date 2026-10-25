@@ -93,7 +93,7 @@ LOAD_STARTED_KEY = "orders_load_started_at"
 LOAD_SCOPE_KEY = "orders_load_account_scope"
 LOAD_GENERATION_KEY = "orders_load_generation"
 LIVE_CHECKED_AT_KEY = "orders_visibility_checked_at"
-DEFAULT_VISIBLE_ROW_LIMIT = 50
+DEFAULT_VISIBLE_ROW_LIMIT = 75
 ORDERS_PAGE_LOAD_TIMEOUT_SECONDS = 8
 # Covers the measured 1.03s p95 Latest 50 read without a loading-poll rerun.
 # Requests exceeding this short grace period keep the asynchronous fallback.
@@ -2896,7 +2896,7 @@ def _render_orders_search_form():
                 label_visibility="collapsed",
                 placeholder="Order, customer, product, variant, edition",
             )
-            search_cols[1].caption("Latest 50")
+            search_cols[1].caption("Latest 75")
             with search_cols[2]:
                 submitted = st.form_submit_button("Search", use_container_width=True)
         return str(query or "").strip(), bool(submitted)
@@ -2907,7 +2907,7 @@ def _render_orders_search_form():
         key=SEARCH_KEY,
         placeholder="Order, customer, product, variant, edition",
     )
-    search_cols[1].caption("Latest 50")
+    search_cols[1].caption("Latest 75")
     return str(query or "").strip(), False
 
 
@@ -2958,7 +2958,7 @@ def _render_orders_data_area():
             )
         return
 
-    # The database is already bounded to 50 orders. Keep every fulfilment unit for
+    # The database is already bounded to 75 orders. Keep every fulfilment unit for
     # those orders so a quantity-2 line can never lose its second allocation here.
     visible_rows = rows
 
