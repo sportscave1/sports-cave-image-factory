@@ -30,6 +30,7 @@ import ads_package_paths
 from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 from ads_footer import COMPACT_FOOTER_RULES, FOOTER_VERSION, apply_footer_contract
+from ads_final_delivery import VERSION as FINAL_DELIVERY_VERSION, apply_final_delivery
 import ads_carousel_winner as carousel_winner
 import ads_google_demand_gen as google_ads
 from ads_navigation import POSTING_ROUTE, POSTING_PAGE_KEY
@@ -8952,13 +8953,13 @@ def build_ads_prompt(
         prompt = ads_refresh_generation.build_prompt(
             sys.modules[__name__], product_name, category, country, campaign_type, product_url,
             creative_refresh_context, campaign_moment=campaign_moment, product_metadata=product_metadata)
-        return apply_footer_contract(physical_realism.apply_context(prompt, product_metadata))
+        return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
     if campaign_type == "Instant Experience" and creative_refresh_context:
         prompt = build_instant_experience_winner_refinement_prompt(
             product_name, category, country, product_url, creative_refresh_context,
             product_metadata=product_metadata, campaign_moment=campaign_moment,
         )
-        return apply_footer_contract(physical_realism.apply_context(prompt, product_metadata))
+        return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
     template_key = get_template_key(category, campaign_type)
     settings = None
     if campaign_type == "Instant Experience":
@@ -9008,8 +9009,8 @@ def build_ads_prompt(
             compose_final_ads_prompt(prompt, **prompt_kwargs),
             creative_refresh_context,
         )
-    return apply_footer_contract(physical_realism.apply_context(
-        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata))
+    return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(
+        compose_final_ads_prompt(prompt, **prompt_kwargs), product_metadata)))
 
 
 def render_insufficient_winner_data():
@@ -9392,7 +9393,7 @@ def ads_prompt_contract_version_for_campaign(
             version += '; ' + ads_refresh_generation.plan.CAROUSEL_CONTRACT + '; OPTIONAL PRODUCT FIDELITY V1; ' + ads_refresh_generation.plan.carousel_copy.CONTRACT
     if campaign_type == "Instant Experience":
         version += '; ' + ie_visuals.VERSION + '; ' + SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2
-    return version + '; OWNER CONFIRMED PHYSICAL AND WORLDWIDE DEFAULTS V1; ' + FOOTER_VERSION
+    return version + '; OWNER CONFIRMED PHYSICAL AND WORLDWIDE DEFAULTS V1; ' + FOOTER_VERSION + '; ' + FINAL_DELIVERY_VERSION
 
 
 def _instant_experience_visual_contract_is_current(prompt):
