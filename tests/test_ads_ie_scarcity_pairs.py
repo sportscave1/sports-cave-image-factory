@@ -51,7 +51,7 @@ class ScarcityPairTests(unittest.TestCase):
         for row in result["instant_experience_fingerprints"]:
             self.assertIn(row["headline_text"], wording.HEADLINES)
             self.assertIn("HEADLINE: " + row["headline_text"], prompt)
-            self.assertNotIn("SUPPORTING LINE:", prompt)
+            self.assertIn("SUPPORTING LINE:", prompt)
 
     def test_prompt_and_saved_fields_reuse_exact_selections(self):
         result = self.record()
@@ -60,7 +60,7 @@ class ScarcityPairTests(unittest.TestCase):
                          rebuilt["product_metadata"]["instant_experience_footer_selections"])
         for row in result["instant_experience_fingerprints"]:
             self.assertIn("HEADLINE: " + row["headline_text"], result["master_prompt"])
-            self.assertNotIn("SUPPORTING LINE:", result["master_prompt"])
+            self.assertIn("SUPPORTING LINE:", result["master_prompt"])
             self.assertEqual(row["eligible_headline_alternatives"], [])
         self.assertNotIn("28 characters", refresh.ie_refresh_image_rules())
         self.assertIn("shared approved five-headline bank", refresh.ie_refresh_image_rules())

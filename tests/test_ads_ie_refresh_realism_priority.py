@@ -17,7 +17,7 @@ class IERefreshRealismPriorityTests(unittest.TestCase):
         self.assertEqual(contracts.count(generation.IE_FINAL_PRODUCT_REALISM_GATE), 3)
         for prompt in contracts.split(generation.IE_CRITICAL_PRODUCT_REALISM)[1:]:
             self.assertIn("HEADLINE: ", prompt)
-            self.assertNotIn("SUPPORTING LINE:", prompt)
+            self.assertIn("SUPPORTING LINE:", prompt)
             self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
             self.assertIn("shared approved five-headline bank", prompt)
             self.assertIn(generation.IE_FINAL_PRODUCT_REALISM_GATE, prompt)

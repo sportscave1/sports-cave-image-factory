@@ -75,7 +75,7 @@ class FiveHeadlinesTests(unittest.TestCase):
                 self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
                 self.assertIn("Always highlight all three digits of 100", prompt)
                 self.assertIn("18–20%", prompt)
-                self.assertNotIn("SUPPORTING LINE:", prompt)
+                self.assertIn("SUPPORTING LINE: " + row["supporting_line"], prompt)
                 self.assertNotIn("FOR YOUR COLLECTION", prompt)
                 self.assertEqual(row["eligible_headline_alternatives"], [])
 

@@ -98,8 +98,7 @@ def coherent_pair(headline, support, *, require_scarcity=True):
 def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=(), selections=(), pair_is_valid=None):
     """Draw once without replacement, then reuse the three persisted assignments.
 
-    Old or duplicate selections are upgraded as a complete set. Historical support
-    fields remain internal compatibility data and never affect headline selection.
+    Old or duplicate selections are upgraded as a complete set. Supporting lines use historical rotation and never affect headline selection.
     """
     eligible = eligible_headlines(context)
     if len(eligible) != 5 or not all(headline_is_valid(h) for h in eligible):
@@ -112,13 +111,33 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
     headlines = ([v["headline_text"] for v in selections] if frozen else
                  random.Random(str(visuals[0]["resolved_seed"]) + "|approved-five-headlines").sample(eligible, 3))
     supports = eligible_support_lines(context)
-    used_supports = set()
-    for index, (visual, headline) in enumerate(zip(visuals, headlines)):
-        saved = selections[index] if frozen else {}
-        support = saved.get("supporting_line")
-        if support not in supports:
-            support = next(s for s in supports if s not in used_supports and coherent_pair(headline, s))
-        used_supports.add(support)
+    # Restore historical support rotation without changing the current headline draw.
+    from itertools import product
+    def compatible(h, sub):
+        return coherent_pair(h, sub) and (pair_is_valid is None or pair_is_valid(h, sub))
+    seed = visuals[0]["resolved_seed"]
+    product_key = context.get("copy_product_key")
+    history = [r for r in list(recent_fingerprints)[:scene_library.HISTORY_LIMIT] if isinstance(r, dict)
+               and (not product_key or r.get("copy_product_key") == product_key)]
+    old_heads = [r.get("on_image_headline") or r.get("campaign_line") for r in history]
+    old_supports = [r.get("on_image_subline") or r.get("fomo_line") for r in history]
+    old_pairs = list(zip(old_heads, old_supports))
+    def age(value, values):
+        return values.index(value) if value in values else len(history) + 1
+    saved_supports = [v.get("supporting_line") for v in selections] if frozen else []
+    if (len(saved_supports) == 3 and len(set(saved_supports)) == 3
+            and all(sub in supports and compatible(h, sub) for h, sub in zip(headlines, saved_supports))):
+        pairs = list(zip(headlines, saved_supports))
+    else:
+        domains = [[s for s in supports if compatible(h, s)] for h in headlines]
+        pairings = [list(zip(headlines, c)) for c in product(*domains) if len(set(c)) == 3]
+        if not pairings:
+            raise ValueError("Three complementary approved supporting lines require exact copy fit.")
+        pairs = min(pairings, key=lambda ps: (
+            sum(p in old_pairs[:3] for p in ps), sum(p in old_pairs for p in ps),
+            sum(sub in old_supports for _, sub in ps), -sum(age(sub, old_supports) for _, sub in ps),
+            -sum(age(p, old_pairs) for p in ps), stable_rank(seed, str(ps))))
+    for visual, (headline, support) in zip(visuals, pairs):
         visual.update(headline_text=headline, supporting_line=support, fomo_line=support,
             cta_text="CLAIM YOUR EDITION", footer_emphasis=footer_emphasis(headline),
             footer_pair_signature=hashlib.sha256(f"{headline}|{support}".encode()).hexdigest()[:20],
@@ -178,8 +197,8 @@ def resolved_camera_variation(visual, index, context, variation_token):
     return CAMERA_VARIATIONS[0]
 
 
-SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline and fixed CTA. '
-                 'Do not render the legacy supporting line or move its claim into the headline. '
+SCARCITY_RULE = ('ON-IMAGE SCARCITY WORDING: Use only the exact resolved headline, supporting line and fixed CTA. '
+                 'Render the assigned supporting line directly below the headline; never move its wording into the headline. '
                  'All Sports Cave editions are owner-confirmed as limited to 100 worldwide; no verification flag or confirmation is required. '
                  'Never replace selected copy with arbitrary wording. '
                  'Do not append geographic scope to any other claim. Never invent a limit. '
@@ -316,7 +335,7 @@ Selected camera: {visual['camera_side']}. Keep verticals straight; never mirror 
 SCENE: {visual['scene_brief']}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Camera distance determines prominence; never enlarge the physical product.
 VARIANT PRECEDENCE — MANDATORY: use this one scene and camera; saved selections take precedence. Never mirror artwork.
-Use only the exact selected headline and CTA below. Pack-level fit selection is completed before this image call; do not pass alternatives or sibling copy into the call.
+Use only the exact selected headline, supporting line and CTA below. Pack-level fit selection is completed before this image call; do not pass alternatives or sibling copy into the call.
 {SCARCITY_RULE}"""
     return f'''LOCKED CAMERA / ROOM / WALL RESOLUTION
 {SCENE_VERSION}
@@ -326,6 +345,6 @@ SCENE: {visual['scene_brief']}
 Framing: {visual['shot_distance']}; target width {visual['product_width']}; {visual['product_position']}. Achieve prominence through camera distance, never physical enlargement. Width targets yield to source aspect ratio, complete-frame visibility and a modest calm margin above the footer. Keep furniture/architecture near the perimeter or deeper behind the artwork. Avoid wide room views, excessive empty wall, dominating furniture and distracting background brightness. Retain enough subtle context to read as a real home.
 VARIANT PRECEDENCE — MANDATORY
 Honour the single resolved scene and explicit saved selections. Sibling metadata is comparison data only. Three different properties must differ in architecture, spatial layout, wall treatment, furniture/cue and light at thumbnail size; angle or accessory changes alone are insufficient. No scene blending or random sporting props. Avoid repeated dark-brown rooms, walnut, leather, whiskey props or orange light. Allow lighter and darker homes. Use the source palette, brightness, frame colour and verified construction for natural contrast. Use the resolved Sports Cave brand wall palette; honour explicit saved overrides. Keep the immediate artwork backdrop calm. Any supplied successful hallway image is a composition/light style reference only: inspect it when accessible, use its artwork prominence without copying its room, and never use it as the product source.
-Use only this image's exact selected headline and CTA. Never change already-resolved wording for fit; pass no sibling copy or alternative lists into the image call.
+Use only this image's exact selected headline, supporting line and CTA. Never change already-resolved wording for fit; pass no sibling copy or alternative lists into the image call.
 Use neutral collector language only; never attach a sport name to collector labels.
 {SCARCITY_RULE}'''
