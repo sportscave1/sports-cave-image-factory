@@ -40,6 +40,7 @@ class ReadService:
         self.epoch = 0
         self.sync_lock = threading.Lock()
         self.manual_refresh = False
+        self.coordination_delay = 0
         self.mutation_lock = threading.Lock()
 
     def request(self, key, loader, ttl=20, *, wait=False):
@@ -185,12 +186,18 @@ class ReadService:
                 try:
                     leased=self.store.claim('inbox-index:'+self.config.address,owner)
                     if not leased:
+                        # A rolling replacement may narrowly lose to the draining
+                        # owner's last sync. Do not then sleep a full poll cycle.
+                        # Persistent followers back off to the normal cadence.
+                        self.coordination_delay = min(60, max(5, self.coordination_delay * 2))
+                        LOGGER.info('email_index_lease_busy retry_seconds=%d', self.coordination_delay)
                         self.restore()
                         return
                 except Exception as error:
                     SNAPSHOT_DB.failed(error,'snapshot_lease')
             with self.lock:
                 forced, self.manual_refresh = self.manual_refresh, False
+                self.coordination_delay = 0
             with operation(background=True, force=forced):
                 self._sync()
         finally:
@@ -285,7 +292,8 @@ class ReadService:
             if not self.value.get('snapshot'):self.restore()
             if self.clock() >= self.health['retry_at']:self.sync()
             if self.stop.is_set():break
-            delay = max(1,self.health['retry_at']-self.clock()) if self.health['retry_at'] else 60
+            # Coordination contention cannot shorten a provider/auth backoff.
+            delay = max(1,self.health['retry_at']-self.clock()) if self.health['retry_at'] else (self.coordination_delay or 60)
             self.wake.wait(delay)
 
     def restore(self):

@@ -144,6 +144,57 @@ class DurableRecoveryTests(unittest.TestCase):
 class SyncRecoveryTests(unittest.TestCase):
     setUp = inbox_cases.InboxReliability.setUp
 
+    def test_busy_index_lease_retries_before_full_poll_without_provider_overlap(self):
+        from support_email_snapshot import SnapshotStore
+        store = Mock(spec=SnapshotStore)
+        store.claim.side_effect = [False, True]
+        store.read_index.return_value = {}
+        self.reads.store = store
+        waits = []
+        def wait(seconds):
+            waits.append(seconds)
+            if len(waits) == 1:
+                self.assertEqual(self.mail.calls, [])
+            else:
+                self.reads.stop.set()
+        self.reads.wake.wait = wait
+        self.reads.run()
+        self.assertLessEqual(waits[0], 5)
+        self.assertEqual(waits[1], 60)
+        self.assertEqual(store.claim.call_count, 2)
+        store.release.assert_called_once()
+        self.assertEqual(len([c for c in self.mail.calls if c[0] == 'headers']), 1)
+
+    def test_continuous_lease_contention_backs_off_and_resets_after_takeover(self):
+        from support_email_snapshot import SnapshotStore
+        store = Mock(spec=SnapshotStore)
+        store.claim.side_effect = [False] * 7 + [True]
+        store.read_index.return_value = {}
+        self.reads.store = store
+        waits = []
+        def wait(seconds):
+            waits.append(seconds)
+            if len(waits) == 8:self.reads.stop.set()
+        self.reads.wake.wait = wait
+        self.reads.run()
+        self.assertEqual(waits, [5, 10, 20, 40, 60, 60, 60, 60])
+        self.assertEqual(len([c for c in self.mail.calls if c[0] == 'headers']), 1)
+        self.assertEqual(self.reads.coordination_delay, 0)
+
+    def test_lease_retry_never_shortens_provider_backoff(self):
+        self.reads.clock = lambda: 0
+        self.reads.health['retry_at'] = 120
+        self.reads.coordination_delay = 5
+        self.reads.sync = Mock()
+        waits = []
+        def wait(seconds):
+            waits.append(seconds)
+            self.reads.stop.set()
+        self.reads.wake.wait = wait
+        self.reads.run()
+        self.assertEqual(waits, [120])
+        self.reads.sync.assert_not_called()
+
     def test_transport_stage_and_retry_are_actionable_and_cache_remains_available(self):
         self.reads.sync()
         before = self.reads.value['snapshot']
