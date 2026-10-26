@@ -135,7 +135,7 @@ class Recording:
         if self.problem:
             raise Invalid(self.problem)
         task = validate({**self.task, "name": name})
-        result = self.repository.save(task)  # Never calls Play.
+        result = self.repository.save(task, duration_ms=self.elapsed_ms)  # Never calls Play.
         self.state = "idle"
         self.task = None
         return result

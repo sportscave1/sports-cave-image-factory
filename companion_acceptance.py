@@ -50,7 +50,7 @@ def process(row,archive):
     import dropbox_integration as integration
     run=row['context']['acceptance_run'];validate_fixture(row['descriptor']['manifest'],run)
     root=archive.parent/'assets';root.mkdir()
-    manifest,proofs=unpack(archive,root,row['context']['source'],100,100)
+    manifest,proofs=unpack(archive,root,row['context']['source'],100,100,resumable=True)
     if ae.fingerprint(manifest)!=row['descriptor']['preparation_hash']:raise ValueError('Acceptance preparation changed.')
     # Independently check deterministic synthetic pixels, not client claims.
     from PIL import Image
@@ -83,7 +83,9 @@ def process(row,archive):
             if (h.hexdigest()!=asset['sha256'] or size!=receipt['bytes'] or meta['id']!=receipt['file_id'] or meta['rev']!=receipt['revision']):raise ValueError('Independent cloud receipt verification failed.')
             checked+=1;download_bytes+=size
         finally:response.close()
+    from auto_editions_package_limits import LEGACY_BYTES
     result=dict(status='Cloud Ready',scope='Isolated acceptance only',preparation_hash=digest,verified_assets=checked,
+        package_bytes=archive.stat().st_size,acceptance_scope='large-v2' if archive.stat().st_size>LEGACY_BYTES else 'v1',
         proof_count=len(proofs),receipts=receipts,timings=dict(provider_verification_bytes=download_bytes,**assets.timings))
     event(run,'completed',result)
     return result
@@ -125,11 +127,13 @@ async def host(request):
         if action=='ping':
             from companion_package_api import capability
             from companion_package_identity import generation
-            return JSONResponse(dict(ok=True,run=run,upload_protocol=capability(),generation=generation()),headers=api.HEADERS)
+            return JSONResponse(dict(ok=True,run=run,upload_protocol=capability(),generation=generation(),large_package_fixture=True),headers=api.HEADERS)
         if action=='create':
             from files_upload_api import _json_body
             descriptor=await _json_body(request);validate_fixture(descriptor['manifest'],run)
-            if not 8*1024**2<descriptor['bytes']<12*1024**2:raise ValueError('Bounded two-chunk acceptance fixture required.')
+            from auto_editions_package_limits import LEGACY_BYTES
+            if not (8*1024**2<descriptor['bytes']<12*1024**2 or LEGACY_BYTES<descriptor['bytes']<LEGACY_BYTES+16*1024**2):
+                raise ValueError('Bounded small or oversized isolated acceptance fixture required.')
             context=dict(source=descriptor['manifest']['source'],number=100,total=100,acceptance_run=run)
             def create():
                 with connect() as connection,connection.cursor() as cursor:

@@ -1,11 +1,8 @@
-[CmdletBinding()]
-param()
-$ErrorActionPreference = 'Stop'
-$recorderSource = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'task_recorder')) { $PSScriptRoot } else { Split-Path -Parent $PSScriptRoot }
-$recorderPython = Join-Path $recorderSource '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $recorderPython)) { $recorderPython = (Get-Command python -ErrorAction Stop).Source }
-Push-Location $recorderSource
+param([Parameter(Mandatory=$true)][string]$ExtensionId)
+$ErrorActionPreference='Stop'
+$RecorderBootstrap=(Get-Command python -ErrorAction Stop).Source
+Push-Location $PSScriptRoot
 try {
-    & $recorderPython -m task_recorder.install
-    if ($LASTEXITCODE -ne 0) { throw 'Task Recorder setup did not complete.' }
+ & $RecorderBootstrap -B -m task_recorder.install --extension-id $ExtensionId
+ if ($LASTEXITCODE -ne 0) { throw 'Task Recorder installation failed; preserve the previous release and inspect diagnostics.' }
 } finally { Pop-Location }

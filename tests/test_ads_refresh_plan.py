@@ -39,7 +39,8 @@ def fixture(campaign='Carousel', seed='synthetic-v3'):
                    winning_headline='Legends Never Die', source_winner=source)
     return ads.build_ads_result_record(TITLE, 'Football', 'Australia', campaign,
         product_id=ROW['shopify_product_id'], product_url=ROW['online_store_url'],
-        variation_token=seed, creative_refresh_context=context)
+        variation_token=seed, creative_refresh_context=context,
+        product_metadata={"edition_limit": 100} if campaign == "Instant Experience" else None)
 
 
 def executions(value):

@@ -30,6 +30,11 @@ def render_page(app):
         # A Sync & Map URL retains only the operation ID across browser refresh.
         # Other existing recovery links remain one-shot; new uploads clear both.
         if st.query_params.get('sync_map')!='1':st.query_params.pop('upload',None)
+    # Navigation unmounts the iframe. Rehydrate only this session's exact
+    # account-owned selection; an unbound iframe otherwise reports id=None.
+    # Never fall back to the most recent upload for the account.
+    if not resume and st.session_state.get('_product_upload_active'):
+        resume=Intakes(connect).read(st.session_state['_product_upload_active'],user['id'])
     event=component(section='upload',**(dict(id=str(resume['id']),mode=resume['mode']) if resume else {}),
                     refresh=st.session_state.get('_product_upload_linked',''),key='product-upload-input-'+visit,default=None)
     if event and event.get('nonce')!=st.session_state.get('_product_upload_event'):
@@ -59,6 +64,12 @@ def render_page(app):
         return
     if not key: return
     row=Intakes(connect).read(key,user['id'])
+    if row and st.query_params.get('recorder_source') is not None:
+        try:
+            from product_upload_recorder import restore
+            restore(row)
+        except ValueError as error:
+            st.error(str(error));st.stop()
     if row and row['data'].get('workflow_version') == 3:
         from product_upload_dropbox import status
         row = status(row, connect)
@@ -160,6 +171,8 @@ def render_design(app,row,user):
         with st.container(key='product-upload-detail-sport'):
             choice=render_selector(app,key,user,disabled=busy)
     sport=choice['sport'] if choice else ''
+    from product_upload_recorder import publish
+    publish(row, name, choice)
     if result and choice and not busy:
         updated=rebind_result(app,result,name,choice)
         if updated is not result:

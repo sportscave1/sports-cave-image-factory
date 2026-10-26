@@ -2746,7 +2746,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ) as direct_read:
             payload = orders_page._read_orders_snapshot()
 
-        direct_read.assert_called_once_with(limit=50, search="")
+        direct_read.assert_called_once_with(limit=75, search="")
         self.assertEqual(payload["rows"][0]["order"], "#SC2843")
 
     def test_hybrid_orders_overlay_protects_goat_supabase_editions(self):

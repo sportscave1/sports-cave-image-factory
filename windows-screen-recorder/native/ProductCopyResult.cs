@@ -15,14 +15,15 @@ static class ProductCopyResult {
         return value!=null&&Get(value,"control_type")==type&&Get(value,"automation_id")==id&&Get(value,"name")==name;
     }
     public static bool KnownButton(string app,string type,string id,string name) {
-        return type=="Button"&&id=="copyPrompt"&&name=="Copy prompt"&&
+        return type=="Button"&&id=="copyPrompt"&&(name=="Copy prompt"||name=="Copy Black Frame Prompt")&&
             String.Equals(Path.GetFileName(app),"msedge.exe",StringComparison.OrdinalIgnoreCase);
     }
     public static bool HasFrameAnchors(IList scope) {
         return scope!=null&&scope.Count>=3&&
             Is(scope[0] as Dictionary<string,object>,"Group","root","")&&
             Is(scope[1] as Dictionary<string,object>,"Document","RootWebArea","")&&
-            Is(scope[2] as Dictionary<string,object>,"Document","",Component);
+            (Is(scope[2] as Dictionary<string,object>,"Document","",Component)||
+             Is(scope[2] as Dictionary<string,object>,"Document","sc-product-upload-copy",Component));
     }
     public static bool HostBoundary(int index,string type,string id) {
         return index==3&&type=="Group"&&id=="";

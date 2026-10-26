@@ -43,16 +43,21 @@
     }finally{bitmap.close();}
   }
   function actions(args){
+    // Stable frame identity for the recorder across Streamlit reruns.
+    if(window.frameElement)window.frameElement.id='sc-product-upload-copy';
     const row=document.createElement('div');row.className='actions';
     const copyImage=button('Copy black frame','copyImage'),copyPrompt=button('Copy prompt','copyPrompt');
+    copyPrompt.setAttribute('aria-label','Copy Black Frame Prompt');
+    copyPrompt.dataset.scCopy=String(args.prompt||'');
+    copyPrompt.dataset.scCopyStatus='ready';
     const imageFeedback=copyFeedback(copyImage,'Image copied'),promptFeedback=copyFeedback(copyPrompt,'Prompt copied');
     copyImage.disabled=!args.original;row.append(copyImage,copyPrompt);root.append(row);
     const status=document.createElement('div');status.id='status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(status);
     copyPrompt.onclick=async()=>{
       if(copyPrompt.disabled)return;
-      const version=epoch;promptFeedback.begin();status.textContent='';resize();
-      try{if(!navigator.clipboard?.writeText)throw new Error();await navigator.clipboard.writeText(args.prompt);active(version);promptFeedback.success();}
-      catch{if(version===epoch){promptFeedback.restore();status.textContent='Could not copy prompt. Allow clipboard access and retry.';}}
+      const version=epoch;copyPrompt.dataset.scCopyStatus='copying';promptFeedback.begin();status.textContent='';resize();
+      try{if(!navigator.clipboard?.writeText)throw new Error();await navigator.clipboard.writeText(args.prompt);active(version);copyPrompt.dataset.scCopyStatus='copied';promptFeedback.success();}
+      catch{if(version===epoch){copyPrompt.dataset.scCopyStatus='failed';promptFeedback.restore();status.textContent='Could not copy prompt. Allow clipboard access and retry.';}}
       finally{if(version===epoch){copyPrompt.disabled=false;resize();}}
     };
     copyImage.onclick=async()=>{
