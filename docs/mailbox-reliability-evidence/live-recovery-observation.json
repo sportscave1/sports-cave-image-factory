@@ -1,0 +1,349 @@
+{
+  "task": "20261025-35ed7e58",
+  "no_manual_refresh": true,
+  "first_window": {
+    "commit": "197cb2c0dafb8b51f9024714bee026a1d99a4c20",
+    "instance": "kh9cq",
+    "start_utc": "2026-10-26T21:56:50.332462+00:00",
+    "retained_through_minute": 25,
+    "samples": [
+      {
+        "minute": 0,
+        "age_s": 17.4,
+        "synced_at": 1793051795.9000437,
+        "signal_checked_at": 1793051015.984008,
+        "index_uid": 121,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 121
+      },
+      {
+        "minute": 1,
+        "age_s": 9.6,
+        "synced_at": 1793051863.9288542,
+        "signal_checked_at": 1793051015.984008,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 2,
+        "age_s": 54.6,
+        "synced_at": 1793051878.8420293,
+        "signal_checked_at": 1793051875.511934,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 3,
+        "age_s": 10.2,
+        "synced_at": 1793051983.1429632,
+        "signal_checked_at": 1793051875.511934,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 4,
+        "age_s": 70.3,
+        "synced_at": 1793051983.1429632,
+        "signal_checked_at": 1793051875.511934,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 5,
+        "age_s": 14,
+        "synced_at": 1793052099.6760557,
+        "signal_checked_at": 1793052106.375257,
+        "index_uid": 121,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 121
+      },
+      {
+        "minute": 6,
+        "age_s": 36.7,
+        "synced_at": 1793052136.6665606,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 7,
+        "age_s": 29,
+        "synced_at": 1793052204.2720053,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 8,
+        "age_s": 22.6,
+        "synced_at": 1793052270.7199967,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 9,
+        "age_s": 16,
+        "synced_at": 1793052337.3501096,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 10,
+        "age_s": 9.6,
+        "synced_at": 1793052403.7405596,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 121
+      },
+      {
+        "minute": 11,
+        "age_s": 69.6,
+        "synced_at": 1793052403.7405596,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 12,
+        "age_s": 63.1,
+        "synced_at": 1793052470.1689162,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 13,
+        "age_s": 55.3,
+        "synced_at": 1793052538.1927948,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 14,
+        "age_s": 48.8,
+        "synced_at": 1793052604.6238983,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 15,
+        "age_s": 41.6,
+        "synced_at": 1793052671.695865,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 121
+      },
+      {
+        "minute": 16,
+        "age_s": 35.1,
+        "synced_at": 1793052738.2648373,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 17,
+        "age_s": 28.7,
+        "synced_at": 1793052804.6620128,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 18,
+        "age_s": 20.9,
+        "synced_at": 1793052872.4009478,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 19,
+        "age_s": 14.4,
+        "synced_at": 1793052938.9564931,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 20,
+        "age_s": 8,
+        "synced_at": 1793053005.357185,
+        "signal_checked_at": 1793052121.687213,
+        "index_uid": 121,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 121
+      },
+      {
+        "minute": 21,
+        "age_s": 32.4,
+        "synced_at": 1793053040.9558685,
+        "signal_checked_at": 1793053037.137038,
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 22,
+        "age_s": 26,
+        "synced_at": 1793053107.2857811,
+        "signal_checked_at": 1793053037.137038,
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 23,
+        "age_s": 18.3,
+        "synced_at": 1793053175.005002,
+        "signal_checked_at": 1793053037.137038,
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 24,
+        "age_s": 11.9,
+        "synced_at": 1793053241.4609866,
+        "signal_checked_at": 1793053037.137038,
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 25,
+        "age_s": 5.2,
+        "synced_at": 1793053308.0753217,
+        "signal_checked_at": 1793053037.137038,
+        "index_uid": 122,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 122
+      }
+    ],
+    "errors": [],
+    "termination": "Unrelated rolling deployment replaced the instance before the 30-minute script completed; no fabricated completion summary."
+  },
+  "handover": {
+    "commit": "05a0b87d205a668ebe2508303ae797a9b804e639",
+    "instance": "cx7fm",
+    "start_utc": "2026-10-26T22:23:53.756379+00:00",
+    "status": "complete",
+    "duration_s": 363,
+    "end_utc": "2026-10-26T22:29:56.755153+00:00",
+    "samples": [
+      {
+        "minute": 0,
+        "age_s": 62.3,
+        "synced_at": 1793053374.4459496,
+        "signal_checked_at": 1793053037.137038,
+        "utc": "2026-10-26T22:23:53.757513+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 122
+      },
+      {
+        "minute": 1,
+        "age_s": 56,
+        "synced_at": 1793053440.69389,
+        "signal_checked_at": 1793053037.137038,
+        "utc": "2026-10-26T22:24:53.756467+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 2,
+        "age_s": 116.1,
+        "synced_at": 1793053440.69389,
+        "signal_checked_at": 1793053507.202391,
+        "utc": "2026-10-26T22:25:53.756462+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 3,
+        "age_s": 42,
+        "synced_at": 1793053574.7130818,
+        "signal_checked_at": 1793053507.202391,
+        "utc": "2026-10-26T22:26:53.756456+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 4,
+        "age_s": 35.9,
+        "synced_at": 1793053640.8090222,
+        "signal_checked_at": 1793053507.202391,
+        "utc": "2026-10-26T22:27:53.756412+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0
+      },
+      {
+        "minute": 5,
+        "age_s": 29.5,
+        "synced_at": 1793053707.2384424,
+        "signal_checked_at": 1793053507.202391,
+        "utc": "2026-10-26T22:28:53.756458+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0,
+        "compared": 20,
+        "missing_count": 0,
+        "provider_uid": 122
+      },
+      {
+        "minute": 6,
+        "age_s": 23.4,
+        "synced_at": 1793053773.3807094,
+        "signal_checked_at": 1793053507.202391,
+        "utc": "2026-10-26T22:29:53.756462+00:00",
+        "index_uid": 122,
+        "duplicate_uids": 0
+      }
+    ],
+    "errors": []
+  },
+  "new_arrival": {
+    "index_uid_before": 121,
+    "index_uid_after": 122,
+    "first_observed_minute": 21,
+    "signal_checked_at": 1793053037.137038,
+    "successful_index_at": 1793053040.9558685,
+    "signal_to_index_success_s": 3.819,
+    "provider_match_confirmed_minute": 25,
+    "not_gui_display_timing": true
+  },
+  "limitations": [
+    "No naturally occurring BYE was captured in available Render logs. BYE/restart/missed-event faults were tested locally; live rolling-restart recovery is separately observed.",
+    "Observation spans a rolling deployment with a diagnostic sampling gap; not an uninterrupted 30-minute single-instance trace."
+  ],
+  "summary": {
+    "elapsed_s": 1986.423,
+    "retained_samples": 33,
+    "recent_id_comparisons": 8,
+    "missing_in_compared_samples": 0,
+    "duplicate_uids_all_samples": 0,
+    "first_window_max_sampled_sync_age_s": 70.3,
+    "handover_max_sampled_sync_age_s": 116.1,
+    "handover_observed_success_gap_s": 134.019,
+    "sampling_gap_between_windows_s": 123.425,
+    "final_index_uid": 122,
+    "final_synced_at": 1793053773.3807094,
+    "naturally_occurring_bye_captured": false,
+    "normal_owner_ui_confirmed": true
+  }
+}
