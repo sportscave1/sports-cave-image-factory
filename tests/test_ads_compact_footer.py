@@ -20,7 +20,7 @@ class CompactFooterTests(unittest.TestCase):
                     i, row, product_name='Synthetic Collector Edition', category='Cricket', country='Australia')
                 self.assertIn('HEADLINE: ' + row['headline_text'], prompt)
                 self.assertIn('CTA: CLAIM YOUR EDITION', prompt)
-                self.assertNotIn(row['supporting_line'], prompt)
+                self.assertIn('SUPPORTING LINE: ' + row['supporting_line'], prompt)
 
     def test_all_public_formats_and_refresh_receive_central_policy(self):
         for campaign in ('Instant Experience', 'Carousel', 'Single Image / Video'):
@@ -33,11 +33,10 @@ class CompactFooterTests(unittest.TestCase):
     def test_no_conflicting_footer_directions_in_active_ie_prompts(self):
         for prompt in (ads.build_ads_prompt('Synthetic Collector Edition', 'Cricket', 'Australia', 'Instant Experience', product_metadata={'edition_limit': 100}),
                        fixture('Instant Experience')['master_prompt']):
-            for old in ('24–28%', '24-28%', '72–76%', 'SUPPORTING LINE:',
-                        'three unique sublines', 'do not shrink the panel',
-                        'different assigned support line', 'headline and subline',
-                        'Some moments are worth claiming while you can.',
-                        'APPROVED IE CREATIVE REFRESH SUPPORTING-LINE BANK'):
+            for old in ('24–28%', '24-28%', '72–76%', 'do not shrink the panel',
+                        'no supporting sentence', 'Render no supporting line',
+                        'Do not render a supporting line', 'no subheadlines',
+                        'Remove the supporting sentence', 'exactly two elements'):
                 self.assertNotIn(old, prompt)
             self.assertIn('18–20%', prompt)
 
