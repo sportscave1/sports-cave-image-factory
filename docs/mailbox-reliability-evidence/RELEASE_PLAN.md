@@ -1,6 +1,6 @@
 # Mailbox release — task 20261025-35ed7e58
 
-Owner explicitly authorised committing/pushing the mailbox changes and releasing them to GitHub/Render on 27 October 2026. No test-send address has yet been approved; a single request for an owner-controlled address, send permission and destination-inbox verification access is pending. Release authorisation does not establish approval for customer test emails.
+Owner explicitly authorised committing/pushing the mailbox changes and releasing them to GitHub/Render on 27 October 2026. In response to the bundled test-send/receipt-verification request, the owner approved hello@sportscaveshop.com. Two self-addressed test messages (initial with one small attachment, then reply) were sent and actual destination receipt verified. No customer test recipients were used.
 
 ## Scope and preparation
 
@@ -28,6 +28,12 @@ Final checks: actual component in Chromium with a deliberately delayed (800 ms) 
 
 ## Rollback
 
+Update after initial release: unrelated release `6e59900dff5e317bce2bb4c0bd84a88703b310f3` superseded the initial mailbox deploy and retains all its source unchanged. Do not roll back to the old 5980a803 build now: that would discard the intervening unrelated release. For the component-height follow-up, immediate rollback is the retained 6e59900d build `dep-dbfsf695efls738rdpag`; this preserves the earlier mailbox repair and unrelated changes. A full mailbox rollback must instead use a reviewed mailbox-only revert on current main. No schema/config rollback is required.
+
 Rollback target is the retained primary build `dep-dbf80g2jnfac73egeskg` / commit `5980a803e5c0073f2e430b7d8e495e10c9b7d78d`. Use the primary service's existing Render rollback action if the new build fails readiness or introduces a material regression (authentication/index failure despite provider availability, broken component or reply/attachment behavior, or duplicate submission risk). Keep the current service identity and configuration. No database rollback is needed: schema is unchanged, existing receipt statuses/copy fields remain compatible. Runtime rollback does not reverse already accepted emails or database receipt updates. Never resend to compensate.
 
 If the retained build is unavailable, prepare a mailbox-only revert commit on current remote main, review its exact diff, use `[skip render]`, push normally and manually redeploy the primary. Do not reset remote history or revert unrelated releases. Record final deployed commit, deploy ID, verification evidence and any remaining blockers.
+
+## Follow-up component-height regression
+
+The owner confirms normal Email loads after the initial release. A stricter delayed-listener Chromium test nevertheless reproduced an independent edge case: content rendered inside a zero-height iframe because the host missed the first height announcement. On the first acknowledged host render, reset only the local height deduplication marker so normal render sends the current height again. Later renders retain height deduplication. No layout/body-loading behavior changes. Before fix, the new actual-frame-height assertion failed; after fix the frame is 710px, the workspace renders, retries stop, later height messages remain deduplicated, and no browser errors occur. The component also renders in a real local Streamlit host with fabricated data. Release this small follow-up only to the primary and restart the full live observation on its final instance.

@@ -168,7 +168,7 @@
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
-  let selectionControlsDisabled=false;
+  let selectionControlsDisabled=false, receivedHostRender=false;
   let completionRequest=null;
   let searchTimer=null, searchText=null, searchFolder='';
   let journal=null,journalScope='',journalError='',recoveryDrafts=[],editRevision=0;
@@ -860,7 +860,13 @@
       return;
     }
     if(event.source!==window.parent)return;
-    if(event.data.type==='streamlit:render'){stopReady();render(event.data.args.model);}
+    if(event.data.type==='streamlit:render'){
+      stopReady();
+      // The initial height announcement can be lost with the ready message.
+      // Resend it once the host is listening, then retain normal deduplication.
+      if(!receivedHostRender){receivedHostRender=true;lastHeight=0;}
+      render(event.data.args.model);
+    }
   });
   window.addEventListener('resize',fit);try{window.parent.addEventListener('resize',fit);new ResizeObserver(fit).observe(window.frameElement);}catch(_){}
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&pendingSignal)signalTick(pendingSignal);});

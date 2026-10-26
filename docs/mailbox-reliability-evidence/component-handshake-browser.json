@@ -1,7 +1,10 @@
 {
   "delayed_host_listener_ms": 800,
+  "initial_frame_height": 0,
+  "rendered_frame_height": 710,
   "workspace_rendered": true,
   "ready_messages_received": 1,
   "retries_stopped_after_ack": true,
+  "later_height_messages_deduplicated": true,
   "page_errors": []
 }
