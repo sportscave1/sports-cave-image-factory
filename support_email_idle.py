@@ -106,7 +106,7 @@ class MailboxWatcher:
 
     def start(self):
         with self.start_lock:
-            if self.thread is not None or not self.cfg.configured:
+            if self.stop.is_set() or (self.thread is not None and self.thread.is_alive()) or not self.cfg.configured:
                 return
             self.thread = threading.Thread(target=self.run, name='email-idle-coordinator', daemon=True)
             self.thread.start()

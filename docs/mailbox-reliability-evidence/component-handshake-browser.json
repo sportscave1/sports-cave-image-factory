@@ -1,0 +1,7 @@
+{
+  "delayed_host_listener_ms": 800,
+  "workspace_rendered": true,
+  "ready_messages_received": 1,
+  "retries_stopped_after_ack": true,
+  "page_errors": []
+}
