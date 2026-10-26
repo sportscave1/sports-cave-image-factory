@@ -20,5 +20,6 @@
     "tests/mailbox_component_handshake_browser.cjs": "d2c2dc33bd199572b011359d354b585818c179a8333f691d1d9b21288111c61b"
   },
   "excluded": "All other unfinished work, benchmark scripts, browser fixtures, ignored runtime copies and unrelated application modules.",
-  "final_checks": "38 SQL/recovery tests, 3 transport tests, Chromium delayed-listener integration, handshake unit, scheduler/context and reader tests passed; topology and diff checks passed."
+  "final_checks": "38 SQL/recovery tests, 3 transport tests, Chromium delayed-listener integration, handshake unit, scheduler/context and reader tests passed; topology and diff checks passed.",
+  "patch_location": "Retained locally as .tmp-mailbox-release-reviewed.patch; generated diff context whitespace excluded from the released tree."
 }
