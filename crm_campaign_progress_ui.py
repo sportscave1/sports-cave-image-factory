@@ -47,7 +47,7 @@ def status_content(store, identity, row=_UNREAD):
     with st.container(key='crm-send-progress'):
         if row:
             if row['status']=='PREPARING':
-                st.markdown('**Preparing**')
+                st.markdown('**'+('Verifying' if row.get('preparation_claimed') else 'Queued')+'**')
                 st.caption(f"{row['total']:,} reviewed recipients · awaiting final verification")
                 st.caption('Sending begins only after verification. No further confirmation is needed.')
                 if row.get('preparation_error'):st.caption('Verification unavailable · bounded background retry pending.')

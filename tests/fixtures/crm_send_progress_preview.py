@@ -7,7 +7,13 @@ from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import patch
 import time
+import os
+import subprocess
 import streamlit as st
+if os.getenv('CAMPAIGN_CLICK_BASELINE')=='1':
+    import crm_campaign_send_ui
+    exec(compile(subprocess.check_output(['git','show','HEAD:crm_campaign_send_ui.py']).decode(),
+                 '<released-send-controls>','exec'),crm_campaign_send_ui.__dict__)
 from crm_campaign_send_ui import review_dialog
 from crm_campaign_review import identity
 from crm_campaign_home import home
@@ -27,7 +33,7 @@ st.html('''<span id="fixture-client-timings"></span><script>
     document.addEventListener('click',e=>{
       const b=e.target.closest('button');if(!b)return;
       if(b.innerText==='Review & send')t.reviewClick=performance.now();
-      if(b.closest('.st-key-crm-review-submit'))t.confirmClick=performance.now();publish();
+      if(b.closest('.st-key-crm-review-submit'))t.confirmClick??=performance.now();publish();
     },true);
     window.fixtureAcceptanceObserver=new MutationObserver(()=>{
       const at=performance.now();
