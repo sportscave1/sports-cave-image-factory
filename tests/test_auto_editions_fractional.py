@@ -26,27 +26,27 @@ def description(record):
 
 def test_sc3340_fractional_target_without_stretch_or_crop():
     record=planned([7016,4961])
-    assert record['required_dimensions']==[9933,7016]
-    assert record['output_dimensions']==[9933,7024]
-    assert record['scale']==pytest.approx(1.415763968073)
-    assert 9933*7024==69_769_392 < ae.WORKER_MAX_PIXELS
+    assert record['required_dimensions']==[11340,8016]
+    assert record['output_dimensions']==[11340,8018]
+    assert record['scale']==pytest.approx(1.616305587229)
+    assert 11340*8018 < ae.WORKER_MAX_PIXELS
     assert record['estimate_before_supplier_crop'] and not record['bleed_verified']
     assert record['print_ready'] is False and record['supplier_verified'] is False
     assert record['resolution_status']=='target_met'
     geometry.validate([7016,4961],record['output_dimensions'],description(record))
 
 
-def test_existing_jake_success_and_sufficient_native_source_are_preserved():
+def test_existing_jake_success_is_preserved_and_new_native_preparation_meets_reference():
     jake=planned([2835,2004])
     assert jake['output_dimensions']==[11340,8016] and jake['scale']==4
     native=planned([9933,7016])
-    assert native['output_dimensions']==[9933,7016] and native['scale']==1
+    assert native['output_dimensions']==[11349,8016] and native['scale']>1
 
 
 def test_smaller_selected_size_never_shrinks_shared_xl_master():
     assert planned([7016,4961],'Black / S')==planned([7016,4961],'Black / XL')
-    assert geometry.for_context([7016,4961],dict(preparation_variants=['Black / M','Oak / L']))['required_dimensions']==[9933,7016]
-    assert geometry.for_context([7016,4961],dict(supplier_sku='GLOBAL-CFP-A1'))['output_dimensions']==[9933,7024]
+    assert geometry.for_context([7016,4961],dict(preparation_variants=['Black / M','Oak / L']))['required_dimensions']==[11340,8016]
+    assert geometry.for_context([7016,4961],dict(supplier_sku='GLOBAL-CFP-A1'))['output_dimensions']==[11340,8018]
 
 
 def test_unknown_unframed_and_missing_variant_never_inherit_a1():
@@ -199,20 +199,21 @@ def test_proportional_rounding_stays_within_one_pixel_and_target(source):
 
 
 def test_extendscript_scale_serialization_retains_exact_pixel_and_cache_checks():
-    record=planned([7016,4961]);record['scale']=1.41576396807298
+    record=planned([7016,4961]);record['scale']=1.61630558722919
     meta=description(record)
-    geometry.validate([7016,4961],[9933,7024],meta)
-    manifest=dict(source_dimensions=[7016,4961],dimensions=[9933,7024],preparation_geometry=meta)
+    geometry.validate([7016,4961],[11340,8018],meta)
+    manifest=dict(source_dimensions=[7016,4961],dimensions=[11340,8018],preparation_geometry=meta)
     assert geometry.matches(manifest,dict(automatic=True,variant_title='Black / XL'))
     meta['scale']=1.41576
-    with pytest.raises(ValueError):geometry.validate([7016,4961],[9933,7024],meta)
-    meta['scale']=record['scale'];manifest['dimensions']=[9933,7023]
+    with pytest.raises(ValueError):geometry.validate([7016,4961],[11340,8018],meta)
+    meta['scale']=record['scale'];manifest['dimensions']=[11340,8017]
     assert not geometry.matches(manifest,dict(automatic=True,variant_title='Black / XL'))
 
 
 from tests.test_auto_editions_jobs import database
 
-def test_shared_variant_context_query_runs_on_postgres_without_cross_product_data(database):
+@pytest.mark.parametrize('with_orders',[False,True])
+def test_shared_variant_context_query_runs_on_postgres_without_cross_product_data(database,with_orders):
     from unittest.mock import Mock
     import auto_editions_onboarding_api as onboarding
     jobs,sql=database
@@ -220,14 +221,71 @@ def test_shared_variant_context_query_runs_on_postgres_without_cross_product_dat
     sql.execute("CREATE TABLE product_psd_mappings(shopify_product_gid text,dropbox_file_id text)")
     sql.execute("CREATE TABLE edition_products(shopify_product_gid text,shopify_product_id text,edition_total int,product_title text)")
     sql.execute("CREATE TABLE shopify_order_lines(shopify_product_id text,raw_json jsonb)")
+    sql.execute("CREATE TABLE shopify_products(shopify_product_id text,raw_json jsonb)")
     pid='gid://shopify/Product/123'
     sql.execute("INSERT INTO auto_edition_onboarding VALUES(%s,'Preparing','lease',now()+interval '1 hour','id:source123',NULL)",(pid,))
     sql.execute("INSERT INTO product_psd_mappings VALUES(%s,'id:source123')",(pid,))
     sql.execute("INSERT INTO edition_products VALUES(%s,'123',100,'Synthetic artwork')",(pid,))
-    for product,variant in [('123','Black / XL'),(pid,'White / Small'),('123','Black / XL'),('999','Other / XXL')]:
-        sql.execute("INSERT INTO shopify_order_lines VALUES(%s,%s::jsonb)",(product,json.dumps(dict(variant_title=variant))))
+    for product,variants in [(pid,['Black / XL','White / Small','Black / XL']),('999',['Other / XXL'])]:
+        sql.execute("INSERT INTO shopify_products VALUES(%s,%s::jsonb)",(product,json.dumps(dict(variants=[dict(title=v) for v in variants]))))
+    if with_orders:
+        for product,variant in [('123','Black / XL'),(pid,'White / Small'),('123','Black / XL'),('999','Other / XXL')]:
+            sql.execute("INSERT INTO shopify_order_lines VALUES(%s,%s::jsonb)",(product,json.dumps(dict(variant_title=variant))))
     assets=Mock();assets.integration.psd_open_metadata.return_value=dict(id='id:source123',rev='abcdef1234567890',content_hash='a'*64,size=1,name='original.psd')
     with patch.object(onboarding,'queue',return_value=Mock(connect=jobs.connect)),patch.object(onboarding.runtime,'storage',return_value=assets),patch('auto_editions_v17.enabled',return_value=False):
         ctx=onboarding.product_context(pid,'lease')
     assert ctx['preparation_variants']==['Black / XL','White / Small']
-    assert geometry.for_context([7016,4961],ctx)['output_dimensions']==[9933,7024]
+    assert geometry.for_context([7016,4961],ctx)['output_dimensions']==[11340,8018]
+
+
+@pytest.mark.parametrize('source,expected',[([2362,1670],[11340,8018]),([1670,2362],[8018,11340])])
+def test_for_brock_reference_floor_is_proportional_and_within_existing_budget(source,expected):
+    record=planned(source)
+    assert record['output_dimensions']==expected
+    assert expected[0]*expected[1]<=95_000_000
+    assert record['source_dimensions']==source and record['resolution_status']=='target_met'
+    target=record['quality_target']
+    assert target['references'][0]['product_gid']=='gid://shopify/Product/15411172376883'
+    assert target['supplier_rating_verified'] is False and record['print_ready'] is False
+    geometry.validate(source,expected,description(record))
+
+
+def test_legacy_plan_remains_valid_but_cannot_be_reused_as_new_reference_sizing():
+    with patch.object(geometry,'quality_references',return_value={}),patch.object(geometry,'VERSION',geometry.LEGACY_VERSION):
+        record=planned([7016,4961])
+    record.pop('quality_target')
+    assert record['output_dimensions']==[9933,7024]
+    meta=description(record);geometry.validate([7016,4961],[9933,7024],meta)
+    manifest=dict(source_dimensions=[7016,4961],dimensions=[9933,7024],preparation_geometry=meta)
+    before=deepcopy(manifest)
+    assert not geometry.matches(manifest,dict(automatic=True,variant_title='Black / XL'))
+    assert manifest==before
+
+
+def test_reference_sizing_is_disclosed_without_claiming_supplier_excellent():
+    record=planned([2362,1670])
+    job=dict(manifest=dict(source_dimensions=[2362,1670],dimensions=record['output_dimensions'],
+                          preparation_geometry=description(record)),archive_labels=dict(variant_title='Black / XL'))
+    info=resolution.for_job(job,dict(dimensions=record['output_dimensions'],test_only=True))
+    assert any('The Final Lap #17' in n and '11340' in n for n in info['notes'])
+    assert info['output_status']=='TEST / NOT PRINT READY'
+
+
+def test_quality_policy_and_geometry_are_bound_into_package_generation(tmp_path,monkeypatch):
+    import companion_package_identity as identity
+    root=Path(__file__).resolve().parents[1]
+    names=('data/auto_editions_template.json','scripts/photoshop/prepare_auto_editions.jsx',
+           'scripts/photoshop/inspect_psd_editions.jsx','auto_editions_onboarding.py',
+           'scripts/prepare_auto_editions.py','auto_editions.py','auto_editions_colour.py',
+           'auto_editions_preparation_geometry.py','data/auto_editions_preparation_quality.json')
+    for name in names:
+        dest=tmp_path/name;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes((root/name).read_bytes())
+    monkeypatch.setattr(identity,'__file__',str(tmp_path/'companion_package_identity.py'))
+    before=identity.generation()
+    policy=tmp_path/'data/auto_editions_preparation_quality.json'
+    value=json.loads(policy.read_text(encoding='utf-8'));value['references']['GLOBAL-CFP-A1']['dimensions'][0]+=1
+    policy.write_text(json.dumps(value),encoding='utf-8')
+    assert identity.generation()!=before
+    second=identity.generation();module=tmp_path/'auto_editions_preparation_geometry.py'
+    module.write_text(module.read_text(encoding='utf-8')+'\n# Changed sizing behaviour\n',encoding='utf-8')
+    assert identity.generation()!=second

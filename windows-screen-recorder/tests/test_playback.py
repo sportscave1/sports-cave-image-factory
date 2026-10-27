@@ -12,6 +12,94 @@ command = phase2.command
 
 
 class PlaybackTests(TestCase):
+    def test_failed_result_journal_preserves_pending_disk_record_and_blocks_next_step(self):
+        self.start()
+        self.event()
+        self.event()
+        self.c.apply(command('stop'))
+        self.c.apply(command('save', {'name':'Storage failure fixture'}))
+        p = Playback(self.c.repository)
+        self.begin(p, self.c.last_saved)
+        p.dispatch(0)
+        path = p.root / (p.run['id'] + '.json')
+        before = path.read_bytes()
+        with patch.object(self.c.repository, 'atomic', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                p.acknowledge(0, verified=True)
+        with self.assertRaises(Invalid):
+            p.dispatch(1)
+        with self.assertRaises(Invalid):
+            p.pause()
+        self.assertEqual(path.read_bytes(), before)
+        recovered = Playback(self.c.repository).recover()[0]
+        self.assertEqual(recovered['state'], 'uncertain')
+        self.assertEqual(recovered['pending'], 0)
+
+    def test_failed_begin_journal_write_prevents_later_dispatch(self):
+        p = Playback(self.c.repository)
+        saved = self.saved()
+        with patch.object(self.c.repository, 'atomic', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.begin(p, saved)
+        with self.assertRaises(Invalid):
+            p.dispatch(0)
+
+    def test_failed_resume_journal_write_prevents_later_dispatch(self):
+        p = Playback(self.c.repository)
+        self.begin(p, self.saved())
+        p.pause()
+        before = (p.root / (p.run['id'] + '.json')).read_bytes()
+        with patch.object(self.c.repository, 'atomic', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                p.resume()
+        with self.assertRaises(Invalid):
+            p.dispatch(0)
+        self.assertEqual((p.root / (p.run['id'] + '.json')).read_bytes(), before)
+
+    def test_normal_pause_resume_preserves_single_pending_dispatch(self):
+        saved = self.saved()
+        for in_flight in (False, True):
+            with self.subTest(in_flight=in_flight):
+                p = Playback(self.c.repository)
+                self.begin(p, saved)
+                if in_flight:
+                    p.dispatch(0)
+                p.pause()
+                p.resume()
+                self.assertEqual(p.run['state'], 'uncertain' if in_flight else 'playing')
+                self.assertFalse(p.run['pause_requested'])
+                if in_flight:
+                    with self.assertRaises(Invalid):
+                        p.dispatch(0)
+                    p.acknowledge(0, verified=True)
+                p.stop()
+
+    def test_stop_revokes_resume_for_paused_run(self):
+        p = Playback(self.c.repository)
+        self.begin(p, self.saved())
+        p.pause()
+        p.stop(reason='Operator stopped the paused run.')
+        before = (p.root / (p.run['id'] + '.json')).read_bytes()
+        with self.assertRaises(Invalid):
+            p.resume()
+        self.assertFalse(p.run['pause_requested'])
+        self.assertEqual(p.run['state'], 'stopped')
+        self.assertEqual((p.root / (p.run['id'] + '.json')).read_bytes(), before)
+
+    def test_stop_revokes_resume_without_resolving_pending_action(self):
+        p = Playback(self.c.repository)
+        self.begin(p, self.saved())
+        p.dispatch(0)
+        p.pause()
+        p.stop(reason='Connection lost during paused action.')
+        with self.assertRaises(Invalid):
+            p.resume()
+        self.assertFalse(p.run['pause_requested'])
+        self.assertEqual(p.run['state'], 'uncertain')
+        self.assertEqual(p.run['pending'], 0)
+        p.acknowledge(0, verified=True)
+        self.assertEqual(p.run['state'], 'stopped')
+
     setUp = phase2.Phase2Tests.setUp
     start = phase2.Phase2Tests.start
     event = phase2.Phase2Tests.event

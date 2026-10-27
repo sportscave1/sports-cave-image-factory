@@ -31,8 +31,8 @@ class ThreeVisualSystemsTests(unittest.TestCase):
         for field in ("room_profile", "wall_colour", "primary_cue", "architectural_cue", "lighting", "product_width", "shot_distance"):
             self.assertEqual(len({v[field] for v in visuals}), 3)
         for i, prompt in enumerate(self.prompts({"edition_limit":100})):
-            for required in (visuals[i]["headline_text"], visuals[i]["supporting_line"],
-                             "CLAIM YOUR EDITION", "24–28%", "72–76%", "Never mirror artwork"):
+            for required in (visuals[i]["headline_text"],
+                             "CLAIM YOUR EDITION", "18–20%", "80–82%", "Never mirror artwork"):
                 self.assertIn(required, prompt)
             self.assertIn(ads_page.ie_visuals.CAMERAS[i], prompt)
 

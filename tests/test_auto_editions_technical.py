@@ -387,3 +387,58 @@ def test_retained_checkpoint_resume_rejects_incomplete_or_unapproved_evidence(fl
     with pytest.raises(ValueError):reset.retry_failed(PID,'admin')
     assert rows(sql,'auto_edition_onboarding')==before
     assert not rows(sql,'auto_edition_layouts')
+
+
+def completed_same_source_replacement(flow):
+    import uuid
+    import worker_health_queue as queue
+    d,sql,original,assets,root=flow
+    assert technical.Technical(d.connect).run_one(assets,local_root=root)=='Cloud Ready'
+    old_layout=deepcopy(rows(sql,'auto_edition_layouts')[0])
+    # Match the persisted total established by a real package import.
+    sql.execute('UPDATE auto_edition_onboarding SET edition_total=%s',(original['manifest']['edition_total'],))
+    record,reset=retained_pinned_import(flow)
+    assert queue.submit(d.connect,PID,'admin',str(uuid.uuid4()),True)['accepted']
+    return record,old_layout
+
+
+def test_completed_owner_replacement_supersedes_only_prior_automatic_test_layout(flow):
+    d,sql,original,assets,root=flow
+    record,old_layout=completed_same_source_replacement(flow);before=protected(sql)
+    service=technical.Technical(d.connect)
+    assert service.run_one(assets,local_root=root)=='Cloud Ready'
+    layout=rows(sql,'auto_edition_layouts')[0]
+    assert layout['preparation_hash']==record['hash'] and layout['approval']==technical.certificate(record)
+    assert protected(sql)==before and len(rows(sql,'auto_edition_preparations'))==2
+    audit=[a for a in rows(sql,'auto_edition_onboarding_audit') if a['event']=='technical_layout_superseded']
+    assert len(audit)==1 and audit[0]['detail']['previous']['approval']==old_layout['approval']
+    assert service.run_one(assets,local_root=root) is None
+    assert len([a for a in rows(sql,'auto_edition_onboarding_audit') if a['event']=='technical_layout_superseded'])==1
+
+
+@pytest.mark.parametrize('fault',['allocation','visual','production','variant','extra_variant','corrupt_asset','retained_source','evidence','request','request_audit','previous_hash','previous_source'])
+def test_replacement_handoff_preserves_restricted_or_unrelated_layouts(flow,fault):
+    d,sql,original,assets,root=flow
+    record,old_layout=completed_same_source_replacement(flow)
+    approval=deepcopy(old_layout['approval'])
+    if fault in ('allocation','visual','production','evidence'):
+        if fault=='allocation':approval['allocation_ids']=[42]
+        if fault=='visual':approval['visual_approved']=True
+        if fault=='production':approval['print_ready']=True
+        if fault=='evidence':approval['evidence_hash']='f'*64
+        sql.execute('UPDATE auto_edition_layouts SET approval=%s::jsonb',(json.dumps(approval),))
+    elif fault=='variant':sql.execute("UPDATE auto_edition_layouts SET variant_id='restricted-variant'")
+    elif fault=='extra_variant':sql.execute("INSERT INTO auto_edition_layouts(product_gid,variant_id,preparation_hash,approval) VALUES(%s,'extra',%s,%s::jsonb)",(PID,old_layout['preparation_hash'],json.dumps(approval)))
+    elif fault=='corrupt_asset':(root/'number-2.png').write_bytes(b'invalid-cloud-asset')
+    elif fault=='retained_source':sql.execute("UPDATE auto_edition_preparations SET manifest=jsonb_set(manifest,'{source,revision}',%s::jsonb) WHERE hash=%s",(json.dumps('changed'),old_layout['preparation_hash']))
+    elif fault=='request_audit':sql.execute("DELETE FROM auto_edition_onboarding_audit WHERE event='reset_requested'")
+    else:
+        pending=rows(sql,'auto_edition_onboarding')[0]['replacement']
+        if fault=='request':pending['id']='not-the-imported-request'
+        if fault=='previous_hash':pending['previous']['preparation_hash']='f'*64
+        if fault=='previous_source':pending['previous']['source']['revision']='different'
+        sql.execute('UPDATE auto_edition_onboarding SET replacement=%s::jsonb',(json.dumps(pending),))
+    before=deepcopy(rows(sql,'auto_edition_layouts'));protected_before=protected(sql)
+    assert technical.Technical(d.connect).run_one(assets,local_root=root)=='Failed'
+    assert rows(sql,'auto_edition_layouts')==before and protected(sql)==protected_before
+    assert not any(a['event']=='technical_layout_superseded' for a in rows(sql,'auto_edition_onboarding_audit'))

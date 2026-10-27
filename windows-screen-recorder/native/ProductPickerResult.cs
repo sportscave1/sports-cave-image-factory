@@ -12,6 +12,39 @@ static class ProductPickerResult {
     // and nested Streamlit documents. Keep a finite bound without mistaking the
     // old 16-level traversal limit for a different window.
     public const int AncestryLimit=32;
+    public static bool KnownScrollTarget(string app,string id,string name) {
+        return String.Equals(Path.GetFileName(app),"msedge.exe",StringComparison.OrdinalIgnoreCase)&&
+            id=="picker"&&name=="Choose PSD from Dropbox";
+    }
+    public static bool SupportsScroll(Dictionary<string,object> target) {
+        object scope;
+        if(!KnownScrollTarget((string)target["app"],(string)target["automation_id"],(string)target["name"])||
+            !target.TryGetValue("scope",out scope)||!(scope is IList))return false;
+        foreach(var raw in (IList)scope){var item=raw as Dictionary<string,object>;
+            if(item!=null&&Equals(item["control_type"],"Document")&&Equals(item["automation_id"],"RootWebArea")&&Equals(item["name"],"Product Uploads"))return true;}
+        return false;
+    }
+    public static AutomationElement ScrollContainer(IntPtr hwnd,uint pid,System.Windows.Point point) {
+        if(!String.Equals(Path.GetFileName(Native.ProcessFor(hwnd).MainModule.FileName),"msedge.exe",StringComparison.OrdinalIgnoreCase))return null;
+        var root=AutomationElement.FromHandle(hwnd);
+        var matches=root.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,"picker"));
+        if(matches.Count>16)throw new Exception("PSD picker scroll scope is ambiguous.");
+        AutomationElement found=null;
+        foreach(AutomationElement dialog in matches) {
+            Safe(dialog,pid);
+            if(dialog.Current.IsOffscreen||!dialog.Current.IsEnabled||dialog.Current.Name!="Choose PSD from Dropbox"||
+                !dialog.Current.BoundingRectangle.Contains(point))continue;
+            var document=Document(dialog,hwnd,pid);
+            if(document==null||!Open(document,hwnd,pid))continue;
+            if(found!=null)throw new Exception("More than one PSD picker contains the scroll. Draft preserved.");
+            found=dialog;
+        }
+        if(found==null)return null;
+        object pattern;
+        if(!found.TryGetCurrentPattern(ScrollPattern.Pattern,out pattern))return null;
+        var position=((ScrollPattern)pattern).Current;
+        return position.HorizontallyScrollable||position.VerticallyScrollable?found:null;
+    }
     public static bool KnownButton(string app,string type,string id,string name) {
         return String.Equals(Path.GetFileName(app),"msedge.exe",StringComparison.OrdinalIgnoreCase)&&
             type=="Button"&&id=="choose"&&name=="Choose PSD";
@@ -50,10 +83,13 @@ static class ProductPickerResult {
             Safe(dialog,pid);if(dialog.Current.IsOffscreen)continue;
             if(dialog.Current.Name!="Choose PSD from Dropbox")throw new Exception("PSD picker dialog identity changed.");
             var close=dialog.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,"picker-close"));
-            int buttons=0;
-            foreach(AutomationElement button in close){Safe(button,pid);
-                if(!button.Current.IsOffscreen&&button.Current.IsEnabled&&button.Current.ControlType==ControlType.Button&&button.Current.Name=="Close Dropbox picker")buttons++;}
-            if(buttons!=1)throw new Exception("PSD picker close control is not unique.");
+            if(close.Count!=1)throw new Exception("PSD picker close control is missing or ambiguous.");
+            var button=close[0];Safe(button,pid);
+            // Scrolling the modal may move its header outside the viewport.
+            // The unique enabled close control still identifies this dialog;
+            // it is never invoked or used as a scroll/input destination here.
+            if(!button.Current.IsEnabled||button.Current.ControlType!=ControlType.Button||button.Current.Name!="Close Dropbox picker")
+                throw new Exception("PSD picker close control identity changed.");
             visible++;
         }
         if(visible>1)throw new Exception("PSD picker dialog is ambiguous.");

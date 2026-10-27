@@ -101,7 +101,7 @@ End If
 flag = ""
 If WScript.Arguments.Count > 0 Then flag = WScript.Arguments(0)
 Select Case flag
- Case "", "--shutdown", "--open", "--pair"
+ Case "", "--shutdown", "--open", "--pair", "--toolbar"
  Case Else: WScript.Quit 2
 End Select
 sh.CurrentDirectory = folder & "\\app"
@@ -167,6 +167,7 @@ def main():
         raise SystemExit("Setup requires Python 3.11 or newer.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--rollback", action="store_true")
+    parser.add_argument("--extension-id", help="Exact installed Sports Cave Edge adapter ID")
     args = parser.parse_args()
     install = Path(os.environ["LOCALAPPDATA"]) / "SportsCaveOS/TaskRecorderHelper"
     data = install.parent / "TaskRecorderV1"
@@ -174,20 +175,38 @@ def main():
         env = {key:value for key,value in os.environ.items() if key.upper() not in {"PYTHONPATH", "PYTHONHOME", "SPORTS_CAVE_RECORDER_SOURCE"}}
         subprocess.run(argv, check=True, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
     if args.rollback:
+        from desktop_recorder.download_install import restore_bridge
+        from .release import release_path
+        selected=(install/'active.txt').read_text().strip()
+        stop_idle(data)
+        if selected!='legacy':restore_bridge(release_path(install,selected)/'bridge-transaction.json',data)
         rollback(install, lambda:stop_idle(data))
         launch(install)
         print("Previous recorder release selected. Recordings, settings and receipts retained.")
         return
-    selected = prepare(Path(__file__).resolve().parent.parent, install, sys.executable, run)
+    import re
+    extension=args.extension_id
+    if not extension and (data/'download-bridge.json').exists():
+        extension=json.loads((data/'download-bridge.json').read_text()).get('extension_id')
+    if not extension or not re.fullmatch('[a-p]{32}',extension):
+        raise RuntimeError('Provide --extension-id from the installed Sports Cave Edge adapter before preparing this update.')
+    source=Path(__file__).resolve().parent.parent
+    selected = prepare(source, install, sys.executable, run)
     write_launchers(install)
     menu = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Sports Cave Task Recorder"
     shortcuts(install, menu, run)
     previous = activate(install, selected, lambda:stop_idle(data))
     try:
+        from desktop_recorder.download_install import install_bridge, restore_bridge
+        from .release import release_path
+        transaction=release_path(install,selected)/'bridge-transaction.json'
+        install_bridge(source/'download-host/DownloadReceiptHost.exe',install,data,extension,transaction)
         launch(install)
         wait_ready(data)
     except Exception:
         if previous != "legacy" or (install / "app/task_recorder/server.py").is_file():
+            stop_idle(data)
+            if 'transaction' in locals():restore_bridge(transaction,data)
             rollback(install, lambda:stop_idle(data))
             launch(install)
         raise
