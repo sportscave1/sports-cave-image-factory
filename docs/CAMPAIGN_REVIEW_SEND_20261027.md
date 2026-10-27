@@ -2,7 +2,11 @@
 
 Task: 20261026-2398b49c. Owner: codex-campaign-send-20261027-01a157b1.
 Branch: codex/task/email-campaign-review-and-send-verification-mism-20261026-2398b49c.
-Status: implemented and tested locally; not committed, pushed, migrated or deployed.
+Status: owner-approved release 191b118594808fcf6453e7a3d0d84116f41d3f2b is deployed.
+Original campaign recovered and SENT at 11:57:02.483 AEDT; all 2,241 eligible original recipients
+have unique provider acceptance receipts. The owner has approved the tested completion-latency
+follow-up for release to the existing CRM worker only.
+See the live release evidence below for completion status, timings and limitations.
 
 ## Exact live failure
 
@@ -150,6 +154,100 @@ Do not reset campaign/preparation statuses or delete jobs. Old worker preparatio
 new contract snapshots safely; already published frozen dispatch remains compatible. If release
 or recovery fails, hold further recovery and inspect existing operations, not a duplicate send.
 
-Remaining gates: fresh project release approval for commit/push/migration/deployment and explicit
-approval to recover/send this original broadcast. No claim of deployed repair or live campaign
-completion is made before those actions and provider evidence.
+The owner subsequently explicitly approved this prepared release and original campaign recovery/send.
+The following evidence records that authorised execution; the preparation section above is historical.
+
+## Approved live release and original campaign recovery
+
+27 October 2026, Australia/Sydney (AEDT, UTC+11). Source revision
+191b118594808fcf6453e7a3d0d84116f41d3f2b is on GitHub main. It contains only the 20 campaign
+implementation/test/documentation files above relative to released main; prior mailbox and other
+released work was merged intact. The occupied EMAIL category worktree was not changed.
+The integrated revision passed 123 focused tests in 22.322 seconds and Studio Verify.
+No main-branch campaign CI workflow exists; the repository's only Actions workflow targets a
+separate image-prompt feature branch. Local checks were run on the exact source revision.
+
+The reviewed recovery migration was applied through Supabase apply_migration and the installed
+function guard was read back. No production environment variables or service topology changed.
+Both approved existing services were deployed deliberately; skip-render commit markers avoided
+unrelated automatic service deployments:
+
+- CRM worker: dep-dbfv5459fdbs73c9br50, live 11:39:54 AEDT, instance g6mgn.
+- Primary web: dep-dbfv5q1srm7s73c1bqkg, live 11:43:03 AEDT, instance vf4cl.
+- Read-only worker runtime verification confirmed source revision, sender
+  Sports Cave <hello@sportscaveshop.com>, reply-to hello@sportscaveshop.com, and matching production
+  settings for the original review. No credentials were printed or copied.
+- Public /_stcore/health returned HTTP 200 / ok (317 ms from Windows).
+
+The new main-page Re-review & resume action was used once, followed by one Send confirmation.
+Snapshot 3c9ac86c-6ac3-4784-a062-b294b7908718 retained the exact original content (ignoring counts),
+and its recipient list was verified as a subset of the original reviewed list. Draft version remains 19.
+The fresh audience had 2,302 members, 2,242 eligible before recovery intersection, and 60 exclusions;
+intersection retained 2,241 eligible original recipients and excluded one additional outside-original
+identity. No recipients were added. No duplicate campaign was created.
+
+Recovery operation: 345b8cef-7df3-4594-b13e-34c516bf81b0.
+Campaign send ID: 0817eed1-4a18-5038-9d29-7db1f72ab304.
+Exactly one recovery acceptance and one preparation attempt were recorded.
+The prior failed operation/snapshot remain in history. Refresh during sending retained the same
+operation, and the main page advanced through Verifying and Sending without another submission.
+
+Actual live timing evidence (AEDT):
+
+| Event | Time / duration |
+|---|---|
+| Re-review click invoked | 11:43:42.392 |
+| Review job began | 11:43:50.524 |
+| Authoritative audience work | 35.796 s, 151 Shopify GraphQL requests, 3 database queries, 0 provider requests |
+| Review job complete | 11:44:36.951; 46.428 s total |
+| Send click invoked | 11:45:05.580 |
+| Disabled control and Submitting observed | by 11:45:06.016 (tool-observed upper bound 436 ms) |
+| Acceptance transaction timestamp | 11:45:06.791656; 1.212 s after click invocation, not an exact commit-latency measurement |
+| Worker claim timestamp | 11:45:11.582868 |
+| Publication / all recipient jobs timestamp | 11:45:49.093929; 42.302 s after acceptance transaction timestamp |
+| First provider-submission boundary | 11:46:35.356194; 88.565 s after acceptance timestamp |
+| First delivered event | 11:46:39.307 |
+| Last acceptance receipt | 11:53:41.926301; 8 min 35.135 s after acceptance timestamp |
+| Worker marked SENT | 11:57:02.483239; 3 min 20.557 s after last acceptance receipt |
+
+All 2,241 recipient rows are ACCEPTED with 2,241 distinct provider IDs and zero duplicate recipient
+groups. All 23 batch manifests are ACCEPTED, attempt_count=1. No pending, failed, blocked or uncertain
+submissions remain. Provider logs show HTTP 200 batch responses and no individual-email submission
+calls. No blind retries or manual queue/status resets were used.
+
+Direct read-only Resend GET /emails/01a17ad2-ca85-7be8-8100-416ebc8dfd7f confirmed last_event=delivered
+for an actual broadcast message, created at 11:46:37.482 AEDT. At approximately 11:55 AEDT, the
+signed callback ledger matched by stored provider ID contained delivery evidence for 411 recipients,
+five bounces and two delayed-delivery events. These are observed partial callback counts, not a claim
+that every accepted message was delivered. Recipient addresses and email bodies were not exported.
+
+Remaining measured limitations: the required fresh audience review still takes about 46 seconds.
+The shared worker paused between its bounded dispatch passes for maintenance; the two passes took
+128.554 s (1,200 recipients) and 123.981 s (1,041 recipients), with a multi-minute gap between them.
+Per-batch database/claim writes took roughly 5–10 seconds, while typical provider requests took
+0.75–0.9 seconds. Final campaign status is updated later in the worker cycle. Delivery/open/click
+counters also lag verified callback arrival because the existing webhook reconciliation queue
+processes events separately (627 campaign events were pending at 11:53:21 AEDT). These remaining
+latencies were observed, not hidden by optimistic success labels, extra submissions or status resets.
+
+The worker naturally marked the campaign SENT at 11:57:02.483239 AEDT; no manual status mutation
+was used. The signed-in main Campaigns page automatically showed Sent and Active 0. The original
+campaign was retained, with 2,241 unique accepted receipts and no duplicate jobs or second send.
+
+### Tested local follow-up: immediate confirmed completion
+
+Live evidence exposed a separate final-status delay: Engine.tick marked completed campaigns only
+after unrelated source maintenance, 200.557 seconds after this campaign's last acceptance receipt.
+The local crm_engine.py follow-up extracts the existing guarded completion statement into
+complete_campaigns() and also invokes it immediately after the existing leased dispatch checkpoint.
+It preserves the same terminal checks: PENDING, CLAIMED, SUBMITTING and UNCERTAIN prevent completion;
+provider-ID-backed acceptances determine the final accepted count. Existing worker-cycle completion
+still calls the same helper. No sending, eligibility, recipient selection or retry rules change.
+
+45 focused checks passed in 10.305 seconds: tests.test_crm_campaign_completion,
+tests.test_crm_batch_dispatch and tests.test_crm_send_progress, with disposable SQL enabled.
+The new checks prove completion runs before returning to maintenance and that pending/uncertain
+recipients remain active. The owner subsequently explicitly approved committing, pushing and
+deploying this follow-up to sports-cave-seo-worker only. Rollback remains revision 191b118.
+No migration or production configuration changes are required. The already completed original
+campaign requires no resend or recovery; no new campaign is submitted for verification.

@@ -47,6 +47,7 @@ class Engine:
             if not self.send_one():break
         from crm_campaign_dispatch import dispatch
         dispatch(self)
+        self.complete_campaigns()
         # Persist only after completed delivery work and a renewed lease. This
         # is separate from the full-cycle/analytics completion timestamp.
         self.hold_lease()
@@ -54,6 +55,13 @@ class Engine:
         self.store.set_state('automation_delivery_health',{'checked_at':self.clock().isoformat(),
             'status':'ok',**worker_configuration(self.config)})
         self._delivery_checkpoint=self.clock()
+    def complete_campaigns(self):
+        # Persist confirmed completion at the delivery boundary. Source/analytics
+        # maintenance can keep the surrounding worker cycle open for minutes.
+        # Unknown, in-flight and future recipients still prevent completion.
+        self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
+          final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
+          WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
     def delivery(self):
         if self.provider is None:self.provider=Resend(self.config)
         return self.provider
@@ -494,9 +502,7 @@ class Engine:
             # Native reviewed campaigns consume the frozen delivery snapshot in
             # batches. Automation/legacy template tests retain their own path.
             self.delivery_checkpoint(force=True)
-            self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
-              final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
-              WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
+            self.complete_campaigns()
             # Read-side analytics continues with marketing OFF and cannot submit
             # email. A Shopify outage must not interrupt delivery/consent handling.
             try:
