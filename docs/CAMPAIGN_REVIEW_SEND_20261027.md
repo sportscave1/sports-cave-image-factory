@@ -4,8 +4,8 @@ Task: 20261026-2398b49c. Owner: codex-campaign-send-20261027-01a157b1.
 Branch: codex/task/email-campaign-review-and-send-verification-mism-20261026-2398b49c.
 Status: owner-approved release 191b118594808fcf6453e7a3d0d84116f41d3f2b is deployed.
 Original campaign recovered and SENT at 11:57:02.483 AEDT; all 2,241 eligible original recipients
-have unique provider acceptance receipts. The owner has approved the tested completion-latency
-follow-up for release to the existing CRM worker only.
+have unique provider acceptance receipts. The completion-latency follow-up is also deployed to
+the existing CRM worker at 356ae9c9e0e1765442318a52eb1a600433a6c28e.
 See the live release evidence below for completion status, timings and limitations.
 
 ## Exact live failure
@@ -251,3 +251,32 @@ recipients remain active. The owner subsequently explicitly approved committing,
 deploying this follow-up to sports-cave-seo-worker only. Rollback remains revision 191b118.
 No migration or production configuration changes are required. The already completed original
 campaign requires no resend or recovery; no new campaign is submitted for verification.
+
+### Follow-up release verification
+
+The owner's fresh worker-only approval was received and executed on 27 October 2026.
+Source 356ae9c9e0e1765442318a52eb1a600433a6c28e was committed and pushed to GitHub main.
+The exact committed source passed the same 45 checks in 9.625 seconds against a fresh disposable
+SQL fixture, plus Studio Verify, secret checks, git diff --check and topology validation.
+The source delta from the initial live release is only crm_engine.py; the other two changed files
+are the completion regression tests and this evidence record.
+
+Render worker deployment dep-dbg0de942hec73d70m80 is live at that exact revision, finished
+13:05:57.376160 AEDT. Instance stx4v started sports_cave_worker.py at 13:05:59.800 and its CRM child
+at 13:06:00.783. The bounded startup log check found no matching traceback or worker-cycle failure.
+The canonical primary web service remains on the initial 191b118 deployment; it was not redeployed.
+No other service, production configuration or migration was changed for this follow-up.
+
+Post-deployment SQL reconfirmed the original campaign remains SENT with its unchanged
+11:57:02.483239 AEDT timestamp, 2,241 recipient jobs, 2,241 distinct accepted provider IDs,
+zero other recipient statuses, and exactly one recovery acceptance. The completed campaign was
+not submitted or retried. At 13:04 AEDT the received callback ledger contained 958 delivered,
+11 bounced, 16 delivery-delayed and one complained recipient; callback counts remain asynchronous
+and event types are not mutually exclusive. No claim is made that every accepted message arrived.
+
+Completion ordering and pending/uncertain guards were verified without delivery. No additional
+live campaign was sent to benchmark the new completion latency. Fresh-audience verification,
+shared-worker maintenance between dispatch passes, database connection overhead and callback
+reconciliation throughput remain the measured performance limitations described above.
+Rollback for this worker-only release is 191b118594808fcf6453e7a3d0d84116f41d3f2b; retain all
+receipts and immutable campaign history if rollback is needed. No rollback was necessary.
