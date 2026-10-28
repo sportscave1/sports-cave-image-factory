@@ -18,7 +18,7 @@ FIELDS = ('campaign','market','updated','recipients','delivered','opened','click
 def refresh_delay():
     states=st.session_state.get('campaign_home_activity',{}).values()
     from crm_campaign_progress import POLL_SECONDS
-    return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else POLL_SECONDS if st.session_state.get('campaign_home_dispatch_active') else TTL
+    return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else POLL_SECONDS if st.session_state.get('campaign_home_dispatch_active') else 3 if st.session_state.get('campaign_home_callback_watch') else TTL
 
 
 def arm_home_poll(*, key='crm-home-poll', seconds=None):
@@ -320,6 +320,7 @@ def campaign_table(store,user):
         # One bounded projection for this visible tab; no top-performer waterfall.
         future=_job(st.session_state,store,key,lambda:rows(store,tab=tab,search=search,market=market,status=status,oldest=sort=='Oldest first',offset=offset))
         items,state=resolve(st.session_state,store,key,future)
+        st.session_state['campaign_home_callback_watch']=bool(items and any(r.get('in_page') and r.get('delivery_status') and not r.get('archived_at') for r in items))
         accepted=st.session_state.get('campaign_home_accepted')
         if accepted:
             authoritative=next((r for r in (items or []) if str(r['id'])==str(accepted['id']) and r.get('delivery_status')),None)
@@ -372,6 +373,9 @@ def home(store,user):
     # shared controller. Child interactions re-arm it when the parent is idle.
     st.session_state['campaign_home_rendering']=True
     try:
+        if st.session_state.get('campaign_home_callback_watch'):
+            from crm_campaign_callback_refresh import watch
+            watch(st.session_state,store)
         st.html(STYLE)
         notice=st.session_state.pop('campaign_home_notice',None)
         if notice:st.toast(notice,icon=':material/check_circle:')

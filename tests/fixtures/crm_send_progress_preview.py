@@ -57,7 +57,10 @@ class FixtureStore:
                 'timing':item['timing'],'scheduled_at':item['due'],'next_due_at':item['due'],'server_now':now(),
                 'last_progress_at':now(),'worker_started_at':now() if processed else None,'send_id':key})
         return result
-    def q(self,*args,**kwargs):self.reads+=1;return self.progress()
+    def q(self,*args,**kwargs):
+        self.reads+=1
+        if 'resend_callback_revision' in args[0]:return {'revision':'fixture'}
+        return self.progress()
     def listed(self):
         return [{**record(),'id':r['id'],'name':r['name'],'status':r['status'],'delivery_status':r['status'],
                  'subject':'Offline collector campaign','thumbnail':'','deletable':False,'recipients':1095,

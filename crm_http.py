@@ -87,6 +87,7 @@ async def shopify_hook(request:Request):
 async def resend_hook(request:Request):
     from crm_resend import Config,verify_resend
     from crm_store import Store
+    from crm_callback_store import Connection
     from crm_webhooks import receive_resend
     from crm_resend_event_worker import admission,log
     from time import perf_counter
@@ -100,7 +101,7 @@ async def resend_hook(request:Request):
             await run_in_threadpool(log,'backpressure')
             return Response(status_code=503)
         await run_in_threadpool(log,'received')
-        await run_in_threadpool(receive_resend,Store(),identity,json.loads(raw),defer=True)
+        await run_in_threadpool(receive_resend,Store(Connection),identity,json.loads(raw),defer=True)
         await run_in_threadpool(log,'acknowledged',duration_ms=round((perf_counter()-started)*1000,1))
         return Response(status_code=200)
     except (ValueError,TypeError):return Response(status_code=400)
