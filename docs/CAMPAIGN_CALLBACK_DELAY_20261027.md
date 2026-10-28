@@ -2,8 +2,9 @@
 
 Task: 20261027-c6d937eb. Owner: codex-callback-delay-20261027-01a157b1.
 Branch: codex/task/email-batch-callback-reconciliation-and-prompt-c-20261027-c6d937eb.
-Local implementation only; no commit, push, deployment, configuration change,
-production write, callback replay, customer message or campaign duplication.
+The initial preparation below was local on 27 October. The approved release and
+28 October verification are recorded at the end. No callback replay, customer
+message or campaign duplication was performed.
 
 ## Evidence and cause
 
@@ -119,9 +120,10 @@ No resend, duplicate, reset, queue clearing, manual production reconciliation or
 status update performed. October 7 unknown mailbox operation is untouched.
 The existing dirty EMAIL category worktree is preserved separately.
 
-## Prepared release and rollback (approval required)
+## Prepared release and rollback (historical preparation)
 
-No release has been executed. Fresh owner approval is required by AGENTS.md.
+These steps were prepared before release. Fresh approval was subsequently received
+on 28 October, as recorded below.
 
 1. Review and commit only this task's listed source/tests/evidence; use the normal
    `[skip render]` release convention to prevent unrelated automatic service
@@ -146,3 +148,46 @@ No release has been executed. Fresh owner approval is required by AGENTS.md.
    accepted campaign work or remove callback rows. The revision key is harmless
    to old code and needs no rollback migration. Old consumer can drain all retained
    PENDING events; DONE and committed facts remain idempotent. No queue reset.
+
+## Approved release: 28 October 2026
+
+Owner explicitly approved committing, integrating, pushing and deploying this
+callback-only release to the two named existing services. No approval inferred
+for customer sends, retries, duplication or configuration changes.
+
+- Source commit: 7f343d64; integrated/tested release:
+  a7747e3a93fe9ac94d7daedf57b4365259610fce. Merged latest main cleanly, preserving
+  released recovery/status changes. Pushed that exact revision to main. Both
+  commits use `[skip render]`; only the two approved services were manually
+  deployed. No worker, cron, Blueprint or environment changes.
+- Exact integrated revision: 94 focused tests passed in 25.586 seconds using
+  callback batch, webhook reliability, workspace, Home and batch-dispatch suites.
+  Studio and topology validation passed. Real Edge/Streamlit passive-refresh
+  check passed again: 4,368 ms INCLUDING the controlled 3,000 ms callback arrival
+  delay; refresh retained the same Sent campaign and one confirmed delivered
+  recipient. No external browser HTTP permitted in that local test.
+- Webhooks deployment: dep-dbgmcrm7bikc73b1lo2g, live at 03:07:12.283 UTC
+  (14:07:12 AEDT), instance 2445m. Public /healthz returns 200 and exact release
+  git_sha a7747e3a. Unsigned callback POST with empty JSON returns 401; it creates
+  no durable callback. No new instance warning/error or callback-processing
+  failure logs observed in the bounded verification window.
+- Primary web deployment: dep-dbgme549v7es73as86v0, live at 03:11:07.380 UTC
+  (14:11:07 AEDT), instance tcvcb, same exact release SHA. /_stcore/health returns
+  200. Normal signed-in Edge Campaigns page loads after reload and shows original
+  Black Friday campaign Sent: 2,241 recipients, 2,205 delivered, 598 opened,
+  79 clicked. These counters match an independent SELECT from the ledger.
+- CRM worker remains on 356ae9c9 / dep-dbg0de942hec73d70m80; no extra deploy.
+- At 03:13:27 UTC, production SELECT confirms all 12,093 Resend queue records DONE,
+  no PENDING records. Black Friday still has 2,241 ACCEPTED jobs, 2,241 distinct
+  provider IDs and unchanged sent_at 2026-10-27 00:57:02.483239 UTC. No campaign
+  or recipient records were manually changed during this release.
+- No natural Resend callback arrived between webhooks becoming live and
+  03:13:27 UTC (6 minutes 15 seconds). Therefore actual new-runtime signed
+  callback acknowledgement/processing latency and a resulting automatic live
+  counter change are NOT measured. Do not substitute local fixture timings or
+  healthy HTTP checks for that missing production event evidence. No synthetic
+  production callbacks or campaign sends/retries were induced to manufacture it.
+
+Release is live; bounded health/UI/data-preservation checks pass. Production
+callback timing and native competing PostgreSQL claims remain unverified.
+Rollback targets above remain retained; no rollback was required.
