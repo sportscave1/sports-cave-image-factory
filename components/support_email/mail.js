@@ -154,11 +154,21 @@
       return {ok:true,message:'✓ Prompt copied — paste into ChatGPT'};
     } catch (_) {return {ok:false,message:'Could not copy the prompt. Allow clipboard access and try again.'};}
   }
-  if (typeof module !== 'undefined') {module.exports={bindEmailFrame,readerStamp,patchReadFlags,searchKnownRows,safeReaderView,patchImagePermission,receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
+  function componentHandshake(post,schedule=setTimeout,cancel=clearTimeout){
+    let attempts=0,stopped=false,timer=null;
+    function announce(){
+      if(stopped)return;
+      post('streamlit:componentReady',{apiVersion:1});
+      if(!stopped&&++attempts<20)timer=schedule(announce,500);
+    }
+    announce();
+    return ()=>{stopped=true;if(timer!==null)cancel(timer);};
+  }
+  if (typeof module !== 'undefined') {module.exports={componentHandshake,bindEmailFrame,readerStamp,patchReadFlags,searchKnownRows,safeReaderView,patchImagePermission,receivedBody,replyPromptControls,copyReplyPrompt,esc,size,safeLink,locked,mailboxCount,messageMenuItems,trashDeleteTarget,sendStatus,sendFeedback,sentReceipt,createViewCache,threadView,recoveryFeedback}; return;}
   const root=document.getElementById('mail');
   let model={}, busy=false, pending='', collapsed=false, mobileReading=false, localDraft=null, downloaded='', selection=null;
   let pendingAction='', queued=null, historyTimer=null, lastHeight=0, readingStamp='', listStamp='', folderStamp='', toolbarStamp='';
-  let selectionControlsDisabled=false;
+  let selectionControlsDisabled=false, receivedHostRender=false;
   let completionRequest=null;
   let searchTimer=null, searchText=null, searchFolder='';
   let journal=null,journalScope='',journalError='',recoveryDrafts=[],editRevision=0;
@@ -246,6 +256,7 @@
   }
   window.addEventListener('pagehide',()=>clearTimeout(reconnectTimer));
   const post=(type,extra={})=>window.parent.postMessage({isStreamlitMessage:true,type,...extra},'*');
+  let stopReady=()=>{};
   const $=id=>document.getElementById(id);
   const button=(label,action,data='',disabled=false,klass='')=>`<button type="button" class="${klass}" data-action="${action}" ${data} ${disabled?'disabled':''}>${label}</button>`;
   function snapshot() {
@@ -535,10 +546,10 @@
     const health=model.sync_health||{}, reconnecting=Boolean(model.error||model.live_error||model.recovery?.state==='stopped'||health.state==='RECONNECTING');
     const attention=['authentication','configuration','tls'].includes(health.category)||model.recovery?.state==='stopped';
     const status=!model.configured?'Not configured':attention?'Mailbox connection needs attention':reconnecting?(model.threads?.length?'Reconnecting · showing last synced mail':'Mailbox unavailable · retrying automatically'):model.initial_load_pending||model.read_pending||health.state==='SYNCING'?'Syncing…':'Connected';
-    root.querySelector('.statusbar').innerHTML=`<span title="Mail source: VentraIP IMAP"><span class="dot ${status==='Connected'?'':'off'}"></span>${esc(status)} · ${esc(model.mailbox)}${model.refreshed?' · Last synced: '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status">${attention?'<button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':esc(model.recovery?.state||model.live_error?'':model.notice||'')}</span>`;
+    root.querySelector('.statusbar').innerHTML=`<span title="${esc(health.diagnosis||'Mail source: VentraIP IMAP')}"><span class="dot ${status==='Connected'?'':'off'}"></span>${esc(status)} · ${esc(model.mailbox)}${model.refreshed?' · Last synced: '+esc(model.refreshed):''}</span><span id="notice" class="notice" role="status">${attention?esc(health.diagnosis||'')+' <button type="button" data-action="retry_connection" class="connection-retry">Retry</button>':esc(model.recovery?.state||model.live_error?health.diagnosis||'':model.notice||health.diagnosis||'')}</span>`;
     if(model.recoverable_drafts?.length)root.querySelector('.statusbar').insertAdjacentHTML('beforeend',`<details><summary>${model.recoverable_drafts.length} saved drafts</summary>${model.recoverable_drafts.map(d=>button(esc(d.subject||'(No subject)'),'open_local_draft',`data-draft="${esc(d.draft_id)}"`)).join('')}</details>`);
     if(recoveryDrafts.length)root.querySelector('.statusbar').insertAdjacentHTML('beforeend',`<details><summary>Recover unsaved edits (${recoveryDrafts.length})</summary>${recoveryDrafts.map(d=>button('Recover copy: '+esc(d.subject||'(No subject)'),'recover_local_edits',`data-draft="${esc(d.id)}"`)+button('Download edits','export_draft_text',`data-draft="${esc(d.id)}"`)).join('')}</details>`);
-    if(model.unresolved_receipts?.length)root.querySelector('.delivery-receipt').insertAdjacentHTML('beforeend',model.unresolved_receipts.map(r=>`<div class="sent-receipt">${esc(r.status==='accepted'?'Accepted by mail server; Sent copy '+r.copy_status:r.status==='unknown'?'Unknown send outcome. Do not resend.':'Saved send is queued or submitting. Do not resend.')} <small>${esc(r.operation_id)}</small>${button('Refresh status','refresh_recovery')}</div>`).join(''));
+    if(model.unresolved_receipts?.length)root.querySelector('.delivery-receipt').insertAdjacentHTML('beforeend',model.unresolved_receipts.map(r=>`<div class="sent-receipt">${esc(r.status==='accepted'?'Accepted by mail server; Sent copy '+r.copy_status:r.status==='unknown'?(r.notice||'Unknown send outcome. Do not resend.'):r.transport_status==='queued'?'Saved send is queued. Do not resend.':'Saved send is submitting. Do not resend.')} <small>${esc(r.operation_id)}</small>${button('Refresh status','refresh_recovery')}</div>`).join(''));
     scheduleReconnect();
     const foldersKey=JSON.stringify([model.folders,model.roles,model.folder,model.initial_load_pending]);
     if(wasFrozen||foldersKey!==folderStamp){const node=root.querySelector('.folders'),top=node.scrollTop;node.outerHTML=folders();root.querySelector('.folders').scrollTop=top;folderStamp=foldersKey;}
@@ -849,10 +860,19 @@
       return;
     }
     if(event.source!==window.parent)return;
-    if(event.data.type==='streamlit:render')render(event.data.args.model);
+    if(event.data.type==='streamlit:render'){
+      stopReady();
+      // The initial height announcement can be lost with the ready message.
+      // Resend it once the host is listening, then retain normal deduplication.
+      if(!receivedHostRender){receivedHostRender=true;lastHeight=0;}
+      render(event.data.args.model);
+    }
   });
   window.addEventListener('resize',fit);try{window.parent.addEventListener('resize',fit);new ResizeObserver(fit).observe(window.frameElement);}catch(_){}
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&pendingSignal)signalTick(pendingSignal);});
   window.addEventListener('pagehide',()=>clearTimeout(signalRetryTimer));
-  post('streamlit:componentReady',{apiVersion:1});fit();
+  // Cached assets can announce before the host installs its listener. Retry only
+  // until the first host render, within the component's initial loading window.
+  window.addEventListener('pagehide',()=>stopReady());
+  stopReady=componentHandshake(post);fit();
 })();

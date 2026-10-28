@@ -1,0 +1,11 @@
+{
+  "policy": "owner-reference-raster-floor-v1",
+  "references": {
+    "GLOBAL-CFP-A1": {
+      "dimensions": [11340, 8016],
+      "name": "Kostecki & Hazelwood — The Final Lap #17",
+      "product_gid": "gid://shopify/Product/15411172376883",
+      "preparation_hash": "5329ce4506f019b94465abbe8bf2248235300f4b20cd15b6c6e24e635c195986"
+    }
+  }
+}

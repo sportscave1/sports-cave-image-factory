@@ -23,6 +23,39 @@ def test_own_position_and_style_preserved():
     assert preparation_scale([2004,2835])==4
 
 
+@pytest.mark.parametrize('suffix', ['1', '2', '12'])
+@pytest.mark.parametrize('kind', ['smart_object', 'raster'])
+def test_download_copy_plaque_retains_exact_layer_identity(suffix,kind):
+    data=inspection();name=f'limited-edition-plaque ({suffix})'
+    data['layers'][1]['path'][0]['name']=name
+    data['layers'][1]['kind']=kind
+    original=deepcopy(data)
+    result=detect(data,100)
+    assert result['plaque_layer']==name
+    assert result['plaque_bounds']==[170,1730,680,1900]
+    assert result['source_dimensions']==[2835,2004]
+    assert data==original
+
+
+@pytest.mark.parametrize('case', ['duplicate', 'canonical_and_copy', 'nested', 'chain',
+                                 'outside', 'text', 'arbitrary', 'trailing', 'zero'])
+def test_download_copy_plaque_does_not_relax_role_safety(case):
+    data=inspection();plaque=data['layers'][1]
+    plaque['path'][0]['name']='limited-edition-plaque (1)'
+    if case in ('duplicate','canonical_and_copy'):
+        other=deepcopy(plaque)
+        other['path'][0]['name']='limited-edition-plaque' if case=='canonical_and_copy' else 'limited-edition-plaque (2)'
+        data['layers'].append(other)
+    if case=='nested':plaque['path'].append(dict(name='nested'))
+    if case=='chain':plaque['smart_object_chain']=[dict(name='parent')]
+    if case=='outside':data['layers'][0]['bounds_px']=[800,1820,980,1850]
+    if case=='text':plaque['kind']='text'
+    if case=='arbitrary':plaque['path'][0]['name']='custom plaque (1)'
+    if case=='trailing':plaque['path'][0]['name']+=' copy'
+    if case=='zero':plaque['path'][0]['name']='limited-edition-plaque (0)'
+    with pytest.raises(NeedsRepair):detect(data,100)
+
+
 @pytest.mark.parametrize('kind',['duplicate','nested','font','locked','total','outside','narrow'])
 def test_uncertain_layers_never_enabled(kind):
     data=inspection();n=data['layers'][0]
@@ -67,6 +100,37 @@ def test_replaced_mapping_invalidates_old_preparation_lease(database):
     with pytest.raises(ValueError):queue.enqueue('p','f','admin')
     queue.enqueue('p','new','admin')
     with pytest.raises(ValueError):queue.checkpoint('p',first['lease_token'],'admin','Cloud Ready')
+
+
+def test_manual_attachment_is_durable_and_reconnect_retry_keeps_one_job(database):
+    from psd_mapping_store import PostgresMappings
+    import psd_directory as psd
+    jobs,sql=database;root=Path(__file__).parents[1]
+    sql.execute((root/'supabase/migrations/20261014053326_auto_editions_onboarding.sql').read_text())
+    sql.execute((root/'scripts/sql/product_psd_mapping.sql').read_text())
+    sql.execute('CREATE TABLE edition_products(shopify_product_gid text,shopify_product_id text,product_title text,shopify_handle text,edition_total int,next_edition_number int)')
+    pid='gid://shopify/Product/1'
+    sql.execute("INSERT INTO edition_products VALUES(%s,%s,'Fixture','fixture',100,50)",(pid,pid))
+    meta={'.tag':'file','id':'id:fixture','name':'Fixture.psd','path_display':psd.ROOT+'/Fixture.psd'}
+    actor=dict(id='admin',role='admin',is_active=True)
+    store=PostgresMappings(jobs.connect);queue=Queue(jobs.connect)
+    store.attach(pid,meta,actor)
+    # No Companion is running: the same persisted checkpoint remains queued.
+    sql.execute('SELECT status FROM auto_edition_onboarding');assert sql.fetchone()['status']=='Awaiting preparation'
+    store.attach(pid,meta,actor,expected_file_id=meta['id'])
+    assert PostgresMappings(jobs.connect).read()[pid]['dropbox_file_id']==meta['id']
+    first=queue.claim('admin');assert first['file_id']==meta['id'] and queue.claim('admin') is None
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()-interval '1 second'")
+    resumed=queue.claim('admin');assert resumed['lease_token']!=first['lease_token']
+    with pytest.raises(ValueError):queue.checkpoint(pid,first['lease_token'],'admin','Cloud Ready')
+    queue.checkpoint(pid,resumed['lease_token'],'admin','Needs PSD Repair','Fixture role repair')
+    queue.retry(pid,'admin')
+    with pytest.raises(ValueError):queue.retry(pid,'admin')
+    assert queue.claim('admin')['file_id']==meta['id']
+    for table in ('auto_edition_onboarding','product_psd_mappings','product_psd_mapping_audit'):
+        sql.execute('SELECT count(*) AS n FROM '+table);assert sql.fetchone()['n']==1
+    sql.execute('SELECT next_edition_number FROM edition_products');assert sql.fetchone()['next_edition_number']==50
+    sql.execute('SELECT count(*) AS n FROM auto_edition_jobs');assert sql.fetchone()['n']==0
 
 
 def test_preparation_metrics_commit_with_checkpoint_or_not_at_all(database):

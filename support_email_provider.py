@@ -865,7 +865,14 @@ class ImapProvider:
                 if low <= high:
                     criteria = f"UID {low}:{high}" + (" " + search_criteria(query, field) if query else "")
                     uids = [uid for uid in self._search(conn, criteria) if low <= int(uid) <= high]
-                    added = self._fetch_uids(conn, uids[-limit:], validity, folder)
+                    requested = uids[-limit:]
+                    added = self._fetch_uids(conn, requested, validity, folder)
+                    missing = set(requested)-{m['uid'] for m in added}
+                    if missing and missing & set(self._search(conn, criteria)):
+                        # Confirm an expunge before skipping missing headers. A
+                        # partial FETCH must not advance past still-present mail.
+                        raise MailboxError('Message headers incomplete; retrying sync.',
+                            code='temporary',retryable=True,stage='fetch_headers')
             return {"flags": flags, "checked_uids": [m["uid"] for m in known],
                     "added": added, "reset": reset, "uidvalidity": validity,
                     "live_uid": int(values[b"UIDNEXT"]) - 1, "total": int(values[b"MESSAGES"]),
