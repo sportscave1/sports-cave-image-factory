@@ -1419,6 +1419,9 @@ Read the entire prompt before generating any images. Review all requirements tog
 DISTINCT_ROOMS = """Each image must depict a clearly different room with its own architecture, furniture, materials, colour palette and lighting. Use distinct room layouts and furniture arrangements across the set. Do not reuse the same wall, furniture composition or room with minor restyling. A changed camera angle, crop or small decorative change does not count as a different room.
 Honour the resolved room subtype and camera angle in each image brief. Scene libraries below provide supporting options within those selections; they do not authorise choosing a different subtype or angle. Vary unspecified scene details within each assigned category."""
 
+OUTPUT_MANIFEST = """DOWNLOADABLE OUTPUT MANIFEST
+After all three finished images are available, also provide a downloadable UTF-8 CSV named mockup-outputs.csv with the columns role,filename. Include exactly three rows, one each for Man Cave, Office and Living Room. Each filename must be the actual downloadable image filename for that role, including its extension. Keep random filenames unchanged and map them explicitly; never infer roles from file order or invent a missing output. If any image or CSV cannot be delivered, report which output is missing and do not claim completion."""
+
 FINAL_CHECK = """FINAL CHECK — BEFORE GENERATION
 Before generating any image, check the complete plan against every detailed instruction:
 - Three separate finished images are planned.
@@ -1463,4 +1466,4 @@ def compose(instructions, texts):
         'Keep its room layout and furniture arrangement visibly different from the other two images.\n\n'
         f'{PER_IMAGE}\n\nSaved scene/composition/output requirements:\n{text}'
         for index, (label, text, selection) in enumerate(zip(LABELS, texts, selections), 1))
-    return summary + '\n\n' + sequential_instructions(instructions) + '\n\n' + briefs + '\n\n' + FINAL_CHECK
+    return summary + '\n\n' + sequential_instructions(instructions) + '\n\n' + briefs + '\n\n' + OUTPUT_MANIFEST + '\n\n' + FINAL_CHECK

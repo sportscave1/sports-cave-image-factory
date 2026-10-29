@@ -200,3 +200,15 @@ def test_saved_custom_details_and_long_tail_are_complete():
         assert text in prompt
         assert f'- Image {index}: {label}. Selected room: Authored {label} subtype; Selected camera angle: custom {index}' in prompt
     assert prompt.endswith(FINAL_CHECK)
+
+
+def test_complete_set_requests_downloadable_role_manifest_without_renaming_assets():
+    from product_upload_lifestyle import OUTPUT_MANIFEST
+    prompt = compose('Preserve saved frame dimensions.', ['saved man cave', 'saved office', 'saved living room'])
+    assert prompt.count(OUTPUT_MANIFEST) == 1
+    assert 'downloadable UTF-8 CSV named mockup-outputs.csv' in prompt
+    assert 'columns role,filename' in prompt
+    assert 'Keep random filenames unchanged' in prompt
+    assert 'do not claim completion' in prompt
+    assert prompt.index(OUTPUT_MANIFEST) > prompt.index('## IMAGE 3')
+    assert prompt.endswith(FINAL_CHECK)

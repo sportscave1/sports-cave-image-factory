@@ -9,14 +9,15 @@
   const active=version=>{if(version!==epoch||controller.signal.aborted)throw new Error('Selection changed. Reopen the current image.');};
   const button=(label,id)=>{const b=document.createElement('button');b.textContent=label;b.setAttribute('aria-label',label);b.title=label+' to clipboard';b.id=id;return b;};
   const feedbackTimers=new Map();
+  const feedbackTitle=(b,text)=>{b.title=text+(b.recorderPromptProof?'\nSports Cave prompt v1: '+b.recorderPromptProof:'');};
   const clearFeedback=b=>{clearTimeout(feedbackTimers.get(b));feedbackTimers.delete(b);};
   const clearAllFeedback=()=>{for(const timer of feedbackTimers.values())clearTimeout(timer);feedbackTimers.clear();};
   function copyFeedback(b,successMessage){
     const original=b.innerHTML,originalTitle=b.title,originalMinWidth=b.style.minWidth||'';
     return {
-      begin(){clearFeedback(b);const width=b.getBoundingClientRect().width;if(width>0)b.style.minWidth=width+'px';b.textContent='Copying…';b.title='Copying…';b.disabled=true;resize();},
-      restore(){clearFeedback(b);b.innerHTML=original;b.title=originalTitle;b.style.minWidth=originalMinWidth;resize();},
-      success(){clearFeedback(b);b.textContent='Copied';b.title=successMessage;feedbackTimers.set(b,setTimeout(()=>{feedbackTimers.delete(b);b.innerHTML=original;b.title=originalTitle;b.style.minWidth=originalMinWidth;resize();},2000));}
+      begin(){clearFeedback(b);const width=b.getBoundingClientRect().width;if(width>0)b.style.minWidth=width+'px';b.textContent='Copying…';feedbackTitle(b,'Copying…');b.disabled=true;resize();},
+      restore(){clearFeedback(b);b.innerHTML=original;feedbackTitle(b,originalTitle);b.style.minWidth=originalMinWidth;resize();},
+      success(){clearFeedback(b);b.textContent='Copied';feedbackTitle(b,successMessage);feedbackTimers.set(b,setTimeout(()=>{feedbackTimers.delete(b);b.innerHTML=original;feedbackTitle(b,originalTitle);b.style.minWidth=originalMinWidth;resize();},2000));}
     };
   }
   function link(original,label){const a=document.createElement('a');a.href=url(original);a.target='_blank';a.rel='noopener';a.setAttribute('aria-label','Open '+label+' full-resolution original');return a;}
@@ -47,6 +48,17 @@
     const copyImage=button('Copy black frame','copyImage'),copyPrompt=button('Copy prompt','copyPrompt');
     const imageFeedback=copyFeedback(copyImage,'Image copied'),promptFeedback=copyFeedback(copyPrompt,'Prompt copied');
     copyImage.disabled=!args.original;row.append(copyImage,copyPrompt);root.append(row);
+    // Prove the complete application-owned payload without exposing its text.
+    // A stale digest must never annotate a newer product's button.
+    if(typeof args.prompt==='string'&&args.prompt.length>0&&args.prompt.length<=1048576&&globalThis.crypto?.subtle){
+      const version=epoch,bytes=new TextEncoder().encode(args.prompt);
+      if(bytes.length<=1048576)crypto.subtle.digest('SHA-256',bytes).then(digest=>{
+        if(version!==epoch||controller.signal.aborted)return;
+        copyPrompt.recorderPromptProof=JSON.stringify({sha256:Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join(''),utf16_length:args.prompt.length,utf8_length:bytes.length});
+        copyPrompt.setAttribute('aria-label','Copy Black Frame Prompt');
+        feedbackTitle(copyPrompt,copyPrompt.title.split('\n')[0]);
+      }).catch(()=>{}); // Manual Copy remains available; recorder refuses missing proof.
+    }
     const status=document.createElement('div');status.id='status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');root.append(status);
     copyPrompt.onclick=async()=>{
       if(copyPrompt.disabled)return;

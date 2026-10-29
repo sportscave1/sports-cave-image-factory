@@ -36,9 +36,10 @@ def payload(kind,data):
     if kind in EDIT_COMMANDS:
         validate_edit_payload(kind,data)
         return data
-    fields={"record":{"url","name"},"play":{"id","revision","values"},"load":{"id"},"rename":{"id","name"},"delete":{"id"},"inspect":{"id"},"reusable":{"id"},
+    fields={"library-page":{"offset"},"record":{"url","name"},"play":{"id","revision","values"},"load":{"id"},"rename":{"id","name"},"delete":{"id"},"inspect":{"id"},"reusable":{"id"},
             "repair-copy":{"id","revision","step","replacement"},"edit":{"task"},"startup":{"enabled"}}
     keys(data,fields.get(kind,set()))
+    if kind == "library-page" and (type(data.get("offset")) is not int or data["offset"] < 0): raise Invalid("Invalid library page.")
     if "id" in data:
         try: uuid.UUID(data["id"])
         except (ValueError,TypeError,AttributeError):raise Invalid("Select a saved recording.")
@@ -154,7 +155,9 @@ class DeviceAgent:
         for task in list(self.active_commands.values()):task.cancel()
         if self.active_commands:await asyncio.gather(*list(self.active_commands.values()),return_exceptions=True)
         self.preparing=False
-        if interrupted:
+        if hasattr(self.runner, "connection_lost"):
+            await self.runner.connection_lost(revoked=revoked)
+        elif interrupted:
             await self.runner.stop()
             self.runner.mode="interrupted"
             self.runner.message="Connection lost. The recording was saved or playback interrupted. Check its result, then press Stop before starting again."
@@ -249,7 +252,8 @@ class DeviceAgent:
                 except asyncio.CancelledError:raise
                 except Exception as error:
                     if time.monotonic()-self.last_failure>30:
-                        atomic(self.root/"transport-status.json",{"error_type":type(error).__name__,
+                        atomic(self.root/"transport-status.json",{"error_type":type(error).__name__, "http_status":error.response.status_code if isinstance(error,httpx.HTTPStatusError) else None,
+                               "explanation":("OS rejected helper authentication; reconnect this PC." if isinstance(error,httpx.HTTPStatusError) and error.response.status_code in (401,403) else "OS connection failed; check the local preview address and server health."),
                                "at":datetime.now().astimezone().isoformat()})
                         self.last_failure=time.monotonic()
                     for pending in (poll,publisher):
@@ -290,7 +294,10 @@ class DeviceAgent:
                 for other,task in list(self.active_commands.items()):
                     if other!=key:task.cancel()
                 was_recording=self.runner.recording or self.runner.mode=="recording_paused"
-                await self.runner.stop()
+                if hasattr(self.runner, "stop_from_device"):
+                    await self.runner.stop_from_device()
+                else:
+                    await self.runner.stop()
                 self.preparing=False
                 self.runner.message="Recording saved." if was_recording and self.runner.draft.get("steps") and self.runner.simple_recording else "Stopped."
                 result={}
@@ -298,8 +305,10 @@ class DeviceAgent:
                 async with self.control_lock:
                     if command["fence"]<self.fence:raise Invalid("Cancelled by Stop.")
                     if time.monotonic()>=deadline:raise Invalid("This control expired. Press it again.")
-                    result=await self.perform(kind,data,key)
+                    result=await asyncio.wait_for(self.perform(kind,data,key), timeout=max(.01, deadline-time.monotonic()))
             status="applied"
+        except asyncio.TimeoutError:
+            status="uncertain";result={"message":"Command deadline expired. Its outcome is unconfirmed; it will not be repeated. Inspect the preserved run."}
         except asyncio.CancelledError:
             status="uncertain";result={"message":"Cancelled while applying a control. Check the previous result."}
         except (Invalid,ValueError) as error:
@@ -317,7 +326,7 @@ class DeviceAgent:
             desktop_target=data.get("id") and r.is_desktop(data["id"])
             if desktop_target and kind not in {"inspect","play","rename","delete"}:
                 raise Invalid("This desktop task is immutable. Use the native recorder to create another recording.")
-            if kind in {"record","open-popup"} or desktop_target or (kind in {"pause","resume"} and r.desktop_busy()):
+            if kind in {"record","open-popup","library-page"} or desktop_target or (kind in {"pause","resume"} and r.desktop_busy()):
                 if kind in {"record","play"}:
                     self.operation_id=key
                     atomic(self.root/"device-session.json",{"boot_id":self.boot_id,"epoch":self.epoch,"operation_id":key})
