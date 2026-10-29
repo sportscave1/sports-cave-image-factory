@@ -27,6 +27,7 @@ import ads_refresh_generation
 import ads_refresh_ui
 import ads_standard_workflow
 import ads_package_paths
+from ads_black_friday import build_black_friday_prompt
 from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 import ads_carousel_winner as carousel_winner
@@ -1689,6 +1690,7 @@ def render_prompt_copy_button(
     disabled=False,
     track_copy=False,
     compact=False,
+    gold_accent=False,
 ):
     prompt_text = creation_instructions(prompt_text)
     if track_copy:
@@ -1714,6 +1716,8 @@ def render_prompt_copy_button(
         background = "#FFFFFF" if not disabled else "#F2F1EE"
         foreground = "#0B0B0D" if not disabled else "#817D75"
         border = "rgba(11,11,13,0.55)" if not disabled else "#D4D0C7"
+    if gold_accent and not disabled:
+        border = "#D4A54C"
     disabled_attribute = " disabled" if disabled else ""
     aria_disabled = "true" if disabled else "false"
     cursor = "not-allowed" if disabled else "pointer"
@@ -1773,9 +1777,29 @@ def render_prompt_copy_button(
         }})();
         </script>
         """,
-        height=48 if compact else 64,
+        height=96 if gold_accent else (48 if compact else 64),
     )
     return None
+
+
+
+def render_new_ads_prompt_copy_buttons(prompt_text, key):
+    """Keep the original copy action and add a derived seasonal footer option."""
+    try:
+        seasonal = build_black_friday_prompt(prompt_text)
+    except ValueError:
+        # Saved older templates retain their original copy action without guessing.
+        render_prompt_copy_button(prompt_text, key)
+        st.caption("Black Friday copy requires a newly submitted Instant Experience prompt.")
+        return
+    normal_col, seasonal_col = st.columns([2, 1])
+    with normal_col:
+        render_prompt_copy_button(prompt_text, key)
+    with seasonal_col:
+        render_prompt_copy_button(
+            seasonal, f"{key}::black-friday", label="Copy Black Friday Prompt",
+            gold_accent=True, compact=True,
+        )
 
 
 def validate_ads_inputs(product_name, category, country, campaign_type, product_url=""):
@@ -14392,7 +14416,7 @@ def render_supported_result(result, *, source_matches=True):
     workflow = _ads_image_workflow(result)
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
-        render_prompt_copy_button(
+        render_new_ads_prompt_copy_buttons(
             master_prompt,
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
@@ -14407,7 +14431,7 @@ def render_supported_result(result, *, source_matches=True):
 
     if campaign_type == "Instant Experience":
         st.subheader("1. Copy this ChatGPT prompt")
-        render_prompt_copy_button(
+        render_new_ads_prompt_copy_buttons(
             master_prompt,
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
