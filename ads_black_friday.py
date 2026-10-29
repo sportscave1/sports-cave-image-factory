@@ -6,16 +6,14 @@ SUBHEADLINE = "EARLY BIRD BLACK FRIDAY"
 # Only footer-subheadline instructions may differ. Keep these substitutions explicit
 # so a prompt-template change cannot silently erase unrelated creative instructions.
 FOOTER_REPLACEMENTS = (
-    ("three unique footer headlines and three unique sublines",
-     "three unique footer headlines and the same EARLY BIRD BLACK FRIDAY subline"),
-    ("three unique selected headlines/subline wording",
-     "three unique selected headlines and the same EARLY BIRD BLACK FRIDAY subline wording"),
+    ("three different approved footer headlines and distinct supporting lines in every set",
+     "three different approved footer headlines and the same EARLY BIRD BLACK FRIDAY supporting line in every set"),
+    ("approved selected headline and supporting-line wording, with maximum eligible variety",
+     "approved selected headline wording with maximum eligible variety and the exact EARLY BIRD BLACK FRIDAY supporting line"),
     ("Supporting text is clearly secondary in softer warm off-white.",
      "Supporting text is clearly secondary in subtle premium gold (#D4A54C)."),
-    ("Supporting text is warm off-white.",
-     "Supporting text is subtle premium gold (#D4A54C)."),
-    ("With verified scarcity, exactly one line supplies the limited-edition/edition-size claim; the other adds collector or emotional meaning.",
-     "Preserve the selected headline exactly; the supporting line is always EARLY BIRD BLACK FRIDAY, replacing the emotional/FOMO line, never adding a fourth line."),
+    ("Restore the exact saved supporting sentence and historical selection rules; never invent replacement wording. Set it in Montserrat Regular, 24–26 px at 1024 px, softer warm off-white, centred on one line.",
+     "Replace the emotional/FOMO supporting sentence and all its historical options with exactly EARLY BIRD BLACK FRIDAY. Set it in Montserrat Regular, 24–26 px at 1024 px, subtle premium gold (#D4A54C), centred on one line."),
     ("- Express one clean supporting thought on exactly one line at the shared secondary supporting-copy target below.",
      "- Render exactly EARLY BIRD BLACK FRIDAY on one line at the shared smaller secondary supporting-copy target below, in subtle premium gold (#D4A54C). Keep the headline dominant and the existing footer height, spacing and proportions; no sale stickers, discount percentages or additional banners."),
 )
@@ -23,7 +21,7 @@ FOOTER_REPLACEMENTS = (
 
 def build_black_friday_prompt(normal_prompt):
     """Derive the current three-cover footer variant without rerolling any choices."""
-    if not normal_prompt.startswith("ADS_IE_COMBINED_EXECUTION_V1"):
+    if "\nADS_IE_COMBINED_EXECUTION_V1\n" not in "\n" + normal_prompt:
         raise ValueError("Black Friday requires the current Instant Experience footer template.")
     seasonal, count = re.subn(r"(?m)^(SUPPORTING LINE: )[^\r\n]+",
                               lambda match: match[1] + SUBHEADLINE, normal_prompt)

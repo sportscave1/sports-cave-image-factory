@@ -11,7 +11,7 @@ import ads_page
 from ads_black_friday import FOOTER_REPLACEMENTS, SUBHEADLINE, build_black_friday_prompt
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = "6e2805d058713cc64cfa70e7a85ee23ea66db7e1"
+BASELINE = "5bb13ace2f959015d3eddf94e265a35682d53e67"
 
 
 def record(category="Cricket", country="Australia", token="seasonal-test"):
@@ -78,7 +78,7 @@ class BlackFridayPromptTests(unittest.TestCase):
 
     def test_changed_or_legacy_templates_fail_without_altering_normal(self):
         normal = record()["master_prompt"]
-        for text in ("legacy prompt", normal.replace("SUPPORTING LINE:", "SUBLINE:"), normal.replace("Supporting text is warm off-white.", "Different typography.")):
+        for text in ("legacy prompt", normal.replace("SUPPORTING LINE:", "SUBLINE:"), normal.replace("Supporting text is clearly secondary in softer warm off-white.", "Different typography.")):
             with self.assertRaises(ValueError):
                 build_black_friday_prompt(text)
 
