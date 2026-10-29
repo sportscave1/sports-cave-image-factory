@@ -35,7 +35,7 @@ Generate each COMPLETE mockup in one image-generation call using the ORIGINAL su
 
 Faithfully preserve the supplied artwork's subjects, faces, vehicles, uniforms, wording, typography, logos, signatures, edition details, colours and composition. Preserve the complete black frame's design, proportions, finish and moulding width. Do not redesign, crop, replace or invent product details. Allow the physical frame and transparent glazing to respond naturally to the room's lighting and camera angle, with coherent perspective, believable depth and natural frame bevel highlights.
 
-Require convincing transparent glazing with noticeable but controlled window or room-light reflections. Keep reflections clear of important artwork details, titles and faces. Require narrow contact shadows, soft directional shadows, realistic wall mounting and consistent lighting across room, frame and glazing. Use believable A1-like scale unless another product size is supplied. No flat pasted-on appearance, floating frame, artificial halo, excessive glare or CGI finish.
+Require convincing transparent glazing with noticeable but controlled window or room-light reflections. Keep reflections clear of important artwork details, titles and faces. Require narrow contact shadows, soft directional shadows, realistic wall mounting and consistent lighting across room, frame and glazing. Use the owner-confirmed large 87 × 62 cm landscape edition, reversed for portrait, with premium glass; never ask for size or glazing confirmation. No flat pasted-on appearance, floating frame, artificial halo, excessive glare or CGI finish.
 
 Output one standalone 1024 × 1024 image per card, never a collage or triptych. Honour each card's saved room and camera selections; keep the three homes architecturally distinct. Use the ORIGINAL supplied product reference for every call, including corrections, never a previous mockup as the product reference.
 
@@ -44,6 +44,8 @@ Present only completed mockups containing the artwork and full black frame. Insp
 For the three-card workflow, finish Card 1 — Man Cave, automatically continue to Card 2 — Office, then Card 3 — Living Room, each in its own call without approval or another user message. A standalone card brief produces its named card; when part of the three-card workflow continue automatically to the next unfinished card.
 
 Describe fidelity honestly: reference-based image generation is not guaranteed pixel-identical reproduction. Never claim exact pixel fidelity, or claim inspection when the actual result has not been checked. If a genuine blocker remains, identify it and the unfinished cards accurately.
+
+All Sports Cave editions are owner-confirmed as limited to 100 worldwide; no verification flag or confirmation is required for this approved claim.
 
 END FINISHED MOCKUPS ONLY'''
 
@@ -99,6 +101,11 @@ def sequential_instructions(text):
     Execution and generation mechanics change; authored room/camera settings stay intact.
     Run at the copy boundary as well as on the default so cached overrides are safe.
     """
+    # Upgrade only the retired size/glazing clauses in saved prompt overrides.
+    text = re.sub(r'Where the selected product is confirmed as A1, use genuine A1 print dimensions:.*?If the source frame proportions contradict the intended scale or physical specifications, request clarification\.',
+                  'Every framed mockup represents the owner-confirmed large 87 × 62 cm landscape edition, or 62 × 87 cm portrait edition. Preserve source proportions and realistic scale. Never request size or glazing confirmation.', text, flags=re.S)
+    text = text.replace('Preserve verified product construction. If the actual front is acrylic rather than glass, depict realistic transparent glazing without falsely implying a different manufactured material.',
+                        'Every framed mockup uses owner-confirmed premium glass, not acrylic, with clearly visible natural glass reflections. No glazing confirmation is required.')
     text = re.sub(r'AUTOMATIC START[^\n]*\n.*?END AUTOMATIC START', '', text,
                   flags=re.DOTALL)
     text = re.sub(r'FINISHED MOCKUPS ONLY[^\n]*\n.*?END FINISHED MOCKUPS ONLY', '', text,
@@ -693,24 +700,16 @@ It should have believable physical weight.
 
 ---
 
-# 12. A1 PHYSICAL SCALE AND PRODUCT SIZE
+# 12. PHYSICAL SCALE AND PRODUCT SIZE
 
 **Physical scale is mandatory.**
 
-Where the selected product is confirmed as A1, use genuine A1 print dimensions:
+Every framed mockup represents the owner-confirmed large Sports Cave edition:
 
-- Landscape print: 841 × 594 mm.
-- Portrait print: 594 × 841 mm.
+- Landscape: 87 × 62 cm.
+- Portrait: 62 × 87 cm.
 
-These are nominal print dimensions, not automatically the complete external framed-product measurements.
-
-Do not fabricate outer-frame dimensions or additional border allowances.
-
-Where A1 is the intended default display reference but the actual selected size is unknown, use a conservative, believable A1-like visual presentation without claiming measured dimensional accuracy.
-
-If another size or verified outer measurement is supplied, it takes priority.
-
-If the source frame proportions contradict the intended scale or physical specifications, request clarification.
+Preserve the source orientation and proportions; never stretch the artwork or invent extra border allowances. Use these dimensions for realistic physical scale regardless of missing or conflicting legacy size flags. Never request size or glazing confirmation; continue the full requested package.
 
 ### Environmental scale references
 
@@ -775,7 +774,7 @@ A window on the left should create plausible left-origin illumination and reflec
 
 A warm picture light should interact naturally with the frame and glazed surface.
 
-Preserve verified product construction. If the actual front is acrylic rather than glass, depict realistic transparent glazing without falsely implying a different manufactured material.
+Every framed mockup has owner-confirmed premium glass, not acrylic. Show clearly visible natural glass reflections; no glazing confirmation is required.
 
 Do not invent a glazed front on a known unglazed or unframed product.
 
@@ -953,7 +952,7 @@ Each prompt must independently contain:
 - Complete room concept and architectural description.
 - Selected wall colour, finish and texture.
 - Distinctive furniture and layout.
-- Appropriate A1 or verified physical-scale requirements.
+- Owner-confirmed large-edition physical scale: 87 × 62 cm landscape, reversed for portrait.
 - Frame mounting and physical-shadow requirements.
 - Premium transparent-glazing and reflection requirements.
 - Camera direction and composition.
@@ -1230,24 +1229,16 @@ It should have believable physical weight.
 
 ---
 
-# 12. A1 PHYSICAL SCALE AND PRODUCT SIZE
+# 12. PHYSICAL SCALE AND PRODUCT SIZE
 
 **Physical scale is mandatory.**
 
-Where the selected product is confirmed as A1, use genuine A1 print dimensions:
+Every framed mockup represents the owner-confirmed large Sports Cave edition:
 
-- Landscape print: 841 × 594 mm.
-- Portrait print: 594 × 841 mm.
+- Landscape: 87 × 62 cm.
+- Portrait: 62 × 87 cm.
 
-These are nominal print dimensions, not automatically the complete external framed-product measurements.
-
-Do not fabricate outer-frame dimensions or additional border allowances.
-
-Where A1 is the intended default display reference but the actual selected size is unknown, use a conservative, believable A1-like visual presentation without claiming measured dimensional accuracy.
-
-If another size or verified outer measurement is supplied, it takes priority.
-
-If the source frame proportions contradict the intended scale or physical specifications, request clarification.
+Preserve the source orientation and proportions; never stretch the artwork or invent extra border allowances. Use these dimensions for realistic physical scale regardless of missing or conflicting legacy size flags. Never request size or glazing confirmation; continue the full requested package.
 
 ### Environmental scale references
 
@@ -1312,7 +1303,7 @@ A window on the left should create plausible left-origin illumination and reflec
 
 A warm picture light should interact naturally with the frame and glazed surface.
 
-Preserve verified product construction. If the actual front is acrylic rather than glass, depict realistic transparent glazing without falsely implying a different manufactured material.
+Every framed mockup has owner-confirmed premium glass, not acrylic. Show clearly visible natural glass reflections; no glazing confirmation is required.
 
 Do not invent a glazed front on a known unglazed or unframed product.
 

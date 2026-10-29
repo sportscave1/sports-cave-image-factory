@@ -87,7 +87,9 @@ class DurableDelivery(unittest.TestCase):
     def test_database_failure_after_provider_never_resends(self):
         self.prepare()
         with patch.object(self.store,'finish',side_effect=RuntimeError('DB')):
-            with self.assertRaises(RuntimeError):self.submit()
+            result=self.submit()
+            self.assertEqual(result['status'],'accepted')
+            self.assertTrue(result['persistence_pending'])
         self.assertEqual(self.store.get(self.mailbox,self.op)['status'],'in_progress')
         self.expire();self.store.due(self.mailbox)
         self.submit();self.provider.submit.assert_called_once()
@@ -178,10 +180,11 @@ class DurableDelivery(unittest.TestCase):
             cur.execute("SELECT relrowsecurity FROM pg_class WHERE relname='support_email_drafts'")
             self.assertTrue(cur.fetchone()['relrowsecurity'])
 
-    def test_reconciliation_is_bounded(self):
+    def test_reconciliation_switches_to_bounded_slow_checks(self):
         self.provider.submit.return_value={'status':'unknown'};self.submit()
         for _ in range(6):self.expire();self.assertIsNotNone(self.store.due(self.mailbox))
-        self.expire();self.assertIsNone(self.store.due(self.mailbox))
+        self.expire();self.assertIsNotNone(self.store.due(self.mailbox))
+        self.assertIsNone(self.store.due(self.mailbox))
 
     def test_transient_confirmed_rejections_retry_bounded_with_cooldown(self):
         self.provider.submit.return_value={'status':'rejected','retryable':True,'error_category':'PROVIDER_4XX'}

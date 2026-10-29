@@ -1,0 +1,709 @@
+{
+  "failure_at": "2026-10-22T00:39:55.354102+00:00",
+  "product_gid": "gid://shopify/Product/15432135377203",
+  "source": {
+    "product_gid": "gid://shopify/Product/15432135377203",
+    "file_id": "id:u1tYiAa2O-AAAAAAAACF1A",
+    "revision": "0165e5100037111000000036d367e13",
+    "content_hash": "371c3dabf911a0b5945fd68b3142f865b0224a77eee6020264b3c632cf9319bb"
+  },
+  "source_psd_bytes": 245028824,
+  "source_dimensions": [
+    2835,
+    2004
+  ],
+  "prepared_dimensions": [
+    11340,
+    8016
+  ],
+  "preparation_geometry": {
+    "scale": 4,
+    "method": "photoshop_layered_bicubic_smoother",
+    "supplier_verified": false,
+    "aspect_preserved": true,
+    "quality_approval_required": true
+  },
+  "required_files": {
+    "manifest.json": 39856,
+    "master.png": 95211976,
+    "original.png": 95217080,
+    "number-1.png": 66401,
+    "number-2.png": 67064,
+    "number-3.png": 67348,
+    "number-4.png": 66838,
+    "number-5.png": 67140,
+    "number-6.png": 67501,
+    "number-7.png": 67030,
+    "number-8.png": 67497,
+    "number-9.png": 67402,
+    "number-10.png": 66312,
+    "number-11.png": 65796,
+    "number-12.png": 66929,
+    "number-13.png": 66872,
+    "number-14.png": 66496,
+    "number-15.png": 66689,
+    "number-16.png": 67188,
+    "number-17.png": 66606,
+    "number-18.png": 67249,
+    "number-19.png": 66909,
+    "number-20.png": 67075,
+    "number-21.png": 66780,
+    "number-22.png": 67324,
+    "number-23.png": 67769,
+    "number-24.png": 67121,
+    "number-25.png": 67542,
+    "number-26.png": 67768,
+    "number-27.png": 67233,
+    "number-28.png": 67849,
+    "number-29.png": 67592,
+    "number-30.png": 67482,
+    "number-31.png": 66702,
+    "number-32.png": 67908,
+    "number-33.png": 67431,
+    "number-34.png": 67460,
+    "number-35.png": 67670,
+    "number-36.png": 67873,
+    "number-37.png": 67422,
+    "number-38.png": 68046,
+    "number-39.png": 67681,
+    "number-40.png": 66782,
+    "number-41.png": 66461,
+    "number-42.png": 67153,
+    "number-43.png": 67331,
+    "number-44.png": 66581,
+    "number-45.png": 67059,
+    "number-46.png": 67453,
+    "number-47.png": 66886,
+    "number-48.png": 67543,
+    "number-49.png": 67319,
+    "number-50.png": 67149,
+    "number-51.png": 66660,
+    "number-52.png": 67579,
+    "number-53.png": 67516,
+    "number-54.png": 67109,
+    "number-55.png": 67046,
+    "number-56.png": 67709,
+    "number-57.png": 67149,
+    "number-58.png": 67717,
+    "number-59.png": 67498,
+    "number-60.png": 67491,
+    "number-61.png": 67042,
+    "number-62.png": 67676,
+    "number-63.png": 67777,
+    "number-64.png": 67523,
+    "number-65.png": 67637,
+    "number-66.png": 67598,
+    "number-67.png": 67530,
+    "number-68.png": 67973,
+    "number-69.png": 67822,
+    "number-70.png": 66995,
+    "number-71.png": 66461,
+    "number-72.png": 67371,
+    "number-73.png": 67540,
+    "number-74.png": 66821,
+    "number-75.png": 67251,
+    "number-76.png": 67532,
+    "number-77.png": 66750,
+    "number-78.png": 67521,
+    "number-79.png": 67251,
+    "number-80.png": 67656,
+    "number-81.png": 67172,
+    "number-82.png": 67833,
+    "number-83.png": 67929,
+    "number-84.png": 67479,
+    "number-85.png": 67708,
+    "number-86.png": 67942,
+    "number-87.png": 67526,
+    "number-88.png": 67602,
+    "number-89.png": 67882,
+    "number-90.png": 67400,
+    "number-91.png": 66821,
+    "number-92.png": 67580,
+    "number-93.png": 67783,
+    "number-94.png": 67323,
+    "number-95.png": 67579,
+    "number-96.png": 67756,
+    "number-97.png": 67195,
+    "number-98.png": 67853,
+    "number-99.png": 67040,
+    "number-100.png": 66500,
+    "reference-1.png": 95217080,
+    "reference-100.png": 95217042
+  },
+  "zip_members": {
+    "manifest.json": {
+      "bytes": 39856,
+      "compressed_bytes": 39856,
+      "compression": 0
+    },
+    "master.png": {
+      "bytes": 95211976,
+      "compressed_bytes": 95211976,
+      "compression": 0
+    },
+    "original.png": {
+      "bytes": 95217080,
+      "compressed_bytes": 95217080,
+      "compression": 0
+    },
+    "number-1.png": {
+      "bytes": 66401,
+      "compressed_bytes": 66401,
+      "compression": 0
+    },
+    "number-2.png": {
+      "bytes": 67064,
+      "compressed_bytes": 67064,
+      "compression": 0
+    },
+    "number-3.png": {
+      "bytes": 67348,
+      "compressed_bytes": 67348,
+      "compression": 0
+    },
+    "number-4.png": {
+      "bytes": 66838,
+      "compressed_bytes": 66838,
+      "compression": 0
+    },
+    "number-5.png": {
+      "bytes": 67140,
+      "compressed_bytes": 67140,
+      "compression": 0
+    },
+    "number-6.png": {
+      "bytes": 67501,
+      "compressed_bytes": 67501,
+      "compression": 0
+    },
+    "number-7.png": {
+      "bytes": 67030,
+      "compressed_bytes": 67030,
+      "compression": 0
+    },
+    "number-8.png": {
+      "bytes": 67497,
+      "compressed_bytes": 67497,
+      "compression": 0
+    },
+    "number-9.png": {
+      "bytes": 67402,
+      "compressed_bytes": 67402,
+      "compression": 0
+    },
+    "number-10.png": {
+      "bytes": 66312,
+      "compressed_bytes": 66312,
+      "compression": 0
+    },
+    "number-11.png": {
+      "bytes": 65796,
+      "compressed_bytes": 65796,
+      "compression": 0
+    },
+    "number-12.png": {
+      "bytes": 66929,
+      "compressed_bytes": 66929,
+      "compression": 0
+    },
+    "number-13.png": {
+      "bytes": 66872,
+      "compressed_bytes": 66872,
+      "compression": 0
+    },
+    "number-14.png": {
+      "bytes": 66496,
+      "compressed_bytes": 66496,
+      "compression": 0
+    },
+    "number-15.png": {
+      "bytes": 66689,
+      "compressed_bytes": 66689,
+      "compression": 0
+    },
+    "number-16.png": {
+      "bytes": 67188,
+      "compressed_bytes": 67188,
+      "compression": 0
+    },
+    "number-17.png": {
+      "bytes": 66606,
+      "compressed_bytes": 66606,
+      "compression": 0
+    },
+    "number-18.png": {
+      "bytes": 67249,
+      "compressed_bytes": 67249,
+      "compression": 0
+    },
+    "number-19.png": {
+      "bytes": 66909,
+      "compressed_bytes": 66909,
+      "compression": 0
+    },
+    "number-20.png": {
+      "bytes": 67075,
+      "compressed_bytes": 67075,
+      "compression": 0
+    },
+    "number-21.png": {
+      "bytes": 66780,
+      "compressed_bytes": 66780,
+      "compression": 0
+    },
+    "number-22.png": {
+      "bytes": 67324,
+      "compressed_bytes": 67324,
+      "compression": 0
+    },
+    "number-23.png": {
+      "bytes": 67769,
+      "compressed_bytes": 67769,
+      "compression": 0
+    },
+    "number-24.png": {
+      "bytes": 67121,
+      "compressed_bytes": 67121,
+      "compression": 0
+    },
+    "number-25.png": {
+      "bytes": 67542,
+      "compressed_bytes": 67542,
+      "compression": 0
+    },
+    "number-26.png": {
+      "bytes": 67768,
+      "compressed_bytes": 67768,
+      "compression": 0
+    },
+    "number-27.png": {
+      "bytes": 67233,
+      "compressed_bytes": 67233,
+      "compression": 0
+    },
+    "number-28.png": {
+      "bytes": 67849,
+      "compressed_bytes": 67849,
+      "compression": 0
+    },
+    "number-29.png": {
+      "bytes": 67592,
+      "compressed_bytes": 67592,
+      "compression": 0
+    },
+    "number-30.png": {
+      "bytes": 67482,
+      "compressed_bytes": 67482,
+      "compression": 0
+    },
+    "number-31.png": {
+      "bytes": 66702,
+      "compressed_bytes": 66702,
+      "compression": 0
+    },
+    "number-32.png": {
+      "bytes": 67908,
+      "compressed_bytes": 67908,
+      "compression": 0
+    },
+    "number-33.png": {
+      "bytes": 67431,
+      "compressed_bytes": 67431,
+      "compression": 0
+    },
+    "number-34.png": {
+      "bytes": 67460,
+      "compressed_bytes": 67460,
+      "compression": 0
+    },
+    "number-35.png": {
+      "bytes": 67670,
+      "compressed_bytes": 67670,
+      "compression": 0
+    },
+    "number-36.png": {
+      "bytes": 67873,
+      "compressed_bytes": 67873,
+      "compression": 0
+    },
+    "number-37.png": {
+      "bytes": 67422,
+      "compressed_bytes": 67422,
+      "compression": 0
+    },
+    "number-38.png": {
+      "bytes": 68046,
+      "compressed_bytes": 68046,
+      "compression": 0
+    },
+    "number-39.png": {
+      "bytes": 67681,
+      "compressed_bytes": 67681,
+      "compression": 0
+    },
+    "number-40.png": {
+      "bytes": 66782,
+      "compressed_bytes": 66782,
+      "compression": 0
+    },
+    "number-41.png": {
+      "bytes": 66461,
+      "compressed_bytes": 66461,
+      "compression": 0
+    },
+    "number-42.png": {
+      "bytes": 67153,
+      "compressed_bytes": 67153,
+      "compression": 0
+    },
+    "number-43.png": {
+      "bytes": 67331,
+      "compressed_bytes": 67331,
+      "compression": 0
+    },
+    "number-44.png": {
+      "bytes": 66581,
+      "compressed_bytes": 66581,
+      "compression": 0
+    },
+    "number-45.png": {
+      "bytes": 67059,
+      "compressed_bytes": 67059,
+      "compression": 0
+    },
+    "number-46.png": {
+      "bytes": 67453,
+      "compressed_bytes": 67453,
+      "compression": 0
+    },
+    "number-47.png": {
+      "bytes": 66886,
+      "compressed_bytes": 66886,
+      "compression": 0
+    },
+    "number-48.png": {
+      "bytes": 67543,
+      "compressed_bytes": 67543,
+      "compression": 0
+    },
+    "number-49.png": {
+      "bytes": 67319,
+      "compressed_bytes": 67319,
+      "compression": 0
+    },
+    "number-50.png": {
+      "bytes": 67149,
+      "compressed_bytes": 67149,
+      "compression": 0
+    },
+    "number-51.png": {
+      "bytes": 66660,
+      "compressed_bytes": 66660,
+      "compression": 0
+    },
+    "number-52.png": {
+      "bytes": 67579,
+      "compressed_bytes": 67579,
+      "compression": 0
+    },
+    "number-53.png": {
+      "bytes": 67516,
+      "compressed_bytes": 67516,
+      "compression": 0
+    },
+    "number-54.png": {
+      "bytes": 67109,
+      "compressed_bytes": 67109,
+      "compression": 0
+    },
+    "number-55.png": {
+      "bytes": 67046,
+      "compressed_bytes": 67046,
+      "compression": 0
+    },
+    "number-56.png": {
+      "bytes": 67709,
+      "compressed_bytes": 67709,
+      "compression": 0
+    },
+    "number-57.png": {
+      "bytes": 67149,
+      "compressed_bytes": 67149,
+      "compression": 0
+    },
+    "number-58.png": {
+      "bytes": 67717,
+      "compressed_bytes": 67717,
+      "compression": 0
+    },
+    "number-59.png": {
+      "bytes": 67498,
+      "compressed_bytes": 67498,
+      "compression": 0
+    },
+    "number-60.png": {
+      "bytes": 67491,
+      "compressed_bytes": 67491,
+      "compression": 0
+    },
+    "number-61.png": {
+      "bytes": 67042,
+      "compressed_bytes": 67042,
+      "compression": 0
+    },
+    "number-62.png": {
+      "bytes": 67676,
+      "compressed_bytes": 67676,
+      "compression": 0
+    },
+    "number-63.png": {
+      "bytes": 67777,
+      "compressed_bytes": 67777,
+      "compression": 0
+    },
+    "number-64.png": {
+      "bytes": 67523,
+      "compressed_bytes": 67523,
+      "compression": 0
+    },
+    "number-65.png": {
+      "bytes": 67637,
+      "compressed_bytes": 67637,
+      "compression": 0
+    },
+    "number-66.png": {
+      "bytes": 67598,
+      "compressed_bytes": 67598,
+      "compression": 0
+    },
+    "number-67.png": {
+      "bytes": 67530,
+      "compressed_bytes": 67530,
+      "compression": 0
+    },
+    "number-68.png": {
+      "bytes": 67973,
+      "compressed_bytes": 67973,
+      "compression": 0
+    },
+    "number-69.png": {
+      "bytes": 67822,
+      "compressed_bytes": 67822,
+      "compression": 0
+    },
+    "number-70.png": {
+      "bytes": 66995,
+      "compressed_bytes": 66995,
+      "compression": 0
+    },
+    "number-71.png": {
+      "bytes": 66461,
+      "compressed_bytes": 66461,
+      "compression": 0
+    },
+    "number-72.png": {
+      "bytes": 67371,
+      "compressed_bytes": 67371,
+      "compression": 0
+    },
+    "number-73.png": {
+      "bytes": 67540,
+      "compressed_bytes": 67540,
+      "compression": 0
+    },
+    "number-74.png": {
+      "bytes": 66821,
+      "compressed_bytes": 66821,
+      "compression": 0
+    },
+    "number-75.png": {
+      "bytes": 67251,
+      "compressed_bytes": 67251,
+      "compression": 0
+    },
+    "number-76.png": {
+      "bytes": 67532,
+      "compressed_bytes": 67532,
+      "compression": 0
+    },
+    "number-77.png": {
+      "bytes": 66750,
+      "compressed_bytes": 66750,
+      "compression": 0
+    },
+    "number-78.png": {
+      "bytes": 67521,
+      "compressed_bytes": 67521,
+      "compression": 0
+    },
+    "number-79.png": {
+      "bytes": 67251,
+      "compressed_bytes": 67251,
+      "compression": 0
+    },
+    "number-80.png": {
+      "bytes": 67656,
+      "compressed_bytes": 67656,
+      "compression": 0
+    },
+    "number-81.png": {
+      "bytes": 67172,
+      "compressed_bytes": 67172,
+      "compression": 0
+    },
+    "number-82.png": {
+      "bytes": 67833,
+      "compressed_bytes": 67833,
+      "compression": 0
+    },
+    "number-83.png": {
+      "bytes": 67929,
+      "compressed_bytes": 67929,
+      "compression": 0
+    },
+    "number-84.png": {
+      "bytes": 67479,
+      "compressed_bytes": 67479,
+      "compression": 0
+    },
+    "number-85.png": {
+      "bytes": 67708,
+      "compressed_bytes": 67708,
+      "compression": 0
+    },
+    "number-86.png": {
+      "bytes": 67942,
+      "compressed_bytes": 67942,
+      "compression": 0
+    },
+    "number-87.png": {
+      "bytes": 67526,
+      "compressed_bytes": 67526,
+      "compression": 0
+    },
+    "number-88.png": {
+      "bytes": 67602,
+      "compressed_bytes": 67602,
+      "compression": 0
+    },
+    "number-89.png": {
+      "bytes": 67882,
+      "compressed_bytes": 67882,
+      "compression": 0
+    },
+    "number-90.png": {
+      "bytes": 67400,
+      "compressed_bytes": 67400,
+      "compression": 0
+    },
+    "number-91.png": {
+      "bytes": 66821,
+      "compressed_bytes": 66821,
+      "compression": 0
+    },
+    "number-92.png": {
+      "bytes": 67580,
+      "compressed_bytes": 67580,
+      "compression": 0
+    },
+    "number-93.png": {
+      "bytes": 67783,
+      "compressed_bytes": 67783,
+      "compression": 0
+    },
+    "number-94.png": {
+      "bytes": 67323,
+      "compressed_bytes": 67323,
+      "compression": 0
+    },
+    "number-95.png": {
+      "bytes": 67579,
+      "compressed_bytes": 67579,
+      "compression": 0
+    },
+    "number-96.png": {
+      "bytes": 67756,
+      "compressed_bytes": 67756,
+      "compression": 0
+    },
+    "number-97.png": {
+      "bytes": 67195,
+      "compressed_bytes": 67195,
+      "compression": 0
+    },
+    "number-98.png": {
+      "bytes": 67853,
+      "compressed_bytes": 67853,
+      "compression": 0
+    },
+    "number-99.png": {
+      "bytes": 67040,
+      "compressed_bytes": 67040,
+      "compression": 0
+    },
+    "number-100.png": {
+      "bytes": 66500,
+      "compressed_bytes": 66500,
+      "compression": 0
+    },
+    "reference-100.png": {
+      "bytes": 95217042,
+      "compressed_bytes": 95217042,
+      "compression": 0
+    },
+    "transport.json": {
+      "bytes": 409,
+      "compressed_bytes": 409,
+      "compression": 0
+    },
+    "transport-reference-1.bin": {
+      "bytes": 2929,
+      "compressed_bytes": 2929,
+      "compression": 0
+    }
+  },
+  "local_transfer": {
+    "package_bytes": 292429952,
+    "sha256": "1a3fb39f69bfa08e1056d0ccf82dda686f309126e1e2fe704bbf3eb0555c365a",
+    "chunk_count": 35,
+    "largest_request_bytes": 8388608,
+    "resumed_bytes": 8388608,
+    "imported_sessions": 1,
+    "import_count": 1,
+    "proofs": [
+      {
+        "number": 1,
+        "reference_sha256": "3babfc4e6e31f5917224246550caa0b3a4bb04211ddf179c31933e4380b06fdd",
+        "preparation_hash": "36f0d1f9569ec87b74c15c84b38ba6b61d5da9113128943907992409f339616c",
+        "pixel_exact": true
+      },
+      {
+        "number": 100,
+        "reference_sha256": "c182d659a53fb901359da87a145eaf3aad3061d4ce649ec9ceb70a3fa4037664",
+        "preparation_hash": "36f0d1f9569ec87b74c15c84b38ba6b61d5da9113128943907992409f339616c",
+        "pixel_exact": true
+      },
+      {
+        "original_sha256": "538a9b770e6598fc43531826fed1281de5db216bb5f8d4d5b0a843e42ed2c155",
+        "outside_number_exact": true,
+        "preparation_hash": "36f0d1f9569ec87b74c15c84b38ba6b61d5da9113128943907992409f339616c"
+      }
+    ],
+    "result": "Verified locally; production readiness still required",
+    "actual_design": true,
+    "python_peak_working_set_bytes": 1176764416
+  },
+  "legacy_limit": 268435456,
+  "expanded_limit": 1073741824,
+  "live_status": "Blocked; no production retry or release performed",
+  "normal_retry_verification": {
+    "reused_retained_exports": true,
+    "source_journal_unchanged": true,
+    "photoshop_started": false,
+    "network_used": false,
+    "package_bytes": 292429952,
+    "sha256": "418536ca922889a43c131712ce5bab57049f0ab8a399b123f65c8bf4d4128c8a",
+    "all_member_bytes_unchanged": true,
+    "zip_timestamp_differs": true
+  }
+}

@@ -171,6 +171,10 @@ def for_job(job, result):
                       preparation_geometry=manifest.get('preparation_geometry'), dpi_metadata=result.get('ppi_metadata'),
                       test_only=result.get('test_only'))
         plan=(manifest.get('preparation_geometry') or {}).get('plan') or {}
+        target=plan.get('quality_target') or {}
+        for ref in target.get('references') or []:
+            info['notes'].append('Preparation raster floor: '+str(ref.get('name') or ref.get('sku'))+
+                ' · '+' × '.join(str(n) for n in ref['dimensions'])+' px. This is a sizing reference, not a supplier Excellent rating or proof of native detail.')
         if plan.get('resolution_status')=='below_target_worker_budget':
             info['notes'].append('Preparation remains below its selected target: the required proportional canvas exceeds the unchanged 95 MP worker budget. A bounded legacy result was retained; no target success is claimed.')
         return info

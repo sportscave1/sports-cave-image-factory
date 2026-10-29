@@ -75,7 +75,7 @@ Do not regenerate already approved cards.'''
             self.assertIn(label, prompt)
             self.assertIn(brief, prompt)
         for requirement in ('Generate each COMPLETE mockup in one image-generation call', 'not guaranteed pixel-identical reproduction',
-                            'Where the selected product is confirmed as A1', 'If another size or verified outer measurement',
+                            'owner-confirmed large 87 × 62 cm landscape edition', 'premium glass; never ask for size or glazing confirmation',
                             '1024 × 1024', 'Inspect each actual result against the reference'):
             self.assertIn(requirement, PER_IMAGE)
         self.assertIn('Immediately generate Card 1 as one standalone image', INSTRUCTIONS)

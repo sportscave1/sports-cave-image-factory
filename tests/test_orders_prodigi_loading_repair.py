@@ -34,7 +34,7 @@ class CapturingExecutor:
 
 
 class OrdersProdigiLoadingRepairTests(unittest.TestCase):
-    def test_orders_default_async_load_requests_latest_50_without_shopify(self):
+    def test_orders_default_async_load_requests_latest_75_without_shopify(self):
         executor = CapturingExecutor()
         fake_st = SimpleNamespace(session_state={})
 
@@ -51,7 +51,7 @@ class OrdersProdigiLoadingRepairTests(unittest.TestCase):
         function, args, kwargs = executor.calls[0]
         self.assertIs(function, orders_page._read_orders_snapshot)
         self.assertEqual(args, ())
-        self.assertEqual(kwargs, {"search": "", "limit": 50})
+        self.assertEqual(kwargs, {"search": "", "limit": 75})
 
     def test_orders_search_is_submitted_and_visibility_poll_runs_after_table(self):
         search_source = inspect.getsource(orders_page._render_orders_search_form)

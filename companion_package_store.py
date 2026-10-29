@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import shutil
 import time
 import auto_editions as ae
 from companion_package_identity import CHUNK,BLOCK,validate
@@ -120,6 +121,9 @@ class Sessions:
                 if result is None:
                     with tempfile.TemporaryDirectory(prefix='sc-resumable-') as folder:
                         archive=Path(folder)/'package.zip'
+                        from auto_editions_package_limits import DISK_RESERVE
+                        if shutil.disk_usage(folder).free<row['descriptor']['bytes']+DISK_RESERVE:
+                            raise OSError('Insufficient temporary disk space for retained preparation; retry pending.')
                         started=time.monotonic();self.provider.download(row['data']['receipt'],archive)
                         downloaded=time.monotonic()-started;started=time.monotonic()
                         if archive.stat().st_size!=row['descriptor']['bytes'] or ae.file_hash(archive)!=row['descriptor']['sha256']:

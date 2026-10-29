@@ -37,6 +37,58 @@ class PreparationTests(unittest.TestCase):
         return editor,result,shop
     def accepted(self,editor,result,op=None):
         return accept(self.store,ADMIN,editor,op or str(uuid.uuid4()),snapshot_id=result['snapshot_id'],confirmed=True,env=LIVE)
+    def test_preview_url_difference_publishes_exact_reviewed_snapshot(self):
+        with patch.object(self.store,'render_settings',return_value={**CFG,'test_unsubscribe_url':'https://preview.example.test/crm/unsubscribe/test'}):
+            editor,result,shop=self.reviewed()
+        self.accepted(editor,result)
+        with patch.object(self.store,'render_settings',return_value={**CFG,'test_unsubscribe_url':''}):
+            tick(self.store,shop,env=LIVE)
+        self.assertEqual(lookup(self.store,ADMIN,editor['id'])['status'],'SENDING')
+        template=self.store.q('''SELECT v.content FROM crm_campaigns c JOIN crm_template_versions v
+          ON v.template_id=c.template_id AND v.version=c.template_version WHERE c.id=%s''',(editor['id'],),True)
+        snapshot=self.store.q('SELECT render_settings FROM crm_campaign_snapshots WHERE id=%s',(result['snapshot_id'],),True)
+        self.assertEqual(template['content']['render_settings'],snapshot['render_settings'])
+    def test_changed_sender_blocks_then_explicit_recovery_preserves_campaign_and_members(self):
+        from crm_campaign_send import review
+        from crm_campaign_reprepare import candidate
+        editor,result,shop=self.reviewed();old=self.accepted(editor,result)
+        changed={**LIVE,'RESEND_FROM_NAME':'Changed sender'}
+        tick(self.store,shop,env=changed)
+        job=candidate(self.store,ADMIN,editor['id'])
+        self.assertEqual(job['error_code'],'settings_changed')
+        editor['recovery_operation']=old['operation_id']
+        second=review(shop,self.store,editor,changed)
+        self.assertFalse(second['blockers'])
+        operation=str(uuid.uuid4())
+        received=accept(self.store,ADMIN,editor,operation,snapshot_id=second['snapshot_id'],
+                        confirmed=True,env=changed,recovery_operation=old['operation_id'])
+        self.assertEqual(received['id'],old['id'])
+        self.assertNotEqual(received['operation_id'],old['operation_id'])
+        again=accept(self.store,ADMIN,editor,str(uuid.uuid4()),snapshot_id=second['snapshot_id'],
+                     confirmed=True,env=changed,recovery_operation=old['operation_id'])
+        self.assertEqual(again['operation_id'],operation)
+        tick(self.store,shop,env=changed)
+        self.assertEqual(lookup(self.store,ADMIN,editor['id'])['status'],'SENDING')
+        self.assertIsNone(candidate(self.store,ADMIN,editor['id']))
+        self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_marketing_sends WHERE campaign_id=%s',(editor['id'],),True)['n'],3)
+        self.assertEqual(self.store.q("SELECT count(*) AS n FROM crm_campaign_history WHERE campaign_id=%s AND action='campaign_recovery_accepted'",(editor['id'],),True)['n'],1)
+    def test_failed_terminal_identity_cannot_be_reset_without_recovery_guard(self):
+        editor,result,shop=self.reviewed();self.accepted(editor,result)
+        self.store.q("UPDATE crm_campaign_preparation SET status='FAILED' WHERE campaign_id=%s",(editor['id'],))
+        with self.assertRaises(Exception):
+            self.store.q("UPDATE crm_campaign_preparation SET status='PREPARING' WHERE campaign_id=%s",(editor['id'],))
+    def test_recovery_database_rejects_added_recipients_even_with_server_guard(self):
+        editor,result,shop=self.reviewed();old=self.accepted(editor,result)
+        self.store.q("UPDATE crm_campaign_preparation SET status='FAILED' WHERE campaign_id=%s",(editor['id'],))
+        forged=self.store.q('''INSERT INTO crm_campaign_snapshots(campaign_id,campaign_version,document,render_settings,counts,recipients,schedule)
+          SELECT campaign_id,campaign_version,document,render_settings,counts,
+          recipients||'[ {"id":"gid://shopify/Customer/999999999999","hash":"unreviewed"} ]'::jsonb,schedule
+          FROM crm_campaign_snapshots WHERE id=%s RETURNING id''',(result['snapshot_id'],),True)
+        with self.assertRaisesRegex(Exception,'only remove reviewed recipients'):
+            accept(self.store,ADMIN,editor,str(uuid.uuid4()),snapshot_id=str(forged['id']),confirmed=True,
+                   env=LIVE,recovery_operation=old['operation_id'])
+        self.assertEqual(lookup(self.store,ADMIN,editor['id'])['status'],'FAILED')
+        self.assertEqual(lookup(self.store,ADMIN,editor['id'])['operation_id'],old['operation_id'])
     def test_worker_general_store_adapter_publishes_the_accepted_campaign(self):
         from crm_store import Store
         from crm_worker import _prepare_campaign

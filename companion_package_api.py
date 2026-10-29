@@ -21,12 +21,19 @@ def accepted():
     # Explicit release acceptance, separate from installing code/schema. Default
     # closed, including installations which prematurely enabled the old flag.
     from companion_package_identity import generation
-    return (os.getenv('COMPANION_RESUMABLE_ACCEPTANCE','')=='provider-postgres-retention-v1'
+    return (os.getenv('COMPANION_RESUMABLE_ACCEPTANCE','') in ('provider-postgres-retention-v1','provider-postgres-retention-large-v2')
         and os.getenv('COMPANION_RESUMABLE_ACCEPTANCE_GENERATION','')==generation()
         and re.fullmatch('[a-f0-9]{64}',os.getenv('COMPANION_RESUMABLE_ACCEPTANCE_EVIDENCE_SHA256','')) is not None)
 
 
 def capability():return 1 if enabled() and runtime.enabled() and accepted() else 0
+
+
+def upload_max_bytes():
+    from auto_editions_package_limits import LEGACY_BYTES,RESUMABLE_BYTES
+    # Prior acceptance evidence covered only packets <=256 MiB. Installation
+    # alone must not advertise or admit the newly supported large packets.
+    return RESUMABLE_BYTES if capability()==1 and os.getenv('COMPANION_RESUMABLE_ACCEPTANCE','')=='provider-postgres-retention-large-v2' else LEGACY_BYTES
 
 
 def service():
@@ -87,6 +94,9 @@ async def host(request):
             if not setup['context'].get('automatic') or setup.get('host_token_hash')!=host_hash or setup['actor_id']!=owner:
                 raise PermissionError('The exact host-owned product preparation grant is required.')
             descriptor=await files._json_body(request)
+            if isinstance(descriptor,dict) and type(descriptor.get('bytes')) is int and descriptor['bytes']>upload_max_bytes():
+                from auto_editions_package_limits import transfer_error
+                raise transfer_error(descriptor['bytes'],upload_max_bytes())
             correlation=request.headers.get('x-sc-transfer-id','')
             correlation=correlation if re.fullmatch('[a-f0-9]{32}',correlation) else None
             result=await run_in_threadpool(store.create,owner,host_hash,str(request.base_url).rstrip('/'),setup['context'],descriptor,correlation)

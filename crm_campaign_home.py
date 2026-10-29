@@ -18,7 +18,7 @@ FIELDS = ('campaign','market','updated','recipients','delivered','opened','click
 def refresh_delay():
     states=st.session_state.get('campaign_home_activity',{}).values()
     from crm_campaign_progress import POLL_SECONDS
-    return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else POLL_SECONDS if st.session_state.get('campaign_home_dispatch_active') else TTL
+    return .25 if any(s in ('UNRESOLVED','LOADING','REFRESHING') for s in states) else POLL_SECONDS if st.session_state.get('campaign_home_dispatch_active') else 3 if st.session_state.get('campaign_home_callback_watch') else TTL
 
 
 def arm_home_poll(*, key='crm-home-poll', seconds=None):
@@ -164,6 +164,7 @@ def row_html(row):
     submission=('<small>'+format(row['submitted'],',')+' / '+format(row['planned'],',')+' submitted</small>') if row['status']=='SENDING' and row.get('submitted') is not None and row.get('planned') is not None else ''
     progress=row.get('progress')
     if progress:
+        if row['status']=='PREPARING':status='Verifying' if progress.get('preparation_claimed') else 'Queued'
         detail=' · '.join(str(progress[f])+' '+f for f in ('submitted','skipped','failed','held'))
         if row['status']=='FAILED':status='Needs attention'
         elif progress.get('stalled'):status='Stalled'
@@ -210,6 +211,19 @@ def actions(store,user,row):
     if row.get('deletable') and st.button('Delete campaign',icon=':material/delete:',help='Delete campaign',key='home_delete_'+identity):
         st.session_state['campaign_home_delete_id']=identity
     with st.popover('⋯',help='Actions for '+row['name']), st.container(key='home-actions-'+identity):
+        if row.get('status')=='FAILED' and st.button('Re-review & resume',key='home_recover_'+identity):
+            from crm_campaign_reprepare import candidate
+            recovery=candidate(store,user,identity)
+            if not recovery:st.warning('Recovery requires reconciliation of existing recipient work. Do not resend.')
+            else:
+                from copy import deepcopy
+                from crm_campaign_send_ui import review_dialog
+                from crm_shopify import Shopify
+                editor=store.draft(identity)
+                editor['recovery_operation']=str(recovery['operation_id'])
+                st.session_state['campaign_editor']=editor
+                st.session_state['campaign_saved']=deepcopy(editor)
+                review_dialog(Shopify(),store,user,editor,'recover_'+str(recovery['operation_id'])+'_',store.render_settings())
         if st.button('View campaign' if row.get('delivery_status') else 'Edit',key='home_open_'+identity):request_open(identity)
         if row.get('delivery_status',row.get('status'))=='SCHEDULED':
             from crm_campaign_timing_ui import open_edit_schedule,open_send_now
@@ -320,6 +334,7 @@ def campaign_table(store,user):
         # One bounded projection for this visible tab; no top-performer waterfall.
         future=_job(st.session_state,store,key,lambda:rows(store,tab=tab,search=search,market=market,status=status,oldest=sort=='Oldest first',offset=offset))
         items,state=resolve(st.session_state,store,key,future)
+        st.session_state['campaign_home_callback_watch']=bool(items and any(r.get('in_page') and r.get('delivery_status') and not r.get('archived_at') for r in items))
         accepted=st.session_state.get('campaign_home_accepted')
         if accepted:
             authoritative=next((r for r in (items or []) if str(r['id'])==str(accepted['id']) and r.get('delivery_status')),None)
@@ -372,6 +387,9 @@ def home(store,user):
     # shared controller. Child interactions re-arm it when the parent is idle.
     st.session_state['campaign_home_rendering']=True
     try:
+        if st.session_state.get('campaign_home_callback_watch'):
+            from crm_campaign_callback_refresh import watch
+            watch(st.session_state,store)
         st.html(STYLE)
         notice=st.session_state.pop('campaign_home_notice',None)
         if notice:st.toast(notice,icon=':material/check_circle:')

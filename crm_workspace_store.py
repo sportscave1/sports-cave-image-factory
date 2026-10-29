@@ -181,11 +181,18 @@ class WorkspaceRecords(BrandTemplates):
     def reconcile_events_many(self,provider_ids):
         # Early signed callbacks may predate the accepted response. Associate by stored
         # provider ID only, never provider-supplied campaign/recipient tags.
+        provider_ids=sorted(set(provider_ids))
+        if not provider_ids:return
         with self.db() as conn:
-            conn.execute('UPDATE crm_delivery_events e SET test_id=t.id FROM crm_internal_tests t WHERE e.provider_id=ANY(%s) AND t.provider_id=e.provider_id AND e.send_id IS NULL',(provider_ids,))
-            conn.execute('UPDATE crm_delivery_events e SET send_id=s.id FROM crm_marketing_sends s WHERE e.provider_id=ANY(%s) AND s.provider_email_id=e.provider_id AND s.test_send=false AND e.test_id IS NULL',(provider_ids,))
+            # Queue claims can contain different events for the same provider ID.
+            # Serialize overlapping groups in a consistent order, including the
+            # dispatch receipt's early-event reconciliation path.
+            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('crm-resend-provider:'||id,0)) FROM (SELECT unnest(%s::text[]) AS id ORDER BY id) ids",(provider_ids,))
+            conn.execute('UPDATE crm_delivery_events e SET test_id=t.id FROM crm_internal_tests t WHERE e.provider_id=ANY(%s) AND t.provider_id=e.provider_id AND e.send_id IS NULL AND e.test_id IS DISTINCT FROM t.id',(provider_ids,))
+            conn.execute('UPDATE crm_delivery_events e SET send_id=s.id FROM crm_marketing_sends s WHERE e.provider_id=ANY(%s) AND s.provider_email_id=e.provider_id AND s.test_send=false AND e.test_id IS NULL AND e.send_id IS DISTINCT FROM s.id',(provider_ids,))
             conn.execute('INSERT INTO crm_marketing_events(event_id,provider_email_id,event_type,recipient_hash,occurred_at) SELECT e.event_id,e.provider_id,e.event_type,s.recipient_hash,e.occurred_at FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id WHERE e.provider_id=ANY(%s) ON CONFLICT DO NOTHING',(provider_ids,))
             rows=conn.execute("SELECT s.recipient_hash,s.shopify_customer_id,e.event_type,e.hard_bounce FROM crm_delivery_events e JOIN crm_marketing_sends s ON s.id=e.send_id WHERE e.provider_id=ANY(%s) AND (e.event_type IN ('email.complained','email.suppressed') OR e.hard_bounce)",(provider_ids,)).fetchall()
+            conn.execute("INSERT INTO crm_runtime_state(key,value) VALUES('resend_callback_revision',%s::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=clock_timestamp()",(json.dumps({'revision':str(uuid.uuid4())}),))
         changed=False
         for row in rows:
             if self.suppressed(row['shopify_customer_id'],row['recipient_hash']):continue

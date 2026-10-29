@@ -2,7 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('nod
 function harness(crypto,textItem=true){
  let now=0,next=1;const timers=new Map(),events={},elements=new Map();
  class Element{
-  constructor(){this.children=[];this.disabled=false;this.html='';this.style={setProperty(){}};}
+  constructor(){this.children=[];this.disabled=false;this.html='';this.dataset={};this.style={setProperty(){}};}
   set textContent(v){this.html=v;this.children=[];}get textContent(){return this.html;}
   set innerHTML(v){this.html=v;}get innerHTML(){return this.html;}
   set id(v){elements.set(v,this);}append(...items){this.children.push(...items);}
@@ -28,7 +28,7 @@ function harness(crypto,textItem=true){
  let resolve;h.pending(new Promise(r=>resolve=r));const copying=prompt.onclick();
  assert.equal(prompt.style.minWidth,'120px');
  assert.equal(prompt.textContent,'Copying…');assert.equal(h.timers.size,0);resolve();await copying;h.pending(null);
- assert.equal(prompt.attributes['aria-label'],'Copy prompt');assert.equal(image.attributes['aria-label'],'Copy black frame');
+ assert.equal(prompt.attributes['aria-label'],'Copy Black Frame Prompt');assert.equal(image.attributes['aria-label'],'Copy black frame');
  assert.equal(prompt.title,'Prompt copied');
  assert.equal(prompt.style.minWidth,'120px');
  assert.equal(prompt.textContent,'Copied');h.tick(1000);await image.onclick();assert.equal(image.textContent,'Copied');

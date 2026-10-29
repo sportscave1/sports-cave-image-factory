@@ -44,6 +44,7 @@ class ReviewJob:
         self.requested_settings = deepcopy(cfg)
         self.audience_job = audience_job
         self.started = time.monotonic()
+        self.completed = None
         self.future = Future()
         self.closed = False
         self.applied = False
@@ -68,6 +69,7 @@ class ReviewJob:
                 result = review(TimedReads(shop,{'segments','campaign_member_ids','campaign_subscribers'}),
                                 TimedReads(store,{'active_suppression_hashes','recent_marketing_hashes','render_settings'}),self.editor,
                                 **({'audience_job':audience_job} if audience_job is not None else {}))
+                self.completed=time.monotonic()
                 self.future.set_result(result)
             except Exception as exc:
                 self.future.set_exception(exc)
@@ -82,7 +84,10 @@ class ReviewJob:
 def start_review(previous, shop, store, user, editor, saved, cfg=None, audience_job=None):
     # Reopening the same in-flight or just-completed review never duplicates a snapshot.
     if previous and previous.identity == identity(editor) and getattr(previous,'requested_settings',None) == cfg and getattr(previous,'audience_job',None) is audience_job:
-        reusable = not previous.future.done() or (previous.future.exception() is None and time.monotonic()-previous.started < 30)
+        completed=getattr(previous,'completed',None)
+        reusable = not previous.future.done() or (previous.future.exception() is None and completed is not None
+                    and time.monotonic()-completed < 240
+                    and (audience_job is None or audience_job.valid()))
         if reusable:
             LOG.info('campaign_review snapshot_reused=%s cache_hit=true age_ms=%.1f',
                 str(previous.future.done()).lower(),(time.monotonic()-previous.started)*1000)

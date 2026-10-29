@@ -1,34 +1,9 @@
+import sports_cave_physical_realism as physical_realism
 """Creative Refresh generation context; production schemas remain owned by ads_page."""
 from sports_categories import sport_family
 from copy import deepcopy
 import json
 import ads_refresh_plan as plan
-
-
-IE_REFRESH_FOOTER_HEADLINES = (
-    'ONLY 100 WILL EVER EXIST',
-    'LIMITED TO 100 EDITIONS',
-    'JUST 100 EDITIONS WORLDWIDE',
-    'ONE OF ONLY 100',
-    'STRICTLY 100 EDITIONS',
-    'ONLY 100 CAN BE CLAIMED',
-    'WHEN 100 GO, IT ENDS',
-    'A 100 EDITION RELEASE',
-    '100 WORLDWIDE. NO MORE',
-    'CLAIM BEFORE 100 ARE GONE',
-)
-IE_REFRESH_FOOTER_SUPPORT = (
-    'Once they’re gone, they’re gone for good.',
-    'A collector release that won’t be repeated.',
-    'No second run after sellout.',
-    'Secure yours before the edition closes.',
-    'A short-run release made for collectors.',
-    'Miss this release and it stays missed.',
-    'The edition retires once the run is gone.',
-    'Own it before the collector window closes.',
-    'Built as a limited run, not a mass release.',
-    'When this release is claimed out, it’s finished.',
-)
 
 
 def ie_refresh_image_rules():
@@ -37,27 +12,18 @@ def ie_refresh_image_rules():
 WINNER_IE supplies the winning creative DNA, collector/scarcity persuasion, product prominence and established footer hierarchy. Evolve that principle into three substantially fresh rooms; never merely recolour or change camera angle. The winner is a creative reference, not the product/frame authority.
 CANONICAL_PRODUCT — the uploaded canonical black-framed website product image — is the absolute authority for exact artwork, black frame thickness, frame depth, outer proportions, bevel profile, frame geometry and glazing relationship. The winning ad must NOT override canonical frame proportions. Preserve the same frame thickness consistently across all three outputs, allowing only physically correct perspective of the whole rigid frame.
 Match the canonical black frame thickness and depth exactly. Do not visually thin, thicken, simplify, flatten or reinterpret the frame.
-The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. If depth/glazing cannot be established from the supplied source, request an additional canonical reference rather than invent construction details.
+The frame is a premium physical object with genuine bevel and mounting depth, never a flat black border. Ignore the canonical photograph's external room/background; never redraw the artwork or import its stock-photo wall into the new scene. Every framed mockup represents the owner-confirmed large 87 × 62 cm landscape edition (62 × 87 cm portrait) with premium glass, not acrylic, even when reflections are absent in the canonical photograph. Never ask for size or glazing confirmation. Preserve source frame depth without inventing measurements.
 
 PREMIUM GLASS, LIGHT AND WALL-MOUNT REALISM — include these requirements explicitly in EACH final image prompt:
-Premium clear glass reflection look on the existing transparent front surface, preserving verified source construction, with clearly visible room-based reflections, physically believable highlight falloff on the glazing, realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glass. Keep reflections restrained and consistent with actual windows/lamps and camera angle; printed artwork text/details remain clear. If the canonical product is explicitly verified as unglazed, preserve that construction instead of adding glass.
+Apply the shared thumbnail-visible protective-glazing requirement for every framed edition with owner-confirmed premium glass, with realistic frame bevel lighting, believable wall mounting depth, soft contact shadow where frame meets wall and realistic ambient occlusion behind/under the frame. Premium interior lighting must interact naturally with the frame and glazing. Preserve unframed construction; every framed edition uses premium glass, never acrylic.
 Use real interior photography, believable wall texture/materials and room proportions, tasteful premium furniture, physically credible lighting sources and high-end but lived-in interior credibility. Product remains the dominant mobile-readable hero on a real customer's wall.
 The final result must feel like a genuine premium lifestyle photograph taken in a real home, not a rendered showroom, not an AI room, and not a flat composited mockup.
 Prohibit flat poster look, matte/no-glass look for a glazed product, pasted-on mockup look, fake shiny CGI glare, generic AI room rendering, inconsistent shadow directions, floating artwork, frame edge distortion and washed-out glazing that hides artwork text/details. Do not add generic decorative clutter or unsupported product details.
 
 IE REFRESH ON-IMAGE FOOTER COPY — apply to ALL THREE covers, not just the first:
-The main/top footer headline must ALWAYS be scarcity/FOMO-led, selected from the approved headline patterns below. Never use Legends On The Wall, Two Names One Standard, Framed Greatness, For Real Fans or a similar generic/conceptual brand headline as the main footer headline. The second footer line must add restrained collector urgency or a distinct scarcity/finality layer; the supporting line must not repeat the headline. CTA remains collector-led within the existing approved CTA bank.
-All 3 outputs must use distinct scarcity/support pairings: three different headlines AND three different supporting lines, with no duplicate footer copy. Do not treat synonym swaps as meaningful variation. If the headline states only 100/100 editions, do not repeat the quantity or worldwide edition statement in its support line. If the headline already expresses sellout finality, support it with collector ownership/limited-run urgency rather than another gone-for-good statement. Avoid pairing two versions of the same finality claim. Preserve the winner's winning scarcity logic across all three while refreshing the rooms substantially.
-Premium, restrained, concise collector tone; no cheap hype, pressure countdowns or invented demand. Keep the established opaque footer, gold separator, safe margins, hierarchy and typography unchanged. Headline: exactly one line, at most 6 words/28 characters. Support: exactly one line, at most 12 words/70 characters. CTA: exactly one line, at most 4 words/24 characters. Shorten copy within the scarcity strategy instead of shrinking fonts or wrapping.
-Evidence gate: 100 in this bank is a pattern example, NOT a product fact. Use 100 only when the canonical artwork or supplied verified product facts confirm that limit; substitute another verified limit and recheck fit. Never infer edition size, remaining stock, exclusivity, no reprint, retirement or a closing deadline from the winner alone. Use no-second-run/finality/support patterns only when that policy is verified. If necessary edition facts are missing, request them before generating final footer copy; do not fall back to a generic non-FOMO headline or fabricate scarcity.
+Use the exact headline and supporting line resolved by the shared approved five-headline bank and historical supporting-line bank in ads_ie_visual_systems. No separate refresh bank, paraphrasing, added product names or extra text. Validate exact bank membership and set uniqueness before generation; reuse the selection verbatim in image prompts and corresponding exported footer fields. Select three different approved headlines per set with no repeats; preserve the assigned headline selections verbatim. CTA: CLAIM YOUR EDITION.
+Restore the assigned supporting sentence directly below the headline in Montserrat Regular, 24–26 px, softer warm off-white. Keep the opaque footer at 18–20% of the square canvas with compact balanced spacing between all three lines, no empty rows or enlargement. Keep the existing typography and fine gold underline beneath the measured 100 glyphs. General Meta copy instructions and character limits apply only to their named Meta fields, never to the selected on-image footer. No additional advertising text in the edition or room photograph; the established footer is required.'''
 
-APPROVED IE CREATIVE REFRESH FOOTER HEADLINE BANK
-''' + '\n'.join('- '+line for line in IE_REFRESH_FOOTER_HEADLINES) + '''
-
-APPROVED IE CREATIVE REFRESH SUPPORTING-LINE BANK
-''' + '\n'.join('- '+line for line in IE_REFRESH_FOOTER_SUPPORT) + '''
-
-Before returning each standalone image prompt, include the complete winner/canonical authority roles, exact frame-thickness/depth instruction, premium glass and wall-mount realism, real-room lifestyle-photography requirement, FOMO-only headline rule, non-repeating support rule and three-output distinct-pair rule. Resolve the exact permitted headline/support/CTA text for that cover in its own prompt; do not leave a choice bank or an instruction to consult another brief. Check all three selected pairs together for duplicate ideas and copy before returning them.'''
 
 
 def source_context(source=None):
@@ -71,7 +37,7 @@ The image FAILS and must be regenerated if any of these are missing:
 1. EXACT CANONICAL FRAME
 Match CANONICAL_PRODUCT frame thickness, bevel profile, depth and outer proportions exactly. Never thin, thicken, flatten, simplify or reinterpret the frame. The winning advertisement must never override canonical frame construction.
 2. CLEAR REAL GLASS OR ACRYLIC GLAZING
-The artwork must visibly sit behind genuine transparent glazing. Show restrained but clearly visible room-based reflections across part of the glass, following the flat glass plane and actual room windows/lights with realistic highlight falloff. Keep reflections subtle without obscuring artwork details. Never a matte, frameless, digitally pasted or flat poster look.
+For every framed edition, apply the shared thumbnail-visible protective-glazing requirement; missing or imperceptible surface reflections fail visual review, and frame-edge highlights alone do not count. Use owner-confirmed premium glass, not acrylic; preserve the exclusion for unframed products. Prompt wording alone cannot pass this visual check.
 3. PREMIUM FRAME BEVEL LIGHTING
 Room light must naturally interact with the physical black frame. At least one front bevel and, where perspective permits, one frame side/depth edge must visibly catch realistic light. The frame must read as a three-dimensional premium physical object.
 4. WALL SEPARATION
@@ -79,11 +45,11 @@ The frame sits physically in front of the wall: believable mounting depth, subtl
 5. CONTACT SHADOW
 Show a soft but clearly visible contact shadow behind/below the frame. Direction, softness and intensity must match the room's primary light source.
 6. PRODUCT FIRST
-Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, visible real glass, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
+Do not prioritise decorative room styling until exact canonical frame thickness, physical frame depth, thumbnail-visible protective glazing on every framed edition, frame bevel lighting, wall separation, contact shadow and ambient occlusion are visually convincing. Product physics comes before room decoration.'''
 
 IE_FINAL_PRODUCT_REALISM_GATE = '''FINAL PRODUCT REALISM REJECTION GATE
 Before returning the generated image, reject and regenerate it if ANY of these are true:
-- glass cannot be visually identified
+- a framed edition has missing or imperceptible surface reflections at 256 × 256; frame-edge highlights alone do not count (exclude unframed products)
 - artwork looks like a flat matte print
 - frame looks like a flat black border
 - canonical frame thickness has changed
@@ -92,8 +58,8 @@ Before returning the generated image, reject and regenerate it if ANY of these a
 - mounting separation from the wall is not believable
 - contact shadow is missing
 - ambient occlusion behind the frame is missing
-- glass reflection conflicts with room lighting
-- glass reflection washes out artwork details
+- glazing reflection conflicts with room lighting
+- glazing reflection washes out artwork details
 - frame geometry is distorted
 - product appears digitally pasted onto the wall
 - product appears to float
@@ -149,16 +115,29 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
     refs = refresh_plan['references']
     attachment_rules = ("ATTACH TO CHATGPT: " + ", ".join(f"ATTACHMENT {i} — WINNER_CARD_{i}" for i in range(1, n+1)) + f" in original order. ATTACHMENT {n+1} — CANONICAL_PRODUCT."
                         if carousel else "ATTACHMENT 1 — WINNER_IE (or WINNER_AD for single-image). ATTACHMENT 2 — CANONICAL_PRODUCT — CANONICAL BLACK-FRAME WEBSITE PRODUCT IMAGE (canonical Sports Cave product image).")
+    resolved = ads.resolve_standard_instant_experience_visuals(
+        product_name=product, category=category, country=country,
+        product_metadata=product_metadata, campaign_moment=campaign_moment) if ie else []
     briefs = []
     for i in range(n if carousel else 3):
         reference = refs[i] if carousel else refs[0]
         style = {} if carousel else refresh_plan['styles'][i]
-        briefs.append(ie_refresh_standalone_brief(ads, product, style=style) if ie else plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
+        briefs.append("\n\n".join((plan.AUTHORITY, IE_CRITICAL_PRODUCT_REALISM,
+            ads.build_standard_instant_experience_image_prompt(i + 1, resolved[i],
+                product_name=product, category=category, country=country),
+            ie_refresh_image_rules(), IE_FINAL_PRODUCT_REALISM_GATE)) if ie else plan.standalone_brief(product, reference['label'], scene=reference.get('scene', ''),
                      role=reference.get('role', ''), style=style, detail=carousel and 'detail' in reference.get('role', '').casefold(),
                      dimensions='1080 x 1080'))
+    legacy_style_plan = f"""REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
+{json.dumps(refresh_plan, ensure_ascii=False)}
+For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and retaining three different home settings, colour families, wall finishes and dark/mid/light earthy shades within the Sports Cave brand palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
+Curated eligible style library (IE/single-image only; never override carousel concepts):
+{json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (sport_family(category) + ' ' + category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
+
+""" if not ie else ""
     visual = ads.build_campaign_moment_visual_context(campaign_moment, selected_country=country)
     return f"""SPORTS CAVE — CREATIVE REFRESH
-Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
+{(ads.IE_FOOTER_TEXT_CLARIFICATION + chr(10)) if ie else ""}Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 {'INSTANT EXPERIENCE WINNER REFINEMENT — NEW ENVIRONMENTS' if ie else ''}
 {ads.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION}
 
@@ -176,10 +155,10 @@ Winning description: {source.get('description') or 'Not supplied'}
 Winning CTA: {source.get('cta') or 'Not supplied'}
 Source evidence (factual context, not customer copy):
 {json.dumps(source, ensure_ascii=False, default=str)}
-Verified product context: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
+Verified product context: {json.dumps(physical_realism.prompt_metadata(product_metadata), ensure_ascii=False, default=str)}
 
 REFERENCE AUTHORITIES AND ATTACHMENT CHECKLIST
-{attachment_rules}
+{('GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.' + chr(10)) if ie else ''}{attachment_rules}
 CSV TEMPLATE — separate non-image attachment (legacy ATTACHMENT 3 for single-image workflow).
 {plan.AUTHORITY}
 The PRINTED internal artwork background is immutable. Ignore the canonical image's external wall, room, furniture, camera and shadows. Never reconstruct artwork from a winner.
@@ -194,7 +173,7 @@ Preserve the winning creative DNA. Evolve it rather than discard it. Create NEW 
 prevent creative fatigue, recognisably related to the reference but not duplicates or unrelated styles.
 Preserve concept and advertising principles, not literal room/composition/wall/crop. Redesign architecture/layout, wall palette/material, camera composition plus at least two other scene dimensions. Never only recolour or move the camera.
 Carousel: original card N maps refreshed card N. Keep all {n} scene categories, roles, defining objects and sequence; do not apply the IE style library to carousel. Preserve a supported detail-card function.
-IE: three genuinely different environments, styles, palettes, layouts, camera compositions and materials; compare against WINNER_IE and each sibling. Permanent right/centre/left CSV identities are compatibility IDs, not three camera angles in one room. Do not force unrelated Winner Evolution / Emotional Expansion / Pattern Interrupt strategies.
+IE: three genuinely different environments, styles, palettes, layouts, camera compositions and materials; compare against WINNER_IE and each sibling. Permanent right/centre/left identities retain their assigned camera roles in three different homes. Do not force unrelated Winner Evolution / Emotional Expansion / Pattern Interrupt strategies.
 Do not describe inconclusive signals or mixed components as a statistically proven winner.
 Only use actual supplied evidence; no invented performance claims, offers, scarcity or endorsements.
 
@@ -219,11 +198,10 @@ VISUAL CAMPAIGN MOMENT RULE
 {visual or 'Do not inject the Campaign Moment, event, seasonal props or promotion into visual instructions.'}
 Campaign Moment must never overwrite the reference creative logic. Use only explicitly entered promotions.
 
-REFRESH RUN / CANDIDATE STYLE PLAN (OS has not analysed winner pixels)
-{json.dumps(refresh_plan, ensure_ascii=False)}
-For IE, inspect WINNER_IE before selecting the final three compatible styles from the curated pool, avoiding recent styles and retaining three different home settings, colour families, wall finishes and dark/mid/light earthy shades within the Sports Cave brand palette. If a candidate conflicts with the actual winner/product, replace it with an eligible unused pool entry; return final style IDs in existing brief/context notes. Never shuffle on recopy/save. No stereotypes or invented equipment/logos/memorabilia.
-Curated eligible style library (IE/single-image only; never override carousel concepts):
-{json.dumps([s for s in plan.STYLES if s['context'] != 'motorsport' or any(t in (sport_family(category) + ' ' + category + ' ' + product).casefold() for t in ('motorsport', 'racing', 'formula', 'f1'))] if not carousel else [], ensure_ascii=False)}
+REFRESH RUN / RESOLVED STYLE PLAN (OS has not analysed winner pixels)
+{json.dumps({"references": refs, "resolved_scenes": [{k: v for k, v in row.items() if k not in {"sibling_summaries"}} for row in resolved]} if ie else refresh_plan, ensure_ascii=False)}
+{legacy_style_plan}
+{'Use the resolved hallway / architectural wall / residential man-cave settings and right/front/left cameras verbatim. Inspect WINNER_IE for atmosphere only; never reselect rooms or footer copy. No additional text outside the established footer and immutable edition.' if ie else ''}
 
 STANDALONE EXECUTION CONTRACTS — complete each after actual attachment analysis
 {chr(10).join(briefs)}
@@ -282,7 +260,7 @@ Campaign format: Carousel
 Product page URL: {url}
 LIVE BLACK-FRAME VERIFICATION: open the supplied live product URL, select the Black frame variant and compare the visible original product gallery, text, border and construction. Use the verified Black variant link supplied by Sports Cave OS if available. A URL is not proof pixels were inspected; disclose when direct visual verification is unavailable.
 Verified Black variant source data (when explicitly checked): {json.dumps((product_metadata or {}).get('verified_black_variant') or {}, ensure_ascii=False, default=str)}
-Verified product facts: {json.dumps(product_metadata or {}, ensure_ascii=False, default=str)}
+Verified product facts: {json.dumps(physical_realism.prompt_metadata(product_metadata), ensure_ascii=False, default=str)}
 
 {plan.carousel_copy.instruction(winner, refs)}
 
