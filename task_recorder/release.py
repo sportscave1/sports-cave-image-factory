@@ -17,6 +17,9 @@ REQUIRED = {"task_recorder/server.py", "task_recorder/install.py", "task_recorde
             "task_recorder/requirements-windows.txt", "native-source/build.ps1",
             "desktop_recorder/helper.py", "desktop_recorder/bin/DesktopRecorder.exe", "Install.ps1", "Install.cmd"}
 LIMIT = 128 * 1024 * 1024
+REQUIRED_V2 = {"desktop_recorder/download_install.py", "desktop_recorder/bin/build-manifest.json",
+               "edge-adapter/manifest.json", "edge-adapter/accessibility.js", "edge-adapter/browser-identity.js",
+               "edge-adapter/downloads.js", "download-host/DownloadReceiptHost.exe"}
 
 
 def canonical(value):
@@ -44,11 +47,13 @@ def windows_x64(data):
 
 
 def verify_files(manifest, read):
-    if set(manifest) != {"format", "version", "protocol", "files"} or manifest["format"] != FORMAT or manifest["version"] != 1 or manifest["protocol"] != 4:
+    if set(manifest) != {"format", "version", "protocol", "files"} or manifest["format"] != FORMAT or manifest["version"] not in {1,2} or manifest["protocol"] != 4:
         raise ValueError("Unsupported Windows recorder package.")
     files = manifest["files"]
     if not isinstance(files, dict) or not REQUIRED <= files.keys() or len(files) > 300:
         raise ValueError("Windows recorder package is incomplete.")
+    if manifest['version']==2 and not REQUIRED_V2 <= files.keys():
+        raise ValueError('Windows recorder download integration is incomplete.')
     total = 0
     for name, record in files.items():
         safe_name(name)
@@ -61,6 +66,21 @@ def verify_files(manifest, read):
         if len(data) != record["size"] or digest(data) != record["sha256"]:
             raise ValueError("Package integrity check failed: " + name)
     windows_x64(read("desktop_recorder/bin/DesktopRecorder.exe"))
+    if manifest['version']==2:
+        windows_x64(read('download-host/DownloadReceiptHost.exe'))
+        native=json.loads(read('desktop_recorder/bin/build-manifest.json').decode('utf-8-sig'))
+        if native['executable_sha256']!=digest(read('desktop_recorder/bin/DesktopRecorder.exe')):
+            raise ValueError('Native build identity does not match the packaged executable.')
+        adapter = json.loads(read('edge-adapter/manifest.json'))
+        if adapter['version'] not in {'0.3.4', '0.3.5'}:
+            raise ValueError('Package requires scoped adapter 0.3.4 or 0.3.5.')
+        if adapter['version'] == '0.3.5':
+            if 'edge-adapter/prepared-context.js' not in files:
+                raise ValueError('Prepared-context adapter module is missing.')
+            for script in adapter['content_scripts']:
+                if 'https://sports-cave-image-factory.onrender.com/*' in script['matches']:
+                    if script['js'].index('prepared-context.js') >= script['js'].index('browser-identity.js'):
+                        raise ValueError('Prepared-context adapter must load before browser identity.')
     return digest(canonical(manifest))
 
 
@@ -107,9 +127,26 @@ def build_package(repo, native):
     for path in sorted((repo / "windows-screen-recorder/native").iterdir()):
         if path.is_file() and path.suffix in {".cs", ".ps1"}:
             files["native-source/" + path.name] = path.read_bytes()
+    # New builds must include the full installed runtime, not a valid but
+    # unusable legacy v1 archive. Retain v1 reading only for old releases.
+    build_path = Path(native).with_name('build-manifest.json')
+    build = json.loads(build_path.read_text(encoding='utf-8-sig'))
+    if build.get('executable_sha256') != digest(files['desktop_recorder/bin/DesktopRecorder.exe']):
+        raise ValueError('Native build identity does not match the candidate.')
+    for name, value in files.items():
+        if name.startswith('native-source/') and build.get('sources', {}).get(name.split('/',1)[1]) != digest(value):
+            raise ValueError('Native source changed after compilation: ' + name)
+    receipt = Path(native).with_name('DownloadReceiptHost.exe').read_bytes()
+    if build.get('download_executable_sha256') != digest(receipt):
+        raise ValueError('Download host build identity does not match the candidate.')
+    files['desktop_recorder/bin/build-manifest.json'] = build_path.read_bytes()
+    files['download-host/DownloadReceiptHost.exe'] = receipt
+    for path in sorted((repo / 'windows-screen-recorder/edge-adapter').iterdir()):
+        if path.is_file() and path.suffix in {'.js', '.json'}:
+            files['edge-adapter/' + path.name] = path.read_bytes()
     files["Install.ps1"] = (repo / "scripts/Install-TaskRecorder.ps1").read_bytes()
     files["Install.cmd"] = b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install.ps1"\r\nif errorlevel 1 pause\r\n'
-    manifest = dict(format=FORMAT, version=1, protocol=4,
+    manifest = dict(format=FORMAT, version=2, protocol=4,
                     files={name:dict(sha256=digest(data), size=len(data)) for name, data in sorted(files.items())})
     verify_files(manifest, files.__getitem__)
     files[MANIFEST] = canonical(manifest)
@@ -173,6 +210,9 @@ def prepare(source, install, bootstrap, run):
     python = destination / "venv/Scripts/python.exe"
     run([str(bootstrap), "-m", "venv", str(destination / "venv")])
     run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "--no-deps", "-r", str(app / "task_recorder/requirements-windows.txt")])
+    if (app / 'task_recorder/requirements-ocr.txt').is_file():
+        run([str(python), '-m', 'pip', 'install', '--disable-pip-version-check', '--no-deps',
+             '--target', str(destination / 'ocr'), '-r', str(app / 'task_recorder/requirements-ocr.txt')])
     run([str(python), "-m", "playwright", "install", "chromium"])
     run([str(python), "-I", "-B", str(app / "task_recorder/release_health.py"), "--app", str(app)])
     atomic_text(destination / "ready.json", json.dumps(dict(package_id=package_id)))

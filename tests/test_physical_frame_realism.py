@@ -17,96 +17,35 @@ def strip_physical(prompt):
 
 
 class PhysicalDimensionsTests(unittest.TestCase):
-    def test_xl_landscape_and_portrait(self):
-        for orientation, expected in [('landscape',(87,62)),('portrait',(62,87))]:
-            with self.subTest(orientation=orientation):
-                value = physical.resolve({'selected_size':'XL','orientation':orientation})
-                self.assertEqual((value['width_cm'],value['height_cm']),expected)
-                self.assertEqual(value['measurement_basis'],'display size; outer frame unconfirmed')
-        for label in ('Extra Large','Extra-large'):
-            self.assertEqual(physical.resolve({'selected_size':label,'orientation':'landscape'})['width_cm'],87)
+    def test_owner_defaults_override_legacy_size_and_glazing_without_questions(self):
+        legacy = ({}, {'selected_size':'S'}, {'selected_variant':'Medium'},
+                  {'explicit_dimensions':{'width_cm':80,'height_cm':56}},
+                  {'frame_specs':{'verified':True,'source':'legacy','outer_width_cm':12,'outer_height_cm':9,'glazing':'acrylic'}},
+                  {'selected_variant':{'verified':False,'glazing':'none'}})
+        for data in legacy:
+            for orientation,pair in [('landscape',(87,62)),('portrait',(62,87))]:
+                value = physical.resolve({**data,'orientation':orientation})
+                self.assertEqual((value['width_cm'],value['height_cm']),pair)
+                self.assertEqual(value['glazing'],'premium glass')
+                self.assertNotIn('needs_confirmation',value)
+                self.assertEqual(value['measurement_basis'],'owner-confirmed framed mockup size')
 
-    def test_all_smaller_variants_use_existing_actual_display_sizes(self):
-        for size, pair in [('S',(30,21)),('M',(45,30)),('L',(62,45))]:
-            value = physical.resolve({'selected_size':size,'orientation':'landscape'})
-            self.assertEqual((value['width_cm'],value['height_cm']),pair)
-            text = physical.build({'selected_size':size,'orientation':'landscape'})
-            self.assertNotIn('87',text)
-
-    def test_existing_selected_variant_label_and_a_size_alias(self):
-        for label in ('Oak / M - 30 × 45 cm (11.8 × 17.7 in)', 'M - 30 x 45 cm', 'A3', 'Medium'):
-            value = physical.resolve({'selected_variant':label,'orientation':'landscape'})
-            self.assertEqual((value['width_cm'],value['height_cm']),(45,30))
-
-    def test_verified_outer_frame_overrides_label_no_border_added(self):
-        value = physical.resolve({'selected_size':'XL','orientation':'landscape',
-            'frame_specs':{'verified':True,'source':'Selected product specification','outer_width_cm':86.7,'outer_height_cm':61.8}})
-        self.assertEqual((value['width_cm'],value['height_cm']),(86.7,61.8))
-        self.assertEqual(value['measurement_basis'],'verified outer frame')
-
-    def test_verified_variant_dimensions_and_nominal_basis_preserved(self):
-        value = physical.resolve({'selected_variant':{'verified':True,'source':'Variant specification',
-            'width_cm':59.4,'height_cm':84.1,'measurement_basis':'nominal print'}})
-        self.assertEqual(value['measurement_basis'],'nominal print')
-        self.assertEqual((value['width_cm'],value['height_cm']),(59.4,84.1))
-        self.assertNotIn('verified_depth_mm',value)
-
-    def test_explicit_dimensions_outrank_largest_fallback(self):
-        value = physical.resolve({'showcase_largest':True,'explicit_dimensions':{'width_cm':80,'height_cm':56}})
-        self.assertEqual((value['width_cm'],value['height_cm']),(80,56))
-        self.assertEqual(value['dimension_source'],'explicitly supplied product dimensions')
-
-    def test_largest_reference_only_when_applicable(self):
-        value = physical.resolve({'showcase_largest':True,'orientation':'landscape'})
-        self.assertEqual((value['width_cm'],value['height_cm']),(87,62))
-        for metadata in ({}, {'width':1920,'height':1080}, {'selected_size':'Custom'}):
-            value = physical.resolve(metadata)
-            self.assertNotIn('width_cm',value)
-            self.assertIn('unresolved',value['measurement_basis'])
-
-    def test_unknown_orientation_does_not_force_landscape_or_ratios(self):
-        value = physical.resolve({'selected_size':'XL'})
-        self.assertIn('orient to the unchanged source',value['axes'])
-        self.assertNotIn('comparable_depth_width_ratios',value)
-
-    def test_conflicting_verified_axes_require_confirmation_not_stretching(self):
-        value = physical.resolve({'orientation':'portrait','frame_specs':{'verified':True,'source':'Spec',
-            'outer_width_cm':87,'outer_height_cm':62}})
-        self.assertIn('needs_confirmation',value)
-        self.assertEqual((value['width_cm'],value['height_cm']),(87,62))
-        self.assertNotIn('comparable_depth_width_ratios',value)
-
-    def test_unverified_specs_do_not_invent_depth_glazing_or_dimensions(self):
-        value = physical.resolve({'frame_specs':{'outer_width_cm':120,'outer_height_cm':90,'depth_mm':70,'glazing':'glass'}})
-        for field in ('width_cm','height_cm','verified_depth_mm','glazing'):
-            self.assertNotIn(field,value)
-
-    def test_depth_glazing_finish_only_from_verified_spec(self):
-        value = physical.resolve({'frame_specs':{'verified':True,'source':'Test product specification',
-            'depth_mm':18,'glazing':'clear acrylic / Perspex','frame_finish':'Oak'}})
+    def test_depth_finish_and_source_orientation_are_preserved(self):
+        value = physical.resolve({'frame_specs':{'verified':True,'source':'spec','depth_mm':18,'frame_finish':'Oak','glazing':'acrylic'}})
         self.assertEqual(value['verified_depth_mm'],18)
-        self.assertEqual(value['glazing'],'clear acrylic / Perspex')
         self.assertEqual(value['frame_finish'],'Oak')
+        self.assertEqual(value['orientation'],'preserve source orientation')
+        self.assertNotIn('comparable_depth_width_ratios',value)
+        self.assertNotIn('verified_depth_mm',physical.resolve({'frame_specs':{'depth_mm':70}}))
+        conflict=physical.resolve({'frame_finish':'White','frame_specs':{'verified':True,'source':'spec','frame_finish':'Black'}})
+        self.assertEqual(conflict['frame_finish'],'White')
+        self.assertIn('finish_needs_confirmation',conflict)
 
-    def test_conflicting_specification_cannot_replace_selected_finish(self):
-        value = physical.resolve({'frame_finish':'White','frame_specs':{'verified':True,
-            'source':'Product specification','frame_finish':'Black'}})
-        self.assertEqual(value['frame_finish'],'White')
-        self.assertIn('finish_needs_confirmation',value)
-
-    def test_malformed_nonfinite_and_pixel_values_never_become_physical_size(self):
-        for bad in ('unknown', -1, 0, float('nan'), float('inf'), True):
-            value = physical.resolve({'explicit_dimensions':{'width_cm':bad,'height_cm':62}})
-            self.assertNotIn('width_cm',value)
-        self.assertNotIn('width_cm',physical.resolve({'image':{'width':1024,'height':1024}}))
-
-    def test_frame_sofa_sideboard_doorway_proportions(self):
-        ratios = physical.resolve({'selected_size':'XL','orientation':'landscape'})['comparable_depth_width_ratios']
+    def test_real_scale_ratios(self):
+        ratios=physical.resolve({'orientation':'landscape'})['comparable_depth_width_ratios']
         self.assertAlmostEqual(ratios['180 cm sideboard'],.4833)
         self.assertAlmostEqual(ratios['200 cm sofa'],.435)
         self.assertAlmostEqual(ratios['85 cm doorway'],1.0235)
-        small = physical.resolve({'selected_size':'S','orientation':'landscape'})['comparable_depth_width_ratios']
-        self.assertEqual(small['200 cm sofa'],.15)
 
     def test_input_metadata_is_not_mutated_and_private_fields_not_serialised(self):
         metadata = {'physical_product':{'selected_size':'M','frame_specs':{'verified':True,'source':'spec',
@@ -124,7 +63,7 @@ class PhysicalContractTests(unittest.TestCase):
         for phrase in ('slim front moulding','side profile','clean mitred joins','invent exact frame-depth',
                        'No thick museum surround','invented matboard','minimal source-consistent wall separation',
                        'soft contact shadows','ambient occlusion','natural residential height',
-                       'PREMIUM CLEAR GLASS REFLECTION LOOK','Preserve verified source construction','no manufactured-material claim',
+                       'PREMIUM CLEAR GLASS REFLECTION LOOK','owner confirms premium glass','no glazing confirmation is required',
                        'No thick protruding slab','signatures and existing edition numbers',
                        'source-preserving compositing','rigid product geometry','rendered pixels when available'):
             self.assertIn(phrase,text)
@@ -167,8 +106,8 @@ class PhysicalContractTests(unittest.TestCase):
         original = blocks.build_sports_cave_image_realism_rules(physical_product={'selected_size':'XL','orientation':'landscape'})
         current = blocks.append_sports_cave_image_realism_rules(original,physical_product={'selected_size':'S','orientation':'portrait'})
         self.assertEqual(current.count(physical.MARKER),1)
-        self.assertNotIn('87',current)
-        self.assertIn('"width_cm": 21',current)
+        self.assertIn('87',current)
+        self.assertIn('"width_cm": 62',current)
         self.assertEqual(strip_physical(current),strip_physical(original))
 
     def test_detail_crop_exception_stays_intact(self):
@@ -181,7 +120,7 @@ class PhysicalContractTests(unittest.TestCase):
         prompt = blocks.append_sports_cave_image_realism_rules(original,
             physical_product={'selected_size':'S','orientation':'portrait'})
         self.assertEqual(prompt.count(physical.MARKER),1)
-        self.assertIn('"width_cm": 21',prompt)
+        self.assertIn('"width_cm": 62',prompt)
         self.assertIn(blocks.SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,prompt)
 
 
@@ -239,9 +178,9 @@ class PhysicalWorkflowTests(unittest.TestCase):
                     product_url=value['product_url'],creative_refresh_context=context,
                     product_metadata={'physical_product':{'selected_size':'M','orientation':'landscape'}})
                 for block in physical.BLOCK.findall(prompt):
-                    self.assertIn('"width_cm": 45',block)
-                    self.assertIn('"height_cm": 30',block)
-                    self.assertNotIn('87',block)
+                    self.assertIn('"width_cm": 87',block)
+                    self.assertIn('"height_cm": 62',block)
+                    self.assertIn('premium glass',block)
 
     def test_ie_winner_refinement_direct_builder_applies_verified_specs(self):
         import ads_page as ads
@@ -250,7 +189,7 @@ class PhysicalWorkflowTests(unittest.TestCase):
         prompt = ads.build_instant_experience_winner_refinement_prompt(value['product_name'],'Football','Australia',
             value['product_url'],value['creative_refresh_context'],product_metadata={'selected_size':'XL','orientation':'portrait'})
         self.assertEqual(prompt.count(physical.MARKER),3)
-        self.assertEqual(prompt.count('"width_cm": 62'),3)
+        self.assertTrue(all('"width_cm": 62' in block for block in physical.BLOCK.findall(prompt)))
 
     def test_four_card_winner_keeps_order_scene_roles_and_copy_contract(self):
         from tests.fixtures.carousel_evolution import greg
@@ -313,7 +252,7 @@ class PhysicalWorkflowTests(unittest.TestCase):
         pack = marketing._build_pack(MarketingFactoryPageTests()._inputs(physical_product=context))
         for text in [p['prompt'] for p in social['visual_prompts']] + [pack['mockup_brief']]:
             for block in physical.BLOCK.findall(text):
-                self.assertIn('"width_cm": 21',block)
+                self.assertIn('"width_cm": 62',block)
                 self.assertIn('"frame_finish": "White"',block)
 
     def test_active_reels_stills_and_video_keep_camera_and_artwork_freeze(self):

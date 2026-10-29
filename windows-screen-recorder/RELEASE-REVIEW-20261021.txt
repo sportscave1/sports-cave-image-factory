@@ -1,0 +1,65 @@
+WINDOWS RECORDER RELEASE REVIEW — 21 OCTOBER 2026
+
+SCOPE
+User authorized Git/Render publication and companion update on 21 October.
+Only recorder work is included. Unrelated dirty CRM/email/Shopify work is excluded.
+Production service remains sports-cave-os (srv-d8kl4on7f7vs73dvavv0).
+No Blueprint, infrastructure, migrations or Photoshop companion settings change.
+This release is based on current main d9baa718, retaining its PSD-picker work.
+
+DONE — STABLE PACKAGE
+- Supported cross-app desktop-session capture, durable save and semantic replay.
+- Bounded plain-text Copy with selection/clipboard agreement and source-hash
+  verification; fixed-text paste records the destination value.
+- Minimize capture and restoration before playback focus.
+- Local Edge accessibility adapter for Streamlit dropdown ownership/labels.
+- Review controls for uncertain and restart-interrupted runs. They record a
+  manual observation and leave the run stopped; they never automatically replay.
+- Readable action logs during capture/playback and selected-recording previews.
+- Ctrl+Tab now explicitly interrupts as unsupported in the stable package,
+  instead of silently disappearing as ordinary editor Tab.
+- Versioned, manifest-verified Windows package with retained rollback release.
+
+EVIDENCE
+Before this release: real UI automation record/save/restart/replay passed the
+nine-action Edge/Notepad copy-minimize-paste-return workflow, with independently
+read final text. Real Streamlit dropdown selection replay also passed. Those
+trials used explicit injected-input TEST mode, not human physical-input proof.
+Normal installed operation excludes injected test input.
+Release source: 52 recorder tests plus 85 helper/integration tests and 14 subtests
+passed. Native package compiled. Render topology validator passed. A first
+unittest invocation used the wrong harness/path for the pytest suite; rerunning
+with pytest and the intended source path passed all helper tests.
+The final stable change to Ctrl+Tab is a stop guard; the tab replay candidate is
+not part of the installed executable. Final installed UI acceptance remains a
+separate check from package/import/health checks.
+
+EXPERIMENTAL SOURCE PUBLISHED BUT NOT INSTALLED
+experimental/EdgeTabsCandidateSource.zip preserves all phase-three code/tests.
+It adds an explicit existing-Edge-tab contract, chrome ancestry and page
+verification, memory-label handling and keyboard classification. Its 54 Python
+tests and 33 native identity-policy checks pass. Live tab acceptance did NOT
+complete: the first trial exposed memory labels, and unrelated desktop input
+interrupted the next. See experimental/REVIEW.txt for exact remaining checks.
+The source archive is not included in the companion ZIP and is never imported.
+
+WHAT REMAINS, IN ORDER
+1. Final installed-helper UI record/save/restart/replay acceptance and hosted
+   panel-to-helper command confirmation using only disposable local fixtures.
+2. Complete live existing-tab acceptance, duplicate/missing-tab and cancellation
+   checks, then repeat cross-app regression before promoting that candidate.
+3. New-tab opening, navigation and detached-window/page-drag identity contracts.
+4. Dynamic copy/paste variables. Current recorded text is fixed and Copy expects
+   an unchanged bounded source; it is not a general changing-data transfer engine.
+5. Broader application, DPI/layout, provider-failure and long-session acceptance.
+6. Large-library/history pagination within the helper's 64 KiB state bound.
+
+PRESERVATION
+No recorded data, browser profile, credentials, journals or local trial logs are
+published. Original local files and recordings remain preserved; the verified
+roundtrip task hash is unchanged. The installer retains previous code and uses
+the existing separate TaskRecorderV1 data directory.
+
+Deployment commit, Render result, installed release ID and health observations
+are recorded in the final release receipt after execution. Git publication alone
+does not prove Render readiness or successful desktop action replay.

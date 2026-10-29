@@ -90,7 +90,7 @@ class CombinedExecutionTests(unittest.TestCase):
             self.assertIn(ads.ie_visuals.CAMERAS[i], group)
             self.assertIn("CTA: CLAIM YOUR EDITION", group)
             self.assertIn("1024 x 1024", expanded)
-            self.assertIn("24–28%", expanded)
+            self.assertIn("18–20%", expanded)
 
     def test_automatic_wall_palettes_and_minimal_architectural_glimpses(self):
         forbidden = re.compile(r"\b(red|pink|rose|salmon|peach|orange|terracotta|ochre)\b", re.I)

@@ -11,7 +11,7 @@ MAX_ATTEMPTS=3
 LEASE_SECONDS=300
 FAILURE_MESSAGES={
     'catalogue_changed':'Product information changed. Refresh and review a duplicate campaign.',
-    'settings_changed':'Sender or rendering settings changed. Review a duplicate with the current settings.',
+    'settings_changed':'Sender or rendering settings changed. Re-review this campaign with the current settings before resuming.',
     'schedule_missed':'The schedule passed during verification. Review a duplicate with a future schedule.',
     'verification_unavailable':'Verification is temporarily unavailable.',
     'preparation_attempts_exhausted':'Background verification could not complete after its bounded attempts.',
@@ -36,7 +36,7 @@ def lookup(store,user,identity):
     return receipt(row) if row else None
 
 
-def accept(store,user,editor,operation_id,*,snapshot_id,confirmed=False,env=None):
+def accept(store,user,editor,operation_id,*,snapshot_id,confirmed=False,env=None,recovery_operation=None):
     require(user,'crm_campaigns_manage')
     if confirmed is not True:raise ValueError('Explicit send confirmation is required.')
     identity=str(uuid.UUID(str(editor['id'])));operation=str(uuid.UUID(str(operation_id)))
@@ -44,7 +44,8 @@ def accept(store,user,editor,operation_id,*,snapshot_id,confirmed=False,env=None
         draft=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
         prior=conn.execute('''SELECT p.*,c.status AS delivery_status FROM crm_campaign_preparation p
           LEFT JOIN crm_campaigns c ON c.id=p.campaign_id WHERE p.campaign_id=%s''',(identity,)).fetchone()
-        if prior:
+        recovering=bool(prior and prior['status']=='FAILED' and recovery_operation and str(prior['operation_id'])==str(recovery_operation))
+        if prior and not recovering:
             if str(prior['snapshot_id'])!=str(snapshot_id) or prior['campaign_version']!=editor['version']:
                 raise ValueError('This campaign already has an accepted operation. Open its status; do not send again.')
             return receipt(prior)
@@ -62,9 +63,21 @@ def accept(store,user,editor,operation_id,*,snapshot_id,confirmed=False,env=None
         import os_accounts
         actor={'id':str(user.get('id','')),'role':user.get('role'),'active':True,
                'page_permissions':sorted(os_accounts.permission_keys(user))}
-        row=conn.execute('''INSERT INTO crm_campaign_preparation(campaign_id,operation_id,snapshot_id,
-          campaign_version,actor,reviewed_count,timing) VALUES(%s,%s,%s,%s,%s::jsonb,%s,%s::jsonb) RETURNING *''',
-          (identity,operation,snapshot_id,draft['version'],json.dumps(actor),reviewed['recipients'],json.dumps(reviewed['timing'] or {'mode':'now'}))).fetchone()
+        if recovering:
+            if conn.execute('SELECT 1 FROM crm_marketing_sends WHERE campaign_id=%s',(identity,)).fetchone():
+                raise ValueError('Recipient work exists. Reconcile delivery before recovery.')
+            conn.execute("SELECT set_config('crm.campaign_recovery_operation',%s,true)",(str(recovery_operation),))
+            row=conn.execute('''UPDATE crm_campaign_preparation SET operation_id=%s,snapshot_id=%s,
+              actor=%s::jsonb,reviewed_count=%s,timing=%s::jsonb,status='PREPARING',attempts=0,
+              lease_token=NULL,lease_until=NULL,error_code='',retry_at=now(),accepted_at=now(),updated_at=now()
+              WHERE campaign_id=%s AND status='FAILED' RETURNING *''',
+              (operation,snapshot_id,json.dumps(actor),reviewed['recipients'],json.dumps(reviewed['timing'] or {'mode':'now'}),identity)).fetchone()
+            store._history(conn,{**draft,'preparation':{'operation_id':operation,'snapshot_id':str(snapshot_id)}},
+                           'campaign_recovery_accepted',actor['id'],{**draft,'preparation':{'operation_id':str(prior['operation_id']),'snapshot_id':str(prior['snapshot_id']),'error_code':prior['error_code']}})
+        else:
+            row=conn.execute('''INSERT INTO crm_campaign_preparation(campaign_id,operation_id,snapshot_id,
+              campaign_version,actor,reviewed_count,timing) VALUES(%s,%s,%s,%s,%s::jsonb,%s,%s::jsonb) RETURNING *''',
+              (identity,operation,snapshot_id,draft['version'],json.dumps(actor),reviewed['recipients'],json.dumps(reviewed['timing'] or {'mode':'now'}))).fetchone()
         store._history(conn,draft,'campaign_send_accepted',actor['id'],draft)
     return {**receipt(row),'already_started':False}
 

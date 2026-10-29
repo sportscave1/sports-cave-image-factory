@@ -1,0 +1,173 @@
+{
+  "task": "20261025-35ed7e58",
+  "approved_by_owner": true,
+  "commit": "6661eb6bf3ea8bfe6762273245f57124e952e38f",
+  "service_id": "srv-d8kl4on7f7vs73dvavv0",
+  "service_name": "sports-cave-os",
+  "workspace": "tea-cut91gtsvqrc73e5acs0",
+  "deploy": {
+    "commit": {
+      "createdAt": "2026-10-26T23:36:13Z",
+      "id": "6661eb6bf3ea8bfe6762273245f57124e952e38f",
+      "message": "Shorten mailbox index lease takeover retries [skip render]"
+    },
+    "createdAt": "2026-10-26T23:36:32.558641Z",
+    "finishedAt": "2026-10-26T23:39:11.117324Z",
+    "id": "dep-dbfu801srm7s73buiqm0",
+    "startedAt": "2026-10-26T23:36:32.523515Z",
+    "status": "live",
+    "trigger": "api",
+    "updatedAt": "2026-10-26T23:39:11.117498Z"
+  },
+  "new_instance": "srv-d8kl4on7f7vs73dvavv0-dd89r",
+  "rollback": {
+    "retained_deploy": "dep-dbft45tg1s2s73es9390",
+    "retained_commit": "05a0b87d205a668ebe2508303ae797a9b804e639",
+    "targeted_patch": ".tmp-mailbox-restart-delay-rollback.patch",
+    "patch_sha256": "558146591b81373ef196cc2f69c17bfc00583775735f04b2faa706e22cfb6235",
+    "apply_check_passed": true,
+    "applied": false
+  },
+  "checks": {
+    "approved_patch_unchanged": true,
+    "focused_tests": 74,
+    "topology_passed": true,
+    "diff_check_passed": true,
+    "health_status": 200,
+    "health_body": "ok",
+    "health_observed_ms": 283.6
+  },
+  "rollout_samples": [
+    {
+      "observed_at": "2026-10-26 23:36:34.889691+00",
+      "index_synced_at": "2026-10-26 23:35:58.093236+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:16:58.885196+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    },
+    {
+      "observed_at": "2026-10-26 23:38:05.098058+00",
+      "index_synced_at": "2026-10-26 23:37:23.646364+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:37:20.275453+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    },
+    {
+      "observed_at": "2026-10-26 23:40:05.675549+00",
+      "index_synced_at": "2026-10-26 23:39:36.341294+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:37:20.275453+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    },
+    {
+      "observed_at": "2026-10-26 23:41:32.504494+00",
+      "index_synced_at": "2026-10-26 23:41:24.905233+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:41:21.226064+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    },
+    {
+      "observed_at": "2026-10-26 23:42:31.469628+00",
+      "index_synced_at": "2026-10-26 23:41:24.905233+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:41:21.226064+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    },
+    {
+      "observed_at": "2026-10-26 23:43:39.117163+00",
+      "index_synced_at": "2026-10-26 23:42:32.727933+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:41:21.226064+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    },
+    {
+      "observed_at": "2026-10-26 23:45:16.493295+00",
+      "index_synced_at": "2026-10-26 23:44:45.678179+00",
+      "live_uid": "122",
+      "total": "94",
+      "signal_checked_at": "2026-10-26 23:41:21.226064+00",
+      "watcher_lease_active": true,
+      "unknown_status": "unknown",
+      "unknown_attempts": 1,
+      "unknown_reconciliations": 10
+    }
+  ],
+  "handover": {
+    "previous": {
+      "old_server_finished_utc": "2026-10-26T22:25:05.018954109Z",
+      "watcher_signal_utc": "2026-10-26T22:25:07.202391Z",
+      "recorded_index_success_utc": "2026-10-26T22:26:14.713082Z",
+      "signal_to_index_s": 67.511
+    },
+    "current": {
+      "live_utc": "2026-10-26T23:39:11.117324Z",
+      "old_shutdown_logged_utc": "2026-10-26T23:41:10.671479566Z",
+      "old_server_finished_utc": "2026-10-26T23:41:13.032559109Z",
+      "watcher_signal_utc": "2026-10-26T23:41:21.226064Z",
+      "recorded_index_success_utc": "2026-10-26T23:41:24.905233Z",
+      "signal_to_index_s": 3.679,
+      "old_exit_to_index_s": 11.873,
+      "traffic_switch_to_recorded_index_s": 133.788
+    },
+    "interpretation": "Single observations with different rollout conditions. The old process remained alive roughly two minutes after traffic switch; reduced coordination wait is separate from Render retirement. No claim that total rollout is 3.7 seconds or that every historical delay had the same cause.",
+    "lease_busy_log_captured": false
+  },
+  "receipts": [
+    {
+      "operation_id": "11b2a2bc-5643-42cb-9a5b-5930dc10d35e",
+      "status": "unknown",
+      "attempts": 1,
+      "copy_status": "pending"
+    },
+    {
+      "operation_id": "a8346ef0-10ea-4942-8acf-5df33720c30c",
+      "status": "accepted",
+      "attempts": 1,
+      "copy_status": "appended"
+    },
+    {
+      "operation_id": "e9a6720a-36b5-485f-aa47-2c009299d7ea",
+      "status": "accepted",
+      "attempts": 1,
+      "copy_status": "appended"
+    }
+  ],
+  "mutations": {
+    "primary_deployment_only": true,
+    "configuration_changed": false,
+    "new_email_sent": false,
+    "unknown_email_resent": false,
+    "mailbox_records_reset": false,
+    "support_services_deployed": false
+  },
+  "limitations": [
+    "No matched before/after repeated rollout benchmark or real competing-worker PostgreSQL test.",
+    "Throttled UI inspection was blocked by Computer Use URL verification in the previous turn; no throttled timing claimed.",
+    "No naturally occurring BYE was induced or awaited again for this index-only release; prior actual recovery evidence is in FOLLOWUP_20261027.md."
+  ],
+  "verified_at_utc": "2026-10-26T23:45:16.493295Z"
+}

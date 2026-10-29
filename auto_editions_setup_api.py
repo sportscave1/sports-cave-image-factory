@@ -181,7 +181,7 @@ async def import_archive(archive,setup,revalidate,started,timings,expected=None)
     timings['package_bytes']=size
     if not timings.get('resumable_protocol'):timings['receive_mib_s']=round(size/1024**2/max(timings['receive_seconds'],.000001),4)
     ctx=setup['context']
-    manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'])
+    manifest,proofs=await run_in_threadpool(unpack,archive,assets_root,ctx['source'],ctx['number'],ctx['total'],resumable=bool(timings.get('resumable_protocol')))
     from auto_editions_preparation_geometry import for_context,matches
     if for_context(manifest['source_dimensions'],ctx)['references'] and not matches(manifest,ctx):
         raise ValueError('Preparation target or policy changed; prepare the current proportional master again.')
