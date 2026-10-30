@@ -77,4 +77,3 @@ class BrandingMigrationTests(unittest.TestCase):
         store.save_email_default(ADMIN,'header','<p>Later approved edit</p>',saved['version'])
         with store.db() as conn:conn.execute(sql())
         self.assertEqual(store.default_sections(cfg)['header'],'<p>Later approved edit</p>')
-
