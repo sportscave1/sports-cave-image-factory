@@ -53,6 +53,8 @@ def thumbnail(store,step,row):
     from crm_thumbnail_cache import selection,request,source_loader,cached,diagnostic
     from crm_thumbnail_store import private_store
     digest,label,live=selection(row,step)
+    from crm_thumbnail_cache import token
+    digest=token([digest,store.default_sections({})])
     key='flow-thumb-'+step['step_id']+'-'+digest[:20]
     with st.container(key=key):
         wake=st.button('Load email thumbnail',key=key+'load')

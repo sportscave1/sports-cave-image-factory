@@ -21,6 +21,7 @@ class CampaignStore(WorkspaceRecords):
     def render_settings(self,env=None):
         cfg=super().render_settings(env)
         cfg['email_defaults']=self.default_sections(cfg)
+        cfg['shared_branding_policy']=1
         return cfg
 
     def list_drafts(self, archived=False, *, search='', status='All', market='All', offset=0, limit=100, metadata=False, working=False):

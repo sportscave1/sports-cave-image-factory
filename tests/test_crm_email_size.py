@@ -153,6 +153,8 @@ class EmailSizeTests(unittest.TestCase):
         store.claim_send.return_value=row;store.suppressed.return_value=False
         store.template.return_value={'format':'campaign_delivery_v1','document':self.doc,'render_settings':self.cfg}
         store.q.return_value={'campaign_send_id':IDENTITY}
+        branding=patch('crm_shared_branding.campaign_settings',return_value=self.cfg)
+        branding.start();self.addCleanup(branding.stop)
         engine=Engine(store,Mock(),provider=provider,config=Config(LIVE))
         with patch.object(engine,'validate',return_value=({'email':'fixture@example.test'}, {},'')),patch('crm_campaign_schedule.overdue_reason',return_value=None),patch('crm_native_unsubscribe.native_unsubscribe_url',return_value='https://example.test/unsubscribe'),patch('crm_campaign_send.production_checks',return_value={'ready':True}),patch('crm_campaign_content.render_campaign',return_value={'html':'x'*(size.LIMIT_BYTES+1),'text':''}):
             engine.send_one()

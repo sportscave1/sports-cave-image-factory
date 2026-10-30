@@ -57,6 +57,18 @@ def stop_state(conn,campaign,rows,hours,at):
 
 
 def prepare(engine,campaign,content,provider_blocked):
+    from copy import deepcopy
+    from crm_shared_branding import campaign_settings,rebrand
+    content=deepcopy(content)
+    old=content['render_settings']
+    latest=campaign_settings(engine.store,campaign['id'],old,content['document'])
+    if latest!=old:
+        dispatch=content['dispatch']
+        dispatch['message']=rebrand(dispatch['message'],content['document'],old,latest,campaign['id'],campaign['campaign_send_id'])
+        for recipient in dispatch['recipients'].values():
+            if recipient.get('message'):
+                recipient['message']=rebrand(recipient['message'],content['document'],old,latest,campaign['id'],campaign['campaign_send_id'])
+        content['render_settings']=latest
     store=engine.store;at=engine.clock();dispatch=content['dispatch'];common=dispatch['message']
     sender=SimpleNamespace(sender=dispatch['sender'],reply_to=dispatch['reply_to'])
     prefix='campaign-batch:'+str(campaign['campaign_send_id'])+':'

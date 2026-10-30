@@ -21,9 +21,11 @@ from tests.test_crm_simple_editor import document
 
 st.session_state['campaign_view']='CAMPAIGN_EDITOR'
 drafts=Mock()
+drafts.html_library.return_value=[]
 drafts.setting.return_value={'value':{'smart_hours':16}}
 drafts.render_settings.return_value=settings({})
 drafts.q.return_value=None
+drafts.q.side_effect=lambda sql,*args,**kwargs: [] if 'FROM crm_runtime_state WHERE key LIKE' in sql else None
 if st.session_state.get('mode') == 'detail_error':
  drafts.render_settings.side_effect=StoreUnavailable('Campaign storage unavailable')
 else:

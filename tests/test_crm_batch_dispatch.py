@@ -34,6 +34,25 @@ class Transport:
 
 @unittest.skipUnless(os.getenv('CRM_TEST_POSTGRES')=='1','Disposable PostgreSQL required')
 class DispatchTests(unittest.TestCase):
+    def test_queued_before_brand_edit_uses_current_branding_and_pins_it(self):
+        identity=self.queue(1)
+        before=self.store.email_defaults(CFG)['header']
+        try:
+            self.store.save_email_default(ADMIN,'header','<p>Queued branding revision</p>',before['version'])
+            dispatch(self.engine)
+            self.assertEqual(len(self.transport.calls),1)
+            html=self.transport.calls[0][1][0]['html']
+            self.assertEqual(html.count('Queued branding revision'),1)
+            pinned=self.store.state('campaign-branding:'+str(identity))
+            self.assertEqual(pinned['email_defaults']['header'],'<p>Queued branding revision</p>')
+            saved=self.store.email_defaults(CFG)['header']
+            self.store.save_email_default(ADMIN,'header','<p>Later revision</p>',saved['version'])
+            from crm_shared_branding import campaign_settings
+            self.assertEqual(campaign_settings(self.store,identity,CFG),pinned)
+        finally:
+            latest=self.store.email_defaults(CFG)['header']
+            self.store.save_email_default(ADMIN,'header',before['value']['html'],latest['version'])
+
     def setUp(self):
         self.store=CampaignStore(connect);self.ids=[];self.transport=Transport()
         self.provider=SimpleNamespace(batch_transport=self.transport)
@@ -49,7 +68,8 @@ class DispatchTests(unittest.TestCase):
         shop=authority(rows);doc=document();doc.update(market='NZ',market_audience=True)
         from crm_campaign_markets import audience
         doc['audience']=audience('NZ')
-        with patch.object(self.store,'render_settings',return_value=deepcopy(CFG)),patch.dict(os.environ,LIVE):
+        cfg={**deepcopy(CFG),'email_defaults':self.store.default_sections(CFG),'shared_branding_policy':1}
+        with patch.object(self.store,'render_settings',return_value=cfg),patch.dict(os.environ,LIVE):
             editor=self.store.save(ADMIN,'Batch '+uuid.uuid4().hex,doc,env=LIVE)
             reviewed=review(shop,self.store,editor,LIVE)
             result=queue_campaign(shop,self.store,ADMIN,editor,str(uuid.uuid4()),env=LIVE,snapshot_id=reviewed['snapshot_id'])

@@ -185,6 +185,10 @@ class Engine:
                     self.store.release_paused_send(row);return True
             else:content=self.store.template(row['template_id'],row['template_version'])
             if content.get('format')=='automation_delivery_v1':
+                from copy import deepcopy
+                from crm_shared_branding import flow_settings
+                content=deepcopy(content)
+                content['render_settings']=flow_settings(self.store,row,content['render_settings'])
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 from crm_automation_runtime import render as render_automation
@@ -214,6 +218,11 @@ class Engine:
                     context['_smart_recipient']=c['id']
                 message=render_automation(content,row,unsubscribe,context)
             elif content.get('format')=='campaign_delivery_v1':
+                from copy import deepcopy
+                from crm_shared_branding import campaign_settings
+                content=deepcopy(content)
+                original_brand_settings=deepcopy(content['render_settings'])
+                content['render_settings']=campaign_settings(self.store,row['campaign_id'],content['render_settings'],content['document'])
                 from crm_campaign_schedule import overdue_reason
                 late=overdue_reason(content,row,self.clock())
                 if late:
@@ -237,6 +246,8 @@ class Engine:
                 if smart_enabled(content['document']):
                     frozen=(content.get('dispatch',{}).get('recipients',{}).get(row['recipient_hash']) or {}).get('message')
                     if not frozen:raise ValueError('Missing recipient catalogue snapshot')
+                    from crm_shared_branding import rebrand
+                    frozen=rebrand(frozen,content['document'],original_brand_settings,content['render_settings'],row['campaign_id'],campaign['campaign_send_id'])
                     from crm_campaign_dispatch import payload
                     mail=payload(frozen,{'address':address,'unsubscribe_url':unsubscribe,'message':frozen},self.config)
                     message={field:mail[field] for field in ('subject','html','text')}

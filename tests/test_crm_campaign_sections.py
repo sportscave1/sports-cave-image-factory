@@ -38,8 +38,8 @@ class SectionTests(unittest.TestCase):
 
     def test_default_header_has_no_invented_asset_and_body_stays_required(self):
         doc = sectioned()
-        self.assertIn('SPORTS CAVE', doc['html_sections']['header'])
-        self.assertNotIn('<img', doc['html_sections']['header'])
+        self.assertIn('alt="Sports Cave"', doc['html_sections']['header'])
+        self.assertIn('sports-cave-email-logo-360.png', doc['html_sections']['header'])
         self.assertIn('{{UNSUBSCRIBE_URL}}', doc['html_sections']['footer'])
         doc['custom_html'] = ''
         self.assertFalse(preflight(doc, ENV)['test_ready'])
