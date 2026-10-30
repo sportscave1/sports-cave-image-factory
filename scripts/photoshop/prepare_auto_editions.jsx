@@ -149,6 +149,10 @@ var SCAutoEditionsPreparation = (function () {
                     throw Error("resize_background_identity_changed");
                 // Only Python-verified opaque native pixels, on the disposable
                 // staged document. No fill colour and no source PSD writes.
+                // Photoshop's background setter also reveals the active layer.
+                // A saved hidden selection may contain obsolete artwork; select
+                // only the verified visible candidate before this operation.
+                doc.activeLayer=bg[0];
                 if(bg[0].kind===LayerKind.SMARTOBJECT)bg[0].rasterize(RasterizeType.ENTIRELAYER);
                 bg[0].isBackgroundLayer=true;
                 savePNG(doc,"resize-original.png");

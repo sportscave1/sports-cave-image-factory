@@ -22,6 +22,11 @@ STRUCTURAL = {'NUMBER_LAYER', 'PLAQUE_AMBIGUOUS', 'NUMBER_FORMAT', 'EDITION_GEOM
 
 
 def enabled():
+    from auto_editions_technical import enabled as technical_enabled
+    return legacy_enabled() or technical_enabled()
+
+
+def legacy_enabled():
     return os.getenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED', '').lower() == 'true'
 
 
@@ -42,7 +47,9 @@ def fix_revision(category):
     # Relevant implementation, not every deployment: unrelated releases must not
     # replenish deterministic retry budgets.
     files = ['auto_editions_recovery.py']
-    if category == 'Colour/provenance':
+    if category == 'Resize background':
+        files = ['auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx']
+    elif category == 'Colour/provenance':
         files += ['auto_editions_colour.py', 'auto_editions_colour_policy.py',
                   'scripts/prepare_auto_editions.py', 'scripts/photoshop/prepare_auto_editions.jsx']
     elif category == 'Plaque/layers':
@@ -80,6 +87,28 @@ def native_runtime(cur):
     return cur.fetchone()
 
 
+def resize_fix_available(runtime):
+    from worker_health import stamp
+    from auto_editions_preflight import preparation_code_hash
+    p=(runtime or {}).get('payload') or {}
+    seen=stamp((runtime or {}).get('seen_at'))
+    return bool(seen and 0<=(datetime.now(timezone.utc)-seen).total_seconds()<=150
+        and p.get('preparation_code_hash')==preparation_code_hash() and p.get('protocol')==1
+        and p.get('state')=='Idle' and not p.get('processor_lock')
+        and not p.get('checkpoint_pending') and not p.get('recovery_failures'))
+
+
+def automatic_scope(row, decision):
+    """Routine recovery must not depend on a historical list of sold designs.
+
+    Keep legacy/manual artwork repairs in their reviewed scope. New native
+    recoveries protect all completed packages and use the same admission guards.
+    """
+    return (legacy_enabled() and row['product_gid'] in ordered_scope() or
+        (not row.get('preparation_hash') and not row.get('replacement') and
+         decision['category'] in ('Resize background','Upload/network','Stale/source','Colour/provenance')))
+
+
 def classify(row, config, *, runtime=None):
     """Conservative eligibility from authoritative current checkpoint evidence."""
     replacement = row.get('replacement') or {}
@@ -89,7 +118,8 @@ def classify(row, config, *, runtime=None):
     code = explain(reason)['code']
     lower = reason.lower()
     transient=code in TRANSIENT or 'transfer failed: timeouterror' in lower
-    category = ('Colour/provenance' if code in COLOUR or 'embedded icc profile required' in lower
+    category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED'
+                else 'Colour/provenance' if code in COLOUR or 'embedded icc profile required' in lower
                 else 'Plaque/layers' if code in STRUCTURAL
                 else 'Upload/receipts' if lower in ('invalid dropbox file id.', 'complete immutable upload receipts required.')
                 else 'Transfer limits' if code=='TRANSFER_LIMIT'
@@ -110,10 +140,13 @@ def classify(row, config, *, runtime=None):
     source = pending.get('source') if pending.get('stage') == 'Failed' else row.get('source')
     if not source or source.get('file_id') != row.get('dropbox_file_id'):
         return {**result, 'reason': 'Restore or explicitly resolve the current mapped source identity.'}
+    if category=='Resize background' and not row.get('preparation_hash') and not pending:
+        return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
+                'reason':'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.'}
     if not row.get('preparation_hash') and pending.get('stage') not in ('Failed',):
         changed=current_source(row)
         if changed and changed.get('content_hash')!=source.get('content_hash'):
-            return {**result,'category':'Stale/source','action':'retry',
+            return {**result,'category':'Stale/source','action':'retry_source',
                     'reason':'Mapped source has a new inventoried revision; inspect it under the current guarded pipeline.'}
     if not row.get('preparation_hash') and ('source exceeds the preparation transfer limit' in lower or lower.startswith('psd transfer failed: valueerror')):
         from auto_editions_source_limits import MAX_SOURCE_BYTES
@@ -165,7 +198,7 @@ def classify(row, config, *, runtime=None):
                 return {**result, 'action': 'repair_exports'}
             from auto_editions_colour_policy import resolve
             resolve(source, **config)
-            return {**result, 'action': 'retry'}
+            return {**result, 'action': 'retry_colour'}
         except (ValueError, KeyError, TypeError) as error:
             return {**result, 'reason': str(error)+' Restore the embedded ICC or register independent, content-bound provenance within the existing approved workflow.'}
     # Historical generic errors can hide an already fixed colour failure. Only
@@ -270,8 +303,8 @@ def plan(connect, config):
         result = []
         for row in rows:
             decision = classify(row, config, runtime=runtime)
-            if row['product_gid'] not in scope:
-                decision={**decision,'action':None,'reason':'Outside the owner-selected ordered-product recovery scope; left untouched.'}
+            if not automatic_scope(row,decision):
+                decision={**decision,'action':None,'reason':decision['reason']+' This repair is outside automatic recovery; manual review is required.'}
             fingerprint = key(row, decision, config)
             waiting = budget(history(cur, row['product_gid'], fingerprint), decision['max_attempts']) if decision['action'] else ''
             from worker_health import stamp
@@ -340,8 +373,8 @@ def scan(connect, read_metadata, *, limit=3):
                 if budget(events, decision['max_attempts']):
                     continue
                 request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, pid + fingerprint + str(len(events))))
-                if pid not in ordered_scope():continue
-                submit(borrowed, pid, ACTOR, request_id, repair_confirmed=decision['action'] in ('repair_exports','retry_roles','retry_native'))
+                if not automatic_scope(fresh,current_decision):continue
+                submit(borrowed, pid, ACTOR, request_id, repair_confirmed=decision['action'] in ('repair_exports','retry_roles','retry_native','retry_source','retry_colour'))
                 Queue.audit(cur, pid, ACTOR, EVENT, dict(fingerprint=fingerprint,
                     attempt=sum(not (e.get('detail') or {}).get('transient_admission') for e in events)+1,admission_attempt=len(events)+1,
                     action=decision['action'], category=decision['category'], source=source,

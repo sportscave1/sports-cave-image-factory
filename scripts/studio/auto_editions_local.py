@@ -60,6 +60,7 @@ def preparation_watchdog(row,stage,controller,now=None):
 
 def health_payload():
     import hashlib
+    from auto_editions_preflight import preparation_code_hash
     active=next((r for r in list(JOBS.values()) if r.get('status')=='Working'),None)
     retained=next((r for r in list(JOBS.values()) if r.get('checkpoint_pending') or r.get('status')=='Recovering'),{})
     row=active or retained;stage=row.get('phase','Unknown')
@@ -70,7 +71,7 @@ def health_payload():
     except (OSError,ValueError):revision='local'
     locked=(Path.home()/'Documents/SportsCavePrintJobs/processor.lock').exists()
     result=dict(state='Recovering' if HOST_FAILURES or retained or locked and not active else 'Live' if active else 'Idle',
-        stage=stage,revision=revision,protocol=1,code_hash=hashlib.sha256(Path(__file__).read_text(encoding='utf-8-sig').replace('\r\n','\n').encode()).hexdigest(),
+        stage=stage,revision=revision,protocol=1,preparation_code_hash=preparation_code_hash(),code_hash=hashlib.sha256(Path(__file__).read_text(encoding='utf-8-sig').replace('\r\n','\n').encode()).hexdigest(),
         product_gid=row.get('context',{}).get('product_gid'),last_progress_at=row.get('last_progress_at',row.get('started_at',0)),
         retry_at=max(HOST_RETRY_AT,row.get('retry_at',0)),recovery_failures=max(HOST_FAILURES,row.get('recovery_failures',0)),
         checkpoint_pending=bool(row.get('checkpoint_pending')),processor_lock=locked and not bool(active))
