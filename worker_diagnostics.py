@@ -2,6 +2,7 @@
 import re
 
 RULES=(
+ ('RESIZE_BACKGROUND_CHANGED','Photoshop',('resize background changed native artwork pixels',),'Background preparation changed the visible artwork; pixel verification rejected it.','Automatic recovery waits for the verified background-selection fix on an idle Companion. The original PSD and mapping are retained.'),
  ('MEMORY_PRESSURE','Photoshop',('not enough memory','insufficient memory','available ram','out of memory'),'Preparation computer has insufficient available memory.','Close applications you are finished with, then retry the retained job. Do not remove active locks or lower output quality.'),
  ('FONT_MISSING','Photoshop',('missing font','font is not installed','font unavailable','font is unavailable','fonts are unavailable','font is missing'),'A required PSD font is unavailable.','Install or repair the required font on the preparation computer, then confirm the correction and retry.'),
  ('EDITION_GEOMETRY','Photoshop',('psd edition total differs','not contained in its plaque','number does not lie inside'),'PSD edition text or plaque geometry does not match the required design.','Repair the mapped PSD to match the authoritative limit and plaque. Do not change issued edition numbers.'),
@@ -29,6 +30,7 @@ RULES=(
  ('ARTWORK_ALPHA','Photoshop',('non-opaque alpha','approved opaque composition'), 'The saved artwork contains transparency.','Provide the approved opaque composition or confirm its existing background treatment; no background is guessed.'),
  ('NUMBER_FORMAT','Photoshop',('formatting cannot hold','number_width_requires_review'), 'Existing number formatting cannot hold the edition range.','Review the number format without changing issued editions.'),
  ('UPLOAD_INTERRUPTED','Dropbox',('upload/checkpoint failed','upload recovery exhausted','upload interrupted'), 'Dropbox upload interrupted — package retained for recovery.','Check connectivity and recovery receipts; do not rerender verified packages.'),
+ ('PACKAGE_TRANSFER_LIMIT','Companion',('prepared package exceeds transfer limit','negotiated transfer limit','expanded preparation is','generated asset exceeds its supported individual byte limit','expanded preparation plus transport evidence'), 'Prepared assets exceed the negotiated package or disk budget.','Keep the PSD and finished exports. Check the reported byte counts; use a compatible production-accepted resumable backend for supported large packets, then retry the same design.'),
  ('TRANSFER_LIMIT','Dropbox',('transfer limit','package exceeds'), 'Artwork exceeds the verified transfer limit.','Review package size and the supported transfer policy.'),
  ('CONNECTION_INTERRUPTED','Companion',('timeouterror','readtimeout','connectionerror','transient preparation connection'), 'Connection interrupted; durable recovery is pending.','Restore the connection and check the next retry checkpoint.'),
  ('SOURCE_CHANGED','Dropbox',('source changed','source revision changed','linked source changed'), 'Pinned PSD identity or revision changed.','Review the exact mapped source before retrying.'),

@@ -93,6 +93,25 @@ class Phase2Tests(unittest.TestCase):
         self.c.apply(command("save", {"name": "Retry"}))
         self.assertEqual(self.c.last_saved["id"], original)
 
+    def test_stop_after_provider_interrupt_keeps_review_reachable(self):
+        self.start()
+        self.event()
+        original = self.c.recording.task["id"]
+        self.c.apply(command("interrupt", {"reason": "Accessibility provider timed out"}))
+        stop = command("stop")
+        self.c.apply(stop)
+        self.c.apply(stop)
+        self.assertEqual(self.c.recording.state, "interrupted")
+        self.assertEqual(self.c.repository.load_draft()["state"], "interrupted")
+        self.assertIsNone(self.c.playback.run)
+        with self.assertRaisesRegex(Invalid, "Stop before Save"):
+            self.c.apply(command("save", {"name": "Unreviewed"}))
+        self.c.apply(command("review"))
+        self.c.apply(command("save", {"name": "Reviewed incomplete draft"}))
+        self.assertEqual(self.c.last_saved["id"], original)
+        self.assertEqual(len(self.c.repository.get(original)["actions"]), 1)
+        self.assertIsNone(self.c.playback.run)
+
     def test_catalogue_cache_legacy_passthrough_and_play_guard(self):
         self.start()
         self.event()
@@ -120,9 +139,41 @@ class Phase2Tests(unittest.TestCase):
                     {**command("stop"), "payload": []}):
             with self.assertRaises(Invalid):
                 self.c.apply(cmd)
-        with self.assertRaises(KeyError):
+        with self.assertRaisesRegex(Invalid, "Choose a starting window"):
             self.c.apply(command("record"))
         self.assertEqual(self.c.recording.state, "idle")
+
+    def test_desktop_transitions_survive_pause_save_and_restart_in_order(self):
+        self.c.apply(command("record", {"mode": "desktop_session"}))
+        window = {**self.window, "control_type": "Window", "scope": [], "name": "Test.txt - Notepad"}
+        def transition(value):
+            return dict(version=2, kind="window_state", requires=["windows.state.v2"],
+                        target=window, value=value, timeout_ms=2000)
+        self.event(transition("minimized"))
+        self.c.apply(command("pause"))
+        self.event(transition("maximized"))
+        self.c.apply(command("resume"))
+        self.event(transition("normal"))
+        self.c.apply(command("stop"))
+        self.c.apply(command("save", {"name": "Desktop transition check"}))
+        restarted = Coordinator(Path(self.tmp.name))
+        task = restarted.repository.get(self.c.last_saved["id"])
+        self.assertEqual(task["starting_context"], {"mode": "desktop_session", "binding": None})
+        self.assertEqual([a["value"] for a in task["actions"]], ["minimized", "normal"])
+
+    def test_window_transition_rejects_old_mode_and_invalid_states(self):
+        from desktop_recorder.contract import validate
+        self.start()
+        transition = dict(version=2, kind="window_state", requires=["windows.state.v2"],
+                          target={**self.window, "control_type": "Window", "scope": []},
+                          value="minimized", timeout_ms=2000)
+        task = {**self.c.recording.task, "actions": [transition]}
+        with self.assertRaisesRegex(Invalid, "desktop session"):
+            validate(task)
+        task["starting_context"] = {"mode": "desktop_session", "binding": None}
+        for value in (None, [], {}, True, "close", ""):
+            with self.subTest(value=value), self.assertRaises(Invalid):
+                validate({**task, "actions": [{**transition, "value": value}]})
 
 
 if __name__ == "__main__":

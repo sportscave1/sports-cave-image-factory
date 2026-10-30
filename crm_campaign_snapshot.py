@@ -10,8 +10,10 @@ def create(store,editor,document,settings,state,schedule):
                 or row['archived_at']):raise ValueError('Save the current draft before reviewing.')
         if conn.execute('SELECT 1 FROM crm_campaigns WHERE id=%s',(row['id'],)).fetchone():
             raise ValueError('This campaign has already been queued.')
-        if conn.execute('SELECT 1 FROM crm_campaign_preparation WHERE campaign_id=%s',(row['id'],)).fetchone():
-            raise ValueError('This campaign is already accepted. Open its status instead of reviewing another send.')
+        prior=conn.execute('SELECT * FROM crm_campaign_preparation WHERE campaign_id=%s',(row['id'],)).fetchone()
+        if prior:
+            if prior['status']!='FAILED' or str(prior['operation_id'])!=str(editor.get('recovery_operation')) or conn.execute('SELECT 1 FROM crm_marketing_sends WHERE campaign_id=%s',(row['id'],)).fetchone():
+                raise ValueError('This campaign is already accepted. Open its status instead of reviewing another send.')
         counts={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
         snapshot=conn.execute('''INSERT INTO crm_campaign_snapshots(campaign_id,campaign_version,document,
           render_settings,counts,recipients,schedule) VALUES(%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb) RETURNING id''',

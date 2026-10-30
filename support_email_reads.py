@@ -40,6 +40,7 @@ class ReadService:
         self.epoch = 0
         self.sync_lock = threading.Lock()
         self.manual_refresh = False
+        self.coordination_delay = 0
         self.mutation_lock = threading.Lock()
 
     def request(self, key, loader, ttl=20, *, wait=False):
@@ -76,7 +77,7 @@ class ReadService:
 
     def start(self):
         with self.lock:
-            if self.thread or not self.config.configured:return
+            if self.stop.is_set() or (self.thread and self.thread.is_alive()) or not self.config.configured:return
             self.thread = threading.Thread(target=self.run, name='email-inbox-index', daemon=True)
             self.thread.start()
 
@@ -185,12 +186,18 @@ class ReadService:
                 try:
                     leased=self.store.claim('inbox-index:'+self.config.address,owner)
                     if not leased:
+                        # A rolling replacement may narrowly lose to the draining
+                        # owner's last sync. Do not then sleep a full poll cycle.
+                        # Persistent followers back off to the normal cadence.
+                        self.coordination_delay = min(60, max(5, self.coordination_delay * 2))
+                        LOGGER.info('email_index_lease_busy retry_seconds=%d', self.coordination_delay)
                         self.restore()
                         return
                 except Exception as error:
                     SNAPSHOT_DB.failed(error,'snapshot_lease')
             with self.lock:
                 forced, self.manual_refresh = self.manual_refresh, False
+                self.coordination_delay = 0
             with operation(background=True, force=forced):
                 self._sync()
         finally:
@@ -204,8 +211,14 @@ class ReadService:
         last=health.get('last_success_at')
         if health['state']=='CONNECTED' and (not last or time.time()-last>180):
             health.update(state='RECONNECTING',category='stale')
+        health['retry_after']=max(0,round(health.get('retry_at',0)-self.clock(),1))
+        stage,category=health.get('failure_stage',''),health.get('category','')
+        health['diagnosis']=('Mailbox connection fails before authentication; check provider/network access.' if stage in {'dns','tcp'} else
+            'Mailbox authentication requires the owner to verify credentials.' if category=='authentication' else
+            'Secure mailbox connection failed; TLS verification needs attention.' if category=='tls' else
+            'Waiting for the next bounded mailbox sync.' if health['state']!='CONNECTED' else '')
         health['database_healthy']=SNAPSHOT_DB.ready() and health.get('database_verified',False)
-        health['authentication_valid']=bool(last and health.get('category')!='authentication' and time.time()-last<180)
+        health['authentication_valid']=bool(last and health['state']=='CONNECTED' and not category and time.time()-last<180)
         health['worker_running']=bool(self.thread and self.thread.is_alive())
         return health
 
@@ -213,6 +226,7 @@ class ReadService:
         started = self.clock()
         run_id=str(uuid.uuid4())
         observed_at = time.time()  # Fence by read start, never late completion.
+        with self.lock:self.health['last_attempt_at']=observed_at
         with self.lock: epoch = self.epoch
         try:
             with self.lock:old = deepcopy(self.value)
@@ -241,7 +255,7 @@ class ReadService:
                 if epoch != self.epoch or self.stop.is_set():return
                 self.value = value
                 self.health.update(state='CONNECTED',category='',attempts=0,retry_at=0,
-                    last_success_at=value['synced_at'],duration_ms=round((self.clock()-started)*1000,1),
+                    last_success_at=value['synced_at'],failure_stage='',last_failure_at=None,duration_ms=round((self.clock()-started)*1000,1),
                     conversations_processed=len(snap['messages']))
                 self.health.update(sync_run_id=run_id,messages_examined=len(raw),
                     duplicates_skipped=len(raw)-len(unique))
@@ -268,8 +282,9 @@ class ReadService:
                 failures = min(7,self.health['attempts']+1)
                 delay = 900 if code in {'authentication','configuration','tls'} else min(300,15*2**(failures-1))
                 delay=max(float(getattr(error,'retry_after',0) or 0),delay+random.uniform(0,min(5,delay*.1)))
-                self.health.update(state='RECONNECTING',category=code,attempts=failures,retry_at=self.clock()+delay)
-            LOGGER.warning('email_index_sync sync_run_id=%s category=%s retry_seconds=%d duration_ms=%.1f',run_id,code,delay,(self.clock()-started)*1000)
+                self.health.update(state='RECONNECTING',category=code,failure_stage=getattr(error,'stage','operation'),
+                    last_failure_at=time.time(),attempts=failures,retry_at=self.clock()+delay)
+            LOGGER.warning('email_index_sync sync_run_id=%s category=%s stage=%s retry_seconds=%d duration_ms=%.1f',run_id,code,getattr(error,'stage','operation'),delay,(self.clock()-started)*1000)
 
     def run(self):
         while not self.stop.is_set():
@@ -277,7 +292,8 @@ class ReadService:
             if not self.value.get('snapshot'):self.restore()
             if self.clock() >= self.health['retry_at']:self.sync()
             if self.stop.is_set():break
-            delay = max(1,self.health['retry_at']-self.clock()) if self.health['retry_at'] else 60
+            # Coordination contention cannot shorten a provider/auth backoff.
+            delay = max(1,self.health['retry_at']-self.clock()) if self.health['retry_at'] else (self.coordination_delay or 60)
             self.wake.wait(delay)
 
     def restore(self):
@@ -298,8 +314,9 @@ class ReadService:
                     self.health['last_success_at'] = cached.get('synced_at')
                     # A recent confirmed sync from the lease owner is healthy; a
                     # restored old snapshot is usable but cannot claim Connected.
-                    if time.time()-float(cached.get('synced_at') or 0)<180:
-                        self.health.update(state='CONNECTED',category='',attempts=0,retry_at=0)
+                    if (time.time()-float(cached.get('synced_at') or 0)<180
+                            and float(cached.get('synced_at') or 0)>=float(self.health.get('last_failure_at') or 0)):
+                        self.health.update(state='CONNECTED',category='',failure_stage='',last_failure_at=None,attempts=0,retry_at=0)
         except Exception as error:SNAPSHOT_DB.failed(error,'snapshot_read')
 
     def index(self, *, check_shared=True):

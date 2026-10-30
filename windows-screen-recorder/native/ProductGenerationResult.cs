@@ -25,7 +25,7 @@ static class ProductGenerationResult {
     }
     public static bool KnownButton(string app,string type,string name) {
         return type=="Button"&&name=="Generate mockups"&&
-            String.Equals(Path.GetFileName(app),"msedge.exe",StringComparison.OrdinalIgnoreCase);
+            WindowIdentity.ChromiumApp(app);
     }
     public static bool Supports(Dictionary<string,object> target) {
         object contract;
@@ -43,7 +43,10 @@ static class ProductGenerationResult {
             Anchor(scope[1],"Document","RootWebArea")&&Anchor(scope[2],"Pane","");
     }
     public static bool LayoutBoundary(int index,string type,string id) {
-        return index==0&&type=="Group"&&id=="";
+        // Current Streamlit exposes its main layout with the stable stMain ID.
+        // Accept only this one immediate layout boundary; root/document/window
+        // anchors and the independent generation witness remain mandatory.
+        return index==0&&type=="Group"&&(id==""||id=="stMain");
     }
     public static bool ScopeMatches(IList expected,IEnumerable<ProductCopyResult.ScopeAnchor> actual) {
         if(!StableScope(expected))return false;
@@ -67,9 +70,34 @@ static class ProductGenerationResult {
     public static bool Completed(Witness before,Witness after) {
         return before!=null&&after!=null&&after.Receipt!=before.Receipt&&after.State=="ready";
     }
+    public static bool CanRequest(Witness before) {
+        // A ready product uses the application's explicit reuse path, which
+        // issues a NEW receipt only for matching current source/name/category.
+        // Playback still requires that fresh receipt; old ready is not success.
+        return before!=null&&(before.State=="idle"||before.State=="ready");
+    }
     public static bool Acknowledged(Witness before,Witness after) {
         return before!=null&&after!=null&&after.Receipt!=before.Receipt&&
             (after.State=="working"||after.State=="ready");
+    }
+    // Observe the single request; never invoke it again while waiting. The
+    // clock and pause are injectable so delayed receipt/cancellation policies
+    // can be checked without a desktop or real-time sleeps.
+    public static Witness WaitAcknowledgement(Witness before,Func<Witness> observe,
+        Action check,Func<long> elapsed,Action pause,int deadlineMs) {
+        while(elapsed()<deadlineMs) {
+            check();
+            Witness after=null;
+            try {after=observe();}catch(ElementNotAvailableException){}
+            check();
+            if(elapsed()>=deadlineMs)return null;
+            if(Acknowledged(before,after))return after;
+            if(after!=null&&before!=null&&after.Receipt!=before.Receipt&&
+                (after.State=="failed"||after.State=="changed"))
+                throw new Exception("Generate failed or its product details changed. Draft preserved.");
+            pause();
+        }
+        return null;
     }
     static void Safe(AutomationElement e,uint pid) {
         object password=e.GetCurrentPropertyValue(AutomationElement.IsPasswordProperty,true);
@@ -100,6 +128,32 @@ static class ProductGenerationResult {
     }
     public static Witness Read(AutomationElement button,IntPtr hwnd,uint pid) {
         return ReadForDocument(Document(button,hwnd,pid),hwnd,pid);
+    }
+    static readonly HashSet<string> PreviewNames=new HashSet<string>{"Black Framed","Oak Framed","White Framed","Unframed","Size Guide"};
+    public static bool CompletePreviewNames(IEnumerable<string> names) {
+        var seen=new HashSet<string>();
+        foreach(string name in names)if(!PreviewNames.Contains(name)||!seen.Add(name))return false;
+        return seen.SetEquals(PreviewNames);
+    }
+    public static bool PreviewsVisible(AutomationElement button,IntPtr hwnd,uint pid) {
+        var document=Document(button,hwnd,pid);
+        if(document==null)return false;
+        var groups=document.FindAll(TreeScope.Descendants,new AndCondition(
+            new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Group),
+            new PropertyCondition(AutomationElement.NameProperty,"Generated mockup previews")));
+        if(groups.Count==0)return false;
+        if(groups.Count!=1)throw new Exception("Generated preview gallery is ambiguous. Generate was not repeated.");
+        var gallery=groups[0];Safe(gallery,pid);
+        var images=gallery.FindAll(TreeScope.Descendants,new PropertyCondition(AutomationElement.ControlTypeProperty,ControlType.Image));
+        if(images.Count!=5)return false;
+        var names=new List<string>();
+        foreach(AutomationElement image in images) {
+            Safe(image,pid);
+            var bounds=image.Current.BoundingRectangle;
+            if(image.Current.IsOffscreen||bounds.IsEmpty||bounds.Width<=0||bounds.Height<=0)return false;
+            names.Add(image.Current.Name);
+        }
+        return CompletePreviewNames(names);
     }
     public static Witness ReadForDocument(AutomationElement document,IntPtr hwnd,uint pid) {
         var root=AutomationElement.FromHandle(hwnd);

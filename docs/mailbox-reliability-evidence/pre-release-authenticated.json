@@ -1,0 +1,16 @@
+{
+  "utc": "2026-10-26T21:18:52.755808+00:00",
+  "commit": "5980a803e5c0073f2e430b7d8e495e10c9b7d78d",
+  "instance": "srv-d8kl4on7f7vs73dvavv0-75d57c5f9d-9ch8w",
+  "authenticated_headers_ms": 2135.7,
+  "provider_total": 91,
+  "provider_live_uid": 119,
+  "index_live_uid": 119,
+  "index_synced_at": 1793049493.220145,
+  "recent_compared": 20,
+  "missing_uids": [],
+  "folders": {"Drafts": {"count": 2, "uidvalidity": "471206461"}, "Sent": {"count": 28, "uidvalidity": "1188156108"}},
+  "local_active_drafts": 27,
+  "old_unknown": {"attempts": 1, "copy_status": "pending", "reconcile_attempts": 6, "status": "unknown"},
+  "scope": "Read-only existing Render environment; credentials never printed/copied. Provider headers only; no bodies or mailbox writes. Latest 20 provider Message-IDs compared in memory to the persisted OS index."
+}

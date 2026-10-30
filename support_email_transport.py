@@ -27,6 +27,12 @@ def connect_tcp(host, port, timeout):
         raise
     last_error = timeout_error = None
     deadline = time.monotonic() + timeout
+    # A black-holed IPv6 endpoint must leave time for resolved IPv4 addresses.
+    # Keep DNS/resolver order and the overall deadline, sharing this small budget
+    # across all IPv6 attempts before the first IPv4 attempt.
+    has_ipv4 = any(item[0] == socket.AF_INET for item in addresses)
+    ipv4_attempted = False
+    ipv6_budget = min(1.0, timeout / 4)
     for family, kind, protocol, _, address in addresses:
         wire = None
         started = time.monotonic()
@@ -38,6 +44,12 @@ def connect_tcp(host, port, timeout):
                         'ipv6' if family == socket.AF_INET6 else 'ipv4')
             last_error = timeout_error or TimeoutError('Mailbox connect deadline exceeded')
             break
+        reserve_ipv4 = family == socket.AF_INET6 and has_ipv4 and not ipv4_attempted
+        if reserve_ipv4:
+            if ipv6_budget <= 0:
+                continue
+            remaining = min(remaining, ipv6_budget)
+        if family == socket.AF_INET:ipv4_attempted = True
         try:
             wire = socket.socket(family, kind, protocol)
             wire.settimeout(remaining)
@@ -51,6 +63,8 @@ def connect_tcp(host, port, timeout):
             failed(error, 'tcp', started, 'ipv6' if family == socket.AF_INET6 else 'ipv4')
             last_error = error
             if isinstance(error, TimeoutError):timeout_error = error
+        finally:
+            if reserve_ipv4:ipv6_budget = max(0, ipv6_budget - (time.monotonic()-started))
     if timeout_error is not None:
         raise timeout_error  # Do not mask IPv4 timeout with the final unroutable IPv6 address.
     if last_error is not None:

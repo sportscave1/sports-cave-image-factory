@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Recorder scroll regression</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;font:22px Segoe UI}#stMain{position:absolute;inset:0;overflow:auto;background:#faf8ef}section{height:1800px;padding:40px}#hit{position:absolute;inset:0;z-index:1;background:transparent}</style>
+<main id="stMain"><section><h1>Harmless local scroll regression</h1><p>Top of page. No product actions.</p><p style="margin-top:700px">Middle marker</p><p style="margin-top:650px">Bottom marker</p></section></main>
+<div id="hit" role="group" aria-label="Wheel layout group"></div>
+<script>document.querySelector('#hit').addEventListener('wheel',e=>{e.preventDefault();document.querySelector('#stMain').scrollTop+=e.deltaY},{passive:false});</script>

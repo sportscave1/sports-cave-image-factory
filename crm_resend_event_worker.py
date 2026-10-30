@@ -6,6 +6,8 @@ from time import perf_counter
 admission=threading.BoundedSemaphore(4)
 _stop=threading.Event()
 _thread=None
+BATCH_SIZE=100
+MAX_RECONCILIATIONS=24
 LOG=logging.getLogger(__name__)
 LOG.setLevel(logging.INFO)
 if not LOG.handlers:
@@ -19,41 +21,62 @@ def log(stage,**fields):
 
 def run_once(store=None):
     from crm_store import Store
+    from crm_callback_store import Connection
     from crm_workspace_store import WorkspaceRecords
-    store=store or Store();processed=0
+    store=store or Store(Connection);processed=0
     # Row lock stays owned until reconciliation completes and DONE commits.
     # A crash/exception rolls it back; PENDING survives for the next cycle.
-    for _ in range(50):
-        if _stop.is_set():break
-        started=perf_counter()
-        row=None
-        try:
-            with store.db() as conn:
-                row=conn.execute("SELECT * FROM crm_webhook_events WHERE provider='resend' AND status='PENDING' AND (lease_until IS NULL OR lease_until<=now()) ORDER BY received_at LIMIT 1 FOR UPDATE SKIP LOCKED").fetchone()
-                if not row:break
-                # Reuse the SAME transaction for the unchanged reconciliation,
-                # including stop-state, and DONE. No second pool connection.
-                class Borrowed:
-                    def __enter__(self):return self
-                    def __exit__(self,*args):return False
-                    def execute(self,*args,**kwargs):return conn.execute(*args,**kwargs)
-                WorkspaceRecords(lambda:Borrowed()).reconcile_events(row['object_id'])
-                conn.execute("UPDATE crm_webhook_events SET status='DONE',processed_at=now() WHERE provider='resend' AND event_id=%s",(row['event_id'],))
-        except Exception as exc:
-            log('processing_failed',event_id=(row or {}).get('event_id','unclaimed'),error_type=type(exc).__name__,duration_ms=round((perf_counter()-started)*1000,1))
-            if row:
-                store.q("UPDATE crm_webhook_events SET attempts=attempts+1,error_code='processing_unavailable',lease_until=now()+interval '5 seconds' WHERE provider='resend' AND event_id=%s AND status='PENDING'",(row['event_id'],))
-            return processed
-        processed+=1
-        log('processed',event_id=row['event_id'],duration_ms=round((perf_counter()-started)*1000,1))
+    if _stop.is_set():return 0
+    started=perf_counter();rows=[]
+    try:
+        with store.db() as conn:
+            rows=conn.execute("SELECT * FROM crm_webhook_events WHERE provider='resend' AND status='PENDING' AND (lease_until IS NULL OR lease_until<=now()) ORDER BY received_at,event_id LIMIT %s FOR UPDATE SKIP LOCKED",(BATCH_SIZE,)).fetchall()
+            if not rows:return 0
+            class Borrowed:
+                def __enter__(self):return self
+                def __exit__(self,*args):return False
+                def execute(self,*args,**kwargs):return conn.execute(*args,**kwargs)
+            records=WorkspaceRecords(lambda:Borrowed())
+            calls=0
+            def defer(group):
+                conn.execute("UPDATE crm_webhook_events SET attempts=attempts+1,error_code='processing_unavailable',lease_until=now()+interval '5 seconds' WHERE provider='resend' AND event_id=ANY(%s) AND status='PENDING'",([r['event_id'] for r in group],))
+            def apply(group):
+                nonlocal calls,processed
+                if _stop.is_set() or calls>=MAX_RECONCILIATIONS:
+                    defer(group);return
+                calls+=1
+                # Savepoints isolate a poison event without dropping its retry or
+                # rolling back healthy peers. Splitting itself is strictly bounded.
+                conn.execute('SAVEPOINT callback_reconcile')
+                try:
+                    records.reconcile_events_many(sorted({r['object_id'] for r in group}))
+                    conn.execute("UPDATE crm_webhook_events SET status='DONE',processed_at=clock_timestamp(),error_code='',lease_until=NULL WHERE provider='resend' AND event_id=ANY(%s)",([r['event_id'] for r in group],))
+                    conn.execute('RELEASE SAVEPOINT callback_reconcile')
+                    processed+=len(group)
+                except Exception as exc:
+                    conn.execute('ROLLBACK TO SAVEPOINT callback_reconcile')
+                    conn.execute('RELEASE SAVEPOINT callback_reconcile')
+                    if len(group)>1:
+                        middle=len(group)//2;apply(group[:middle]);apply(group[middle:])
+                    else:
+                        defer(group)
+                        log('processing_failed',event_id=group[0]['event_id'],error_type=type(exc).__name__)
+            apply(rows)
+    except Exception as exc:
+        # A failed/unknown outer commit is not acknowledged or automatically
+        # replayed in this call. Durable queue state decides the next claim.
+        log('processing_failed',error_type=type(exc).__name__,duration_ms=round((perf_counter()-started)*1000,1))
+        return 0
+    log('batch_processed',event_count=processed,claimed_count=len(rows),provider_count=len({r['object_id'] for r in rows}),duration_ms=round((perf_counter()-started)*1000,1))
     return processed
 
 
 def _loop():
     while not _stop.is_set():
-        try:run_once()
-        except Exception as exc:log('processing_failed',error_type=type(exc).__name__)
-        _stop.wait(1)
+        try:processed=run_once()
+        except Exception as exc:
+            processed=0;log('processing_failed',error_type=type(exc).__name__)
+        _stop.wait(.05 if processed else 1)
 
 
 def start():

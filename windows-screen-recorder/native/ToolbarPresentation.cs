@@ -13,7 +13,9 @@ static class ToolbarPresentation {
     public static string Label(string state,bool awaiting,bool playbackPaused,string pending,bool connected) {
         if(!connected)return "Disconnected";
         if(pending=="save")return "Saving…";
-        if(pending=="stop")return "Stopping…";
+        // A completed Stop can retain its command label after the helper has
+        // returned a terminal snapshot. The authoritative state wins then.
+        if(pending=="stop"&&StopVisible(state))return "Stopping…";
         if(state=="playing")return awaiting?"Ready to play":playbackPaused?"Paused":"Playing";
         if(state=="recording")return "Recording";
         if(state=="paused")return "Paused";

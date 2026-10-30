@@ -7,7 +7,7 @@ import uuid
 from .schema import Invalid, text
 from .state_updates import merge_tasks
 
-KINDS = {"open-popup", "record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
+KINDS = {"library-page", "open-popup", "record", "stop", "stop-save", "play", "pause", "resume", "view", "load",
          "new", "rename", "reusable", "edit", "inspect", "startup", "choose-files", "delete", "repair-copy",
          "edit-copy", "edit-file", "record-replacement"}
 STARTS = {"record", "play", "record-replacement"}
@@ -174,7 +174,7 @@ class Relay:
         if snapshot is not None and (not isinstance(snapshot,dict) or len(json.dumps(snapshot))>180000): raise Invalid("Invalid helper state.")
         # These keys are produced by the helper, never cookies or browser sessions.
         allowed={"mode","message","step","total","action","can_resume","browser_open","recording","privacy_pause","tasks",
-                 "operation_id","starting_url","selected_id","startup","connection","protocol","active_task_id","active_task_name","desktop_capabilities"}
+                 "operation_id","starting_url","selected_id","startup","connection","protocol","active_task_id","active_task_name","desktop_capabilities","runtime","connection_detail","library_page"}
         if snapshot is not None and set(snapshot)-allowed: raise Invalid("Unsupported helper state fields.")
         if delta is not None and set(delta["changes"])-allowed: raise Invalid("Unsupported helper state fields.")
         if delta is not None and "tasks" in delta:
@@ -185,6 +185,7 @@ class Relay:
             cur.execute("SELECT * FROM task_recorder_private.devices WHERE id=%s AND key_hash=%s AND revoked=false FOR UPDATE",(device_id,digest(key)))
             device=cur.fetchone()
             if not device: raise PermissionError("PC was disconnected.")
+            previous_control_state = (device["active_run"], device["needs_review"])
             new_boot=device["boot_id"]!=boot
             if new_boot:
                 if epoch<=device["epoch"]: raise PermissionError("An old helper session cannot reconnect.")
@@ -233,7 +234,8 @@ class Relay:
             if device["active_run"] in expired:
                 device["active_run"]=None
                 device["needs_review"]=True
-            changed=snapshot!=device["state"]
+            changed=(snapshot!=device["state"] or
+                     previous_control_state != (device["active_run"], device["needs_review"]))
             cur.execute("UPDATE task_recorder_private.devices SET state=%s::jsonb,last_seen=%s,seq=seq+%s,active_run=%s,needs_review=%s,state_version=%s WHERE id=%s",
                         (json.dumps(snapshot),now,1 if changed else 0,device["active_run"],device["needs_review"],device["state_version"],device_id))
             cur.execute("SELECT * FROM task_recorder_private.commands WHERE device_id=%s AND boot_id=%s AND status IN ('queued','dispatched') AND expires>%s ORDER BY CASE WHEN kind IN ('stop','stop-save') THEN 0 ELSE 1 END,created LIMIT 10",(device_id,boot,now))

@@ -307,6 +307,8 @@ class WorkspacePersistenceTests(unittest.TestCase):
         secret='whsec_'+base64.b64encode(b'fixture-signing-key-32-bytes-long!').decode()
         raw=json.dumps({'type':'email.delivered','created_at':now().isoformat(),'data':{'email_id':self.provider_id}})
         stamp=now();event='evt_'+uuid.uuid4().hex
+        self.addCleanup(self.store.q,"DELETE FROM crm_webhook_events WHERE provider='resend' AND event_id=%s",(event,))
+        self.addCleanup(self.store.q,'DELETE FROM crm_delivery_events WHERE event_id=%s',(event,))
         headers={'svix-id':event,'svix-timestamp':str(int(stamp.timestamp())),'svix-signature':Webhook(secret).sign(event,stamp,raw)}
         with patch.dict(os.environ,{'CRM_RESEND_WEBHOOK_SECRET':secret}),patch('crm_store.Store',return_value=self.store):
             self.assertEqual(client.post('/webhooks/resend/crm',content=raw,headers=headers).status_code,200)

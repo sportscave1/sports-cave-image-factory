@@ -59,12 +59,12 @@ class ContextTypographyTests(unittest.TestCase):
             record = self.record(name, sport, name)
             prompt = record["master_prompt"]
             self.assertLess(prompt.index(ads.IE_CREATIVE_VARIETY_AND_TYPOGRAPHY), prompt.index("\nSCENE:"))
-            for phrase in ("for OTHER products too", "small residential glimpse", "collector sitting-room setting",
+            for phrase in ("for OTHER products too", "small residential glimpse", "premium residential man cave setting",
                            "exactly three successful image-generation calls", "not guaranteed cross-session memory"):
                 self.assertIn(phrase, prompt)
             shared = ads.build_instant_experience_typography_quality_rules(shared=True)
             self.assertEqual(prompt.count(shared), 1)
-            for text in ("headline 42–48 px", "supporting line 24–26 px, Montserrat Regular", "CTA 26–28 px, Montserrat Medium",
+            for text in ("headline 42–48 px", "CTA 26–28 px, clean Montserrat sans serif in Medium weight",
                          "Uppercase wording is casing only", "Never enlarge text to fill empty panel space"):
                 self.assertIn(text, prompt)
             for obsolete in ("Relative guidance", "recent oversized reference", "Montserrat SemiBold", "Montserrat Bold",
@@ -74,7 +74,7 @@ class ContextTypographyTests(unittest.TestCase):
             self.assertEqual(len(briefs), 3)
             self.assertIn("Premium collector hallway", briefs[0])
             self.assertIn("tiny but recognisable", briefs[1])
-            self.assertIn("Refined collector sitting-room setting", briefs[2])
+            self.assertIn("Premium residential man cave", briefs[2])
             self.assertTrue(all("CTA: CLAIM YOUR EDITION" in brief for brief in briefs))
 
     def test_saved_and_explicit_choices_are_not_rerolled(self):

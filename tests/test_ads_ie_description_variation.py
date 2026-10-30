@@ -127,7 +127,7 @@ class DescriptionVariationTests(unittest.TestCase):
                 self.assertIn(ads.build_instant_experience_on_image_copy_fit_rules(), prompt)
                 self.assertIn(visuals[i]["camera_side"], prompt)
                 self.assertIn("HEADLINE: " + visuals[i]["headline_text"], prompt)
-                self.assertIn("SUPPORTING LINE: " + visuals[i]["supporting_line"], prompt)
+                self.assertNotIn("SUPPORTING LINE:", prompt)
                 self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
                 self.assertEqual(prompt.count("PRODUCT LOCK — ABSOLUTE"), 1)
 

@@ -4,6 +4,15 @@ from PIL import Image, ImageChops
 from auto_editions_onboarding import detect
 
 
+def preparation_code_hash():
+    """Content identity of the native fix; independent of unrelated releases."""
+    import hashlib
+    root=Path(__file__).parent
+    return hashlib.sha256(''.join((root/name).read_text(encoding='utf-8-sig').replace('\r\n','\n')
+        for name in ('auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx',
+                     'scripts/photoshop/inspect_psd_editions.jsx')).encode()).hexdigest()
+
+
 def opaque(path):
     with Image.open(path) as image:
         if image.format != 'PNG' or image.mode not in ('RGB', 'RGBA'):

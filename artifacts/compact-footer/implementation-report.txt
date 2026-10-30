@@ -1,0 +1,21 @@
+Sports Cave compact ad footer — local implementation
+Task: 20261024-c16bd9f4
+Owner: codex-footer-20261025-session1
+
+Only footer instructions changed: remove the secondary sentence and its reserved space; preserve selected headline variations, headline styling, CLAIM YOUR EDITION styling, and thin gold separator. Footer target is 18–20% (formerly 24–28%); photograph is 80–82% (formerly 72–76%). Artwork, scene selection, frames, realism, image-call counts and output schemas are unchanged.
+
+Central source: ads_footer.py. All public Meta format builders include it, including Creative Refresh; existing layouts without a footer remain unchanged. The versioned prompt cache refreshes stale instructions. Standalone IE exports carry the same policy. Legacy supporting-copy banks remain internal selection/history data so removing their display does not reroll headline choices or saved packs.
+
+Conflicts removed: three-line hierarchy; supporting-line payloads and type targets; unique-subline requirements; second-line scarcity requirements; old height percentages and their rejection gates; do-not-shrink-panel instruction; empty-space instruction; refresh supporting-line bank in emitted prompts; legacy fixed secondary sentence.
+
+Validation: 174 tests passed, 0 failures/errors. Suites: all tests/test_ads_ie_*.py plus test_ads_compact_footer, test_ads_instant_experience_footer, test_ads_refresh_generation and test_ads_winner_refinement, excluding the three known baseline-failing tests below. Checks cover exact pre-change headline selections, all Meta formats and five markets, new/refresh paths, standalone exports, saved-selection preservation, clipboard, CSV, typography, scenes and physical realism. git diff --check passed.
+
+Broader run: 177 tests, seven pre-existing assertion failures across three test methods after the footer regressions were fixed. All seven were independently reproduced by loading the three unmodified HEAD modules. Excluded methods:
+- tests.test_ads_ie_locked_legacy_copy.LockedLegacyCopyTests.test_actual_public_prompt_assigns_one_framework_to_each_ad_for_all_sports (five subtests)
+- tests.test_ads_ie_locked_legacy_copy.LockedLegacyCopyTests.test_current_image_prompts_and_unchanged_creative_refresh
+- tests.test_ads_winner_refinement.WinnerRefinementTests.test_ie_refresh_all_three_briefs_include_premium_fomo_rules
+See baseline-check.log and focused-tests.log.
+
+Final user clarification limited this to the prompt/spacing change. No sample image generated and no pixel-level visual validation claimed. sample-full-prompt.txt is a generated example PROMPT only, with a synthetic product name and the unchanged selected headline FOR YOUR COLLECTION. final-footer-prompt.txt contains the exact shared footer block.
+
+Uncommitted local changes retained for review. No push, merge, production mutation or deployment. Staff production behaviour changes only after a separately authorised release.

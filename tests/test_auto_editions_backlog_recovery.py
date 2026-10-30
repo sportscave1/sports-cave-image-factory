@@ -12,6 +12,119 @@ from tests.test_worker_health_queue import operations,telemetry,continuous,store
 CONFIG=dict(policies=[],memberships=[],default_group='')
 
 
+def resize_runtime():
+    from auto_editions_preflight import preparation_code_hash
+    return dict(seen_at=datetime.now(timezone.utc),payload=dict(state='Idle',protocol=1,
+        preparation_code_hash=preparation_code_hash(),processor_lock=False,checkpoint_pending=False,recovery_failures=0))
+
+
+@pytest.mark.parametrize('reason',[
+    'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
+    'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
+    'Photoshop inspection failed: Inspector failure: Error: Cannot open the file because the open options are incorrect'])
+def test_new_design_resize_failure_recovers_once_without_historical_scope(backlog,monkeypatch,reason):
+    d,sql=backlog
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    monkeypatch.delenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED')
+    monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
+    pid,source=source_job(d,sql,2001,reason)
+    protected={t:deepcopy(rows(sql,t)) for t in ('edition_products','edition_allocations','product_psd_mappings')}
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG),patch.object(recovery,'native_runtime',return_value=resize_runtime()):
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+        claimed=d.queue.claim('synthetic-companion')
+        assert claimed['product_gid']==pid
+        assert d.queue.claim('duplicate-companion') is None
+        sql.execute("UPDATE auto_edition_onboarding SET status='Blocked',reason=%s,source=%s::jsonb,lease_token=NULL,lease_until=NULL WHERE product_gid=%s",(reason,json.dumps(source),pid))
+        sql.execute("UPDATE auto_edition_onboarding_audit SET created_at=now()-interval '1 hour' WHERE event=%s",(recovery.EVENT,))
+        # A restart and elapsed backoff do not reset the shared-fix budget.
+        assert recovery.scan(d.connect,metadata)==[]
+    assert {t:rows(sql,t) for t in protected}==protected
+
+
+@pytest.mark.parametrize('change',[{'state':'Live'},{'processor_lock':True},{'checkpoint_pending':True},
+    {'preparation_code_hash':'old'},{'recovery_failures':1}])
+def test_resize_recovery_waits_for_idle_fixed_runtime(change):
+    runtime=resize_runtime();runtime['payload'].update(change)
+    assert not recovery.resize_fix_available(runtime)
+
+
+def test_resize_recovery_identity_ignores_unrelated_web_release(monkeypatch):
+    runtime=resize_runtime()
+    monkeypatch.setenv('RENDER_GIT_COMMIT','unrelated-web-release')
+    assert recovery.resize_fix_available(runtime)
+    runtime['seen_at']-=timedelta(minutes=3)
+    assert not recovery.resize_fix_available(runtime)
+
+
+def test_ended_native_lease_recovers_through_shared_idle_guard(backlog,monkeypatch):
+    d,sql=backlog
+    pid,source=source_job(d,sql,2010,'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.')
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()+interval '45 minutes' WHERE product_gid=%s",(pid,))
+    runtime=resize_runtime()
+    from worker_health import record_heartbeat
+    record_heartbeat(d.connect,'Companion','fixture',runtime['payload'])
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG),patch.object(recovery,'native_runtime',return_value=runtime):
+        assert recovery.plan(d.connect,CONFIG)[0]['waiting']==''
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert d.queue.claim('companion')['product_gid']==pid
+
+
+@pytest.mark.parametrize('change',[{'state':'Live'},{'processor_lock':True},{'checkpoint_pending':True},
+    {'product_gid':'gid://shopify/Product/2010'},{'preparation_code_hash':'old'}])
+def test_unexpired_terminal_lease_still_protects_uncertain_work(change):
+    row=dict(status='Blocked',lease_until=datetime.now(timezone.utc)+timedelta(minutes=45))
+    runtime=resize_runtime();runtime['payload'].update(change)
+    assert recovery.lease_protects(row,runtime)
+    assert recovery.lease_protects({**row,'preparation_hash':'retained'},resize_runtime())
+
+
+def test_unscoped_transient_failure_retries_with_existing_budget(backlog,monkeypatch):
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    test_restart_backoff_and_retry_ceiling(backlog)
+
+
+@pytest.mark.parametrize('reason',['Preparation failed: Transient preparation connection: HTTP 503. Existing PSD and mapping are preserved.',
+    'Preparation failed: HTTPError. Existing PSD and mapping are preserved.'])
+def test_preparation_service_failure_uses_bounded_shared_network_recovery(backlog,monkeypatch,reason):
+    d,sql=backlog
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    pid,source=source_job(d,sql,2011,reason)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        plan=recovery.plan(d.connect,CONFIG)[0]
+        assert plan['decision']['category']=='Upload/network'
+        assert plan['decision']['max_attempts']==3
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+
+
+@pytest.mark.parametrize('code',[408,429,500,502,503,504,400,401,403,404])
+def test_preparation_http_diagnostics_preserve_status_and_retry_class(tmp_path,code):
+    import sys
+    from urllib.error import HTTPError
+    sys.path.insert(0,str(Path(__file__).parents[1]/'scripts/studio'))
+    from auto_editions_local import failure_detail
+    from worker_diagnostics import explain
+    reason=failure_detail(dict(folder=tmp_path),'Preparation',HTTPError('https://example.test/private',code,'unavailable',{},None))
+    assert 'HTTP '+str(code) in reason
+    assert 'example.test' not in reason
+    assert (explain(reason)['code']=='CONNECTION_INTERRUPTED')==(code in (408,429,500,502,503,504))
+
+
+def test_corrected_input_resumes_without_manual_retry(backlog,monkeypatch):
+    from tests.test_auto_editions_discovery import asset
+    d,sql=backlog;pid,source=source_job(d,sql,2002,'Exactly one visible, editable edition-number layer is required.')
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    changed=asset(id=source['file_id'],rev='a2',content_hash='b'*64)
+    # The discovery inventory is the persisted signal that corrected input arrived.
+    sql.execute("INSERT INTO auto_edition_source_inventory(file_id,name_key,path_lower,metadata) VALUES(%s,'corrected','/corrected.psd',%s::jsonb)",(source['file_id'],json.dumps(changed)))
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        assert recovery.scan(d.connect,lambda _:changed)==[pid]
+        assert recovery.scan(d.connect,lambda _:changed)==[]
+    assert rows(sql,'auto_edition_onboarding')[0]['status']=='Awaiting preparation'
+
+
 @pytest.fixture(autouse=True)
 def fixture_recovery_scope(monkeypatch):
     # Disposable test products are explicitly selected; no production scope read.
@@ -224,7 +337,7 @@ def test_source_revision_reassessment_requires_changed_bytes():
         dropbox_file_id='id:original')
     assert recovery.classify({**base,'inventory_metadata':asset(rev='a2')},CONFIG)['action'] is None
     revised={**base,'inventory_metadata':asset(rev='a2',content_hash='b'*64)}
-    assert recovery.classify(revised,CONFIG)['action']=='retry'
+    assert recovery.classify(revised,CONFIG)['action']=='retry_source'
     assert recovery.key(revised,dict(category='Stale/source'),CONFIG)!=recovery.key(base,dict(category='Stale/source'),CONFIG)
 
 
@@ -244,7 +357,7 @@ def test_recovery_health_has_wait_reason_and_review_resolution(backlog,monkeypat
 
 
 def test_ordered_scope_excludes_peer_and_preserves_priority(backlog,monkeypatch):
-    d,sql=backlog;outside,_=source_job(d,sql,1000);selected,_=source_job(d,sql,1001)
+    d,sql=backlog;outside,_=source_job(d,sql,1000,'Unreviewed native artwork error');selected,_=source_job(d,sql,1001)
     monkeypatch.setattr(recovery,'ordered_scope',lambda:{selected:231})
     before=next(r for r in rows(sql,'auto_edition_onboarding') if r['product_gid']==outside)
     with patch('auto_editions_colour_store.configuration',return_value=CONFIG):

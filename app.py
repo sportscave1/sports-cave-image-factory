@@ -3162,11 +3162,8 @@ def get_current_page():
         )
     if route != session_route:
         _begin_navigation_transition(route, source=source)
-    if route == "Product Uploads" and st.session_state.get(CURRENT_PAGE_STATE_KEY) != route:
-        from product_upload_mockups import release_transient
-        release_transient(st.session_state.get('_product_upload_mockups_result'))
-        for key in ("_product_upload_visit", "_product_upload_active", "_product_upload_event", "_product_upload_manual", "_product_upload_mockups_result"):
-            st.session_state.pop(key, None)
+    # Returning to Product Uploads retains the prepared selection. Its explicit
+    # Start another upload / Remove controls own reset and transient cleanup.
     _store_current_page(route, source=source)
     st.session_state[CURRENT_PAGE_QUERY_STATE_KEY] = query_value
 
@@ -3192,11 +3189,7 @@ def set_current_page(page, *, source="user", sync_query=True, force=False):
     _begin_navigation_transition(route, source=source, force=force)
     # Durably store the exact route before either the query-parameter forward
     # message or the explicit Streamlit rerun can be emitted.
-    if route == "Product Uploads" and st.session_state.get(CURRENT_PAGE_STATE_KEY) != route:
-        from product_upload_mockups import release_transient
-        release_transient(st.session_state.get('_product_upload_mockups_result'))
-        for key in ("_product_upload_visit", "_product_upload_active", "_product_upload_event", "_product_upload_manual", "_product_upload_mockups_result"):
-            st.session_state.pop(key, None)
+    # Page navigation must not discard a prepared Product Uploads workflow.
     _store_current_page(route, source=source)
     if sync_query:
         sync_current_page_to_query_params(route)

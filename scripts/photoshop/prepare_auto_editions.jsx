@@ -92,6 +92,7 @@ var SCAutoEditionsPreparation = (function () {
         }
         try {
             var tick = new Date().getTime();
+            app.bringToFront(); // A minimized Photoshop can reject native PSD opens.
             doc = app.open(new File(r.input));
             timings.photoshop_open_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }
@@ -149,6 +150,10 @@ var SCAutoEditionsPreparation = (function () {
                     throw Error("resize_background_identity_changed");
                 // Only Python-verified opaque native pixels, on the disposable
                 // staged document. No fill colour and no source PSD writes.
+                // Photoshop's background setter also reveals the active layer.
+                // A saved hidden selection may contain obsolete artwork; select
+                // only the verified visible candidate before this operation.
+                doc.activeLayer=bg[0];
                 if(bg[0].kind===LayerKind.SMARTOBJECT)bg[0].rasterize(RasterizeType.ENTIRELAYER);
                 bg[0].isBackgroundLayer=true;
                 savePNG(doc,"resize-original.png");

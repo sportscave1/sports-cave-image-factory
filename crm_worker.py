@@ -12,6 +12,16 @@ def _prepare_campaign(store,shop,*,env=None):
     from crm_campaign_preparation import tick
     return tick(CampaignStore(store.connect),shop,env=env)
 
+
+def preparation_run(store,shop,stop):
+    """Only publication verification belongs on this latency-sensitive loop."""
+    while not stop.is_set():
+        try:worked=_prepare_campaign(store,shop)
+        except Exception as exc:
+            worked=False
+            logging.getLogger(__name__).warning('campaign_preparation_cycle_failed error_class=%s',type(exc).__name__)
+        stop.wait(0.2 if worked else 2)
+
 def main(argv=None):
     logging.basicConfig(level=logging.WARNING,format='%(asctime)s %(levelname)s %(message)s')
     # Enable only the safe batch counters/timings, not third-party debug output.
@@ -43,27 +53,25 @@ def main(argv=None):
     publication_thread=None
     # External verification is isolated from delivery ticks. The thread owns no
     # durable state: DB leases and fenced publication recover across processes.
-    def preparation_run():
-        preparation_shop=Shopify()
+    def lifecycle_run():
+        from crm_lifecycle_sync import tick
+        shop=Shopify()
         while not stop.is_set():
-            try:worked=_prepare_campaign(store,preparation_shop)
-            except Exception as exc:
-                worked=False
-                logging.getLogger(__name__).warning('campaign_preparation_cycle_failed error_class=%s',type(exc).__name__)
-            try:
-                from crm_lifecycle_sync import tick as lifecycle_sync
-                lifecycle_sync(store,preparation_shop)
+            try:tick(store,shop)
             except Exception as exc:
                 logging.getLogger(__name__).warning('lifecycle_audience_sync_failed error_class=%s',type(exc).__name__)
-            stop.wait(0.2 if worked else 2)
+            stop.wait(2)
+    lifecycle_thread=None
     preparation_thread=None
     buyer_thread=None
     if args.once:_prepare_campaign(store,Shopify())
     else:
+        lifecycle_thread=threading.Thread(target=lifecycle_run,name='lifecycle-audience-sync',daemon=True)
+        lifecycle_thread.start()
         from crm_buyer_segments import run as buyer_sync_run
         buyer_thread=threading.Thread(target=buyer_sync_run,args=(store,Shopify(),stop),name='buyer-segment-sync',daemon=True)
         buyer_thread.start()
-        preparation_thread=threading.Thread(target=preparation_run,name='campaign-preparation-poll',daemon=True)
+        preparation_thread=threading.Thread(target=preparation_run,args=(store,Shopify(),stop),name='campaign-preparation-poll',daemon=True)
         preparation_thread.start()
     if not args.once:
         from crm_automation_publication import run as publication_run
@@ -105,6 +113,7 @@ def main(argv=None):
     if publication_thread:publication_thread.join(timeout=6)
     if preparation_thread:preparation_thread.join(timeout=6)
     if buyer_thread:buyer_thread.join(timeout=6)
+    if lifecycle_thread:lifecycle_thread.join(timeout=6)
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

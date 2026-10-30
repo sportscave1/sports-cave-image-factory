@@ -1,5 +1,6 @@
 """Disposable release transactions; no installation, native input or package downloads."""
 import io
+import hashlib
 import asyncio
 import json
 import re
@@ -24,6 +25,14 @@ def package(tmp_path, suffix=b""):
     struct.pack_into("<H", pe, 68, 0x8664)
     native = tmp_path / "synthetic.exe"
     native.write_bytes(pe + suffix)
+    receipt = tmp_path / 'DownloadReceiptHost.exe'
+    receipt.write_bytes(pe)
+    sources = ROOT / 'windows-screen-recorder/native'
+    (tmp_path / 'build-manifest.json').write_text(json.dumps({
+        'executable_sha256': hashlib.sha256(native.read_bytes()).hexdigest(),
+        'download_executable_sha256': hashlib.sha256(receipt.read_bytes()).hexdigest(),
+        'sources': {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in sources.iterdir() if p.suffix in {'.cs', '.ps1'}}}))
     return build_package(ROOT, native)
 
 
@@ -48,6 +57,10 @@ def test_bundle_is_deterministic_complete_and_rejects_tampering(tmp_path):
     source = extract(data, tmp_path / "source")
     manifest, identity = verify_directory(source)
     assert identity == verify_archive(data)
+    assert manifest['version'] == 2
+    assert 'edge-adapter/prepared-context.js' in manifest['files']
+    assert 'edge-adapter/browser-identity.js' in manifest['files']
+    assert 'download-host/DownloadReceiptHost.exe' in manifest['files']
     assert "desktop_recorder/bin/DesktopRecorder.exe" in manifest["files"]
     assert "desktop_recorder/helper.py" in manifest["files"]
     with zipfile.ZipFile(io.BytesIO(data)) as original:
@@ -224,3 +237,17 @@ def test_actual_start_launcher_reads_newline_terminated_release_pointer(tmp_path
                               timeout=5,creationflags=subprocess.CREATE_NO_WINDOW)
         assert result.returncode==0,result.stderr
         assert result.stdout.strip()==selected
+
+
+def test_build_rejects_stale_native_and_missing_receipt(tmp_path):
+    package(tmp_path)
+    build_path = tmp_path / 'build-manifest.json'
+    build = json.loads(build_path.read_text())
+    build['sources']['Host.cs'] = '0' * 64
+    build_path.write_text(json.dumps(build))
+    with pytest.raises(ValueError, match='source changed'):
+        build_package(ROOT, tmp_path / 'synthetic.exe')
+    package(tmp_path)
+    (tmp_path / 'DownloadReceiptHost.exe').unlink()
+    with pytest.raises(FileNotFoundError):
+        build_package(ROOT, tmp_path / 'synthetic.exe')

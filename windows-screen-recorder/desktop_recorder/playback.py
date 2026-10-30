@@ -23,7 +23,18 @@ class Playback:
         self.run = None
 
     def _write(self):
-        self.repository.atomic(self.root / (self.run["id"] + ".json"), self.run)
+        try:
+            self.repository.atomic(self.root / (self.run["id"] + ".json"), self.run)
+        except OSError:
+            # A tentative in-memory transition is not permission to send input
+            # after its durable journal failed. Keep the last disk journal for
+            # recovery; do not retry the write or repeat an application action.
+            self.stop_event.set()
+            self.ready.clear()
+            self.run['pause_requested'] = False
+            self.run['state'] = 'uncertain' if self.run['pending'] is not None else 'stopped'
+            self.run['message'] = 'Playback stopped because its journal could not be saved. Restore disk access and review the preserved run.'
+            raise
 
     def begin(self, run_id, task_id, revision, capabilities, *,
               controls_visible, emergency_stop_ready):
@@ -88,6 +99,10 @@ class Playback:
 
     def pause(self):
         with self.lock:
+            if (not self.run or self.stop_event.is_set() or
+                    self.run['state'] not in {'playing', 'paused', 'uncertain'} or
+                    (self.run['state'] == 'uncertain' and self.run.get('result_received'))):
+                raise Invalid('Only active playback can pause.')
             self.ready.clear()
             if self.run:
                 self.run["pause_requested"] = True
@@ -98,7 +113,8 @@ class Playback:
 
     def resume(self):
         with self.lock:
-            if not self.run or not self.run["pause_requested"]:
+            if (not self.run or not self.run["pause_requested"] or self.stop_event.is_set()
+                    or self.run['state'] not in {'paused', 'uncertain'}):
                 raise Invalid("Only a paused, confirmed run can resume.")
             self.run["pause_requested"] = False
             self.run["state"] = "playing" if self.run["pending"] is None else "uncertain"
@@ -110,6 +126,7 @@ class Playback:
         self.ready.set()
         with self.lock:
             if self.run and self.run["state"] not in {"completed", "stopped"}:
+                self.run["pause_requested"] = False
                 if reason:
                     self.run["stop_reason"] = str(reason)[:240]
                     self.run["message"] = self.run["stop_reason"]
@@ -133,24 +150,90 @@ class Playback:
                         run["state"] = "stopped"
                         self.repository.atomic(path, run)
                 if run["state"] in {"playing", "paused", "uncertain"}:
+                    run["interrupted_by_restart"] = True
                     run["state"] = "uncertain" if run["pending"] is not None else "stopped"
                     run["message"] = "Helper restarted. No action was repeated."
                     self.repository.atomic(path, run)
                 recovered.append(deepcopy(run))
         return recovered
 
+    def resume_recovered(self, run_id, revision, capabilities, *,
+                         controls_visible, emergency_stop_ready):
+        """Explicit resume at a confirmed restart boundary; never dispatch here.
+
+        Caller must use returned next_step, then normal native per-action guards.
+        Not wired to toolbar/IPC until the full-workflow integration gate passes.
+        """
+        import json
+        with self.lock:
+            if str(UUID(run_id)) != run_id:
+                raise Invalid('Invalid recovery run ID.')
+            if self.run and self.run['state'] in {'playing', 'paused', 'uncertain'}:
+                raise Invalid('Resolve active playback before recovery.')
+            path = self.root / (run_id + '.json')
+            run = json.loads(path.read_text(encoding='utf-8'))
+            if (run.get('id') != run_id or run.get('revision') != revision
+                    or run.get('state') != 'stopped' or run.get('pending') is not None
+                    or run.get('interrupted_by_restart') is not True or run.get('stop_reason')
+                    or run.get('reconciliation')):
+                raise Invalid('Only a confirmed restart boundary may resume; no retry of uncertain effects.')
+            task = self.repository.get(run['task_id'])
+            if self.repository.revision(task) != revision:
+                raise Invalid('Saved task changed; recovery refused.')
+            checked = prepare_play(task, capabilities, explicit_play=True,
+                controls_visible=controls_visible, emergency_stop_ready=emergency_stop_ready)
+            next_step = run.get('next_step')
+            if (type(next_step) is not int or not 0 <= next_step < len(checked['actions'])
+                    or run.get('total') != len(checked['actions'])
+                    or run.get('results') != [dict(step=i, verified=True) for i in range(next_step)]):
+                raise Invalid('Recovery requires a contiguous verified checkpoint prefix.')
+            for other in self.root.glob('*.json'):
+                prior = json.loads(other.read_text(encoding='utf-8'))
+                if other != path and prior.get('task_id') == run['task_id'] and prior.get('state') in {'playing','paused','uncertain'}:
+                    raise Invalid('Another unresolved run prevents checkpoint resume.')
+            self.run = run
+            self.run.update(state='playing', pause_requested=False, interrupted_by_restart=False,
+                            message='Explicitly resumed at the last verified checkpoint.')
+            self.stop_event.clear()
+            self.ready.clear()
+            self._write()
+            self.ready.set()
+            return dict(task=checked, next_step=next_step)
+
+    def reviews(self):
+        """Only settled failures or journals recovered without a live executor."""
+        import json
+        rows = []
+        with self.lock:
+            for path in sorted(self.root.glob("*.json")):
+                run = json.loads(path.read_text(encoding="utf-8"))
+                if (run["state"] != "uncertain" or run.get("pending") is None or
+                    not (run.get("result_received") or run.get("interrupted_by_restart"))):
+                    continue
+                task = self.repository.get(run["task_id"], include_removed=True)
+                if self.repository.revision(task) != run["revision"]:
+                    continue
+                action = task["actions"][run["pending"]]
+                target = action["target"]
+                rows.append(dict(id=run["id"], revision=run["revision"], step=run["pending"],
+                                 name=self.repository.display_name(task),
+                                 summary=f"Step {run['pending'] + 1}: {action['kind']} — {target['name']}\nWindow: {target['window_key']}",
+                                 message=run.get("message", "Result was not confirmed.")))
+        return rows
+
     def reconcile_observed_result(self, run_id, revision, step, evidence):
         """Explicit operator observation closes uncertainty without replay or pass."""
         import json
-        if str(UUID(run_id)) != run_id or not isinstance(evidence, str) or not evidence.strip():
+        if (str(UUID(run_id)) != run_id or type(step) is not int or not isinstance(evidence, str)
+                or not evidence.strip() or len(evidence) > 500):
             raise Invalid("A specific run and operator observation are required.")
         with self.lock:
             path = self.root / (run_id + ".json")
             run = json.loads(path.read_text(encoding="utf-8"))
-            if (run["state"] != "uncertain" or not run.get("result_received") or
+            if (run["state"] != "uncertain" or not (run.get("result_received") or run.get("interrupted_by_restart")) or
                     run["revision"] != revision or run["pending"] != step):
                 raise Invalid("This result is not available for reconciliation.")
-            task = self.repository.get(run["task_id"])
+            task = self.repository.get(run["task_id"], include_removed=True)
             if self.repository.revision(task) != revision:
                 raise Invalid("The saved task revision changed.")
             run["reconciliation"] = dict(step=step, evidence=evidence[:500],
