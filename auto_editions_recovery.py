@@ -132,7 +132,8 @@ def classify(row, config, *, runtime=None):
     reason = (replacement.get('reason') if replacement.get('stage')=='Failed' else None) or row.get('technical_reason') or row.get('reason') or ''
     code = explain(reason)['code']
     lower = reason.lower()
-    transient=code in TRANSIENT or 'transfer failed: timeouterror' in lower
+    transient=(code in TRANSIENT or 'transfer failed: timeouterror' in lower
+        or reason=='Preparation failed: HTTPError. Existing PSD and mapping are preserved.')
     category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED'
                 else 'Native inspection' if 'cannot open the file because the open options are incorrect' in lower or reason=='Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.'
                 else 'Colour/provenance' if code in COLOUR or 'embedded icc profile required' in lower

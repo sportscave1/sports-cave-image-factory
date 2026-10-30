@@ -85,6 +85,33 @@ def test_unscoped_transient_failure_retries_with_existing_budget(backlog,monkeyp
     test_restart_backoff_and_retry_ceiling(backlog)
 
 
+@pytest.mark.parametrize('reason',['Preparation failed: Transient preparation connection: HTTP 503. Existing PSD and mapping are preserved.',
+    'Preparation failed: HTTPError. Existing PSD and mapping are preserved.'])
+def test_preparation_service_failure_uses_bounded_shared_network_recovery(backlog,monkeypatch,reason):
+    d,sql=backlog
+    monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
+    pid,source=source_job(d,sql,2011,reason)
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG):
+        plan=recovery.plan(d.connect,CONFIG)[0]
+        assert plan['decision']['category']=='Upload/network'
+        assert plan['decision']['max_attempts']==3
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+
+
+@pytest.mark.parametrize('code',[408,429,500,502,503,504,400,401,403,404])
+def test_preparation_http_diagnostics_preserve_status_and_retry_class(tmp_path,code):
+    import sys
+    from urllib.error import HTTPError
+    sys.path.insert(0,str(Path(__file__).parents[1]/'scripts/studio'))
+    from auto_editions_local import failure_detail
+    from worker_diagnostics import explain
+    reason=failure_detail(dict(folder=tmp_path),'Preparation',HTTPError('https://example.test/private',code,'unavailable',{},None))
+    assert 'HTTP '+str(code) in reason
+    assert 'example.test' not in reason
+    assert (explain(reason)['code']=='CONNECTION_INTERRUPTED')==(code in (408,429,500,502,503,504))
+
+
 def test_corrected_input_resumes_without_manual_retry(backlog,monkeypatch):
     from tests.test_auto_editions_discovery import asset
     d,sql=backlog;pid,source=source_job(d,sql,2002,'Exactly one visible, editable edition-number layer is required.')

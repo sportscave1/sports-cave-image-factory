@@ -827,6 +827,13 @@ def failure_detail(row,stage,error):
         with (row['folder']/'failure-history.jsonl').open('a',encoding='utf-8') as history:
             history.write(json.dumps(detail)+'\n')
     except OSError:pass
+    from urllib.error import HTTPError
+    if isinstance(error,HTTPError):
+        if error.code in (408,429,500,502,503,504):
+            detail='Transient preparation connection: HTTP '+str(error.code)
+            row['diagnostic']=safe_diagnostic(detail,safe_stage)
+            return detail
+        return 'Preparation service rejected the request: HTTP '+str(error.code)
     if isinstance(error,RuntimeError):
         if 'source_profile_requires_review' in message or 'colour_conversion_requires_approval' in message:
             row['repair']=False

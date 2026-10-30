@@ -85,3 +85,11 @@ defers to the shared guarded admission only for terminal, unprepared jobs with
 a fresh matching idle runtime, no active product, lock or pending checkpoint.
 The checks repeat under the queue transaction; active work and retained packages
 remain protected. No lease is cleared by a manual database edit.
+
+The next live attempt passed inspection, then received HTTP 503 fetching context
+during web rollout. The former handler masked HTTP status as `HTTPError`, leaving
+it outside transient recovery. Preparation diagnostics now distinguish retryable
+408/429/5xx status from rejected 4xx requests. The historical masked preparation
+HTTP error also receives the existing bounded network retry budget. This covers
+rollout interruptions without manually retrying a product or weakening source
+and upload verification.
