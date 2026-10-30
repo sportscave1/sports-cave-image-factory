@@ -18,12 +18,15 @@ def resize_runtime():
         preparation_code_hash=preparation_code_hash(),processor_lock=False,checkpoint_pending=False,recovery_failures=0))
 
 
-def test_new_design_resize_failure_recovers_once_without_historical_scope(backlog,monkeypatch):
+@pytest.mark.parametrize('reason',[
+    'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
+    'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
+    'Photoshop inspection failed: Inspector failure: Error: Cannot open the file because the open options are incorrect'])
+def test_new_design_resize_failure_recovers_once_without_historical_scope(backlog,monkeypatch,reason):
     d,sql=backlog
     monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
     monkeypatch.delenv('AUTO_EDITIONS_BACKLOG_RECOVERY_ENABLED')
     monkeypatch.setenv('AUTO_EDITIONS_TECHNICAL_FLOW_ENABLED','true')
-    reason='Preparation failed: Resize background changed native artwork pixels; preparation rejected.'
     pid,source=source_job(d,sql,2001,reason)
     protected={t:deepcopy(rows(sql,t)) for t in ('edition_products','edition_allocations','product_psd_mappings')}
     with patch('auto_editions_colour_store.configuration',return_value=CONFIG),patch.object(recovery,'native_runtime',return_value=resize_runtime()):

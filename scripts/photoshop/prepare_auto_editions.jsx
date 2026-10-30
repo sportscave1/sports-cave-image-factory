@@ -92,6 +92,7 @@ var SCAutoEditionsPreparation = (function () {
         }
         try {
             var tick = new Date().getTime();
+            app.bringToFront(); // A minimized Photoshop can reject native PSD opens.
             doc = app.open(new File(r.input));
             timings.photoshop_open_ms = new Date().getTime()-tick; tick = new Date().getTime();
             if (existing[String(doc.id)]) { doc = null; throw Error("staged_document_already_open"); }

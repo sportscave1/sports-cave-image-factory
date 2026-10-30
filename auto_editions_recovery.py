@@ -47,8 +47,8 @@ def fix_revision(category):
     # Relevant implementation, not every deployment: unrelated releases must not
     # replenish deterministic retry budgets.
     files = ['auto_editions_recovery.py']
-    if category == 'Resize background':
-        files = ['auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx']
+    if category in ('Resize background','Native inspection'):
+        files = ['auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx','scripts/photoshop/inspect_psd_editions.jsx']
     elif category == 'Colour/provenance':
         files += ['auto_editions_colour.py', 'auto_editions_colour_policy.py',
                   'scripts/prepare_auto_editions.py', 'scripts/photoshop/prepare_auto_editions.jsx']
@@ -106,7 +106,7 @@ def automatic_scope(row, decision):
     """
     return (legacy_enabled() and row['product_gid'] in ordered_scope() or
         (not row.get('preparation_hash') and not row.get('replacement') and
-         decision['category'] in ('Resize background','Upload/network','Stale/source','Colour/provenance')))
+         decision['category'] in ('Resize background','Native inspection','Upload/network','Stale/source','Colour/provenance')))
 
 
 def classify(row, config, *, runtime=None):
@@ -119,6 +119,7 @@ def classify(row, config, *, runtime=None):
     lower = reason.lower()
     transient=code in TRANSIENT or 'transfer failed: timeouterror' in lower
     category = ('Resize background' if code=='RESIZE_BACKGROUND_CHANGED'
+                else 'Native inspection' if 'cannot open the file because the open options are incorrect' in lower or reason=='Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.'
                 else 'Colour/provenance' if code in COLOUR or 'embedded icc profile required' in lower
                 else 'Plaque/layers' if code in STRUCTURAL
                 else 'Upload/receipts' if lower in ('invalid dropbox file id.', 'complete immutable upload receipts required.')
@@ -143,6 +144,9 @@ def classify(row, config, *, runtime=None):
     if category=='Resize background' and not row.get('preparation_hash') and not pending:
         return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
                 'reason':'Background pixel verification rejected a changed composition. Waiting for the verified background-selection fix on an idle Companion.'}
+    if category=='Native inspection' and not row.get('preparation_hash') and not pending:
+        return {**result,'action':'retry_native' if resize_fix_available(runtime) else None,
+                'reason':'Photoshop could not open the staged PSD. Waiting for the verified native-window restoration fix on an idle Companion.'}
     if not row.get('preparation_hash') and pending.get('stage') not in ('Failed',):
         changed=current_source(row)
         if changed and changed.get('content_hash')!=source.get('content_hash'):

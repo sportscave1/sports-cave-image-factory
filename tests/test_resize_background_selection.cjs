@@ -15,3 +15,14 @@ for(const smart of [true,false]){
  assert.equal(saved,1);assert.equal(number.visible,true);assert.equal(plaque.visible,true);
 }
 console.log('Native background selection: hidden selected raster/smart-object cases passed');
+for(const [file,opening] of [['scripts/photoshop/inspect_psd_editions.jsx','doc=app.open(new File(e.work_path));'],
+ ['scripts/photoshop/prepare_auto_editions.jsx','doc = app.open(new File(r.input));']]){
+ const text=fs.readFileSync(file,'utf8'),end=text.indexOf(opening)+opening.length;
+ const start=text.lastIndexOf('app.bringToFront();',end);
+ assert.ok(start>=0);
+ let minimized=true,opened=0;
+ vm.runInNewContext(text.slice(start,end),{app:{bringToFront(){minimized=false},open(){assert.equal(minimized,false);opened++;return {}}},
+   File:function(path){this.path=path},e:{work_path:'staged.psd'},r:{input:'staged.psd'}});
+ assert.equal(opened,1);
+}
+console.log('Native PSD opens restore minimized Photoshop before opening staged copies');

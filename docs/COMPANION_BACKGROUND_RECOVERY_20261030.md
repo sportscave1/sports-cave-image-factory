@@ -68,3 +68,12 @@ native preparation, upload receipts and successful technical verification.
 Live deployment IDs, preservation hashes and final recovery evidence are recorded
 in the task's ignored output directory and final user report. This document's
 pre-release tests alone do not claim production recovery or supplier approval.
+
+The first live automatic recovery exposed a second native condition: Photoshop
+27.11 rejects `app.open` with error 8000 while its window is minimized. Both the
+original retained PSD and its byte-identical new staged copy failed minimized,
+and both opened immediately after native `app.bringToFront()`. The shared
+inspection and preparation open paths now restore Photoshop first, preserve
+existing documents, and retain the actual inspection error. This condition and
+its old masked error get one guarded attempt per source/native fix, with the
+same matching-runtime and duplicate protections as background recovery.

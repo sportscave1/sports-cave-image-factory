@@ -742,7 +742,9 @@ def inspect(key):
                 atomic_json(folder/'inspection-cache.json',inspection_receipt(folder,row['context']['source'],hashes['sha256'],inspector_hash))
         result=inspection['documents'][0]
         row['timings']['inspection_seconds']=round(time.monotonic()-row['created']-row['timings']['psd_retrieval_seconds'],3)
-        if 'error' in result:raise ColourReview('Inspector failure: Photoshop could not inspect the linked source.')
+        if 'error' in result:
+            detail=result.get('error_message') or 'Photoshop could not inspect the linked source.'
+            raise ColourReview('Inspector failure: '+detail)
         document=result['inspection']['document']
         if colour['state']=='untagged':
             document['observed_profile']=document.get('profile')
