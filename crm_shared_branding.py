@@ -11,7 +11,7 @@ def current(store,settings):
     return result
 
 
-def flow_settings(store,row,settings):
+def flow_settings(store,row,settings,document=None):
     key='flow-branding:'+str(row['id'])
     candidate=current(store,settings)
     with store.db() as conn:
@@ -19,6 +19,8 @@ def flow_settings(store,row,settings):
         saved=conn.execute('SELECT value FROM crm_runtime_state WHERE key=%s',(key,)).fetchone()
         if saved:return saved['value']
         value=deepcopy(settings if receipt and receipt['first_submitted_at'] else candidate)
+        if receipt and receipt['first_submitted_at'] and not settings.get('shared_branding_policy') and document and document.get('html_sections'):
+            value['email_defaults']=deepcopy(document['html_sections'])
         conn.execute('INSERT INTO crm_runtime_state(key,value) VALUES(%s,%s::jsonb)',(key,json.dumps(value)))
         return value
 

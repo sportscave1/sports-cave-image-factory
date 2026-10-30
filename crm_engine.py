@@ -196,7 +196,7 @@ class Engine:
                 from copy import deepcopy
                 from crm_shared_branding import flow_settings
                 content=deepcopy(content)
-                content['render_settings']=flow_settings(self.store,row,content['render_settings'])
+                content['render_settings']=flow_settings(self.store,row,content['render_settings'],content['document'])
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 from crm_automation_runtime import render as render_automation

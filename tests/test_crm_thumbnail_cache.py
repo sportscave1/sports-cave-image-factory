@@ -34,10 +34,12 @@ class ThumbnailTests(TestCase):
             self.assertEqual(label,'DRAFT');self.assertIsNone(live)
             step['document']['subject']='changed'
             self.assertNotEqual(cache.selection(self.row,step)[0],key)
-    def test_live_source_uses_exact_template_and_no_render_settings_read(self):
+    def test_live_source_uses_exact_template_and_current_shared_branding(self):
         store=Mock();store.template.return_value={'automation_id':'flow','step_id':'one','automation_version':7,'document':{'live':True},'render_settings':{'frozen':True}}
         _,_,live=cache.selection(self.row,self.step)
-        self.assertEqual(cache.source_loader(store,self.row,self.step,live)(),({'live':True},{'frozen':True}))
+        with patch('crm_shared_branding.current',return_value={'shared':'current'}) as branding:
+            self.assertEqual(cache.source_loader(store,self.row,self.step,live)(),({'live':True},{'shared':'current'}))
+        branding.assert_called_once_with(store,{'frozen':True})
         store.template.assert_called_once_with('template',7);store.render_settings.assert_not_called()
         store.send.assert_not_called();store.q.assert_not_called()
     def test_wrong_publication_rejected(self):
