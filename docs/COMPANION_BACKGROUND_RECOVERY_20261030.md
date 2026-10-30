@@ -77,3 +77,11 @@ inspection and preparation open paths now restore Photoshop first, preserve
 existing documents, and retain the actual inspection error. This condition and
 its old masked error get one guarded attempt per source/native fix, with the
 same matching-runtime and duplicate protections as background recovery.
+
+The live failure checkpoint also retained a 45-minute lease. Shared queue
+admission already handles this with fresh idle Companion evidence, but the
+scanner's unconditional expiry check delayed that recovery. The scanner now
+defers to the shared guarded admission only for terminal, unprepared jobs with
+a fresh matching idle runtime, no active product, lock or pending checkpoint.
+The checks repeat under the queue transaction; active work and retained packages
+remain protected. No lease is cleared by a manual database edit.

@@ -109,6 +109,21 @@ def automatic_scope(row, decision):
          decision['category'] in ('Resize background','Native inspection','Upload/network','Stale/source','Colour/provenance')))
 
 
+def lease_protects(row, runtime):
+    """A terminal checkpoint can retain its old expiry after native work ended.
+
+    Admit only with fresh fixed idle evidence; submit repeats its authoritative
+    ownership checks under the queue lock. Completed/replacement assets stay fenced.
+    """
+    from worker_health import stamp
+    lease=stamp(row.get('lease_until'))
+    if not lease or lease<=datetime.now(timezone.utc):return False
+    return not (row.get('status') in ('Blocked','Needs PSD Repair')
+        and not row.get('preparation_hash') and not row.get('replacement')
+        and not ((runtime or {}).get('payload') or {}).get('product_gid')
+        and resize_fix_available(runtime))
+
+
 def classify(row, config, *, runtime=None):
     """Conservative eligibility from authoritative current checkpoint evidence."""
     replacement = row.get('replacement') or {}
@@ -311,9 +326,7 @@ def plan(connect, config):
                 decision={**decision,'action':None,'reason':decision['reason']+' This repair is outside automatic recovery; manual review is required.'}
             fingerprint = key(row, decision, config)
             waiting = budget(history(cur, row['product_gid'], fingerprint), decision['max_attempts']) if decision['action'] else ''
-            from worker_health import stamp
-            lease=stamp(row.get('lease_until'))
-            if decision['action'] and lease and lease>datetime.now(timezone.utc):
+            if decision['action'] and lease_protects(row,runtime):
                 waiting='An active lease protects this checkpoint.'
             result.append(dict(row=row, decision=decision, fingerprint=fingerprint, waiting=waiting))
     return result
@@ -336,7 +349,7 @@ def scan(connect, read_metadata, *, limit=3):
     from auto_editions import source_identity
     from auto_editions_onboarding_store import Queue
     from worker_health_queue import submit
-    from worker_health import control, stamp
+    from worker_health import control
     accepted = []; attempted = 0
     items = plan(connect, config)
     for item in items:
@@ -361,8 +374,7 @@ def scan(connect, read_metadata, *, limit=3):
                 fresh = cur.fetchone()
                 if not fresh or digest(fresh) != digest(row):
                     continue
-                lease = stamp(fresh.get('lease_until'))
-                if lease and lease > datetime.now(timezone.utc):
+                if lease_protects(fresh,native_runtime(cur)):
                     continue
                 # Policy changes between planning and admission fail closed.
                 @contextmanager

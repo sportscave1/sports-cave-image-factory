@@ -57,6 +57,29 @@ def test_resize_recovery_identity_ignores_unrelated_web_release(monkeypatch):
     assert not recovery.resize_fix_available(runtime)
 
 
+def test_ended_native_lease_recovers_through_shared_idle_guard(backlog,monkeypatch):
+    d,sql=backlog
+    pid,source=source_job(d,sql,2010,'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.')
+    sql.execute("UPDATE auto_edition_onboarding SET lease_until=now()+interval '45 minutes' WHERE product_gid=%s",(pid,))
+    runtime=resize_runtime()
+    from worker_health import record_heartbeat
+    record_heartbeat(d.connect,'Companion','fixture',runtime['payload'])
+    with patch('auto_editions_colour_store.configuration',return_value=CONFIG),patch.object(recovery,'native_runtime',return_value=runtime):
+        assert recovery.plan(d.connect,CONFIG)[0]['waiting']==''
+        assert recovery.scan(d.connect,metadata)==[pid]
+        assert recovery.scan(d.connect,metadata)==[]
+    assert d.queue.claim('companion')['product_gid']==pid
+
+
+@pytest.mark.parametrize('change',[{'state':'Live'},{'processor_lock':True},{'checkpoint_pending':True},
+    {'product_gid':'gid://shopify/Product/2010'},{'preparation_code_hash':'old'}])
+def test_unexpired_terminal_lease_still_protects_uncertain_work(change):
+    row=dict(status='Blocked',lease_until=datetime.now(timezone.utc)+timedelta(minutes=45))
+    runtime=resize_runtime();runtime['payload'].update(change)
+    assert recovery.lease_protects(row,runtime)
+    assert recovery.lease_protects({**row,'preparation_hash':'retained'},resize_runtime())
+
+
 def test_unscoped_transient_failure_retries_with_existing_budget(backlog,monkeypatch):
     monkeypatch.setattr(recovery,'ordered_scope',lambda:{})
     test_restart_backoff_and_retry_ceiling(backlog)
