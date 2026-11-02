@@ -29,6 +29,14 @@ def rendered(prompt, **kwargs):
 
 
 class BlackFridayPromptTests(unittest.TestCase):
+    def test_new_ads_exposes_only_original_prompt(self):
+        for prompt in ("Saved original prompt", record()["master_prompt"], record(country="USA")["master_prompt"]):
+            with patch.object(ads_page, "render_prompt_copy_button") as render, patch.object(ads_page.st, "columns") as columns, patch.object(ads_page.st, "caption") as caption:
+                ads_page.render_new_ads_prompt_copy_buttons(prompt, "original-key")
+            render.assert_called_once_with(prompt, "original-key")
+            columns.assert_not_called()
+            caption.assert_not_called()
+
     def test_only_subheadline_instructions_change_and_are_reversible(self):
         for category in ("Cricket", "Baseball", "Motorsport", "Other"):
             for country in ("Australia", "USA", "UK"):
@@ -37,6 +45,13 @@ class BlackFridayPromptTests(unittest.TestCase):
                     normal = result["master_prompt"]
                     seasonal = build_black_friday_prompt(normal)
                     originals = re.findall(r"(?m)^SUPPORTING LINE: (.+)$", normal)
+                    if country == "USA":
+                        # Fresh USA IE explicitly keeps its resolved footer, even in seasonal copy.
+                        self.assertEqual(seasonal, normal)
+                        self.assertEqual(len(originals), 3)
+                        self.assertEqual(len(set(originals)), 1)
+                        self.assertNotEqual(originals[0], SUBHEADLINE)
+                        continue
                     self.assertEqual(re.findall(r"(?m)^SUPPORTING LINE: (.+)$", seasonal), [SUBHEADLINE] * 3)
                     # Undo only the authorized edits; every remaining byte must match.
                     restored = seasonal

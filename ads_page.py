@@ -1,6 +1,7 @@
 from sports_categories import sport_category_options, normalize_sport_state, sport_family
 import ads_ie_legacy_description as ie_legacy_description
 import ads_ie_copy as ie_copy
+import ads_ie_usa as ie_usa
 import csv
 import hashlib
 import html
@@ -27,7 +28,6 @@ import ads_refresh_generation
 import ads_refresh_ui
 import ads_standard_workflow
 import ads_package_paths
-from ads_black_friday import build_black_friday_prompt
 from ads_creation_ui import creation_instructions
 import ads_ie_visual_systems as ie_visuals
 from ads_footer import COMPACT_FOOTER_RULES, FOOTER_VERSION, apply_footer_contract
@@ -1777,22 +1777,8 @@ def render_prompt_copy_button(
 
 
 def render_new_ads_prompt_copy_buttons(prompt_text, key):
-    """Keep the original copy action and add a derived seasonal footer option."""
-    try:
-        seasonal = build_black_friday_prompt(prompt_text)
-    except ValueError:
-        # Saved older templates retain their original copy action without guessing.
-        render_prompt_copy_button(prompt_text, key)
-        st.caption("Black Friday copy requires a newly submitted Instant Experience prompt.")
-        return
-    normal_col, seasonal_col = st.columns([2, 1])
-    with normal_col:
-        render_prompt_copy_button(prompt_text, key)
-    with seasonal_col:
-        render_prompt_copy_button(
-            seasonal, f"{key}::black-friday", label="Copy Black Friday Prompt",
-            gold_accent=True, compact=True,
-        )
+    """Copy only the original prompt, including saved templates, without rewriting it."""
+    render_prompt_copy_button(prompt_text, key)
 
 
 def validate_ads_inputs(product_name, category, country, campaign_type, product_url=""):
@@ -5066,7 +5052,9 @@ def resolve_standard_instant_experience_visuals(
     variation_token="",
     recent_fingerprints=None,
     country="",
+    usa_upgrade=True,
 ):
+    usa = usa_upgrade and ie_usa.enabled(normalize_country_language_key(country), product_metadata)
     context = resolve_instant_experience_product_context(
         product_name,
         category,
@@ -5126,7 +5114,7 @@ def resolve_standard_instant_experience_visuals(
         ie_visuals.resolve_visual_system(visual, index, {**context, "product_metadata": product_metadata or {}}, variation_token)
         resolved.append(visual)
     ie_visuals.resolve_set_copy(resolved, {
-        **context,
+        **context, "usa_product_first": usa,
         "copy_product_key": ie_copy.product_key(product_name),
         "no_second_run_verified": _metadata_bool(product_metadata or {}, "no_second_run_verified", "no_reprint_verified", "no_second_run", "no_reprint"),
         "retires_when_sold_out": _metadata_bool(product_metadata or {}, "retires_when_sold_out", "retirement_verified"),
@@ -5140,7 +5128,7 @@ def resolve_standard_instant_experience_visuals(
         (product_metadata or {}).get("instant_experience_footer_selections") or ()
     ))
     ie_visuals.resolve_scene_set(resolved, {
-        **context, "selected_sport": category, "market": country,
+        **context, "usa_product_first": usa, "selected_sport": category, "market": country,
         "product_metadata": product_metadata or {},
         "scene_product_key": ie_copy.product_key(product_name),
         "physical_product": physical_realism.physical_metadata(product_metadata),
@@ -5182,6 +5170,10 @@ def _instant_experience_pairwise_difference_count(first, second):
 
 def validate_instant_experience_set_differentiation(visuals=None):
     visuals = tuple(visuals or INSTANT_EXPERIENCE_STANDARD_VISUALS)
+    if visuals and all(v.get("scene_selection_version") == ie_usa.VERSION for v in visuals):
+        if len(visuals) != 3 or any(not ie_usa.distinct(a, b) for i, a in enumerate(visuals) for b in visuals[i + 1:]):
+            raise ValueError("USA IE requires three distinct residential compositions.")
+        return True
     for index, first in enumerate(visuals):
         for second in visuals[index + 1 :]:
             if first.get("visual_family") and second.get("visual_family") and first["visual_family"] != second["visual_family"] and first["composition"] != second["composition"]:
@@ -5384,6 +5376,7 @@ def build_standard_instant_experience_fingerprints(
     variation_token="",
     recent_fingerprints=None,
     country="",
+    usa_upgrade=True,
 ):
     validate_instant_experience_set_differentiation()
     visuals = resolve_standard_instant_experience_visuals(
@@ -5394,6 +5387,7 @@ def build_standard_instant_experience_fingerprints(
         variation_token=variation_token,
         recent_fingerprints=recent_fingerprints,
         country=country,
+        usa_upgrade=usa_upgrade,
     )
     return [
         standard_instant_experience_fingerprint(index, visual, category=category)
@@ -5444,11 +5438,12 @@ def build_instant_experience_canonical_prompt_v4(
     product_url="",
     campaign_moment=None,
 ):
+    usa = visual.get("scene_selection_version") == ie_usa.VERSION
     product_name = _clean_product_name(product_name)
     category = _normalise_option_label(category) or "selected sport category"
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
-    shared_realism_rules = physical_realism.build(visual.get("physical_product"), compact=True, glazing_requirement=ie_visuals.GLAZING_REQUIREMENT)
+    shared_realism_rules = physical_realism.build(visual.get("physical_product"), compact=True, glazing_requirement=ie_usa.GLAZING if usa else ie_visuals.GLAZING_REQUIREMENT)
     ie_quality_contract = "\n\n".join((
         build_instant_experience_fixed_opaque_footer_rules(),
         build_instant_experience_on_image_copy_fit_rules(),
@@ -5462,7 +5457,7 @@ def build_instant_experience_canonical_prompt_v4(
     )
     campaign_moment_visual_block = (
         f"\n\n{campaign_moment_visual_context}"
-        if campaign_moment_visual_context
+        if campaign_moment_visual_context and not usa
         else ""
     )
     scarcity_note = (
@@ -5473,7 +5468,7 @@ def build_instant_experience_canonical_prompt_v4(
             "exactly. Do not use the route FOMO line or invent a number."
         )
     )
-    return f"""{visual["prompt_heading"]}
+    prompt = f"""{visual["prompt_heading"]}
 
 {IE_FOOTER_TEXT_CLARIFICATION}
 
@@ -5483,7 +5478,7 @@ Generate this one ad image using the ORIGINAL supplied framed product reference.
 
 {ie_visuals.VERSION}
 
-{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
+{ie_usa.COMPOSITION if usa else SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
 {ie_visuals.camera_wall_rules(visual)}
 
 PRODUCT AND VERIFIED METADATA
@@ -5558,6 +5553,7 @@ FINAL ROUTE CHECK
 - The fixed black footer remains within approximately 18–20% of the canvas height.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
+    return ie_usa.adapt_prompt(prompt) if usa else prompt
 
 
 def build_standard_instant_experience_image_prompt(
@@ -8526,9 +8522,9 @@ GLAZING CHECK: Every framed edition must show believable surface reflections cle
 Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification."""
 
 
-def build_instant_experience_shared_template(physical_product=None):
+def build_instant_experience_shared_template(physical_product=None, *, usa=False):
     """Deduplicate unchanged rendering rules in the master; expand for each tool call."""
-    return "\n\n".join((
+    prompt = "\n\n".join((
         "SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call\n"
         f"{ie_visuals.SCENE_VERSION}\n"  # Required saved-prompt recognition, not a variation token.
         "1024 x 1024, 1:1, sRGB; upper photograph 80–82%. Near-black charcoal #101112/#121314 "
@@ -8553,8 +8549,9 @@ def build_instant_experience_shared_template(physical_product=None):
         ie_visuals.SCARCITY_RULE,
         ie_visuals.SCENE_REFERENCE_RULES.strip(),
         ie_visuals.SCENE_VISIBILITY_RULES.strip(),
-        physical_realism.build(physical_product, compact=True, glazing_requirement=ie_visuals.GLAZING_REQUIREMENT),
+        physical_realism.build(physical_product, compact=True, glazing_requirement=ie_usa.GLAZING if usa else ie_visuals.GLAZING_REQUIREMENT),
     ))
+    return ie_usa.adapt_prompt(prompt) if usa else prompt
 
 
 def build_instant_experience_execution_image_brief(index, visual):
@@ -8621,12 +8618,13 @@ def build_standard_instant_experience_prompt(
         campaign_moment=campaign_moment, variation_token=variation_token,
         recent_fingerprints=recent_fingerprints, country=country,
     )
+    usa = visuals[0].get("scene_selection_version") == ie_usa.VERSION
     description_context = resolve_instant_experience_description_context(
         product_name, category, product_metadata=product_metadata, campaign_moment=campaign_moment, country=country,
     )
     fit_candidates = json.dumps({v["route_key"]: v["eligible_headline_alternatives"] for v in visuals}, ensure_ascii=False)
     groups = "\n\n".join(build_instant_experience_execution_image_brief(i, v) for i, v in enumerate(visuals, 1))
-    return f"""{ADS_IE_COMBINED_EXECUTION_VERSION}
+    prompt = f"""{ADS_IE_COMBINED_EXECUTION_VERSION}
 SPORTS CAVE INSTANT EXPERIENCE — THREE IMAGES AND COMPLETED CSV
 {IE_FOOTER_TEXT_CLARIFICATION}
 
@@ -8657,14 +8655,14 @@ If it is unclear whether an image was created, first recover the existing call r
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If any image is missing, the three-cover delivery requirement is incomplete: apply the failure handling above and never label a two-image result as three completed covers; preserve completed outputs and all three final copy records, matching CSV rows and setup. State any inspection limitation. Return only actually created assets, final copy, setup and the specific failure report; do not print these instructions, internal plans or research notes.
 
-{build_instant_experience_shared_template(visuals[0].get('physical_product'))}
+{build_instant_experience_shared_template(visuals[0].get('physical_product'), usa=usa)}
 
 {ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
 
 {WRITTEN_META_HEADLINE_INSTRUCTIONS}
 Exact Promotion or Offer entered: {_standard_instant_experience_exact_offer(campaign_moment) or 'None supplied'}. Preserve a supported supplied offer in ad copy only; never invent one or replace edition scarcity.
 {build_country_campaign_localisation_note(category, country, campaign_type='Instant Experience')}
-{build_campaign_moment_visual_context(campaign_moment, selected_country=country)}
+{'' if usa else build_campaign_moment_visual_context(campaign_moment, selected_country=country)}
 
 GROUPED INSTANT EXPERIENCE OUTPUT — THREE SEPARATE IMAGES
 The following are resolved call specifications; execute all three automatically in order. Group labels and copy fields are preserved.
@@ -8674,7 +8672,10 @@ The following are resolved call specifications; execute all three automatically 
 {build_instant_experience_completed_csv_contract()}
 
 {build_instant_experience_shared_setup(product_name, category, product_url)}"""
-
+    if usa:
+        prompt = ie_usa.VERSION + "\n" + ie_usa.adapt_prompt(prompt)
+        prompt = prompt.replace("CONTROLLED PERSONALISATION", ie_usa.COPY_RULES + "\nCONTROLLED PERSONALISATION")
+    return prompt
 
 
 def build_generic_instant_experience_prompt(
@@ -9323,6 +9324,7 @@ def build_ads_result_record(
             variation_token=clean_variation_token,
             recent_fingerprints=recent_instant_experience_fingerprints,
             country=country,
+            usa_upgrade=not bool(clean_creative_refresh_context),
         )
         if campaign_type == "Instant Experience"
         else []
@@ -9450,6 +9452,8 @@ def ensure_current_ads_result_prompt(result):
         return result
     if google_ads.platform_for(result) == "google":
         return result
+    if result.get("campaign_type") == "Instant Experience" and normalize_country_language_key(result.get("country")) == "USA":
+        return result  # New USA policy is generation-only, never a saved-record migration.
     workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
     expected_version = ads_prompt_contract_version_for_campaign(
         result.get("campaign_type"),

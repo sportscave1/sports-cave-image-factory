@@ -3,6 +3,7 @@ import hashlib
 import re
 import random
 import ads_ie_scenes as scene_library
+import ads_ie_usa as usa_policy
 import sports_cave_physical_realism as physical_realism
 
 
@@ -100,6 +101,8 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
 
     Old or duplicate selections are upgraded as a complete set. Supporting lines use historical rotation and never affect headline selection.
     """
+    if context.get("usa_product_first"):
+        return usa_policy.resolve_footer(visuals, context, headline_is_valid, pair_is_valid, selections)
     eligible = eligible_headlines(context)
     if len(eligible) != 5 or not all(headline_is_valid(h) for h in eligible):
         raise ValueError("The approved headline bank requires exact copy fit; no substitute headline is allowed.")
@@ -267,8 +270,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
     fully_saved = len(selections) == 3 and all(isinstance(s, dict) and all(s.get(k) for k in
         ("scene_signature", "room_type", "wall_colour", "wall_finish", "lighting")) for s in selections)
     construction = physical_realism.resolve(context.get("physical_product"))
-    chosen = [dict(s) for s in selections] if fully_saved else scene_library.select(seed, {**context, "frame_finish": construction.get("frame_finish", "")}, recent_fingerprints, selections)
-    if not fully_saved:
+    chosen = [dict(s) for s in selections] if fully_saved else (usa_policy.select_scenes if context.get("usa_product_first") else scene_library.select)(seed, {**context, "frame_finish": construction.get("frame_finish", "")}, recent_fingerprints, selections)
+    if not fully_saved and not context.get("usa_product_first"):
         scene_library.resolve_collector_details(chosen, seed, recent_fingerprints, selections)
     glazing = str(construction.get("glazing", "")).casefold()
     for index, (visual, scene) in enumerate(zip(visuals, chosen)):
@@ -296,6 +299,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             reflection = (f"Preserve {material}. Apply the shared thumbnail-visible glazing requirement using {scene['reflection_source']}: "
                 f"{scene['reflection_placement']}, consistent with camera/light even straight-on. "
                 "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unframed products. No size or glazing confirmation is required.")
+        if context.get("usa_product_first") and not physical_realism.is_unframed(context.get("physical_product")):
+            reflection = usa_policy.GLAZING
         scene["glazing_treatment"] = reflection
         visual.update(scene)
         visual["assigned_camera_angle"] = visual["camera_side"]
@@ -325,9 +330,16 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             (scene_library.COLLECTOR_DETAIL_RULES if collector_detail else "") +
             SCENE_VISIBILITY_RULES
         )
+        if context.get("usa_product_first"):
+            visual["product_width"] = "source-proportionate, recognisable at thumbnail size; no universal crop target"
+            visual["shot_distance"] = "edition-led moderate perspective; wider residential context only when recognition is retained"
+            visual["scene_brief"] = usa_policy.adapt_prompt(visual["scene_brief"])
+
 
 
 def camera_wall_rules(visual, *, compact=False):
+    if visual.get("scene_selection_version") == usa_policy.VERSION:
+        return f"LOCKED CAMERA / ROOM / WALL RESOLUTION\n{SCENE_VERSION}\nSelected camera: {visual['camera_side']}.\nSCENE: {visual['scene_brief']}\n{usa_policy.COMPOSITION}\n{SCARCITY_RULE}"
     if compact:
         return f"""LOCKED CAMERA / ROOM / WALL RESOLUTION
 {SCENE_VERSION}

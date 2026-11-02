@@ -1,0 +1,632 @@
+[
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "9344c2423acc280f692d24b2262674cd10464132e92f5741c5eaf6edf4974912",
+    "visuals_sha256": "8f4734149491dd97493c4fcd93b04628a8d239607c50a5f3c32c32fec8723420"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "5c3dab3ca696f7a5cbaaeaeedc5bb05a93764ac56801f4a72465902e20f6ecf6",
+    "visuals_sha256": "8f4734149491dd97493c4fcd93b04628a8d239607c50a5f3c32c32fec8723420"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "2d65cd5e81b921478cdb80278d0c2deb2b737953c77def340fd36c801a45e585",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "cda95815b8e94aa119110a6f3a21f465c75bd511192801ef1f0d8762d7035e33",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "af1f80636b83d660a5b27dd1fc870965ec4d4d0f60023758aa50825479c9f287",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shane Warne",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "e5fb8b62deb1fca8f496e624609b4efd37d8bf49f2e420d3cdbc6fdee03bc7b7",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "The Final Lap #17",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "48d8275649111c2a24477d56229d78415bb0ac6a29f3e6b5e0c7a959efb48a61",
+    "visuals_sha256": "87b79937628838ebde7bc3457f6201e211f4ac57aae83987cc894c86b28c71c4"
+  },
+  {
+    "args": {
+      "product_name": "The Final Lap #17",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "82356378d453300ba3efcf47efd427d4dcf266ac750946229e91b17069e95797",
+    "visuals_sha256": "87b79937628838ebde7bc3457f6201e211f4ac57aae83987cc894c86b28c71c4"
+  },
+  {
+    "args": {
+      "product_name": "The Final Lap #17",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "feffd91637f2537676fe15e59ef13e4c16c15ffd2be67f4a83519dfa3e93f143",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "The Final Lap #17",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "115ac750d3e755cd7f518e647707b1f44b5de089b4f7ad684b901c860c808619",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "The Final Lap #17",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "ace694e6b266971c92c50307580a90ee5bf9f2d1fb411bc9bf7bf0d7e59d2426",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "The Final Lap #17",
+      "category": "Motorsport",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "61d91adbb29739ea63c7372d50da8647e65272757b2828484f8ecddb6af147eb",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Jordan × Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "8636dbd657fa89250ba6a1b609ba9886f1421512f8cf52e90e42909033bd1aa1",
+    "visuals_sha256": "6707364ca0810f020ad5f52fd4685488435ee549bdf8a07ee3303877a7349e54"
+  },
+  {
+    "args": {
+      "product_name": "Jordan × Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "192f6778e3fe09e01507e52abfc002f377eea3ba75ab33854fcaa287fcb81e1c",
+    "visuals_sha256": "6707364ca0810f020ad5f52fd4685488435ee549bdf8a07ee3303877a7349e54"
+  },
+  {
+    "args": {
+      "product_name": "Jordan × Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "cfe21d1f1cc14582220512fe56f596dacd17b31ea2d52d1df34ce9594854b2e6",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Jordan × Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "2c2ff2e3924b9283a46f7ccd5b9e9fb380c00cc4b63f82acd70dfee9c5d55e95",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Jordan × Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "ca1712f3b3fc719a7a4cc9f5fea7d356867fb67cbf52ac41ff3f27988eafdcc7",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Jordan × Kobe",
+      "category": "NBA",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "ca41756aba7bc78bb89d190b15a26a9df22c1b0004e4dff71f6c9708297ccd6e",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Don Mattingly",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "da55c8b62b040b0cb1fa83f7c51b33697acfce4b5fd761527148a72e6cfd7abd",
+    "visuals_sha256": "304c7b894f632749621b75d582524d4da07d7ed7a420d8307189fcd6fdf348e9"
+  },
+  {
+    "args": {
+      "product_name": "Don Mattingly",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "76249fdde55d1ea2a38f6f34679de9c30650e3432a629a8c453bd3dad4093632",
+    "visuals_sha256": "304c7b894f632749621b75d582524d4da07d7ed7a420d8307189fcd6fdf348e9"
+  },
+  {
+    "args": {
+      "product_name": "Don Mattingly",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "039b85c7903e35b301cb5bebbe15141fb0c215734336d471abf615d307d39a00",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Don Mattingly",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "6c93fe27f4ecaacfdd7d5efa8be8ae83aa56c78bc6964573adcf1b738b719758",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Don Mattingly",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "fb0c6690f4bc152d9358f677ee1f82e5330e1d4df0b13957a25f97efa62d0f2f",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Don Mattingly",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "83a9668869c503b893542000c509b5114e45b7c85c9cda7e63d61f361defd37f",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shohei Ohtani 50/50",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "685da9457378b8cb7ca764a4c5726767017daf13f386d141812221d0a98277d2",
+    "visuals_sha256": "3c0232e0a7b29902bc895c9f2a0b3c2dd1b3a97af7e651fd68f7035d97eee9f4"
+  },
+  {
+    "args": {
+      "product_name": "Shohei Ohtani 50/50",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "9d000dc6a604db5ff7c71f92a1df7e50b8f74065b6a8f8de1b0fd8655a217681",
+    "visuals_sha256": "3c0232e0a7b29902bc895c9f2a0b3c2dd1b3a97af7e651fd68f7035d97eee9f4"
+  },
+  {
+    "args": {
+      "product_name": "Shohei Ohtani 50/50",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "21de66f35a0b1bef5671710a6e5f248eb17d115bbfd98b97a5b4f8f1ee84eb72",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shohei Ohtani 50/50",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "77cbec24dcedce02703b10ff99a89fa599183279920bfcde0014fe0fc466bca6",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shohei Ohtani 50/50",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "c29d4827364e00f1f7fe8fda5b875c919424bbd57ecf4272f7c55e1d84f29472",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Shohei Ohtani 50/50",
+      "category": "Baseball",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "77da41d4a4c96f969445e9da3c1ebab1b9b603c5f07d2f4befb4c19720a9f148",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Football",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "f7c01b412dc6b052a65d36bb0a1a0090ffa494a79356adc49dff1b5d613b4dfa",
+    "visuals_sha256": "c55826742875ed98d5b34414282e8737d0344052ebbc4a5d30aec872ad246c5c"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Football",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "bfad0a6dcbc15fff05a57b946efea532b3ac9957b151613b002a1f440cb878c5",
+    "visuals_sha256": "c55826742875ed98d5b34414282e8737d0344052ebbc4a5d30aec872ad246c5c"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Football",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "56df2a392608d0294beef60cc3aac7fded9385a36b74d0088e925abf22d76f54",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Football",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "9045989a7bfeec66b8f063f3cf56f7af3a33b1005975f41abc8709c235ecaea3",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Football",
+      "country": "UK",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "5d7755091822bae4d1c1969136965c2f8acf5feb564ad1765000b8794a6abe7a",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Football",
+      "country": "UK",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "c24dea2d4471e5526a8dda8c505ff923fee43f47088047a760c6773bd4f5661e",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Baseball",
+      "country": "Canada",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "00f8755215019048a0cda4e0f5bcf0f695f8a8a30aee034376e4d78e13f8a681",
+    "visuals_sha256": "6df6c49cd418b0d68ded72fc6e99c0b026370c54679ea8e3e99e6a67e7fa4754"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Baseball",
+      "country": "Canada",
+      "campaign_type": "Instant Experience",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "a82cc56c2f461eb7c5af43d145cf6a7b7ddfa8c425bba2f276788a6b651e7e0a",
+    "visuals_sha256": "6df6c49cd418b0d68ded72fc6e99c0b026370c54679ea8e3e99e6a67e7fa4754"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Baseball",
+      "country": "Canada",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "0b7c41f7d766c4bd3f9007b58e5318a1cc7e1c9d933f05d41b32104b34bdb7c2",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Baseball",
+      "country": "Canada",
+      "campaign_type": "Carousel",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "3ce4124cee291a55700b23f9c594fab6de4930eba829ebb243a616730346e133",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Baseball",
+      "country": "Canada",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {}
+    },
+    "prompt_sha256": "f7c392eb88147aa5c19e21ea18ab3ebb3a61b43ac2de6ae7a98dd9a818fc30d4",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Collector Edition",
+      "category": "Baseball",
+      "country": "Canada",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "usa-isolation-baseline",
+      "product_url": "https://example.test/edition",
+      "product_metadata": {},
+      "creative_refresh_context": {
+        "winning_primary_text": "Approved supplied winner",
+        "winning_headline": "Assigned headline"
+      }
+    },
+    "prompt_sha256": "a76610473d5d163481cd5a26b06fc1d1d6429301765b2a391a7cdd188e9f6b98",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+]

@@ -23,6 +23,9 @@ FOOTER_REPLACEMENTS = (
 
 def build_black_friday_prompt(normal_prompt):
     """Derive the current three-cover footer variant without rerolling any choices."""
+    from ads_ie_usa import VERSION as USA_VERSION
+    if USA_VERSION in normal_prompt:
+        return normal_prompt  # USA footer remains fixed; written offers use the existing offer mechanism.
     if "\nADS_IE_COMBINED_EXECUTION_V1\n" not in "\n" + normal_prompt:
         raise ValueError("Black Friday requires the current Instant Experience footer template.")
     seasonal, count = re.subn(r"(?m)^(SUPPORTING LINE: )[^\r\n]+",
