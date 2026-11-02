@@ -182,6 +182,8 @@ Only use actual supplied evidence; no invented performance claims, offers, scarc
 {ads.build_country_language_guidance(country)}
 {ads.build_carousel_card_copy_rules().replace('For all five carousel cards:', f'For all {n} carousel cards:') if carousel else 'Use the exact supplied three-row IE contract with one copy pair per cover.' if ie else ads.build_standard_ads_output_contract()}
 
+{ads.ie_legacy_description.DESCRIPTION_WORDING_INSTRUCTIONS if ie else ''}
+
 {ads.WRITTEN_META_HEADLINE_INSTRUCTIONS}
 
 COPY AND IMAGE OUTPUT
