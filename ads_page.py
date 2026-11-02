@@ -7267,6 +7267,7 @@ def normalize_creative_refresh_context(context=None):
         **({"refresh_plan": dict(context["refresh_plan"])} if context.get("refresh_plan") else {}),
         **({"source_winner": dict(context["source_winner"])} if context.get("source_winner") else {}),
         **({"canonical_reference": dict(context["canonical_reference"])} if context.get("canonical_reference") else {}),
+        **({"on_image_headlines": list(context["on_image_headlines"])} if context.get("on_image_headlines") else {}),
     }
 
 
@@ -7348,7 +7349,7 @@ def build_instant_experience_winner_refinement_prompt(product_name, category, co
     prompt = ads_refresh_generation.build_prompt(
         sys.modules[__name__], product_name, category, country, "Instant Experience", product_url, context,
         product_metadata=product_metadata, campaign_moment=campaign_moment)
-    return prompt if prompt.startswith(ads_refresh_generation.plan.VERSION) else physical_realism.apply_context(prompt, product_metadata)
+    return prompt if prompt.startswith((ads_refresh_generation.plan.VERSION, ads_refresh_generation.plan.preserve.VERSION)) else physical_realism.apply_context(prompt, product_metadata)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -9001,13 +9002,13 @@ def build_ads_prompt(
         prompt = ads_refresh_generation.build_prompt(
             sys.modules[__name__], product_name, category, country, campaign_type, product_url,
             creative_refresh_context, campaign_moment=campaign_moment, product_metadata=product_metadata)
-        return prompt if prompt.startswith(ads_refresh_generation.plan.VERSION) else apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
+        return prompt if prompt.startswith((ads_refresh_generation.plan.VERSION, ads_refresh_generation.plan.preserve.VERSION)) else apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
     if campaign_type == "Instant Experience" and creative_refresh_context:
         prompt = build_instant_experience_winner_refinement_prompt(
             product_name, category, country, product_url, creative_refresh_context,
             product_metadata=product_metadata, campaign_moment=campaign_moment,
         )
-        return prompt if prompt.startswith(ads_refresh_generation.plan.VERSION) else apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
+        return prompt if prompt.startswith((ads_refresh_generation.plan.VERSION, ads_refresh_generation.plan.preserve.VERSION)) else apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
     template_key = get_template_key(category, campaign_type)
     settings = None
     if campaign_type == "Instant Experience":
@@ -9328,7 +9329,8 @@ def build_ads_result_record(
             resolution = resolve_campaign_type(source)
             if not resolution['confirmed']:
                 raise ValueError('Confirm the source winner format from Meta Review before generating a refresh.')
-            campaign_type = resolution['campaign_type']
+            campaign_type = ads_refresh_generation.plan.distinct.output_format(resolution['campaign_type'], clean_creative_refresh_context)
+        campaign_type = ads_refresh_generation.plan.distinct.output_format(campaign_type, clean_creative_refresh_context)
         clean_creative_refresh_context["refresh_plan"] = ads_refresh_generation.plan.current_plan(
             clean_creative_refresh_context, campaign_type, clean_product_name, category,
             clean_variation_token, recent_instant_experience_fingerprints or [])
@@ -11865,7 +11867,7 @@ def _instant_experience_package_items(result, workflow):
     notes_text += "\r\nCreative layout\r\n"
     if (result.get("creative_refresh_context") or {}).get("refresh_plan"):
         for execution in (workflow.get("ad_notes") or {}).get("refresh_executions") or []:
-            notes_text += f"Image {execution['position']}: {execution['scene']}; style {execution.get('style_id')}; compatibility slot only, not a forced camera angle.\r\n"
+            notes_text += f"Image {execution['position']}: {execution.get('scene') or execution.get('scene_treatment', '')}; style {execution.get('style_id')}; compatibility slot only, not a forced camera angle.\r\n"
     else:
         for index, camera in enumerate(("Right angle", "Centre / straight-on", "Left angle"), 1):
             notes_text += f"Image {index}: {camera}; Room {index}; black/gold bottom banner.\r\n"
@@ -12903,7 +12905,7 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         issues += _creative_refresh_asset_issues(result, workflow)
         issues += _creative_refresh_visual_review_issues(result, workflow)
-        if ads_refresh_generation.plan.preserve.active((result.get('creative_refresh_context') or {}).get('refresh_plan')) and _ads_image_valid_slots(result, workflow):
+        if (ads_refresh_generation.plan.preserve.active((result.get('creative_refresh_context') or {}).get('refresh_plan')) or ads_refresh_generation.plan.distinct.active((result.get('creative_refresh_context') or {}).get('refresh_plan'))) and _ads_image_valid_slots(result, workflow):
             issues += creative_refresh_quality_issues(result, workflow)
     if issues:
         st.button("POST NOW", type="primary", disabled=True,
@@ -14281,6 +14283,16 @@ def creative_refresh_quality_issues(result, workflow):
         return []
     context = result.get("creative_refresh_context") or {}
     plan = context.get("refresh_plan") or {}
+    if ads_refresh_generation.plan.distinct.active(plan):
+        records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
+        rows = ([values[0] if values else {} for values in
+                 [_instant_experience_concept_copy_notes_from_workflow(workflow).get(c['id'], []) for c in INSTANT_EXPERIENCE_CONCEPTS]]
+                if result['campaign_type'] == 'Instant Experience' else workflow.get('standard_ads') or [])
+        issues = ads_refresh_generation.plan.distinct.execution_issues(records, plan) if records else []  # Existing CSV has no analysis column; existing manual visual review remains mandatory.
+        issues += ads_refresh_generation.plan.distinct.copy_issues(rows, result['campaign_type'])
+        if len(_ads_image_valid_slots(result, workflow)) != 3:
+            issues.append('Three accessible uploaded image outputs are required before completion.')
+        return issues + _creative_refresh_asset_issues(result, workflow)
     if ads_refresh_generation.plan.preserve.active(plan):
         records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
         issues = ads_refresh_generation.plan.execution_issues(records, plan, result['product_name'], result['campaign_type'])
@@ -14389,7 +14401,7 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
             if _ads_image_valid_slots(result, workflow):
                 with st.expander("Final visual verification — required before POST NOW",
                                  expanded=bool(_creative_refresh_visual_review_issues(result, workflow))):
-                    st.caption("Compare each result with its original winner and exact canonical variant. Verify the declared single change and that all other scene, copy and footer components remain preserved. Check any product or offer conflicts. This is manual review, not automated pixel recognition." if ads_refresh_generation.plan.preserve.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
+                    st.caption("Inspect all three new images against the canonical product and winner: same room type, distinct scene and camera treatments, visible glass, assigned headlines and no supporting sentence. Verify complete copy and CSV. This is manual visual review." if ads_refresh_generation.plan.distinct.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each result with its original winner and exact canonical variant. Verify the declared single change and that all other scene, copy and footer components remain preserved. Check any product or offer conflicts. This is manual review, not automated pixel recognition." if ads_refresh_generation.plan.preserve.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
                     review_key = _creative_refresh_visual_review_key(result, workflow)
                     reviewed = st.checkbox(
                         "I checked every refreshed image against its product and winner references",
@@ -14793,9 +14805,13 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
         if reference:
             creative_refresh_context['canonical_reference'] = dict(reference)
     if creative_refresh_context:
+        deliberate_new = st.button("New refresh", key="ads-refresh-new-run")
+        output_campaign = ads_refresh_generation.plan.distinct.output_format(campaign_type, {} if deliberate_new else (result or {}).get('creative_refresh_context') or {})
+        if output_campaign != campaign_type:
+            st.caption('Creative Refresh produces three separate single-image ads from the source direction, not a new carousel. Existing saved carousel packages retain their format.')
+            campaign_type = output_campaign
         plan_identity = json.dumps([product_name, product_url, category, country, campaign_type,
                                     campaign_moment, creative_refresh_context], sort_keys=True, default=str)
-        deliberate_new = st.button("New refresh", key="ads-refresh-new-run")
         if deliberate_new:
             st.query_params.pop('refresh_saved_folder', None)
         saved_context = (result or {}).get('creative_refresh_context') or {}

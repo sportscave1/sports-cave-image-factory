@@ -8,12 +8,13 @@ import re
 from difflib import SequenceMatcher
 import ads_carousel_evolution as carousel_copy
 import ads_refresh_preserve as preserve
+import ads_refresh_distinct as distinct
 from itertools import combinations
 from ads_ie_scenes import ROOM_STYLE
 
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
 
-VERSION = preserve.VERSION
+VERSION = distinct.VERSION
 AUTHORITY = ('The canonical black-framed product image supplies the exact artwork and black frame only. '
              'Its external background is not a creative reference. Analyse the separately supplied winning '
              'advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.')
@@ -146,9 +147,10 @@ def identity_hash(context, campaign_type, product, category):
 
 
 def build_plan(context, campaign_type, product, category, seed, history=()):
+    campaign_type = distinct.output_format(campaign_type, {})
     source = (context or {}).get('source_winner') or {}
     identity = identity_hash(context, campaign_type, product, category)
-    return preserve.build_plan(context, campaign_type, product, category, seed, reference_map(campaign_type, source), identity)
+    return distinct.build_plan(context, campaign_type, product, category, seed, reference_map(campaign_type, source), identity)
 
 
 def current_plan(context, campaign_type, product, category, seed, history=()):
@@ -247,6 +249,8 @@ def asset_issues(slots, source_hashes=()):
 
 def execution_issues(executions, refresh_plan, product, campaign_type):
     """Validate declared plans only. This does not certify rendered image fidelity."""
+    if distinct.active(refresh_plan):
+        return distinct.execution_issues(executions, refresh_plan)
     if preserve.active(refresh_plan):
         return preserve.execution_issues(executions, refresh_plan, campaign_type)
     count = len([r for r in refresh_plan.get('references', []) if r.get('label', '').startswith('WINNER_CARD_')]) if campaign_type == 'Carousel' else 3

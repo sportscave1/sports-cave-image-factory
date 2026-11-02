@@ -25,10 +25,11 @@ class GlazingTests(unittest.TestCase):
                 creative_refresh_context={"winning_primary_text": "Winner", "winning_headline": "Winner"} if refresh else None)
             prompt = result["master_prompt"]
             if refresh:
-                import ads_refresh_preserve
-                self.assertIn(ads_refresh_preserve.AUTHORITY, prompt)
-                self.assertNotIn(glass.REQUIREMENT, prompt)
-                continue  # Refresh preserves source glazing instead of applying New Ads instructions.
+                import ads_refresh_distinct
+                self.assertTrue(prompt.startswith(ads_refresh_distinct.VERSION))
+                self.assertIn(glass.REQUIREMENT, prompt)
+                self.assertIn("visible_glazing", prompt)
+                continue  # New Refresh requires visible glass while retaining winner direction.
             self.assertIn(visuals.GLAZING_REQUIREMENT if refresh else glass.REQUIREMENT, prompt)
             self.assertIn("GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size." if refresh else glass.CHECK, prompt)
             self.assertIn("missing or imperceptible surface reflections" if refresh else "confirm recognisable glass", prompt)

@@ -96,12 +96,15 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
         resolution = resolve_campaign_type(source)
         if not resolution['confirmed']:
             raise ValueError('Confirm the source winner format from Meta Review before generating a refresh.')
-        campaign_type = resolution['campaign_type']
+        campaign_type = plan.distinct.output_format(resolution['campaign_type'], winner)
+    campaign_type = plan.distinct.output_format(campaign_type, winner)
     selected = plan.current_plan(winner, campaign_type, product, category, 'direct-prompt')
-    if campaign_type == 'Carousel':
+    if campaign_type == 'Carousel' or (plan.distinct.active(selected) and (source.get('product_mapping') or source.get('carousel_cards'))):
         issue = carousel_identity_issue(product, url, source)
         if issue:
             raise ValueError(issue)
+    if plan.distinct.active(selected):
+        return plan.distinct.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata)
     if plan.preserve.active(selected):
         return plan.preserve.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata)
     if campaign_type == 'Carousel':
@@ -256,6 +259,8 @@ def build_carousel_refresh_prompt(ads, product, category, country, url, winner,
     issue = carousel_identity_issue(product, url, source)
     if issue:
         raise ValueError(issue)
+    if not winner.get('refresh_plan') or plan.distinct.active(winner.get('refresh_plan')):
+        return build_prompt(ads, product, category, country, 'Single Image / Video', url, winner, campaign_moment=campaign_moment, product_metadata=product_metadata)
     selected = plan.current_plan(winner, 'Carousel', product, category, 'direct-prompt')
     if plan.preserve.active(selected):
         return plan.preserve.build_prompt(ads, product, category, country, 'Carousel', url, winner, selected, product_metadata)

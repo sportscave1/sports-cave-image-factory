@@ -36,11 +36,8 @@ def winner(carousel=False):
 
 def result(carousel=False):
     source = winner(carousel)
-    return ads.build_ads_result_record(TITLE, 'Football', 'Australia',
-        'Carousel' if carousel else 'Single Image / Video', product_url=ROW['online_store_url'],
-        product_id=ROW['shopify_product_id'], creative_refresh_context={
-            'winning_primary_text': source['components']['primary_text']['value'],
-            'winning_headline': source['components']['headline']['value'], 'source_winner': source})
+    from tests.test_ads_refresh_plan import fixture
+    return fixture("Carousel" if carousel else "Single Image / Video")
 
 
 def completed_single():
@@ -189,7 +186,7 @@ class RefreshWorkflowTests(unittest.TestCase):
         value = result()
         context = {'winning_primary_text': 'A selected reference', 'winning_headline': 'A collector memory'}
         prompt = ads.build_ads_prompt(TITLE, 'Football', 'Australia', 'Carousel', product_url=ROW['online_store_url'], creative_refresh_context=context)
-        self.assertIn('CTA: Read from source evidence', prompt)
+        self.assertIn('CTA exactly CLAIM YOUR EDITION', prompt)
         second = copy.deepcopy(value['creative_refresh_context'])
         second['source_winner']['ad_id'] = 'different-real-fixture'
         key = ads.ads_result_context_key(value['product_id'], TITLE, 'Football', 'Australia', 'Single Image / Video', creative_refresh_context=second)

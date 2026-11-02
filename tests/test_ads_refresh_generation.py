@@ -99,6 +99,8 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
         for i, card in enumerate(source['carousel_cards'],1):
             card.update(headline=f'Unique headline {i}', description=f'Unique description {i}')
         context = dict(winning_primary_text='Source primary 1', winning_headline='Shared headline', source_winner=source)
+        context=ads.normalize_creative_refresh_context(context)
+        context['refresh_plan']=plan.preserve.build_plan(context,'Carousel',TITLE,'Football','saved',plan.reference_map('Carousel',source),plan.identity_hash(context,'Carousel',TITLE,'Football'))
         value = ads.build_ads_result_record(TITLE,'Football','Australia','Carousel',product_url=ROW['online_store_url'],creative_refresh_context=context)
         refs = value['creative_refresh_context']['refresh_plan']['references']
         for i, ref in enumerate(refs,1):
@@ -171,8 +173,8 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
 
     def test_legacy_manual_prompt_still_requests_complete_references(self):
         prompt=ads.build_ads_prompt(TITLE,'Football','Australia','Carousel',creative_refresh_context={'winning_primary_text':'Old copy','winning_headline':'Old headline'})
-        self.assertIn('list every missing labelled image',prompt)
-        self.assertIn('OS has not analysed winner pixels',prompt)
+        self.assertIn('request only the missing reference rather than guessing',prompt)
+        self.assertIn('Do not claim fidelity was verified',prompt)
 
     def test_noncarousel_authority_unchanged_and_no_network(self):
         with patch('requests.get',side_effect=AssertionError('network')), patch('requests.post',side_effect=AssertionError('mutation')):

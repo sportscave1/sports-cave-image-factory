@@ -38,6 +38,9 @@ def fixture(campaign='Carousel', seed='synthetic-v3'):
             card.update(headline=headline, description=description)
     context = dict(winning_primary_text='Two legends. One unforgettable rivalry.',
                    winning_headline='Legends Never Die', source_winner=source)
+    context = ads.normalize_creative_refresh_context(context)
+    context['refresh_plan'] = plan.preserve.build_plan(context, campaign, TITLE, 'Football', seed,
+        plan.reference_map(campaign, source), plan.identity_hash(context, campaign, TITLE, 'Football'))
     return ads.build_ads_result_record(TITLE, 'Football', 'Australia', campaign,
         product_id=ROW['shopify_product_id'], product_url=ROW['online_store_url'],
         variation_token=seed, creative_refresh_context=context,
@@ -78,9 +81,9 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertTrue(all(not r['image_sha256'] for r in refs[:5]))
         prompt = ads.build_ads_prompt(TITLE, 'Football', 'Australia', 'Carousel',
                                      creative_refresh_context={'winning_primary_text': 'Copy', 'winning_headline': 'Title'})
-        self.assertIn('list every missing labelled image', prompt)
-        self.assertIn('One winning image cannot stand in for 5', prompt)
-        self.assertIn('OS has not analysed winner pixels', prompt)
+        self.assertIn('request only the missing reference rather than guessing', prompt)
+        self.assertIn('Do not claim fidelity was verified', prompt)
+        self.assertIn('Campaign format: Single Image / Video', prompt)
 
     def test_partial_reference_keeps_its_original_position(self):
         with self.assertRaisesRegex(ValueError,'Complete winning Carousel'):
@@ -128,6 +131,12 @@ class RefreshPlanTests(unittest.TestCase):
 
     def test_changed_product_replaces_stale_plan(self):
         value=fixture('Instant Experience'); context=value['creative_refresh_context']
+        # New refresh must not silently use the old product mapping.
+        with self.assertRaisesRegex(ValueError, 'do not match'):
+            ads.build_ads_result_record('Different verified product','Cricket','Australia','Instant Experience',variation_token='different',creative_refresh_context=context)
+        context=copy.deepcopy(context)
+        context['source_winner'].pop('product_mapping',None)
+        context['source_winner'].pop('carousel_cards',None)
         changed=ads.build_ads_result_record('Different verified product','Cricket','Australia','Instant Experience',
                                            variation_token='different',creative_refresh_context=context)
         self.assertNotEqual(changed['creative_refresh_context']['refresh_plan']['run_id'],context['refresh_plan']['run_id'])
@@ -207,8 +216,8 @@ class RefreshPlanTests(unittest.TestCase):
 
     def test_no_network_or_storage_for_prompt_generation(self):
         with patch('requests.get', side_effect=AssertionError('network')), patch('requests.post', side_effect=AssertionError('network')):
-            self.assertIn(plan.VERSION, fixture()['master_prompt'])
-            self.assertIn(plan.VERSION, fixture('Instant Experience')['master_prompt'])
+            self.assertIn(plan.preserve.VERSION, fixture()['master_prompt'])
+            self.assertIn(plan.preserve.VERSION, fixture('Instant Experience')['master_prompt'])
 
     def test_plan_changes_invalidate_context_but_recopy_preserves_manual_output(self):
         value = fixture('Instant Experience')

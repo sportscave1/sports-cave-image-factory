@@ -28,12 +28,13 @@ class ReferenceCleanupTests(unittest.TestCase):
                 product_url=source['product_mapping']['product_url'],creative_refresh_context={
                     'winning_primary_text':source['components']['primary_text']['value'],
                     'winning_headline':source['components']['headline']['value'], 'source_winner':state[handoff.ACTIVE]})
-            self.assertEqual(value['campaign_type'],expected)
+            expected_output = 'Single Image / Video' if expected == 'Carousel' else expected
+            self.assertEqual(value['campaign_type'],expected_output)
             if expected == 'Instant Experience':
-                self.assertIn('SOURCE WINNER PRESERVATION V1',value['master_prompt'])
+                self.assertIn('WINNER DIRECTION THREE DISTINCT REFRESHES V2',value['master_prompt'])
                 self.assertIn('CANONICAL_PRODUCT',value['master_prompt'])
             else:
-                self.assertIn('Campaign format: '+expected,value['master_prompt'])
+                self.assertIn('Campaign format: '+expected_output,value['master_prompt'])
             state['ads_campaign_type']='Carousel'
             self.assertFalse(handoff.hydrate(state))
             self.assertEqual(state['ads_campaign_type'],'Carousel')

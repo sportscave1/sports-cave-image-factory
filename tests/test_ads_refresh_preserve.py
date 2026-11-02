@@ -24,15 +24,23 @@ WINNERS=(
 )
 
 
-def record(winner=WINNERS[0],campaign='Single Image / Video'):
+def record(winner=WINNERS[0],campaign='Single Image / Video', *, historical=True):
     p=PRODUCTS[WINNERS.index(winner)]
     canonical=reference.canonical_variant_image(p,p['handle'],frame_finish='Black')
-    return ads.build_ads_result_record(winner['product'],'Motorsport' if winner==WINNERS[0] else 'NBA','Australia' if winner==WINNERS[0] else 'USA',campaign,
+    result = ads.build_ads_result_record(winner['product'],'Motorsport' if winner==WINNERS[0] else 'NBA','Australia' if winner==WINNERS[0] else 'USA',campaign,
         variation_token='preserve',creative_refresh_context={
             'winning_primary_text':'Exact source primary text','winning_headline':winner['headline'],
             'canonical_reference':canonical,'source_winner':{'creative_format':winner['format'],'destination_url':winner['destination'],
                 'scene':winner['scene'],'footer_headline':winner['footer'],'footer_support':winner['subline'],
                 'cta':'CLAIM YOUR EDITION','image_sha256':hashlib.sha256(b'original').hexdigest()}})
+
+    if historical:
+        context=result['creative_refresh_context']
+        plan=ads.ads_refresh_generation.plan
+        context['refresh_plan']=policy.build_plan(context, result['campaign_type'], result['product_name'], result['category'], 'preserve',
+            plan.reference_map(result['campaign_type'],context['source_winner']),plan.identity_hash(context,result['campaign_type'],result['product_name'],result['category']))
+        result['master_prompt']=ads.build_ads_prompt(result['product_name'],result['category'],result['country'],result['campaign_type'],creative_refresh_context=context)
+    return result
 
 
 def executions():
