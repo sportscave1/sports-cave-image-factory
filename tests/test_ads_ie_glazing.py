@@ -2,6 +2,7 @@
 import unittest
 import ads_page as ads
 import ads_ie_visual_systems as visuals
+import ads_ie_glazing as glass
 import sports_cave_physical_realism as physical
 
 
@@ -23,9 +24,14 @@ class GlazingTests(unittest.TestCase):
                 product_metadata=self.metadata(), variation_token="glazing",
                 creative_refresh_context={"winning_primary_text": "Winner", "winning_headline": "Winner"} if refresh else None)
             prompt = result["master_prompt"]
-            self.assertIn(visuals.GLAZING_REQUIREMENT, prompt)
-            self.assertIn("GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size.", prompt)
-            self.assertIn("missing or imperceptible surface reflections", prompt)
+            if refresh:
+                import ads_refresh_preserve
+                self.assertIn(ads_refresh_preserve.AUTHORITY, prompt)
+                self.assertNotIn(glass.REQUIREMENT, prompt)
+                continue  # Refresh preserves source glazing instead of applying New Ads instructions.
+            self.assertIn(visuals.GLAZING_REQUIREMENT if refresh else glass.REQUIREMENT, prompt)
+            self.assertIn("GLAZING CHECK: Every framed edition must show believable surface reflections clearly visible at thumbnail size." if refresh else glass.CHECK, prompt)
+            self.assertIn("missing or imperceptible surface reflections" if refresh else "confirm recognisable glass", prompt)
             for old in ("only if present in the original", "subtle but perceptible reflection", "broad faint",
                         "Keep reflections subtle", "perceptible source-consistent glazing when present"):
                 self.assertNotIn(old, prompt)
@@ -33,7 +39,8 @@ class GlazingTests(unittest.TestCase):
                 self.assertIn("premium glass", row["glazing_treatment"])
                 self.assertIn(row["reflection_source"], row["glazing_treatment"])
                 self.assertIn(row["reflection_placement"], row["glazing_treatment"])
-            self.assertIn("even when reflections are absent", prompt)
+            if refresh:
+                self.assertIn("even when reflections are absent", prompt)
 
     def test_unglazed_and_unframed_exclusions(self):
         for kind in ("unglazed", "unframed"):

@@ -2,6 +2,7 @@ from sports_categories import sport_category_options, normalize_sport_state, spo
 import ads_ie_legacy_description as ie_legacy_description
 import ads_ie_copy as ie_copy
 import ads_ie_usa as ie_usa
+import ads_ie_glazing as ie_glazing
 import csv
 import hashlib
 import html
@@ -5130,6 +5131,7 @@ def resolve_standard_instant_experience_visuals(
     ))
     ie_visuals.resolve_scene_set(resolved, {
         **context, "usa_product_first": usa, "selected_sport": category, "market": country,
+        "controlled_glazing": usa_upgrade and normalize_country_language_key(country) in {"USA", "Australia"},
         "product_metadata": product_metadata or {},
         "scene_product_key": ie_copy.product_key(product_name),
         "physical_product": physical_realism.physical_metadata(product_metadata),
@@ -5554,7 +5556,8 @@ FINAL ROUTE CHECK
 - The fixed black footer remains within approximately 18–20% of the canvas height.
 - No unresolved placeholders remain.
 - No unverified quantity or scarcity fact is introduced."""
-    return ie_usa.adapt_prompt(prompt) if usa else prompt
+    prompt = ie_usa.adapt_prompt(prompt) if usa else prompt
+    return ie_glazing.apply(prompt) if ie_glazing.active(visual) else prompt
 
 
 def build_standard_instant_experience_image_prompt(
@@ -7263,6 +7266,7 @@ def normalize_creative_refresh_context(context=None):
         "winner_image_attached_in_chatgpt": bool(context.get("winner_image_attached_in_chatgpt", False)),
         **({"refresh_plan": dict(context["refresh_plan"])} if context.get("refresh_plan") else {}),
         **({"source_winner": dict(context["source_winner"])} if context.get("source_winner") else {}),
+        **({"canonical_reference": dict(context["canonical_reference"])} if context.get("canonical_reference") else {}),
     }
 
 
@@ -7287,6 +7291,9 @@ def _ie_concepts_for_result(result):
 
 
 def _ie_default_cta(result, concept_id):
+    context = (result or {}).get('creative_refresh_context') or {}
+    if ads_refresh_generation.plan.preserve.active(context.get('refresh_plan')):
+        return str((context.get('source_winner') or {}).get('written_cta') or '')
     return ie_copy.ROUTES[concept_id][3] if _is_ie_copy_v2(result) else INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept_id, "")
 
 
@@ -7341,7 +7348,7 @@ def build_instant_experience_winner_refinement_prompt(product_name, category, co
     prompt = ads_refresh_generation.build_prompt(
         sys.modules[__name__], product_name, category, country, "Instant Experience", product_url, context,
         product_metadata=product_metadata, campaign_moment=campaign_moment)
-    return physical_realism.apply_context(prompt, product_metadata)
+    return prompt if prompt.startswith(ads_refresh_generation.plan.VERSION) else physical_realism.apply_context(prompt, product_metadata)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -8523,7 +8530,7 @@ GLAZING CHECK: Every framed edition must show believable surface reflections cle
 Read the complete brief before acting. This checklist is an index, not a replacement for the detailed requirements below. Resolve all three ads before generation, and check each output against its assigned specification."""
 
 
-def build_instant_experience_shared_template(physical_product=None, *, usa=False):
+def build_instant_experience_shared_template(physical_product=None, *, usa=False, controlled_glazing=False):
     """Deduplicate unchanged rendering rules in the master; expand for each tool call."""
     prompt = "\n\n".join((
         "SHARED IMAGE REQUIREMENTS — include this entire section in every image-generation call\n"
@@ -8552,13 +8559,15 @@ def build_instant_experience_shared_template(physical_product=None, *, usa=False
         ie_visuals.SCENE_VISIBILITY_RULES.strip(),
         physical_realism.build(physical_product, compact=True, glazing_requirement=ie_usa.GLAZING if usa else ie_visuals.GLAZING_REQUIREMENT),
     ))
-    return ie_usa.adapt_prompt(prompt) if usa else prompt
+    prompt = ie_usa.adapt_prompt(prompt) if usa else prompt
+    return ie_glazing.apply(prompt) if controlled_glazing else prompt
 
 
 def build_instant_experience_execution_image_brief(index, visual):
     # The unchanged resolved brief is also used by standalone exports. Remove
     # only its exact shared prefix/suffix here, never rebuild/reroll scene fields.
-    scene = visual['scene_brief'].removeprefix(ie_visuals.SCENE_REFERENCE_RULES).removesuffix(ie_visuals.SCENE_VISIBILITY_RULES)
+    visibility = ie_glazing.apply(ie_visuals.SCENE_VISIBILITY_RULES) if ie_glazing.active(visual) else ie_visuals.SCENE_VISIBILITY_RULES
+    scene = visual['scene_brief'].removeprefix(ie_visuals.SCENE_REFERENCE_RULES).removesuffix(visibility)
     return f"""{visual['group_heading']}
 
 IMAGE GENERATION PROMPT
@@ -8656,7 +8665,7 @@ If it is unclear whether an image was created, first recover the existing call r
 If a supplied successful hallway reference is accessible, inspect its close-camera/product-background balance as style guidance only. Never extract the artwork from it or copy its room.
 If any image is missing, the three-cover delivery requirement is incomplete: apply the failure handling above and never label a two-image result as three completed covers; preserve completed outputs and all three final copy records, matching CSV rows and setup. State any inspection limitation. Return only actually created assets, final copy, setup and the specific failure report; do not print these instructions, internal plans or research notes.
 
-{build_instant_experience_shared_template(visuals[0].get('physical_product'), usa=usa)}
+{build_instant_experience_shared_template(visuals[0].get('physical_product'), usa=usa, controlled_glazing=ie_glazing.active(visuals[0]))}
 
 {ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
 
@@ -8676,7 +8685,7 @@ The following are resolved call specifications; execute all three automatically 
     if usa:
         prompt = ie_usa.VERSION + "\n" + ie_usa.adapt_prompt(prompt)
         prompt = prompt.replace("CONTROLLED PERSONALISATION", ie_usa.COPY_RULES + "\nCONTROLLED PERSONALISATION")
-    return prompt
+    return ie_glazing.apply(prompt) if any(ie_glazing.active(v) for v in visuals) else prompt
 
 
 def build_generic_instant_experience_prompt(
@@ -8992,13 +9001,13 @@ def build_ads_prompt(
         prompt = ads_refresh_generation.build_prompt(
             sys.modules[__name__], product_name, category, country, campaign_type, product_url,
             creative_refresh_context, campaign_moment=campaign_moment, product_metadata=product_metadata)
-        return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
+        return prompt if prompt.startswith(ads_refresh_generation.plan.VERSION) else apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
     if campaign_type == "Instant Experience" and creative_refresh_context:
         prompt = build_instant_experience_winner_refinement_prompt(
             product_name, category, country, product_url, creative_refresh_context,
             product_metadata=product_metadata, campaign_moment=campaign_moment,
         )
-        return apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
+        return prompt if prompt.startswith(ads_refresh_generation.plan.VERSION) else apply_final_delivery(apply_footer_contract(physical_realism.apply_context(prompt, product_metadata)))
     template_key = get_template_key(category, campaign_type)
     settings = None
     if campaign_type == "Instant Experience":
@@ -9313,6 +9322,13 @@ def build_ads_result_record(
         else None
     )
     if clean_creative_refresh_context:
+        source = clean_creative_refresh_context.get('source_winner') or {}
+        if source:
+            from meta_review_handoff import resolve_campaign_type
+            resolution = resolve_campaign_type(source)
+            if not resolution['confirmed']:
+                raise ValueError('Confirm the source winner format from Meta Review before generating a refresh.')
+            campaign_type = resolution['campaign_type']
         clean_creative_refresh_context["refresh_plan"] = ads_refresh_generation.plan.current_plan(
             clean_creative_refresh_context, campaign_type, clean_product_name, category,
             clean_variation_token, recent_instant_experience_fingerprints or [])
@@ -9327,7 +9343,7 @@ def build_ads_result_record(
             country=country,
             usa_upgrade=not bool(clean_creative_refresh_context),
         )
-        if campaign_type == "Instant Experience"
+        if campaign_type == "Instant Experience" and not clean_creative_refresh_context
         else []
     )
     if instant_experience_fingerprints:
@@ -9453,6 +9469,8 @@ def ensure_current_ads_result_prompt(result):
         return result
     if google_ads.platform_for(result) == "google":
         return result
+    if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
+        return result  # Saved refresh contracts and outputs are immutable on reopen.
     if result.get("campaign_type") == "Instant Experience" and normalize_country_language_key(result.get("country")) in {"USA", "Australia"}:
         return result  # Supporting-line updates are generation-only, never a saved-record migration.
     workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
@@ -12885,6 +12903,8 @@ def _render_saved_ad_post_now(result, workflow, *, source_matches=True, quality_
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         issues += _creative_refresh_asset_issues(result, workflow)
         issues += _creative_refresh_visual_review_issues(result, workflow)
+        if ads_refresh_generation.plan.preserve.active((result.get('creative_refresh_context') or {}).get('refresh_plan')) and _ads_image_valid_slots(result, workflow):
+            issues += creative_refresh_quality_issues(result, workflow)
     if issues:
         st.button("POST NOW", type="primary", disabled=True,
                   key=f"ads-post-now::{result['context_key']}")
@@ -13361,6 +13381,8 @@ def _render_instant_experience_package_save(result, workflow):
     if result.get('workflow_mode') == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         package_saved = bool(workflow.get('refresh_workspace_saved')) and (workflow.get(posting_handoff.SAVED_PACKAGE_KEY) or {}).get('source_signature') == _ads_saved_source_signature(result, workflow)
 
+    if result.get('workflow_mode') != ADS_WORKFLOW_MODE_CREATIVE_REFRESH and google_ads.platform_for(result) == 'meta':
+        _render_final_ad_review(result, workflow)
     if st.button(
         ("Saved" if package_saved else "Save now") if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Instant Experience Package",
         type="primary",
@@ -13570,6 +13592,8 @@ def _render_ads_image_save(result, workflow, *, quality_issues=None):
         st.caption(f"{len(valid_slots)} of {required_count} images ready. You can save now and add more later.")
     else:
         st.caption(f"{len(valid_slots)} of {required_count} images ready.")
+    if result.get('workflow_mode') != ADS_WORKFLOW_MODE_CREATIVE_REFRESH and google_ads.platform_for(result) == 'meta':
+        _render_final_ad_review(result, workflow)
     if st.button(
         ("Saved" if all_saved else "Save now") if result.get("workflow_mode") == ADS_WORKFLOW_MODE_CREATIVE_REFRESH else "Save Images",
         type="primary",
@@ -13822,22 +13846,14 @@ def build_final_ad_review_landing_page_block(product_page_url):
     return FINAL_REVIEW_LANDING_PAGE_BLOCK_TEMPLATE.format(product_page_url=clean_url)
 
 
-def build_final_ad_review_copy_prompt(result, *, resolved_prompt=None):
-    context = build_ads_review_context(result)
-    base_prompt = str(
-        resolved_prompt
-        if resolved_prompt is not None
-        else ads_final_review.build_review_instructions(CAROUSEL_CARD_MAX_CHARACTERS)
-    )
-    context_text = ads_final_review.build_review_context(context, "")
-    landing_page_block = build_final_ad_review_landing_page_block(context.get("product_url") or "")
-    return (
-        f"{base_prompt.rstrip()}\n\n"
-        f"{SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1}\n\n"
-        "CAMPAIGN CONTEXT\n\n"
-        f"{context_text}\n\n"
-        f"{landing_page_block}"
-    )
+def build_final_ad_review_copy_prompt(result, workflow=None, *, resolved_prompt=None):
+    # Legacy review overrides must not reintroduce scoring or visual/website audits.
+    import ads_copy_optimisation
+    if workflow is None:
+        workflow = st.session_state.get(_ads_image_state_key(result.get('workflow_mode'))) or {}
+        if workflow.get('context_key') != result.get('context_key'):
+            workflow = {}
+    return ads_copy_optimisation.build(sys.modules[__name__], result, workflow)
 
 
 def _new_ads_review_workflow(result):
@@ -14207,15 +14223,9 @@ def _submit_ads_review(result, workflow):
             st.session_state[_ads_review_state_key()] = current
 
 
-def _render_final_ad_review(result):
-    st.markdown('<div class="sc-ad-review-heading">Final Ad Review</div>', unsafe_allow_html=True)
-    st.caption(
-        "Upload screenshots of the finished Meta campaign to ChatGPT, then paste the review prompt below."
-    )
-    with st.expander("How to complete the final review", expanded=False):
-        st.markdown("\n\n".join(FINAL_REVIEW_HOW_TO_STEPS))
+def _render_final_ad_review(result, workflow=None):
     render_prompt_copy_button(
-        build_final_ad_review_copy_prompt(result),
+        build_final_ad_review_copy_prompt(result, workflow),
         f"ads-final-review-prompt::{result['context_key']}",
         label="Copy Final Review Prompt",
         success_label="Final review prompt copied",
@@ -14226,6 +14236,10 @@ def render_product_artwork_reference(selection, product_url, *, creative_refresh
     """A collapsed, read-only product source panel shared by New Ads and Refresh."""
     from ads_product_catalog import product_reference_image_url
     row = (selection or {}).get("row") or {}
+    if creative_refresh:
+        from ads_refresh_reference import render_canonical_reference
+        render_canonical_reference(st, row, product_url)
+        return
     image_url = product_reference_image_url(row)
     with st.expander("Canonical black-frame product image", expanded=False):
         if creative_refresh:
@@ -14267,6 +14281,27 @@ def creative_refresh_quality_issues(result, workflow):
         return []
     context = result.get("creative_refresh_context") or {}
     plan = context.get("refresh_plan") or {}
+    if ads_refresh_generation.plan.preserve.active(plan):
+        records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
+        issues = ads_refresh_generation.plan.execution_issues(records, plan, result['product_name'], result['campaign_type'])
+        records = records if isinstance(records, list) else []
+        source = context.get('source_winner') or {}
+        if result['campaign_type'] == 'Carousel':
+            carousel = _carousel_copy_notes_from_workflow(result, workflow)
+            rows, originals = carousel['cards'], plan.get('references') or []
+            changed = [c for row in records if isinstance(row, dict) for c in (row.get('changed_components') or [])]
+            if 'primary_text' not in changed:
+                source_texts = source.get('shared_primary_texts') or [context.get('winning_primary_text')]
+                if any(text and text not in source_texts for text in carousel['primary_texts']):
+                    issues.append('Preserve the source shared primary text unless it is the declared test.')
+        else:
+            rows = ([values[0] if values else {} for values in
+                     [_instant_experience_concept_copy_notes_from_workflow(workflow).get(c['id'], []) for c in INSTANT_EXPERIENCE_CONCEPTS]]
+                    if result['campaign_type'] == 'Instant Experience' else workflow.get('standard_ads') or [])
+            originals = [dict(primary_text=context.get('winning_primary_text'), headline=context.get('winning_headline'),
+                              description=source.get('description'), cta=source.get('written_cta')) for _ in rows]
+        issues += ads_refresh_generation.plan.preserve.copy_issues(rows, records, originals)
+        return issues + _creative_refresh_asset_issues(result, workflow)
     if plan.get("version") != ads_refresh_generation.plan.VERSION:
         return []  # Historical saved packages keep their existing compatibility contract.
     if result.get("campaign_type") == "Carousel":
@@ -14300,6 +14335,23 @@ def _creative_refresh_asset_issues(result, workflow):
     """Check uploaded bytes without making historical execution notes a draft gate."""
     context = result.get("creative_refresh_context") or {}
     plan = context.get("refresh_plan") or {}
+    if ads_refresh_generation.plan.preserve.active(plan):
+        records = (workflow.get('ad_notes') or {}).get('refresh_executions') or []
+        issues, edited = [], []
+        refs = plan.get('references') or []
+        for i, expected in enumerate(_result_image_slots(result)):
+            slot = (workflow.get('slots') or {}).get(expected['id']) or {}
+            if not slot.get('data'):
+                continue
+            execution = records[i] if i < len(records) and isinstance(records[i], dict) else {}
+            reference = refs[i] if result.get('campaign_type') == 'Carousel' and i < len(refs) else (refs[0] if refs else {})
+            digest = hashlib.sha256(slot['data']).hexdigest()
+            if execution.get('image_action') == 'reuse_original':
+                if not reference.get('image_sha256') or digest != reference['image_sha256']:
+                    issues.append(f'Refresh {i+1}: copy-only image must match the original winner bytes.')
+            else:
+                edited.append(slot)
+        return issues + ads_refresh_generation.plan.asset_issues(edited, [r.get('image_sha256') for r in refs if r.get('image_sha256')])
     source_hashes = [r.get("image_sha256") for r in plan.get("references", []) if r.get("image_sha256")]
     canonical_hash = (result.get("product_metadata") or {}).get("image_sha256")
     if canonical_hash:
@@ -14337,7 +14389,7 @@ def _render_ads_final_actions(result, workflow, *, source_matches=True):
             if _ads_image_valid_slots(result, workflow):
                 with st.expander("Final visual verification — required before POST NOW",
                                  expanded=bool(_creative_refresh_visual_review_issues(result, workflow))):
-                    st.caption("Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
+                    st.caption("Compare each result with its original winner and exact canonical variant. Verify the declared single change and that all other scene, copy and footer components remain preserved. Check any product or offer conflicts. This is manual review, not automated pixel recognition." if ads_refresh_generation.plan.preserve.active((result.get("creative_refresh_context") or {}).get("refresh_plan")) else "Compare each final image with the original Black-framed artwork and its matching winning card. Check frame profile, premium glass reflections, shadows, printed detail and distinct scenery. This is a manual review, not automated pixel recognition.")
                     review_key = _creative_refresh_visual_review_key(result, workflow)
                     reviewed = st.checkbox(
                         "I checked every refreshed image against its product and winner references",
@@ -14709,7 +14761,7 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                   on_click=ads_refresh_product.select_from_url,args=(product_rows,))
     if is_creative_refresh:
         render_product_artwork_reference(product_selection, product_url, creative_refresh=True)
-        if campaign_type != 'Carousel':
+        if campaign_type != 'Carousel' and not st.session_state.get('ads-refresh-canonical-reference'):
             from ads_refresh_reference import render_product_image_link
             render_product_image_link(st)
     elif not is_google:
@@ -14737,6 +14789,9 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
                 **ads_refresh_generation.source_context(st.session_state.get("meta-review-refresh-source")),
             }
         )
+        reference = st.session_state.get('ads-refresh-canonical-reference')
+        if reference:
+            creative_refresh_context['canonical_reference'] = dict(reference)
     if creative_refresh_context:
         plan_identity = json.dumps([product_name, product_url, category, country, campaign_type,
                                     campaign_moment, creative_refresh_context], sort_keys=True, default=str)
@@ -14959,8 +15014,6 @@ def render_page(workflow_mode=ADS_WORKFLOW_MODE_NEW):
             (creative_refresh_context or None) == (result.get("creative_refresh_context") or None),
         ))
         render_supported_result(result, source_matches=source_matches)
-        if not is_creative_refresh:
-            _render_final_ad_review(result)
 
 
 render_ads_page = render_page

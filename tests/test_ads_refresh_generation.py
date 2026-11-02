@@ -87,13 +87,11 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
         self.assertEqual(products.resolve(source, [ROW])['product']['product_title'], TITLE)
 
     def test_exact_order_only_five_references_and_standalone_prompts(self):
-        value = fixture(); prompt = value['master_prompt']
-        self.assertEqual([r['label'] for r in value['creative_refresh_context']['refresh_plan']['references']], [f'WINNER_CARD_{i}' for i in range(1,6)])
-        for i in range(1,6): self.assertIn(f'Image {i} = Card {i} = WINNER_CARD_{i}', prompt)
-        self.assertIn('CANONICAL_PRODUCT', prompt)
-        self.assertNotIn('ATTACHMENT 6', prompt)
-        self.assertEqual(prompt.count('PRODUCT: '+TITLE), 5)
-        self.assertIn('EXACTLY 5 COMPLETE STANDALONE IMAGE PROMPTS', prompt)
+        value=fixture();prompt=value['master_prompt']
+        self.assertEqual([r['label'] for r in value['creative_refresh_context']['refresh_plan']['references']],[f'WINNER_CARD_{i}' for i in range(1,6)])
+        for row in executions(value):self.assertIn(row['winner_reference'],row['image_prompt'])
+        self.assertIn('ONE refreshed 5-CARD',prompt)
+        self.assertIn('CANONICAL_PRODUCT',prompt)
 
     def test_matching_card_copy_and_separate_primary_pool(self):
         source = winner(True)
@@ -107,13 +105,12 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
             self.assertEqual((ref['headline'],ref['description']), (f'Unique headline {i}',f'Unique description {i}'))
             self.assertIn(f'Source primary {i}', value['master_prompt'])
 
-    def test_same_family_new_execution_and_realism(self):
-        prompt = fixture()['master_prompt']
-        for family in ('bedroom', 'man cave', 'office', 'lounge'):
-            self.assertIn(f'{family} -> new {family}', prompt)
-        for phrase in ('detail-role -> new detail execution','INDIVIDUAL WINNER ANALYSIS','CANONICAL_PRODUCT, when supplied as the original black-framed Shopify product reference, has FIRST authority',
-                       'glass','bevel','contact shadow','ambient occlusion','wall separation','every word','mitred joins'):
-            self.assertIn(phrase,prompt)
+    def test_original_scene_and_product_authorities(self):
+        prompt=fixture()['master_prompt']
+        self.assertIn('recognisable setting',prompt)
+        self.assertIn('lighting character',prompt)
+        self.assertIn('Never reconstruct the design',prompt)
+        self.assertNotIn('-> new',prompt)
 
     def test_exact_csv_schema_and_five_shared_variations(self):
         value=fixture(); text=value['master_prompt'].split('EXACT CSV TEMPLATE\n',1)[1]
@@ -131,26 +128,23 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Complete winning Carousel required. Reload the winner from Meta Review.'):
                 plan.reference_map('Carousel',source)
 
-    def test_old_session_plan_is_replaced(self):
-        state={}; ctx={'source_winner':winner(True)}
-        old=plan.session_plan(state,'same',ctx,'Carousel',TITLE,'Football',lambda:'seed')
-        old['references'].append({'label':'CANONICAL_PRODUCT'})
-        current=plan.session_plan(state,'same',ctx,'Carousel',TITLE,'Football',lambda:'unused')
-        self.assertEqual(len(current['references']),5)
+    def test_saved_session_plan_is_preserved(self):
+        value=fixture();context=value['creative_refresh_context'];saved=context['refresh_plan']
+        saved['version']='HISTORICAL APPROVED';saved['references'].append({'label':'CANONICAL_PRODUCT'})
+        self.assertIs(plan.current_plan(context,'Carousel',TITLE,'Football','new'),saved)
 
     def test_uninspected_or_generic_execution_is_not_ready(self):
         value=fixture(); records=executions(value); selected=value['creative_refresh_context']['refresh_plan']
         self.assertFalse(plan.execution_issues(records,selected,TITLE,'Carousel'))
-        records[0]['collective_product_inspected']=False
+        records[0]['canonical_inspected']=False
         self.assertTrue(plan.execution_issues(records,selected,TITLE,'Carousel'))
-        records=executions(value); records[0]['execution']={k:'TBD' for k in records[0]['execution']}
+        records=executions(value); records[0]['change']=''
         self.assertTrue(plan.execution_issues(records,selected,TITLE,'Carousel'))
 
-    def test_recolour_only_fails(self):
-        value=fixture(); records=executions(value)
-        records[0]['observations']['execution']=copy.deepcopy(records[0]['execution'])
-        records[0]['execution']['wall_palette']='A new colour only'
-        self.assertTrue(any('recolour' in s for s in plan.execution_issues(records,value['creative_refresh_context']['refresh_plan'],TITLE,'Carousel')))
+    def test_one_colour_test_allowed(self):
+        value=fixture();records=executions(value)
+        records[0]['changed_components']=['wall_colour']
+        self.assertFalse(plan.execution_issues(records,value['creative_refresh_context']['refresh_plan'],TITLE,'Carousel'))
 
     def test_source_copy_and_reordered_words_fail(self):
         context={'source_winner':{'carousel_cards':[{'headline':'Make room for a champion'}], 'shared_primary_texts':['Your wall tells the story of your sporting life']}}
@@ -168,19 +162,17 @@ class CarouselRefreshGenerationTests(unittest.TestCase):
         self.assertIn('creative_refresh_message = ads_refresh_generation.carousel_identity_issue(',source)
         self.assertIn('elif creative_refresh_message:',source)
 
-    def test_current_prompt_migrates_old_six_reference_plan(self):
-        value=fixture()
-        value['prompt_contract_version']='old'
+    def test_saved_prompt_never_migrates_on_reopen(self):
+        value=fixture();value['prompt_contract_version']='old'
         value['creative_refresh_context']['refresh_plan']['references'].append({'label':'CANONICAL_PRODUCT'})
-        updated=ads.ensure_current_ads_result_prompt(value)
-        self.assertIn('CANONICAL_PRODUCT',updated['master_prompt'])
-        self.assertEqual(len(updated['creative_refresh_context']['refresh_plan']['references']),5)
+        original=copy.deepcopy(value)
+        self.assertIs(ads.ensure_current_ads_result_prompt(value),value)
+        self.assertEqual(value,original)
 
     def test_legacy_manual_prompt_still_requests_complete_references(self):
-        context={'winning_primary_text':'Old copy','winning_headline':'Old headline'}
-        prompt=ads.build_ads_prompt(TITLE,'Football','Australia','Carousel',creative_refresh_context=context)
-        self.assertIn('legacy manual winner',prompt)
-        self.assertEqual(prompt.count('PRODUCT: '+TITLE),5)
+        prompt=ads.build_ads_prompt(TITLE,'Football','Australia','Carousel',creative_refresh_context={'winning_primary_text':'Old copy','winning_headline':'Old headline'})
+        self.assertIn('list every missing labelled image',prompt)
+        self.assertIn('OS has not analysed winner pixels',prompt)
 
     def test_noncarousel_authority_unchanged_and_no_network(self):
         with patch('requests.get',side_effect=AssertionError('network')), patch('requests.post',side_effect=AssertionError('mutation')):

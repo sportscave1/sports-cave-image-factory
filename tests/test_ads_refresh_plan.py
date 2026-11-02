@@ -24,6 +24,7 @@ ROLES = ('recognition', 'fan ownership', 'collector identity', 'display desire',
 
 def fixture(campaign='Carousel', seed='synthetic-v3'):
     source = winner(campaign == 'Carousel')
+    source['format'] = campaign
     source['carousel_cards'] = [dict(position=i, image_url=f'https://example.fbcdn.net/card{i}.png',
                                    scene=scene, role=role) for i, (scene, role) in enumerate(zip(SCENES, ROLES), 1)]
     if campaign == 'Carousel':
@@ -49,24 +50,15 @@ def executions(value):
     result = []
     for i in range(1, 6 if carousel else 4):
         reference = selected['references'][i-1 if carousel else 0]
-        style = {} if carousel else selected['styles'][i-1]
-        scene = reference.get('scene') if carousel else style['name']
-        role = reference.get('role') if carousel else 'collector identity'
-        prompt = plan.standalone_brief(TITLE, reference['label'], scene=scene, role=role, style=style, detail=carousel and 'detail' in role,
-                                      dimensions='1080 x 1080' if carousel else '1024 x 1024',
-                                      references=[r['label'] for r in selected['references']] if carousel else ())
-        result.append(dict(position=i, winner_reference=reference['label'], reference_inspected=True, canonical_inspected=True, collective_product_inspected=True,
-                           observations={k:'Synthetic fixture observation: '+str(scene) for k in ('scene_category','ad_role','defining_objects','composition','product_attention','strengths','clutter','mood_contrast','copy_hook','tone','structure','emotional_appeal')}, scene=scene, role=role,
-                           keep=f'Preserve {scene} concept and {role}',
-                           change='New architecture/layout, wall materials, camera, furniture and lighting',
-                           improvement='Reduce clutter; preserve product prominence',
-                           style_id=style.get('id'), image_prompt=prompt,
-                           execution=dict(architecture=f'New {scene} architecture {i}', layout=f'New spatial layout {i}',
-                                          wall_palette=f'Synthetic palette {i}', wall_material=f'Synthetic material {i}',
-                                          camera=f'New composition {i}', furniture=f'New furnishings {i}',
-                                          lighting='One coherent side light and restrained glazing', product_placement='Source preserving prominent detail' if carousel and 'detail' in role else 'Dominant mounted artwork')))
-    for row in result:
-        row['observations']['execution'] = {k: 'Observed original ' + str(v) for k, v in row['execution'].items()}
+        changed = ['lighting'] if not carousel or i == 1 else []
+        result.append(dict(position=i, winner_reference=reference['label'], reference_inspected=True, canonical_inspected=True,
+            observations={'scene':'Synthetic inspected source'}, scene=reference.get('scene','source'), role=reference.get('role','collector'),
+            keep='All source components except declared lighting', change='Test softer light' if changed else 'Unchanged card',
+            improvement='Test product recognition', secondary_differences='none', changed_components=changed,
+            image_action='local_edit' if changed else 'reuse_original', unresolved_conflicts=[],
+            image_prompt=reference['label']+' CANONICAL_PRODUCT. Preserve original; change only declared lighting.',
+            execution={'lighting':'softer source light'}))
+
     return result
 
 
@@ -95,27 +87,20 @@ class RefreshPlanTests(unittest.TestCase):
             plan.reference_map('Carousel',{'carousel_cards':[{'position':3,'image_sha256':'actual-card-three'}]})
 
     def test_canonical_authority_exact_in_every_standalone(self):
-        value = fixture()
-        for row in executions(value):
-            self.assertIn(plan.CAROUSEL_AUTHORITY, row['image_prompt'])
-            self.assertIn('PRINTED', value['master_prompt'])
-            self.assertIn('CANONICAL_PRODUCT, when supplied', row['image_prompt'])
-            self.assertIn('Do not redraw or reconstruct the product', value['master_prompt'])
+        for campaign in ('Carousel','Instant Experience'):
+            value=fixture(campaign)
+            self.assertIn(plan.preserve.AUTHORITY,value['master_prompt'])
+            for row in executions(value):
+                self.assertIn(row['winner_reference'],row['image_prompt'])
+                self.assertIn('CANONICAL_PRODUCT',row['image_prompt'])
 
-    def test_full_shared_block_in_all_active_carousel_and_ie_briefs(self):
-        block = build_sports_cave_image_realism_rules(include_product_lock=True)
-        for campaign, count in [('Carousel', 5), ('Instant Experience', 3)]:
-            prompt = fixture(campaign)['master_prompt']
-            self.assertEqual(prompt.count(block), count-1 if campaign == 'Carousel' else count)
-            if campaign == 'Carousel':
-                self.assertIn(build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=True), prompt)
-            if campaign == 'Instant Experience':
-                self.assertEqual(prompt.count(ads.build_instant_experience_fixed_opaque_footer_rules()), 3)
-            for row in executions(fixture(campaign)):
-                applicable = build_sports_cave_image_realism_rules(include_product_lock=True, allow_intentional_detail_crop=campaign == 'Carousel' and 'detail' in row['role'])
-                self.assertIn(applicable, row['image_prompt'])
-                for required in ('mitred joins', 'ambient occlusion', 'glass-like reflections', 'physically', 'every word'):
-                    self.assertIn(required, row['image_prompt'])
+    def test_source_authority_replaces_new_ads_scene_and_footer_wrappers(self):
+        for campaign in ('Carousel','Instant Experience'):
+            prompt=fixture(campaign)['master_prompt']
+            self.assertIn('WINNER_REFERENCE',prompt)
+            self.assertIn('preserve unaffected regions',prompt)
+            self.assertNotIn('Redesign architecture',prompt)
+            self.assertNotIn(ads.build_instant_experience_fixed_opaque_footer_rules(),prompt)
 
     def test_scenes_roles_order_preserved_and_new_execution_declared(self):
         value = fixture()
@@ -124,25 +109,22 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertEqual([r['scene'] for r in rows], list(SCENES))
         self.assertEqual([r['role'] for r in rows], list(ROLES))
         rows[1]['scene'] = 'office'
-        self.assertTrue(any('scene anchor changed' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Carousel')))
+        self.assertTrue(any('source scene changed' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Carousel')))
 
     def test_card_one_cannot_stand_in_for_other_cards(self):
         value = fixture(); rows = executions(value)
         rows[4]['winner_reference'] = 'WINNER_CARD_1'
-        self.assertTrue(any('wrong winner' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Carousel')))
+        self.assertTrue(any('source reference' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Carousel')))
 
     def test_marker_only_and_incomplete_authority_rejected(self):
-        value = fixture(); rows = executions(value)
-        rows[0]['image_prompt'] = TITLE + plan.AUTHORITY + 'WINNER_CARD_1 SPORTS_CAVE_IMAGE_REALISM_RULES_V1'
-        self.assertTrue(any('full shared rules' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Carousel')))
+        value=fixture();rows=executions(value);rows[0]['image_prompt']='WINNER_CARD_1 only'
+        self.assertTrue(plan.execution_issues(rows,value['creative_refresh_context']['refresh_plan'],TITLE,'Carousel'))
 
     def test_supported_detail_role_does_not_require_a_room(self):
-        value=fixture(); rows=executions(value)
-        rows[-1]['execution']={'camera':'Photographic close detail', 'lighting':'Coherent side lighting',
-                               'product_placement':'Exact source edition plaque detail'}
+        value=fixture();rows=executions(value)
         self.assertFalse(plan.execution_issues(rows,value['creative_refresh_context']['refresh_plan'],TITLE,'Carousel'))
-        self.assertIn('INTENTIONAL DETAIL CARD ONLY',rows[-1]['image_prompt'])
-        self.assertIn('never redraw',rows[-1]['image_prompt'])
+        self.assertEqual(rows[-1]['role'],'edition detail')
+        self.assertEqual(rows[-1]['image_action'],'reuse_original')
 
     def test_changed_product_replaces_stale_plan(self):
         value=fixture('Instant Experience'); context=value['creative_refresh_context']
@@ -151,16 +133,15 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertNotEqual(changed['creative_refresh_context']['refresh_plan']['run_id'],context['refresh_plan']['run_id'])
         self.assertEqual(changed['creative_refresh_context']['refresh_plan']['product'],'Different verified product')
 
-    def test_recolour_only_rejected(self):
-        value = fixture('Instant Experience'); rows = executions(value)
-        rows[1]['execution'] = {**rows[0]['execution'], 'wall_palette': 'another colour'}
-        self.assertTrue(any('near-identical planned' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Instant Experience')))
+    def test_single_declared_colour_change_is_permitted(self):
+        value=fixture('Instant Experience');rows=executions(value)
+        for row in rows:row['changed_components']=['wall_colour']
+        self.assertFalse(plan.execution_issues(rows,value['creative_refresh_context']['refresh_plan'],TITLE,'Instant Experience'))
 
-    def test_declared_winner_room_copy_flagged_without_claiming_pixel_analysis(self):
-        value=fixture('Instant Experience'); rows=executions(value)
-        rows[0]['observations']['execution']=copy.deepcopy(rows[0]['execution'])
-        rows[0]['execution']['wall_palette']='Only paint changed'
-        self.assertTrue(any('barely changes the winner' in s for s in plan.execution_issues(rows,value['creative_refresh_context']['refresh_plan'],TITLE,'Instant Experience')))
+    def test_multiple_scene_changes_rejected(self):
+        value=fixture('Instant Experience');rows=executions(value)
+        rows[0]['changed_components']=['lighting','camera']
+        self.assertTrue(plan.execution_issues(rows,value['creative_refresh_context']['refresh_plan'],TITLE,'Instant Experience'))
 
     def test_thirty_structured_styles_and_product_filter(self):
         self.assertEqual(len(plan.STYLES), 30)
@@ -170,23 +151,21 @@ class RefreshPlanTests(unittest.TestCase):
             self.assertNotIn('18', [s['id'] for s in plan.select_styles(i, category='Football')])
         self.assertEqual(len(plan.select_styles('motor', category='Motorsport', eligible_ids=['18','23','05'])), 3)
 
-    def test_ie_three_distinct_styles_and_no_literal_room_lock(self):
-        value = fixture('Instant Experience'); selected = value['creative_refresh_context']['refresh_plan']['styles']
-        self.assertEqual(len({s['id'] for s in selected}), 3)
-        self.assertEqual(len({(s['family'],s['wall_hue']) for s in selected}), 3)
-        self.assertIn('not three camera angles in one room', value['master_prompt'])
-        self.assertNotIn('Keep the winning room style and composition', value['master_prompt'])
-        self.assertEqual(len(list(csv.DictReader(io.StringIO(value['master_prompt'].split('EXACT CSV TEMPLATE\n')[1])))), 3)
+    def test_ie_three_alternatives_without_preselected_replacement_scenes(self):
+        value=fixture('Instant Experience')
+        self.assertEqual(value['creative_refresh_context']['refresh_plan']['styles'],[])
+        self.assertIn('original source winner',value['master_prompt'])
+        self.assertEqual(len(list(csv.DictReader(io.StringIO(value['master_prompt'].split('EXACT CSV TEMPLATE\n')[1])))),3)
 
     def test_same_family_palette_rejected(self):
         twins = [dict(s, family='same', wall_hue='same') for s in plan.STYLES[:4]]
         with patch.object(plan, 'STYLES', twins), self.assertRaises(ValueError):
             plan.select_styles('seed')
 
-    def test_repeat_style_id_rejected_by_quality_gate(self):
-        value = fixture('Instant Experience'); rows = executions(value)
-        rows[1]['style_id'] = rows[0]['style_id']
-        self.assertTrue(any('repeated style' in s for s in plan.execution_issues(rows, value['creative_refresh_context']['refresh_plan'], TITLE, 'Instant Experience')))
+    def test_same_source_style_is_valid_preservation(self):
+        value=fixture('Instant Experience');rows=executions(value)
+        for row in rows:row['style_id']='same-source'
+        self.assertFalse(plan.execution_issues(rows,value['creative_refresh_context']['refresh_plan'],TITLE,'Instant Experience'))
 
     def test_seed_and_recopy_stable_new_run_avoids_recent(self):
         state = {}; seeds = iter(['one','two'])
@@ -264,6 +243,7 @@ class RefreshPlanTests(unittest.TestCase):
         self.assertEqual(package['refresh_executions'],workflow['ad_notes']['refresh_executions'])
         self.assertEqual(package['source_provenance']['refresh_plan'],value['creative_refresh_context']['refresh_plan'])
         self.assertNotIn('refresh_executions', ads.STANDARD_ADS_CSV_HEADERS)
+        workflow['ad_notes']['refresh_executions'] = executions(value)
         before = ads._ads_saved_source_signature(value,workflow)
         workflow['ad_notes']['refresh_executions'][0]['change'] = 'Edited after save'
         self.assertNotEqual(before, ads._ads_saved_source_signature(value,workflow))
@@ -317,15 +297,17 @@ class RefreshPlanTests(unittest.TestCase):
             self.assertEqual(state[posting.PRIMARY_TEXT_KEYS[i]],text)
         self.assertEqual(package['refresh_executions'],workflow['ad_notes']['refresh_executions'])
 
-    def test_optional_prompt_analysis_does_not_block_production_assets(self):
-        value, workflow = completed_single()
-        workflow['standard_ads'][0]['image_prompt'] = TITLE + '. Short incomplete brief.'
-        self.assertFalse(ads.creative_refresh_quality_issues(value,workflow))
+    def test_new_execution_notes_required_for_review_but_drafts_can_save(self):
+        value,workflow=completed_single()
+        workflow['ad_notes']['refresh_executions']=[]
+        self.assertTrue(ads.creative_refresh_quality_issues(value,workflow))
+        save_locally(value,workflow)
+        self.assertIn(handoff.SAVED_PACKAGE_KEY,workflow)
 
     def test_declared_analysis_does_not_claim_pixel_fidelity(self):
         value = fixture('Instant Experience')
-        self.assertIn('Pending external ChatGPT',value['creative_refresh_context']['refresh_plan']['visual_analysis'])
-        self.assertIn('Prompt instructions alone cannot guarantee pixel-perfect fidelity',value['master_prompt'])
+        self.assertIn('Pending actual winner',value['creative_refresh_context']['refresh_plan']['visual_analysis'])
+        self.assertIn('never claim exact preservation',value['master_prompt'])
 
     def test_session_style_switch_preserves_other_manual_work(self):
         state={'unrelated-manual-editor':'Keep this'}

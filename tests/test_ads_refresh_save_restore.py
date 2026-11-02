@@ -15,6 +15,8 @@ from tests.test_ads_refresh_workflow import ROW
 class RefreshSaveRestoreTests(unittest.TestCase):
     def ready_ie(self):
         result = fixture('Instant Experience')
+        # These cases exercise the unchanged historical saved-package contract.
+        result['creative_refresh_context']['refresh_plan']['version'] = 'HISTORICAL SAVED REFRESH'
         _, workflow = completed_ad('Instant Experience', 'creative_refresh')
         workflow['context_key'] = result['context_key']
         for concept in ads.INSTANT_EXPERIENCE_CONCEPTS:

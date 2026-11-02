@@ -7,12 +7,13 @@ import random
 import re
 from difflib import SequenceMatcher
 import ads_carousel_evolution as carousel_copy
+import ads_refresh_preserve as preserve
 from itertools import combinations
 from ads_ie_scenes import ROOM_STYLE
 
 from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
 
-VERSION = 'WINNER LED REFRESH V3'
+VERSION = preserve.VERSION
 AUTHORITY = ('The canonical black-framed product image supplies the exact artwork and black frame only. '
              'Its external background is not a creative reference. Analyse the separately supplied winning '
              'advertisement(s) for creative direction. Preserve the product; redesign the surrounding scene.')
@@ -147,25 +148,13 @@ def identity_hash(context, campaign_type, product, category):
 def build_plan(context, campaign_type, product, category, seed, history=()):
     source = (context or {}).get('source_winner') or {}
     identity = identity_hash(context, campaign_type, product, category)
-    return {'version': VERSION, 'run_id': hashlib.sha256((identity+str(seed)).encode()).hexdigest()[:24],
-            'identity_hash': identity, 'product': product, 'category': category, 'campaign_type': campaign_type,
-            **({'carousel_contract': CAROUSEL_CONTRACT, 'copy_contract': carousel_copy.CONTRACT} if campaign_type == 'Carousel' else {}),
-            'seed': str(seed), 'references': reference_map(campaign_type, source),
-            'styles': select_styles(seed, product=product, category=category, history=history) if campaign_type != 'Carousel' else [],
-            'recent_styles': deepcopy(list(history)[-30:]),
-            'visual_analysis': 'Pending external ChatGPT attachment inspection; OS has not analysed pixels.'}
+    return preserve.build_plan(context, campaign_type, product, category, seed, reference_map(campaign_type, source), identity)
 
 
 def current_plan(context, campaign_type, product, category, seed, history=()):
     saved = (context or {}).get('refresh_plan') or {}
-    refs = saved.get('references') or []
-    expected = len(reference_map(campaign_type, (context or {}).get('source_winner'))) if campaign_type == 'Carousel' else 2
-    structural = (isinstance(refs, list) and len(refs) == expected
-                  and all(isinstance(r, dict) for r in refs)
-                  and (saved.get('carousel_contract') == CAROUSEL_CONTRACT and saved.get('copy_contract') == carousel_copy.CONTRACT and refs == reference_map(campaign_type, (context or {}).get('source_winner')) if campaign_type == 'Carousel' else refs[-1].get('label') == 'CANONICAL_PRODUCT')
-                  and (campaign_type == 'Carousel' or len(saved.get('styles') or []) == 3))
-    if structural and saved.get('version') == VERSION and saved.get('identity_hash') == identity_hash(context, campaign_type, product, category):
-        return saved
+    if saved and saved.get('identity_hash') == identity_hash(context, campaign_type, product, category):
+        return saved  # Reopen/copy/export never upgrades an existing plan.
     return build_plan(context, campaign_type, product, category, seed, history)
 
 
@@ -258,6 +247,8 @@ def asset_issues(slots, source_hashes=()):
 
 def execution_issues(executions, refresh_plan, product, campaign_type):
     """Validate declared plans only. This does not certify rendered image fidelity."""
+    if preserve.active(refresh_plan):
+        return preserve.execution_issues(executions, refresh_plan, campaign_type)
     count = len([r for r in refresh_plan.get('references', []) if r.get('label', '').startswith('WINNER_CARD_')]) if campaign_type == 'Carousel' else 3
     if not isinstance(executions, list) or len(executions) != count:
         return [f'Paste {count} final execution records in refresh notes before marking ready.']

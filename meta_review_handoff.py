@@ -47,6 +47,13 @@ def resolve_campaign_type(source, ad=None):
     from meta_review_benchmarks import ad_format
 
     source, ad = source or {}, ad or {}
+    # An IE destination is stronger evidence than a single cover-image asset.
+    # A carousel remains a carousel even when a card links to a canvas.
+    destination = urlparse(str(source.get('destination_url') or ''))
+    canvas_destination = destination.scheme == 'https' and destination.hostname in ('fb.com', 'www.fb.com', 'facebook.com', 'www.facebook.com') and destination.path.startswith(('/canvas_doc/', '/canvas/', '/instant_experience/'))
+    detected = source.get('creative_format') or (ad.get('winning_creative') or {}).get('creative_format')
+    if detected not in ('CAROUSEL', 'DYNAMIC_CAROUSEL') and not source.get('carousel') and canvas_destination:
+        return {'campaign_type':'Instant Experience','confirmed':True,'source':'source_destination.canvas','creative_format':'INSTANT_EXPERIENCE'}
     detected = source.get('creative_format') or (ad.get('winning_creative') or {}).get('creative_format')
     if detected:
         types = {'CAROUSEL': 'Carousel', 'DYNAMIC_CAROUSEL': 'Carousel', 'INSTANT_EXPERIENCE': 'Instant Experience', 'SINGLE_IMAGE': 'Single Image / Video'}

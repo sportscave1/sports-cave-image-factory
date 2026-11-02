@@ -30,8 +30,8 @@ class ReferenceCleanupTests(unittest.TestCase):
                     'winning_headline':source['components']['headline']['value'], 'source_winner':state[handoff.ACTIVE]})
             self.assertEqual(value['campaign_type'],expected)
             if expected == 'Instant Experience':
-                self.assertIn('INSTANT EXPERIENCE WINNER REFINEMENT',value['master_prompt'])
-                self.assertIn('canonical Sports Cave product image',value['master_prompt'])
+                self.assertIn('SOURCE WINNER PRESERVATION V1',value['master_prompt'])
+                self.assertIn('CANONICAL_PRODUCT',value['master_prompt'])
             else:
                 self.assertIn('Campaign format: '+expected,value['master_prompt'])
             state['ads_campaign_type']='Carousel'
@@ -97,9 +97,9 @@ class ReferenceCleanupTests(unittest.TestCase):
         self.assertEqual(st.session_state,before)
         source=(ROOT/'ads_page.py').read_text(encoding='utf-8')
         self.assertIn('render_product_artwork_reference(product_selection, product_url, creative_refresh=True)',source)
-        self.assertIn("if campaign_type != 'Carousel':\n            from ads_refresh_reference import render_product_image_link\n            render_product_image_link(st)",source)
+        self.assertIn("if campaign_type != 'Carousel' and not st.session_state.get('ads-refresh-canonical-reference'):\n            from ads_refresh_reference import render_product_image_link\n            render_product_image_link(st)",source)
         self.assertIn('elif not is_google:\n        render_product_artwork_reference(product_selection, product_url)',source)
-        self.assertNotIn('shopify',Path(reference.__file__).read_text(encoding='utf-8').lower())
+        self.assertIn('include_variant_media=True',Path(reference.__file__).read_text(encoding='utf-8'))
 
     def test_format_and_provenance_survive_existing_save_and_posting(self):
         for campaign_type in ('Single Image / Video','Carousel','Instant Experience'):

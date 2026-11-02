@@ -1019,13 +1019,17 @@ def shopify_gid(resource_type, value):
     return f"gid://shopify/{resource_type}/{raw}"
 
 
-def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=None):
+def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=None, *, include_variant_media=False):
     config = config or get_config()
     product_gid = shopify_gid("Product", shopify_product_id)
     if not product_gid:
         raise ShopifyAPIError("Shopify product ID is missing.")
+    query = PRODUCT_BY_ID_QUERY
+    if include_variant_media:
+        query = query.replace('selectedOptions {', 'media(first: 2) { pageInfo { hasNextPage } nodes { ... on MediaImage { image { url altText } } } } selectedOptions {')
+        query = query.replace('variants(first: 100) {', 'variants(first: 100) { pageInfo { hasNextPage }')
     data, served_version = graphql_request(
-        PRODUCT_BY_ID_QUERY,
+        query,
         variables={"id": product_gid},
         config=config,
         request_post=request_post,
@@ -1037,6 +1041,14 @@ def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=No
     if (registration_meta.get("pageInfo") or {}).get("hasNextPage"):
         raise ShopifyAPIError("Edition metadata is incomplete; automatic registration refused.")
     normalized = normalize_product(product, config["store_domain"])
+    if include_variant_media:
+        media = {v['id']: [m.get('image') for m in (v.get('media') or {}).get('nodes', []) if m.get('image')]
+                 for v in (product.get('variants') or {}).get('nodes', [])}
+        incomplete = {v['id']: bool((v.get('media') or {}).get('pageInfo', {}).get('hasNextPage')) for v in (product.get('variants') or {}).get('nodes', [])}
+        normalized['reference_variants_incomplete'] = bool((product.get('variants') or {}).get('pageInfo', {}).get('hasNextPage'))
+        for variant in normalized['variants']:
+            variant['reference_images'] = media.get(variant['id'], [])
+            variant['reference_images_incomplete'] = incomplete.get(variant['id'], False)
     by_key = {(m["namespace"], m["key"]): m for m in normalized["metafields"]}
     by_key.update({(m["namespace"], m["key"]): m for m in registration_meta.get("nodes") or []})
     normalized["metafields"] = list(by_key.values())

@@ -22,6 +22,8 @@ class USAInstantExperienceTests(unittest.TestCase):
         checked = 0
         for case in json.loads(FIXTURES.read_text(encoding='utf-8')):
             args = case['args']
+            if args.get('creative_refresh_context'):
+                continue  # New Refresh now has its separately tested source-preservation contract.
             if args['country'] in ('USA', 'Australia') and args['campaign_type'] == 'Instant Experience' and not args.get('creative_refresh_context'):
                 continue
             with self.subTest(args=args):
@@ -29,7 +31,7 @@ class USAInstantExperienceTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(r['master_prompt'].encode()).hexdigest(), case['prompt_sha256'])
                 self.assertEqual(hashlib.sha256(json.dumps(r['instant_experience_fingerprints'],sort_keys=True).encode()).hexdigest(), case['visuals_sha256'])
                 checked += 1
-        self.assertEqual(checked, 37)
+        self.assertEqual(checked, 16)
 
     def test_usa_market_normalization_and_owner_approved_support_bank(self):
         for market in ('USA', 'US', 'United States'):
@@ -56,7 +58,8 @@ class USAInstantExperienceTests(unittest.TestCase):
             for prompt in prompts:
                 for obsolete in ('Select three different approved headlines','Never repeat a headline or subline','AND visible depth arrangement','imperceptible surface reflections','thumbnail-visible glazing','reflections clearly visible at thumbnail','visible at a 256 × 256 preview','all signature and fixed template lines verbatim'):
                     self.assertNotIn(obsolete,prompt)
-                self.assertIn('product recognition takes priority over reflection visibility',prompt)
+                self.assertIn('Product recognition takes priority over excessive glare',prompt)
+                self.assertIn('never over visible glazing',prompt)
                 self.assertIn('Limited to 100 Worldwide',prompt)
                 self.assertNotIn('A limited run of 100 editions.',prompt)
                 self.assertTrue(any(s in prompt for s in usa.SUPPORT_LINES))

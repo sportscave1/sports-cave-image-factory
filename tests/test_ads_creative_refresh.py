@@ -815,7 +815,7 @@ class CreativeRefreshV2Tests(unittest.TestCase):
         )
         winner_block = ads_page.build_creative_refresh_winner_context(winner_context)
 
-        self.assertIn("three genuinely different environments", refresh_prompt)
+        self.assertIn("original source winner", refresh_prompt)
         self.assertIn(winner_context["winning_primary_text"], refresh_prompt)
         self.assertIn(winner_context["winning_headline"], refresh_prompt)
         self.assertEqual(
@@ -835,10 +835,10 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             ),
         )
         self.assertNotIn(ads_page.CREATIVE_REFRESH_WINNER_CONTEXT_VERSION, new_ads_prompt)
-        self.assertIn("Return exactly three complete grouped Instant Experience routes", new_ads_prompt)
+        self.assertEqual(new_ads_prompt, ads_page.build_ads_prompt("Purple Reign", "NBA", "USA", "Instant Experience", **kwargs))
         self.assertEqual(
             new_ads_prompt.count(ads_page.ie_visuals.VERSION),
-            3,
+            1,
         )
         self.assertEqual(
             refresh_prompt.count("SPORTS CAVE INSTANT EXPERIENCE PREMIUM ROOM SYSTEM V4"),
@@ -1377,10 +1377,10 @@ class CreativeRefreshV2Tests(unittest.TestCase):
             result["creative_refresh_context"]["winning_headline"],
             "Only 100 Shane Warne Editions",
         )
-        self.assertIn("WINNER REFINEMENT", result["master_prompt"])
+        self.assertIn("SOURCE WINNER PRESERVATION V1", result["master_prompt"])
         self.assertIn("WINNER_IE", result["master_prompt"])
         self.assertIn("CANONICAL_PRODUCT", result["master_prompt"])
-        self.assertIn("three genuinely different environments", result["master_prompt"])
+        self.assertIn("original source winner", result["master_prompt"])
         self.assertEqual(
             len(ads_page.ads_image_workflow.campaign_image_slots(result["campaign_type"])),
             3,

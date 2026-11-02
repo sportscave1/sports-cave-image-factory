@@ -91,6 +91,19 @@ def build_prompt(ads, product, category, country, campaign_type, url, context,
                  *, campaign_moment=None, product_metadata=None):
     winner = ads.normalize_creative_refresh_context(context)
     source = winner.get("source_winner") or {}
+    if source:
+        from meta_review_handoff import resolve_campaign_type
+        resolution = resolve_campaign_type(source)
+        if not resolution['confirmed']:
+            raise ValueError('Confirm the source winner format from Meta Review before generating a refresh.')
+        campaign_type = resolution['campaign_type']
+    selected = plan.current_plan(winner, campaign_type, product, category, 'direct-prompt')
+    if campaign_type == 'Carousel':
+        issue = carousel_identity_issue(product, url, source)
+        if issue:
+            raise ValueError(issue)
+    if plan.preserve.active(selected):
+        return plan.preserve.build_prompt(ads, product, category, country, campaign_type, url, winner, selected, product_metadata)
     if campaign_type == 'Carousel':
         return build_carousel_refresh_prompt(ads, product, category, country, url, winner,
             campaign_moment=campaign_moment, product_metadata=product_metadata)
@@ -244,6 +257,8 @@ def build_carousel_refresh_prompt(ads, product, category, country, url, winner,
     if issue:
         raise ValueError(issue)
     selected = plan.current_plan(winner, 'Carousel', product, category, 'direct-prompt')
+    if plan.preserve.active(selected):
+        return plan.preserve.build_prompt(ads, product, category, country, 'Carousel', url, winner, selected, product_metadata)
     refs = selected['references']
     n = len(refs)
     identity = dict(product_name=product, category=category, country=country,

@@ -94,8 +94,8 @@ class RefreshWorkflowTests(unittest.TestCase):
     def test_prompt_two_references_copy_evidence_and_count(self):
         prompt = result()['master_prompt']
         for text in (TITLE, 'Two legends. One unforgettable rivalry.', 'Legends Never Die',
-                     'ATTACHMENT 1', 'ATTACHMENT 2', 'ATTACHMENT 3', 'BLACK-FRAME', 'THREE refreshed',
-                     'Signals inconclusive', 'Do not describe inconclusive', 'Collector wall art', 'SHOP_NOW'):
+                     'WINNER_REFERENCE', 'CANONICAL_PRODUCT', 'THREE refresh alternatives',
+                     'Signals inconclusive', 'Do not describe these untested alternatives', 'Collector wall art', 'SHOP_NOW'):
             self.assertIn(text, prompt)
         self.assertIn('5-CARD', result(True)['master_prompt'])
 
@@ -189,7 +189,7 @@ class RefreshWorkflowTests(unittest.TestCase):
         value = result()
         context = {'winning_primary_text': 'A selected reference', 'winning_headline': 'A collector memory'}
         prompt = ads.build_ads_prompt(TITLE, 'Football', 'Australia', 'Carousel', product_url=ROW['online_store_url'], creative_refresh_context=context)
-        self.assertIn('Winning CTA: Not supplied', prompt)
+        self.assertIn('CTA: Read from source evidence', prompt)
         second = copy.deepcopy(value['creative_refresh_context'])
         second['source_winner']['ad_id'] = 'different-real-fixture'
         key = ads.ads_result_context_key(value['product_id'], TITLE, 'Football', 'Australia', 'Single Image / Video', creative_refresh_context=second)
@@ -200,8 +200,8 @@ class RefreshWorkflowTests(unittest.TestCase):
         for include in (False, True):
             moment['include_in_image_prompts'] = include
             prompt = ads.build_ads_prompt(TITLE, 'Football', 'Australia', 'Single Image / Video', product_url=ROW['online_store_url'], creative_refresh_context=result()['creative_refresh_context'], campaign_moment=moment)
-            visual = prompt.split('VISUAL CAMPAIGN MOMENT RULE', 1)[1].split('EXACT CSV TEMPLATE')[0]
-            self.assertEqual('Collector Week' in visual, include)
+            self.assertNotIn('Collector Week',prompt)
+            self.assertIn('Preserve valid offers',prompt)
 
     def test_drafts_survive_context_switch(self):
         first, second = result(), result(True)

@@ -49,11 +49,15 @@ class SupportingLineTests(unittest.TestCase):
         cases=json.loads((Path(__file__).parent/'fixtures/ads_supporting_line_baseline.json').read_text())
         for case in cases:
             args=case['args']
+            if args.get('creative_refresh_context'):
+                continue  # New Refresh deliberately retains source footer wording.
             with self.subTest(args=args):
                 r=ads.build_ads_result_record(**args)
                 fresh_scoped=args['country'] in ('USA','Australia') and args['campaign_type']=='Instant Experience' and not args['creative_refresh_context']
                 if not fresh_scoped:
                     self.assertEqual(hashlib.sha256(r['master_prompt'].encode()).hexdigest(),case['prompt_sha256'])
+                if fresh_scoped:
+                    continue  # Glazing-only visual/export isolation now has its own pre-edit baseline test.
                 fp=[{k:v for k,v in row.items() if k not in ('supporting_line','on_image_subline','fomo_line','footer_pair_signature')} for row in r['instant_experience_fingerprints']]
                 self.assertEqual(hashlib.sha256(json.dumps(fp,sort_keys=True).encode()).hexdigest(),case['visuals_sha256'])
 

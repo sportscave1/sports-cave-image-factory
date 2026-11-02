@@ -394,43 +394,20 @@ class AdsFinalReviewStateTests(unittest.TestCase):
 
 class AdsFinalReviewUiTests(unittest.TestCase):
     def test_section_is_copy_only_with_how_to_and_no_review_uploads(self):
-        app_test = submitted_ads_page()
-        labels = [candidate.label for candidate in app_test.file_uploader]
-        self.assertNotIn("Finished Meta Ad Screenshots", labels)
-        self.assertNotIn("Final Creative Images", labels)
-        self.assertNotIn("Final Copy", [candidate.label for candidate in app_test.text_area])
-        self.assertNotIn("Review Finished Ad", [candidate.label for candidate in app_test.button])
-        self.assertNotIn("Clear Review", [candidate.label for candidate in app_test.button])
-        self.assertTrue(
-            any(
-                "Upload screenshots of the finished Meta campaign to ChatGPT, then paste the review prompt below."
-                in caption.value
-                for caption in app_test.caption
-            )
-        )
-        self.assertTrue(
-            "How to complete the final review" in (ROOT / "ads_page.py").read_text(encoding="utf-8")
-        )
-        self.assertEqual(len(app_test.exception), 0)
+        result = ads_page.build_ads_result_record("Six Laps Ahead", "Motorsport", "Australia", "Carousel", variation_token="review-ui")
+        with patch.object(ads_page, "render_prompt_copy_button") as button, patch.object(ads_page.st, "markdown") as heading, patch.object(ads_page.st, "caption") as caption, patch.object(ads_page.st, "expander") as accordion:
+            ads_page._render_final_ad_review(result, {})
+        button.assert_called_once()
+        heading.assert_not_called(); caption.assert_not_called(); accordion.assert_not_called()
 
     def test_final_review_copy_prompt_preserves_existing_prompt_and_appends_landing_page(self):
-        result = ads_page.build_ads_result_record(
-            "Six Laps Ahead",
-            "Motorsport",
-            "Australia",
-            "Carousel",
-            product_url="  https://sportscave.com.au/products/six-laps?variant=1  ",
-            variation_token="copy-review",
-        )
-        prompt = ads_page.build_final_ad_review_copy_prompt(result)
-
-        self.assertIn("You are the final campaign approver and senior Meta Ads growth strategist", prompt)
-        self.assertIn("WEIGHTED SCORE", prompt)
-        self.assertIn("OUTPUT DISCIPLINE", prompt)
-        self.assertIn("Product page URL: `https://sportscave.com.au/products/six-laps?variant=1`", prompt)
-        self.assertIn("PRODUCT LANDING PAGE", prompt)
-        self.assertIn("ad-to-landing-page journey is ready to launch", prompt)
-        self.assertIn('"product_url": "https://sportscave.com.au/products/six-laps?variant=1"', prompt)
+        result = ads_page.build_ads_result_record("Six Laps Ahead", "Motorsport", "Australia", "Carousel", product_url="https://sportscave.com.au/products/six-laps?variant=1", variation_token="copy-review")
+        prompt = ads_page.build_final_ad_review_copy_prompt(result, {})
+        self.assertIn("FINAL AD COPY OPTIMISATION AND REWRITE", prompt)
+        self.assertIn("https://sportscave.com.au/products/six-laps?variant=1", prompt)
+        self.assertIn("CURRENT COMPLETE CSV", prompt)
+        self.assertNotIn("WEIGHTED SCORE", prompt)
+        self.assertNotIn("PRODUCT LANDING PAGE", prompt)
 
     def test_final_review_copy_button_copies_complete_prompt_with_success_state(self):
         result = ads_page.build_ads_result_record(
@@ -447,27 +424,15 @@ class AdsFinalReviewUiTests(unittest.TestCase):
 
         self.assertIn("Copy Final Review Prompt", html_payload)
         self.assertIn("Final review prompt copied", html_payload)
-        self.assertIn("PRODUCT LANDING PAGE", html_payload)
+        self.assertIn("FINAL AD COPY OPTIMISATION AND REWRITE", html_payload)
         self.assertIn("https://sportscave.com.au/products/six-laps", html_payload)
         self.assertIn("navigator.clipboard.writeText(promptText)", html_payload)
 
     def test_saved_prompt_override_text_is_preserved_when_supplied(self):
-        result = ads_page.build_ads_result_record(
-            "Six Laps Ahead",
-            "Motorsport",
-            "Australia",
-            "Carousel",
-            product_url="https://sportscave.com.au/products/six-laps",
-            variation_token="copy-review-override",
-        )
-        prompt = ads_page.build_final_ad_review_copy_prompt(
-            result,
-            resolved_prompt="CUSTOM SAVED FINAL REVIEW PROMPT\nKeep this exact custom wording.",
-        )
-
-        self.assertTrue(prompt.startswith("CUSTOM SAVED FINAL REVIEW PROMPT\nKeep this exact custom wording."))
-        self.assertIn("PRODUCT LANDING PAGE", prompt)
-        self.assertIn("Product page URL: `https://sportscave.com.au/products/six-laps`", prompt)
+        result = ads_page.build_ads_result_record("Six Laps Ahead", "Motorsport", "Australia", "Carousel", variation_token="copy-review-override")
+        prompt = ads_page.build_final_ad_review_copy_prompt(result, {}, resolved_prompt="WEIGHTED SCORE legacy review")
+        self.assertTrue(prompt.startswith("SPORTS CAVE — FINAL AD COPY OPTIMISATION AND REWRITE"))
+        self.assertNotIn("WEIGHTED SCORE", prompt)
 
     def test_no_in_app_ai_review_request_is_triggered_by_page_render(self):
         with patch("ads_final_review.request_final_ad_review") as review_request:

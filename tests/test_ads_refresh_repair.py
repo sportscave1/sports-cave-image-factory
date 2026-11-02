@@ -135,12 +135,11 @@ class ActiveRefreshRepairTests(unittest.TestCase):
 
     def test_reference_authorities_and_all_required_copy_explicit(self):
         prompt=fixture()['master_prompt']
-        self.assertIn('all five shared headline variation rows',prompt)
-        self.assertIn('all five shared description variation rows',prompt)
-        self.assertEqual(prompt.count('CANONICAL_PRODUCT (when supplied) is a separate product-accuracy attachment'),5)
+        self.assertIn('five shared-copy rows as compatibility slots',prompt)
+        self.assertIn(plan.preserve.AUTHORITY,prompt)
         self.assertEqual(len(fixture()['creative_refresh_context']['refresh_plan']['references']),5)
-        self.assertIn('winner cards are provisional cross-references, not verified product truth',prompt)
-        self.assertIn('If product pixels or frame construction remain unclear, request the full-resolution black-framed original image',prompt)
+        self.assertIn('never guess',prompt)
+        self.assertIn('actual accessible labelled images',prompt)
         self.assertNotIn('ATTACHMENT 6',prompt)
 
     def test_duplicate_original_references_fail_without_fabrication(self):

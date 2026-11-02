@@ -4,6 +4,7 @@ import re
 import random
 import ads_ie_scenes as scene_library
 import ads_ie_usa as usa_policy
+import ads_ie_glazing as glazing_policy
 import sports_cave_physical_realism as physical_realism
 
 
@@ -311,6 +312,12 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
                 "Keep face, title and edition details readable. No opaque streaks, arbitrary diagonal glare or glossy haze; never add a pane to unframed products. No size or glazing confirmation is required.")
         if context.get("usa_product_first") and not physical_realism.is_unframed(context.get("physical_product")):
             reflection = usa_policy.GLAZING
+        if context.get("controlled_glazing") and not physical_realism.is_unframed(context.get("physical_product")):
+            if saved.get("glazing_treatment"):
+                reflection = saved["glazing_treatment"]
+            else:
+                reflection = (glazing_policy.REQUIREMENT + f" Resolved reflection source: {scene['reflection_source']}; "
+                              f"placement: {scene['reflection_placement']}, consistent with the assigned camera and lighting.")
         scene["glazing_treatment"] = reflection
         visual.update(scene)
         visual["assigned_camera_angle"] = visual["camera_side"]
@@ -344,6 +351,8 @@ def resolve_scene_set(visuals, context, recent_fingerprints=(), selections=()):
             visual["product_width"] = "source-proportionate, recognisable at thumbnail size; no universal crop target"
             visual["shot_distance"] = "edition-led moderate perspective; wider residential context only when recognition is retained"
             visual["scene_brief"] = usa_policy.adapt_prompt(visual["scene_brief"])
+        if glazing_policy.active(visual):
+            visual["scene_brief"] = glazing_policy.apply(visual["scene_brief"])
 
 
 

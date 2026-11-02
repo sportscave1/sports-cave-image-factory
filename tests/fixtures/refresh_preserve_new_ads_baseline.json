@@ -1,0 +1,101 @@
+[
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Instant Experience",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "65fa64749bded3363b747e69d50a65490baf8e49cf4984464a6bd380adfb3523",
+    "visuals_sha256": "7ce6597eedda1c871414f04211b27725a2c5228afe566ca681ac669e43203c5a"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Carousel",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "8894113291e3f75a68f762285e930b37fcc678f4a898d0a9218d38ec041d6b6a",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "USA",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "4ccf3bdeb925912ff14d382891f9d26902a7cfea2fccdd781167fffb64fbfe81",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Instant Experience",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "e6bec718ee1eca422edcfa15b5e1313ba062279fd45c4b0e712cb1682de0f2a3",
+    "visuals_sha256": "1a9fd2e67639b429be50c5c335ba40e10f5dcda2751bcc232ede73bb5df42521"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Carousel",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "449329f785e17305d6bc9eef2c6a5db3ea5c908665e1419d3f3ba001c7336866",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "Australia",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "d9b29da1d280be42f921510cc6f237ee7719577ecd1ce443665d0a9bd301c988",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Instant Experience",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "f759934189279f2a9da83aa014401d941c74e36fefdd682644a3ba771b874b4a",
+    "visuals_sha256": "6be40a15a9604c6f534b8daba45b98b2b98692caa9cdcc933111f212832ddfea"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Carousel",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "dad6efeea9cd9b28e1465b2e9e14e0b85100aa92b496ac6dd3a7a938527a9dd1",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  },
+  {
+    "args": {
+      "product_name": "Synthetic Edition",
+      "category": "Cricket",
+      "country": "UK",
+      "campaign_type": "Single Image / Video",
+      "variation_token": "preservation-baseline"
+    },
+    "prompt_sha256": "9c8e4a5c7d8e48c7b02a0e970c38aad1a6bbf9795b4a5c0d0c25e0a13f3c55e0",
+    "visuals_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+]
