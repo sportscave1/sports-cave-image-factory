@@ -203,6 +203,8 @@ Only use actual supplied evidence; no invented performance claims, offers, scarc
 {ads.build_country_language_guidance(country)}
 {ads.build_carousel_card_copy_rules().replace('For all five carousel cards:', f'For all {n} carousel cards:') if carousel else 'Use the exact supplied three-row IE contract with one copy pair per cover.' if ie else ads.build_standard_ads_output_contract()}
 
+{ads.WRITTEN_META_HEADLINE_INSTRUCTIONS}
+
 COPY AND IMAGE OUTPUT
 Refresh all required CSV copy fields substantially while retaining the winner's underlying emotional/collector appeal. Distinct openings, supporting arguments and headlines per sibling; reject synonym swaps, reordered openings, repeated descriptions and one-word headline changes. Fixed verified facts, product names and required CTAs may repeat. Carousel tells one connected {n}-card story aligned to its scenes. Do not invent stock, demand, discounts, delivery, endorsements or personally signed claims.
 Return the copy in the supplied CSV with matching standalone briefs, one per creative/card. Generate images only when requested.

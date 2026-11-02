@@ -7573,6 +7573,8 @@ def compose_final_ads_prompt(
             recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
             workflow_mode=workflow_mode,
         )
+    if campaign_type == "Instant Experience":
+        prompt += "\n\n" + WRITTEN_META_HEADLINE_INSTRUCTIONS
     if campaign_type == "Instant Experience" and normalize_ads_workflow_mode(workflow_mode) == ADS_WORKFLOW_MODE_CREATIVE_REFRESH:
         prompt += "\n\nCOPY FATIGUE CONTEXT\n" + json.dumps(
             [item for item in (recent_instant_experience_fingerprints or []) if item.get("market") == country and item.get("sport") == category], ensure_ascii=False)
@@ -8443,6 +8445,21 @@ def build_carousel_winner_examples(example_text):
     return "; ".join(example for example in examples if example)
 
 
+WRITTEN_META_HEADLINE_INSTRUCTIONS = """WRITTEN META HEADLINE — PRODUCT MEANING
+Scope: only newly generated written Meta headline fields in ad output and CSV. These rules take precedence over all other written-headline directions, examples and option counts, including refresh instructions. They do not apply to on-image scarcity headlines, image prompts, primary text, descriptions, CTAs, catalogue product.name or any other field. Preserve explicitly assigned or proven headlines unless headline regeneration is requested; never rewrite saved ads.
+For each three-ad package, return exactly THREE final headlines total: ONE selected headline in each ad's existing headline field, reused verbatim in its CSV cell. Never return three headlines per ad, alternatives, angle labels or extra fields.
+Before writing, use supplied product details, artwork, approved research and selected market to identify the exact subjects, depicted moment/achievement/era/relationship, why supporters care, and the mentality, memory or allegiance they identify with. Use only available verified context; never invent records, achievements, rivalries, comeback stories, fan sayings or athlete quotes.
+Start with three distinct internal angles: 1. MENTALITY — this subject's attitude or character; 2. MOMENT OR LEGACY — meaning of this depicted story, achievement, era or relationship; 3. FAN IDENTITY — supporter connection, allegiance or shared memory. Substitute a stronger product-grounded angle when one is unsupported. These are written-headline angles only, not changes to ad strategies, descriptions or visual routes.
+Sports Cave voice: premium, understated, confident, inspiring and fluent in the sport. Express sporting identity, mentality, allegiance, memories or legacy in plain, powerful words. Avoid sales filler, forced poetry, exaggerated hype, interchangeable motivational slogans and paraphrases of one idea.
+Jordan × Kobe's “Built Different.” is a quality benchmark: short, confident and meaningful beside those athletes. Learn that product-to-headline relationship; never copy it onto unrelated products or use it as a universal template. Reject name-insertion slogans; a phrase without names can pass when its meaning is specific alongside the artwork.
+Aim for 2–6 words; natural, memorable phrasing matters more than a rigid count. Two short phrases are allowed when meaningful. No forced line breaks, emojis, hashtags, unnecessary exclamation marks or all-caps shouting.
+The image already communicates edition scarcity; the written headline must add emotional meaning. Never use edition-count claims such as “Limited to 100” or “Only 100”; “Claim Yours”, “Shop Now”, “Secure Yours”, “Bring [athlete] Home”, “Your Collection Starts Here”, “A Collector’s Dream”, “Own Greatness”, “A Collection Worthy of [athlete]”, or generic combinations of iconic, legendary, premium and exclusive. Keep the approved on-image scarcity and existing CTA systems unchanged.
+Adapt to the actual fan base and product, not national stereotypes. USA: consider relevant athlete mentality, team/city allegiance, defining records and era memories. Australia: consider relevant sporting heritage, local allegiance, shared memories and homegrown connection. Do not force Australian pride into USA copy because an athlete is Australian. A shared emotional connection can use the same headline in both markets; do not force market-only wording changes.
+Within the existing generation process, consider at least nine headline candidates internally, then select the strongest three. Assess exact-product fit, supporter emotion, brevity/natural wording, confident collector tone, distinctness and factual accuracy. Ask: Would a knowledgeable fan recognise why this belongs with this edition? Does it add something beyond scarcity? Does it sound like a fan's belief rather than a shop's sales pitch? Rewrite weak candidates before returning only one selected headline per ad.
+Generate from product meaning each time, never a rotating headline bank. Avoid repetition across unrelated products when recent headline history is already supplied; never claim to check unavailable history or add history infrastructure. Do not sacrifice a strong phrase solely for novelty. These are creative candidates to test, not proven winners.
+"""
+
+
 def build_category_winner_angle_block(category, campaign_type, country, *, include_ie_setting=True):
     angle = get_category_winner_angle(category)
     if not angle:
@@ -8477,7 +8494,7 @@ def build_category_winner_angle_block(category, campaign_type, country, *, inclu
 - If the product is narrow to a team, player, rivalry, country or event, use that as the hook while keeping enough category-wide appeal for cold audiences.
 {("- Instant Experience setting: " + angle["ie_setting"] + ".") if include_ie_setting else ""}
 - Catalogue/cards underneath should feel like a connected {category} collector range, not one isolated product.
-- Strong short-line examples for this category: {angle["headline_examples"]}.
+- Written Meta headlines must express distinct, verified product meaning; never use a generic purchase or scarcity headline bank.
 - Additional short copy cues for this category: {angle["description_examples"]}.
 - {angle["country_note"]}"""
     else:
@@ -8490,7 +8507,7 @@ def build_category_winner_angle_block(category, campaign_type, country, *, inclu
 - Creative setting: {angle["ie_setting"]}.
 - Primary text should connect the exact product to identity, memory, ownership and limited-edition scarcity.
 - Headlines should be short, product-specific and sharper than generic wall-art labels.
-- Strong short-line examples for this category: {angle["headline_examples"]}.
+- Written Meta headlines must express distinct, verified product meaning; never use a generic purchase or scarcity headline bank.
 - Short description examples for this category: {angle["description_examples"]}.
 - {angle["country_note"]}"""
 
@@ -8657,6 +8674,8 @@ If any image is missing, the three-cover delivery requirement is incomplete: app
 {build_instant_experience_shared_template(visuals[0].get('physical_product'))}
 
 {ie_copy.instructions(product_name, category, country, variation_token, description_context, recent_fingerprints or [])}
+
+{WRITTEN_META_HEADLINE_INSTRUCTIONS}
 Exact Promotion or Offer entered: {_standard_instant_experience_exact_offer(campaign_moment) or 'None supplied'}. Preserve a supported supplied offer in ad copy only; never invent one or replace edition scarcity.
 {build_country_campaign_localisation_note(category, country, campaign_type='Instant Experience')}
 {build_campaign_moment_visual_context(campaign_moment, selected_country=country)}
@@ -8894,11 +8913,7 @@ Rules:
 
 HEADLINE
 
-Create 5 headline options.
-
-Rules:
-- Short, urgent and category-specific.
-- Make them feel like Sports Cave collector advertising, not generic wall art.
+{WRITTEN_META_HEADLINE_INSTRUCTIONS}
 
 DESCRIPTION
 
@@ -8946,11 +8961,9 @@ Variant 5:
 
 HEADLINE
 
-1. [headline]
-2. [headline]
-3. [headline]
-4. [headline]
-5. [headline]
+1. [one selected headline for Ad 1]
+2. [one selected headline for Ad 2]
+3. [one selected headline for Ad 3]
 
 DESCRIPTION
 

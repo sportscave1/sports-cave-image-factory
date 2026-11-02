@@ -982,6 +982,8 @@ All creative must be premium, realistic, Sports Cave branded, mobile-first, uncl
 
 9. After completing the concise analysis, switch to the standard SPORTS CAVE ADS OUTPUT FORMAT below. Do not invent a Creative Refresh-specific schema, alternative ad headings or replacement production fields. The strategy names are analysis/internal metadata only; they do not replace Primary Text, Headline, Description, CTA or Image Generation Prompt.
 
+{ads_page.WRITTEN_META_HEADLINE_INSTRUCTIONS}
+
 STANDARD SPORTS CAVE ADS OUTPUT FORMAT — EXACT
 
 {standard_output_contract}
@@ -1765,6 +1767,8 @@ Approved collector-led creative CTAs are: {approved_ctas}. Do not use "Own the F
 {ads_page.build_country_language_guidance(country)}
 
 {moment_block or 'No campaign moment is active. Keep the package evergreen and do not invent an event or offer.'}
+
+{ads_page.WRITTEN_META_HEADLINE_INSTRUCTIONS if campaign_type != 'Carousel' else ''}
 
 ON-IMAGE COPY CONTRACT
 
