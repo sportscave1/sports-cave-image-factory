@@ -38,12 +38,13 @@ class LegacyDescriptionTests(unittest.TestCase):
         self.assertEqual([row['route_key'] for row in rows], [concept['id'] for concept in ads.INSTANT_EXPERIENCE_CONCEPTS])
         self.assertTrue(all(row['output_mode'] == 'winner_refinement' and row['variation'] == '1' for row in rows))
 
-    def test_version_refreshes_cached_prompt_preserving_completed_copy(self):
+    def test_saved_australian_prompt_and_completed_copy_are_not_migrated(self):
         current = self.record()
         stale = {**current, "prompt_contract_version": 'historical IE copy contract',
                  "master_prompt": "Previous generic instructions", "generated_ad_output": "Completed winning copy"}
         rebuilt = ads.ensure_current_ads_result_prompt(stale)
-        self.assertIn('Create THREE refreshed creatives', rebuilt["master_prompt"])
+        self.assertIs(rebuilt, stale)
+        self.assertEqual(rebuilt["master_prompt"], "Previous generic instructions")
         self.assertNotIn(legacy.VERSION, rebuilt["master_prompt"])
         self.assertEqual(rebuilt["generated_ad_output"], "Completed winning copy")
         for key in ("context_key", "product_metadata", "creative_refresh_context", "variation_token"):

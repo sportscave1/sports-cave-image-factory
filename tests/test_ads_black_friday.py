@@ -49,7 +49,7 @@ class BlackFridayPromptTests(unittest.TestCase):
                         # Fresh USA IE explicitly keeps its resolved footer, even in seasonal copy.
                         self.assertEqual(seasonal, normal)
                         self.assertEqual(len(originals), 3)
-                        self.assertEqual(len(set(originals)), 1)
+                        self.assertEqual(len(set(originals)), 3)
                         self.assertNotEqual(originals[0], SUBHEADLINE)
                         continue
                     self.assertEqual(re.findall(r"(?m)^SUPPORTING LINE: (.+)$", seasonal), [SUBHEADLINE] * 3)

@@ -22,26 +22,25 @@ class USAInstantExperienceTests(unittest.TestCase):
         checked = 0
         for case in json.loads(FIXTURES.read_text(encoding='utf-8')):
             args = case['args']
-            if args['country'] == 'USA' and args['campaign_type'] == 'Instant Experience' and not args.get('creative_refresh_context'):
+            if args['country'] in ('USA', 'Australia') and args['campaign_type'] == 'Instant Experience' and not args.get('creative_refresh_context'):
                 continue
             with self.subTest(args=args):
                 r = ads.build_ads_result_record(**args)
                 self.assertEqual(hashlib.sha256(r['master_prompt'].encode()).hexdigest(), case['prompt_sha256'])
                 self.assertEqual(hashlib.sha256(json.dumps(r['instant_experience_fingerprints'],sort_keys=True).encode()).hexdigest(), case['visuals_sha256'])
                 checked += 1
-        self.assertEqual(checked, 39)
+        self.assertEqual(checked, 37)
 
-    def test_usa_market_normalization_and_footer_claim_gate(self):
+    def test_usa_market_normalization_and_owner_approved_support_bank(self):
         for market in ('USA', 'US', 'United States'):
-            for metadata, expected in (({}, usa.FALLBACK), ({'edition_limit':100}, usa.FALLBACK),
-                                       ({'no_reprint_verified':True}, usa.FINALITY),
-                                       ({'retires_when_sold_out':True}, usa.FINALITY),
-                                       ({'no_reprint_verified':False}, usa.FALLBACK)):
+            for metadata in ({}, {'edition_limit':100}, {'no_reprint_verified':True},
+                             {'retires_when_sold_out':True}, {'no_reprint_verified':False}):
                 r = self.record(country=market, metadata=metadata)
                 fp = r['instant_experience_fingerprints']
                 self.assertEqual(len(fp),3)
                 self.assertEqual([v['headline_text'] for v in fp], [usa.HEADLINE]*3)
-                self.assertEqual([v['supporting_line'] for v in fp], [expected]*3)
+                self.assertEqual(len({v['supporting_line'] for v in fp}), 3)
+                self.assertTrue(all(v['supporting_line'] in usa.SUPPORT_LINES for v in fp))
                 self.assertEqual([v['cta_text'] for v in fp], ['CLAIM YOUR EDITION']*3)
                 self.assertEqual([v['route_key'] for v in fp], list(writing.ROUTES))
                 for v in fp:
@@ -59,7 +58,8 @@ class USAInstantExperienceTests(unittest.TestCase):
                     self.assertNotIn(obsolete,prompt)
                 self.assertIn('product recognition takes priority over reflection visibility',prompt)
                 self.assertIn('Limited to 100 Worldwide',prompt)
-                self.assertIn('A limited run of 100 editions.',prompt)
+                self.assertNotIn('A limited run of 100 editions.',prompt)
+                self.assertTrue(any(s in prompt for s in usa.SUPPORT_LINES))
                 self.assertIn('18–20%',prompt)
                 self.assertIn('1024 x 1024',prompt)
             self.assertEqual(ads_black_friday.build_black_friday_prompt(r['master_prompt']),r['master_prompt'])
@@ -73,7 +73,7 @@ class USAInstantExperienceTests(unittest.TestCase):
         r = self.record(campaign_moment={'type':'Sale Period','name':'Black Friday','market':'Global',
                                        'promotion':'Free shipping','strength':'Campaign-led'})
         self.assertIn('Exact Promotion or Offer entered: Free shipping',r['master_prompt'])
-        self.assertEqual(r['master_prompt'].count('SUPPORTING LINE: '+usa.FALLBACK),3)
+        self.assertEqual(sum(r['master_prompt'].count('SUPPORTING LINE: '+s) for s in usa.SUPPORT_LINES),3)
         self.assertNotIn('SUPPORTING LINE: EARLY BIRD BLACK FRIDAY',r['master_prompt'])
         self.assertEqual(ads_black_friday.build_black_friday_prompt(r['master_prompt']),r['master_prompt'])
 

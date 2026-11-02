@@ -29,6 +29,10 @@ APPROVED_SUPPORT_LINES = (
     "Made for serious collectors only.",
     "Some moments are worth claiming while you can.",
 )
+AU_SUPPORT_REPLACEMENTS = {
+    "Made for serious collectors only.": "Once it sells out, it’s done.",
+    "A rare piece for those who know its meaning.": "Once this edition sells out, there is no second run.",
+}
 # Frozen legacy room labels are copy-selection seeds only, never scene directions.
 # Retain them so matching inputs keep their exact approved supporting lines.
 COPY_ROOM_OPTIONS = (
@@ -58,7 +62,10 @@ def eligible_headlines(context):
 
 def eligible_support_lines(context):
     # Original quantity/meaning pairings; other approved lines duplicate scarcity.
-    return [APPROVED_SUPPORT_LINES[i] for i in (1, 2, 4, 7, 8)]
+    lines = [APPROVED_SUPPORT_LINES[i] for i in (1, 2, 4, 7, 8)]
+    if context.get("supporting_line_market") == "Australia":
+        return [AU_SUPPORT_REPLACEMENTS.get(line, line) for line in lines]
+    return lines
 
 
 def footer_emphasis(headline):
@@ -117,7 +124,8 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
     # Restore historical support rotation without changing the current headline draw.
     from itertools import product
     def compatible(h, sub):
-        return coherent_pair(h, sub) and (pair_is_valid is None or pair_is_valid(h, sub))
+        approved_au = context.get("supporting_line_market") == "Australia" and sub in AU_SUPPORT_REPLACEMENTS.values()
+        return (approved_au or coherent_pair(h, sub)) and (pair_is_valid is None or pair_is_valid(h, sub))
     seed = visuals[0]["resolved_seed"]
     product_key = context.get("copy_product_key")
     history = [r for r in list(recent_fingerprints)[:scene_library.HISTORY_LIMIT] if isinstance(r, dict)
@@ -129,7 +137,9 @@ def resolve_set_copy(visuals, context, headline_is_valid, recent_fingerprints=()
         return values.index(value) if value in values else len(history) + 1
     saved_supports = [v.get("supporting_line") for v in selections] if frozen else []
     if (len(saved_supports) == 3 and len(set(saved_supports)) == 3
-            and all(sub in supports and compatible(h, sub) for h, sub in zip(headlines, saved_supports))):
+            and all((context.get("supporting_line_market") == "Australia" and isinstance(sub, str) and bool(sub)
+                     and (pair_is_valid is None or pair_is_valid(h, sub)))
+                    or (sub in supports and compatible(h, sub)) for h, sub in zip(headlines, saved_supports))):
         pairs = list(zip(headlines, saved_supports))
     else:
         domains = [[s for s in supports if compatible(h, s)] for h in headlines]

@@ -5115,6 +5115,7 @@ def resolve_standard_instant_experience_visuals(
         resolved.append(visual)
     ie_visuals.resolve_set_copy(resolved, {
         **context, "usa_product_first": usa,
+        "supporting_line_market": normalize_country_language_key(country) if usa_upgrade else "",
         "copy_product_key": ie_copy.product_key(product_name),
         "no_second_run_verified": _metadata_bool(product_metadata or {}, "no_second_run_verified", "no_reprint_verified", "no_second_run", "no_reprint"),
         "retires_when_sold_out": _metadata_bool(product_metadata or {}, "retires_when_sold_out", "retirement_verified"),
@@ -9452,8 +9453,8 @@ def ensure_current_ads_result_prompt(result):
         return result
     if google_ads.platform_for(result) == "google":
         return result
-    if result.get("campaign_type") == "Instant Experience" and normalize_country_language_key(result.get("country")) == "USA":
-        return result  # New USA policy is generation-only, never a saved-record migration.
+    if result.get("campaign_type") == "Instant Experience" and normalize_country_language_key(result.get("country")) in {"USA", "Australia"}:
+        return result  # Supporting-line updates are generation-only, never a saved-record migration.
     workflow_mode = normalize_ads_workflow_mode(result.get("workflow_mode"))
     expected_version = ads_prompt_contract_version_for_campaign(
         result.get("campaign_type"),
