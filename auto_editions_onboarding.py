@@ -9,6 +9,9 @@ from auto_editions_colour_source import ColourReview
 
 NUMBER = re.compile(r'^(\s*(?:(?:LIMITED\s+)?EDITION\s+)?(?:No\.\s*)?#?\s*)(\d{1,6})(\s*/\s*|\s+of\s+)(\d{1,6})(\s*)$', re.I)
 PLAQUES = {'SC_EDITION_PLAQUE', 'limited-edition-plaque'}
+# Placed assets can retain a numeric filename suffix. Match only that known
+# asset name, not arbitrary plaques.
+PLAQUE_COPY = re.compile(r'limited-edition-plaque \([1-9][0-9]*\)')
 MATTING = {'SC_EDITION_MATTING', 'Matting', 'matting'}
 
 
@@ -53,8 +56,20 @@ def detect_roles(inspection,total,*,source=None):
         raise NeedsRepair('The exact edition-number font is unavailable.')
     from auto_editions_role_evidence import plaque as pinned_plaque
     pinned=pinned_plaque(inspection,source)
+    def recognised_plaque(row):
+        name = row['path'][0]['name']
+        if pinned:
+            return name == pinned
+        if name in PLAQUES:
+            return True
+        # A suffixed placed asset must still be an independent top-level image.
+        # Count every recognised candidate before checking containment, so two
+        # plaques cannot be resolved by choosing the one nearest the number.
+        return (PLAQUE_COPY.fullmatch(name) is not None
+                and row.get('kind') in ('smart_object', 'raster')
+                and not row.get('smart_object_chain'))
     plaques = [r for r in rows if len(r.get('path', [])) == 1
-               and r['path'][0]['name'] in ({pinned} if pinned else PLAQUES) and r.get('visible')]
+               and r.get('visible') and recognised_plaque(r)]
     if len(plaques) != 1:
         raise NeedsRepair('A unique recognised collector plaque is required; manual role review needed.')
     plaque = plaques[0]

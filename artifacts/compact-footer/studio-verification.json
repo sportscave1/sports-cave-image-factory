@@ -1,0 +1,63 @@
+{
+  "id": "20261024-c16bd9f4",
+  "name": "Meta Ads compact two-element footer prompts",
+  "category": "ADS",
+  "worktree_path": "C:\\Dev\\SportsCaveWorktrees\\sports-cave-ads-meta-ads-compact-two-element-footer-prompt-20261024-c16bd9f4",
+  "branch": "codex/task/ads-meta-ads-compact-two-element-footer-prompt-20261024-c16bd9f4",
+  "base_commit": "6e2805d058713cc64cfa70e7a85ee23ea66db7e1",
+  "current_commit": "6e2805d058713cc64cfa70e7a85ee23ea66db7e1",
+  "owner": "codex-footer-20261025-session1",
+  "status": "Implemented Locally",
+  "last_verified_test": null,
+  "verification": {
+    "passed": true,
+    "checks": [
+      "syntax:ads_footer.py",
+      "syntax:ads_ie_visual_systems.py",
+      "syntax:ads_page.py",
+      "syntax:ads_refresh_generation.py",
+      "syntax:tests/test_ads_compact_footer.py",
+      "syntax:tests/test_ads_ie_combined_execution.py",
+      "syntax:tests/test_ads_ie_context_typography.py",
+      "syntax:tests/test_ads_ie_description_variation.py",
+      "syntax:tests/test_ads_ie_prompt_integration.py",
+      "syntax:tests/test_ads_ie_prompt_simplification.py",
+      "syntax:tests/test_ads_ie_refresh_realism_priority.py",
+      "syntax:tests/test_ads_ie_scarcity_pairs.py",
+      "syntax:tests/test_ads_ie_visual_systems.py",
+      "syntax:tests/test_ads_instant_experience_footer.py",
+      "syntax:tests/test_ads_page.py",
+      "syntax:tests/test_ads_winner_refinement.py",
+      "studio unit tests",
+      "changed-file secret patterns",
+      "git diff --check"
+    ],
+    "failures": [],
+    "verified_at": "2026-10-24T21:52:53.656526+00:00",
+    "snapshot": {
+      "commit": "6e2805d058713cc64cfa70e7a85ee23ea66db7e1",
+      "files_hash": "cc3e2d5977dece785ca68d8682e52fd77b7c3b71e055649d180e4248e1c4c33a",
+      "status": " M ads_ie_visual_systems.py\n M ads_page.py\n M ads_refresh_generation.py\n M tests/test_ads_ie_combined_execution.py\n M tests/test_ads_ie_context_typography.py\n M tests/test_ads_ie_description_variation.py\n M tests/test_ads_ie_prompt_integration.py\n M tests/test_ads_ie_prompt_simplification.py\n M tests/test_ads_ie_refresh_realism_priority.py\n M tests/test_ads_ie_scarcity_pairs.py\n M tests/test_ads_ie_visual_systems.py\n M tests/test_ads_instant_experience_footer.py\n M tests/test_ads_page.py\n M tests/test_ads_winner_refinement.py\n?? ads_footer.py\n?? artifacts/compact-footer/\n?? tests/test_ads_compact_footer.py"
+    },
+    "scope": "Infrastructure/static only; feature tests require RecordTests."
+  },
+  "created_at": "2026-10-24T21:46:21.912220+00:00",
+  "updated_at": "2026-10-24T21:52:53.656611+00:00",
+  "integration_readiness": false,
+  "lease": "owned",
+  "history": [
+    {
+      "status": "Implemented Locally",
+      "at": "2026-10-24T21:52:50.153375+00:00",
+      "owner": "codex-footer-20261025-session1",
+      "evidence": null
+    }
+  ],
+  "dependencies": [],
+  "preview": {
+    "enabled": false,
+    "port": 8746,
+    "runtime_path": "C:\\Dev\\SportsCaveWorktrees\\.studio\\runtime\\20261024-c16bd9f4",
+    "reason": "Phase 2 integration isolation required"
+  }
+}

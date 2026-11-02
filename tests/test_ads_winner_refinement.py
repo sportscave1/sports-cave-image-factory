@@ -31,9 +31,9 @@ class WinnerRefinementTests(unittest.TestCase):
                        'soft contact shadow where frame meets wall','ambient occlusion behind/under the frame',
                        'genuine premium lifestyle photograph taken in a real home',
                        'main/top footer headline must ALWAYS be scarcity/FOMO-led',
-                       'supporting line must not repeat the headline',
-                       'three different headlines AND three different supporting lines',
-                       'No second run after sellout.'):
+                       'Remove the supporting sentence entirely',
+                       'All 3 outputs retain their dynamically selected headline variations',
+                       'CTA remains exactly CLAIM YOUR EDITION.'):
             self.assertEqual(contracts.count(phrase),3,phrase)
         self.assertIn('three genuinely different environments',prompt)
         self.assertIn('exactly one square 1024 x 1024 cover',prompt)

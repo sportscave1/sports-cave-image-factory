@@ -43,11 +43,9 @@ class InstantExperiencePromptIntegrationTests(unittest.TestCase):
         for i, (_, _, prompt) in enumerate(groups):
             self.assertNotIn(footer, prompt)  # Expanded from the shared template for each call.
             headline = re.search(r"^HEADLINE: (.+)$", prompt, re.M).group(1)
-            support = re.search(r"^SUPPORTING LINE: (.+)$", prompt, re.M).group(1)
+            self.assertNotIn("SUPPORTING LINE:", prompt)
             context = {"edition_limit": limit}
             self.assertIn(headline, ads_page.ie_visuals.eligible_headlines(context))
-            self.assertIn(support, ads_page.ie_visuals.eligible_support_lines(context))
-            self.assertTrue(ads_page.ie_visuals.coherent_pair(headline, support))
             self.assertTrue(any(room in prompt for room in ads_page.ie_visuals.ROOM_OPTIONS[i]))
             self.assertIn("explicit user selections remain authoritative", text)
             self.assertIn("CLAIM YOUR EDITION", prompt)

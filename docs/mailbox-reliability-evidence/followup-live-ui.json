@@ -1,0 +1,74 @@
+{
+  "date_sydney": "2026-10-27",
+  "runtime_commit": "05a0b87d205a668ebe2508303ae797a9b804e639",
+  "normal_signed_in_chrome": true,
+  "samples_per_case": 1,
+  "measurement_method": "Native UI dispatch to accessibility-observed content, including input/capture/poll overhead",
+  "new_session_existing_asset_cache_ms": 5615,
+  "conversation_first_body_ms": 4144,
+  "initial_body_frames": 1,
+  "initial_collapsed_messages": 1,
+  "second_body_expansion_ms": 4030,
+  "expanded_body_frames": 2,
+  "cached_reply_reopen_ms": 2160,
+  "cache_disabled_reload_ms": 7429,
+  "network_at_inbox_visible": {
+    "requests": 94,
+    "transferred_bytes": 1606699,
+    "dom_content_loaded_s": 1.29,
+    "load_s": 1.31
+  },
+  "mail_component_asset_bytes_displayed": {
+    "style.css": 6200,
+    "draft_journal.js": 1100,
+    "mail_tools.js": 7800,
+    "mail.js": 24600
+  },
+  "network_notes": [
+    "One persistent Streamlit websocket. Its pending HTTP request displays0bytes; that is not a body-byte measurement.",
+    "HTTP capture includes OS/Streamlit resources and topbar polling.",
+    "No attachment download was clicked. No matched before/after or throttled comparison yet.",
+    "Real inspected conversation has two messages; long-conversation findings remain the existing labelled synthetic checks."
+  ],
+  "live_bye": {
+    "utc": "2026-10-26T22:45:07.63984291Z",
+    "stage": "idle_done",
+    "code": "bye",
+    "reconnect_delay_s": 15,
+    "post_bye_signal_utc": "2026-10-26T22:56:37.283728Z",
+    "watcher_lease_active_observed_utc": "2026-10-26T23:06:55.664604Z",
+    "index_success_utc": "2026-10-26T23:06:47.051729Z",
+    "index_uid": 122,
+    "provider_signal_uidnext": 123,
+    "exact_reconnect_latency_measured": false
+  },
+  "unknown_operation": {
+    "operation_id": "11b2a2bc-5643-42cb-9a5b-5930dc10d35e",
+    "status": "unknown",
+    "attempts": 1,
+    "reconcile_attempts": 9,
+    "copy_status": "pending",
+    "mutated_or_resent": false
+  },
+  "live_bye_second": {
+    "utc": "2026-10-26T23:16:37.723991706Z",
+    "stage": "idle_done",
+    "code": "bye",
+    "configured_reconnect_delay_s": 15,
+    "post_bye_signal_utc": "2026-10-26T23:16:58.885196Z",
+    "index_success_utc": "2026-10-26T23:17:02.594355Z",
+    "bye_to_authenticated_signal_s": 21.161,
+    "bye_to_index_success_s": 24.87,
+    "index_uid": 122,
+    "watcher_lease_active": true
+  },
+  "visible_frame_observation": {
+    "first_body_visible_ms": 4441,
+    "initial_body_frames": 1,
+    "collapsed_messages": 1,
+    "server_model_frame_displayed": "39.4 kB",
+    "client_event_frame_displayed": "587 B",
+    "complete_message_wire_byte_total": null,
+    "note": "Metadata-only WebSocket inspection; virtual table shows a subset of frames, so no complete sum claimed."
+  }
+}

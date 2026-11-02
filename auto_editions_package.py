@@ -2,17 +2,23 @@
 import json
 from pathlib import Path
 import zipfile
+import shutil
 import auto_editions as ae
+from auto_editions_package_limits import LEGACY_BYTES,RESUMABLE_BYTES,EXPANDED_BYTES,ASSET_BYTES,DISK_RESERVE
 
-MAX_PACKAGE_BYTES=256*1024*1024
+MAX_PACKAGE_BYTES=LEGACY_BYTES
 
 
-def unpack(archive,root,source,number,total):
+def unpack(archive,root,source,number,total,*,resumable=False):
     root=Path(root)
+    limit=RESUMABLE_BYTES if resumable else MAX_PACKAGE_BYTES
+    if Path(archive).stat().st_size>limit:
+        from auto_editions_package_limits import transfer_error
+        raise transfer_error(Path(archive).stat().st_size,limit)
     with zipfile.ZipFile(archive) as package:
         entries=package.infolist()
         names=[e.filename for e in entries]
-        if len(names)!=len(set(names)) or len(names)>1010 or sum(e.file_size for e in entries)>MAX_PACKAGE_BYTES:
+        if len(names)!=len(set(names)) or len(names)>1010 or sum(e.file_size for e in entries)>EXPANDED_BYTES:
             raise ValueError('Preparation package exceeds its bounds or has duplicate entries.')
         if any('/' in n or '\\' in n or n in ('.','..') for n in names):
             raise ValueError('Preparation package must contain flat generated files only.')
@@ -31,11 +37,14 @@ def unpack(archive,root,source,number,total):
         if reviewed and reviewed.get('hidden_number'):allowed.add('uncorrected.png')
         from auto_editions_transport import descriptor,reconstruct
         deltas=descriptor(package,allowed)
-        if sum(e.file_size for e in entries)+sum(d['bytes'] for d in deltas.values())>MAX_PACKAGE_BYTES:
+        expanded=sum(e.file_size for e in entries)+sum(d['bytes'] for d in deltas.values())
+        if expanded>EXPANDED_BYTES:
             raise ValueError('Expanded preparation package exceeds its bounds.')
+        if shutil.disk_usage(root).free<expanded+DISK_RESERVE:
+            raise OSError(f'Preparation needs {expanded+DISK_RESERVE} free temporary bytes before extraction; package retained for retry.')
+        if any(e.is_dir() or e.file_size>ASSET_BYTES for e in entries):raise ValueError('Invalid generated asset.')
         for entry in entries:
             # No ZipFile.extract; symbolic links/directories cannot change destinations.
-            if entry.is_dir() or entry.file_size>160*1024*1024:raise ValueError('Invalid generated asset.')
             with package.open(entry) as content,(root/entry.filename).open('xb') as output:
                 length=0
                 while block:=content.read(1024*1024):

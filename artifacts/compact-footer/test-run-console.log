@@ -1,0 +1,1206 @@
+2026-10-25 08:51:28.858 WARNING streamlit.runtime.caching.cache_data_api: No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.027 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:29.027 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.030 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.031 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.031 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.031 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.091 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.190 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.190 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.190 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.191 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:29.191 No runtime found, using MemoryCacheStorageManager
+2026-10-25 08:51:33.485 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:33.485 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:33.485 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:33.485 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.021s stage=0.021s
+2026-10-25 08:51:34,284 INFO STARTUP APP IMPORTS DONE total=0.021s stage=0.021s
+STARTUP SET PAGE CONFIG DONE total=0.329s stage=0.308s
+2026-10-25 08:51:34.592 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:34,592 INFO STARTUP SET PAGE CONFIG DONE total=0.329s stage=0.308s
+STARTUP CSS LOADED total=0.335s stage=0.006s
+2026-10-25 08:51:34,598 INFO STARTUP CSS LOADED total=0.335s stage=0.006s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:34.661 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.399s stage=0.063s
+2026-10-25 08:51:34,662 INFO STARTUP SIDEBAR START total=0.399s stage=0.063s
+STARTUP SIDEBAR DONE total=0.429s stage=0.030s
+2026-10-25 08:51:34,692 INFO STARTUP SIDEBAR DONE total=0.429s stage=0.030s
+STARTUP ROUTER START total=0.429s stage=0.000s
+2026-10-25 08:51:34,692 INFO STARTUP ROUTER START total=0.429s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.429s stage=0.000s
+2026-10-25 08:51:34,692 INFO STARTUP PAGE SELECTED: Ads total=0.429s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.429s stage=0.000s Ads
+2026-10-25 08:51:34,692 INFO STARTUP PAGE RENDER START total=0.429s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.430s stage=0.001s
+2026-10-25 08:51:34,693 INFO STARTUP ADS PAGE IMPORT START total=0.430s stage=0.001s
+STARTUP ADS PAGE IMPORT DONE total=0.430s stage=0.000s
+2026-10-25 08:51:34,693 INFO STARTUP ADS PAGE IMPORT DONE total=0.430s stage=0.000s
+2026-10-25 08:51:34.700 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.437s stage=0.007s Ads
+2026-10-25 08:51:34,700 INFO STARTUP PAGE RENDER DONE total=0.437s stage=0.007s Ads
+PERF startup total=0.437s page=Ads
+2026-10-25 08:51:34,700 INFO PERF startup total=0.437s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=106.37 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:35,371 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:35.377 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:35,377 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.010s stage=0.003s
+2026-10-25 08:51:35,380 INFO STARTUP CSS LOADED total=0.010s stage=0.003s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:35.382 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:35,382 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+2026-10-25 08:51:35,397 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+STARTUP ROUTER START total=0.027s stage=0.000s
+2026-10-25 08:51:35,397 INFO STARTUP ROUTER START total=0.027s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:35,397 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:35,397 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:35,398 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:35,398 INFO STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:35.404 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.035s stage=0.007s Ads
+2026-10-25 08:51:35,405 INFO STARTUP PAGE RENDER DONE total=0.035s stage=0.007s Ads
+PERF startup total=0.035s page=Ads
+2026-10-25 08:51:35,405 INFO PERF startup total=0.035s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=27.07 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:35,969 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:35.976 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.007s
+2026-10-25 08:51:35,976 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.007s
+STARTUP CSS LOADED total=0.010s stage=0.003s
+2026-10-25 08:51:35,979 INFO STARTUP CSS LOADED total=0.010s stage=0.003s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:35.981 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.013s stage=0.002s
+2026-10-25 08:51:35,981 INFO STARTUP SIDEBAR START total=0.013s stage=0.002s
+STARTUP SIDEBAR DONE total=0.040s stage=0.027s
+2026-10-25 08:51:36,008 INFO STARTUP SIDEBAR DONE total=0.040s stage=0.027s
+STARTUP ROUTER START total=0.040s stage=0.000s
+2026-10-25 08:51:36,008 INFO STARTUP ROUTER START total=0.040s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.040s stage=0.000s
+2026-10-25 08:51:36,009 INFO STARTUP PAGE SELECTED: Ads total=0.040s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.041s stage=0.001s Ads
+2026-10-25 08:51:36,009 INFO STARTUP PAGE RENDER START total=0.041s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.041s stage=0.000s
+2026-10-25 08:51:36,009 INFO STARTUP ADS PAGE IMPORT START total=0.041s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.041s stage=0.000s
+2026-10-25 08:51:36,010 INFO STARTUP ADS PAGE IMPORT DONE total=0.041s stage=0.000s
+2026-10-25 08:51:36.016 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.048s stage=0.006s Ads
+2026-10-25 08:51:36,016 INFO STARTUP PAGE RENDER DONE total=0.048s stage=0.006s Ads
+PERF startup total=0.048s page=Ads
+2026-10-25 08:51:36,016 INFO PERF startup total=0.048s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=39.50 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:36,600 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:36.606 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:36,606 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:36,609 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:36.611 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:36,611 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:36,626 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:36,626 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+2026-10-25 08:51:36,626 INFO STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+2026-10-25 08:51:36,626 INFO STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:36,627 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:36,627 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:36.633 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+2026-10-25 08:51:36,633 INFO STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+PERF startup total=0.034s page=Ads
+2026-10-25 08:51:36,633 INFO PERF startup total=0.034s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=26.64 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:37,155 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:37.161 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:37,161 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:37,163 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:37.165 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:37,166 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+2026-10-25 08:51:37,181 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+STARTUP ROUTER START total=0.027s stage=0.000s
+2026-10-25 08:51:37,181 INFO STARTUP ROUTER START total=0.027s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:37,181 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:37,182 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:37,182 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:37,182 INFO STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:37.188 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+2026-10-25 08:51:37,188 INFO STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+PERF startup total=0.034s page=Ads
+2026-10-25 08:51:37,188 INFO PERF startup total=0.034s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=27.01 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:37,760 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:37.767 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.008s stage=0.007s
+2026-10-25 08:51:37,767 INFO STARTUP SET PAGE CONFIG DONE total=0.008s stage=0.007s
+STARTUP CSS LOADED total=0.012s stage=0.004s
+2026-10-25 08:51:37,771 INFO STARTUP CSS LOADED total=0.012s stage=0.004s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.09 route=Ads
+2026-10-25 08:51:37.774 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.016s stage=0.003s
+2026-10-25 08:51:37,775 INFO STARTUP SIDEBAR START total=0.016s stage=0.003s
+STARTUP SIDEBAR DONE total=0.040s stage=0.024s
+2026-10-25 08:51:37,799 INFO STARTUP SIDEBAR DONE total=0.040s stage=0.024s
+STARTUP ROUTER START total=0.040s stage=0.000s
+2026-10-25 08:51:37,799 INFO STARTUP ROUTER START total=0.040s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.040s stage=0.000s
+2026-10-25 08:51:37,799 INFO STARTUP PAGE SELECTED: Ads total=0.040s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.040s stage=0.001s Ads
+2026-10-25 08:51:37,799 INFO STARTUP PAGE RENDER START total=0.040s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.041s stage=0.000s
+2026-10-25 08:51:37,800 INFO STARTUP ADS PAGE IMPORT START total=0.041s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.041s stage=0.000s
+2026-10-25 08:51:37,800 INFO STARTUP ADS PAGE IMPORT DONE total=0.041s stage=0.000s
+2026-10-25 08:51:37.807 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.048s stage=0.008s Ads
+2026-10-25 08:51:37,807 INFO STARTUP PAGE RENDER DONE total=0.048s stage=0.008s Ads
+PERF startup total=0.048s page=Ads
+2026-10-25 08:51:37,807 INFO PERF startup total=0.048s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=39.58 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:38,382 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:38.388 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:38,388 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.003s
+2026-10-25 08:51:38,391 INFO STARTUP CSS LOADED total=0.009s stage=0.003s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:38.393 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:38,393 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+2026-10-25 08:51:38,409 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+STARTUP ROUTER START total=0.027s stage=0.000s
+2026-10-25 08:51:38,409 INFO STARTUP ROUTER START total=0.027s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:38,409 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+2026-10-25 08:51:38,409 INFO STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:38,410 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:38,410 INFO STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:38,426 INFO Activity log write skipped: No Supabase/Postgres database URL is configured. Set DATABASE_URL, SUPABASE_DATABASE_URL, or POSTGRES_URL in Render.
+2026-10-25 08:51:38.427 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:38.430 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:38.433 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:38.435 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:38.439 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:38.439 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.058s stage=0.030s Ads
+2026-10-25 08:51:38,439 INFO STARTUP PAGE RENDER DONE total=0.058s stage=0.030s Ads
+PERF startup total=0.058s page=Ads
+2026-10-25 08:51:38,439 INFO PERF startup total=0.058s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=50.35 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:38,974 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:38.980 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:38,980 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:38,983 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:38.985 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:38,985 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.016s
+2026-10-25 08:51:39,001 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.016s
+STARTUP ROUTER START total=0.027s stage=0.000s
+2026-10-25 08:51:39,001 INFO STARTUP ROUTER START total=0.027s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:39,001 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+2026-10-25 08:51:39,002 INFO STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:39,002 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:39,002 INFO STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:39.009 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:39.045 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:39.047 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:39.050 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:39.054 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:39.054 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.080s stage=0.052s Ads
+2026-10-25 08:51:39,054 INFO STARTUP PAGE RENDER DONE total=0.080s stage=0.052s Ads
+PERF startup total=0.080s page=Ads
+2026-10-25 08:51:39,054 INFO PERF startup total=0.080s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=73.29 route=Ads
+2026-10-25 08:51:39.057 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.057 Session state does not function when running a script without `streamlit run`
+2026-10-25 08:51:39.057 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.057 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.057 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.057 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.058 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.072 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.073 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.073 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.073 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.073 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.083 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.084 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:39.531 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:42.200 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:42.200 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:42.200 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:42.200 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:42,968 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:42.974 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:42,974 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:42,976 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:42.978 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:42,979 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:42,993 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:42,993 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:42,994 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:42,994 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:42,994 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:42,994 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:43.000 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+2026-10-25 08:51:43,000 INFO STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+PERF startup total=0.033s page=Ads
+2026-10-25 08:51:43,000 INFO PERF startup total=0.033s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=25.90 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:43,512 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:43.518 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:43,518 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:43,520 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:43.522 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:43,523 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:43,537 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:43,538 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:43,538 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+2026-10-25 08:51:43,538 INFO STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:43,539 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:43,539 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:43.545 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+PERF startup total=0.034s page=Ads
+2026-10-25 08:51:43,545 INFO STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=26.42 route=Ads
+2026-10-25 08:51:43,545 INFO PERF startup total=0.034s page=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:44,119 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:44.124 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:44,124 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:44,127 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:44.129 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:44,129 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:44,144 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:44,144 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+2026-10-25 08:51:44,144 INFO STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:44,145 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:44,145 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:44,145 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:44.152 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.034s stage=0.007s Ads
+2026-10-25 08:51:44,152 INFO STARTUP PAGE RENDER DONE total=0.034s stage=0.007s Ads
+PERF startup total=0.034s page=Ads
+2026-10-25 08:51:44,152 INFO PERF startup total=0.034s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=27.21 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:44,673 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:44.679 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:44,680 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:44,682 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.07 route=Ads
+2026-10-25 08:51:44.684 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:44,684 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.014s
+2026-10-25 08:51:44,699 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.014s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:44,699 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+2026-10-25 08:51:44,699 INFO STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+2026-10-25 08:51:44,699 INFO STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:44,700 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:44,700 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:44.706 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+2026-10-25 08:51:44,706 INFO STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+PERF startup total=0.033s page=Ads
+2026-10-25 08:51:44,706 INFO PERF startup total=0.033s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=26.04 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:45,282 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:45.289 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:45,289 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:45,291 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:45.293 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:45,293 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+2026-10-25 08:51:45,308 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+STARTUP ROUTER START total=0.027s stage=0.000s
+2026-10-25 08:51:45,308 INFO STARTUP ROUTER START total=0.027s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:45,308 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:45,309 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:45,309 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:45,309 INFO STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:45.315 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+2026-10-25 08:51:45,315 INFO STARTUP PAGE RENDER DONE total=0.034s stage=0.006s Ads
+PERF startup total=0.034s page=Ads
+2026-10-25 08:51:45,315 INFO PERF startup total=0.034s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=26.37 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:45,929 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:45.936 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.007s
+2026-10-25 08:51:45,936 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.007s
+STARTUP CSS LOADED total=0.010s stage=0.002s
+2026-10-25 08:51:45,938 INFO STARTUP CSS LOADED total=0.010s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.11 route=Ads
+2026-10-25 08:51:45.940 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.003s
+2026-10-25 08:51:45,941 INFO STARTUP SIDEBAR START total=0.012s stage=0.003s
+STARTUP SIDEBAR DONE total=0.028s stage=0.016s
+2026-10-25 08:51:45,956 INFO STARTUP SIDEBAR DONE total=0.028s stage=0.016s
+STARTUP ROUTER START total=0.028s stage=0.000s
+2026-10-25 08:51:45,957 INFO STARTUP ROUTER START total=0.028s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.028s stage=0.000s
+2026-10-25 08:51:45,957 INFO STARTUP PAGE SELECTED: Ads total=0.028s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.029s stage=0.001s Ads
+2026-10-25 08:51:45,957 INFO STARTUP PAGE RENDER START total=0.029s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+2026-10-25 08:51:45,958 INFO STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:45,958 INFO STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:45.964 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.036s stage=0.007s Ads
+2026-10-25 08:51:45,964 INFO STARTUP PAGE RENDER DONE total=0.036s stage=0.007s Ads
+PERF startup total=0.036s page=Ads
+2026-10-25 08:51:45,964 INFO PERF startup total=0.036s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=28.24 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:46,502 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:46.508 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:46,508 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:46,510 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:46.512 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:46,512 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:46,527 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:46,527 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:46,527 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+2026-10-25 08:51:46,528 INFO STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:46,528 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:46,528 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:46,544 INFO Activity log write skipped: No Supabase/Postgres database URL is configured. Set DATABASE_URL, SUPABASE_DATABASE_URL, or POSTGRES_URL in Render.
+2026-10-25 08:51:46.545 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:46.548 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:46.551 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:46.553 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:46.556 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:46.557 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.056s stage=0.028s Ads
+2026-10-25 08:51:46,557 INFO STARTUP PAGE RENDER DONE total=0.056s stage=0.028s Ads
+PERF startup total=0.056s page=Ads
+2026-10-25 08:51:46,557 INFO PERF startup total=0.056s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=48.58 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:47,107 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:47.114 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.008s stage=0.007s
+2026-10-25 08:51:47,114 INFO STARTUP SET PAGE CONFIG DONE total=0.008s stage=0.007s
+STARTUP CSS LOADED total=0.010s stage=0.002s
+2026-10-25 08:51:47,116 INFO STARTUP CSS LOADED total=0.010s stage=0.002s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:47.118 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:47,119 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+2026-10-25 08:51:47,134 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+STARTUP ROUTER START total=0.028s stage=0.000s
+2026-10-25 08:51:47,134 INFO STARTUP ROUTER START total=0.028s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.028s stage=0.000s
+2026-10-25 08:51:47,134 INFO STARTUP PAGE SELECTED: Ads total=0.028s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+2026-10-25 08:51:47,134 INFO STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:47,135 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:47,135 INFO STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:47.143 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:47.151 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:47.153 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:47.155 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:47.159 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:51:47.159 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.053s stage=0.025s Ads
+2026-10-25 08:51:47,160 INFO STARTUP PAGE RENDER DONE total=0.053s stage=0.025s Ads
+PERF startup total=0.053s page=Ads
+2026-10-25 08:51:47,160 INFO PERF startup total=0.053s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=45.08 route=Ads
+2026-10-25 08:51:47.162 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.162 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.163 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.177 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.177 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.177 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.177 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.178 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.190 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.191 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.275 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.276 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.279 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.279 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.279 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.279 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:47.280 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:48.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:48.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:48.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:48.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:49,016 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:49.022 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:49,022 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.010s stage=0.003s
+2026-10-25 08:51:49,025 INFO STARTUP CSS LOADED total=0.010s stage=0.003s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:49.027 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:49,027 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+STARTUP ROUTER START total=0.027s stage=0.000s
+2026-10-25 08:51:49,042 INFO STARTUP SIDEBAR DONE total=0.027s stage=0.015s
+2026-10-25 08:51:49,042 INFO STARTUP ROUTER START total=0.027s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:49,042 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+2026-10-25 08:51:49,043 INFO STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+2026-10-25 08:51:49,043 INFO STARTUP ADS PAGE IMPORT START total=0.028s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:49,043 INFO STARTUP ADS PAGE IMPORT DONE total=0.028s stage=0.000s
+2026-10-25 08:51:49.050 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.035s stage=0.007s Ads
+2026-10-25 08:51:49,050 INFO STARTUP PAGE RENDER DONE total=0.035s stage=0.007s Ads
+PERF startup total=0.035s page=Ads
+2026-10-25 08:51:49,050 INFO PERF startup total=0.035s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=27.39 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:49,661 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:49.668 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:49,668 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:49,670 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:49.672 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:49,672 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:49,687 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:49,687 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+2026-10-25 08:51:49,687 INFO STARTUP PAGE SELECTED: Ads total=0.027s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+2026-10-25 08:51:49,688 INFO STARTUP PAGE RENDER START total=0.027s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:49,688 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:49,688 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:49.695 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.034s stage=0.007s Ads
+2026-10-25 08:51:49,695 INFO STARTUP PAGE RENDER DONE total=0.034s stage=0.007s Ads
+PERF startup total=0.034s page=Ads
+2026-10-25 08:51:49,695 INFO PERF startup total=0.034s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=26.83 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:50,255 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:50.262 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.008s stage=0.007s
+2026-10-25 08:51:50,262 INFO STARTUP SET PAGE CONFIG DONE total=0.008s stage=0.007s
+STARTUP CSS LOADED total=0.010s stage=0.003s
+2026-10-25 08:51:50,265 INFO STARTUP CSS LOADED total=0.010s stage=0.003s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:50.267 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.013s stage=0.002s
+2026-10-25 08:51:50,267 INFO STARTUP SIDEBAR START total=0.013s stage=0.002s
+STARTUP SIDEBAR DONE total=0.028s stage=0.015s
+2026-10-25 08:51:50,282 INFO STARTUP SIDEBAR DONE total=0.028s stage=0.015s
+STARTUP ROUTER START total=0.028s stage=0.000s
+2026-10-25 08:51:50,283 INFO STARTUP ROUTER START total=0.028s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.028s stage=0.000s
+2026-10-25 08:51:50,283 INFO STARTUP PAGE SELECTED: Ads total=0.028s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+2026-10-25 08:51:50,283 INFO STARTUP PAGE RENDER START total=0.028s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+2026-10-25 08:51:50,283 INFO STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:50,283 INFO STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:50.290 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.035s stage=0.007s Ads
+2026-10-25 08:51:50,290 INFO STARTUP PAGE RENDER DONE total=0.035s stage=0.007s Ads
+PERF startup total=0.035s page=Ads
+2026-10-25 08:51:50,290 INFO PERF startup total=0.035s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=27.53 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:50,898 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:50.904 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:50,904 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.010s stage=0.002s
+2026-10-25 08:51:50,907 INFO STARTUP CSS LOADED total=0.010s stage=0.002s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.06 route=Ads
+2026-10-25 08:51:50.909 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:50,909 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.028s stage=0.016s
+2026-10-25 08:51:50,926 INFO STARTUP SIDEBAR DONE total=0.028s stage=0.016s
+STARTUP ROUTER START total=0.029s stage=0.000s
+2026-10-25 08:51:50,926 INFO STARTUP ROUTER START total=0.029s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.029s stage=0.000s
+2026-10-25 08:51:50,926 INFO STARTUP PAGE SELECTED: Ads total=0.029s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.029s stage=0.001s Ads
+2026-10-25 08:51:50,927 INFO STARTUP PAGE RENDER START total=0.029s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+2026-10-25 08:51:50,927 INFO STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.030s stage=0.000s
+2026-10-25 08:51:50,927 INFO STARTUP ADS PAGE IMPORT DONE total=0.030s stage=0.000s
+2026-10-25 08:51:50.934 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.036s stage=0.007s Ads
+2026-10-25 08:51:50,934 INFO STARTUP PAGE RENDER DONE total=0.036s stage=0.007s Ads
+PERF startup total=0.036s page=Ads
+2026-10-25 08:51:50,934 INFO PERF startup total=0.036s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=28.96 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:51,518 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:51.524 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:51,524 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:51,527 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:51.529 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:51,529 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.014s
+2026-10-25 08:51:51,543 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.014s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:51,543 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+2026-10-25 08:51:51,544 INFO STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:51,544 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:51,544 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:51,544 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:51.550 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+2026-10-25 08:51:51,550 INFO STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+PERF startup total=0.033s page=Ads
+2026-10-25 08:51:51,550 INFO PERF startup total=0.033s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=25.69 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:52,137 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:52.143 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:52,143 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:52,146 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.07 route=Ads
+2026-10-25 08:51:52.148 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.011s stage=0.002s
+2026-10-25 08:51:52,148 INFO STARTUP SIDEBAR START total=0.011s stage=0.002s
+STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+2026-10-25 08:51:52,163 INFO STARTUP SIDEBAR DONE total=0.026s stage=0.015s
+STARTUP ROUTER START total=0.026s stage=0.000s
+2026-10-25 08:51:52,163 INFO STARTUP ROUTER START total=0.026s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+2026-10-25 08:51:52,163 INFO STARTUP PAGE SELECTED: Ads total=0.026s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+2026-10-25 08:51:52,163 INFO STARTUP PAGE RENDER START total=0.027s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+2026-10-25 08:51:52,164 INFO STARTUP ADS PAGE IMPORT START total=0.027s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:52,164 INFO STARTUP ADS PAGE IMPORT DONE total=0.027s stage=0.000s
+2026-10-25 08:51:52.170 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+2026-10-25 08:51:52,170 INFO STARTUP PAGE RENDER DONE total=0.033s stage=0.006s Ads
+PERF startup total=0.033s page=Ads
+2026-10-25 08:51:52,170 INFO PERF startup total=0.033s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=26.17 route=Ads
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:52,765 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:52.772 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.009s stage=0.008s
+2026-10-25 08:51:52,773 INFO STARTUP SET PAGE CONFIG DONE total=0.009s stage=0.008s
+STARTUP CSS LOADED total=0.011s stage=0.002s
+2026-10-25 08:51:52,775 INFO STARTUP CSS LOADED total=0.011s stage=0.002s
+PERF auth duration_ms=0.05 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:52.777 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.014s stage=0.003s
+2026-10-25 08:51:52,778 INFO STARTUP SIDEBAR START total=0.014s stage=0.003s
+STARTUP SIDEBAR DONE total=0.028s stage=0.014s
+2026-10-25 08:51:52,792 INFO STARTUP SIDEBAR DONE total=0.028s stage=0.014s
+STARTUP ROUTER START total=0.028s stage=0.000s
+2026-10-25 08:51:52,792 INFO STARTUP ROUTER START total=0.028s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.029s stage=0.000s
+2026-10-25 08:51:52,792 INFO STARTUP PAGE SELECTED: Ads total=0.029s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.029s stage=0.000s Ads
+2026-10-25 08:51:52,793 INFO STARTUP PAGE RENDER START total=0.029s stage=0.000s Ads
+STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+2026-10-25 08:51:52,793 INFO STARTUP ADS PAGE IMPORT START total=0.029s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:52,793 INFO STARTUP ADS PAGE IMPORT DONE total=0.029s stage=0.000s
+2026-10-25 08:51:52,810 INFO Activity log write skipped: No Supabase/Postgres database URL is configured. Set DATABASE_URL, SUPABASE_DATABASE_URL, or POSTGRES_URL in Render.
+2026-10-25 08:51:52.819 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.055s stage=0.026s Ads
+2026-10-25 08:51:52,819 INFO STARTUP PAGE RENDER DONE total=0.055s stage=0.026s Ads
+PERF startup total=0.055s page=Ads
+2026-10-25 08:51:52,819 INFO PERF startup total=0.055s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=46.22 route=Ads
+2026-10-25 08:51:52.823 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+STARTUP APP START total=0.000s stage=0.000s
+STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:53,389 INFO STARTUP APP IMPORTS DONE total=0.001s stage=0.001s
+2026-10-25 08:51:53.396 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+2026-10-25 08:51:53,396 INFO STARTUP SET PAGE CONFIG DONE total=0.007s stage=0.006s
+STARTUP CSS LOADED total=0.009s stage=0.002s
+2026-10-25 08:51:53,398 INFO STARTUP CSS LOADED total=0.009s stage=0.002s
+PERF auth duration_ms=0.04 cache=miss
+PERF route_resolution duration_ms=0.05 route=Ads
+2026-10-25 08:51:53.400 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP SIDEBAR START total=0.012s stage=0.002s
+2026-10-25 08:51:53,400 INFO STARTUP SIDEBAR START total=0.012s stage=0.002s
+STARTUP SIDEBAR DONE total=0.033s stage=0.022s
+2026-10-25 08:51:53,422 INFO STARTUP SIDEBAR DONE total=0.033s stage=0.022s
+STARTUP ROUTER START total=0.034s stage=0.000s
+2026-10-25 08:51:53,422 INFO STARTUP ROUTER START total=0.034s stage=0.000s
+STARTUP PAGE SELECTED: Ads total=0.034s stage=0.000s
+2026-10-25 08:51:53,422 INFO STARTUP PAGE SELECTED: Ads total=0.034s stage=0.000s
+MEMORY LOG SKIPPED Page load start: Ads
+STARTUP PAGE RENDER START total=0.034s stage=0.001s Ads
+2026-10-25 08:51:53,423 INFO STARTUP PAGE RENDER START total=0.034s stage=0.001s Ads
+STARTUP ADS PAGE IMPORT START total=0.035s stage=0.000s
+2026-10-25 08:51:53,423 INFO STARTUP ADS PAGE IMPORT START total=0.035s stage=0.000s
+STARTUP ADS PAGE IMPORT DONE total=0.035s stage=0.000s
+2026-10-25 08:51:53,423 INFO STARTUP ADS PAGE IMPORT DONE total=0.035s stage=0.000s
+2026-10-25 08:51:53.444 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+STARTUP PAGE RENDER DONE total=0.055s stage=0.021s Ads
+2026-10-25 08:51:53,444 INFO STARTUP PAGE RENDER DONE total=0.055s stage=0.021s Ads
+PERF startup total=0.055s page=Ads
+2026-10-25 08:51:53,444 INFO PERF startup total=0.055s page=Ads
+MEMORY LOG SKIPPED Page load end: Ads
+PERF rerun total_ms=48.42 route=Ads
+2026-10-25 08:51:59.654 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:51:59.956 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:52:00.183 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:52:00.460 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-10-25 08:52:00.676 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:52:00.679 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+2026-10-25 08:52:00.681 Please replace `st.components.v1.html` with `st.iframe`.
+
+`st.components.v1.html` will be removed after 2026-06-01.
+Tests: 174 Failures: 0 Errors: 0

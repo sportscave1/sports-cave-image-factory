@@ -31,12 +31,21 @@ def spans(base,target):
             suffix+=next(i for i in range(n) if a[-1-i]!=b[-1-i]);break
     return prefix,suffix
 
-def build_package(root,names,destination,*,compact=False):
+def build_package(root,names,destination,*,compact=False,max_bytes=None):
     root=Path(root).resolve();destination=Path(destination)
+    from auto_editions_package import MAX_PACKAGE_BYTES
+    from auto_editions_package_limits import RESUMABLE_BYTES,EXPANDED_BYTES,ASSET_BYTES,DISK_RESERVE,transfer_error,PackageBudgetError
+    if max_bytes is None:max_bytes=MAX_PACKAGE_BYTES
+    if type(max_bytes) is not int or max_bytes not in (MAX_PACKAGE_BYTES,RESUMABLE_BYTES):raise ValueError('Unnegotiated package budget.')
     if len(names)!=len(set(names)):raise ValueError('Unique package members required.')
+    if len(names)>1009:raise ValueError('Too many generated package members.')
     for n in names:
         if Path(n).name!=n or (root/n).is_symlink() or (root/n).resolve().parent!=root:
             raise ValueError('Unsafe prepared package member.')
+    expanded=sum((root/n).stat().st_size for n in names)
+    if expanded>EXPANDED_BYTES:raise PackageBudgetError(f'Expanded preparation is {expanded} bytes; supported disk limit is {EXPANDED_BYTES} bytes.')
+    if any((root/n).stat().st_size>(1024*1024 if n=='manifest.json' else ASSET_BYTES) for n in names):
+        raise PackageBudgetError('Generated asset exceeds its supported individual byte limit; retain the source for review.')
     deltas={};payloads={};saved=0
     base=root/'original.png'
     if compact and 'original.png' in names:
@@ -56,19 +65,29 @@ def build_package(root,names,destination,*,compact=False):
             saved+=prefix+suffix
     temporary=destination.with_name(destination.name+'.partial')
     if destination.exists() or temporary.exists():raise ValueError('Existing transport evidence is never overwritten.')
+    descriptor_bytes=json.dumps(dict(version=VERSION,deltas=deltas),sort_keys=True).encode() if deltas else None
+    members={n:(root/n).stat().st_size for n in names if n not in deltas}
+    if deltas:members.update({DESCRIPTOR:len(descriptor_bytes)},**{n:len(v) for n,v in payloads.items()})
+    if sum(members.values())+sum(d['bytes'] for d in deltas.values())>EXPANDED_BYTES:
+        raise PackageBudgetError('Expanded preparation plus transport evidence exceeds the supported disk budget.')
+    # ZIP_STORED, flat UTF-8 names, no ZIP64 members: exact wire size before
+    # writing another large copy or starting any expensive network request.
+    predicted=22+sum(size+76+2*len(name.encode('utf-8')) for name,size in members.items())
+    if predicted>max_bytes:raise transfer_error(predicted,max_bytes)
+    if shutil.disk_usage(destination.parent).free<predicted+DISK_RESERVE:
+        raise PackageBudgetError(f'Preparation needs {predicted+DISK_RESERVE} free temporary bytes before packaging; exports retained for retry.')
     try:
         with zipfile.ZipFile(temporary,'x',compression=zipfile.ZIP_STORED) as z:
             for name in names:
                 if name not in deltas:z.write(root/name,name)
             if deltas:
-                z.writestr(DESCRIPTOR,json.dumps(dict(version=VERSION,deltas=deltas),sort_keys=True))
+                z.writestr(DESCRIPTOR,descriptor_bytes)
                 for name,data in payloads.items():z.writestr(name,data)
-        from auto_editions_package import MAX_PACKAGE_BYTES
-        if temporary.stat().st_size>MAX_PACKAGE_BYTES:raise ValueError('Prepared package exceeds transfer limit.')
+        if temporary.stat().st_size>max_bytes:raise transfer_error(temporary.stat().st_size,max_bytes)
         temporary.replace(destination)
     finally:temporary.unlink(missing_ok=True)
     return dict(transport_version=VERSION if deltas else 0,references_shared=len(deltas),
-                shared_bytes=saved,package_bytes=destination.stat().st_size)
+                shared_bytes=saved,package_bytes=destination.stat().st_size,expanded_bytes=expanded,transfer_limit_bytes=max_bytes)
 
 def descriptor(package,allowed):
     """Validate the expanded logical file set before extracting any member."""

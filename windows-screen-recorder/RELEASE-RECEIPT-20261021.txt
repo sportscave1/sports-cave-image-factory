@@ -1,0 +1,49 @@
+RELEASE COMPLETED — 21 OCTOBER 2026
+
+Application commit pushed to origin/main:
+7c7232719ae68cb7e93f95935a9e4e69f1f615b1
+
+Render confirmed LIVE on that exact commit:
+- sports-cave-os: dep-dbca8ugu01pc73d2fhc0
+  Finished 2026-10-21 11:42:26 UTC. /_stcore/health returned HTTP 200.
+- sports-cave-os-webhooks: dep-dbca8ugu01pc73d2fk2g
+  Finished 2026-10-21 11:41:29 UTC. /healthz returned HTTP 200.
+- sports-cave-seo-worker: dep-dbca8ugu01pc73d2fjj0
+  Finished 2026-10-21 11:41:10 UTC. Deployment status verified; no customer
+  processing job was initiated for this recorder release.
+The daily cron remains suspended as previously configured. No services were
+created, renamed, replaced or reconfigured. Auto-deployment handled the push;
+there was no duplicate manual deployment or Blueprint sync.
+
+INSTALLED WINDOWS RECORDER COMPANION
+Active release: 72d074f248996f7df51c
+Retained rollback: 64b4feda5333c42db2cd
+Full package manifest:
+72d074f248996f7df51ce1fc0e035a2a226fcedb062e0c86a99cb7917b184d26
+Published ZIP SHA256:
+1bb81644d368188e19f515ebbabb45915a9b1083aad6ce61279efa3938960353
+Installed files verified against that exact published manifest. Installer
+completed successfully, authenticated loopback state responds idle, desktop
+capture/playback capabilities are available, and four existing library entries
+remain. Pairing credentials for the existing production origin remain stored.
+No new transport-failure timestamp was observed after installation. This is
+not a claim of end-to-end hosted-command or final installed UI replay acceptance.
+Render request-log inspection was unavailable because the connector had no
+selected workspace; no workspace setting was changed to bypass that constraint.
+
+The stopped experimental desktop draft was saved locally without playback,
+then its test toolbar closed. No injected-input test recorder remains open.
+The installed helper uses normal input mode. Photoshop companion code, jobs,
+settings and processes were not changed by this recorder-specific release.
+
+DONE AND REMAINING
+See RELEASE-REVIEW-20261021.txt for the complete supported-workflow review.
+52 recorder tests, 85 helper/integration tests and 14 subtests passed.
+The unverified tab-switching implementation is preserved in the experimental
+source archive on Git, not activated in the stable package. Remaining work is
+installed/hosted acceptance, tab lifecycle and detached windows, changing-data
+copy/paste variables, broader application/DPI/long-session tests, and large
+library pagination. This is not yet an every-action recorder.
+
+This receipt is documentation only; its follow-up commit skips another Render
+deploy. The application runtime and downloadable ZIP are from 7c723271 above.

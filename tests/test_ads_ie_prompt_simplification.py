@@ -53,9 +53,9 @@ class PromptSimplificationTests(unittest.TestCase):
     def test_exact_values_limits_exceptions_and_output_contract_survive(self):
         prompt = self.result_and_visuals()[0]["master_prompt"]
         requirements = {
-            "format": ("1024 x 1024", "1:1, sRGB", "72–76%", "24–28%", "256 x 256"),
-            "fit": ("880–896 px usable width", "12 words and no more than 70 characters", "four words and no more than 24 characters"),
-            "type": ("headline 42–48 px", "supporting line 24–26 px, Montserrat Regular", "CTA 26–28 px, Montserrat Medium", "0.04–0.06 em", "22–30 px", "Thickness is approximately 1 px", "3–5 px", "4-8 px", "64-72 px"),
+            "format": ("1024 x 1024", "1:1, sRGB", "80–82%", "18–20%", "256 x 256"),
+            "fit": ("880–896 px usable width", "Do not render a supporting line, secondary sentence or replacement text", "four words and no more than 24 characters"),
+            "type": ("headline 42–48 px", "CTA 26–28 px, Montserrat Medium", "0.04–0.06 em", "22–30 px", "Thickness is approximately 1 px", "3–5 px", "4-8 px", "64-72 px"),
             "copy": ("Usually 40–75 words", "at most six words", "0.90 or more", "Exactly one description uses this construction", "Claim Your Edition", "Shop Now"),
             "execution": ("exactly three successful image-generation calls", "No variants, alternatives, correction or replacement generations", "Once access succeeds, automatically resume the original task", "Retry only a missing output", "never repeat a successful call", "Never restart the set", "If it is unclear whether an image was created", "Recover or redisplay an existing asset if display fails", "Never claim an image or CSV exists unless it was created"),
             "csv": ("UTF-8 with BOM (utf-8-sig)", "CRLF row terminators", "quote fields containing commas/newlines/quotes", "double embedded quotes", "variation stays 1", "If file creation is genuinely unavailable", "product.name", ads.META_AD_URL_PARAMETERS),
@@ -76,7 +76,8 @@ class PromptSimplificationTests(unittest.TestCase):
             self.assertIn(physical.build(visual["physical_product"], compact=True), prompt)
             self.assertIn(ads.build_instant_experience_typography_quality_rules(visual), prompt)
             self.assertIn("HEADLINE: " + visual["headline_text"], prompt)
-            self.assertIn("SUPPORTING LINE: " + visual["supporting_line"], prompt)
+            self.assertNotIn("SUPPORTING LINE:", prompt)
+            self.assertNotIn(visual["supporting_line"], prompt)
             self.assertIn("CTA: CLAIM YOUR EDITION", prompt)
             self.assertNotIn("CREATIVE_VARIATION_TOKEN:", prompt)
 

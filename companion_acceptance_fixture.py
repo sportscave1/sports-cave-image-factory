@@ -4,7 +4,7 @@ from pathlib import Path
 from PIL import Image,ImageCms
 import auto_editions as ae
 
-def build(root,run):
+def build(root,run,*,large=False):
     root=Path(root);root.mkdir(parents=True,exist_ok=True)
     icc=ImageCms.ImageCmsProfile(ImageCms.createProfile('sRGB')).tobytes()
     pixels=random.Random(20261020).randbytes(1024*768*3)
@@ -26,9 +26,17 @@ def build(root,run):
     for number in (1,100):
         with ae.compose(manifest,root,number) as image:image.save(root/f'reference-{number}.png',icc_profile=icc)
     archive=root/'package.zip'
-    with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_STORED) as output:
-        for path in root.iterdir():
-            if path.suffix in ('.png','.json'):output.write(path,path.name)
+    with archive.open('wb') as stream:
+        if large:
+            # Legal ZIP preamble is explicit synthetic transport load, never
+            # evidence of artwork compression or image quality. Bounded writes.
+            from auto_editions_package_limits import LEGACY_BYTES
+            remaining=LEGACY_BYTES+1;block=b'\0'*(1024*1024)
+            while remaining:
+                count=min(remaining,len(block));stream.write(block[:count]);remaining-=count
+        with zipfile.ZipFile(stream,'w',compression=zipfile.ZIP_STORED) as output:
+            for path in root.iterdir():
+                if path.suffix in ('.png','.json'):output.write(path,path.name)
     return archive
 
 def validate_fixture(manifest,run):

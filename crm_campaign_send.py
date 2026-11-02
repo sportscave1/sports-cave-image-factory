@@ -84,9 +84,12 @@ def review(shop,store,editor,env=None,*,audience_job=None):
                 raise ValueError('Audience changed; review again.')
             state=audience_job.result()
         else:state=final_audience(shop,store,doc)
+        from crm_campaign_reprepare import restrict
+        state=restrict(store,editor,state)
     doc['counts']={k:state[k] for k in ('members','eligible','excluded','complete','checked_at')}
     with stage('Campaign review','render_settings'):
-        cfg=store.render_settings(env)
+        from crm_campaign_contract import capture
+        cfg=capture(store.render_settings(env),env)
     tracking_ok=False;email_size=None
     with timed('render_validation'):
         from crm_email_size import analyze_rendered_email
@@ -157,8 +160,8 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
     reviewed=load(store,identity,snapshot_id)
     if reviewed['campaign_version']!=saved['version']:raise ValueError('Campaign changed; review again.')
     doc=reviewed['document'];state={'recipients':reviewed['recipients']}
-    cfg=store.render_settings(env)
-    if cfg!=reviewed['render_settings']:raise ValueError('Sender or rendering settings changed; review again.')
+    from crm_campaign_contract import capture,validate
+    cfg=validate(reviewed['render_settings'],capture(store.render_settings(env),env))
     from crm_email_size import validate_rendered_email
     with timed('queue_content_validation'):
         rendered=validate_tracking(doc,cfg,identity)
@@ -262,7 +265,7 @@ def queue_campaign(shop,store,user,editor,operation_id,*,env=None,snapshot_id=No
               'dispatch':{'version':1,'message':rendered,'recipients':delivery_recipients,
                           'sender':config.sender,'reply_to':config.reply_to}}
     status='SCHEDULED' if schedule else 'SENDING'
-    if store.render_settings(env)!=cfg:raise ValueError('Sender or rendering settings changed; review again.')
+    validate(cfg,capture(store.render_settings(env),env))
     with store.db() as conn:
         row=conn.execute('SELECT * FROM crm_campaign_drafts WHERE id=%s FOR UPDATE',(identity,)).fetchone()
         prior=conn.execute('SELECT * FROM crm_campaigns WHERE id=%s',(identity,)).fetchone()

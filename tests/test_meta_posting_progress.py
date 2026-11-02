@@ -17,7 +17,8 @@ class ProgressViewTests(unittest.TestCase):
     def test_cleanup_is_scoped_to_verified_owner_and_preserves_other_data(self):
         row = completed_row()
         for status, same_owner in [('COMPLETE', True), ('COMPLETE', False), ('FAILED', True), ('AMBIGUOUS', True)]:
-            state = {progress.RECEIPT_KEY: {**row, 'status': status},
+            state = {progress.LAST_RESULT_KEY: {**row, 'status': status},
+                     progress.NEW_CAMPAIGN_KEY: row['submission_id'],
                      posting.SUBMISSION_ID_KEY: row['submission_id'] if same_owner else 'new-draft',
                      posting.CSV_IMPORT_STATE_KEY: {'csv': b'original'},
                      posting.IMAGE_STATE_KEYS[0]: {'data': b'image'},
@@ -82,8 +83,9 @@ class ProgressViewTests(unittest.TestCase):
         with patch.object(progress.JOBS, 'snapshot', return_value=row):
             app.run()
         self.assertFalse(app.exception)
-        self.assertNotEqual(app.session_state[posting.SUBMISSION_ID_KEY], identity)
-        self.assertNotEqual(app.text_area(key=posting.PRIMARY_TEXT_KEYS[0]).value, 'Unfinished copy')
+        self.assertEqual(app.session_state[posting.SUBMISSION_ID_KEY], identity)
+        self.assertFalse(app.session_state[posting.PROCESSING_KEY])
+        self.assertEqual(app.text_area(key=posting.PRIMARY_TEXT_KEYS[0]).value, 'Unfinished copy')
         self.assertNotIn(progress.QUERY_KEY, app.query_params)
         for button in app.button:
             if button.label == 'New Campaign':
@@ -91,6 +93,11 @@ class ProgressViewTests(unittest.TestCase):
                 break
         self.assertFalse(app.exception)
         self.assertNotIn('Close', [b.label for b in app.button])
+        self.assertNotEqual(app.session_state[posting.SUBMISSION_ID_KEY], identity)
+        self.assertNotEqual(app.text_area(key=posting.PRIMARY_TEXT_KEYS[0]).value, 'Unfinished copy')
+        self.assertEqual(app.session_state[posting.RUN_STATE_KEY], posting.RUN_STATE_DRAFT)
+        self.assertEqual(app.session_state[posting.POSTING_MODE_KEY], 'New Campaign')
+        self.assertEqual(app.session_state[progress.LAST_RESULT_KEY]['submission_id'], identity)
 
     def test_submission_immediate_progress_and_url_restoration(self):
         path = Path(__file__).with_name('meta_posting_progress_fixture.py')
@@ -105,6 +112,45 @@ class ProgressViewTests(unittest.TestCase):
         self.assertFalse(restored.exception)
         self.assertIn('Creating Meta Ads…', [item.value for item in restored.subheader])
         app.button[1].click().run()  # Release the test-only service gate.
+
+
+    def test_close_clears_tracking_and_busy_without_changing_completed_campaign(self):
+        row = completed_row()
+        fixture = Path(__file__).parent / 'fixtures/post_ad_compact_preview.py'
+        app = AppTest.from_file(str(fixture), default_timeout=30)
+        app.session_state[progress.JOB_KEY] = row['submission_id']
+        app.session_state[posting.SUBMISSION_ID_KEY] = row['submission_id']
+        app.session_state[posting.PROCESSING_KEY] = True
+        with patch.object(progress.JOBS, 'snapshot', return_value=row) as read, \
+             patch.object(progress.JOBS, 'submit') as submit, patch.object(progress.JOBS, 'retry') as retry:
+            app.run()
+            self.assertFalse(app.session_state[posting.PROCESSING_KEY])
+            app.button(key='posting_success_close').click().run()
+            app.run()
+            self.assertFalse(app.exception)
+            self.assertNotIn(progress.JOB_KEY, app.session_state)
+            self.assertNotIn(progress.RECEIPT_KEY, app.session_state)
+            self.assertNotIn(progress.QUERY_KEY, app.query_params)
+            self.assertEqual(app.session_state[posting.RESULT_KEY], row)
+            self.assertEqual(app.session_state[posting.SUBMISSION_ID_KEY], row['submission_id'])
+            self.assertNotIn('Close', [b.label for b in app.button])
+            self.assertEqual(read.call_count, 1)
+            submit.assert_not_called()
+            retry.assert_not_called()
+
+    def test_late_error_cannot_pollute_a_new_draft(self):
+        row = completed_row()
+        def late_error(_):
+            progress.clear()
+            progress.st.session_state[posting.SUBMISSION_ID_KEY] = 'new-draft'
+            raise TimeoutError('delayed previous job')
+        app = AppTest.from_string('import ads_posting_progress as p; p.render_current()')
+        app.session_state[progress.JOB_KEY] = row['submission_id']
+        with patch.object(progress.JOBS, 'snapshot', side_effect=late_error):
+            app.run()
+        self.assertFalse(app.exception)
+        self.assertEqual(app.session_state[posting.SUBMISSION_ID_KEY], 'new-draft')
+        self.assertNotIn('posting_status_failures', app.session_state)
 
 
 if __name__ == '__main__': unittest.main()

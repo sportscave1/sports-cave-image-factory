@@ -7,7 +7,7 @@ const context={stepEditor:null,editorLoading:false,state:{mode:'completed',activ
  tasks:()=>[{id:'requested',name:'Requested recording'},{id:'selected',name:'Other selected recording'}],
  activeModes:new Set(['recording','recording_paused','running','pausing','paused','starting']),
  active:()=>context.activeModes.has(context.state.mode),starting:()=>context.pending.size>0,
- online:()=>true,modern:()=>true,status:()=>''};
+ online:()=>true,modern:()=>true,desktopCapable:()=>true,desktopTask:t=>t?.format==='sports-cave.desktop',status:()=>''};
 vm.createContext(context);vm.runInContext(fn,context);context.renderControls();
 assert.equal(elements.get('activeName').textContent,'Requested recording');
 context.pending.clear();context.state={mode:'running',active_task_name:'Actual active recording'};context.renderControls();
@@ -17,4 +17,6 @@ context.state={mode:'paused',can_resume:true,active_task_name:'Actual active rec
 assert.equal(elements.get('resume').hidden,false);assert.equal(elements.get('activeName').textContent,'Actual active recording');
 context.state={mode:'idle'};context.stepEditor={};context.renderControls();
 assert.equal(elements.get('record').disabled,true);assert.equal(elements.get('play').disabled,true);
+context.stepEditor=null;context.desktopCapable=()=>false;context.renderControls();
+assert.equal(elements.get('record').disabled,true);
 console.log('PASS requested start name, active run independent of selection, acknowledged Pause/Resume controls');

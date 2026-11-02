@@ -182,7 +182,8 @@ def source_loader(store, row, step, live):
             if (str(content.get('automation_id')) != str(row['id']) or content.get('step_id') != step['step_id']
                     or content.get('automation_version') != version):
                 raise ValueError('Publication identity mismatch')
-            return deepcopy(content['document']), deepcopy(content['render_settings'])
+            from crm_shared_branding import current
+            return deepcopy(content['document']), current(store,content['render_settings'])
         return load
     doc = deepcopy(step['document'])
     return lambda: (doc, store.render_settings())
@@ -194,7 +195,7 @@ def prewarm(bundles, version, store=None):
         from crm_thumbnail_store import private_store
         storage=private_store(store)
         for template_id, _, content in bundles:
-            key = token([str(content['automation_id']), str(template_id), version])
+            key = token([token([str(content['automation_id']), str(template_id), version]),content['render_settings'].get('email_defaults',{})])
             snapshot = deepcopy(content)
             request(key, lambda snapshot=snapshot: (snapshot['document'], snapshot['render_settings']),storage)
     except Exception as exc:

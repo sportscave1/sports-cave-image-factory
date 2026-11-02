@@ -1,0 +1,86 @@
+{
+  "task": "20261025-35ed7e58",
+  "commit": "197cb2c0dafb8b51f9024714bee026a1d99a4c20",
+  "deploy": "dep-dbfsne8m7kps73asb4n0",
+  "live_at_utc": "2026-10-26T21:55:46.551814Z",
+  "instance": "srv-d8kl4on7f7vs73dvavv0-74977fb85d-kh9cq",
+  "authenticated_check_utc": "2026-10-26T21:56:41.918936+00:00",
+  "authenticated_headers_ms": 1929.6,
+  "provider_total": 93,
+  "provider_live_uid": 121,
+  "index_live_uid": 121,
+  "index_synced_at": 1793051795.9000437,
+  "recent_compared": 20,
+  "missing_uids": [],
+  "folders": {
+    "Drafts": {
+      "count": 2,
+      "uidvalidity": "471206461"
+    },
+    "Sent": {
+      "count": 31,
+      "uidvalidity": "1188156108"
+    }
+  },
+  "local_active_drafts": 31,
+  "old_unknown": {
+    "attempts": 1,
+    "copy_status": "pending",
+    "reconcile_attempts": 8,
+    "status": "unknown"
+  },
+  "exact_message_id_audit_utc": "2026-10-26T21:58:17.204736+00:00",
+  "exact_message_id_matches": [
+    {
+      "operation_id": "a8346ef0-10ea-4942-8acf-5df33720c30c",
+      "inbox_uids": [
+        "120"
+      ],
+      "sent_uids": [
+        "30"
+      ]
+    },
+    {
+      "operation_id": "e9a6720a-36b5-485f-aa47-2c009299d7ea",
+      "inbox_uids": [
+        "121"
+      ],
+      "sent_uids": [
+        "31"
+      ]
+    },
+    {
+      "operation_id": "11b2a2bc-5643-42cb-9a5b-5930dc10d35e",
+      "inbox_uids": [],
+      "sent_uids": []
+    }
+  ],
+  "public_component_http_status": 200,
+  "public_component_first_height_recovery_present": true,
+  "owner_confirmation": "Email loads normally",
+  "controlled_browser_ui": "component warning; also fails local Streamlit host that passes headless Chromium",
+  "counts_note": "Sent/local drafts increased after the immediate post-test audit during independent live activity. Test messages each still have exactly one Inbox and one Sent match. No mailbox reset or draft deletion performed.",
+  "latest_live": {
+    "commit": "05a0b87d205a668ebe2508303ae797a9b804e639",
+    "deploy": "dep-dbft45tg1s2s73es9390",
+    "live_at_utc": "2026-10-26T22:23:01.537982Z",
+    "instance": "srv-d8kl4on7f7vs73dvavv0-64b5f4694b-cx7fm",
+    "mailbox_source_unchanged_from": "197cb2c0dafb8b51f9024714bee026a1d99a4c20",
+    "authenticated_check_utc": "2026-10-26T22:23:44.949969+00:00",
+    "authenticated_headers_ms": 2307.8,
+    "provider_total": 94,
+    "provider_live_uid": 122,
+    "index_live_uid": 122,
+    "recent_compared": 20,
+    "missing_uids": [],
+    "provider_sent_count": 32,
+    "provider_drafts_count": 2,
+    "local_active_drafts": 32,
+    "old_unknown": {
+      "attempts": 1,
+      "status": "unknown",
+      "copy_status": "pending",
+      "reconcile_attempts": 9
+    }
+  }
+}

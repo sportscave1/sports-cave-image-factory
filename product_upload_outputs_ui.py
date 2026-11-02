@@ -209,7 +209,7 @@ def render_outputs(app,result,row,user,name):
             if not prompt_path:continue
             with st.container(key='mockups-lifestyle-'+prompt_path.stem):
                 st.markdown('**'+label+'**')
-                uploaded=st.file_uploader('Upload image from ChatGPT',type=['png','jpg','jpeg','webp'],
+                uploaded=st.file_uploader(f'Upload {label} image from ChatGPT',type=['png','jpg','jpeg','webp'],
                     key=f"lifestyle-upload::{result['run_dir']}::{filename}",disabled=saving)
                 try:
                     if not saving:

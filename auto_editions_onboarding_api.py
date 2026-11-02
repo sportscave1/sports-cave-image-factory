@@ -256,9 +256,17 @@ def product_context(pid, token):
     store=queue()
     with store.connect() as conn,conn.cursor() as cur:
         cur.execute("""SELECT q.*,m.dropbox_file_id,p.edition_total AS current_total,p.product_title,
-            ARRAY(SELECT DISTINCT COALESCE(to_jsonb(l)->>'variant_title',to_jsonb(l)->'raw_json'->>'variant_title')
+            ARRAY(SELECT title FROM (
+                SELECT COALESCE(to_jsonb(l)->>'variant_title',to_jsonb(l)->'raw_json'->>'variant_title') AS title
                 FROM shopify_order_lines l WHERE regexp_replace(l.shopify_product_id,'^gid://shopify/Product/','')=
-                regexp_replace(q.product_gid,'^gid://shopify/Product/','') ORDER BY 1 LIMIT 50) AS preparation_variants
+                regexp_replace(q.product_gid,'^gid://shopify/Product/','')
+                UNION
+                SELECT v->>'title' FROM shopify_products sp
+                CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sp.raw_json->'variants')='array'
+                    THEN sp.raw_json->'variants' ELSE '[]'::jsonb END) v
+                WHERE regexp_replace(sp.shopify_product_id,'^gid://shopify/Product/','')=
+                    regexp_replace(q.product_gid,'^gid://shopify/Product/','')
+            ) variants WHERE title IS NOT NULL AND title<>'' ORDER BY title) AS preparation_variants
             FROM auto_edition_onboarding q
             LEFT JOIN product_psd_mappings m ON m.shopify_product_gid=q.product_gid
             JOIN edition_products p ON COALESCE(NULLIF(p.shopify_product_gid,''),p.shopify_product_id)=q.product_gid
@@ -415,7 +423,7 @@ async def claim(request):
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False)
         host=request.headers.get('x-sports-cave-preparation-host')
         if host:record.v6_setup['host_token_hash']=hashlib.sha256(host.encode()).hexdigest()
-        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,transfer_settings=transfer_settings,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),upload_max_bytes=__import__('companion_package_api').upload_max_bytes(),package_transport=1,transfer_settings=transfer_settings,context=ctx,product_gid=row['product_gid'],grant=dict(base_url=str(request.base_url).rstrip('/'),
             ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:
         if row:
@@ -482,7 +490,7 @@ async def reconnect(request):
         record.expires_at=time.monotonic()+45*60
         record.v6_setup=dict(context=ctx,actor_id=str(user['id']),session_version=user.get('session_version'),importing=False,
             host_token_hash=hashlib.sha256(request.headers['x-sports-cave-preparation-host'].encode()).hexdigest())
-        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
+        return JSONResponse(dict(upload_protocol=__import__('companion_package_api').capability(),upload_max_bytes=__import__('companion_package_api').upload_max_bytes(),package_transport=1,grant=dict(base_url=str(request.base_url).rstrip('/'),ticket=record.ticket,secret=record.secret)),headers=api.HEADERS)
     except Exception as error:return api.failure(error)
 
 

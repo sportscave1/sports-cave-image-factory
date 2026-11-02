@@ -6,7 +6,7 @@ let stepEditor=null,editorLoading=false;
 const rowCache=new Map();
 const requests=new Set();
 let pending=new Map(),deleted=new Set(),renames=new Map(),rowErrors=new Map(),editing='',editName='',confirmDelete='',details=null,values={},detailRequest=0,tableSignature='',attentionKey='';
-const activeModes=new Set(['recording','recording_paused','running','pausing','paused','starting']);
+const activeModes=new Set(['recording','recording_paused','draft','running','pausing','paused','starting']);
 const uuid=()=>crypto.randomUUID();
 const tasks=()=> (state.tasks||[]).filter(t=>!deleted.has(t.id)).map(t=>renames.has(t.id)?{...t,name:renames.get(t.id)}:t);
 const active=()=>activeModes.has(state.mode)||!!device?.active_run||!!device?.needs_review;
@@ -160,7 +160,7 @@ function renderControls(){
  const legacy=task&&!desktopTask(task),nativeTask=tasks().find(t=>t.id===state.active_task_id);
  const nativeBusy=desktopCapable()&&(busy||mode==='interrupted')&&(desktopTask(nativeTask)||!nativeTask);
  $('activity').hidden=!nativeBusy;
- $('popupStatus').textContent={recording:'Recording',recording_paused:'Paused',running:'Playing',paused:'Paused',starting:'Ready to play',interrupted:'Review draft'}[mode]||'Windows popup';
+ $('popupStatus').textContent={recording:'Recording',recording_paused:'Paused',draft:'Ready to save',running:'Playing',paused:'Paused',starting:'Ready to play',interrupted:'Review draft'}[mode]||'Windows popup';
  $('popupMessage').textContent=state.message||'Continue in the Windows popup.';
  const stoppedRecovery=!!device?.needs_review&&['idle','stopped','completed'].includes(mode);
  $('acknowledgeStop').hidden=!stoppedRecovery;
@@ -242,8 +242,9 @@ function renderTable(){
    const save=button('Save','Save name for '+t.name,()=>send('rename',{id:t.id,name:editName}),!online()||busy);
    form.onsubmit=e=>{e.preventDefault();if(!save.disabled)send('rename',{id:t.id,name:editName});};form.append(field,save,button('Cancel','Cancel rename',()=>{editing='';renderTable();}));cells[0].append(form);
   }else{const label=button(t.name,'Select '+t.name,()=>select(t.id));label.className='row-name';cells[0].append(label);}
-  cells[1].textContent=date(t.updated_at);
-  cells[2].textContent=isActive?({running:'Playing',paused:'Paused',recording:'Recording',recording_paused:'Paused'}[mode]||'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Needs review',running:'Needs review',paused:'Paused'}[t.result]||'Saved');
+  cells[1].textContent=native?duration(t.duration_ms):date(t.updated_at);
+  cells[1].title=native&&t.duration_ms==null?"Duration was not stored in this older recording.":date(t.updated_at);
+  cells[2].textContent=isActive?({running:'Playing',paused:'Paused',recording:'Recording',recording_paused:'Paused',draft:'Ready to save'}[mode]||'Starting…'):({completed:'Completed',stopped:'Stopped',interrupted:'Needs review',executing:'Needs review',running:'Needs review',paused:'Paused'}[t.result]||'Saved');
   if(!isActive&&t.attention?.length){cells[2].replaceChildren(button('Needs attention','Review '+t.name,()=>review(t.id)));}
   const actions=document.createElement('div');actions.className='actions';
   const unavailable=native&&(!desktopCapable()||!t.playback_available);
@@ -268,7 +269,10 @@ function renderTable(){
 }
 function render(){
  if(!details||details.task.id!==selected)$('inputs').replaceChildren();
- $('pc').textContent=device?device.name+' · '+(online()?'Connected':'Offline'):'No PC connected';
+ $('pc').textContent=device?device.name+' · '+(online()?'Connected':'Helper unavailable')+(state.runtime?' · '+state.runtime.build+' / IPC '+state.runtime.ipc+' / '+(state.runtime.native_sha256||'').slice(0,8):''):'No PC connected';
+ let pages=$('libraryPages');if(!pages){pages=document.createElement('div');pages.id='libraryPages';$('pc').after(pages);}
+ pages.replaceChildren();if(state.library_page){const p=state.library_page;pages.append(button('Previous recordings','Previous recordings',()=>send('library-page',{offset:Math.max(0,p.offset-20)}),!online()||p.offset===0));pages.append(document.createTextNode(` ${p.total ? p.offset+1 : 0}–${Math.min(p.total,p.offset+tasks().filter(t=>t.revision).length)} of ${p.total} `));pages.append(button('Next recordings','Next recordings',()=>send('library-page',{offset:p.next}),!online()||p.next===null));}
+ let adapterStatus=$('adapterStatus');if(!adapterStatus){adapterStatus=document.createElement('div');adapterStatus.id='adapterStatus';$('pc').after(adapterStatus);}adapterStatus.textContent=state.runtime?.adapter?.explanation||'';
  $('setup').hidden=online();$('setupText').textContent=!transportOK?'Connection unavailable. Check your internet connection, then refresh.':device?'The Windows recorder is unavailable. Open Task Recorder from the Windows Start menu, then refresh the connection.':'Connect this Windows PC to use the recorder popup. You only need to do this once.';
  $('pair').hidden=!!device;
  $('legacySummary').textContent='Older browser recordings ('+tasks().filter(t=>!desktopTask(t)).length+')';

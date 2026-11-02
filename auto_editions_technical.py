@@ -103,6 +103,45 @@ def current_identity(value,digest,source,colour_evidence):
     return True
 
 
+def supersede_replaced_test_layout(cur,q,record,layouts,value):
+    """Only an explicitly completed same-source replacement may move a TEST layout.
+
+    Called inside the fenced technical commit, after fresh cloud/source checks.
+    Restricted, visual and production approvals are never carried forward.
+    """
+    pending=q.get('replacement') or {};previous=pending.get('previous') or {}
+    m=record['manifest'];digest=record['hash']
+    allowed=(len(layouts)==1 and layouts[0]['variant_id']=='*'
+        and pending.get('stage')=='Complete' and pending.get('actor')
+        and pending.get('id')==m.get('reset_request_id')
+        and pending.get('preparation_hash')==digest and pending.get('source')==m['source']
+        and previous.get('status')=='Cloud Ready' and previous.get('source')==m['source']
+        and previous.get('file_id')==q['file_id'] and previous.get('edition_total')==m['edition_total']
+        and previous.get('preparation_hash')==layouts[0]['preparation_hash'])
+    if not allowed:raise ValueError('Conflicting retained layout. Use explicit reset/repair; no layout was replaced.')
+    old=layouts[0];approval=old['approval']
+    cur.execute('SELECT * FROM auto_edition_preparations WHERE hash=%s',(old['preparation_hash'],))
+    retained=cur.fetchone()
+    if (not retained or retained['manifest']['source']!=m['source']
+            or retained['manifest']['edition_total']!=m['edition_total'] or set(approval)!=set(value)
+            or not current(approval,retained['manifest'])
+            or approval.get('evidence_hash')!=ae.fingerprint(dict(proofs=retained['proofs'],receipts=retained['receipts']))
+            or ae.status(retained['manifest'],approval)!='TEST READY'):
+        raise ValueError('Retained layout is restricted or its technical evidence changed; explicit review is required.')
+    cur.execute("""SELECT 1 FROM auto_edition_onboarding_audit WHERE product_gid=%s AND actor_id=%s
+        AND event='reset_requested' AND detail->>'request_id'=%s AND detail->'previous'=%s::jsonb LIMIT 1""",
+        (q['product_gid'],pending['actor'],pending['id'],json.dumps(previous)))
+    if not cur.fetchone():raise ValueError('Retained layout replacement has no matching owner request.')
+    from auto_editions_onboarding_store import Queue
+    Queue.audit(cur,q['product_gid'],ACTOR,'technical_layout_superseded',dict(request_id=pending['id'],
+        requested_by=pending['actor'],previous=json.loads(json.dumps(dict(old),default=str)),
+        preparation_hash=digest,test_only=True))
+    cur.execute("""UPDATE auto_edition_layouts SET preparation_hash=%s,approval=%s::jsonb,updated_at=now()
+        WHERE product_gid=%s AND variant_id='*' AND preparation_hash=%s""",
+        (digest,json.dumps(value),q['product_gid'],old['preparation_hash']))
+    return [{**old,'preparation_hash':digest,'approval':value}]
+
+
 def project(row,valid,uploaded,*,writable=False,now=None):
     from datetime import datetime,timezone
     from auto_editions_status import reason
@@ -348,7 +387,8 @@ class Technical:
                 certificate(record)  # Fresh policy check inside the final fence.
             cur.execute('LOCK TABLE auto_edition_layouts IN SHARE ROW EXCLUSIVE MODE')
             cur.execute('SELECT * FROM auto_edition_layouts WHERE product_gid=%s',(pid,));layouts=cur.fetchall()
-            if any(l['preparation_hash']!=digest for l in layouts):raise ValueError('Conflicting retained layout. Use explicit reset/repair; no layout was replaced.')
+            if any(l['preparation_hash']!=digest for l in layouts):
+                layouts=supersede_replaced_test_layout(cur,q,record,layouts,value)
             old=next((l for l in layouts if l['variant_id']=='*'),None)
             if old:
                 if old['approval'].get('allocation_ids') is not None:raise ValueError('Restricted TEST layout retained. Explicit scope correction is required; its allowlist was not broadened.')

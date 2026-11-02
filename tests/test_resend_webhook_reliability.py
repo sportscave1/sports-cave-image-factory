@@ -77,15 +77,15 @@ class DurableReliabilityTests(unittest.TestCase):
         self.assertTrue(receive_resend(self.store,self.event,self.payload,defer=True))
         self.assertFalse(receive_resend(self.store,self.event,self.payload,defer=True))
         self.assertEqual(self.store.q('SELECT count(*) AS n FROM crm_delivery_events WHERE event_id=%s',(self.event,),True)['n'],1)
-        with patch('crm_workspace_store.WorkspaceRecords.reconcile_events',side_effect=RuntimeError('temporary')):
+        with patch('crm_workspace_store.WorkspaceRecords.reconcile_events_many',side_effect=RuntimeError('temporary')):
             worker.run_once(self.store)
         row=self.store.q("SELECT * FROM crm_webhook_events WHERE provider='resend' AND event_id=%s",(self.event,),True)
         self.assertEqual(row['status'],'PENDING');self.assertEqual(row['attempts'],1)
         self.store.q("UPDATE crm_webhook_events SET lease_until=NULL WHERE provider='resend' AND event_id=%s",(self.event,))
         # Fresh consumer instance needs no in-memory payload or pending task.
-        with patch('crm_workspace_store.WorkspaceRecords.reconcile_events') as reconcile:
+        with patch('crm_workspace_store.WorkspaceRecords.reconcile_events_many') as reconcile:
             worker.run_once(self.store);worker.run_once(self.store)
-            reconcile.assert_called_once_with(self.provider)
+            reconcile.assert_called_once_with([self.provider])
         self.assertEqual(self.store.q("SELECT status FROM crm_webhook_events WHERE provider='resend' AND event_id=%s",(self.event,),True)['status'],'DONE')
         self.assertFalse(receive_resend(self.store,self.event,self.payload,defer=True))
 

@@ -103,10 +103,13 @@ var SCPSDInspector = (function () {
                 if(!inside(request.stage_root,e.work_path)||!/\.psd$/i.test(e.work_path))throw Error("Only staged PSD copies can be inspected");
                 for(var j=0;j<app.documents.length;j++)existing[String(app.documents[j].id)]=true;
                 try{
+                    // Photoshop 27 can reject PSD opens with error 8000 while minimized.
+                    // Restore its native window; never close the user's documents.
+                    app.bringToFront();
                     doc=app.open(new File(e.work_path));
                     if(existing[String(doc.id)]){doc=null;throw Error("Staged document is already open");}
                     result.inspection=inspect(doc,request);
-                }catch(error){result.error="Photoshop inspection unavailable";result.error_number=attempt(function(){return error.number;},null);}
+                }catch(error){result.error="Photoshop inspection unavailable";result.error_number=attempt(function(){return error.number;},null);result.error_message=String(error).substring(0,500);}
                 finally{if(doc&&!existing[String(doc.id)])doc.close(SaveOptions.DONOTSAVECHANGES);}
                 result.elapsed_ms=new Date().getTime()-start;results.push(result);
             }

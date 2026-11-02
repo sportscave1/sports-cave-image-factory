@@ -1,0 +1,64 @@
+PHASE 2 — RECOVERY AND ACTION VISIBILITY
+
+Implemented locally, 21 October 2026. Start-VerifiedRecorder.cmd now launches
+phase2-build-3 in normal input mode. The previous build and baseline sources
+remain available; saved recording definitions were not changed.
+
+REVIEW FINDINGS
+The cross-app engine already passes the prepared Edge/Notepad workflow. The
+largest usability defect was recovery: an uncertain result blocked further
+playback, but the existing reconciliation method had no toolbar control. A
+crash before acknowledgement could not even use that method. The toolbar also
+showed action counts without a readable captured-action plan.
+
+The coordinator durably marks each action uncertain before dispatch. Keep that
+design: it prevents an interrupted click being silently repeated. Recovery must
+never relabel an unverified run as completed or automatically restart it.
+The optional helper adapter projects recovered history into the app, so its
+in-memory history also needs to reflect the reviewed journal state.
+
+IMPLEMENTED
+- Recovery panel lists settled failed runs and failures recovered after restart.
+- Shows the exact pending step, action, control and window.
+- Requires an observation and the checked-result acknowledgement before saving.
+- Saves the observation to the existing journal and leaves the run stopped.
+- Does not dispatch, resume, retry or mark any action as verified.
+- Rejects in-flight recovery, stale revisions/steps, blank observations and
+  malformed acknowledgements. Duplicate command receipts do not repeat effects.
+- Updates recovered-history projections for the optional helper adapter.
+- Details now shows a readable action log during capture and playback and a
+  preview of saved recordings. It displays the latest 12 actions; field values
+  and clipboard contents are not copied into this log. Playback marks confirmed
+  actions and the action awaiting confirmation. Inspect/refresh tools remain
+  disabled during capture/playback.
+
+VERIFICATION
+52 Python tests passed; native build compiled successfully.
+The real toolbar recovered an isolated synthetic failed-run fixture. The review
+button remained disabled until both inputs were supplied. Saving removed the
+review panel and retained the failed journal with zero verified results and no
+native action dispatched. This is a recovery UI fixture, not a claimed replay.
+The saved nine-action Edge/Notepad round trip then passed on phase2-build-2 after
+the browser fields and synthetic scratch text were cleared. Independent UI
+reads confirmed the expected text in all three fields. Run:
+7aa304fb-43e5-4b5e-9eed-3d44cb151c83 (9/9 completed).
+Final phase2-build-3 adds on-demand preview loading. Its real toolbar selection
+was verified to request and display the selected nine-action log, with only that
+recording carrying preview data. Normal input mode remains enabled; injected test input is disabled.
+
+WHAT REMAINS
+1. Browser lifecycle is the next capability phase: selecting/opening/navigating
+   tabs and handling detached windows with stable page identity. Arbitrary page
+   dragging and navigation are not yet verified supported actions.
+2. Dynamic transfer: current paste records the resulting fixed text; Copy checks
+   an unchanged bounded source. Reading changing source data into variables and
+   replaying it into other apps requires a distinct capture/replay contract.
+3. Integrate the candidate into a local app preview and migrate libraries with
+   backups. The installed app and the other worktree have not been replaced.
+4. Selected-task previews now load on demand; only one action log is transmitted
+   with the catalogue. Full library/history pagination and large-library
+   acceptance remain outstanding within the helper IPC 64 KiB bound.
+5. Extend UI acceptance across more applications, DPI/layout changes, long runs,
+   partial selections and cancellation. No universal every-action claim.
+
+Evidence: phase2-verification.json. Prior review/evidence files remain unchanged.

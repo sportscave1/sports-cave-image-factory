@@ -61,9 +61,9 @@ def work(host,run,restored):
         traces.append({k:v for k,v in value.items() if isinstance(v,(int,float,bool)) or k in ('state','failure_class')})
         traces[:]=traces[-6:]
     try:
-        for _ in range(3):ping()
+        for _ in range(3):capabilities=ping()
         archive=folder/'packet'/'package.zip'
-        if not archive.exists():archive=build(folder/'packet',run)
+        if not archive.exists():archive=build(folder/'packet',run,large=capabilities.get('large_package_fixture') is True)
         grant=dict(base_url=config['base_url'],ticket='isolated-acceptance',secret='isolated-no-grant',upload_path='/api/auto-editions/acceptance/')
         if restored:
             # Exercise the real safe-boundary pause without changing mode.

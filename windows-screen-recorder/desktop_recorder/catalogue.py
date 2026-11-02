@@ -26,7 +26,7 @@ class Catalogue:
             cached = self.cache.get(path.stem)
             if cached is None or cached[0] != stamp:
                 task = self.repository.get(path.stem)
-                playable = self.playback_available and bool(task["actions"]) and all(a["version"] == 2 for a in task["actions"])
+                playable = self.playback_available and bool(task["actions"]) and all(a["version"] in {2,3} for a in task["actions"])
                 row = dict(id=task["id"], name=task["name"], format=FORMAT,
                            format_version=1, capabilities=sorted(requirements(task)),
                            playback_available=playable, inputs=[], steps=len(task["actions"]),
@@ -36,6 +36,8 @@ class Catalogue:
             row = deepcopy(self.cache[path.stem][1])
             row["name"] = metadata.get("name", row["name"])
             row["updated_at"] = metadata.get("updated_at", row["updated_at"])
+            duration = metadata.get("duration_ms")
+            row["duration_ms"] = duration if type(duration) is int and duration >= 0 else None
             rows.append(row)
         self.cache = {key: value for key, value in self.cache.items() if key in live}
         # Legacy rows retain their original schema and revision.

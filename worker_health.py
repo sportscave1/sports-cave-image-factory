@@ -43,7 +43,7 @@ def set_pause(connect,paused,actor):
 
 
 def validate_heartbeat(value):
-    allowed={'state','stage','revision','code_hash','protocol','product_gid','last_progress_at','retry_at','recovery_failures','checkpoint_pending','processor_lock','diagnostic','transfer_control'}
+    allowed={'state','stage','revision','code_hash','preparation_code_hash','protocol','product_gid','last_progress_at','retry_at','recovery_failures','checkpoint_pending','processor_lock','diagnostic','transfer_control'}
     if not isinstance(value,dict) or set(value)-allowed:raise ValueError('Bounded worker evidence required.')
     out={}
     for key,val in value.items():
@@ -53,7 +53,7 @@ def validate_heartbeat(value):
         if key=='diagnostic':out[key]=diagnostics.accepted(val);continue
         if key=='state' and val not in STATES:raise ValueError('Invalid worker state.')
         if key=='stage' and val not in diagnostics.STAGES:raise ValueError('Invalid worker stage.')
-        if key in ('code_hash','revision') and not re.fullmatch(r'[a-zA-Z0-9._-]{1,64}',str(val)):raise ValueError('Invalid worker version.')
+        if key in ('code_hash','revision','preparation_code_hash') and not re.fullmatch(r'[a-zA-Z0-9._-]{1,64}',str(val)):raise ValueError('Invalid worker version.')
         if key=='product_gid' and val is not None and not re.fullmatch(r'gid://shopify/Product/[1-9][0-9]*',str(val)):raise ValueError('Invalid product identity.')
         if key in ('last_progress_at','retry_at','recovery_failures','protocol') and (type(val) not in (int,float) or not math.isfinite(val) or not 0<=val<=10**11):raise ValueError('Invalid worker measurement.')
         if key in ('checkpoint_pending','processor_lock') and type(val) is not bool:raise ValueError('Invalid worker checkpoint flag.')

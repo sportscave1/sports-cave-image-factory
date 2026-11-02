@@ -13,13 +13,16 @@ def generation():
     root=Path(__file__).parent
     names=('data/auto_editions_template.json','scripts/photoshop/prepare_auto_editions.jsx',
            'scripts/photoshop/inspect_psd_editions.jsx','auto_editions_onboarding.py',
-           'scripts/prepare_auto_editions.py','auto_editions.py','auto_editions_colour.py')
+           'scripts/prepare_auto_editions.py','auto_editions.py','auto_editions_colour.py',
+           'auto_editions_preparation_geometry.py','data/auto_editions_preparation_quality.json')
     return ae.fingerprint(dict(contract=1,files={name:hashlib.sha256((root/name).read_text(encoding='utf-8-sig').replace('\r\n','\n').encode()).hexdigest() for name in names}))
 
 
 def describe(path):
     import zipfile
     path=Path(path)
+    from auto_editions_package_limits import RESUMABLE_BYTES,transfer_error
+    if not 0<path.stat().st_size<=RESUMABLE_BYTES:raise transfer_error(path.stat().st_size,RESUMABLE_BYTES)
     with zipfile.ZipFile(path) as archive:
         if archive.getinfo('manifest.json').file_size>1024*1024:raise ValueError('Bounded manifest required.')
         manifest=ae.validate_manifest(json.loads(archive.read('manifest.json')))
@@ -33,11 +36,11 @@ def describe(path):
 
 def validate(value,context):
     import re
-    from auto_editions_package import MAX_PACKAGE_BYTES
+    from auto_editions_package_limits import RESUMABLE_BYTES
     fields={'protocol','bytes','sha256','preparation_hash','generation','manifest','chunks'}
     if not isinstance(value,dict) or set(value)!=fields or value['protocol']!=PROTOCOL:
         raise ValueError('Unsupported resumable package protocol.')
-    if type(value['bytes']) is not int or not 0<value['bytes']<=MAX_PACKAGE_BYTES:raise ValueError('Invalid package size.')
+    if type(value['bytes']) is not int or not 0<value['bytes']<=RESUMABLE_BYTES:raise ValueError('Invalid package size.')
     if not isinstance(value['chunks'],list) or len(value['chunks'])!=(value['bytes']+CHUNK-1)//CHUNK:raise ValueError('Invalid chunk inventory.')
     if any(not re.fullmatch('[a-f0-9]{64}',str(h)) for h in [value['sha256'],value['preparation_hash'],value['generation']]+value['chunks']):
         raise ValueError('Exact package fingerprints required.')

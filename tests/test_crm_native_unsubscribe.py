@@ -91,6 +91,8 @@ class NativeUnsubscribeTests(unittest.TestCase):
         from crm_tracking import send_identity
         store.q.return_value={'campaign_send_id':send_identity(row['campaign_id'])}
         store.template.return_value={'format':'campaign_delivery_v1','document':sectioned(),'render_settings':settings(ENV)}
+        branding=patch('crm_shared_branding.campaign_settings',return_value=settings(ENV))
+        branding.start();self.addCleanup(branding.stop)
         shop=Mock();shop.customer.return_value=customer
         delivery=Mock();delivery.suppressed.return_value=False;delivery.send.return_value='mock-message'
         with patch('crm_campaign_send.production_checks',return_value={'ready':True}),patch('crm_workspace_store.WorkspaceRecords.frequency_blocked',return_value=False):

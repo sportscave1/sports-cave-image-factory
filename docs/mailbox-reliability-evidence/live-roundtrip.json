@@ -1,0 +1,55 @@
+{
+  "task": "20261025-35ed7e58",
+  "runtime_commit": "6e59900dff5e317bce2bb4c0bd84a88703b310f3",
+  "approved_destination": "hello@sportscaveshop.com",
+  "test_mode": "Real application runtime compose/outbox/SMTP/IMAP; same-provider self round trip, not GUI automation",
+  "messages": [
+    {
+      "label": "initial",
+      "operation_id": "a8346ef0-10ea-4942-8acf-5df33720c30c",
+      "message_id": "<sc.a8346ef0-10ea-4942-8acf-5df33720c30c@sportscaveshop.com>",
+      "queue_ack_ms": 3017.0,
+      "created_at_utc": "2026-10-26T21:43:00.018042Z",
+      "smtp_accepted_at_utc": "2026-10-26T21:43:08.902003Z",
+      "queued_to_smtp_acceptance_ms": 8883.961,
+      "inbox_receipt_observed_from_test_start_ms": 17062.7,
+      "sent_visibility_observed_from_test_start_ms": 23299.6,
+      "inbox_uid": 120,
+      "sent_uid": 30,
+      "attachment_decoded_bytes_verified": true,
+      "status": "accepted",
+      "copy_status": "appended",
+      "smtp_submission_attempts": 1
+    },
+    {
+      "label": "reply",
+      "operation_id": "e9a6720a-36b5-485f-aa47-2c009299d7ea",
+      "message_id": "<sc.e9a6720a-36b5-485f-aa47-2c009299d7ea@sportscaveshop.com>",
+      "queue_ack_ms": 2864.6,
+      "created_at_utc": "2026-10-26T21:43:26.783711Z",
+      "smtp_accepted_at_utc": "2026-10-26T21:43:35.083749Z",
+      "queued_to_smtp_acceptance_ms": 8300.038,
+      "inbox_receipt_observed_from_test_start_ms": 16982.6,
+      "sent_visibility_observed_from_test_start_ms": 20609.2,
+      "inbox_uid": 121,
+      "sent_uid": 31,
+      "status": "accepted",
+      "copy_status": "appended",
+      "smtp_submission_attempts": 1
+    }
+  ],
+  "both_indexed_without_manual_refresh": true,
+  "threaded_together": true,
+  "index_synced_at": 1793051020.496435,
+  "test_duration_s": 50.5,
+  "folder_audit_immediately_after_test": {
+    "INBOX": 93,
+    "Sent": 30,
+    "Drafts": 2,
+    "active_local_drafts": 27
+  },
+  "limitations": [
+    "Receipt and Sent observations include polling; not exact provider availability latency.",
+    "No GUI click acknowledgement, actual UI opening or cross-provider delivery timing measured."
+  ]
+}

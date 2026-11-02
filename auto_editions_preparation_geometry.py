@@ -1,10 +1,30 @@
 """Selected-SKU sizing for shared masters; no source, approval or archive writes."""
+import json
 import math
+from functools import lru_cache
+from pathlib import Path
 
 from auto_editions_resolution import supplier_reference
 import print_specifications
 
-VERSION = 'selected-sku-fractional-v1'
+LEGACY_VERSION = 'selected-sku-fractional-v1'
+VERSION = 'selected-sku-reference-v2'
+QUALITY_POLICY = 'owner-reference-raster-floor-v1'
+
+
+@lru_cache(maxsize=1)
+def quality_references():
+    """Owner-selected raster floor, never a supplier or native-detail approval."""
+    value=json.loads((Path(__file__).parent/'data/auto_editions_preparation_quality.json').read_text(encoding='utf-8'))
+    if value.get('policy')!=QUALITY_POLICY or not isinstance(value.get('references'),dict):
+        raise ValueError('Preparation quality reference policy is invalid.')
+    for sku,ref in value['references'].items():
+        dims=ref.get('dimensions') if isinstance(ref,dict) else None
+        if (not isinstance(sku,str) or not sku or not isinstance(dims,list) or len(dims)!=2
+                or any(type(n) is not int or n<=0 for n in dims)
+                or dims[0]*dims[1]>95_000_000 or not ref.get('product_gid') or not ref.get('preparation_hash')):
+            raise ValueError('Preparation quality reference is invalid or exceeds the worker budget.')
+    return value['references']
 
 
 def proportional_dimensions(source, width):
@@ -64,12 +84,19 @@ def plan(source, legacy_scale, *, variant='', variants=None, sku=None,
             raise ValueError('Known supplier crop is outside the source.')
         fraction = [(x1 - x0) / source[0], (y1 - y0) / source[1]]
     required = [0, 0]
+    quality=[]
     for spec in specs:
         physical = sorted(spec['printable_mm'], reverse=source[0] >= source[1])
         pixels = [round(mm * spec['recommended_ppi'] / 25.4) for mm in physical]
         configured = spec.get('pixel_dimensions')
         if isinstance(configured, list) and len(configured) == 2:
             pixels = [max(a, b) for a, b in zip(pixels, sorted(configured, reverse=source[0] >= source[1]))]
+        ref=quality_references().get(spec['sku'])
+        if ref:
+            floor=sorted(ref['dimensions'],reverse=source[0]>=source[1])
+            pixels=[max(a,b) for a,b in zip(pixels,floor)]
+            quality.append(dict(sku=spec['sku'],dimensions=list(ref['dimensions']),name=ref.get('name',''),
+                                product_gid=ref['product_gid'],preparation_hash=ref['preparation_hash']))
         required = [max(old, math.ceil(px / part)) for old, px, part in zip(required, pixels, fraction)]
     output = legacy
     desired = None
@@ -90,6 +117,7 @@ def plan(source, legacy_scale, *, variant='', variants=None, sku=None,
                 estimate_before_supplier_crop=crop_bounds_px is None,
                 bleed_verified=bool(specs) and all(s['includes_bleed'] for s in specs),
                 resolution_status=status, requested_dimensions=desired,
+                quality_target=dict(policy=QUALITY_POLICY,references=quality,supplier_rating_verified=False),
                 worker_max_pixels=max_pixels, supplier_verified=False, print_ready=False)
 
 
@@ -102,7 +130,7 @@ def _scale(value):
 def validate(source, dimensions, geometry):
     """Validate a recorded plan structurally without invalidating historic specs."""
     record = geometry.get('plan') or {}
-    if (record.get('version') != VERSION or record.get('source_dimensions') != source
+    if (record.get('version') not in (LEGACY_VERSION,VERSION) or record.get('source_dimensions') != source
             or record.get('output_dimensions') != dimensions
             or record.get('worker_max_pixels') != 95_000_000
             or dimensions[0] * dimensions[1] > 95_000_000
@@ -115,6 +143,11 @@ def validate(source, dimensions, geometry):
             or geometry.get('quality_approval_required') is not (dimensions != source)
             or record.get('supplier_verified') is not False or record.get('print_ready') is not False):
         raise ValueError('Fractional preparation requires a pinned proportional TEST geometry plan.')
+    if record['version']==VERSION:
+        target=record.get('quality_target') or {}
+        if (target.get('policy')!=QUALITY_POLICY or not isinstance(target.get('references'),list)
+                or target.get('supplier_rating_verified') is not False):
+            raise ValueError('Reference sizing requires explicit TEST-only quality provenance.')
 
 
 def for_context(source, ctx, *, legacy_scale=None):

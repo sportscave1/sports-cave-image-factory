@@ -131,12 +131,20 @@ class ProductionCardinalityDatabase:
 
 
 class OrdersBoundedReaderRegressionTests(unittest.TestCase):
-    def _load(self, order_count=100_000):
+    def _load(self, order_count=100_000, limit=50):
         database = ProductionCardinalityDatabase(order_count=order_count)
         started = time.perf_counter()
         with patch.object(supabase_backend, "read_connection", side_effect=disposable_read_connection), patch.object(supabase_backend, "connect", side_effect=database.connect):
-            rows = supabase_backend.list_hybrid_order_rows(limit=50)
+            rows = supabase_backend.list_hybrid_order_rows(limit=limit)
         return database, rows, (time.perf_counter() - started) * 1000
+
+    def test_latest_75_returns_all_orders_and_fulfilment_units(self):
+        database, rows, _ = self._load(limit=75)
+        self.assertEqual(75, database.statements[0][1][-1])
+        self.assertEqual(75, len({row["shopify_order_id"] for row in rows}))
+        self.assertEqual(150, len(rows))
+        snapshot = order_allocator._snapshot_rows_from_supabase_order_rows(rows)
+        self.assertEqual(150, len(snapshot))
 
     def test_latest_window_is_selected_before_every_enrichment(self):
         database, rows, _elapsed_ms = self._load()

@@ -19,6 +19,7 @@ await db.exec(readFileSync('migrations/20261005064444_crm_checkout_analytics.sql
 await db.exec(readFileSync('migrations/20261006033000_crm_single_delay.sql','utf8'));
 await db.exec(readFileSync('migrations/20261010090000_crm_flow_tests.sql','utf8'));
 await db.exec(readFileSync('migrations/20261010110000_crm_campaign_preparation.sql','utf8'));
+await db.exec(readFileSync('migrations/20261027000251_crm_campaign_safe_recovery.sql','utf8'));
 let queue=Promise.resolve();
 const server=http.createServer(async(req,res)=>{
  if(req.method!=='POST'){res.writeHead(405).end();return;}

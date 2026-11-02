@@ -47,6 +47,7 @@ class Engine:
             if not self.send_one():break
         from crm_campaign_dispatch import dispatch
         dispatch(self)
+        self.complete_campaigns()
         # Persist only after completed delivery work and a renewed lease. This
         # is separate from the full-cycle/analytics completion timestamp.
         self.hold_lease()
@@ -54,6 +55,13 @@ class Engine:
         self.store.set_state('automation_delivery_health',{'checked_at':self.clock().isoformat(),
             'status':'ok',**worker_configuration(self.config)})
         self._delivery_checkpoint=self.clock()
+    def complete_campaigns(self):
+        # Persist confirmed completion at the delivery boundary. Source/analytics
+        # maintenance can keep the surrounding worker cycle open for minutes.
+        # Unknown, in-flight and future recipients still prevent completion.
+        self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
+          final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
+          WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
     def delivery(self):
         if self.provider is None:self.provider=Resend(self.config)
         return self.provider
@@ -185,6 +193,10 @@ class Engine:
                     self.store.release_paused_send(row);return True
             else:content=self.store.template(row['template_id'],row['template_version'])
             if content.get('format')=='automation_delivery_v1':
+                from copy import deepcopy
+                from crm_shared_branding import flow_settings
+                content=deepcopy(content)
+                content['render_settings']=flow_settings(self.store,row,content['render_settings'],content['document'])
                 if row['test_send'] or recipient_hash(address)!=row['recipient_hash']:
                     self.store.finish_send(row,'BLOCKED','recipient_changed');return True
                 from crm_automation_runtime import render as render_automation
@@ -214,6 +226,11 @@ class Engine:
                     context['_smart_recipient']=c['id']
                 message=render_automation(content,row,unsubscribe,context)
             elif content.get('format')=='campaign_delivery_v1':
+                from copy import deepcopy
+                from crm_shared_branding import campaign_settings
+                content=deepcopy(content)
+                original_brand_settings=deepcopy(content['render_settings'])
+                content['render_settings']=campaign_settings(self.store,row['campaign_id'],content['render_settings'],content['document'])
                 from crm_campaign_schedule import overdue_reason
                 late=overdue_reason(content,row,self.clock())
                 if late:
@@ -237,6 +254,8 @@ class Engine:
                 if smart_enabled(content['document']):
                     frozen=(content.get('dispatch',{}).get('recipients',{}).get(row['recipient_hash']) or {}).get('message')
                     if not frozen:raise ValueError('Missing recipient catalogue snapshot')
+                    from crm_shared_branding import rebrand
+                    frozen=rebrand(frozen,content['document'],original_brand_settings,content['render_settings'],row['campaign_id'],campaign['campaign_send_id'])
                     from crm_campaign_dispatch import payload
                     mail=payload(frozen,{'address':address,'unsubscribe_url':unsubscribe,'message':frozen},self.config)
                     message={field:mail[field] for field in ('subject','html','text')}
@@ -494,9 +513,7 @@ class Engine:
             # Native reviewed campaigns consume the frozen delivery snapshot in
             # batches. Automation/legacy template tests retain their own path.
             self.delivery_checkpoint(force=True)
-            self.store.q("""UPDATE crm_campaigns c SET status='SENT',sent_at=now(),updated_at=now(),
-              final_recipient_count=(SELECT count(*) FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status='ACCEPTED' AND s.provider_email_id IS NOT NULL)
-              WHERE status='SENDING' AND NOT EXISTS(SELECT 1 FROM crm_marketing_sends s WHERE s.campaign_id=c.id AND s.status IN ('PENDING','CLAIMED','SUBMITTING','UNCERTAIN'))""")
+            self.complete_campaigns()
             # Read-side analytics continues with marketing OFF and cannot submit
             # email. A Shopify outage must not interrupt delivery/consent handling.
             try:

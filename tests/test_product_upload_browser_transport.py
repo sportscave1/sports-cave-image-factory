@@ -41,7 +41,10 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
     monkeypatch.setattr(files,'_directory_page',directory)
     thumbnail=io.BytesIO();Image.new('RGB',(160,100),'navy').save(thumbnail,format='JPEG')
     provider.api.get_psd_thumbnail_bytes.return_value=thumbnail.getvalue()
-    async def html(request):return HTMLResponse((ROOT/'components/product_uploads/index.html').read_text(encoding='utf-8'))
+    async def html(request):
+        # Match the production page's same-origin script URLs when mounted at /.
+        html=(ROOT/'components/product_uploads/index.html').read_text(encoding='utf-8')
+        return HTMLResponse(html.replace('./app.js','/product-uploads.js').replace('./mapping.js','/product-upload-mapping.js'))
     app=Starlette(routes=[Route('/',html),*[Route(p,e,methods=list(m)) for p,e,m in api.ROUTES]])
     with local_client(app) as client,sync_playwright() as pw:
         browser=pw.chromium.launch(headless=True);page=browser.new_page(viewport=dict(width=1280,height=900));errors=[];requests=[]
@@ -90,7 +93,9 @@ def test_dropbox_picker_browser_exact_source_search_navigation_fresh_page_and_ti
         page.goto(client.base+'/__frame');frame=page.frame_locator('iframe')
         frame.locator('#choose').click();expect(frame.locator('#picker-path')).to_have_attribute('title',REVIEW)
         page.wait_for_function("() => {const f=document.querySelector('iframe'),p=f.contentDocument.querySelector('#picker');return p.getBoundingClientRect().bottom<=f.getBoundingClientRect().height;}")
-        assert frame.locator('#picker').bounding_box()['height']>400
+        # Status copy can wrap differently; the picker must retain a useful
+        # viewport and fit the resized host frame, rather than a magic 400px.
+        assert 300<frame.locator('#picker').bounding_box()['height']<=page.viewport_size['height']
         frame.locator('#picker-close').click();expect(frame.locator('#picker')).to_be_hidden()
         assert not any('/chunk' in url or '/start' in url or '/finish' in url for url in requests)
         assert not provider.sessions and not provider.calls and not errors

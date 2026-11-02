@@ -1,0 +1,27 @@
+{
+  "task": "20261025-35ed7e58",
+  "release_parent": "5980a803e5c0073f2e430b7d8e495e10c9b7d78d",
+  "target_service": "srv-d8kl4on7f7vs73dvavv0",
+  "rollback_deploy": "dep-dbf80g2jnfac73egeskg",
+  "approval": "Owner authorised Git/Render release and approved hello@sportscaveshop.com for the real round trip, attachment and reply.",
+  "patch_sha256": "f730abdd383acd763581044c2999a19151ee65524a2e334d648b12bce3c647c5",
+  "files": {
+    "components/support_email/mail.js": "e8a79464ea71242b2f310a2bacb2d61db602302836beac716ac572c24957f503",
+    "support_email_durable.py": "dd711ba6bfc9db7e6dd5d00561bbdd33cd376a7c23660a1a6e5b8f4ecc5f08a7",
+    "support_email_idle.py": "3e1f0082fd35a6430ae6724158a738c87e91054b6b753a455235c9e7979f2685",
+    "support_email_provider.py": "02e248e8bf881647bdb65823de09d4b5a655c7077b327be237839d8b588b64a6",
+    "support_email_reads.py": "7be15db2914562bbdef2b352887740335a64d80c3ce455c66f1fcc56f5ca1b4b",
+    "support_email_smtp.py": "3cf2c090af51cb7d314a216e3414517c898fd6bd2985bfac24ceef798f2c7e7c",
+    "support_email_transport.py": "ff747c6c4d89597f2311e4f0a5060cebefb51cd0099c4921a2668e9c28439c24",
+    "tests/test_email_durable_delivery.py": "7f058af4a240ba2329a68c60d534984331050b0cbc54624c2e9b76140dffaa99",
+    "tests/test_mailbox_reliability_recovery.py": "9abbc32629bd8254a425bbc0e372dafae2c562df6e0f024ec3c201f27a3b1cf5",
+    "tests/test_email_component_handshake.cjs": "6fdb2752f89afc6eb9349d36b873539e516ccca84b1f305f7e54691509880731",
+    "tests/mailbox_reliability_postgres.mjs": "6eafb04f5a45642aa46d79f9e8c01da2993af8ca4ad3ace19cd3002276dfd6a0",
+    "tests/mailbox_component_handshake_browser.cjs": "3b86e1f12f071bfb8537fe31fb63ad653f65e5df83b682c1828ace0fa48e8021"
+  },
+  "excluded": "All other unfinished work, benchmark scripts, browser fixtures, ignored runtime copies and unrelated application modules.",
+  "final_checks": "38 SQL/recovery tests, 3 transport tests, Chromium delayed-listener integration, handshake unit, scheduler/context and reader tests passed; topology and diff checks passed.",
+  "patch_location": "Retained locally as .tmp-mailbox-release-reviewed.patch; generated diff context whitespace excluded from the released tree.",
+  "followup_parent": "6e59900dff5e317bce2bb4c0bd84a88703b310f3",
+  "followup_rollback_deploy": "dep-dbfsf695efls738rdpag"
+}

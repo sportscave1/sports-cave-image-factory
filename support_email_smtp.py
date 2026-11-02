@@ -58,22 +58,29 @@ class SMTPProvider:
 
     def submit(self, mime, *, mailbox, progress=None):
         cfg, conn, data_started = self.configuration, None, False
+        stage, known_accepted = 'configuration', False
+        try:operation_id=str(uuid.UUID(str(mime.get('message_id','')).removeprefix('<sc.').split('@',1)[0]))
+        except ValueError:operation_id='unavailable'
         started=time.monotonic()
         if not cfg.configured or cfg.address.casefold() != mailbox.casefold():
             return {"status": "rejected", "notice": "SMTP is not configured for this mailbox."}
         try:
             report_progress(progress, 45, "Connecting securely…")
+            stage='connect'
             conn = self.connection_factory(cfg.host, cfg.port, context=ssl.create_default_context(), timeout=cfg.timeout)
             conn.set_debuglevel(0)
+            stage='greeting'
             code, _ = conn.ehlo()
             if code != 250:
                 raise smtplib.SMTPException("EHLO rejected")
             report_progress(progress, 60, "Authenticating mail server…")
+            stage='authentication'
             conn.login(cfg.address, cfg.password)
             maximum = str(getattr(conn, "esmtp_features", {}).get("size", ""))
             if maximum.isdigit() and len(mime["bytes"]) > int(maximum):
                 return {"status": "rejected", "notice": "Message exceeds the mail server size limit. Remove an attachment."}
             options = [f"size={len(mime['bytes'])}"] if maximum else []
+            stage='envelope'
             code, _ = conn.mail(cfg.address, options=options)
             if code != 250:
                 return {"status": "rejected", "error_category":"PROVIDER_4XX" if code<500 else "PROVIDER_5XX",
@@ -91,6 +98,7 @@ class SMTPProvider:
                         "error_category":"PROVIDER_4XX" if temporary else "PROVIDER_5XX",
                         "notice": "A recipient was rejected. Nothing was sent; check the addresses."}
             data_started = True
+            stage='data'
             report_progress(progress, 75, "Sending email…")
             # Submission can include provider spam/virus scanning after DATA. The
             # short connection timeout must not abandon a still-processing send.
@@ -99,6 +107,8 @@ class SMTPProvider:
                 conn.sock.settimeout(cfg.data_timeout)
             code, _ = conn.data(mime["bytes"])
             if code == 250:
+                known_accepted=True
+                stage='accepted'
                 report_progress(progress, 100, "Sent")
                 return {"status": "accepted", "notice": "Mail server accepted the email."}
             return {"status": "rejected", "retryable":400<=code<500,
@@ -108,14 +118,15 @@ class SMTPProvider:
             return {"status": "rejected", "retryable":400<=error.smtp_code<500,
                     "error_category":"PROVIDER_4XX" if 400<=error.smtp_code<500 else "PROVIDER_5XX", "notice": "Mail server rejected the message. Nothing was accepted."}
         except Exception as error:
-            LOGGER.warning("Email SMTP operation failed (%s)", type(error).__name__)
             category='AUTH' if isinstance(error,smtplib.SMTPAuthenticationError) else 'TIMEOUT' if isinstance(error,TimeoutError) else 'NETWORK' if isinstance(error,(OSError,smtplib.SMTPServerDisconnected)) else 'UNKNOWN'
+            LOGGER.warning('email_smtp_failure operation_id=%s stage=%s category=%s type=%s data_started=%s',
+                           operation_id,stage,category,type(error).__name__,data_started)
             if data_started:
                 return {"status": "unknown", "error_category":category,"notice": "Confirming original send. Do not resend."}
             return {"status": "rejected", "retryable":category in {'TIMEOUT','NETWORK'},
                     "error_category":category,"notice": "Could not send email. Check SMTP connection settings."}
         finally:
-            LOGGER.info('email_smtp_attempt message_id=%s duration_ms=%.1f data_started=%s',mime.get('message_id',''),(time.monotonic()-started)*1000,data_started)
+            LOGGER.info('email_smtp_attempt operation_id=%s stage=%s provider_accepted=%s duration_ms=%.1f data_started=%s',operation_id,stage,known_accepted,(time.monotonic()-started)*1000,data_started)
             if conn is not None:
                 try:
                     if getattr(conn, 'sock', None) is not None:

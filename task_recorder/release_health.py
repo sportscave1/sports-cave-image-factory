@@ -4,6 +4,7 @@ import asyncio
 from importlib import metadata
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 
 
@@ -22,6 +23,19 @@ def main():
     assert root in Path(desktop_recorder.helper.__file__).resolve().parents
     assert native_path().resolve() == root / "desktop_recorder/bin/DesktopRecorder.exe"
     assert issubclass(DesktopRunner, task_recorder.server.Runner)
+    ocr_requirements = root / 'task_recorder/requirements-ocr.txt'
+    if ocr_requirements.is_file():
+        library = root.parent / 'ocr'
+        versions = {d.metadata['Name'].lower().replace('_', '-'): d.version
+                    for d in metadata.distributions(path=[str(library)])}
+        for requirement in ocr_requirements.read_text().splitlines():
+            if not requirement.strip() or requirement.startswith('#'):
+                continue
+            name, version = requirement.strip().split('==')
+            if versions.get(name.lower().replace('_', '-')) != version:
+                raise RuntimeError('Local OCR dependency mismatch: ' + name)
+        subprocess.run([sys.executable, '-I', '-B', str(root / 'desktop_recorder/thumbnail_ocr_worker.py'),
+                        '--check', str(library)], check=True, timeout=30)
     for requirement in (root / "task_recorder/requirements-windows.txt").read_text().splitlines():
         requirement = requirement.strip()
         if not requirement or requirement.startswith("#"):

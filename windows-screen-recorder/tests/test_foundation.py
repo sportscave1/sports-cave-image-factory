@@ -160,6 +160,45 @@ class FoundationTests(unittest.TestCase):
         with self.assertRaises(Invalid):
             validate(task)
 
+    def test_anonymous_scroll_scope_survives_save_and_cannot_authorize_other_actions(self):
+        self.start()
+        item = {**action(), "version": 2, "kind": "scroll", "requires": ["uia.scroll.v2"],
+                "target": {**action()["target"], "control_type": "Group", "automation_id": "", "name": "",
+                           "selector": "uia.unique-scoped-scroll.v1",
+                           "scope": [{"control_type": "Document", "automation_id": "RootWebArea", "name": "Test page"}]},
+                "value": {"horizontal": -1, "vertical": 100}}
+        self.assertTrue(self.accept(item))
+        self.rec.stop()
+        saved = self.rec.save("Scoped page scroll")
+        task = self.repo.get(saved["id"])
+        self.assertEqual(task["actions"][0]["target"], item["target"])
+        for changes in ({"scope": []}, {"selector": "arbitrary"}, {"control_type": "Button"},
+                        {"name": "Named control"}, {"scope": [{"control_type": "Group", "automation_id": "", "name": ""}]}):
+            bad = copy.deepcopy(task)
+            bad["actions"][0]["target"].update(changes)
+            with self.subTest(changes=changes), self.assertRaises(Invalid):
+                validate(bad)
+        for kind, capability in (("invoke", "uia.invoke.v2"), ("wait_ready", "uia.readiness.v2")):
+            bad = copy.deepcopy(task)
+            bad["actions"][0].update(kind=kind, requires=[capability])
+            del bad["actions"][0]["value"]
+            with self.subTest(kind=kind), self.assertRaises(Invalid):
+                validate(bad)
+
+    def test_scroll_viewport_metadata_survives_save_and_rejects_invalid_sizes(self):
+        task = self.repo.get(self.saved()["id"])
+        item = {**action(), "version": 2, "kind": "scroll", "requires": ["uia.scroll.v2"],
+                "target": {**action()["target"], "scope": []},
+                "value": {"horizontal": -1, "vertical": 6.012269938650307,
+                          "horizontal_view_size": 100, "vertical_view_size": 39.292364990689016}}
+        task.update(id=str(uuid4()), actions=[item])
+        self.repo.save(task)
+        self.assertEqual(self.repo.get(task["id"])["actions"][0]["value"], item["value"])
+        for bad in (0, -1, 101, True, "39", None, float("nan"), float("inf")):
+            item["value"]["vertical_view_size"] = bad
+            with self.subTest(bad=bad), self.assertRaises(Invalid):
+                validate(task)
+
     def test_menu_expansion_requires_an_explicit_state(self):
         task = self.repo.get(self.saved()["id"])
         task["actions"] = [{**action(), "version":2, "kind":"expand", "requires":["uia.expand.v2"],

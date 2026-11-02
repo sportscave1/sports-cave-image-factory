@@ -18,7 +18,8 @@ from test_auto_editions import package
 from test_auto_editions_api import request
 from test_auto_editions_speed import async_test
 
-BASELINE = '9991df9ad3f6cece5d1d7a7a52e556db2feebd53'
+# Preserve the current released rules, including the approved plaque-copy fix.
+BASELINE = '131d0fa6d9bffa2d9ce63c14048c42355071e6f1'
 
 
 def snapshot(source=(7016, 4961), scale=1):

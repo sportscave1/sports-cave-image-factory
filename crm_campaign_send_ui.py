@@ -187,7 +187,8 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
     retry_requested=st.session_state.pop(key+'acceptance_retry',False)
     if st.session_state.get(key+'acceptance_uncertain'):
         from crm_campaign_preparation import lookup
-        try:known=lookup(store,user,editor['id'])
+        from crm_campaign_reprepare import recovery_receipt
+        try:known=recovery_receipt(editor,lookup(store,user,editor['id']))
         except Exception:
             st.warning('Acceptance status unavailable. No replacement operation will be created.')
             if st.button('Check acceptance',key=key+'check_acceptance'):st.rerun(scope='fragment')
@@ -279,26 +280,21 @@ def _review_finalization(shop,store,user,editor,key,job,delivery,summary_slot,cf
     clicked=action_slot.button(action,key=key+'confirm_send',disabled=not ready or bool(st.session_state.get(key+'queue_busy')),type='primary')
     # Immediate native feedback; durable uniqueness remains exclusively server
     # owned. Preserve the real label and accessibility rather than disguising it.
-    st.html('''<script>/* '''+uuid.uuid4().hex+''' */(()=>{
-      const b=document.querySelector('[role="dialog"] .st-key-crm-review-submit button');
-      if(!b)return;
-      b.disabled='''+('false' if ready and not st.session_state.get(key+'queue_busy') else 'true')+''';
-      b.removeAttribute('aria-busy');b.style.opacity='';
-      if(b.dataset.acceptFeedback)return;b.dataset.acceptFeedback='true';
-      b.addEventListener('click',()=>queueMicrotask(()=>{
-        b.disabled=true;b.setAttribute('aria-busy','true');b.style.opacity='.65';
-      }));
-    })();</script>''',unsafe_allow_javascript=True)
+    from pathlib import Path
+    feedback=Path(__file__).with_name('components').joinpath('campaign_recovery','accept_feedback.js').read_text(encoding='utf-8')
+    st.html('<script>/* '+uuid.uuid4().hex+' */'+feedback+'</script>',unsafe_allow_javascript=True)
     if (clicked or retry_requested) and ready:
         operation=st.session_state.setdefault(key+'production_operation',str(uuid.uuid4()))
         st.session_state[key+'queue_busy']=True
         action_slot.button('Accepting campaign…',disabled=True,key=key+'preparing_send')
         try:
             from crm_campaign_preparation import accept,lookup
-            sent=accept(store,user,editor,operation,snapshot_id=result['snapshot_id'],confirmed=True)
+            sent=accept(store,user,editor,operation,snapshot_id=result['snapshot_id'],confirmed=True,
+                        recovery_operation=editor.get('recovery_operation'))
         except Exception as exc:
             # A lost commit response must resolve against durable identity first.
-            try:sent=lookup(store,user,editor['id'])
+            from crm_campaign_reprepare import recovery_receipt
+            try:sent=recovery_receipt(editor,lookup(store,user,editor['id']))
             except Exception:
                 st.session_state[key+'acceptance_uncertain']=True
                 st.warning('Acceptance status unavailable. Open Campaigns Home to check this campaign before retrying.')

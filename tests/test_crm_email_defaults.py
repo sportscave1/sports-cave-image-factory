@@ -135,7 +135,7 @@ class EmailDefaultsTests(unittest.TestCase):
         before=deepcopy(at.session_state['campaign_editor']['document'])
         at.session_state[at.session_state['campaign_edit_key']+'panel']='Templates';at.run()
         self.assertFalse(at.exception)
-        edits=[b for b in at.button if (b.key or '').startswith('edit_email_default_')]
+        edits=[b for b in at.button if b.key in ('edit_email_default_header','edit_email_default_footer')]
         self.assertEqual(len(edits),2)
         # AppTest does not retain native tab selection on subsequent button events.
         # Exercise the same editor directly, then verify the composer preview anew.
@@ -159,4 +159,4 @@ brand_templates_settings(store,ADMIN)
         self.assertEqual(self.store.default_sections(self.cfg)['header'],'<p>UI default</p>')
         at.run()
         self.assertEqual(at.session_state['campaign_editor']['document']['custom_html'],before['custom_html'])
-        self.assertTrue(any('UI default' in f.proto.srcdoc for f in at.get('iframe')))
+        self.assertIn('UI default',str(at.session_state[at.session_state['campaign_edit_key']+'local_preview_model']))

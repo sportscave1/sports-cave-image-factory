@@ -45,7 +45,7 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
         contract = ads_page.build_instant_experience_fixed_opaque_footer_rules()
         for wording in (
             "span the complete image width from the left edge to the right edge",
-            "occupy approximately the bottom 24–28% of the canvas",
+            "occupy approximately the bottom 18–20% of the canvas",
             "anchored flush to the bottom edge",
             "perfectly straight, hard top edge",
             "be fully opaque",
@@ -130,7 +130,7 @@ class InstantExperienceFooterRegressionTests(unittest.TestCase):
         contract = ads_page.build_instant_experience_on_image_copy_fit_rules()
         for wording in (
             "Assess rendered glyph width, not character or word count",
-            "no more than 12 words and no more than 70 characters",
+            "Do not render a supporting line, secondary sentence or replacement text",
             "no more than four words and no more than 24 characters",
             "880–896 px usable width",
             "Keep size and weight within the shared collector typography targets",

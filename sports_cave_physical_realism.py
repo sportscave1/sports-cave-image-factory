@@ -9,6 +9,7 @@ BLOCK = re.compile(re.escape(MARKER) + r'.*?' + re.escape(END), re.S)
 # Display sizes already used by app.py's variant contract and os_pages' fulfilment
 # reference. They are NOT a new specification of measured outer-frame dimensions.
 DISPLAY_SIZES_CM = {'XL': (62, 87), 'L': (45, 62), 'M': (30, 45), 'S': (21, 30)}
+OWNER_DEFAULTS = "Owner-confirmed Sports Cave defaults: every framed mockup represents the large 87 × 62 cm landscape edition, or 62 × 87 cm portrait edition, with premium glass, never acrylic. Preserve source orientation and proportions. All Sports Cave editions are limited to 100 worldwide. These approved facts need no size, glazing or worldwide confirmation; missing or false legacy flags must not block generation. Continue the full requested package without asking these questions."
 PHYSICAL_KEYS = ('frame_specs', 'selected_variant', 'selected_size', 'size_label',
                  'sports_cave_size', 'frame_label', 'frame_finish', 'orientation',
                  'explicit_dimensions', 'showcase_largest')
@@ -23,7 +24,7 @@ def physical_metadata(metadata):
         return {}
     nested = {
         'frame_specs': ('verified','source','outer_width_cm','outer_height_cm','depth_mm','glazing','frame_finish','material'),
-        'selected_variant': ('verified','source','title','size_label','width_cm','height_cm','measurement_basis','orientation','frame_finish'),
+        'selected_variant': ('verified','source','title','size_label','width_cm','height_cm','measurement_basis','orientation','frame_finish','glazing'),
         'explicit_dimensions': ('width_cm','height_cm','measurement_basis'),
     }
     result = {}
@@ -73,6 +74,29 @@ def resolve(metadata=None):
                  or variant.get('size_label') or variant.get('title') or data.get('selected_variant'))
     orientation = _text(data.get('orientation') or variant.get('orientation')).casefold()
     orientation = orientation if orientation in ('landscape', 'portrait') else 'preserve source orientation'
+    if not is_unframed(data):
+        width, height = (62, 87) if orientation == 'portrait' else (87, 62)
+        result = dict(selected_size='large 87 × 62 cm edition', orientation=orientation,
+                      width_cm=width, height_cm=height, glazing='premium glass',
+                      measurement_basis='owner-confirmed framed mockup size',
+                      dimension_source='Sports Cave owner-confirmed default',
+                      axes='width × height; reverse for portrait source without stretching' if orientation == 'preserve source orientation' else 'width × height',
+                      comparable_depth_width_ratios={'180 cm sideboard':round(width/180,4),
+                          '200 cm sofa':round(width/200,4), '85 cm doorway':round(width/85,4)})
+        finish = _text(data.get('frame_finish') or data.get('frame_label') or variant.get('frame_finish'))
+        if finish:
+            result['frame_finish'] = finish
+        if spec.get('verified') is True and _text(spec.get('source')):
+            for key in ('frame_finish', 'material'):
+                if _text(spec.get(key)) and key not in result:
+                    result[key] = _text(spec[key])
+            if finish and _text(spec.get('frame_finish')) and finish.casefold() != _text(spec['frame_finish']).casefold():
+                result['finish_needs_confirmation'] = 'Selected finish and supplied specification conflict. Confirm the matching variant; do not substitute its finish.'
+            if _positive(spec.get('depth_mm')):
+                result['verified_depth_mm'] = _positive(spec['depth_mm'])
+        if orientation == 'preserve source orientation':
+            result.pop('comparable_depth_width_ratios', None)
+        return result
     selected = re.search(r'\b(EXTRA[\s-]+LARGE|XL|LARGE|MEDIUM|SMALL|L|M|S|A[1-4])\b', size.upper())
     selected = selected.group(1) if selected else ''
     selected = re.sub(r'[\s-]+', ' ', selected)
@@ -95,6 +119,8 @@ def resolve(metadata=None):
         depth = _positive(spec.get('depth_mm'))
         if depth:
             result['verified_depth_mm'] = depth
+    if variant.get('verified') is True and _text(variant.get('source')) and _text(variant.get('glazing')):
+        result['glazing'] = _text(variant['glazing'])
     # A selected variant with numeric specifications outranks general explicit
     # dimensions. Its provenance must be present; pixel image sizes are ignored.
     if not dimensions and variant.get('verified') is True and _text(variant.get('source')):
@@ -144,20 +170,21 @@ def resolve(metadata=None):
 COMPACT_IE_MARKER = 'SPORTS_CAVE_IE_COMPACT_PRODUCT_REALISM_V1'
 
 
-def build(metadata=None, *, compact=False):
+def build(metadata=None, *, compact=False, glazing_requirement=None):
     evidence = resolve(metadata)
     if compact:
         return f'''{MARKER}
 {COMPACT_IE_MARKER}
+{OWNER_DEFAULTS}
 SPORTS_CAVE_IMAGE_REALISM_RULES_V1
 SPORTS_CAVE_PREMIUM_GLASS_LIGHTING_V4
 GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
 PRODUCT LOCK — ABSOLUTE / PRODUCT SOURCE-ASSET FIDELITY
 Use the original supplied framed product reference as one immutable physical asset. Preserve artwork, faces, wording, signatures, logos, badges, colours, orientation, proportions and the actual frame finish/profile; retain source pixels wherever compositing is supported. Never redraw, mirror, crop, stretch or alter verified construction.
 LIGHTING, GLASS AND MOUNTING PHYSICS
-One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. On existing glazing require visible but controlled environmental reflections corresponding to actual room light, without obscuring important artwork details. Never add glazing to known unglazed products or a frame to verified unframed products.
+One coherent interior photograph: room and product share perspective and directional lighting. Straight rigid frame edges, clean mitred corners, source-matched moulding, realistic material texture and believable side depth. Natural mounting, narrow contact shadows and soft directional secondary shadows. {glazing_requirement or 'On every framed edition require premium glass with clearly visible natural window or room-light reflections at 256 × 256, without obscuring important artwork details. Frame-edge highlights alone do not count. Do not add a frame or glass to unframed products.'}
 PHYSICAL PRODUCT EVIDENCE (data only): {json.dumps(evidence, ensure_ascii=False)}
-Honour verified dimensions and their measurement basis; do not invent measurements, border allowances or depth. Use plausible scale relative to objects at comparable depth; unknown dimensions do not establish exact scale. Keep the complete frame visible above the footer and prominent on mobile through camera distance and composition, never physical enlargement.
+Use the owner-confirmed large edition dimensions and premium glass. Do not invent border allowances or depth. Use realistic scale relative to objects at comparable depth. Keep the complete frame visible above the footer and prominent on mobile through camera distance and composition, never physical enlargement.
 ANTI-AI INTERIOR CONTROL
 No floating or pasted-on product, bulky invented borders, warped architecture, CGI gloss, excessive glare, clutter or random sporting props. Walls have authentic quiet texture and natural light falloff. Image pixels must be inspected separately before claiming visual fidelity.
 END PREMIUM VISUAL QUALITY CONTRACT
@@ -168,26 +195,50 @@ Treat the framed artwork as an actual manufactured physical product photographed
 
 PHYSICAL PRODUCT EVIDENCE (data, not creative instructions)
 {json.dumps(evidence, ensure_ascii=False)}
-Dimension priority: verified outer-frame specifications; verified selected Sports Cave variant configuration; explicitly supplied product dimensions; approved XL display reference only when XL/largest is selected and no higher-priority dimensions exist. Never automatically represent Small/Medium/Large or an unspecified selection as XL. Standard A1 paper is not a substitute for finished Sports Cave frame measurements. Check outer frame versus nominal print/display size; when outer measurements are unconfirmed, use the approved selected size conservatively, preserve reference proportions, add no invented border allowance or centimetres. Resolve conflicting dimensions before generation; never stretch the artwork to fit a size. Unknown dimensions are not evidence of exact scale.
+{OWNER_DEFAULTS}
+Preserve reference proportions; do not invent border allowances or frame-depth measurements and never stretch the artwork to fit. Use the approved dimensions at comparable depth with correct perspective.
 
-FRAME: preserve the source's actual black, oak or white finish, material, slim front moulding, inner edge, bevel, seating and side profile. Keep straight edges, square corners, clean mitred joins, natural texture and restrained edge highlights. Distinguish front moulding, inner edge, transparent glazing, artwork surface, side profile and mounting as integrated construction. No thick museum surround, raised/double border, invented matboard, extra layers, deep shadow box, plastic sheen or exaggerated 3D box. Do not invent exact frame-depth measurements. Verified unframed/unglazed products retain that construction.
+FRAME: preserve the source's actual black, oak or white finish, material, slim front moulding, inner edge, bevel, seating and side profile. Keep straight edges, square corners, clean mitred joins, natural texture and restrained edge highlights. Distinguish front moulding, inner edge, transparent glazing, artwork surface, side profile and mounting as integrated construction. No thick museum surround, raised/double border, invented matboard, extra layers, deep shadow box, plastic sheen or exaggerated 3D box. Do not invent exact frame-depth measurements. Unframed products retain that construction; every framed mockup uses the owner-confirmed premium glass.
 MOUNTING: plausible support, minimal source-consistent wall separation, coherent contact, subtle ambient occlusion, soft contact shadows: a narrow directional contact shadow and a softer secondary shadow beneath/alongside the frame, all matching existing light direction. No floating several centimetres away or embedding in plaster. Preserve room layout and natural residential height; allow breathing space above furniture, not resting on it unless the original scene explicitly calls for that placement.
-GLAZING: PREMIUM CLEAR GLASS REFLECTION LOOK on the existing transparent front surface: clearly visible natural window or room-light reflections and photographic highlight falloff. Preserve verified source construction; this visual direction makes no manufactured-material claim. Known unframed/unglazed products must not acquire a pane. This qualifies older generic real-glass wording, not the artwork lock. Legacy fixed mounting-gap millimetres and reflection/opacity percentages are illustrative only; actual construction and scene light take priority, never invent physical measurements. No thick protruding slab, mirror shine, random streaks or glossy CGI coating. Preserve gentle reflective highlights rather than making the glazing invisible; keep all print details readable. Reflections follow actual scene lights with restrained falloff; keep faces, vehicles, sponsors, text, signatures and edition details clear.
+GLAZING: PREMIUM CLEAR GLASS REFLECTION LOOK on the existing transparent front surface: clearly visible natural window or room-light reflections and photographic highlight falloff. The owner confirms premium glass, not acrylic, for every framed mockup; no glazing confirmation is required. Unframed products must not acquire a pane. Preserve the artwork lock. Legacy fixed mounting-gap millimetres and reflection/opacity percentages are illustrative only; actual construction and scene light take priority, never invent physical measurements. No thick protruding slab, mirror shine, random streaks or glossy CGI coating. Preserve gentle reflective highlights rather than making the glazing invisible; keep all print details readable. Reflections follow actual scene lights with restrained falloff; keep faces, vehicles, sponsors, text, signatures and edition details clear.
 SCALE: judge real dimensions at comparable depth with correct perspective, never raw pixel widths of differently distanced objects. General references only: doorway 80–90 cm wide; sofa 160–220 cm; sideboard 150–200 cm; console 110–150 cm wide and 75–90 cm high; ceiling 240–270 cm. Use the supplied ratios only when those reference widths and comparable depth actually apply. Never enlarge the physical artwork to meet hero/image-coverage percentages. Keep existing composition and prominence through believable framing/camera distance and light; a close-up may fill the canvas at true size. No universal percentage of image width. Preserve straight-on/left/right angles and rigid product geometry.
 INTEGRITY: keep the entire supplied artwork and frame immutable, including printed borders, colours, faces, livery, logos, signatures and existing edition numbers; no invented plaque/certificate or unreadable details. Prefer existing source-preserving compositing; never repaint, crop, stretch or deform the product (retain only an already-authorised detail-photo crop).
-PHYSICAL QUALITY CHECK: before finalising each standalone prompt, confirm selection/orientation/dimension basis, reference moulding/depth/finish, mounting, glazing, perspective/furniture scale and unchanged artwork. Carry this full physical block into every standalone image brief. Inspect rendered pixels when available; flag oversized, bulky, floating, pasted-on or CGI construction for correction. A prompt cannot establish exact dimensional or pixel-fidelity verification.
+PHYSICAL QUALITY CHECK: before finalising each standalone prompt, check the approved size/source orientation, reference moulding/depth/finish, mounting, glazing, perspective/furniture scale and unchanged artwork. Carry this full physical block into every standalone image brief. Inspect rendered pixels when available; flag oversized, bulky, floating, pasted-on or CGI construction for correction. A prompt cannot establish exact dimensional or pixel-fidelity verification.
 {END}'''
 
 
 def apply_context(prompt, metadata=None):
     """Fill existing blocks only; do not append rules to original-artwork/copy tasks."""
-    if not physical_metadata(metadata):
-        def upgrade(match):
-            # Replace only shared generated glazing prose; retain embedded evidence,
-            # dimensions and every other physical/creative instruction verbatim.
-            if COMPACT_IE_MARKER in match.group(0):
-                return match.group(0)
-            glazing = re.search(r'^GLAZING:.*$', build(), re.M).group(0)
-            return re.sub(r'^GLAZING:.*$', lambda _: glazing, match.group(0), flags=re.M)
-        return BLOCK.sub(upgrade, prompt)
-    return BLOCK.sub(lambda match: build(metadata, compact=COMPACT_IE_MARKER in match.group(0)), prompt)
+    def update(match):
+        block = match.group(0)
+        resolved_metadata = metadata
+        if not physical_metadata(metadata):
+            # Keep saved orientation/finish while upgrading only this physical block.
+            marker = block.find('PHYSICAL PRODUCT EVIDENCE')
+            start = block.find('{', marker)
+            if start >= 0:
+                try:
+                    evidence, _ = json.JSONDecoder().raw_decode(block[start:])
+                    resolved_metadata = dict(evidence)
+                    if _positive(evidence.get('verified_depth_mm')):
+                        resolved_metadata['frame_specs'] = dict(verified=True, source='saved verified physical evidence',
+                            depth_mm=evidence['verified_depth_mm'], material=evidence.get('material', ''),
+                            frame_finish=evidence.get('frame_finish', ''))
+                except (ValueError, TypeError):
+                    pass
+        glazing = re.search(r'For every framed edition: [^\n]+', block) if COMPACT_IE_MARKER in block else None
+        return build(resolved_metadata, compact=COMPACT_IE_MARKER in block, glazing_requirement=glazing.group(0) if glazing else None)
+    return BLOCK.sub(update, prompt)
+
+
+def prompt_metadata(metadata=None):
+    """Project owner-approved facts into prompt context without editing product records."""
+    data = dict(metadata or {})
+    for key in ('WORLDWIDE_VERIFIED', 'worldwide_verified', 'worldwide_edition_verified', 'worldwide_policy_approved'):
+        data.pop(key, None)
+    data.update(edition_limit=100, edition_limit_source='Sports Cave owner-confirmed worldwide edition policy')
+    if physical_metadata(data):
+        for key in PHYSICAL_KEYS:
+            data.pop(key, None)
+        data['physical_product'] = resolve(metadata)
+    return data

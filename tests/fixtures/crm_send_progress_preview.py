@@ -7,7 +7,13 @@ from concurrent.futures import Future
 from types import SimpleNamespace
 from unittest.mock import patch
 import time
+import os
+import subprocess
 import streamlit as st
+if os.getenv('CAMPAIGN_CLICK_BASELINE')=='1':
+    import crm_campaign_send_ui
+    exec(compile(subprocess.check_output(['git','show','HEAD:crm_campaign_send_ui.py']).decode(),
+                 '<released-send-controls>','exec'),crm_campaign_send_ui.__dict__)
 from crm_campaign_send_ui import review_dialog
 from crm_campaign_review import identity
 from crm_campaign_home import home
@@ -27,7 +33,7 @@ st.html('''<span id="fixture-client-timings"></span><script>
     document.addEventListener('click',e=>{
       const b=e.target.closest('button');if(!b)return;
       if(b.innerText==='Review & send')t.reviewClick=performance.now();
-      if(b.closest('.st-key-crm-review-submit'))t.confirmClick=performance.now();publish();
+      if(b.closest('.st-key-crm-review-submit'))t.confirmClick??=performance.now();publish();
     },true);
     window.fixtureAcceptanceObserver=new MutationObserver(()=>{
       const at=performance.now();
@@ -57,7 +63,10 @@ class FixtureStore:
                 'timing':item['timing'],'scheduled_at':item['due'],'next_due_at':item['due'],'server_now':now(),
                 'last_progress_at':now(),'worker_started_at':now() if processed else None,'send_id':key})
         return result
-    def q(self,*args,**kwargs):self.reads+=1;return self.progress()
+    def q(self,*args,**kwargs):
+        self.reads+=1
+        if 'resend_callback_revision' in args[0]:return {'revision':'fixture'}
+        return self.progress()
     def listed(self):
         return [{**record(),'id':r['id'],'name':r['name'],'status':r['status'],'delivery_status':r['status'],
                  'subject':'Offline collector campaign','thumbnail':'','deletable':False,'recipients':1095,

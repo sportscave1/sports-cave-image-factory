@@ -37,7 +37,7 @@ def summarize(row):
             'complete': complete, 'stalled': stalled, 'attention': bool(row['status']=='FAILED' or held or failed or stalled or schedule_error or (complete and (skipped or not submitted))),
             'title': ('Campaign complete · needs attention' if held or failed or skipped or not submitted else 'Campaign sent')
                      if complete else 'Send appears stalled · view details' if stalled else 'Campaign needs attention' if held or schedule_error else
-                     'Preparing campaign' if row['status'] == 'PREPARING' else 'Campaign scheduled' if row['status'] == 'SCHEDULED' else
+                     ('Verifying campaign' if row.get('preparation_claimed') else 'Campaign queued') if row['status'] == 'PREPARING' else 'Campaign scheduled' if row['status'] == 'SCHEDULED' else
                      'Campaign paused' if row['status'] == 'PAUSED' else
                      'Campaign failed' if row['status'] == 'FAILED' else
                      'Campaign cancelled' if row['status'] == 'CANCELLED' else 'Sending campaign'}
@@ -52,6 +52,7 @@ def read_progress(store, identities):
       SELECT i.id,COALESCE(c.name,d.name) AS name,COALESCE(c.status,pr.status) AS status,
       GREATEST(c.updated_at,pr.updated_at) AS updated_at,c.sent_at,now() AS server_now,
       CASE WHEN c.id IS NULL THEN pr.reviewed_count END AS reviewed_total,pr.error_code AS preparation_error,
+      (pr.lease_token IS NOT NULL AND pr.lease_until>clock_timestamp()) AS preparation_claimed,
       COALESCE((SELECT (r.value->>'due_at')::timestamptz FROM crm_runtime_state r WHERE r.key='campaign-timing:'||c.id::text),c.scheduled_at) AS scheduled_at,
       c.campaign_send_id AS send_id,c.sending_started_at,
       p.worker_started_at,p.last_progress_at,p.next_due_at,

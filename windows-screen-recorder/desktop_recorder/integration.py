@@ -86,7 +86,9 @@ class Repository:
             return None  # Save committed before a crash; never resurrect as unsaved.
         return draft
 
-    def save(self, task):
+    def save(self, task, *, duration_ms=None):
+        if duration_ms is not None and (type(duration_ms) is not int or duration_ms < 0):
+            raise Invalid("Invalid recording duration.")
         task = validate(task)
         path = self.root / (task["id"] + ".json")
         if path.exists():
@@ -94,6 +96,12 @@ class Repository:
                 raise Invalid("Saved tasks are immutable. Editing requires a new ID.")
         else:
             self.atomic(path, task)
+        if duration_ms is not None:
+            metadata = deepcopy(self.library())
+            record = metadata.setdefault(task["id"], {})
+            if "duration_ms" not in record:
+                record["duration_ms"] = duration_ms
+                self.atomic(self.library_path, metadata)
         return {"id": task["id"], "revision": self.revision(task)}
 
     def get(self, task_id, *, include_removed=False):
