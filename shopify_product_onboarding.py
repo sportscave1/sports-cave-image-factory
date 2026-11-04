@@ -197,6 +197,10 @@ def reconcile(db, config=None, max_pages=4, renew=None):
         for product in connection['nodes']:
             if renew:
                 renew()
+                # A bulk update can make a scan take many minutes. Give durable
+                # webhook receipts a turn between products, under the same lease,
+                # rather than starving new uploads until all scan pages finish.
+                drain(db, config, limit=1, renew=renew)
             pid = product['id'].rsplit('/', 1)[-1]
             event = 'edition-recovery-' + hashlib.sha256((product['id'] + product['updatedAt']).encode()).hexdigest()
             payload = {'id': pid}

@@ -85,6 +85,66 @@ def test_brock_targeted_import_duplicates_out_of_order_and_first_order(state):
     assert not rows(sql,'certificates')
 
 
+def test_disabled_new_product_resumes_same_receipt_after_explicit_enable(state):
+    sql, product, history = state
+    product['metafields'] = [dict(namespace='sports_cave', key='edition_enabled', value='false')]
+    deliver('disabled-new-product')
+    assert not rows(sql, 'edition_products')
+    receipt = rows(sql, 'webhook_events')[0]
+    assert receipt['status'] == 'pending'
+    assert receipt['error_message'] == 'explicitly_disabled_mirror_requires_review'
+    history.assert_not_called()
+
+    # The operator corrects Shopify metadata; retry must refetch current state.
+    product['metafields'][0]['value'] = 'true'
+    sql.execute("UPDATE webhook_events SET processed_at=now()-interval '2 hours'")
+    onboarding.drain(db)
+    edition = rows(sql, 'edition_products')[0]
+    assert (edition['edition_total'], edition['next_edition_number'],
+            edition['sold_count'], edition['remaining_count']) == (100, 1, 0, 100)
+    assert len(rows(sql, 'edition_runs')) == 1
+    assert rows(sql, 'webhook_events')[0]['status'] == 'processed'
+    assert deliver('disabled-new-product')['duplicate']
+    assert len(rows(sql, 'edition_products')) == 1
+    assert not rows(sql, 'edition_orders')
+
+
+def test_bulk_scan_services_new_webhook_before_finishing_page(state, monkeypatch):
+    sql, product, api = state
+    db.claim_product_create_webhook_receipt(
+        {'id': PID.rsplit('/', 1)[-1]}, 'urgent-upload', 'products/create',
+        shop_domain='fixture.myshopify.com')
+    scan_product = 'gid://shopify/Product/999'
+    original = onboarding.process_receipt
+    observed = []
+
+    def process(row, database, config=None):
+        observed.append(row['webhook_id'])
+        if row['payload']['id'] == '999':
+            # A queued upload must already be registered before scan work runs.
+            assert len(rows(sql, 'edition_products')) == 1
+            assert rows(sql, 'webhook_events')[0]['status'] == 'processed'
+            database._update_webhook_event_status(row['webhook_id'], 'processed')
+            return {}
+        return original(row, database, config)
+
+    def graphql(query, variables=None, **kwargs):
+        if query == onboarding.PRODUCT_PAGE:
+            return {'products': {'nodes': [dict(id=scan_product, updatedAt='2026-11-04T00:00:00Z')],
+                                 'pageInfo': {'hasNextPage': False}}}, '2026-04'
+        return {'orders': {'nodes': [], 'pageInfo': {'hasNextPage': False}}}, '2026-04'
+
+    monkeypatch.setattr(onboarding, 'process_receipt', process)
+    api.side_effect = graphql
+    renew = Mock()
+    onboarding.reconcile(db, renew=renew)
+    assert observed[0] == 'urgent-upload'
+    assert observed[1].startswith('edition-recovery-')
+    assert len(rows(sql, 'edition_runs')) == 1
+    assert renew.called
+    assert db.get_app_setting(onboarding.CHECKPOINT, {}, ensure_schema_first=False)['checkpoint']
+
+
 def test_late_metadata_and_retry_survive_worker_recreation(state):
     sql,p,history=state
     p['tags'].append('sc-edition-limit-75')
