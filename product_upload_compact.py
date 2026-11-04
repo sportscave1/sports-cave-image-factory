@@ -6,7 +6,7 @@ import json
 import re
 from difflib import SequenceMatcher
 
-VERSION = 'compact-upload-v1'
+VERSION = 'compact-upload-v1-artwork-first'
 FIELDS = (
     'product_name', 'design_name', 'sport_category', 'sport', 'subjects', 'athletes',
     'team', 'event', 'product_context', 'research', 'customer_facing_title',
@@ -28,7 +28,7 @@ Dropbox temporary links are single-use: download each directly without a prelimi
 
 Continue through the selected upload workflow using available supported tools. If one step fails, retain completed work, retry recoverable failures and report the specific unfinished step. Do not declare the transfer impossible merely because Dropbox returns download links."""
 
-COPY = """Title/H1: use the supplied customer title or generate Subject — Short Design Hook (two subjects: Subject 1 vs Subject 2 — Hook). Preserve a strong design name; use a grounded 2–6-word hook. Target 35–55 characters, maximum 60 including spaces/punctuation; count and rewrite rather than truncate. Wall Art is optional within that limit. Avoid colon separators, keyword stuffing and repeated subject names.
+COPY = """Title/H1: required format ARTWORK NAME – ATHLETE / RIVALRY / TEAM / EVENT Wall Art. Original edition/design name first, one spaced en dash (–), verified subject, mandatory Wall Art suffix. Example: The Nuke – Luke Littler Wall Art. Preserve the original name, essential edition identifiers and design meaning; never invent or improve a name or guess a subject. If identity is uncertain, leave an existing title unchanged and flag it for review; request verified identity for new products. Target 35–55 characters, maximum 60 including spaces/punctuation; calculate the actual count using code. Remove only optional filler; never truncate, rename the edition or drop Wall Art to fit. If a faithful title cannot fit, flag the conflict for review without writing that title. Validate the format and count again immediately before a title write; read back the persisted title. These naming rules override conflicting saved title instructions. For title-only edits, write only product ID and title; preserve handles/URLs and all other product fields. Separate SEO instructions remain unchanged.
 Description: approximately 45–70 words, shorter when stronger; 3–4 compact blocks with a bold 3–7-word hook, one supported sporting moment, and fan/collector meaning. Use <p>, <strong>, and <em> only where useful; no headings, lists, tables, CSS or visual narration. Preserve supplied history and sizing/frame facts. No stock slogans, career summaries, room lists, fake hype or invented facts/specifications.
 Use the confirmed edition limit only. For a confirmed worldwide run, end with <p>Limited to N worldwide.</p>, substituting the confirmed N. If the run is not worldwide, use its confirmed scope; if non-limited or unknown, omit scarcity and report the missing fact. Finish exactly with <p>Real fans remember this. Own the moment.</p> and nothing after it. Never assume 100, remaining quantities, signatures, licensing or no-reprint claims.
 SEO title: 50–60 characters, maximum 60; principal commercial keyword near the start, subject and Wall Art, optional sport/brand if space permits. Meta description: 145–160 characters where practical; subject, keyword once, confirmed collector intent and relevant use; no store URL, emoji, hashtags or keyword lists. New handle: lowercase hyphenated subject-wall-art; no random numbers.
@@ -173,6 +173,9 @@ def build(selected, filename, source, metadata, additions=None):
     from product_upload_intake import MODES
     from product_upload_source import prompt_section
     m = dict(metadata or {})
+    if m.get('customer_facing_title'):
+        from product_title_rules import apply_rules
+        apply_rules('', m)  # Shared explicit-title validation before prompt handoff.
     if source and source.get('upload_id') and not m.get('operation_tag'):
         from product_upload_identity import tag
         m['operation_tag'] = tag(source['upload_id'])

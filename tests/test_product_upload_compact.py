@@ -109,7 +109,7 @@ def test_products_do_not_leak_identity_or_unrelated_sport_rules():
 def test_saved_values_and_selected_options_are_preserved():
     row = fixture()
     row['data'].update(
-        subjects=['Synthetic Athlete'], customer_facing_title='Synthetic Athlete — Courtside Legacy',
+        subjects=['Synthetic Athlete'], customer_facing_title='Courtside Legacy – Synthetic Athlete Wall Art',
         confirmed_limit=75, worldwide=True, selected_collections=[dict(id='gid://shopify/Collection/42', title='Chosen')],
         publication_settings=dict(channels=['Online Store'], markets=['Australia']),
         inventory=dict(location_id='gid://shopify/Location/10', quantity=7, tracked=False),

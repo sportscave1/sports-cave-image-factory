@@ -15,16 +15,17 @@ changes/full standardisation; Media Update Mode still preserves both. This block
 does not authorise any extra Shopify changes or alter publishing/edition policies.
 
 TITLE
-Default: [ATHLETE / SUBJECT] — [SHORT DESIGN HOOK]
-Two subjects: [SUBJECT 1] vs [SUBJECT 2] — [SHORT HOOK]
-Subject first, one EM DASH (—). Wall Art is optional within the 60-character limit. Never use a colon separator,
+Default: [ARTWORK NAME] – [ATHLETE / RIVALRY / TEAM / EVENT] Wall Art
+Two subjects: [ARTWORK NAME] – [SUBJECT 1] vs [SUBJECT 2] Wall Art
+Artwork name first, one EN DASH (–), mandatory Wall Art suffix. Never use a colon separator,
 or remove the separator to form an awkward SEO phrase. No pipes, brackets, quotes
 or unnecessary punctuation. Use verified name spelling and accents from supplied
 research. Do not repeat the subject inside the design name. Do not automatically
 insert Framed, Limited Edition, Premium, Collector, Poster, Print or Memorabilia.
-Preserve a strong approved edition/design name. Improve a weak, generic or awkward
-name before constructing the title: normally 2–6 memorable words, grounded in the
-actual subject/moment, not clickbait. Do not invent an event to justify a title.
+Preserve the original approved edition/design name and the design's meaning.
+Never invent, improve or rename the edition to fit this convention. If the original
+edition name or featured subject is uncertain, leave the existing title unchanged
+and flag it for review; for a new product, request verified identity before creation.
 An identification filename or existing SEO title is input evidence, not an order
 to reuse awkward wording. If subject identity is uncertain, request clarification.
 
@@ -77,7 +78,7 @@ without confirmed policy. Omit scarcity when edition facts are unavailable.
 Never imply a closed run is open. Preserve explicit edition exceptions.
 
 INTERNAL QUALITY PASS — revise before returning; do not print this reasoning
-Title: subject first? em dash? Wall Art suffix? strong design name? natural aloud?
+Title: original edition name first? en dash? mandatory Wall Art suffix? verified subject? natural aloud?
 No colon, repeated subject or keyword stuffing?
 Description: around 70 words or less unless genuinely justified? strong hook?
 One central idea? fan emotion/memory? no visual narration, banned phrases, room
