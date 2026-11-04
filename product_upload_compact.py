@@ -6,7 +6,9 @@ import json
 import re
 from difflib import SequenceMatcher
 
-VERSION = 'compact-upload-v1-artwork-first'
+VERSION = 'compact-upload-v2-edition-ownership'
+
+EDITION_SYNC_RULES = """Edition Ops owns all sports_cave edition metafields. Uploads must not create, update or delete sports_cave.edition_enabled, edition_archived, edition_status, edition totals/numbers/counters or sold-out flags, including through product create/update inputs. In particular, never set edition_enabled=false as a temporary publication, missing-PSD or setup-pending safeguard, and never force it true to bypass a deliberate restriction. Leave missing edition fields absent so the normal OS webhook can initialize them; preserve existing fields unchanged. Observe the storefront's existing unavailable state without writing flags or changing the theme, inventory or checkout to manufacture that state. PSD attachment is independent of automatic edition registration. If setup is pending, report it and return to Mapping; do not disable the edition. These ownership rules override conflicting saved upload requirements and supplied metafield values."""
 FIELDS = (
     'product_name', 'design_name', 'sport_category', 'sport', 'subjects', 'athletes',
     'team', 'event', 'product_context', 'research', 'customer_facing_title',
@@ -93,7 +95,10 @@ def template_additions(saved, default):
     removed = re.compile(
         r'stop before|before any Shopify write|mandatory.*(?:preflight|report)|'
         r'rollback|roll back|restore.*(?:draft|DRAFT)|all.*checks.*(?:before|pass)|'
-        r'request.*permission|ask.*permission|local Python|backend hook', re.I)
+        r'request.*permission|ask.*permission|local Python|backend hook|'
+        r'edition_enabled|edition_archived|disabled purchasing|'
+        r'(?:disable|block|prevent).*(?:purchas|checkout)|'
+        r'(?:purchas|checkout).*(?:disable|block|prevent)', re.I)
     for action, _, _, start, end in SequenceMatcher(None, before, after, autojunk=False).get_opcodes():
         if action not in ('insert', 'replace'):
             continue
@@ -208,7 +213,8 @@ def build(selected, filename, source, metadata, additions=None):
         ('\nUpdate scope: ' + str(scope) if is_update else '') +
         '\nReuse the saved Shopify product ID or the product with this operation tag on retries; never create duplicates. Add the operation tag in the initial create/update, preserving other tags.' +
         (f'\nAdd edition-limit tag sc-edition-limit-{limit}.' if limit is not None and m.get('limited_edition') is not False
-         else '\nAdd sc-edition-limit-N only when N is confirmed; no assumed edition limit.'),
+         else '\nAdd sc-edition-limit-N only when N is confirmed; no assumed edition limit.') +
+        '\n' + EDITION_SYNC_RULES,
         '2. DROPBOX FOLDER AND ORDERED WEBP MANIFEST\n' +
         (prompt_section(source).strip() if source else 'No saved Dropbox folder: use the original WEBP attachments. Standard approved order: 1 Black frame; 2 Man cave; 3 Office; 4 Living room; 5 Size guide; 6 Oak frame; 7 White frame; 8 Unframed. Use an explicitly approved differing manifest if supplied.'),
         '3. RETRIEVAL AND SHOPIFY MEDIA TRANSFER\n' +
@@ -218,6 +224,16 @@ def build(selected, filename, source, metadata, additions=None):
     ]
     supplied_copy = {k: m[k] for k in ('customer_facing_title', 'pricing_update', 'rewrite_description', 'change_handle', 'description_html', 'seo_title', 'meta_description', 'vendor',
                      'product_type', 'category', 'metafields', 'selected_collections', 'existing_tags', 'tags') if k in m}
+    # Saved metadata is input to an external uploader, not permission to mirror
+    # OS-owned state. Preserve unrelated category/custom fields in the brief.
+    if isinstance(supplied_copy.get('metafields'), list):
+        supplied_copy['metafields'] = [field for field in supplied_copy['metafields']
+                                     if not (isinstance(field, dict)
+                                             and field.get('namespace') == 'sports_cave'
+                                             and (str(field.get('key', '')).startswith('edition_')
+                                                  or field.get('key') in {'is_sold_out', 'remaining_count',
+                                                                         'sold_count', 'last_assigned_edition',
+                                                                         'next_edition_number'}))]
     sport = sport_requirements(m)
     copy_rules = COPY
     classification_rules = CLASSIFICATION
@@ -290,7 +306,7 @@ def build(selected, filename, source, metadata, additions=None):
     sections.append('7. SELECTED-MODE PUBLICATION OR UPDATE\n' + publication +
         ('\nExplicitly selected publication changes: ' + encoded(m['publication_settings']) + '. Apply only these requested changes.' if is_update and m.get('publication_settings') else '') +
         '\nRetain completed work on partial failure; retry the same product. Incidental or unsupported checks do not trigger rollback to Draft or unpublishing.' + extra(7))
-    edition_result = (' Pending edition setup alone does not block Live publication; preserve its archived/unavailable message and disabled purchasing until normal setup completes. For a published product awaiting setup report PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING; do not claim it is ready to purchase.' if selected == 'LIVE' else ' Preserve existing purchasing restrictions until normal edition setup completes.')
+    edition_result = (' Pending edition setup alone does not block Live publication. An unavailable storefront message is an observation, not an instruction to disable the product. For a published product awaiting setup report PRODUCT PUBLISHED LIVE — EDITION SETUP PENDING; do not claim it is ready to purchase.' if selected == 'LIVE' else ' Preserve existing edition state; do not write setup-pending purchase restrictions.')
     sections.append('8. COMPLETION CHECK AND RETURN TO MAPPING\n'
         'Read the resulting product once to check the requested copy/SEO/classification, actual saved image count/order, 16 variants and permitted prices/SKUs/inventory, frame mappings, tags/collections and selected publication result. Report completed work and specific unfinished items without claiming unverified success; no separate preflight report or QA matrix.\n'
         'Return exact product title, admin URL, stable product ID/handle and a brief result. Then return to Product Uploads → Mapping to open Edition Ops. Find the product and use Add / Attach PSD manually. Eligible products sync automatically without a PSD; if not found, report sync pending. Mapping must not create another product or move files.\n'
