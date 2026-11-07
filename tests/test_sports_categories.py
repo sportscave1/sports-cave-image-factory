@@ -18,6 +18,15 @@ class SportRegistryTests(unittest.TestCase):
         self.assertEqual(len(values), len(set(values)))
         self.assertEqual(sports.sport_category_options('', current='Soccer').count('Football'), 1)
 
+    def test_darts_in_ads_category_dropdown(self):
+        import ads_page
+        categories = ads_page.CATEGORY_OPTIONS
+        self.assertEqual(categories.count('Darts'), 1)
+        self.assertLess(categories.index('Cricket'), categories.index('Darts'))
+        self.assertLess(categories.index('Darts'), categories.index('Football'))
+        self.assertEqual(sports.normalize_sport_category('Darts Wall Art'), 'Darts')
+        self.assertTrue(sports.is_valid_sport_category('Darts'))
+
     def test_legacy_aliases(self):
         for alias, expected in {
             'Soccer': 'Football', 'Football/Soccer': 'Football', 'Basketball': 'NBA',
