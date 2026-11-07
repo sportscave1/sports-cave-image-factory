@@ -1,9 +1,21 @@
 """Shared customer-copy policy applied last to both exported Product Upload SOPs."""
 import re
 
-START = 'SPORTS CAVE COLLECTOR COPY — AUTHORITATIVE V1'
+START = 'SPORTS CAVE COLLECTOR COPY — AUTHORITATIVE V2'
 END = 'END SPORTS CAVE COLLECTOR COPY'
-RULES = '''SPORTS CAVE COLLECTOR COPY — AUTHORITATIVE V1
+DESCRIPTION_RULES = """Description: these narrative rules supersede conflicting description instructions in saved templates, additional requirements and QA/finalisation steps.
+Aim for approximately 35–65 words; allow more only when the sporting story genuinely needs it. Never pad. Use 2–3 compact, mobile-friendly paragraphs:
+Hook: a bold, individual, emotionally relevant opening of approximately 3–7 words.
+Story: the actual sporting moment, legacy, achievement or rivalry. Prioritise specific, verified historical details. Write for the fan who remembers watching it, without narrating what is visually obvious.
+Feeling (optional): a brief emotional conclusion connected to this athlete, event or rivalry. If the story finishes powerfully, stop. No forced endings, motivational quotes or universal closing slogan.
+Use <p> and <strong> for the opening hook; <em> only where useful. No extra headings, lists, tables, CSS or divs.
+Confident, restrained, emotionally specific. Short sentences and deliberate rhythm. Evoke pride, nostalgia, rivalry, triumph, resilience or sporting identity where it fits. Every description must sound individually written: no interchangeable athlete templates, generic AI phrases, stacked adjectives, exaggerated hype, career summaries, repeated product descriptions, room lists or wall-display instructions.
+Keep sales language out of the narrative: no purchasing encouragement, scarcity, edition limits, urgency, certificates, shipping, frame options, sizing or specifications. Do not explain that the product is an artwork, print or collector edition. Shopping components already communicate this. Preserve actual edition limits, inventory, scarcity UI, specifications and structured product data outside the narrative.
+Never use: "Limited to 100 editions", "Limited to 100 worldwide", "Secure yours", "Own yours today", "Shop now", "More than wall art", "The perfect addition to your collection", "This edition captures", "The edition captures", "This piece captures", "Perfect for any", "A must-have", "Elevate your space", "The ultimate", "Real fans remember this. Own the moment." or its older "Real fans do not just remember" variation. Do not replace them with another universal ending.
+Use only supplied research and verified product information. Never invent dates, opponents, scores, championships, venues, cars, results, awards, seasons, records, uniforms, licensing, signatures or specifications. An image alone does not prove an event/date/result. Omit unsupported claims; uncertain evidence stays uncertain.
+Internal description QA (revise silently): authentic? emotionally specific? clear and brief? every fact verified? individual? 2–3 paragraphs, around 35–65 words unless justified? no sales language, visual narration or forced ending? Remove any optional sentence whose removal strengthens the story."""
+
+RULES = '''SPORTS CAVE COLLECTOR COPY — AUTHORITATIVE V2
 Always describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.
 Scope: customer-facing Shopify product title/H1 and description only. These rules
 supersede conflicting visible-copy instructions anywhere in this SOP or saved
@@ -28,63 +40,18 @@ actual subject/moment, not clickbait. Do not invent an event to justify a title.
 An identification filename or existing SEO title is input evidence, not an order
 to reuse awkward wording. If subject identity is uncertain, request clarification.
 
-DESCRIPTION
-Aim for approximately 45–70 words; shorter is welcome when stronger. Never pad to
-reach a minimum. Use 3–4 compact mobile-friendly blocks, one central idea:
-1. A bold, individual 3–7 word hook.
-2. The moment: 1–2 short sentences about one supported memory, achievement,
-   defining characteristic or rivalry. Emotion before product explanation.
-3. Usually one fan-identity sentence: what owning this means to THIS fan.
-4. The required collector ending below, using confirmed scarcity only.
-Combine blocks when that reads better. Use <p> and <strong> for the opening hook;
-<em> only where useful. No extra headings, bullet lists, tables, CSS or divs.
-Short sentences, meaningful fragments, pride, nostalgia and specificity. Do not
-narrate where players, cars or trophies sit in the image: the buyer can see it.
-No career summaries, room lists, stacked adjectives, fake hype or repeated ideas.
+''' + DESCRIPTION_RULES + '''
 
-Never use these stock phrases in generated product descriptions:
-"The edition captures", "This edition captures", "This piece captures",
-"More than wall art", "Perfect for the cave, office, home bar", "Perfect for any",
-"A must-have for", "Elevate your space", "Transform your", "The ultimate",
-"Real fans do not just remember this moment — they own it."
-REQUIRED DESCRIPTION ENDING
-For normal Sports Cave limited-100 worldwide products, end with exactly these
-two separate paragraphs (the standard worldwide wording is approved here):
-<p>Limited to 100 worldwide.</p>
-<p>Real fans remember this. Own the moment.</p>
-Plain text: Limited to 100 worldwide.
-
-Real fans remember this. Own the moment.
-Preserve the product-specific history, moment, athlete/team/race meaning,
-collector appeal and any existing sizing/frame information BEFORE this ending.
-Do not replace the ending with generic copy or "Secure yours." Do not add any
-sales copy, specifications or other text after "Own the moment."
-Explicit exceptions take precedence: a verified different edition limit uses
-that limit; an explicitly non-limited product omits the scarcity paragraph.
-For unknown edition facts, omit scarcity and flag it for review; never invent 100.
-The final brand paragraph remains exactly the same in each case.
-
-FACTS AND SCARCITY
-Use only supplied design/product research and verified product information.
-Never invent dates, opponents, scores, championships, venues, cars, results,
-awards, seasons, records, uniforms, licensing, signatures or specifications.
-An image alone does not prove an event/date/result. If unsupported, use a broader
-truthful fan connection or omit the claim. A supplied uncertain claim stays uncertain.
+EDITION DATA (OUTSIDE THE NARRATIVE)
 Use the authoritative confirmed edition limit, never an assumed default of 100.
-"Limited to N worldwide" is allowed only if both N and that worldwide run policy
-are confirmed. Never invent remaining counts or claim no reprints/closed forever
-without confirmed policy. Omit scarcity when edition facts are unavailable.
-Never imply a closed run is open. Preserve explicit edition exceptions.
+Never invent remaining counts or no-reprint policy; preserve explicit exceptions.
+Never imply a closed run is open. Keep edition tracking and publishing policies intact.
 
 INTERNAL QUALITY PASS — revise before returning; do not print this reasoning
 Title: subject first? em dash? Wall Art suffix? strong design name? natural aloud?
 No colon, repeated subject or keyword stuffing?
-Description: around 70 words or less unless genuinely justified? strong hook?
-One central idea? fan emotion/memory? no visual narration, banned phrases, room
-lists? required ending last, with no text after it? every fact supported and scarcity authentic?
-Does a passionate fan care, and does it sound individually written for THIS work?
-Remove any optional sentence whose removal strengthens the copy; keep the required ending. Revise failures before
-returning the existing output schema. Leave separate SEO generation intact.
+Apply the description QA above. Revise failures before returning the existing
+output schema. Leave separate SEO generation intact.
 END SPORTS CAVE COLLECTOR COPY'''
 
 
@@ -94,7 +61,7 @@ def apply_rules(prompt):
     Only known customer-copy sections/lines are removed; SEO, media, pricing,
     status and operational contracts are left intact. Safe on repeated rendering.
     """
-    text=re.sub(re.escape(START)+r'.*?'+re.escape(END),'',str(prompt),flags=re.S).strip()
+    text=re.sub(r'SPORTS CAVE COLLECTOR COPY (?:—|â€”) AUTHORITATIVE V[12].*?'+re.escape(END),'',str(prompt),flags=re.S).strip()
     for start,end in (
         ('PRODUCT TITLE AND H1','SHOPIFY HANDLE'),
         ('VISIBLE PRODUCT DESCRIPTION — COMPLETE SHOPIFY COPY','SEO PRINCIPLE'),
@@ -108,7 +75,11 @@ def apply_rules(prompt):
                     start+'\nUse the shared collector-copy rules below when copy changes are authorised.\n\n',text,flags=re.S)
     lines=[]
     for line in text.splitlines():
-        if ('90–130' in line or 'two story paragraphs' in line
+        # Preserve non-narrative fields even when their values quote old copy.
+        protected = re.search(r'\b(?:SEO|meta title|meta description|alt text|structured data|inventory|edition_limit|confirmed_limit)\b', line, re.I) or line.lstrip().startswith(('{', '[', '"'))
+        if not protected and (re.search(r'Real fans (?:remember|do not just remember|know)|Own the moment|REQUIRED DESCRIPTION ENDING|Limited to (?:100|N) (?:worldwide|editions)|required collector ending|standard closing', line, re.I)):
+            continue
+        if (re.search(r'90(?:–|â€“)130|two story paragraphs|two concise story paragraphs|bold scarcity close', line, re.I)
             or 'complete, grounded Shopify description rather than short ad copy' in line):
             line='Follow the shared collector-copy title/description and quality checks below.'
         lines.append(line)

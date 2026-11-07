@@ -5,6 +5,7 @@ No network, file transfers, Shopify writes, or edition mutations.
 import json
 import re
 from difflib import SequenceMatcher
+from product_collector_copy import DESCRIPTION_RULES
 
 VERSION = 'compact-upload-v1'
 FIELDS = (
@@ -29,8 +30,7 @@ Dropbox temporary links are single-use: download each directly without a prelimi
 Continue through the selected upload workflow using available supported tools. If one step fails, retain completed work, retry recoverable failures and report the specific unfinished step. Do not declare the transfer impossible merely because Dropbox returns download links."""
 
 COPY = """Title/H1: use the supplied customer title or generate Subject — Short Design Hook (two subjects: Subject 1 vs Subject 2 — Hook). Preserve a strong design name; use a grounded 2–6-word hook. Target 35–55 characters, maximum 60 including spaces/punctuation; count and rewrite rather than truncate. Wall Art is optional within that limit. Avoid colon separators, keyword stuffing and repeated subject names.
-Description: approximately 45–70 words, shorter when stronger; 3–4 compact blocks with a bold 3–7-word hook, one supported sporting moment, and fan/collector meaning. Use <p>, <strong>, and <em> only where useful; no headings, lists, tables, CSS or visual narration. Preserve supplied history and sizing/frame facts. No stock slogans, career summaries, room lists, fake hype or invented facts/specifications.
-Use the confirmed edition limit only. For a confirmed worldwide run, end with <p>Limited to N worldwide.</p>, substituting the confirmed N. If the run is not worldwide, use its confirmed scope; if non-limited or unknown, omit scarcity and report the missing fact. Finish exactly with <p>Real fans remember this. Own the moment.</p> and nothing after it. Never assume 100, remaining quantities, signatures, licensing or no-reprint claims.
+""" + DESCRIPTION_RULES + """
 SEO title: 50–60 characters, maximum 60; principal commercial keyword near the start, subject and Wall Art, optional sport/brand if space permits. Meta description: 145–160 characters where practical; subject, keyword once, confirmed collector intent and relevant use; no store URL, emoji, hashtags or keyword lists. New handle: lowercase hyphenated subject-wall-art; no random numbers.
 Alt text: unique per image, usually 80–140 characters, accessibility first; describe the actual subject, visible frame/room or size guide, with the primary keyword at most once. No hype or invented details. Open Graph: buyer-friendly title and concise description if supported."""
 

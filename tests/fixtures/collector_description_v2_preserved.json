@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "confirmed_limit": 75,
+    "worldwide": true,
+    "update_scope": "full_standardisation",
+    "rewrite_description": true
+  },
+  "sha256_without_narrative": {
+    "DRAFT": "c3c42b091f39086d3e9714df2794b54f8d1e4543b3be872c0119186195fea516",
+    "LIVE": "90264ed7815fbbc75a6adbef573b5257d39d8a0ba2e3ed1ade797496ce8a9b5b",
+    "UPDATE": "85a9eb15c2ff5b046d375c0b9ff6fd49ea3ba9c01f137896465479516448c2b3"
+  }
+}

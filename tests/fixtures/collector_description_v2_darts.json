@@ -1,0 +1,74 @@
+[
+  {
+    "title": "Luke Humphries — Cool Hand Luke",
+    "product_url": "https://www.sportscaveshop.com/products/luke-humphries-wall-art",
+    "retrieved_date": "2026-11-07",
+    "before_excerpt": "Composure worthy of the crown.",
+    "before_words": 49,
+    "after_html": "<p><strong>Five sets. Nothing left unanswered.</strong></p><p>Luke Littler led 4–2 in the 2024 World Championship final. Luke Humphries took the next five sets. No deciding set. No last chance for the teenager. Just Cool Hand Luke turning a deficit into his first world title.</p><p>The calm meant something that night.</p>",
+    "fact_sources": [
+      "https://www.pdc-europe.tv/news/sensational-humphries-denies-littler-to-seal-world-championship-glory/"
+    ],
+    "editorial_note": "Comeback and composure; five straight sets replace generic trophy language."
+  },
+  {
+    "title": "Gerwyn Price — The Iceman",
+    "product_url": "https://www.sportscaveshop.com/products/gerwyn-price-wall-art",
+    "retrieved_date": "2026-11-07",
+    "before_excerpt": "The Iceman. World Champion 2021.",
+    "before_words": 53,
+    "after_html": "<p><strong>Wales had its world champion.</strong></p><p>In 2021, Gerwyn Price beat Gary Anderson 7–3 to become the first Welsh PDC world champion. The former rugby player had reached the top of another sport. For the supporters who had followed that unlikely journey, the Iceman name now carried a world title.</p>",
+    "fact_sources": [
+      "https://www.pdc-europe.tv/news/prolific-price-is-crowned-william-hill-world-darts-champion/"
+    ],
+    "editorial_note": "Welsh pride and an unusual sporting journey; two paragraphs need no added ending."
+  },
+  {
+    "title": "Phil Taylor — The Power",
+    "product_url": "https://www.sportscaveshop.com/products/phil-taylor-wall-art",
+    "retrieved_date": "2026-11-07",
+    "before_excerpt": "You knew that throw.",
+    "before_words": 92,
+    "after_html": "<p><strong>Sixteen times. Still the measure.</strong></p><p>Two BDO world titles. Fourteen in the PDC. Phil Taylor made winning on the biggest stage feel familiar, without making it ordinary. If you grew up watching The Power, you remember how much a final could seem to turn on his next visit.</p>",
+    "fact_sources": [
+      "https://en.wikipedia.org/wiki/Phil_Taylor_(darts_player)"
+    ],
+    "editorial_note": "Dominance and remembered anticipation; distinguishes 16 total titles from 14 PDC titles."
+  },
+  {
+    "title": "Gary Anderson — The Flying Scotsman",
+    "product_url": "https://www.sportscaveshop.com/products/gary-anderson-wall-art",
+    "retrieved_date": "2026-11-07",
+    "before_excerpt": "Back-to-back. Every dart mattered.",
+    "before_words": 95,
+    "after_html": "<p><strong>The second crown was his.</strong></p><p>Phil Taylor in 2015. Adrian Lewis in 2016. Gary Anderson beat both in successive World Championship finals, keeping the trophy in Scottish hands for another year. The Flying Scotsman had followed his first title with a second.</p><p>That familiar throw. That feeling again.</p>",
+    "fact_sources": [
+      "https://matchroom.com/news/glorious-gary-anderson-seals-sensational-world-championship-title-defence/"
+    ],
+    "editorial_note": "Continuity and Scottish pride; names both final opponents without a career summary."
+  },
+  {
+    "title": "Michael Smith — The Perfect Leg",
+    "product_url": "https://www.sportscaveshop.com/products/michael-smith-wall-art",
+    "retrieved_date": "2026-11-07",
+    "before_excerpt": "One throw. Every nerve.",
+    "before_words": 104,
+    "after_html": "<p><strong>One missed double. Then perfection.</strong></p><p>Michael van Gerwen missed double 12 for a nine-darter. Michael Smith stepped up and hit it for his own. The 2023 World Championship final had its perfect leg. Smith went on to win 7–4 and claim his first world title.</p><p>You remember the noise.</p>",
+    "fact_sources": [
+      "https://www.pdc-europe.tv/news/nine-dart-smith-stuns-van-gerwen-to-become-world-champion/"
+    ],
+    "editorial_note": "Centres the nine-darter and precise double-12 sequence, then separates it from the later match result."
+  },
+  {
+    "title": "Luke Littler — The Nuke",
+    "product_url": "https://www.sportscaveshop.com/products/luke-littler-wall-art",
+    "retrieved_date": "2026-11-07",
+    "before_excerpt": "Back for the crown.",
+    "before_words": 85,
+    "after_html": "<p><strong>He came back as champion.</strong></p><p>Luke Littler won the world title in 2025. In 2026, he returned to Alexandra Palace and beat Gian van Veen 7–1 to keep it. The Nuke had gone from the teenager everyone was watching to the champion everyone had to catch.</p>",
+    "fact_sources": [
+      "https://www.skysports.com/darts/news/12288/13489993/world-darts-championship-2026-luke-littler-thrashes-gian-van-veen-in-final-to-retain-title-at-alexandra-palace)"
+    ],
+    "editorial_note": "Identity shifts from emerging talent to defending champion; keeps the existing back-to-back focus."
+  }
+]

@@ -82,8 +82,8 @@ def test_all_sixteen_prices_skus_dimensions_and_business_values():
             assert r['sku'] == f'[PREFIX]A{i+1}{suffix}'
     text = prompt(fixture())
     assert all(size in text for size in SIZES)
-    for required in ('maximum 60', '35–55', '45–70', '3–7', '50–60', '145–160', '80–140',
-                     'Real fans remember this. Own the moment.', 'Sports Cave', 'Framed Art',
+    for required in ('maximum 60', '35–55', '35–65', '3–7', '50–60', '145–160', '80–140',
+                     'No forced endings', 'Sports Cave', 'Framed Art',
                      'Prints in Posters, Prints, & Visual Artwork', 'gift card false',
                      'condition New', 'custom product true', 'Adult/Unisex',
                      'tracked true', 'CONTINUE', 'requires shipping true', 'taxable true'):
@@ -122,7 +122,7 @@ def test_saved_values_and_selected_options_are_preserved():
                   '"tracked": false', 'EXACTSKU', '388.00', '"taxable": false', 'Confirmed material'):
         assert value in text
     assert 'Facebook & Instagram' not in text
-    assert 'Limited to 100' not in text and 'sc-edition-limit-100' not in text
+    assert '<p>Limited to 100' not in text and 'sc-edition-limit-100' not in text
     row['data']['upload_operation']['product_id'] = 'gid://shopify/Product/123'
     row['data']['upload_operation']['product'] = dict(handle='saved-handle', title='Existing title')
     row['data']['upload_operation']['sync_map'] = dict(confirmed_limit=75)
@@ -164,7 +164,7 @@ def test_existing_full_update_keeps_price_exception_and_scope():
     row = fixture('UPDATE')
     row['data'].update(update_scope='full_standardisation', pricing_update=True, rewrite_description=True)
     text = prompt(row)
-    assert '45–70' in text
+    assert '35–65' in text
     assert 'Small to A$169 and Medium to A$209' in text
     assert 'Large/XL/unframed prices' in text
     assert 'Preserve existing status and publication state' in text
