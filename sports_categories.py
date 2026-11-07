@@ -28,8 +28,11 @@ PRODUCT_EVIDENCED_SPORTS = {
     'Road Racing': 'Michael Dunlop The Mountain King Wall Art',
 }
 LEGACY_SUPPORTED_SPORTS = ('Rugby Union',)
+# Added after the October 2026 Shopify taxonomy audit; no unverified collection handle.
+ADDITIONAL_SUPPORTED_SPORTS = ('Darts',)
 CANONICAL_SPORT_CATEGORIES = alphabetize_options(
-    (*SPORT_COLLECTION_HANDLES, *PRODUCT_EVIDENCED_SPORTS, *LEGACY_SUPPORTED_SPORTS)
+    (*SPORT_COLLECTION_HANDLES, *PRODUCT_EVIDENCED_SPORTS,
+     *LEGACY_SUPPORTED_SPORTS, *ADDITIONAL_SUPPORTED_SPORTS)
 )
 MOTORSPORT_DISCIPLINES = frozenset(('Formula One', 'MotoGP', 'NASCAR', 'V8 Supercars',
                                   'Motocross', 'Rally', 'IndyCar', 'Road Racing'))
