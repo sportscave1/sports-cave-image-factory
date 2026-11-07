@@ -9,11 +9,12 @@ def test_categories_read_all_pages_only_direct_folders(monkeypatch):
     root='/Sportscave Team Folder';base=root+'/04_OUTPUT/product-images'
     def entry(name, tag='folder'):
         return {'.tag':tag,'name':name,'path_display':base+'/'+name}
-    pages=Mock(side_effect=[dict(entries=[entry('Zulu'),entry('file.txt','file')],has_more=True,cursor='next'),
+    pages=Mock(side_effect=[dict(entries=[entry('Zulu'),entry('Darts Wall Art'),entry('file.txt','file')],has_more=True,cursor='next'),
                            dict(entries=[entry('Motorsport Wall Art'),entry('Zulu/existing-product'),entry('alpha')],has_more=False)])
     monkeypatch.setattr(api,'list_folder_page',pages)
     options=sport_categories(api,'authenticated-token',root)
-    assert [x['name'] for x in options]==['alpha','Motorsport Wall Art','Zulu']
+    assert [x['name'] for x in options]==['alpha','Darts Wall Art','Motorsport Wall Art','Zulu']
+    assert options[1]['sport']=='Darts'
     assert [c.args for c in pages.call_args_list]==[('authenticated-token',base)]*2
     assert [c.kwargs['cursor'] for c in pages.call_args_list]==['','next']
 

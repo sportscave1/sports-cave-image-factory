@@ -23,7 +23,7 @@ TAGS = dict(zip(
      'SC_SPORT_COMBAT', 'SC_SPORT_WWE', 'SC_SPORT_ATHLETICS', 'SC_SPORT_OLYMPICS',
      'SC_SPORT_SURFING', 'SC_CATEGORY_APPAREL')))
 TAGS.update({name: 'SC_SPORT_' + name.upper().replace(' ', '_') for name in
-             ('Motocross', 'Rally', 'Motorcycle Road Racing', 'Rally Raid', 'IndyCar')})
+             ('Motocross', 'Rally', 'Motorcycle Road Racing', 'Rally Raid', 'IndyCar', 'Darts')})
 MOTOR_CHILDREN = {'Formula One', 'NASCAR', 'V8 Supercars', 'MotoGP',
                   'Motocross', 'Rally', 'Motorcycle Road Racing', 'Rally Raid', 'IndyCar'}
 OTHER_MOTOR = {'Sports Car Racing',
@@ -35,7 +35,7 @@ ALIASES = {
     'NASCAR': (), 'V8 Supercars': ('australian touring car championship', 'atcc', 'australian supercars', 'bathurst 1000'),
     'MotoGP': ('motorcycle grand prix', '500cc grand prix'),
     'Basketball': ('nba',), 'NFL': ('american football',), 'Baseball': ('mlb',),
-    'Ice Hockey': ('nhl',), 'Cricket': (), 'Football': ('soccer', 'association football'),
+    'Ice Hockey': ('nhl',), 'Cricket': (), 'Darts': (), 'Football': ('soccer', 'association football'),
     'Rugby League': ('nrl',), 'Rugby Union': (),
     'AFL': ('australian rules football', 'australian football', 'aussie rules'),
     'Tennis': (), 'Golf': (), 'Horse Racing': ('thoroughbred racing',),
