@@ -56,7 +56,19 @@ def test_download_copy_plaque_does_not_relax_role_safety(case):
     with pytest.raises(NeedsRepair):detect(data,100)
 
 
-@pytest.mark.parametrize('kind',['duplicate','nested','font','locked','total','outside','narrow'])
+@pytest.mark.parametrize('text', ['No. 81/100', '81 / 100'])
+def test_number_with_one_more_digit_keeps_existing_plaque_checks(text):
+    data = inspection()
+    number = data['layers'][0]
+    number['text'] = number['path'][0]['name'] = text
+    assert detect(data, 100)['reference_number'] == 81
+
+    data['layers'].pop()
+    with pytest.raises(NeedsRepair, match='unique recognised collector plaque'):
+        detect(data, 100)
+
+
+@pytest.mark.parametrize('kind',['duplicate','nested','font','locked','total','outside','narrow','padded_narrow'])
 def test_uncertain_layers_never_enabled(kind):
     data=inspection();n=data['layers'][0]
     if kind=='duplicate':data['layers'].append(deepcopy(n))
@@ -66,6 +78,7 @@ def test_uncertain_layers_never_enabled(kind):
     if kind=='total':n['text']='001 / 200'
     if kind=='outside':n['bounds_px']=[800,1820,980,1850]
     if kind=='narrow':n['text']='1 / 100'
+    if kind=='padded_narrow':n['text']='01 / 100'
     with pytest.raises(NeedsRepair):detect(data,100)
 
 

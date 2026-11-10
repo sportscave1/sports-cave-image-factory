@@ -21,6 +21,7 @@ def resize_runtime():
 @pytest.mark.parametrize('reason',[
     'Preparation failed: Resize background changed native artwork pixels; preparation rejected.',
     'Photoshop inspection failed: Inspector failure: Photoshop could not inspect the linked source.',
+    'Photoshop inspection failed: Photoshop is busy before script dispatch (HRESULT 0x80010001)',
     'Photoshop inspection failed: Inspector failure: Error: Cannot open the file because the open options are incorrect'])
 def test_new_design_resize_failure_recovers_once_without_historical_scope(backlog,monkeypatch,reason):
     d,sql=backlog

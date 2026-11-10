@@ -19,6 +19,36 @@ def test_preflight_cleanup_cannot_release_a_later_uncertain_rpc(tmp_path):
     assert (tmp_path/'preflight-native-status.json').exists()
 
 
+def test_busy_method_lookup_retries_without_invoking_a_script(monkeypatch):
+    from scripts import photoshop_dispatch as dispatch
+
+    attempts = Mock(side_effect=[-2147418111, -2147417846, 0])
+    wait = Mock()
+    monkeypatch.setattr(dispatch.time, 'sleep', wait)
+    dispatch.resolve_script_method(attempts)
+    assert attempts.call_count == 3
+    assert wait.call_count == 2
+
+    attempts = Mock(return_value=-2147352570)
+    with pytest.raises(dispatch.PhotoshopMethodUnavailable, match='80020006'):
+        dispatch.resolve_script_method(attempts)
+    attempts.assert_called_once()
+
+
+@pytest.mark.parametrize("prior_close", [None, True, False])
+def test_pre_dispatch_lookup_preserves_prior_cleanup_evidence(tmp_path, prior_close):
+    from scripts.photoshop_dispatch import PhotoshopMethodUnavailable
+    from scripts.prepare_auto_editions import native_cleanup_uncertain, native_dispatch
+
+    (tmp_path/'photoshop-dispatch.json').write_text('{"started":true}')
+    if prior_close is not None:
+        (tmp_path/'native-status.json').write_text(json.dumps({"owned_document_closed": prior_close}))
+    failed_lookup = Mock(side_effect=PhotoshopMethodUnavailable(0x80010001))
+    with pytest.raises(PhotoshopMethodUnavailable):
+        native_dispatch(failed_lookup, 'script', tmp_path)
+    assert native_cleanup_uncertain(tmp_path) is (prior_close is False)
+
+
 def test_invalid_source_identity_stops_before_native_processing(tmp_path):
     from scripts.prepare_auto_editions import prepare
     with patch('scripts.photoshop_dispatch.run') as native_run:

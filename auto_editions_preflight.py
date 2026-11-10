@@ -10,7 +10,7 @@ def preparation_code_hash():
     root=Path(__file__).parent
     return hashlib.sha256(''.join((root/name).read_text(encoding='utf-8-sig').replace('\r\n','\n')
         for name in ('auto_editions_preflight.py','scripts/photoshop/prepare_auto_editions.jsx',
-                     'scripts/photoshop/inspect_psd_editions.jsx')).encode()).hexdigest()
+                     'scripts/photoshop/inspect_psd_editions.jsx','scripts/photoshop_dispatch.py')).encode()).hexdigest()
 
 
 def opaque(path):

@@ -834,6 +834,9 @@ def failure_detail(row,stage,error):
             row['diagnostic']=safe_diagnostic(detail,safe_stage)
             return detail
         return 'Preparation service rejected the request: HTTP '+str(error.code)
+    from scripts.photoshop_dispatch import PhotoshopMethodUnavailable
+    if isinstance(error, PhotoshopMethodUnavailable):
+        return message
     if isinstance(error,RuntimeError):
         if 'source_profile_requires_review' in message or 'colour_conversion_requires_approval' in message:
             row['repair']=False
