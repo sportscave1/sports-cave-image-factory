@@ -70,7 +70,7 @@ class Workspace:
         self.progress = progress
         for key, default in {"cache": {}, "processed": set(), "limit": 50, "query": "", "field": "TEXT",
                              "settings": default_settings(), "expanded": set(), "notice": "", "view": "mail",
-                             "mailbox_version": 0, "history_pending": False,
+                             "mailbox_version": 0, "reader_version": 0, "history_pending": False,
                              "selected": None, "active_message": None, "conversation": []}.items():
             state.setdefault(key, default)
         # Content lives separately from short-lived mailbox/header snapshots and selection.
@@ -265,6 +265,7 @@ class Workspace:
                           refreshed_at=entry["refreshed_at"], snapshot=snapshot)
         if changed:
             self.state["mailbox_version"] += 1
+            self.state["reader_version"] += 1
             self.state["snapshot_signature"] = signature
             self.state["threads"] = sorted(build_threads(snapshot["messages"], self.config.address), key=lambda t: t["last_activity"], reverse=True)
             self.state["thread_index"] = {t["thread_key"]: t for t in self.state["threads"]}
@@ -509,6 +510,9 @@ class Workspace:
             thread["unread"] = sum(m["unread"] for m in thread["messages"])
         self.state.pop("list_model", None)
         self.state["mailbox_version"] += 1
+        # Keep safe reader previews available when only a flag was updated.
+        if membership_changed:
+            self.state["reader_version"] += 1
         # Flag-only changes invalidate rendered rows, not expensive thread membership.
         retained = [] if membership_changed else [
             (key[1], entry["value"]) for key, entry in self.resolved_threads.data["entries"].items()]
@@ -941,7 +945,7 @@ class Workspace:
             elif action == 'dismiss_receipt':
                 delivery = self.state.get('last_sent', {})
                 if (event.get('operation_id') == delivery.get('operation_id') and
-                        delivery.get('copy', {}).get('status') in {'present', 'appended'}):
+                        delivery.get('copy', {}).get('status') in {'present', 'appended'} and not delivery.get('draft_ref')):
                     self.state.pop('last_sent', None)
                     self.state.pop('sent_focus', None)
                     self.state['send_stage'] = ''
@@ -983,6 +987,9 @@ class Workspace:
                 message = self._header(event.get("message_key"))
                 if message["folder"] != self.roles.get("drafts"):
                     raise ComposeError("Only messages in the mapped Drafts folder can be edited.")
+                if any(d.get("draft_ref") and reference_key(d["draft_ref"]) == reference_key(message)
+                       for d in self.state.get("pending_sent", {}).values()):
+                    raise ComposeError("This mailbox draft was already sent and is awaiting cleanup.")
                 self.state["draft"] = edit_mailbox_draft(self.imap.read_draft(message), self.config.address, message)
                 thread = self._thread()
                 self.state["draft"]["source_thread"] = {"thread_key": thread["thread_key"], "aliases": thread["aliases"]}
@@ -992,6 +999,7 @@ class Workspace:
                 if draft and draft.get("mailbox_ref"):
                     self._trash_draft(draft["mailbox_ref"])
                 if draft and self.durable:self.durable.discard(self.config.address,self.user['id'],draft['id'])
+                self.state.pop('saved_draft', None)
                 self.state.update(draft=None, draft_pending=None, view="mail", send_result={})
             elif action in {"close_composer", "close_panel", "resume_composer", "settings", "context"}:
                 if action == 'resume_composer':
@@ -1171,6 +1179,7 @@ class Workspace:
         if not self.durable or not draft or self.state.get('send_result',{}).get('status') in {'accepted','unknown','in_progress'}:return
         try:
             self.durable.save_draft(self.config.address,self.user['id'],draft)
+            self.state['saved_draft'] = deepcopy(draft)
             self.state['draft_save_status']='Saved'
             self.state['draft_saved_revision'] = int(draft.get('edit_revision', 0))
             self.state['draft_save_error'] = ''
@@ -1258,7 +1267,7 @@ class Workspace:
         if not self.durable or not draft_id or self.state.get('draft'):return
         draft=self.durable.restore_draft(self.config.address,self.user['id'],draft_id)
         if not draft:return
-        self.state.update(draft=draft,view='compose',draft_save_status='Saved')
+        self.state.update(draft=draft, saved_draft=deepcopy(draft), view='compose', draft_save_status='Saved')
         self.state['draft_saved_revision'] = int(draft.get('edit_revision', 0))
         self.bind_draft_source()
         self.state['view'] = 'compose'
@@ -1266,7 +1275,8 @@ class Workspace:
         if row:
             from support_email_durable import decode,receipt
             self.state.update(outgoing_mime=decode(row['payload']),send_result=receipt(row),
-                send_stage='SAVING_SENT_COPY' if row['status']=='accepted' else 'SENDING' if row['status'] in {'queued','in_progress'} else row['status'].upper())
+                send_stage='SAVING_SENT_COPY' if row['status']=='accepted' else 'SENDING' if row['status'] in {'queued','in_progress'} else row['status'].upper(),
+                send_finalized=False)
 
     def send(self, operation_id):
         """An explicit Send click validates and freezes the exact outgoing MIME once."""
@@ -1294,54 +1304,75 @@ class Workspace:
         # handle() enforces Email access for every action. Optional support-workflow
         # metadata is not transport authorization: all permitted users share this
         # send path, even when that metadata is unavailable or marked for review.
+        started = time.monotonic()
         self.state["send_stage"] = "VALIDATING"
         self.state.pop('sent_focus', None)
         self.state.pop('sent_focus_header', None)
         mime = build_mime(draft, self.config.address, self.state["settings"]["sender_name"], self.state["settings"]["signatures"])
         prepared=None
         if self.durable:
-            self.autosave_draft()
-            prepared=self.registry.prepare(operation_id,self.config.address,mime,actor=self.user['id'],
-                folder=self.roles.get('sent',''),policy='verify' if self.state['settings']['sent_policy']=='server' else 'append')
-            from support_email_durable import decode
-            mime=decode(self.durable.get(self.config.address,operation_id)['payload'])
+            from support_email_durable import DraftConflict, decode
+            if draft != self.state.get('saved_draft'):
+                self.autosave_draft()
+            try:
+                prepared=self.registry.prepare(operation_id,self.config.address,mime,actor=self.user['id'],
+                    folder=self.roles.get('sent',''),policy='verify' if self.state['settings']['sent_policy']=='server' else 'append',
+                    saved_draft=draft)
+            except DraftConflict:
+                self.state['draft_save_status'] = 'Conflict'
+                raise
+            if prepared['fingerprint'] != hashlib.sha256(mime['bytes']).hexdigest():
+                # A repeated event can rebuild a different Date or MIME boundary.
+                # The first durable operation owns the exact bytes.
+                mime=decode(self.durable.get(self.config.address,operation_id)['payload'])
         self.state["outgoing_mime"] = mime
-        self.state.update(send_result=prepared or {"status": "in_progress", "operation_id": operation_id, "notice": "Sending…"},
-                          send_stage='SAVING_SENT_COPY' if prepared and prepared['status']=='accepted' else "SENDING", send_progress={}, send_finalized=False, uncertain_checks=0)
+        result = prepared or {"status": "in_progress", "operation_id": operation_id, "notice": "Sending…"}
+        self.state.update(send_result=result,
+                          send_stage={"accepted": "SAVING_SENT_COPY", "in_progress": "SENDING"}.get(
+                              result["status"], result["status"].upper()),
+                          send_progress={}, send_finalized=False, uncertain_checks=0)
+        if prepared:
+            LOGGER.info("email_send_prepared operation_id=%s duration_ms=%.1f", operation_id, (time.monotonic()-started)*1000)
+            if prepared['transport_status'] == 'queued':
+                self.registry.dispatch(operation_id, self.config.address, self.smtp, mime)
 
     def recover_send(self):
         """Reconcile an interrupted run from metadata only; rendering cannot send mail."""
         result = self.state.get("send_result", {})
         if result.get("status") in {"in_progress", "unknown"}:
-            try:receipt = self.registry.get(result.get("operation_id"), self.config.address)
+            try:
+                receipt = self.registry.get(result["operation_id"], self.config.address)
             except Exception:
                 self.state['notice']='Saved send receipt is temporarily unavailable. Do not resend.'
                 return
-            if receipt and receipt.get("status") != "in_progress":
+            if receipt:
                 self.state["send_result"] = receipt
                 if self.durable:self.state['uncertain_checks']=6 if receipt.get('verification_overdue') else receipt.get('reconcile_attempts',0)
-                self.state["send_stage"] = "SAVING_SENT_COPY" if receipt["status"] == "accepted" else receipt["status"].upper()
+                self.state["send_stage"] = {"accepted": "SAVING_SENT_COPY", "in_progress": "SENDING"}.get(
+                    receipt["status"], receipt["status"].upper())
 
     def advance_send(self, operation_id):
         """Continue only a previously confirmed send, using its frozen bytes and receipt."""
-        self.recover_send()
         result = self.state.get("send_result", {})
         if not operation_id or operation_id != result.get("operation_id") or self.state.get("send_finalized"):
             return
-        if result.get("status") == "in_progress" and self.state.get("outgoing_mime"):
+        self.recover_send()
+        result = self.state["send_result"]
+        if not self.durable and result.get("status") == "in_progress" and self.state.get("outgoing_mime"):
             result = self.registry.submit(operation_id, self.config.address, self.state["outgoing_mime"], self.smtp,
                                           progress=self._send_progress)
             self.state.update(send_result=result, send_progress={},
                               send_stage="SAVING_SENT_COPY" if result["status"] == "accepted" else
                               "SENDING" if result['status'] == 'in_progress' else result["status"].upper())
-            # Complete accepted delivery even if the browser disconnects now. No Streamlit
-            # calls occur between SMTP acceptance and saving its mailbox copy.
         if result.get("status") == "accepted":
             self._finish_send()
 
     def _finish_send(self):
         s, result, draft = self.state, self.state["send_result"], self.state.get("draft") or {}
         if s.get("last_sent", {}).get("operation_id") != result["operation_id"]:
+            if self.durable and s.get("last_sent"):
+                s["last_sent"].pop("html", None)
+                s["last_sent"].pop("to", None)
             s["last_sent"] = {"operation_id": result["operation_id"], "mime": s["outgoing_mime"],
                               "result": dict(result), "subject": draft.get("subject", ""), "checks": 0}
         delivery = s["last_sent"]
@@ -1350,6 +1381,16 @@ class Workspace:
             action = "email_reply_sent" if draft.get("mode") in {"reply", "reply_all"} else "email_forward_sent" if draft.get("mode") == "forward" else "email_sent"
             self.audit(action, result["message_id"])
         self._sent_preview(delivery)
+        if self.durable:
+            delivery.pop("mime", None)
+            delivery["draft_ref"] = draft.get("mailbox_ref")
+            self._update_sent_copy(delivery, self._copy_receipt(result))
+            s.pop("saved_draft", None)
+            s.pop("outgoing_mime", None)
+            s.update(send_stage="SENT", send_progress={}, send_finalized=True, draft=None, draft_pending=None)
+            if s["view"] == "compose":
+                s["view"] = "mail"
+            return
         self.check_sent()
         if delivery.get('copy', {}).get('status') not in {'present', 'appended'}:
             s.update(send_stage='CONFIRMING_SENT_COPY', send_progress={})
@@ -1359,18 +1400,38 @@ class Workspace:
     def _complete_sent(self, delivery):
         """Only confirmed acceptance/copy completion may close the frozen draft."""
         s, draft = self.state, self.state.get('draft') or {}
-        if draft.get("mailbox_ref") and not delivery.get("draft_cleanup_attempted"):
-            delivery["draft_cleanup_attempted"] = True
-            try:
-                self._trash_draft(draft["mailbox_ref"])
-            except Exception:
-                delivery["draft_warning"] = "The saved draft remains in Drafts; do not send it again."
+        self._cleanup_sent_draft(delivery, draft.get("mailbox_ref"))
         try:
             self._show_sent(delivery)
         except Exception as error:
             LOGGER.warning("Email Sent view unavailable (%s)", type(error).__name__)
             self.state["notice"] = "Email sent. Sent-folder refresh is temporarily unavailable; refresh Sent to view it."
         s.update(send_stage="SENT", send_progress={}, send_finalized=True, draft=None, draft_pending=None, view="mail")
+
+    def _cleanup_sent_draft(self, delivery, draft_ref):
+        if draft_ref and not delivery.get("draft_cleanup_attempted"):
+            delivery["draft_cleanup_attempted"] = True
+            try:
+                self._trash_draft(draft_ref)
+            except Exception:
+                delivery["draft_warning"] = "The saved draft remains in Drafts; do not send it again."
+
+    @staticmethod
+    def _copy_receipt(result):
+        status = result.get("copy_status")
+        if status in {"present", "appended"}:
+            return {"status": status}
+        return {"status": status or "pending", "retryable": status == "failed"}
+
+    def _update_sent_copy(self, delivery, copy):
+        delivery["copy"] = copy
+        pending = self.state.setdefault("pending_sent", {})
+        if copy["status"] in {"present", "appended"} and not delivery.get("draft_ref"):
+            pending.pop(delivery["operation_id"], None)
+        else:
+            pending[delivery["operation_id"]] = delivery
+        if self.state.get("send_result", {}).get("operation_id") == delivery["operation_id"]:
+            self.state.update(sent_result=copy, sent_checks=delivery.get("checks", 0))
 
     def _sent_preview(self,delivery):
         """An accepted local record is readable even while IMAP is unavailable."""
@@ -1434,11 +1495,25 @@ class Workspace:
             return
         retry = retry and delivery.get("copy", {}).get("retryable") is True
         if automatic:
-            if (delivery.get("checks", 0) >= 3 or delivery.get("copy", {}).get("status") in {"present", "appended"}
+            if (delivery.get("checks", 0) >= 3 or (delivery.get("copy", {}).get("status") in {"present", "appended"} and not delivery.get("draft_ref"))
                     or time.monotonic() - self.state.get("sent_check_at", 0) < 5):
                 return
             delivery["checks"] = delivery.get("checks", 0) + 1
         self.state["sent_check_at"] = time.monotonic()
+        if self.durable:
+            operation = delivery["operation_id"]
+            latest = self.registry.get(operation, self.config.address, fresh=True)
+            copy = self._copy_receipt(latest)
+            if not automatic and copy["status"] not in {"present", "appended"}:
+                from support_email_durable import decode
+                row = self.durable.get(self.config.address, operation)
+                if row.get("status") == "accepted":
+                    copy = self.registry.save_sent(operation, self.config.address, self.imap,
+                        decode(row["payload"]), self.roles.get("sent"), "append" if retry else row["sent_policy"], retry=retry)
+            if copy["status"] in {"present", "appended"}:
+                self._cleanup_sent_draft(delivery, delivery.pop("draft_ref", None))
+            self._update_sent_copy(delivery, copy)
+            return
         # Legacy verify default now ensures a copy. Explicit confirmed server-saving is respected.
         policy = "verify" if self.state["settings"]["sent_policy"] == "server" else "append"
         if retry:
@@ -1446,13 +1521,7 @@ class Workspace:
         previous = delivery.get("copy", {}).get("status")
         delivery["copy"] = self.registry.save_sent(delivery["operation_id"], self.config.address, self.imap,
             delivery["mime"], self.roles.get("sent"), policy, retry=retry)
-        pending = self.state.setdefault("pending_sent", {})
-        if delivery["copy"]["status"] in {"present", "appended"}:
-            pending.pop(delivery["operation_id"], None)
-        else:
-            pending[delivery["operation_id"]] = delivery
-        if result.get("operation_id") == delivery["operation_id"]:
-            self.state.update(sent_result=delivery["copy"], sent_checks=delivery.get("checks", 0))
+        self._update_sent_copy(delivery, delivery["copy"])
         if (result.get('operation_id') == delivery['operation_id']
                 and self.state.get('send_stage') == 'CONFIRMING_SENT_COPY'
                 and delivery['copy']['status'] in {'present', 'appended'}):
@@ -1499,6 +1568,7 @@ class Workspace:
         self.cache.clear()
         self.resolved_threads.clear()
         self.state["mailbox_version"] += 1
+        self.state["reader_version"] += 1
         self.state["history_pending"] = bool(self.state.get("selected"))
 
     def _trash_draft(self, header):
@@ -1640,7 +1710,7 @@ class Workspace:
             "error": s.get("error", ""), "live_error": s.get("live_error", ""), "notice": s["notice"] or s.get("live_error", ""), "ack": s.get("ack", ""),
             "recovery": {"state": s.get("recovery_state", ""), "message": s.get("connection_message", ""),
                          "delay_ms": max(0, int((s.get("load_retry_at", 0) - time.monotonic()) * 1000))},
-            "mailbox_version": s["mailbox_version"], "history_pending": s["history_pending"],
+            "mailbox_version": s["mailbox_version"], "reader_version": s["reader_version"], "history_pending": s["history_pending"],
             "idle_version": s.get("idle_version", ""),
             "refreshed": formatted_date((s.get("snapshot", {}).get("refreshed_at") if hasattr(self.imap, 'reads') else s.get("refreshed_at")), user), "folders": ordered_folders(s.get("folders", []), self.roles), "roles": self.roles,
             "folder": s.get("folder", ""), "query": s["query"], "field": s["field"], "threads": threads,
@@ -1663,8 +1733,10 @@ class Workspace:
             "signature_logo": logo_data_uri() if s["view"] in {"compose", "settings"} else "",
             "matched": s.get("snapshot", {}).get("matched", 0), "limit": s["limit"], "send_result": s.get("send_result", {}),
             "send_stage": s.get("send_stage", ""), "send_progress": s.get("send_progress", {}), "sent_result": s.get("sent_result", {}), "sent_checks": s.get("sent_checks", 0),
-            "last_sent": {k: s.get("last_sent", {}).get(k) for k in ("operation_id", "subject", "result", "copy", "checks", "draft_warning", "html", "to")},
+            "last_sent": {k: s.get("last_sent", {}).get(k) for k in ("operation_id", "subject", "result", "copy", "checks", "draft_warning", "html", "to")}
+                         | {"draft_cleanup_pending": bool(s.get("last_sent", {}).get("draft_ref"))},
             "pending_sent": [{k: d.get(k) for k in ("operation_id", "subject", "copy", "checks", "draft_warning")}
+                             | {"draft_cleanup_pending": bool(d.get("draft_ref"))}
                              for d in s.get("pending_sent", {}).values() if d["operation_id"] != s.get("last_sent", {}).get("operation_id")],
             "download": s.get("download"), "settings": {"sender_name": settings["sender_name"], "sent_policy": settings["sent_policy"],
             "folder_mapping": settings["folder_mapping"], "signatures": signatures}, "settings_available": s.get("settings_available", False),

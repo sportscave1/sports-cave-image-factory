@@ -79,6 +79,24 @@ class DurableDelivery(unittest.TestCase):
         self.registry.submit(self.op,self.mailbox,changed,self.provider)
         self.assertEqual(self.provider.submit.call_args.args[0]['bytes'],self.mime['bytes'])
 
+    def test_matching_mime_uses_the_durable_envelope(self):
+        self.prepare()
+        same_bytes = dict(self.mime, recipients=['wrong@example.test'])
+        self.registry.submit_prepared(self.op, self.mailbox, self.provider, mime=same_bytes)
+        self.assertEqual(self.provider.submit.call_args.args[0], self.mime)
+
+    def test_stale_saved_draft_cannot_queue_an_outbox_operation(self):
+        draft = self.draft()
+        self.store.save_draft(self.mailbox, 'admin', draft)
+        stale = deepcopy(draft)
+        draft['subject'] = 'Edited in another tab'
+        self.store.save_draft(self.mailbox, 'admin', draft)
+        with self.assertRaises(ComposeError):
+            self.registry.prepare(self.op, self.mailbox, self.mime, actor='admin', saved_draft=stale)
+        self.assertFalse(self.store.get(self.mailbox, self.op))
+        self.registry.prepare(self.op, self.mailbox, self.mime, actor='admin', saved_draft=draft)
+        self.assertEqual(self.store.get(self.mailbox, self.op)['status'], 'queued')
+
     def test_database_failure_before_send_never_calls_provider(self):
         with patch.object(self.store,'prepare',side_effect=RuntimeError('DB')):
             with self.assertRaises(RuntimeError):self.submit()
@@ -202,7 +220,7 @@ class DurableDelivery(unittest.TestCase):
         self.assertEqual(self.provider.submit.call_count,2)
         self.assertEqual(self.store.get(self.mailbox,self.op)['attempts'],2)
 
-    def test_workspace_preserves_draft_until_sent_folder_is_available(self):
+    def test_workspace_acknowledges_smtp_without_waiting_for_browser_or_sent_folder(self):
         from dataclasses import replace
         from support_email_workspace import Workspace
         from support_email_smtp import SMTPConfiguration
@@ -213,12 +231,35 @@ class DurableDelivery(unittest.TestCase):
         draft=new_draft(self.mailbox);draft.update(to='fixture@example.test',subject='Accepted locally',html='<p>Stored reply</p>')
         w.state['draft']=draft
         w.state['settings_available']=True  # This test starts after authoritative settings loading.
-        w.send(draft['operation_id']);self.provider.submit.assert_not_called()
-        self.assertEqual(self.store.get(self.mailbox,draft['operation_id'])['status'],'queued')
-        with patch.object(w,'audit'):
-            w.advance_send(draft['operation_id'])
-        self.assertEqual(w.state['send_stage'],'CONFIRMING_SENT_COPY')
-        self.assertIs(w.state['draft'],draft)
+        started, release = threading.Event(), threading.Event()
+
+        def accept(*args, **kwargs):
+            started.set()
+            if not release.wait(5):
+                raise AssertionError('Test did not release fake SMTP')
+            return {'status': 'accepted'}
+
+        self.provider.submit.side_effect = accept
+        w.state['view'] = 'compose'
+        op = draft['operation_id']
+        try:
+            w.send(op)
+            self.assertTrue(started.wait(2), 'SMTP must start without advance_send')
+            w.advance_send(op)
+            w.send(op)
+            self.assertEqual(w.state['send_result']['status'], 'in_progress')
+            self.assertIs(w.state['draft'], draft)
+            self.assertEqual(self.store.get(self.mailbox, op)['status'], 'in_progress')
+        finally:
+            release.set()
+            self.registry.send_pool.shutdown(wait=True)
+        with patch.object(w, 'audit'):
+            w.advance_send(op)
+        self.provider.submit.assert_called_once()
+        self.assertEqual(w.state['send_stage'], 'SENT')
+        self.assertEqual(w.state['view'], 'mail')
+        self.assertIsNone(w.state['draft'])
+        self.assertEqual(w.state['last_sent']['copy']['status'], 'pending')
         self.assertIn('Stored reply',w.state['last_sent']['html'])
         self.imap.find_message_id.assert_not_called();self.imap.append_message.assert_not_called()
         restored=Workspace({},USER,config,SMTPConfiguration(),imap=self.imap,smtp=self.provider,registry=DurableRegistry(self.store))

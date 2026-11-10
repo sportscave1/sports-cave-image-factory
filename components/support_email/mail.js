@@ -55,7 +55,7 @@
     if(!sent?.operation_id)return '';
     const copy=sent.copy||{}, saved=['present','appended'].includes(copy.status);
     const preview=sent.html?`<details><summary>View sent message</summary><p>To: ${esc(sent.to)}</p><div class="message-body">${sent.html}</div></details>`:'';
-    return `<div class="sent-receipt" role="status"><span class="send-success">✓ Sent</span> <span>${esc(sent.subject)}</span>${saved?'':`<span class="send-pending">Accepted by the mail server; ${copy.status==='pending'?'the Sent-folder copy is not visible yet.':'the Sent-folder copy could not be saved or verified.'} ${esc(copy.notice||'')}</span><button type="button" data-action="${copy.retryable?'retry_sent_copy':'check_sent'}" data-operation="${esc(sent.operation_id)}">${copy.retryable?'Retry saving Sent copy':'Check Sent copy'}</button>`}${sent.draft_warning?`<span>${esc(sent.draft_warning)}</span>`:''}${preview}${saved?`<button type="button" data-action="dismiss_receipt" data-operation="${esc(sent.operation_id)}">Dismiss</button>`:''}</div>`;
+    return `<div class="sent-receipt" role="status"><span class="send-success">✓ Sent</span> <span>${esc(sent.subject)}</span>${saved?'':`<span class="send-pending">Accepted by the mail server; ${['pending','attempting'].includes(copy.status)?'syncing the Sent-folder copy.':'the Sent-folder copy could not be saved or verified.'} ${esc(copy.notice||'')}</span><button type="button" data-action="${copy.retryable?'retry_sent_copy':'check_sent'}" data-operation="${esc(sent.operation_id)}">${copy.retryable?'Retry saving Sent copy':'Check Sent copy'}</button>`}${sent.draft_cleanup_pending?'<span>Saved draft cleanup pending.</span>':''}${sent.draft_warning?`<span>${esc(sent.draft_warning)}</span>`:''}${preview}${saved&&!sent.draft_cleanup_pending?`<button type="button" data-action="dismiss_receipt" data-operation="${esc(sent.operation_id)}">Dismiss</button>`:''}</div>`;
   }
   function createViewCache(limit=20,byteLimit=8*1024*1024){
     const entries=new Map();let bytes=0;
@@ -231,18 +231,27 @@
   function scheduleSentCheck(){
     clearTimeout(sentTimer);
     if(model.send_result?.status==='unknown'&&(model.uncertain_checks||0)<6&&!busy){sentTimer=setTimeout(()=>emit('auto_check_sent'),10000);return;}
-    const sent=model.last_sent;
-    if(!sent?.operation_id||!['pending','unknown','failed','attempting'].includes(sent.copy?.status)||sent.checks>=3||busy)return;
+    if(busy)return;
+    const sent=[model.last_sent,...(model.pending_sent||[])].find(item=>item?.operation_id&&item.checks<3&&
+      (item.draft_cleanup_pending||['pending','unknown','failed','attempting'].includes(item.copy?.status)));
+    if(!sent)return;
     sentTimer=setTimeout(()=>emit('auto_check_sent',{operation_id:sent.operation_id}),[6000,12000,24000][sent.checks||0]);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sentTimer));
-  let sendTimer=null;
+  let sendTimer=null, sendingOperation='', sendStarted=0;
   function scheduleSendStage(){
     clearTimeout(sendTimer);
     if(busy||!model.send_result?.operation_id||!['SENDING','SAVING_SENT_COPY'].includes(model.send_stage))return;
     const operation_id=model.send_result.operation_id;
-    // Only continue the operation created by an explicit Send click, after painting its real stage.
-    sendTimer=setTimeout(()=>emit('advance_send',{operation_id}),Math.max(100,model.send_result.retry_delay_ms||100));
+    const now=Date.now();
+    const first=operation_id!==sendingOperation;
+    if(first){sendingOperation=operation_id;sendStarted=now;}
+    let delay=Math.max(100,model.send_result.retry_delay_ms||100);
+    // Check early for a fast acceptance, then fall back to the normal cadence.
+    // Respect a future retry time for temporarily rejected messages.
+    if(delay<=500&&now-sendStarted<1000)delay=first?100:200;
+    if(model.send_stage==='SAVING_SENT_COPY')delay=100;
+    sendTimer=setTimeout(()=>emit('advance_send',{operation_id}),delay);
   }
   window.addEventListener('pagehide',()=>clearTimeout(sendTimer));
   let reconnectTimer=null;
@@ -269,13 +278,13 @@
   function emit(action, values={}) {
     const selecting=['open_thread','open_message'].includes(action);
     if (busy) {
-      if(selecting || ['folder','search','compose','settings','close_composer','resume_composer','context'].includes(action) || ['open_thread','open_message','resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','sync_index','auto_check_sent','autosave_draft','live_check','load_mail_metadata','mark_visible_read','contact_search'].includes(pendingAction)){
+      if(selecting || ['folder','search','compose','settings','close_composer','resume_composer','context'].includes(action) || ['open_thread','open_message','resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','sync_index','auto_check_sent','advance_send','autosave_draft','live_check','load_mail_metadata','mark_visible_read','contact_search'].includes(pendingAction)){
         queued={action,values};
         if(selecting) optimistic(action,values);
       }
       return;
     }
-    const draft=snapshot();
+    const draft=action==='advance_send'?undefined:snapshot();
     if(['refresh','mark_read','mark_unread','star','unstar','archive','move','copy','trash','junk','confirm_delete_forever','mark_folder_read','bulk_action','restore'].includes(action))folderViews.clear();
     if(action==='folder'){
       const cached=folderViews.get(folderKey(model,values.folder));
@@ -297,7 +306,7 @@
     }
     if(selecting) optimistic(action,values);
     else if(['send','discard_draft','attach','remove_attachment','forward_attachment','save_draft'].includes(action)){root.classList.add('busy');freeze();}
-    if (!selecting && !['resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','sync_index','auto_check_sent','autosave_draft','live_check','load_mail_metadata','mark_visible_read'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Downloading attachment…':action==='refresh'?'Refreshing…':'Working…';
+    if (!selecting && !['resolve_thread','load_visible_body','load_conversation_body','load_initial_mailbox','sync_index','auto_check_sent','advance_send','autosave_draft','live_check','load_mail_metadata','mark_visible_read'].includes(action) && $('notice')) $('notice').textContent=action==='send'?'Sending…':action==='download'?'Downloading attachment…':action==='refresh'?'Refreshing…':'Working…';
     if(['reconnect','retry_connection'].includes(action)&&$('notice'))$('notice').innerHTML=recoveryFeedback(model,true);
     post('streamlit:setComponentValue',{value:{id:pending,action,...values,draft},dataType:'json'});
   }
@@ -318,7 +327,8 @@
     };
     wait();
   }
-  const viewKey=(m,key)=>JSON.stringify([m.reader_scope,m.mailbox,m.mailbox_version,key]);
+  const readerVersion=m=>m.reader_version??m.mailbox_version;
+  const viewKey=(m,key)=>JSON.stringify([m.reader_scope,m.mailbox,readerVersion(m),key]);
   function markSelection(){
     root.querySelectorAll('.conversation').forEach(e=>{const active=e.dataset.key===model.selected;e.classList.toggle('selected',active);e.setAttribute('aria-selected',String(active));});
   }
@@ -508,7 +518,7 @@
     if(next.folder!==model.folder||next.reader_scope!==model.reader_scope){clearTimeout(searchTimer);searchText=null;}
     const wasFrozen=busy&&['send','discard_draft','attach','remove_attachment','forward_attachment','save_draft'].includes(pendingAction);
     const selectionChanged=next.selected!==model.selected;
-    if(next.mailbox_version!==model.mailbox_version||next.mailbox!==model.mailbox||next.error)views.clear();
+    if(readerVersion(next)!==readerVersion(model)||next.mailbox!==model.mailbox||next.error)views.clear();
     if (next.draft?.id!==model.draft?.id || next.send_result?.status==='accepted') localDraft=null;
     if(next.reader_scope!==model.reader_scope||next.error||(['live_check','sync_index'].includes(pendingAction)&&next.mailbox_version!==model.mailbox_version))folderViews.clear();
     model=next;
@@ -530,7 +540,13 @@
       const cached=threadView(safeReaderView(model.messages),model.folder);
       views.put(viewKey(model,model.selected),cached?{...cached,scrollTop:root.querySelector('.reading-scroll')?.scrollTop||0}:cached);
     }
-    if(queued){const action=queued;queued=null;emit(action.action,action.values);return;}
+    if(queued){
+      const action=queued;queued=null;
+      if(action.action==='send'){
+        if(model.draft?.operation_id===action.values.operation_id)send();
+      }else emit(action.action,action.values);
+      if(busy)return;
+    }
     root.classList.remove('busy');
     scheduleSentCheck();
     scheduleSendStage();
@@ -630,8 +646,12 @@
     mobileReading=true;emit('compose',{mode,message_key:model.active_message});
   }
   function send(){
-    if(!model.draft||busy||locked(model)||!model.smtp_configured||!model.settings_available)return;
+    if(!model.draft||locked(model)||!model.smtp_configured||!model.settings_available)return;
     const id=model.draft.operation_id;if(submitted.has(id))return;
+    if(busy){
+      if(['autosave_draft','auto_check_sent'].includes(pendingAction))queued={action:'send',values:{operation_id:id}};
+      return;
+    }
     submitted.add(id);emit('send',{operation_id:id});
   }
   function closeReplyPrompts() {
