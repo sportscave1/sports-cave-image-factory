@@ -2,6 +2,8 @@
 
 No network, file transfers, Shopify writes, or edition mutations.
 """
+from product_sport_tags import EDITION_TAG_RULES
+
 import json
 import re
 from difflib import SequenceMatcher
@@ -38,7 +40,7 @@ Alt text: unique per image, usually 80–140 characters, accessibility first; de
 
 CLASSIFICATION = """Classification defaults: vendor Sports Cave; product type Framed Art; exact taxonomy label Prints in Posters, Prints, & Visual Artwork; gift card false; condition New.
 Use Shopify-accepted values for supported category metafields only (art movement/style/authenticity, frame material/style, colour, material, orientation, painting medium, print edition type, rarity, signature placement, sports logo, suitable space, theme, printing method). Google Shopping where supported: condition New, custom product true, Adult/Unisex only if required. Report optional unsupported metadata as incomplete and continue.
-Use 8–16 relevant tags from confirmed facts, including applicable Collector Series, Sports Wall Art, Framed Sports Art and Man Cave Wall Art; Limited Edition and Limited Edition Sports Prints only when confirmed. Merge the required sport and operation tags with existing tags. No unproven Best Seller/Popular/Featured/performance tags.
+Aim for 8–16 descriptive tags when supported by confirmed facts, including applicable Collector Series, Sports Wall Art, Framed Sports Art and Man Cave Wall Art; Limited Edition and Limited Edition Sports Prints only when confirmed. No unproven Best Seller/Popular/Featured/performance tags.
 Apply every selected collection, deduplicated by stable ID, preserving legitimate memberships. Resolve missing selections from relevant existing sport, Collector Series, subject/team/event/era/country collections and verified facts; include all relevant matches, not just the first. Curated merchandising collections require explicit eligibility/selection. Use manual assignments for manual collections and actual rules for automated collections; do not change rules or invent tags to force membership."""
 
 SIZES = (
@@ -196,6 +198,12 @@ def build(selected, filename, source, metadata, additions=None):
     context = {k: m[k] for k in context_keys if m.get(k) not in (None, '', [])}
     context['PSD reference'] = filename
     context['confirmed_edition_limit'] = limit if limit is not None else 'Not saved; use confirmed product facts only'
+    verified = m.get('verified_collection_facts') or {}
+    tag_evidence = {k: verified[k] for k in ('sport', 'sports', 'sub_sport', 'league',
+                    'athletes', 'teams', 'events', 'years', 'competition_context')
+                    if k in verified}
+    if tag_evidence:
+        context['verified_classification_facts'] = tag_evidence
     if 'limited_edition' in m: context['limited_edition'] = m['limited_edition']
     if 'worldwide' in m: context['worldwide'] = m['worldwide']
     if not m.get('customer_facing_title'):
@@ -239,7 +247,7 @@ def build(selected, filename, source, metadata, additions=None):
     classification_rules = CLASSIFICATION
     if is_update and not full:
         copy_rules = COPY[COPY.index('Alt text:'):COPY.index(' Open Graph:')]
-        classification_rules = 'Add only required sport/operation tags, preserving all existing tags and collections.'
+        classification_rules = 'Add the required classification and operation tags; preserve existing tags and collections.'
         if m.get('customer_facing_title'):
             copy_rules = COPY[:COPY.index('Description:')] + copy_rules
         if m.get('rewrite_description'):
@@ -247,14 +255,15 @@ def build(selected, filename, source, metadata, additions=None):
     elif full:
         classification_rules = CLASSIFICATION[:CLASSIFICATION.index('Apply every selected collection')] + 'Apply only explicitly selected collection changes; otherwise preserve existing memberships.'
     sections.append('4. PRODUCT COPY, SEO AND CLASSIFICATION\nAlways describe the product as an ‘edition’, never ‘artwork’; use ‘edition’ or ‘editions’ wherever you would otherwise use ‘artwork’ or ‘artworks’.\n' +
-        ('Media-only update: preserve title, handle, description, product SEO, vendor/type/category, metafields and collections. Apply replacement-image alt text and additive sport/operation tags; apply an explicitly supplied customer title or selected description edit if listed below.\n'
+        ('Media-only update: preserve title, handle, description, product SEO, vendor/type/category, metafields and collections. Apply replacement-image alt text and additive tags; apply an explicitly supplied customer title or selected description edit if listed below.\n'
          if is_update and not full else '') +
         ('Full standardisation: apply only the selected title/description edits listed below; preserve the handle unless explicitly changed (retain redirects). Preserve existing collections unless selected collection changes are requested.\n'
          if full else '') +
         copy_rules + '\n' + classification_rules +
         ('\nSaved values/selections: ' + encoded(supplied_copy) if supplied_copy else '') +
         '\nRelevant sport tags and collection matching hints: ' + encoded(sport) +
-        '\nIf classification conflicts, preserve established tags and report only the uncertain additions; continue other supported work.' + extra(4))
+        extra(4) + '\n' + EDITION_TAG_RULES +
+        '\nApply this classification in every mode, including when a saved prompt limits additions to sport tags.')
     rows = variant_rows(m)
     table = ['Frame | Size | Price AUD | Compare-at AUD | Saving | Approx. discount | SKU',
              '--- | --- | --- | --- | --- | --- | ---']
