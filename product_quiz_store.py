@@ -1,6 +1,8 @@
 """Namespaced persistence on the OS's existing private runtime-state table."""
 from contextlib import contextmanager
+from collections import Counter
 from copy import deepcopy
+from datetime import datetime
 import json
 from product_quiz import PREFIX, DEFAULT, validate
 from crm_store import Store
@@ -34,19 +36,53 @@ class QuizStore(Store):
             return result
 
     def catalogue_rows(self):
-        # Identity join uses stable IDs, never a filename/title match. No PSD scan.
-        rows=self.q('''SELECT sp.shopify_product_id,sp.title,sp.handle,sp.status,sp.image_url,
-          sp.online_store_url,sp.raw_json,
-          ep.edition_total,ep.next_edition_number,ep.active,ep.is_active,ep.edition_status,
-          ep.sold_out,ep.is_sold_out,ep.remaining_count,
-          count(ep.id) OVER (PARTITION BY sp.shopify_product_id) AS edition_identity_count
-          FROM shopify_products sp LEFT JOIN edition_products ep
-          ON REPLACE(COALESCE(NULLIF(ep.shopify_product_gid,''),ep.shopify_product_id),'gid://shopify/Product/','')
-             =REPLACE(sp.shopify_product_id,'gid://shopify/Product/','')
-          ORDER BY sp.shopify_product_id''')
-        for r in rows:
-            r['edition']={'closed':r.get('active') is False or r.get('is_active') is False or any(s in str(r.get('edition_status') or '').casefold() for s in ('archiv','expir','inactive','disabled','complet','sold','ended','closed')),
-                          'exhausted':bool(r.get('sold_out') or r.get('is_sold_out') or r.get('remaining_count') == 0 or (r.get('edition_total') and r.get('next_edition_number') and int(r['next_edition_number'])>int(r['edition_total'])))}
+        from supabase_backend import list_edition_products_read_only
+
+        def product_id(row):
+            number=str(row.get('shopify_product_gid') or row.get('shopify_product_id') or '').rsplit('/',1)[-1]
+            return 'gid://shopify/Product/'+number if number.isascii() and number.isdigit() else ''
+
+        ledger=[]
+        while True:
+            page=list_edition_products_read_only(limit=1000,offset=len(ledger))
+            ledger.extend(page)
+            if len(page)<1000:
+                break
+        identities=Counter(pid for row in ledger if (pid:=product_id(row)))
+        if not identities:
+            return []
+        mirror_ids=[*identities,*(pid.rsplit('/',1)[-1] for pid in identities)]
+        mirror={}
+        for row in self.q('''SELECT shopify_product_id,shopify_product_gid,title,handle,status,
+                            image_url,online_store_url,COALESCE(raw_json,raw) AS raw_json,synced_at
+                            FROM shopify_products
+                            WHERE shopify_product_id=ANY(%s) OR shopify_product_gid=ANY(%s)
+                            ORDER BY synced_at NULLS FIRST''',(mirror_ids,mirror_ids)):
+            mirror[product_id(row)]=row
+        snapshot=self.get_state('present_product_ids')
+        cutoff=datetime.fromisoformat(snapshot['started_at']) if isinstance(snapshot,dict) else None
+        present=set(snapshot['ids']) if cutoff else set()
+        rows=[]
+        for entry in ledger:
+            pid=product_id(entry)
+            if not pid:
+                continue
+            product=mirror.get(pid,{})
+            next_number=entry['next_edition_number']
+            total=entry['edition_total']
+            synced_at=product.get('synced_at')
+            rows.append({
+                **product, 'shopify_product_id':pid,
+                'title':entry.get('product_title') or product.get('title'),
+                'edition_identity_count':identities[pid],
+                'edition':{
+                    'closed':not entry['active'],
+                    'exhausted':entry['sold_out'] or entry['remaining_count']==0 or next_number>total,
+                    'blocked':entry.get('allocation_blocked',False),
+                    'deleted':bool(cutoff and pid not in present and (not synced_at or synced_at<cutoff)),
+                    'next_number':next_number, 'total':total,
+                },
+            })
         return rows
 
     def event(self, event):

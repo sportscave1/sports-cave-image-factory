@@ -77,7 +77,7 @@ def clean(payload):
     for name in ('event_id','session_id'): result[name]=str(UUID(payload[name]))
     if not re.fullmatch('[a-f0-9]{24}',payload['version']): raise ValueError('Invalid version')
     if payload['type'] not in {'started','question','answered','completed','product_click','closed'}: raise ValueError('Invalid event')
-    if payload['step'] not in {'','sport','subject','preference'} or payload['source'] not in {'collection','page','campaign'}: raise ValueError('Invalid context')
+    if payload['step'] not in {'','sport','more','subject','preference'} or payload['source'] not in {'collection','page','campaign'}: raise ValueError('Invalid context')
     if payload['product_id'] and not re.fullmatch(r'gid://shopify/Product/\d{1,24}',payload['product_id']): raise ValueError('Invalid product')
     return {**payload,**result}
 

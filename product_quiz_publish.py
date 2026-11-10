@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from copy import deepcopy
-from product_quiz import DEFAULT, digest, validate, classify, public_product, verified_collections
+from product_quiz import DEFAULT, TITLE, digest, validate, classify, public_product, sport_options, verified_collections
 
 ROOT=Path(__file__).parent
 
@@ -57,18 +57,53 @@ def sync(store,assets,*,rows=None):
         config=store.get_state('classification',{'aliases':{},'overrides':{}})
         published=assets.get('manifest.json') or {}
         live_config=assets.get(published['config']) if published.get('config') else DEFAULT
-        products,review=compile_catalogue(store.catalogue_rows() if rows is None else rows,config['overrides'],live_config['aliases'])
-        revision=digest(products)
+        rows=store.catalogue_rows() if rows is None else rows
+        products,review=compile_catalogue(rows,config['overrides'],live_config['aliases'])
+        collections=verified_collections(rows,exact_sport=True)
+        options=sport_options(set(collections.values()) | {s for p in products for s in p['sports']},live_config['aliases'])
+        revision=digest([products,collections,options])
         previous=assets.get('catalogue.json') or {}
         if previous.get('revision') != revision:
+            existing_paths=set(previous.get('sports',{}).values())
+            existing_paths.update(path for pages in previous.get('extra_pages',{}).values() for path in pages)
+            existing_paths.update(previous.get('unclassified',[]))
+
+            def write_shards(subset):
+                paths=[]
+
+                def write_page(page):
+                    data={'products':page}
+                    path='catalogue/'+digest(data)+'.json'
+                    if path not in existing_paths:
+                        assets.put(path,data,immutable=True)
+                        existing_paths.add(path)
+                    paths.append(path)
+
+                page=[]
+                size=len(b'{"products":[]}')
+                for product in subset:
+                    product_size=len(json.dumps(product,separators=(',',':'),ensure_ascii=False).encode())+1
+                    if page and size+product_size>240_000:
+                        write_page(page)
+                        page=[]
+                        size=len(b'{"products":[]}')
+                    page.append(product)
+                    size+=product_size
+                if page:
+                    write_page(page)
+                return paths
+
             shards={}
-            for sport in sorted({s for p in products for s in p['sports']}):
-                subset=[p for p in products if sport in p['sports']]
-                data={'products':subset}
-                path='catalogue/'+digest(data)+'.json'
-                assets.put(path,data,immutable=True)
-                shards[sport]=path
-            previous={'revision':revision,'sports':shards}
+            extra_pages={}
+            for sport in options:
+                pages=write_shards([p for p in products if sport in p['sports']])
+                if pages:
+                    shards[sport]=pages[0]
+                    if len(pages)>1:
+                        extra_pages[sport]=pages[1:]
+            previous={'revision':revision,'sports':shards,'extra_pages':extra_pages,
+                      'unclassified':write_shards([p for p in products if not p['sports']]),
+                      'collections':collections,'sport_options':options}
         assets.put('catalogue.json',{**previous,'generated_at':now()})
         store.put_state('catalogue_status',{'last_success':now(),'error':'','revision':revision,'products':review})
         return review
@@ -121,7 +156,7 @@ def snippets(base,collection=''):
     loader=escape(base.rstrip('/')+'/product-quiz/loader.js',quote=True)
     context=' data-collection="'+escape(collection,quote=True)+'"' if collection else ''
     return {
-        'Collection button':f'<div data-sports-cave-quiz="button"{context}><a href="/collections/all">Find your edition</a></div>\n<script src="{loader}" defer></script>',
+        'Collection button':f'<div data-sports-cave-quiz="button"{context}><a href="/collections/all">{TITLE}</a></div>\n<script src="{loader}" defer></script>',
         'Inline page':f'<div data-sports-cave-quiz="inline"><a href="/collections/all">Browse editions</a></div>\n<script src="{loader}" defer></script>'}
 
 

@@ -51,6 +51,8 @@ def refresh_mirror(store):
     """Recover missed product events; never calls allocation or Shopify mutations."""
     from shopify_sync import fetch_catalog_page,graphql_request,get_config
     from supabase_backend import _upsert_shopify_product_display_row
+    from product_quiz_publish import now
+    started_at=now()
     seen=set()
     config=dict(get_config())
     config['max_products']=100000
@@ -79,7 +81,7 @@ def refresh_mirror(store):
         raise ValueError('Catalogue listing did not reach its end; previous ID snapshot preserved')
     # Tombstone deleted products only after a successful complete listing.
     # Do not alter the shared mirror: private exclusions disappear if an ID reappears.
-    store.put_state('present_product_ids',sorted(seen))
+    store.put_state('present_product_ids',{'started_at':started_at,'ids':sorted(seen)})
 
 
 def retry_read(call):
@@ -97,17 +99,21 @@ def retry_read(call):
 
 def cycle(store,assets,*,reconcile=False):
     from product_quiz_publish import sync,now
+    refresh_error=None
+    if reconcile:
+        try:
+            refresh_mirror(store)
+        except Exception as exc:
+            refresh_error=exc
     try:
-        if reconcile: refresh_mirror(store)
-        rows=store.catalogue_rows()
-        present=store.get_state('present_product_ids')
-        if present is not None: rows=[r for r in rows if r['shopify_product_id'] in present]
-        sync(store,assets,rows=rows)
+        sync(store,assets)
         store.q("DELETE FROM crm_runtime_state WHERE left(key,19)='product_quiz/event/' AND updated_at<now()-interval '90 days'")
     except Exception:
         status=store.get_state('catalogue_status',{})
         store.put_state('catalogue_status',{**status,'error':'Catalogue sync failed. Last published catalogue preserved; retry reconciliation.','last_attempt':now()})
         raise
+    if refresh_error:
+        raise refresh_error
 
 
 def run(stop,role='worker'):
@@ -116,8 +122,11 @@ def run(stop,role='worker'):
     from product_quiz_publish import Assets
     next_reconcile=0
     while not stop.is_set():
+        reconcile=time.monotonic()>=next_reconcile
         try:
-            cycle(QuizStore(),Assets(),reconcile=time.monotonic()>=next_reconcile)
-            if time.monotonic()>=next_reconcile: next_reconcile=time.monotonic()+3600
-        except Exception as exc: logging.getLogger(__name__).warning('product_quiz_sync_failed type=%s',type(exc).__name__)
+            cycle(QuizStore(),Assets(),reconcile=reconcile)
+            if reconcile: next_reconcile=time.monotonic()+3600
+        except Exception as exc:
+            logging.getLogger(__name__).warning('product_quiz_sync_failed type=%s',type(exc).__name__)
+            if reconcile: next_reconcile=time.monotonic()+300
         stop.wait(60)

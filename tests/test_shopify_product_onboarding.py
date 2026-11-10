@@ -164,6 +164,35 @@ def test_late_metadata_and_retry_survive_worker_recreation(state):
     assert rows(sql,'webhook_events')[0]['status']=='processed'
 
 
+def test_new_edition_and_allocations_feed_quiz_catalogue(state):
+    from product_quiz_publish import compile_catalogue
+    from product_quiz_store import QuizStore
+
+    sql,product,_=state
+    product['tags'].append('Sport: V8 Supercars')
+    sql.execute('CREATE TABLE crm_runtime_state(key text PRIMARY KEY,value jsonb)')
+
+    class LocalQuizStore(QuizStore):
+        def q(self, statement, args=(), one=False):
+            sql.execute(statement,args)
+            return sql.fetchone() if one else sql.fetchall()
+
+    store=LocalQuizStore()
+    token=db._ACTIVE_DATABASE_READ_CURSOR.set(sql)
+    try:
+        assert store.catalogue_rows()==[]
+        deliver()
+        eligible,_=compile_catalogue(store.catalogue_rows(),{},{})
+        assert [(p['id'],p['sports'],p['next_number'],p['edition_total']) for p in eligible]==[
+            (PID,['V8 Supercars'],1,100)]
+        sql.execute('SELECT allocate_edition_line_units_atomic(%s,%s,%s,%s,%s,%s,%s,%s)',
+                    ('shopify','local-order','local-line',PID,1,'local-order','#LOCAL','local-line'))
+        eligible,_=compile_catalogue(store.catalogue_rows(),{},{})
+        assert eligible[0]['next_number']==2
+    finally:
+        db._ACTIVE_DATABASE_READ_CURSOR.reset(token)
+
+
 def test_recovery_checkpoint_and_pagination_only_after_success(state):
     sql,p,history=state
     def api(query,variables=None,**kwargs):

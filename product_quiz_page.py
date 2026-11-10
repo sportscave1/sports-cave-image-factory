@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
-from product_quiz import DEFAULT,validate,public_product,digest
+from product_quiz import DEFAULT, SPORT_PROMPT, TITLE, validate, public_product, digest, sport_options
 from product_quiz_store import QuizStore
 from product_quiz_publish import Assets,publish,revert,sync,snippets,asset_base,verify_public
 
@@ -25,7 +25,9 @@ def reload_draft():
 
 def preview_html(config,products):
     """Self-contained, network-free preview with explicit synthetic commerce facts."""
-    payload={'config':validate(config),'preview':{'products':products,'catalogue':{'sports':{s:'preview' for p in products for s in p['sports']}}},'manifest':{'version':digest(config)}}
+    sports={s:'preview' for p in products for s in p['sports']}
+    payload={'config':validate(config),'preview':{'products':products,'catalogue':{
+        'sports':sports,'sport_options':sport_options(sports,config['aliases'])}},'manifest':{'version':digest(config)}}
     encoded=json.dumps(payload).replace('<','\\u003c')
     runtime=(Path(__file__).parent/'static/product-quiz/runtime.js').read_text(encoding='utf-8')
     return '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;background:#0b0b0c"><div id="quiz"></div><script>'+runtime+'</script><script>const data='+encoded+';const host=document.querySelector("#quiz");const shadow=host.attachShadow({mode:"open"});const launcher=document.createElement("button");SportsCaveQuizRuntime.mount({host,shadow,launcher,base:"",mode:"inline",...data});</script></body></html>'
@@ -36,7 +38,7 @@ def render_page(user,store=None):
     if not os_accounts.can_access_page(user,'Product Quiz'):
         st.error('Access not approved');return
     st.title('Product Quiz')
-    st.caption('Developer · Find your edition · Manual Shopify installation')
+    st.caption(TITLE)
     store=store or QuizStore()
     try: draft=store.draft();status=store.get_state('catalogue_status',{})
     except Exception:
@@ -44,29 +46,37 @@ def render_page(user,store=None):
     state_key='product-quiz-edit'
     if state_key not in st.session_state: st.session_state[state_key]=deepcopy(draft)
     editing=st.session_state[state_key];config=deepcopy(editing['config'])
+    config['appearance'].update(title=TITLE,intro='')
+    config['rules']['max_results']=1
     questions,matching,catalogue,appearance,publication,analytics,installation=st.tabs(['Questions & answers','Matching rules','Catalogue','Appearance','Preview & publish','Analytics','Install'])
     with questions:
-        order=st.selectbox('Question order',['Sport → Subject → Preference','Sport → Preference → Subject'],index=0 if config['questions'][1]['id']=='subject' else 1)
         lookup={q['id']:q for q in config['questions']}
-        config['questions']=[lookup[k] for k in (('sport','subject','preference') if order.startswith('Sport → Subject') else ('sport','preference','subject'))]
-        st.caption('Choices are generated from eligible editions. Overrides rename or hide an existing choice; they never invent a catalogue match. A preference question is skipped unless it separates editions.')
+        config['questions']=[lookup[k] for k in ('sport','subject','preference')]
+        st.caption('Shoppers can add more sports, name a favourite for each sport, and answer one final question. Suggestions use the sports collections and eligible editions.')
         for q in config['questions']:
             with st.expander(q['id'].title(),expanded=q['id']=='sport'):
-                q['enabled']=st.checkbox('Enabled',q['enabled'],key='pq-enabled-'+q['id'],disabled=q['id']=='sport')
-                q['label']=st.text_input('Question',q['label'],max_chars=120,key='pq-label-'+q['id'])
+                q['enabled']=True
+                if q['id']=='sport':
+                    q['label']=SPORT_PROMPT
+                    st.write(SPORT_PROMPT)
+                elif q['id']=='subject':
+                    q['label']=DEFAULT['questions'][1]['label']
+                    st.caption('Uses team, driver, rider, player or other wording for the selected sport.')
+                else:
+                    q['label']=st.text_input('Question when story choices are available',q['label'],max_chars=120,key='pq-label-preference')
                 field={'sport':'sports','subject':'subjects','preference':'preferences'}[q['id']]
                 values=sorted({v for p in status.get('products',[]) if p['status']=='Eligible' for v in p[field]})
+                if q['id']=='sport': values=list(sport_options(values))
                 st.caption('Current catalogue choices: '+(', '.join(values) or 'Reconcile the catalogue first'))
                 q['answers']=edit_records(q['answers'],['value','label','enabled'],num_rows='dynamic',key='pq-answers-'+q['id'],column_config={'value':st.column_config.TextColumn('Catalogue value'),'label':st.column_config.TextColumn('Display label'),'enabled':st.column_config.CheckboxColumn('Enabled',default=True)})
     with matching:
-        config['rules']['max_results']=st.slider('Maximum editions',1,3,config['rules']['max_results'])
-        config['rules']['allow_broader']=st.checkbox('Offer another preference within the selected sport and athlete/team',config['rules']['allow_broader'])
-        st.caption('Explicit sport and athlete/team choices always constrain results. Featured preference only orders relevant matches. Broader preferences are labelled.')
+        config['rules']['allow_broader']=st.checkbox('Allow a broader match within the selected sports',config['rules']['allow_broader'])
+        st.caption('The quiz recommends one edition. Team and athlete matches rank first, followed by the final preference and featured priority.')
         st.write('Canonical aliases')
         alias_rows=edit_records(pairs(config['aliases']),['Value','Maps to'],num_rows='dynamic',key='pq-aliases')
         config['aliases']={r['Value']:r['Maps to'] for r in alias_rows if r.get('Value') and r.get('Maps to')}
     with catalogue:
-        st.caption('Last successful quiz sync: '+str(status.get('last_success') or 'Never')+' · Eligibility is rechecked in the shopper’s market before results.')
+        st.caption('Edition Ops catalogue · Last successful quiz sync '+str(status.get('last_success') or 'Never')+' · Availability is rechecked in the shopper’s Shopify market.')
         if status.get('error'): st.warning(status['error'])
         rows=status.get('products',[])
         counts={s:sum(p['status']==s for p in rows) for s in ('Eligible','Needs details','Excluded')}
@@ -92,11 +102,11 @@ def render_page(user,store=None):
                         latest=store.get_state('classification',{'aliases':{},'overrides':{}})
                         latest['overrides'][pid]=override;store.put_state('classification',latest)
                     st.success('Classification saved. Reconcile to update public catalogue.')
-        if st.button('Reconcile catalogue from existing mirror'):
+        if st.button('Refresh from Edition Ops'):
             try: sync(store,Assets());st.rerun()
             except Exception: st.error('Catalogue refresh failed; the last published catalogue remains in place.')
     with appearance:
-        for name in ('title','intro'): config['appearance'][name]=st.text_input(name.title(),config['appearance'][name],max_chars=160)
+        st.write(TITLE)
         cols=st.columns(3)
         for col,name in zip(cols,('accent','background','text')): config['appearance'][name]=col.color_picker(name.title(),config['appearance'][name])
     with analytics:
