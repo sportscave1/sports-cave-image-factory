@@ -378,6 +378,14 @@ class AsyncInbox:
         self._revision_checked = True
         with self.reads.lock:return self.reads.value.get('mutation_revision', '')
 
+    @staticmethod
+    def _read_key(name, args, kwargs, epoch):
+        return name, repr(args), repr(sorted(kwargs.items())), epoch
+
+    def invalidate_header_read(self, *args, **kwargs):
+        with self.reads.lock:
+            self.reads.jobs.pop(self._read_key('list_headers', args, kwargs, self.reads.epoch), None)
+
     def __getattr__(self,name):
         method = getattr(self.provider,name)
         if name in MUTATIONS:
@@ -397,7 +405,7 @@ class AsyncInbox:
             if name in {'list_headers','live_changes'} and isinstance(self.reads.store, SnapshotStore):
                 self.reads.restore()
             epoch = self.reads.epoch
-            key = self.body_key(args[0]) if name == 'read_message' else (name,repr(args),repr(sorted(kwargs.items())),epoch)
+            key = self.body_key(args[0]) if name == 'read_message' else self._read_key(name,args,kwargs,epoch)
             result = self.reads.request(key,lambda:method(*deepcopy(args),**deepcopy(kwargs)))
             if epoch != self.reads.epoch:
                 raise MailboxError('Mailbox changed; refreshing…', code='pending', retry_after=1)

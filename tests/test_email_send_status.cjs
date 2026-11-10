@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const {sendStatus,sendFeedback,sentReceipt,locked}=require('../components/support_email/mail.js');
+const {sendStatus,sendFeedback,sentReceipt,deliveryHistory,locked}=require('../components/support_email/mail.js');
 for(const copy of ['pending','unknown','appended']) {
   const model={draft:{id:'draft'},send_result:{status:'accepted'},sent_result:{status:copy}};
   assert.equal(sendStatus(model),'');assert.equal(locked(model),true);
@@ -51,4 +51,16 @@ assert.match(sendFeedback({sent_view_pending:true}),/Opening sent email.*<progre
 
 assert.doesNotMatch(sendFeedback({send_stage:'CONFIRMING_SENT_COPY',send_result:{status:'accepted'},last_sent:{checks:3}}),/<progress/);
 
-assert.match(sendStatus({sent_view_pending:true,draft:{id:'new'},send_stage:'VALIDATING',send_result:{status:'in_progress'}}),/Validating/);
+assert.match(sendStatus({sent_view_pending:true,draft:{id:'new'},send_stage:'VALIDATING',send_result:{status:'in_progress'}}),/Sending email/);
+
+assert.match(sendFeedback({send_stage:'VALIDATING'}),/Sending email.*<progress/);
+const history=deliveryHistory({
+  last_sent:{operation_id:'current'},
+  unresolved_receipts:[
+    {operation_id:'current',status:'accepted'},
+    {operation_id:'old',status:'unknown',created_label:'07 Oct'}
+  ]
+});
+assert.match(history,/<details class="delivery-history" >.*Earlier send receipts \(1\)/);
+assert.match(history,/Outcome unverified.*07 Oct.*old/);
+assert.doesNotMatch(history,/current/);

@@ -54,7 +54,7 @@ def receipt(row):
     if due and status=='queued':
         delay=max(delay, min(5000, int((due-datetime.now(timezone.utc)).total_seconds()*1000)))
     source = 'smtp' if row.get('accepted_at') else 'provider_sent' if status == 'accepted' and row.get('copy_status') == 'present' else ''
-    return {'confirmation_source':source, 'confirmed_at':str(row.get('updated_at') or ''),
+    return {'confirmation_source':source, 'created_at':str(created or ''), 'confirmed_at':str(row.get('updated_at') or ''),
             'operation_id':str(row['operation_id']), 'status':'in_progress' if status=='queued' else status,
             'transport_status':status, 'copy_status':row.get('copy_status', ''),
             'retry_delay_ms':delay,

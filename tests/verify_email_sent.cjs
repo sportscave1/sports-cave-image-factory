@@ -21,7 +21,7 @@ fs.mkdirSync(output,{recursive:true});
       // A second physical click and keyboard shortcut must not create another send.
       const started=performance.now();
       await mail.locator('[data-action="send"]').click();
-      await mail.locator('#send-status').filter({hasText:/Validating email|Queued securely|Submitting to mail server/}).waitFor();
+      await mail.locator('#send-status').filter({hasText:/Sending email/}).waitFor();
       assert.equal(await mail.locator('[data-action="send"]').isDisabled(),true);
       assert.equal(await mail.locator('.compose-footer progress').count(),0);
       const progressBox=await mail.locator('#send-status').boundingBox();
@@ -38,7 +38,7 @@ fs.mkdirSync(output,{recursive:true});
         await receipt.waitFor();
         const sentMs=Math.round(performance.now()-started);
         console.log(scenario,width,'click to Sent:',sentMs,'ms');
-        assert.equal(await mail.locator('.folder.selected[data-folder="INBOX"]').count(),1);
+        assert.equal(await mail.locator('.folder.selected[data-folder="INBOX.Sent Items"]').count(),1);
         assert.equal(await mail.locator('#editor').count(),0);
         assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),'0');
         await receipt.getByText('View sent message').click();
@@ -51,9 +51,7 @@ fs.mkdirSync(output,{recursive:true});
         }
         await receipt.getByRole('button',{name:'Dismiss',exact:true}).waitFor();
         assert.equal(await page.locator('.fixture-metrics').getAttribute('data-copies'),scenario==='copy_failure'?'2':scenario==='success'?'1':'0');
-        await mail.locator('.folder[data-folder="INBOX.Sent Items"]').click();
-        const conversation=mail.locator('.conversation').filter({hasText:/Local .* send fixture/}).first();
-        await conversation.click();
+        await mail.locator('.conversation.selected').filter({hasText:/Local .* send fixture/}).waitFor();
         await mail.locator('.reading').filter({hasText:'This is a fabricated send verification.'}).waitFor();
         await mail.getByRole('button',{name:'↻ Refresh',exact:true}).click();
         await mail.locator('#mail:not(.busy)').waitFor();
@@ -68,7 +66,7 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'1');
       if(scenario==='rejected'){
         await mail.locator('[data-action="send"]:enabled').click();
-        await mail.locator('#send-status').filter({hasText:/Validating email|Queued securely|Submitting to mail server/}).waitFor();
+        await mail.locator('#send-status').filter({hasText:/Sending email/}).waitFor();
         await mail.locator('#send-status').filter({hasText:'Email not sent'}).waitFor();
         assert.equal(await page.locator('.fixture-metrics').getAttribute('data-submissions'),'2');
       }

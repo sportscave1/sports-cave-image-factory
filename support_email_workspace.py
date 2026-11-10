@@ -784,6 +784,9 @@ class Workspace:
                 self.state.pop('body_mark_read', None)
                 self.state['body_loading'] = False
                 self.state['image_grants'] = set()
+            if action in {'open_thread', 'open_message', 'folder', 'search', 'compose', 'edit_draft', 'open_local_draft'}:
+                self.state.pop('sent_focus', None)
+                self.state.pop('sent_folder_load_pending', None)
             if action in {'open_thread', 'open_message', 'folder', 'search', 'settings', 'context',
                           'close_composer', 'edit_draft', 'open_local_draft', 'compose', 'close_panel'}:
                 self.autosave_draft()  # Failed/conflicting persistence cancels destructive navigation.
@@ -809,6 +812,8 @@ class Workspace:
             elif action == 'mail_diagnostics':
                 if not os_accounts.is_admin(self.user):raise PermissionError('Admin required.')
                 self.state['mail_diagnostics'] = self.durable.diagnostics(self.config.address) if self.durable else {}
+            elif action == 'load_sent_after_send':
+                self._load_sent_after_send()
             elif action == 'sync_index':
                 for key in list(self.cache):
                     if key[0] == 'headers':self.cache.pop(key,None)
@@ -1194,7 +1199,10 @@ class Workspace:
         try:
             self.state['local_drafts'] = self.durable.list_drafts(self.config.address, self.user['id'])
             # Narrow metadata only. Resolved historical sends do not take over Inbox.
-            self.state['unresolved_receipts'] = self.durable.unresolved_receipts(self.config.address, self.user['id'])
+            receipts = self.durable.unresolved_receipts(self.config.address, self.user['id'])
+            self.state['unresolved_receipts'] = [
+                dict(row, created_label=formatted_date(row.get('created_at'), self.user)) for row in receipts
+            ]
         except Exception:
             self.state['notice'] = 'Draft recovery is temporarily unavailable. Retry shortly.'
 
@@ -1390,6 +1398,7 @@ class Workspace:
             s.update(send_stage="SENT", send_progress={}, send_finalized=True, draft=None, draft_pending=None)
             if s["view"] == "compose":
                 s["view"] = "mail"
+            self._stage_sent_folder(result["message_id"])
             return
         self.check_sent()
         if delivery.get('copy', {}).get('status') not in {'present', 'appended'}:
@@ -1428,6 +1437,9 @@ class Workspace:
         pending = self.state.setdefault("pending_sent", {})
         if copy["status"] in {"present", "appended"} and not delivery.get("draft_ref"):
             pending.pop(delivery["operation_id"], None)
+            if self.state.get("unresolved_receipts"):
+                self.state["unresolved_receipts"] = [row for row in self.state["unresolved_receipts"]
+                    if row["operation_id"] != delivery["operation_id"]]
         else:
             pending[delivery["operation_id"]] = delivery
         if self.state.get("send_result", {}).get("operation_id") == delivery["operation_id"]:
@@ -1443,6 +1455,34 @@ class Workspace:
             text=body.get_content()
             delivery['html']=sanitize_html(text) if body.get_content_type()=='text/html' else readable_html(text)
         delivery['to']=str(message.get('To',''))
+
+    def _stage_sent_folder(self, message_id):
+        """Select Sent at acceptance; load provider headers after the receipt paints."""
+        folder = self.roles.get("sent")
+        if not folder:
+            return
+        s = self.state
+        self._cancel_body_load()
+        for key in ('page_request', 'read_mark_pending', 'sent_focus_header'):
+            s.pop(key, None)
+        s.update(folder=folder, query="", field="TEXT", limit=50, filters={}, selected=None,
+                 active_message=None, conversation=[], expanded=set(), context={}, view="mail",
+                 sent_focus=message_id, sent_folder_load_pending=True, load_retry_at=0)
+        self._mailbox_changed()
+
+    def _load_sent_after_send(self):
+        s = self.state
+        if (not s.get('sent_folder_load_pending') or s.get('view') != 'mail'
+                or s.get('folder') != self.roles.get('sent') or s.get('query') or s.get('filters')):
+            return
+        s.pop('sent_folder_load_pending')
+        for key in list(self.cache):
+            if key[0] == 'headers' and key[1] == s['folder']:
+                self.cache.pop(key)
+        invalidate = getattr(self.imap, 'invalidate_header_read', None)
+        if invalidate:
+            invalidate(s['limit'], s['folder'], query="", field="TEXT", previews=False)
+        self.load(previews=False, defer_body=True)
 
     def _show_sent(self, delivery):
         folder = self.roles.get("sent")
@@ -1512,6 +1552,10 @@ class Workspace:
                         decode(row["payload"]), self.roles.get("sent"), "append" if retry else row["sent_policy"], retry=retry)
             if copy["status"] in {"present", "appended"}:
                 self._cleanup_sent_draft(delivery, delivery.pop("draft_ref", None))
+                if (delivery.get("copy", {}).get("status") not in {"present", "appended"}
+                        and self.state.get("sent_focus") == delivery["result"]["message_id"]
+                        and self.state.get("folder") == self.roles.get("sent")):
+                    self.state['sent_folder_load_pending'] = True
             self._update_sent_copy(delivery, copy)
             return
         # Legacy verify default now ensures a copy. Explicit confirmed server-saving is respected.
@@ -1702,7 +1746,8 @@ class Workspace:
             'local_drafts':s.get('local_drafts',[]) if s.get('folder')==self.roles.get('drafts') and not s.get('query') and not s.get('filters') else [],
             'durable_drafts':bool(self.durable),'draft_save_status':s.get('draft_save_status',''),
             'uncertain_checks':s.get('uncertain_checks',0),
-            'sent_view_pending':bool(s.get('sent_focus')),
+            'sent_view_pending':not self.durable and bool(s.get('sent_focus')),
+            'sent_folder_load_pending':bool(s.get('sent_folder_load_pending') and s['view']=='mail'),
             'admin_diagnostics':s.get('mail_diagnostics') if os_accounts.is_admin(user) else None,
             'can_diagnose':os_accounts.is_admin(user),
             "inbox_status": s.get("inbox_status", {}),
