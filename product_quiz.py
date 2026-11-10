@@ -89,8 +89,6 @@ def verified_collections(rows, *, exact_sport=False):
         for collection in raw.get('collections') or []:
             if not isinstance(collection,dict) or not collection.get('handle'): continue
             explicit,subjects=collection_sports(collection)
-            if any(key(collection.get(field)) in {'darts', 'darts wall art'} for field in ('handle','title')):
-                explicit.add('Darts')
             found.setdefault(collection['handle'],set()).update(explicit or (set() if exact_sport else subjects))
     return {handle:next(iter(sports)) for handle,sports in found.items() if len(sports)==1}
 
@@ -139,19 +137,24 @@ def classify(row, override=None, aliases=None):
     labels = {key(label): sport for sport in ALIASES.keys() | SPORT_COLLECTIONS.keys()
               for label in (sport, *ALIASES.get(sport, ()), *SPORT_COLLECTIONS.get(sport, ()), TAGS.get(sport, sport))}
     tagged_sports, tagged_subjects, tagged_preferences, keywords = set(), [], [], []
+    preference_tags = {'moment','era','style','preference','theme','event','year','format'}
+    acronyms = {'afl','atcc','atp','bbl','f1','fifa','ipl','mlb','mma','nba','nbl','nfl',
+                'nhl','nrl','ufc','v8','wnba','wrc','wta','wwe'}
     story_tags = {'legacy', 'rivalry', 'defining moment', 'championship', 'championship moment',
                   'record breaker', 'retro', 'vintage', 'modern'}
     for tag in tag_list(raw.get('tags')):
-        match = re.fullmatch(r'(?:sc[ _-]+)?(sport|league|team|athlete|player|driver|rider|fighter|jockey|horse|subject|moment|era|style|preference|theme)\s*[:=_-]\s*(.+)', tag, re.I)
+        match = re.fullmatch(r'(?:sc[ _-]+)?(sport|league|team|athlete|player|driver|rider|fighter|jockey|horse|subject|moment|era|style|preference|theme|event|year|format)\s*[:=_-]\s*(.+)', tag, re.I)
         value = match[2].replace('_', ' ').strip() if match else tag
         if len(value)>80 or not all(c.isalnum() or c in " '-.&’" for c in value):
             continue
+        if match and tag.upper().startswith('SC_') and value.isupper():
+            value = ' '.join(word if word.lower() in acronyms else word.title() for word in value.split())
         kind = match[1].lower() if match else ''
         if kind in {'','sport','league'} and key(value) in labels and (kind or key(value) != 'grand prix'):
             tagged_sports.add(labels[key(value)])
         elif kind == 'sport' and key(value):
             tagged_sports.add(value.title())
-        elif kind in {'moment','era','style','preference','theme'} or (not match and key(value) in story_tags):
+        elif kind in preference_tags or (not match and key(value) in story_tags):
             tagged_preferences.append(value)
         elif kind and kind != 'league':
             tagged_subjects.append(value)

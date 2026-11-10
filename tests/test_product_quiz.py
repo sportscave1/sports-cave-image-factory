@@ -120,6 +120,13 @@ class QuizContracts(unittest.TestCase):
         self.assertEqual((product['next_number'],product['edition_total']),(23,100))
         darts=classify(row(title='The Final Double',sport='Darts Wall Art',subject='Unknown'))
         self.assertEqual((darts['status'],darts['sports'],darts['subjects']),('Eligible',['Darts'],[]))
+        tagged = classify(row(title='The Last Shot',sport='Unknown',subject='Unknown',tags=[
+            'SC_LEAGUE_NBA','SC_SUBJECT_MICHAEL_JORDAN','SC_TEAM_CHICAGO_BULLS',
+            'SC_EVENT_NBA_FINALS','SC_YEAR_1998','SC_FORMAT_DUO','SC_THEME_CHAMPIONSHIP',
+        ]))
+        self.assertEqual(tagged['sports'],['Basketball'])
+        self.assertEqual(tagged['subjects'],['Chicago Bulls','Michael Jordan'])
+        self.assertEqual(tagged['preferences'],['1998','Championship','Duo','NBA Finals'])
 
     def test_catalogue_uses_edition_ops_and_admits_new_rows_after_shopify_snapshot(self):
         from datetime import datetime, timezone
